@@ -17,31 +17,32 @@ status: Draft
 
 ```
 datatug backup new <profile> [--project <id> | --dir <path>] --source <datatug://…|env:NAME> --to <destination>
-                   [--branch <name>] [--mode incremental|full] [--history additive|windowed]
+                   [--branch <name>] [--mode incremental|full]
                    [--filter-config <file>] [--git none|stage|commit]
 datatug backup list [--strict]
 datatug backup pin <profile>
 datatug backup run <profile>... | --all [--expect-destination <pin>] [--trust <point>]
                    [--require-consistent-snapshot] [--fail-on-warning] [--progress]
 datatug backup point list <profile>
-datatug backup restore <profile> --to <target-url> [--at <point> | --tombstones]
+datatug backup restore <profile> --to <target-url> [--at <point>]
                    [--overwrite recreate|reload] [--include …] [--exclude …] [--where …] [--limit …]
                    [--filter-config <file>] [--parallel-streams N] [--dry-run] [--fail-on-warning] [--progress]
 datatug backup verify <profile> [--at <point> | --all-points] [--level structure|hashes|restore]
                    [--since-trusted [--trust <point>]] [--against-source]
-datatug backup prune <profile> [--apply] [--confirm-windowed] [--expect-destination <pin>]   # chain destinations only
 
 every verb: [--project <id> | --dir <path>] [--format text|json|yaml | --json]
 ```
 
-A backup is **`db copy` plus a destination policy**, not a second engine: every run opens the source through the same code as [`db copy`](../db/copy/README.md) (URL and `datatug://` resolution, `env:NAME`, PostgreSQL preview gate, read-only session), applies the same filters, serialises records with the inGitDB writer of [`db export`](#boundary-with-db-export-and-db-copy), and adds what a copy does not have: history of restore points, change detection between runs, retention, locking and verification.
+A backup is **`db copy` plus a destination policy**, not a second engine: every run opens the source through the same code as [`db copy`](../db/copy/README.md) (URL and `datatug://` resolution, `env:NAME`, PostgreSQL preview gate, read-only session), applies the same filters, serialises records with the inGitDB writer of [`db export`](#boundary-with-db-export-and-db-copy), and adds what a copy does not have: history of restore points, change detection between runs, locking and verification.
 
 **Founder decisions this Feature encodes (2026-10-16):**
 
 1. `export` stays a small local shortcut: `db copy --to ingitdb://<local dir>` (a plain path is allowed; the default is `./<name>.ingitdb`). It has no profiles, history or remote destinations.
 2. Backup to cloud or remote storage belongs to the `backup` family, never to `export` or `db copy`.
 3. A project can hold **several backup profiles** (different sources, destinations, filters or cadences).
-4. Backups are **incremental** (a run stores only what changed) and **additive** (a run never removes anything already backed up; deleted rows stay recoverable) by default.
+4. Backups are **incremental** (a run stores only what changed) and **additive** (nothing already backed up is ever removed; deleted rows stay recoverable from the points at which they existed).
+
+**Scope of this Feature (v1):** git and local-folder destinations, plus object-storage backends of the same append-only chain. Nothing in v1 deletes backed-up data. Retention and pruning (removing old points, tombstone archives for what they held) are a separate, later Feature, `cli/backup/prune`, not specified here; see [Later work](#later-work).
 
 ## Problem
 
@@ -72,7 +73,7 @@ A backup is **`db copy` plus a destination policy**, not a second engine: every 
 | Purpose | Move a database into another engine, once | Write a local inGitDB copy, once | Keep a history of restore points |
 | Destination | Any `--to` scheme | A local folder only | Git remote, local folder, later object storage |
 | Configuration | Flags | Flags | A profile file in the project |
-| History, retention, locking, verification | No | No | Yes |
+| History, locking, verification | No | No | Yes (retention later) |
 | Engine | Itself | The inGitDB writer | `db copy`'s source side + the inGitDB writer + a destination store |
 
 `db export` changes that the founder decision implies (a plain path for `--to`, default `./<name>.ingitdb`, being literally `db copy --to ingitdb://`) belong to a `cli/db/export` Feature, which does not exist yet; `backup` depends on the exporter being extended for backups (stage 1), not on the answer to [Q2](#open-questions).
@@ -95,11 +96,9 @@ destination:
   branch: datatug-backup/chinook-prod        # default datatug-backup/<project>/<name>
   credentials: env:DATATUG_BACKUP_GH_TOKEN   # optional, https and object storage only (ssh uses ssh-agent); a reference, never a value
 mode: incremental                            # incremental (default) | full
-history: additive                            # additive (default) | windowed
 records_format: jsonl                        # default jsonl for git, see REQ:deterministic-tree
 require_consistent_snapshot: false
 verify_after_run: hashes                     # none | structure | hashes (default) | restore
-retention: {}                                # chain only: keep_last / keep_days; empty = keep every point (default)
 ```
 
 Unknown keys MUST be refused (exit 2, naming the key), so a typo never silently changes a backup.
@@ -148,21 +147,21 @@ When no record, no collection definition and no collection set changed since the
 
 #### REQ: keyless-collections
 
-A collection without a primary key MUST be compared as a multiset of record hashes (as [`compare`](../../../../docs/database-compare.md) does). Its records are identified by their record hash (a duplicate row gets the hash plus an occurrence number), never by position, so an insert does not renumber every following row. When its multiset changed, the point MUST store the whole collection again and emit a `keyless-collection-rewritten` warning naming it. Instead of per-key deletion markers, the manifest records the record hashes (with occurrence numbers) that left the multiset, so prune can archive them (REQ:additive-by-default).
+A collection without a primary key MUST be compared as a multiset of record hashes (as [`compare`](../../../../docs/database-compare.md) does). Its records are identified by their record hash (a duplicate row gets the hash plus an occurrence number), never by position, so an insert does not renumber every following row. When its multiset changed, the point MUST store the whole collection again and emit a `keyless-collection-rewritten` warning naming it. Instead of per-key deletion markers, the manifest records the record hashes (with occurrence numbers) that left the multiset; the rows themselves stay restorable from the earlier points (REQ:additive-by-default).
 
 #### REQ: schema-changes-tracked
 
-A point MUST store the collection definitions in force at that point. A changed definition (column added, removed, retyped, key changed) MUST make the point store the whole collection again, with a `schema-changed` note naming the collection and the definition hashes before and after. A collection that disappeared from the source MUST get a collection-level deletion marker (its records and definition stay in the predecessor point, and prune archives them as a whole); one that appeared is stored in full. Renames are a deletion plus an addition (no rename detection).
+A point MUST store the collection definitions in force at that point. A changed definition (column added, removed, retyped, key changed) MUST make the point store the whole collection again, with a `schema-changed` note naming the collection and the definition hashes before and after. A collection that disappeared from the source MUST get a collection-level deletion marker (its records and definition stay restorable from the earlier points); one that appeared is stored in full. Renames are a deletion plus an addition (no rename detection).
 
 #### REQ: point-published-atomically
 
-A point MUST become visible only after every collection and its manifest are durably written: for a git destination one commit pushed in one ref update; for a chain destination (folder, object storage) the manifest written last, as the commit marker. A run that fails or is interrupted MUST leave no visible point; what it already uploaded is unreferenced; a later run may reuse it (REQ:resumable-by-rerun) and `prune` removes it once it is older than the grace period (REQ:retention-explicit).
+A point MUST become visible only after every collection and its manifest are durably written: for a git destination one commit pushed in one ref update; for a chain destination (folder, object storage) the manifest written last, as the commit marker. A run that fails or is interrupted MUST leave no visible point; what it already uploaded is unreferenced, stays (nothing deletes in v1) and may be reused by a later run (REQ:resumable-by-rerun).
 
 #### REQ: resumable-by-rerun
 
-There is no checkpoint protocol. Every object MUST be written atomically, so a partly written object never exists under its final name: the folder store writes a temporary file (`tmp/<random>`) on the same file system, `fsync`s it, renames it to its final name and `fsync`s the folder; object stores write each object in one PUT (a multipart upload becomes visible only when it completes). An object's name is the SHA-256 of its **uncompressed** content (the JSONL bytes); the stored bytes are that content compressed with zstd, and the uncompressed hash is also stored as object metadata (`datatug-sha256`) so `verify` can check it after decompressing. Store checksums are not compared.
+There is no checkpoint protocol. Every object MUST be written atomically, so a partly written object never exists under its final name: the folder store writes a temporary file (`tmp/<random>`) on the same file system, `fsync`s it, renames it to its final name and `fsync`s the folder; object stores write each object in one PUT (a multipart upload becomes visible only when it completes). An object's name is the SHA-256 of its **uncompressed** content (the JSONL bytes); the stored bytes are that content compressed with zstd, and the uncompressed hash is also stored as object metadata (`datatug-sha256`) so `verify` can check it after decompressing.
 
-A re-run MUST re-read the source in a new snapshot and MAY reuse an existing object instead of uploading it again only if the object is needed by the predecessor point (it is protected by retention, REQ:retention-explicit) or is younger than the **reuse window** (12 hours by the store's modification time); otherwise it writes the content again. A run never overwrites or deletes: when the name it needs is taken by an object it may not reuse, or by an object `verify` marked corrupt (a create-only `corrupt/<hash>.json`), it writes the content under the next free name `<hash>.<n>.jsonl.zst` and reports `object-rewritten`. The cost of a retry within the reuse window is therefore the source read plus what had not yet been uploaded.
+Because nothing in v1 deletes objects, a re-run MUST re-read the source in a new snapshot and MUST reuse every object that already exists under the name it needs, except one marked corrupt: `verify` writes a create-only `corrupt/<object name>.json` for each object whose content does not match its name, and a run that needs such content writes it under the next free name `<hash>.<n>.jsonl.zst` and reports `object-rewritten`. The cost of a retry is therefore the source read plus what had not yet been uploaded.
 
 #### REQ: point-manifest
 
@@ -170,12 +169,11 @@ Every point MUST carry a manifest (`format: datatug-backup-manifest/v1`) with: p
 
 #### REQ: single-run-per-profile
 
-At most one run of a profile MUST publish a point at a time, and no `prune` may remove what a run is about to reference.
+At most one run of a profile MUST publish a point at a time.
 
-- **Locally** a writing verb (`run`, `prune --apply`) MUST take an exclusive lock in the CLI's per-user configuration folder (`os.UserConfigDir()/datatug/backup/locks/<project-id>/<profile>.lock`, where `datatug` already keeps per-user state).
-- **Across machines, git:** a run pushes a fast-forward of the profile branch and never forces. Ref compare-and-swap is the whole lock; git destinations have no `prune` (REQ:git-keeps-all-history).
-- **Across machines, chain:** there is no lease. The manifest `points/<seq>.json` is created with create-only semantics (`If-None-Match: *` on S3 and Azure Blob, `ifGenerationMatch=0` on GCS, write-to-temp then `link` on a folder), so two runs cannot publish the same sequence number; the loser reports `status: conflict`. Protection from `prune` comes from time, measured so that clocks of different machines do not matter: a run MUST NOT publish when more than **12 hours** have passed on its own monotonic clock since it started (`status: run-too-long`, exit `1`); it reuses only objects inside the 12-hour reuse window or needed by its predecessor (REQ:resumable-by-rerun); and `prune` removes an unreferenced object only when the store's own modification time is more than **48 hours** older than the store's current time (read from the response `Date` of a request prune makes). An object a run references is therefore at most 24 hours old when its manifest is created, half the grace period, which leaves room for any plausible clock difference between store and machines.
-- Before creating the manifest a run MUST check that every object the manifest references exists.
+- **Locally** `run` MUST take an exclusive lock in the CLI's per-user configuration folder (`os.UserConfigDir()/datatug/backup/locks/<project-id>/<profile>.lock`, where `datatug` already keeps per-user state).
+- **Across machines, git:** a run pushes a fast-forward of the profile branch and never forces. Ref compare-and-swap is the whole lock.
+- **Across machines, chain:** the manifest `points/<seq>.json` is created with create-only semantics (`If-None-Match: *` on S3 and Azure Blob, `ifGenerationMatch=0` on GCS, write-to-temp then `link` on a folder), so two runs cannot publish the same sequence number. Before creating it the run MUST check that every object the manifest references exists; one that does not (removed by something outside the CLI) is written again as `<hash>.<n>` before the manifest is created.
 
 The loser MUST make no point visible, report `status: locked` (local lock) or `status: conflict` (the destination moved under it) and exit `1`.
 
@@ -185,13 +183,17 @@ The loser MUST make no point visible, report `status: locked` (local lock) or `s
 
 #### REQ: additive-by-default
 
-`backup run` never overwrites or deletes anything at the destination, so a run needs only create permissions and works against write-once storage (S3 Object Lock, GCS retention policies, Azure immutable blobs). Only `prune --apply` deletes, and only on chain destinations.
+Backups are append-only in v1: no verb overwrites or deletes anything at the destination, so a run needs only create permissions (plus read) and a chain destination works on write-once storage (S3 Object Lock, GCS retention policies, Azure immutable blobs). Every point stays restorable, so every record ever backed up — keyed rows, rows of keyless tables, whole dropped tables, rows under an older schema — is recoverable by restoring a point at which it existed (REQ:restore-deletes). Removing old points is the later `cli/backup/prune` Feature.
 
-- **Git destinations** are additive by construction: the history keeps every point, and there is no prune (REQ:git-keeps-all-history).
-- **Chain, `history: additive`** (the default): **every record ever backed up stays recoverable in its last stored version** — keyed records, keyless occurrences and whole dropped collections alike. Prune MAY remove old points (and with them intermediate versions of records that still exist), but it MUST first copy every record that leaves the kept window for good into the profile's **tombstone archive**: create-only objects listed by the prune's record (REQ:retention-explicit). Archive collections are named only by the definition the records were stored under, `v<first 12 hex of the definition hash>`, with a sidecar that maps each one to its source collection name and records, per record, the point at which it left the source; nothing in the archive is ever renamed, rewritten or (in this mode) removed. `backup restore <profile> --tombstones --to <url>` restores each archive collection as a table named `<source collection>__v<12 hex>`; a name that collides with a table already on the target is refused by `db copy`'s empty-target rule like any other.
-- **Chain, `history: windowed`:** prune keeps only the retention window; a row deleted before the oldest kept point is gone. Chosen explicitly for data that must not be kept. After a profile is switched to `windowed`, the first `prune --apply` that would empty its tombstone archive MUST refuse (exit `2`) unless `--confirm-windowed` is given, because the switch is only a line in a committed file. Erasing one row from history is not supported (non-goal).
+Stated limits: a lifecycle or expiration rule on the bucket or prefix, a person deleting objects, or a git host deleting the branch removes backed-up data behind the CLI's back; `verify --level structure` reports the missing objects or commits, and the next run repairs only what the new point needs (REQ:single-run-per-profile, REQ:incomplete-predecessor).
 
-A git profile with `history: windowed` or a non-empty `retention` MUST be refused (exit `2`).
+#### REQ: incomplete-predecessor
+
+When the predecessor point cannot be materialised for a collection (an object is missing or marked corrupt, as after a `published-unverified` run), the run MUST store that collection in full in the new point, with a `predecessor-incomplete` warning naming it, instead of failing; change detection resumes from the new point. This also covers a CI runner without a cache.
+
+#### REQ: destination-owned-by-profile
+
+Every manifest records the project id and profile name. A run MUST refuse (exit `1`, `status: foreign-destination`) a destination whose latest manifest names another project or profile, so two projects that use the same profile name and destination never interleave their points.
 
 ### Destinations
 
@@ -201,7 +203,7 @@ A destination URL `git+ssh://…`, `git+https://…` or `git+file://…` is a gi
 
 #### REQ: git-file-size-cap
 
-A records, definition or record-hash index file larger than the destination's file-size cap MUST fail the run before anything is pushed (exit `1`, naming the collection and its size). The default cap is 95 MB (GitHub refuses files over 100 MB); a profile MAY set a lower `destination.max_file_mb`. Splitting one collection over several files needs an inGitDB records layout that does not exist yet (see [External dependencies](#external-dependencies)); until it does, a database with a collection over the cap uses a chain destination.
+A records, definition or record-hash index file larger than the destination's file-size cap MUST fail the run before anything is pushed (exit `1`, naming the collection and its size). The default cap is 95 MB (GitHub refuses files over 100 MB); a profile MAY set a lower `destination.max_file_mb`. A run MUST warn (`file-near-cap`) when a file passes 80 % of the cap, so the move to a folder chain is planned and not a CI failure. A single push larger than the host accepts (GitHub refuses pushes over 2 GB, which a first run of a large database can reach with every file under the cap) MUST fail with exit `1` and a message that names the limit; nothing is published. Splitting one collection over several files needs an inGitDB records layout that does not exist yet (see [External dependencies](#external-dependencies)); until it does, a database with a collection over the cap uses a chain destination.
 
 #### REQ: destination-chain
 
@@ -211,14 +213,15 @@ A folder destination (`file:///abs/path`, `file:./rel/path`, or a plain path) an
 <prefix>/<profile>/
   points/<seq>.json                    # the manifest; created last, create-only
   objects/sha256/<2 hex>/<hash>[.<n>].jsonl.zst  # record segments, definitions, archive segments
-  pruned/<n>.json                      # one create-only record per prune --apply
-  corrupt/<hash>.json                  # create-only marks written by verify
+  corrupt/<object name>.json           # create-only marks written by verify
   probe/, tmp/                         # create-only probe objects; folder temp files
 ```
 
-A point's segments hold, per collection, the records added or changed and the deletion markers, sorted by key, each line `{"k": <key>, "h": <record hash>, "op": "put"|"del", "v": <record>}`. Point 1, and any point after a definition change, holds the full collection. The state of point N is the merge of its chain back to the last full segment of each collection. The state of a point at or after a prune is materialised from the base segments recorded by the latest prune record at or before it (REQ:retention-explicit). All three backends implement one small store interface (put-if-absent, get, list by prefix, delete), so the folder backend is the test double of object storage.
+A point's segments hold, per collection, the records added or changed and the deletion markers, sorted by key, each line `{"k": <key>, "h": <record hash>, "op": "put"|"del", "v": <record>}`. Point 1, and any point after a definition change, holds the full collection. The state of point N is the merge of its chain back to the last full segment of each collection. All three backends implement one small store interface (put-if-absent, get, list by prefix, delete), so the folder backend is the test double of object storage.
 
-Not every store honours create-only writes (some S3-compatible servers ignore `If-None-Match`, `O_EXCL` is unreliable on some NFS mounts). The first run of a profile on a destination MUST probe it: create `probe/<random>` create-only twice and require the second to fail with a precondition error. A store that overwrites MUST be refused (exit `1`, `store-not-create-only`) unless the profile sets `destination.single_writer: true`, which declares that only one machine ever writes and leaves only the local lock. The probe result is cached per destination in the per-user folder (an ephemeral CI runner probes on every run). The probe deletes its object afterwards where the store allows it; on write-once storage the object stays, and `prune` removes probe objects older than the grace period where it can.
+Not every store honours create-only writes (some S3-compatible servers ignore `If-None-Match`, `O_EXCL` is unreliable on some NFS mounts). The first run of a profile on a destination MUST probe it: create `probe/<random>` create-only twice and require the second to fail with a precondition error. A store that overwrites MUST be refused (exit `1`, `store-not-create-only`) unless the profile sets `destination.single_writer: true`, which declares that only one machine ever writes and leaves only the local lock. The probe result is cached per destination in the per-user folder (an ephemeral CI runner probes on every run). The probe deletes its object afterwards where the store allows it; on write-once storage it stays (one small object per probe).
+
+Stated limits of object stores: on a versioned bucket every object is kept as written (v1 never deletes, so this costs nothing extra); a lifecycle expiration rule on the prefix deletes backed-up data and MUST NOT be configured (REQ:additive-by-default); S3 reports a multipart object's `Last-Modified` as the start of its upload, which v1 does not use.
 
 An object store's endpoint, region and addressing style are profile fields, never URL query parameters: `destination.endpoint` (an `https://` URL without credentials; `http://` only for `localhost`, for the MinIO, fake-gcs-server and Azurite tests), `destination.region`, `destination.path_style: true|false`.
 
@@ -256,7 +259,7 @@ A restore MUST materialise the selected point as a read-only inGitDB tree in a t
 
 #### REQ: restore-deletes
 
-`--at` and `--tombstones` are mutually exclusive (exit `2`). A restore of point N MUST produce the source as it was at point N: rows deleted after N are present, rows deleted before N are absent. A single deleted row is recovered by restoring an earlier point with a filter, e.g. `backup restore prod --at 41 --include Customer --where Customer:CustomerId:=:42 --to sqlite://./recovered.db`.
+A restore of point N MUST produce the source as it was at point N: rows deleted after N are present, rows deleted before N are absent. A single deleted row is recovered by restoring an earlier point with a filter, e.g. `backup restore prod --at 41 --include Customer --where Customer:CustomerId:=:42 --to sqlite://./recovered.db`.
 
 #### REQ: restore-postgres-preview
 
@@ -268,7 +271,7 @@ A restore to PostgreSQL and a run from PostgreSQL MUST obey the same preview swi
 
 `backup verify <profile> [--at <point> | --all-points] [--level …]` MUST check, by level (each includes the previous):
 
-- `structure`: every manifest parses; sequence numbers are contiguous from the oldest kept point; each predecessor hash equals the SHA-256 of the predecessor's manifest bytes, except that the oldest kept point's predecessor hash MUST equal the hash recorded for that predecessor in the latest prune record (so a prune gap is accepted only where a prune record covers it); prune records chain to each other the same way; every referenced object (or git commit and file) exists.
+- `structure`: every manifest parses; sequence numbers are contiguous from `1`; each predecessor hash equals the SHA-256 of the predecessor's manifest bytes; every manifest names this project and profile; every referenced object (or git commit and file) exists.
 - `hashes` (default): recompute each stored record hash and each collection digest of the point(s) from the stored bytes and compare them, and the row counts, with the manifest.
 - `restore`: materialise the point, restore it into a scratch SQLite file in a temporary folder through REQ:restore-is-db-copy, and compare the scratch database with the materialised tree through `pkg/dbcompare.Compare`; the result MUST be zero added, removed and changed records and the manifest's row counts. This level proves that the point can be restored through `db copy`; integrity of the stored bytes is the `hashes` level.
 
@@ -278,20 +281,11 @@ A failure MUST exit `1` and name the point, the collection and, for a record, it
 
 `backup run` MUST run `verify` at the profile's `verify_after_run` level (default `hashes`) on the new point before reporting success. A verification failure after a point was published MUST exit `1` with `status: published-unverified` so CI does not treat the point as good.
 
-### Retention
-
-#### REQ: retention-explicit
-
-Retention exists only for chain destinations and MUST only ever be applied by `backup prune <profile>`, which by default prints what it would remove and changes nothing; `--apply` removes it. The profile's `retention` keeps a **contiguous window of the newest points**: `keep_last: N` and/or `keep_days: D` (a point is kept if either keeps it); empty keeps every point. The latest point is always kept. `prune --apply` MUST, in this order:
-
-1. compute the oldest kept point K;
-2. write, create-only, the base segments of every collection's state at K (unless K's own chain already starts at full segments) and, in `additive` mode, the archive segments (REQ:additive-by-default);
-3. create `pruned/<n>.json` create-only, holding: the removed sequence numbers and the SHA-256 of each removed manifest, K, the base segments per collection, the archive segments, and the SHA-256 of the previous prune record. A concurrent prune that loses this create MUST stop with `status: conflict` before deleting anything;
-4. delete the removed manifests and every object that no kept manifest, prune record or archive references and that is older than the 48-hour grace period by the store's clock (REQ:single-run-per-profile), including leftovers of interrupted runs, probe objects and folder temp files.
+### Size over time
 
 #### REQ: git-keeps-all-history
 
-A git destination keeps every point; its history is never rewritten and `prune` on a git profile MUST exit `2` saying so. To bound its size the person creates a new profile (a new branch, or a new repository) and deletes the old branch when it is no longer needed; the CLI does neither. Git's own delta compression is what keeps incremental points small.
+A git destination keeps every point; its history is never rewritten. To bound its size the person starts a new profile with a **new repository** (a new branch in the same repository does not shrink it, and deleting a branch on a hosted service does not reclaim its objects) and deletes the old repository when it is no longer needed; the CLI does neither. Git's own delta compression is what keeps incremental points small.
 
 ### CI friendliness and output
 
@@ -305,7 +299,7 @@ No verb MAY prompt. Every verb MUST accept `--format text|json|yaml`, defaulting
 
 #### REQ: exit-codes
 
-Verbs MUST follow the [shared CLI exit codes](../README.md#shared-exit-code-contract): `0` done (including `unchanged`), `1` failed (run, verification, lock lost, conflict, size cap), `2` usage or invalid profile, `3` profile or point not found, `4` source or destination could not be reached. With `--fail-on-warning` a run or restore that finished with warnings MUST exit `1` with `status: failed-on-warning` (not `3`, which the shared contract gives to "not found"; `db copy` uses `3` for this, and a restore maps it to `1`).
+Verbs MUST follow the [shared CLI exit codes](../README.md#shared-exit-code-contract): `0` done (including `unchanged`), `1` failed (run, verification, local lock held, conflict, foreign destination, size or push limit), `2` usage or invalid profile, `3` profile or point not found, `4` source or destination could not be reached. With `--fail-on-warning` a run or restore that finished with warnings MUST exit `1` with `status: failed-on-warning` (not `3`, which the shared contract gives to "not found"; `db copy` uses `3` for this, and a restore maps it to `1`).
 
 ### Security
 
@@ -323,7 +317,7 @@ A backup reads what `db copy` reads with the same credentials, and, like `db cop
 
 #### REQ: destination-pinned
 
-A profile is a committed file, so a pull request that edits `destination` (or `source`) could make the next CI run copy every row to a destination its author controls; the public-repo refusal does not help against a private one. A writing verb MUST therefore refuse (exit `1`, `status: destination-not-pinned`) unless the profile's **pin** — the SHA-256 of its normalised source reference, destination URL, branch or prefix and endpoint — matches one of: `--expect-destination <pin>`, the environment variable `DATATUG_BACKUP_PINS` (a comma list, meant to be set in protected CI configuration outside the repository), or the per-user pins file written by `backup new` and `backup pin <profile>` (which prints the pin and asks for no confirmation; it is a deliberate command). The refusal MUST print the expected pin and what changed, never a credential. Because a pin is a hash of values anyone can read, it protects only when it comes from outside the repository: `--expect-destination` and `DATATUG_BACKUP_PINS` MUST be set in protected CI configuration (an environment with required reviewers, a protected variable), never in a workflow file the same pull request can edit; the documentation MUST say so.
+A profile is a committed file, so a pull request that edits `destination` (or `source`) could make the next CI run copy every row to a destination its author controls; the public-repo refusal does not help against a private one. A writing verb MUST therefore refuse (exit `1`, `status: destination-not-pinned`) unless the profile's **pin** — the SHA-256 of its normalised source reference, what that reference resolves to in the project (the driver and the SQLite path, or the `dsnEnv` variable name — never its value), destination URL, branch or prefix and endpoint — matches one of: `--expect-destination <pin>`, the environment variable `DATATUG_BACKUP_PINS` (a comma list, meant to be set in protected CI configuration outside the repository), or the per-user pins file written by `backup new` and `backup pin <profile>` (which prints the pin and asks for no confirmation; it is a deliberate command). The refusal MUST print the expected pin and what changed, never a credential. Because a pin is a hash of values anyone can read, it protects only when it comes from outside the repository: `--expect-destination` and `DATATUG_BACKUP_PINS` MUST be set in protected CI configuration (an environment with required reviewers, a protected variable), never in a workflow file the same pull request can edit; the documentation MUST say so.
 
 #### REQ: encryption-seam
 
@@ -408,7 +402,7 @@ One person and one CI job; Chinook as the source; a private git repository as th
 1. **Create the profile.** Alex runs `datatug backup new prod --project chinook --source datatug://chinook/chinook?env=prod --to git+ssh://git@github.com/acme/chinook-backups.git --git=commit`. *Good result:* `backups/prod.yaml` exists and is committed; it contains no host, password or token; nothing connected to the database or to GitHub; the profile's pin is in Alex's pins file and printed, so it can be put in the CI's protected `DATATUG_BACKUP_PINS`.
 2. **First backup.** Alex runs `datatug backup run prod --json`. *Good result:* exit `0`; the report shows point `1`, 11 collections, 15,607 rows, all `added`; branch `datatug-backup/chinook/prod` has one commit holding an inGitDB project and `.datatug-backup/manifest.json`; the post-run `hashes` verification passed.
 3. **Nothing changes, run again.** *Good result:* exit `0`, `status: unchanged`, no new commit; `backup point list prod` still shows one point.
-4. **The database changes** (3 invoices updated, 1 customer deleted, 2 tracks added) and the CI job, triggered by the release of the app that changed them, runs `datatug backup run prod --json`. *Good result:* point `2`; report counts `changed 3, deleted 1, added 2`; `git diff` of the two commits shows exactly those six record lines.
+4. **The database changes** (3 invoices updated, 1 customer deleted, 2 tracks added) and the CI job, triggered by the release of the app that changed them, runs `datatug backup run prod --json`. *Good result:* point `2`; report counts `changed 3, deleted 1, added 2`; `git diff` of the two commits shows exactly those six records (and their index entries).
 5. **Restore an earlier point.** Alex runs `datatug backup restore prod --at 1 --to sqlite://./prod-at-1.sqlite`. *Good result:* the file holds point 1's row counts per table, including the customer deleted in step 4; the report names the fidelity used.
 6. **Recover one row.** `datatug backup restore prod --at 1 --include Customer --where Customer:CustomerId:=:42 --to sqlite://./customer-42.sqlite`. *Good result:* one row, the deleted customer.
 7. **Verify everything.** `datatug backup verify prod --all-points --level restore`. *Good result:* exit `0`. After someone pushes a commit that edits a record line on the backup branch, the same command exits `1` naming that commit as not a backup; after someone force-pushes a point's commit with an edited record line, it exits `1` naming the point, the collection and the key (found through the record-hash index of REQ:destination-git).
@@ -464,7 +458,7 @@ The whole journey MUST run as one hermetic end-to-end test: a Chinook SQLite sou
 
 **Given** point `1`, then 3 updated rows, 1 deleted row and 2 inserted rows in the source
 **When** the user runs `backup run prod --json`
-**Then** point `2` reports `changed 3, deleted 1, added 2`; `git diff <point1> <point2> --stat` touches only the records files of the affected collections and the manifest, and the diff touches exactly 6 records (3 changed, 1 removed, 2 added).
+**Then** point `2` reports `changed 3, deleted 1, added 2`; `git diff <point1> <point2> --stat` touches only the records files and record-hash index files of the affected collections and the manifest, and the records diff touches exactly 6 records (3 changed, 1 removed, 2 added), with the matching 6 entries in the index diff.
 
 ### AC: chain-incremental-and-deletion-markers
 
@@ -503,7 +497,7 @@ The whole journey MUST run as one hermetic end-to-end test: a Chinook SQLite sou
 
 **Given** a profile with `destination.max_file_mb: 1` and a collection whose records file is 2 MB
 **When** the user runs `backup run`
-**Then** exit `1` naming the collection and its size; the remote branch is unchanged.
+**Then** exit `1` naming the collection and its size; the remote branch is unchanged. With a 1.7 MB file the run succeeds with a `file-near-cap` warning. A fake remote that refuses a push over its limit makes the run exit `1` naming the push limit, with nothing published.
 
 ### AC: restore-point-to-new-sqlite
 
@@ -537,22 +531,6 @@ The whole journey MUST run as one hermetic end-to-end test: a Chinook SQLite sou
 **When** the user runs `backup run prod --json`
 **Then** exit `1`, stdout is one JSON object with `status: published-unverified` and `exitCode: 1`.
 
-### AC: prune-is-explicit-and-safe
-
-**Requirements:** backup#req:retention-explicit, backup#req:additive-by-default, backup#req:chain-rebase, backup#req:verify-levels
-
-**Given** a folder destination with 40 points and `retention: {keep_last: 5}`
-**When** the user runs `backup prune prod`, then `backup prune prod --apply`, then `backup verify prod --all-points --level restore`
-**Then** the first changes nothing and lists 35 points; after the second, points 36–40 and `pruned/1.json` remain; verify exits `0` (the gap before point 36 is covered by the prune record); deleting `pruned/1.json` makes `verify --level structure` exit `1` naming the uncovered gap; no `backup run` ever removed an object.
-
-### AC: git-prune-refused
-
-**Requirements:** backup#req:git-keeps-all-history
-
-**Given** a git profile, and a second git profile file with `retention: {keep_last: 1}`
-**When** the user runs `backup prune prod`, and `backup run` on the second profile
-**Then** both exit `2`; the first says git destinations keep all history and how to start a new profile; the remote is unchanged.
-
 ### AC: inconsistent-source-is-flagged
 
 **Requirements:** backup#req:consistent-snapshot
@@ -577,14 +555,6 @@ The whole journey MUST run as one hermetic end-to-end test: a Chinook SQLite sou
 **When** the user runs `backup run prod`
 **Then** exit `1` naming `allow_public`; nothing is pushed.
 
-### AC: additive-prune-keeps-deleted-rows
-
-**Requirements:** backup#req:additive-by-default, backup#req:retention-explicit
-
-**Given** a folder destination with `history: additive`, 10 points, a row deleted at point 3, and `retention: {keep_last: 2}`
-**When** the user runs `backup prune prod --apply` and then `backup restore prod --tombstones --to sqlite://./t.sqlite`
-**Then** 2 points remain and `t.sqlite` holds the deleted row's last stored version; with `history: windowed` the same prune leaves no copy of that row.
-
 ### AC: rewritten-history-refused
 
 **Requirements:** backup#req:rewritten-history-refused, backup#req:local-state-cache
@@ -593,21 +563,13 @@ The whole journey MUST run as one hermetic end-to-end test: a Chinook SQLite sou
 **When** someone force-pushes the branch back to point 1 with an edited record and the user runs `backup run prod`
 **Then** exit `1`, `status: history-rewritten`, naming point 2; nothing is pushed.
 
-### AC: prune-cannot-race-a-run
-
-**Requirements:** backup#req:single-run-per-profile, backup#req:retention-explicit, backup#req:resumable-by-rerun
-
-**Given** a folder destination with a fake store clock, `retention: {keep_last: 1}`, and a run paused by fault injection after it wrote its segments and before its manifest
-**When** `backup prune prod --apply` runs from another process with another per-user folder (a second machine), and the run then resumes
-**Then** prune removes none of the run's segments and none of the predecessor point's objects; the run publishes and `verify --level hashes` passes. With the store clock advanced 49 hours before prune, prune removes the run's segments, and the resumed run, whose monotonic clock is advanced 13 hours, exits `1` with `status: run-too-long` and publishes nothing. A separate fault point that deletes a referenced object between the run's existence check and its manifest create is caught by the post-run verification (`status: published-unverified`), and the next run writes that content as `<hash>.1` and reports `object-rewritten`.
-
 ### AC: interrupted-write-leaves-no-partial-object
 
 **Requirements:** backup#req:resumable-by-rerun
 
 **Given** a folder destination where a run was killed while writing an object
-**When** the destination is listed and the run is repeated within the reuse window
-**Then** no object under `objects/` is partial (only `tmp/` holds the unfinished file); the re-run uploads only the objects that were missing; after `prune --apply` past the grace period no `tmp/` file remains.
+**When** the destination is listed and the run is repeated
+**Then** no object under `objects/` is partial (only `tmp/` holds the unfinished file); the re-run uploads only the objects that were missing and publishes a point that verifies at level `hashes`.
 
 ### AC: store-without-create-only-refused
 
@@ -621,7 +583,7 @@ The whole journey MUST run as one hermetic end-to-end test: a Chinook SQLite sou
 
 **Requirements:** backup#req:destination-pinned
 
-**Given** a profile whose `destination.url` was changed in a commit, an empty pins file and no `DATATUG_BACKUP_PINS`
+**Given** a profile whose `destination.url` was changed in a commit (and, separately, a profile whose source's registered `dsnEnv` was changed in the project), an empty pins file and no `DATATUG_BACKUP_PINS`
 **When** CI runs `backup run --all`
 **Then** that profile exits `1` with `status: destination-not-pinned` and nothing is written anywhere; with the new pin in `DATATUG_BACKUP_PINS`, or passed as `--expect-destination`, it runs; `backup pin prod` prints the pin and writes it to the per-user pins file, after which the run also succeeds on that machine.
 
@@ -632,22 +594,6 @@ The whole journey MUST run as one hermetic end-to-end test: a Chinook SQLite sou
 **Given** a git destination with points 1 and 2, then force-pushed back to point 1, and a run with no local cache
 **When** the run is made without `--trust`, and again with `--trust <point 2 SHA>`
 **Then** the first continues from point 1 and reports `trust: destination-head`; the second exits `1` with `status: history-rewritten` naming point 2.
-
-### AC: additive-covers-keyless-dropped-and-old-schemas
-
-**Requirements:** backup#req:additive-by-default, backup#req:keyless-collections, backup#req:schema-changes-tracked
-
-**Given** a folder destination with `history: additive`, where across points a keyless table lost one row, a keyed table gained a column and then lost a row, a third table was dropped, and a fourth source table is literally named `Orders__v0123456789ab`
-**When** prune keeps only the latest point, the schema of the keyed table changes again and a second prune runs, and the archive is restored with `--tombstones` into an empty SQLite file
-**Then** the target holds the keyless row, the deleted keyed row in `<name>__v<12 hex>` with the columns it had, and every row of the dropped table; no archive object written by the first prune was rewritten or removed by the second; the oddly named source table is backed up and restored like any other.
-
-### AC: windowed-switch-needs-confirmation
-
-**Requirements:** backup#req:additive-by-default
-
-**Given** a profile with a non-empty tombstone archive whose `history` was edited to `windowed`
-**When** the user runs `backup prune prod --apply`, then with `--confirm-windowed`
-**Then** the first exits `2` and removes nothing; the second empties the archive.
 
 ### AC: list-and-point-list
 
@@ -663,6 +609,46 @@ The whole journey MUST run as one hermetic end-to-end test: a Chinook SQLite sou
 
 **Given** the built CLI and its documentation
 **Then** no `backup` verb starts a background process or timer (the process tree after each verb is empty); the documented CI example has no `schedule:`/cron trigger; every object written in a run passes through the `ObjectTransform` (a counting identity transform in the test sees every put) and the manifest names `transform: identity`; with an access policy that masks a column present in `~/.datatug/policies/`, the backup still holds the column's values, as `db copy` would.
+
+### AC: additive-history-recovers-everything
+
+**Requirements:** backup#req:additive-by-default, backup#req:keyless-collections, backup#req:schema-changes-tracked, backup#req:restore-deletes
+
+**Given** a folder destination and three points where between them a keyless table lost one row, a keyed table gained a column and later lost a row, and a third table was dropped
+**When** each earlier point is restored into an empty SQLite file
+**Then** the keyless row, the keyed row with the columns it had, and every row of the dropped table come back from the points at which they existed; no object written by an earlier run was modified or removed.
+
+### AC: incomplete-predecessor-is-repaired
+
+**Requirements:** backup#req:incomplete-predecessor, backup#req:resumable-by-rerun, backup#req:verify-after-run
+
+**Given** a folder destination where one segment of point 2 was deleted by hand and another replaced with wrong bytes, and no local cache
+**When** `backup verify prod --at 2` runs, then `backup run prod`
+**Then** verify exits `1` naming both objects and writes `corrupt/<object name>.json` for the replaced one; the run stores the two affected collections in full with `predecessor-incomplete` warnings, writes the corrupt content as `<hash>.1` if it needs it, and point 3 verifies at level `hashes`.
+
+### AC: foreign-destination-refused
+
+**Requirements:** backup#req:destination-owned-by-profile
+
+**Given** a folder destination holding points of project `a`, profile `prod`
+**When** project `b` runs its profile `prod` against the same folder
+**Then** exit `1`, `status: foreign-destination`, nothing written.
+
+### AC: chain-rebase-bounds-restore
+
+**Requirements:** backup#req:chain-rebase
+
+**Given** a folder destination and 31 runs that each change one row of one collection
+**When** the 31st run is made and its point is restored
+**Then** the 31st point holds a new full segment for that collection, computed without an extra source read (the source fake counts one read per run), and the restore reads no segment older than it; no earlier object was changed.
+
+### AC: git-history-only-grows
+
+**Requirements:** backup#req:git-keeps-all-history, backup#req:destination-git
+
+**Given** a git destination after 10 runs
+**When** every verb of this Feature is run against it
+**Then** the branch's history is a superset of what it was before each verb (no push was forced, no commit removed), and no verb offers to delete points.
 
 ### AC: whole-journey-e2e
 
@@ -685,12 +671,16 @@ Each stage is one PR (sizes are production code + tests, excluding fixtures). Ea
 | 3b | Remote git: cache clone, fetch, fast-forward push (system `git` binary with an askpass helper and no credential helper if go-git proves unreliable), local lock, `--trust` and rewritten-history refusal, size cap, public-repo refusal | M (~700 LOC) | 2–4 against a bare remote |
 | 4 | Snapshot reader: a `dal.DB`/row reader scoped to one read transaction for SQLite and PostgreSQL (upstream in `dalgo2sqlite` / `dalgo2postgres` or a `pkg/dbcopy` reader beside `faithful`), used by `ExportInGitDB` | M (~600 LOC, part upstream) | 2 |
 | 5 | `backup restore` (own report, `--dry-run`, `--fail-on-warning`) and `backup verify` (all levels, `dbcompare` restore check); whole-journey e2e steps 1–7 | M (~800 LOC) | 5, 6, 7 |
-| 6 | Chain format + folder store: segments, deletion markers, atomic writes, reuse window and run time limit, create-only probe, create-only manifests, chain rebase; journey step 8 | L (~1,100 LOC) | 8 |
-| 7 | `backup prune` for chains (prune records, base segments, grace-period deletion, tombstone archive, windowed retention), `restore --tombstones` | M (~700 LOC) | — |
-| 8a–c | Object storage stores: S3, GCS, Azure Blob — one PR each, conditional-create locking, emulator tests (MinIO, fake-gcs-server, Azurite) | M each (~400 LOC) | 8 with a cloud store |
-| later | Watermarks, range digests, logical replication; faithful restore after inGitDB follow-up A; partitioned records after the inGitDB layout lands | separate Features | — |
+| 6 | Chain format + folder store: segments, deletion markers, atomic writes, corrupt marks, create-only probe, create-only manifests, incomplete-predecessor repair, chain rebase; journey step 8 | L (~1,000 LOC) | 8 |
+| 7a–c | Object storage stores: S3, GCS, Azure Blob — one PR each, conditional-create locking, emulator tests (MinIO, fake-gcs-server, Azurite) | M each (~400 LOC) | 8 with a cloud store |
+| later | `cli/backup/prune` (retention for chains, tombstone archive); watermarks, range digests, logical replication; faithful restore after inGitDB follow-up A; partitioned records after the inGitDB layout lands | separate Features | — |
 
-Stages 1–3b and 5 are the minimum that delivers the founder's ask for a git remote; 4 makes points consistent; 6 adds the local folder; 8 adds cloud storage.
+Stages 1–3b and 5 are the minimum that delivers the founder's ask for a git remote; 4 makes points consistent; 6 adds the local folder; 7 adds cloud storage.
+
+## Later work
+
+- **`cli/backup/prune`** (a separate Feature, to be specified): retention for chain destinations, removing old points while keeping restore and `verify` consistent, and a tombstone archive that keeps the last version of every record those points held. Three review rounds of this Feature showed that pruning concurrent with runs, prune bookkeeping that `verify` accepts, and an archive that keeps identically defined tables and re-deleted keys apart each need their own design; v1 ships without them because it never deletes.
+- Git destinations will not get pruning; a new repository is the way to start over (REQ:git-keeps-all-history).
 
 ## Non-goals
 
@@ -703,6 +693,7 @@ Stages 1–3b and 5 are the minimum that delivers the founder's ask for a git re
 - Erasing selected rows from existing points (right-to-erasure tooling); only whole points and archives are removed.
 - Evaluating backups against query access policies (REQ:same-access-as-db-copy).
 - Rewriting git history, force pushes, or git LFS.
+- Deleting backed-up data in v1 (retention is the later `cli/backup/prune` Feature).
 - Restoring into the source without an explicit `--to` and `--overwrite`.
 - Merging two profiles' histories, or cross-profile deduplication.
 
@@ -714,7 +705,7 @@ Decisions needed from the founder; each has a recommendation that the spec alrea
 2. **Should `db copy --to ingitdb://` become the native exporter, so `export` is literally `db copy --to ingitdb://`?** Today they are two writers with different trees. `backup` uses the exporter either way (stage 1). Moving `db copy` onto it means the exporter must also implement `--overwrite=recreate|reload` and the empty-target check, and the layout of every copy to inGitDB changes (one file per record → one records file per collection), which rewrites the expectations of `AC:sqlite-to-ingitdb-chinook-roundtrip` and the filtering ACs. *Recommendation:* yes, as its own `cli/db/export` + `db copy` change after stage 1, announced in the release notes; not a blocker for `backup`.
 3. **Retire the Approved `db snapshot` Idea?** [`db-snapshot-command`](../../../ideas/db-snapshot-command.md) proposed `db snapshot --project/--db/--env` writing timestamped local inGitDB trees. With `export` as the ad-hoc local shortcut and `backup` (folder destination) as the named, repeatable one, it duplicates both. *Recommendation:* archive it as superseded by this Feature and the `db export` decision; carry its default-path idea into the `cli/db/export` Feature.
 
-Not founder decisions (resolved in this spec, listed so a reviewer can challenge them): restore always needs `--to`; `--fail-on-warning` exits `1`, not `3`; backups are not gated by query access policies; prune is the only deleting verb, exists only for chain destinations and, in the default `additive` mode, keeps every deleted record in the tombstone archive; git destinations keep all history; chain concurrency uses create-only manifests and time windows instead of leases.
+Not founder decisions (resolved in this spec, listed so a reviewer can challenge them): restore always needs `--to`; `--fail-on-warning` exits `1`, not `3`; backups are not gated by query access policies; v1 never deletes backed-up data (retention is a later Feature); git destinations keep all history; chain concurrency uses create-only manifests, not leases.
 
 ---
 *This document follows the https://specscore.md/feature-specification*

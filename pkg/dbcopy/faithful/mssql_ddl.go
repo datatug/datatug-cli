@@ -150,6 +150,9 @@ func mssqlComment(s string) string {
 	return strings.ReplaceAll(commentText(s), "$(", "$ (")
 }
 
+// mssqlNoticeLine is the SQL Server rule for one line of a notice: "$(" is broken.
+func mssqlNoticeLine(s string) string { return strings.ReplaceAll(s, "$(", "$ (") }
+
 func (d mssqlDialect) Header(p *ScriptPlan, h Header) []string {
 	var l []string
 	add := func(format string, args ...any) {
@@ -170,6 +173,10 @@ func (d mssqlDialect) Header(p *ScriptPlan, h Header) []string {
 	}
 	if h.Attribution != "" {
 		add("Attribution: %s", h.Attribution)
+	}
+	if h.Notice != "" {
+		raw("")
+		l = append(l, NoticeLines("-- ", h.Notice, mssqlNoticeLine)...)
 	}
 	raw("")
 	raw("Requires SQL Server 2016 or later. Verified on SQL Server 2022.")

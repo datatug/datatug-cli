@@ -57,6 +57,29 @@ fetch() { # id -> $work/<id>.sqlite
 
 license_of() { awk -v id="$1" '$1 == id { print $5 }' scripts/journey-datasets.txt; }
 
+# urlencode percent-encodes a path for a query value (ASCII paths; anything outside [A-Za-z0-9._~/-] is escaped).
+urlencode() {
+	local s=$1 out= c i
+	for ((i = 0; i < ${#s}; i++)); do
+		c=${s:i:1}
+		case $c in [a-zA-Z0-9._~/-]) out+=$c ;; *) out+=$(printf '%%%02X' "'$c") ;; esac
+	done
+	printf '%s' "$out"
+}
+
+# The hostile multi-line licence notice (a GO line, \! cmd, source, */, CR LF, U+2028, a byte order mark ...) that the fixture
+# and fuzz datasets carry in their header through notice-file=: it must load, verify and change no line that is not a comment.
+hostile_notice=$work/hostile_notice.txt
+DATATUG_WRITE_HOSTILE_NOTICE="$hostile_notice" go test -count=1 -run '^TestWriteHostileNotice$' ./pkg/dbcopy/faithful/ >/dev/null
+[ -s "$hostile_notice" ] || { echo "the hostile notice was not written" >&2; exit 1; }
+pwned=/tmp/datatug-notice-pwned
+
+# Positive control: the hazard is real. A line that starts with \! is a command of the mysql client and runs a program.
+printf '\\! touch %s\n' "$pwned" | docker exec -i "$name" mysql -uroot -p"$password" >/dev/null 2>&1 || true
+docker exec "$name" test -e "$pwned" || { echo "notice control: the mysql client did not run \\! touch, so the notice check proves nothing" >&2; exit 1; }
+docker exec "$name" rm -f "$pwned"
+echo "notice control: a line that starts with \\! runs a program in this mysql client (no notice line starts that way)"
+
 failures=0
 printf '%-15s %-8s %-9s %-11s %-9s %s\n' dataset tables rows values warnings result
 for ds in $datasets; do
@@ -72,10 +95,21 @@ for ds in $datasets; do
 		license=$(license_of "$ds")
 	fi
 	file="$work/$ds.sqlite"
-	url="sqlscript://$work/$ds.mysql.sql?dialect=mysql&name=$ds&license=$license&edition=DemoDB%20contract%20edition"
+	notice_query=
+	case $ds in fixture | fuzz) notice_query="&notice-file=$(urlencode "$hostile_notice")" ;; esac
+	url="sqlscript://$work/$ds.mysql.sql?dialect=mysql&name=$ds&license=$license&edition=DemoDB%20contract%20edition$notice_query"
 	"$work/datatug" db copy --from "sqlite://$file" --to "$url" --json >"$work/$ds.report.json"
 	"$work/datatug" db copy --from "sqlite://$file" --to "${url/$ds.mysql.sql/$ds.again.sql}" --json >/dev/null
 	cmp -s "$work/$ds.mysql.sql" "$work/$ds.again.sql" || { echo "$ds: two exports are not byte for byte the same" >&2; failures=$((failures + 1)); continue; }
+	if [ -n "$notice_query" ]; then
+		# The notice is in the header, whole, and it added no line that is not a comment: the script is the one
+		# of the same export without a notice, plus comment lines.
+		grep -q 'Copyright (c) 2024 Hostile Notice Co\.' "$work/$ds.mysql.sql" || { echo "$ds: the notice is not in the script" >&2; failures=$((failures + 1)); continue; }
+		plain_url=${url%&notice-file=*}
+		"$work/datatug" db copy --from "sqlite://$file" --to "${plain_url/$ds.mysql.sql/$ds.nonotice.sql}" --json >/dev/null
+		cmp -s <(grep -v '^--' "$work/$ds.mysql.sql") <(grep -v '^--' "$work/$ds.nonotice.sql") || { echo "$ds: the notice added a line that is not a comment" >&2; failures=$((failures + 1)); continue; }
+		echo "    notice: ${hostile_notice##*/} is in the header, and every line it added is a comment"
+	fi
 	db=journey_$ds
 	mysql_root -e "DROP DATABASE IF EXISTS \`$db\`; CREATE DATABASE \`$db\` CHARACTER SET utf8mb4"
 	if ! docker exec -i "$name" mysql -uroot -p"$password" --default-character-set=utf8mb4 --skip-commands --database "$db" <"$work/$ds.mysql.sql" 2>"$work/$ds.load.err"; then
@@ -88,6 +122,20 @@ for ds in $datasets; do
 		echo "$ds: the script loaded twice into one database" >&2; failures=$((failures + 1)); continue
 	fi
 	grep -q '_demodb_import' "$work/$ds.reload.err" || { echo "$ds: the second load did not stop at the marker table:" >&2; head -3 "$work/$ds.reload.err" >&2; failures=$((failures + 1)); continue; }
+	if [ -n "$notice_query" ]; then
+		# The same script loads with the plain client too (no --skip-commands: it reads the notice as comment lines),
+		# and neither load ran the "\! touch" of the notice.
+		mysql_root -e "DROP DATABASE IF EXISTS \`${db}_plain\`; CREATE DATABASE \`${db}_plain\` CHARACTER SET utf8mb4"
+		if ! docker exec -i "$name" mysql -uroot -p"$password" --default-character-set=utf8mb4 --database "${db}_plain" <"$work/$ds.mysql.sql" 2>"$work/$ds.plain.err"; then
+			echo "$ds: the plain mysql client (no --skip-commands) stopped at an error:" >&2
+			grep -v 'Using a password' "$work/$ds.plain.err" | head -5 >&2
+			failures=$((failures + 1)); continue
+		fi
+		rows=$(mysql_root -N -e "SELECT COUNT(*) FROM \`${db}_plain\`._demodb_import")
+		[ "$rows" = 1 ] || { echo "$ds: the plain client load left no marker row" >&2; failures=$((failures + 1)); continue; }
+		if docker exec "$name" test -e "$pwned"; then echo "$ds: the notice ran a client command" >&2; failures=$((failures + 1)); continue; fi
+		echo "    notice: loads with and without --skip-commands; no client command ran"
+	fi
 	out="$work/$ds.verify.txt"
 	DATATUG_JOURNEY_SQLITE="$file" DATATUG_JOURNEY_MYSQL_DSN="root:$password@tcp(127.0.0.1:$port)/$db?charset=utf8mb4" \
 		go test -count=1 -v -run '^TestJourneyMySQL$' ./internal/crossverify/ >"$out" 2>&1 || true

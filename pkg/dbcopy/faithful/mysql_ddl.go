@@ -138,6 +138,10 @@ func (d mysqlDialect) Header(p *ScriptPlan, h Header) []string {
 	if h.Attribution != "" {
 		add("Attribution: %s", h.Attribution)
 	}
+	if h.Notice != "" {
+		raw("")
+		l = append(l, NoticeLines("-- ", h.Notice, nil)...)
+	}
 	raw("")
 	raw("Requires MySQL 8.0.16 or later (CHECK constraints are enforced from there). Verified on MySQL 8.4 LTS.")
 	raw("Load it into an EMPTY database with the mysql client; the script stops at the first error:")

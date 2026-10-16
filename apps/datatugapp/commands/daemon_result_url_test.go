@@ -62,7 +62,7 @@ func TestDaemonURLOfAResult(t *testing.T) {
 	} {
 		out, err = runDaemon(t, argv...)
 		require.NoError(t, err, strings.Join(argv, " "))
-		assert.Contains(t, out, "/result/t4?view=sources&row=2")
+		assert.Contains(t, out, "/result/t4?view=sources\\u0026row=2")
 	}
 	// a table link still takes a bare --view, and --view=true
 	out, err = runDaemon(t, "url", "--project", "p", "--env", "e", "--db", "d", "--table", "t", "--view=true")

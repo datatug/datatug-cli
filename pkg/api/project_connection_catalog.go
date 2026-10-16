@@ -54,6 +54,22 @@ func LocalProjectConnectionCatalog(_ context.Context, ref dto.ProjectRef) (*Loca
 	return readLocalConnectionCatalog(dir)
 }
 
+// LocalProjectConnectionCatalogForBranch binds declaration metadata to the
+// selected current branch and its observed HEAD.
+func LocalProjectConnectionCatalogForBranch(ctx context.Context, ref dto.ProjectRef, branch string) (*LocalConnectionCatalog, error) {
+	value, err := withCurrentBranchRead(ctx, ref, branch, func(reader *qualifiedProjectReader) (any, error) {
+		body, err := reader.readFileLimit("connections/demo-db.json", 256<<10)
+		if err != nil {
+			return nil, errConnectionCatalogUnavailable
+		}
+		return readLocalConnectionCatalogBody(body)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return value.(*LocalConnectionCatalog), nil
+}
+
 func readLocalConnectionCatalog(dir string) (*LocalConnectionCatalog, error) {
 	root, err := os.OpenRoot(dir)
 	if err != nil {
@@ -73,6 +89,10 @@ func readLocalConnectionCatalog(dir string) (*LocalConnectionCatalog, error) {
 	if err != nil || len(body) > 256<<10 {
 		return nil, errConnectionCatalogUnavailable
 	}
+	return readLocalConnectionCatalogBody(body)
+}
+
+func readLocalConnectionCatalogBody(body []byte) (*LocalConnectionCatalog, error) {
 	var declarations datatug.ProjectConnections
 	var catalog LocalConnectionCatalog
 	if json.Unmarshal(body, &declarations) != nil || declarations.Validate() != nil || json.Unmarshal(body, &catalog) != nil {

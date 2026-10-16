@@ -13,10 +13,46 @@ import (
 
 // getBoard handles get board endpoint
 func getBoard(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Has("branch") {
+		if err := api.RequireLocalReadPrincipal(); err != nil {
+			writeProjectMutationError(w, r, err)
+			return
+		}
+		ref, err := newProjectItemRef(r.URL.Query())
+		if err != nil {
+			writeProjectMutationError(w, r, err)
+			return
+		}
+		board, err := api.LocalProjectBoard(r.Context(), ref, r.URL.Query().Get("branch"))
+		if err != nil {
+			writeProjectMutationError(w, r, err)
+			return
+		}
+		writeProjectMutationJSON(w, r, http.StatusOK, board)
+		return
+	}
 	var ref dto.ProjectItemRef
 	getProjectItem(w, r, &ref, func(ctx context.Context) (responseDTO apicore.ResponseDTO, err error) {
 		return api.GetBoard(ctx, ref)
 	})
+}
+
+func getBoards(w http.ResponseWriter, r *http.Request) {
+	if err := api.RequireLocalReadPrincipal(); err != nil {
+		writeProjectMutationError(w, r, err)
+		return
+	}
+	ref, err := newProjectRef(r.URL.Query())
+	if err != nil {
+		writeProjectMutationError(w, r, err)
+		return
+	}
+	briefs, err := api.LocalProjectBoards(r.Context(), ref, r.URL.Query().Get("branch"))
+	if err != nil {
+		writeProjectMutationError(w, r, err)
+		return
+	}
+	writeProjectMutationJSON(w, r, http.StatusOK, briefs)
 }
 
 // createBoard handles board creation endpoint

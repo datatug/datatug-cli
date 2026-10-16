@@ -25,4 +25,25 @@ func getEnvironmentSummary(w http.ResponseWriter, r *http.Request) {
 	}, urlParamID, "environment", "env")
 }
 
+// getEnvironments returns only safe environment presentation fields when a
+// branch is selected. Connection and server declarations are intentionally
+// omitted from the wire response.
+func getEnvironments(w http.ResponseWriter, r *http.Request) {
+	if err := api.RequireLocalReadPrincipal(); err != nil {
+		writeProjectMutationError(w, r, err)
+		return
+	}
+	ref, err := newProjectRef(r.URL.Query())
+	if err != nil {
+		writeProjectMutationError(w, r, err)
+		return
+	}
+	briefs, err := api.LocalProjectEnvironments(r.Context(), ref, r.URL.Query().Get("branch"))
+	if err != nil {
+		writeProjectMutationError(w, r, err)
+		return
+	}
+	writeProjectMutationJSON(w, r, http.StatusOK, briefs)
+}
+
 var getEnvironmentSummaryFunc = api.GetEnvironmentSummary

@@ -121,6 +121,7 @@ func queriesRoutes(path string, router router, wrap wrapper, writeOnly bool, cap
 
 func boardsRoutes(path string, router router, wrap wrapper, writeOnly bool, caps Capabilities) {
 	if !writeOnly {
+		route(router, wrap, http.MethodGet, path+"/boards/all_boards", getBoards)
 		route(router, wrap, http.MethodGet, path+"/boards/board", getBoard)
 	}
 	route(router, wrap, http.MethodPost, path+"/boards/create_board", requireWriteCapability(caps, createBoard))
@@ -144,6 +145,7 @@ func projectsRoutes(path string, router router, wrap wrapper, writeOnly bool, ca
 
 func environmentsRoutes(path string, router router, wrap wrapper, writeOnly bool) {
 	if !writeOnly {
+		route(router, wrap, http.MethodGet, path+"/environments/all_environments", getEnvironments)
 		route(router, wrap, http.MethodGet, path+"/environment-summary", getEnvironmentSummary)
 		// catalog-tables: Task 17 item A.2 (S121) — see
 		// getCatalogTablesHandler/api.CatalogTables's own doc comments.

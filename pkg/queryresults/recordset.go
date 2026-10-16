@@ -118,7 +118,8 @@ type Data struct {
 	Rows    Rows
 }
 
-// Build encodes data.json for id with the columns given ($key is put first).
+// Build encodes data.json for id with the columns given, in that order ($key
+// is put first and marked internal in meta.json).
 // A column's type is its one observed kind; a column of several kinds is a
 // string column with each cell written as its text, and it records the kinds
 // in ObservedTypes. A column with a declared contract type takes it when every
@@ -208,7 +209,7 @@ func (c *Collector) Build(id string, columns []string, declared map[string]strin
 	joined = append(joined, ']')
 	meta := make([]Column, len(names))
 	for i, name := range names {
-		meta[i] = Column{Name: name, Type: types[i], ObservedTypes: observed[i]}
+		meta[i] = Column{Name: name, Type: types[i], ObservedTypes: observed[i], Internal: i == 0}
 		for _, row := range c.rows[:kept] {
 			found := cellAt(row, i)
 			if found.encoding != "" && meta[i].Encoding == "" {

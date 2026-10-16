@@ -115,3 +115,44 @@ func TestFindCatalogRelationsSkipsLinkedFolders(t *testing.T) {
 		t.Fatalf("a linked schema folder was followed: %v %v", scanned, err)
 	}
 }
+
+func TestScannedColumnOrder(t *testing.T) {
+	dir := t.TempDir()
+	writeCatalogFile(t, dir, "local", "shop", "shop")
+	// the file lists the columns alphabetically; the ordinal is the table's order
+	writeColumnsFile(t, dir, "shop", "main", "tables", "Pet", `{"columns":[{"name":"age","ordinalPosition":4},{"name":"id","ordinalPosition":1},{"name":"name","ordinalPosition":3},{"name":"zone","ordinalPosition":2}]}`)
+	writeColumnsFile(t, dir, "shop", "main", "views", "PetCard", `{"columns":[{"name":"b","ordinalPosition":2},{"name":"a","ordinalPosition":1}]}`)
+	writeColumnsFile(t, dir, "shop", "main", "tables", "Flat", `{"columns":[{"name":"z"},{"name":"a"}]}`)
+	writeColumnsFile(t, dir, "shop", "main", "tables", "Twin", `{"columns":[{"name":"m","ordinalPosition":1}]}`)
+	writeColumnsFile(t, dir, "shop", "other", "tables", "Twin", `{"columns":[{"name":"o","ordinalPosition":1}]}`)
+	writeColumnsFile(t, dir, "shop", "main", "tables", "Empty", `{"columns":[]}`)
+
+	cases := []struct {
+		name, schema, relation string
+		want                   []string
+		ok                     bool
+	}{
+		{"table", "", "Pet", []string{"id", "zone", "name", "age"}, true},
+		{"schema named", "main", "Pet", []string{"id", "zone", "name", "age"}, true},
+		{"view", "", "PetCard", []string{"a", "b"}, true},
+		{"no ordinals keep the file order", "", "Flat", []string{"z", "a"}, true},
+		{"ambiguous without a schema", "", "Twin", nil, false},
+		{"the schema picks one", "other", "Twin", []string{"o"}, true},
+		{"not scanned", "", "Ghost", nil, false},
+		{"no columns", "", "Empty", nil, false},
+	}
+	for _, c := range cases {
+		got, ok := ScannedColumnOrder(dir, "local", "shop", c.schema, c.relation)
+		if ok != c.ok || strings.Join(got, ",") != strings.Join(c.want, ",") {
+			t.Errorf("%s: got %v %v, want %v %v", c.name, got, ok, c.want, c.ok)
+		}
+	}
+	if _, ok := ScannedColumnOrder(dir, "local", "ghost", "", "Pet"); ok {
+		t.Error("unknown catalog")
+	}
+	// a columns file that lists no JSON object
+	writeColumnsFile(t, dir, "shop", "main", "tables", "Broken", `not json`)
+	if _, ok := ScannedColumnOrder(dir, "local", "shop", "", "Broken"); ok {
+		t.Error("broken file")
+	}
+}

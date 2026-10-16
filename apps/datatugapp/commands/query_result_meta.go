@@ -26,6 +26,11 @@ type resultDescription struct {
 	participants []queryresults.Participant
 	related      []queryresults.Related
 	unavailable  queryresults.Unavailable
+	// order is the result's columns in source order: the SELECT list of the
+	// query, with each wildcard expanded to its table's columns in the order
+	// the table declares them. Nil where the source order is unknown; the
+	// stored columns are then the sorted union.
+	order []string
 }
 
 // dtqlSources opens the database a participant of a DTQL query is in ("" is
@@ -35,6 +40,10 @@ type resultDescription struct {
 type dtqlSources struct {
 	open func(ctx context.Context, database string) (db dal.DB, driver string, release func(), err error)
 	ref  func(database string) *string
+	// scanned is the columns of a relation in the order the project's scanned
+	// metadata records them; nil, or false, when the project holds none. It is
+	// preferred to the database's own order, which needs no scan.
+	scanned func(database, schema, relation string) ([]string, bool)
 }
 
 // snapshotState is the foreign-key snapshot of one database, or why there is none.
@@ -88,6 +97,9 @@ func describeDTQL(ctx context.Context, text string, columns []string, sources dt
 		state.driver = driver
 		if err == nil {
 			state.snapshot, err = joinmeta.LoadForeignKeySnapshot(ctx, db, "result")
+			if err == nil {
+				addViewColumns(ctx, db, &state.snapshot, database, instances)
+			}
 			release()
 		}
 		if err != nil {
@@ -112,7 +124,78 @@ func describeDTQL(ctx context.Context, text string, columns []string, sources dt
 	}
 	description.related, description.unavailable.Related = relatedOf(text, states)
 	description.unavailable.DeclaredTypes = describeColumns(query, instances, states, columns, description)
+	description.order = sourceOrder(query, instances, states, sources)
 	return description
+}
+
+// sourceOrder is the columns of a query in source order: its select list as
+// written, a wildcard expanded to the columns of its relation(s) in table
+// order (the project's scanned metadata when it holds the relation, else the
+// database's own description), and a query with no select list as all of its
+// relations' columns, the root's first.
+func sourceOrder(query dal.StructuredQuery, instances []joinmeta.RelationInstance, states map[string]*snapshotState, sources dtqlSources) []string {
+	columnsOf := func(instance joinmeta.RelationInstance) []string {
+		if sources.scanned != nil {
+			if names, ok := sources.scanned(instance.Database, instance.Schema, instance.Relation); ok {
+				return names
+			}
+		}
+		// describeDTQL loaded every instance's database before this runs.
+		return states[instance.Database].snapshot.Columns[joinmeta.RelationKey(instance.Schema, instance.Relation)]
+	}
+	var order []string
+	expand := func(source string) {
+		for _, instance := range instances {
+			alias := instance.Alias
+			if alias == "" {
+				alias = instance.Relation
+			}
+			if source == "" || strings.EqualFold(source, alias) {
+				order = append(order, columnsOf(instance)...)
+			}
+		}
+	}
+	if len(query.Columns()) == 0 {
+		expand("")
+	}
+	for _, column := range query.Columns() {
+		if column.Wildcard != nil {
+			expand(column.Wildcard.Source)
+			continue
+		}
+		name := column.Alias
+		if field, isField := column.Expression.(dal.FieldRef); isField && name == "" {
+			name = field.Name()
+		}
+		if name != "" {
+			order = append(order, name)
+		}
+	}
+	return order
+}
+
+// addViewColumns records, in the snapshot's column order, the columns of the
+// views the query reads from database: a snapshot describes tables only, and a
+// view's columns are what its SELECT list gives, which the source reports with
+// its view definitions. A view the source does not report is left out (its
+// result then has the sorted union).
+func addViewColumns(ctx context.Context, db dal.DB, snapshot *joinmeta.ForeignKeySnapshot, database string, instances []joinmeta.RelationInstance) {
+	reader, ok := dal.As[dbschema.SourceViewReader](db)
+	if !ok || snapshot.Columns == nil {
+		return
+	}
+	views, _ := reader.ListSourceViews(ctx) // none reported when the source cannot list them
+	for _, instance := range instances {
+		key := joinmeta.RelationKey(instance.Schema, instance.Relation)
+		if instance.Database != database || snapshot.Columns[key] != nil {
+			continue
+		}
+		for _, view := range views {
+			if strings.EqualFold(view.Name, instance.Relation) {
+				snapshot.Columns[key] = view.Columns
+			}
+		}
+	}
 }
 
 // relatedOf lists the join candidates of every participant from the foreign

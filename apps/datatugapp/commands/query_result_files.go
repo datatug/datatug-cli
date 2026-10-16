@@ -104,12 +104,16 @@ func (s *resultSink) discardUnlessWritten() {
 
 // describeAdHoc records the database and the query of an ad-hoc run.
 func (s *resultSink) describeAdHoc(ctx context.Context, o queryOptions, backend dbcopy.BackendRef, db dal.DB, queryText string, variables map[string]any) {
+	sources := dtqlSources{
+		open: func(context.Context, string) (dal.DB, string, func(), error) {
+			return db, backend.Scheme, func() {}, nil
+		},
+	}
+	if ref, ok := fullDatatugRef(ctx, o.db); ok {
+		sources.scanned = scannedColumns(projectDirOfRef(o.db), ref.Env, ref.DB)
+	}
 	s.describe = func(columns []string) resultDescription {
-		return describeDTQL(ctx, queryText, columns, dtqlSources{
-			open: func(context.Context, string) (dal.DB, string, func(), error) {
-				return db, backend.Scheme, func() {}, nil
-			},
-		})
+		return describeDTQL(ctx, queryText, columns, sources)
 	}
 	s.meta.DB = queryresults.DB{Driver: backend.Scheme}
 	if ref, ok := fullDatatugRef(ctx, o.db); ok {
@@ -129,7 +133,12 @@ func (s *resultSink) describeSaved(ctx context.Context, store datatug.ProjectSto
 	switch queryDef.Type {
 	case datatug.QueryTypeSQL:
 		s.meta.SetEditor(queryDef.Text, queryresults.LanguageSQL)
-		s.describe = func([]string) resultDescription { return describeNativeSQL(result.ColumnTypes) }
+		order := result.ColumnOrder
+		s.describe = func([]string) resultDescription {
+			description := describeNativeSQL(result.ColumnTypes)
+			description.order = order
+			return description
+		}
 	case datatug.QueryTypeHTTP:
 		s.meta.SetEditor("", queryresults.LanguageHTTP)
 		s.describe = func([]string) resultDescription { return describeHTTP(result.Collection) }
@@ -148,6 +157,15 @@ func savedDTQLSources(ctx context.Context, store datatug.ProjectStore, projectDi
 	envID, _ := resolveQueryEnvironment(ctx, store, envFlag)
 	projectID := registeredProjectID(projectDir)
 	return dtqlSources{
+		scanned: func(database, schema, relation string) ([]string, bool) {
+			if database == "" {
+				var err error
+				if database, err = resolveQueryDatabase(ctx, store, envID, queryDef); err != nil {
+					return nil, false
+				}
+			}
+			return scannedColumns(projectDir, envID, database)(database, schema, relation)
+		},
 		open: func(ctx context.Context, database string) (dal.DB, string, func(), error) {
 			var source string
 			var err error
@@ -216,6 +234,10 @@ func (s *resultSink) write(stdout io.Writer, collector *queryresults.Collector, 
 	if s.describe != nil {
 		description = s.describe(columns)
 	}
+	// The stored columns follow the source's order (table or SELECT list). The
+	// stdout rows of `query run` keep the documented order (request order, else
+	// the sorted union): only the stored files are reordered.
+	columns = queryresults.OrderColumns(columns, description.order)
 	data := collector.Build(s.id, columns, description.declared)
 	meta := queryresults.NewMeta(s.id, cliVersion(), data)
 	meta.DB, meta.Query, meta.Provenance = s.meta.DB, s.meta.Query, s.meta.Provenance
@@ -366,6 +388,37 @@ func fullDatatugRef(ctx context.Context, arg string) (dbcopy.DatatugRef, bool) {
 		return dbcopy.DatatugRef{}, false
 	}
 	return dbcopy.DatatugRef{Project: id, DB: reference.DB, Env: env}, true
+}
+
+// scannedColumns reads the column order of a relation from the scanned
+// metadata of one database of a project; it answers false for a project that
+// is not on this machine, a database that was not scanned and a relation the
+// scan lacks.
+func scannedColumns(projectDir, env, database string) func(database, schema, relation string) ([]string, bool) {
+	return func(_, schema, relation string) ([]string, bool) {
+		if projectDir == "" || env == "" || database == "" {
+			return nil, false
+		}
+		return api.ScannedColumnOrder(projectDir, env, database, schema, relation)
+	}
+}
+
+// projectDirOfRef is the folder of the project a datatug:// reference names,
+// or "" when it names none that is on this machine.
+func projectDirOfRef(arg string) string {
+	reference, err := dbcopy.ParseDatatugRef(arg)
+	if err != nil {
+		return ""
+	}
+	project, dir, err := projectNameOf(reference.Project)
+	if err != nil {
+		return ""
+	}
+	base, err := openProjectForRead(project, dir)
+	if err != nil {
+		return ""
+	}
+	return base.ProjectDir
 }
 
 // registeredProjectID is the id under which the project at dir is registered,

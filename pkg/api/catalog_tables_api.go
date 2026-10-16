@@ -88,6 +88,9 @@ type CatalogRelation struct {
 	DbType  string          `json:"dbType"`
 	Columns []CatalogColumn `json:"columns"`
 	Issue   string          `json:"-"` // partial explorer load only; never publish raw file errors
+	// folder is where FindCatalogRelations found the relation; it is not part
+	// of any answer.
+	folder string
 }
 
 // CatalogSchema is the compact stored schema supplied to consumers such as

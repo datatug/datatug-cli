@@ -73,8 +73,14 @@ func TestUIResultOpensTheLoadedRecordsWithoutRunningTheQuery(t *testing.T) {
 		opened = snapshot
 		return restore(ctx, sessions, model)
 	}
+	// opening a result leaves the last chat choices as they were
+	restorePath := lastChatOptionsPath
+	t.Cleanup(func() { lastChatOptionsPath = restorePath })
+	lastPath := filepath.Join(t.TempDir(), "last.json")
+	lastChatOptionsPath = func() (string, error) { return lastPath, nil }
 	out, code := runUICommand(t, "--result", "t4")
 	require.Zero(t, code, out)
+	assert.NoFileExists(t, lastPath)
 	require.Len(t, opened.RecordSets, 1)
 	for _, record := range opened.RecordSets {
 		assert.Equal(t, "from:\n  name: Item\n", record.DTQL)
@@ -277,4 +283,47 @@ func TestRunUnifiedResultApp(t *testing.T) {
 	}{"", nil})
 	require.NoError(t, runUnifiedResultApp(nil, datatugui.Options{}, result, chatOptions{}))
 	assert.Empty(t, seen[0].ai)
+}
+
+// A folder named like the result's project in the current directory is not
+// the project: the result opens in the registered project's absolute folder,
+// and nothing is written into the planted one. A project registered with a
+// relative or remote location is not opened.
+func TestUIResultOpensOnlyTheRegisteredProject(t *testing.T) {
+	resultsHome(t)
+	dir, _ := registeredItemProject(t)
+	_, stderr, code := runQuery(t, "", "--db", "datatug://covc/main", "--from", "Item", "--no-policies", "--result-id", "t4")
+	require.Zero(t, code, stderr)
+	cwd := t.TempDir()
+	planted := filepath.Join(cwd, "covc")
+	require.NoError(t, os.Mkdir(planted, 0o700))
+	t.Chdir(cwd)
+
+	restore := runResultApp
+	t.Cleanup(func() { runResultApp = restore })
+	var opened string
+	runResultApp = func(_ []datatugui.Module, _ datatugui.Options, result resultOpen, _ chatOptions, _ ...tea.ProgramOption) error {
+		opened = result.projectDir
+		return nil
+	}
+	out, code := runUICommand(t, "--result", "t4")
+	require.Zero(t, code, out)
+	want, err := filepath.EvalSymlinks(dir)
+	require.NoError(t, err)
+	got, err := filepath.EvalSymlinks(opened)
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+	assert.True(t, filepath.IsAbs(opened))
+	entries, err := os.ReadDir(planted)
+	require.NoError(t, err)
+	assert.Empty(t, entries)
+
+	for _, location := range []string{"covc", "https://example.com/covc"} {
+		require.NoError(t, os.WriteFile(filepath.Join(os.Getenv("HOME"), ".datatug.yaml"), []byte("projects:\n  - id: covc\n    path: "+location+"\n"), 0o600))
+		out, code = runUICommand(t, "--result", "t4")
+		assert.Equal(t, exitCodeNotFound, code, location+": "+out)
+	}
+	entries, err = os.ReadDir(planted)
+	require.NoError(t, err)
+	assert.Empty(t, entries)
 }

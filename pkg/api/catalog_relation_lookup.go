@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/datatug/datatug-core/pkg/storage"
@@ -60,7 +61,7 @@ func FindCatalogRelations(projectDir, environmentID, catalogID, name string) (fo
 				if err != nil {
 					return nil, false, err
 				}
-				found = append(found, CatalogRelation{Schema: schemaDir.Name(), Name: name, DbType: kind.dbType, Columns: columns})
+				found = append(found, CatalogRelation{Schema: schemaDir.Name(), Name: name, DbType: kind.dbType, Columns: columns, folder: filepath.Join(kindDir, name)})
 			}
 		}
 	}
@@ -69,6 +70,19 @@ func FindCatalogRelations(projectDir, environmentID, catalogID, name string) (fo
 
 // readBoundedColumns reads the one columns file of a relation's folder.
 func readBoundedColumns(folder string) ([]CatalogColumn, error) {
+	data, err := readBoundedColumnsData(folder)
+	if err != nil {
+		return nil, err
+	}
+	var parsed catalogColumnsFile
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return nil, errRelationUnreadable
+	}
+	return parsed.Columns, nil
+}
+
+// readBoundedColumnsData is the bytes of the one columns file of a relation's folder.
+func readBoundedColumnsData(folder string) ([]byte, error) {
 	entries, err := os.ReadDir(folder)
 	if err != nil {
 		return nil, errRelationUnreadable
@@ -95,9 +109,48 @@ func readBoundedColumns(folder string) ([]CatalogColumn, error) {
 	if err != nil || len(data) > MaxColumnsFileSize {
 		return nil, errRelationUnreadable
 	}
-	var parsed catalogColumnsFile
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		return nil, errRelationUnreadable
+	return data, nil
+}
+
+// ScannedColumnOrder is the column names of one scanned table or view in the
+// order the database declares them (the columns file's ordinalPosition; the
+// file's own order when it records none). schema "" matches any schema; a name
+// found in several schemas, a relation that was not scanned and a columns file
+// that cannot be read all answer false: the caller then has no scanned order.
+func ScannedColumnOrder(projectDir, environmentID, catalogID, schema, name string) ([]string, bool) {
+	found, _, err := FindCatalogRelations(projectDir, environmentID, catalogID, name)
+	if err != nil || len(found) == 0 {
+		return nil, false
 	}
-	return parsed.Columns, nil
+	pick := -1
+	for i, relation := range found {
+		if schema != "" && relation.Schema == schema {
+			pick = i
+			break
+		}
+	}
+	if pick < 0 {
+		if len(found) != 1 {
+			return nil, false
+		}
+		pick = 0
+	}
+	var parsed struct {
+		Columns []struct {
+			Name            string `json:"name"`
+			OrdinalPosition int    `json:"ordinalPosition"`
+		} `json:"columns"`
+	}
+	// The file was read by FindCatalogRelations a moment ago; a failure now is
+	// the same as having no scanned order.
+	if data, err := readBoundedColumnsData(found[pick].folder); err != nil || json.Unmarshal(data, &parsed) != nil || len(parsed.Columns) == 0 {
+		return nil, false
+	}
+	columns := parsed.Columns
+	sort.SliceStable(columns, func(i, j int) bool { return columns[i].OrdinalPosition < columns[j].OrdinalPosition })
+	names := make([]string, len(columns))
+	for i, column := range columns {
+		names[i] = column.Name
+	}
+	return names, true
 }

@@ -86,6 +86,12 @@ func TestResultRoute(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	assert.Equal(t, "t1", body.Meta["id"])
 	require.Len(t, body.Recordset.Rows, 1)
+	// meta.columns marks the record key internal (additive; data keeps it first)
+	columns, _ := body.Meta["columns"].([]any)
+	require.Len(t, columns, 2)
+	assert.Equal(t, true, columns[0].(map[string]any)["internal"])
+	assert.NotContains(t, columns[1], "internal")
+	assert.Equal(t, "$key", body.Recordset.Columns[0].Name)
 	assert.Contains(t, w.Body.String(), marker)
 
 	refused("bad.id", http.StatusBadRequest, queryresults.ReasonBadID)

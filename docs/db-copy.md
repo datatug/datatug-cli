@@ -536,8 +536,8 @@ names for tables and constraints: a unique key or foreign key named like a table
   (keeping the update) its `ON DELETE` action, then both; the first that fits is kept; each lost action is a counted
   `fk-action-not-carried` with the reason. A `DELETE` follows `CASCADE` keys and a `SET NULL` key updates the child rows, from
   where the update goes on through the keys that cascade updates; an `UPDATE` follows the keys with an `ON UPDATE` action. A
-  table may be reached at most once by one change, and never again. For Sakila, the keys that cascade updates through
-  `language`, `store`/`staff` and `payment` are the ones that lose their action. **The rule is measured, not derived from
+  table may be reached at most once by one change, and never again. For Sakila, 8 of the 22 `ON UPDATE CASCADE` keys lose their
+  action (`film.language_id`, `rental` x3, `staff` x2, `store` x2), and its 21 `ON DELETE RESTRICT` keys become `NO ACTION`. **The rule is measured, not derived from
   SQL Server's source**: a SET NULL key is also counted among the keys that update. It was checked on SQL Server 2022 against 400
   random foreign key graphs (every downgraded action, 1,245 of them, was tried back on the loaded database and refused with error
   1785 by the server, except 28, and no script failed to load); the 28 (2%) are in graphs with an `ON DELETE SET NULL` key, where the

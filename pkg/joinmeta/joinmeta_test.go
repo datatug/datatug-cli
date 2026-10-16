@@ -139,6 +139,8 @@ func TestConstraintID(t *testing.T) {
 	assert.Equal(t, "public.orders:fk_customer", constraintID(false, "public", "orders", "fk_customer", 0))
 	assert.NotEqual(t, constraintID(false, "public", "orders", "fk_customer", 0), constraintID(false, "public", "invoices", "fk_customer", 0))
 	assert.Equal(t, "orders:fk:2", constraintID(false, "", "orders", "", 2))
+	assert.Equal(t, "main", schemaOrMain(""))
+	assert.Equal(t, "other", schemaOrMain("other"))
 	assert.False(t, isSQLite(noAdapter{chinook(t)}))
 	assert.True(t, isSQLite(chinook(t)))
 }

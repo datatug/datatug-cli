@@ -176,3 +176,36 @@ func TestWellFormedRefusesAnEmptyParameter(t *testing.T) {
 		t.Fatal("an empty parameter is well formed")
 	}
 }
+
+// A result written before query.text/language/dbRef/params and prompt existed
+// still loads, and an annotated one loads with its prompt.
+func TestLoadOldAndAnnotatedMeta(t *testing.T) {
+	store := newStore(t)
+	c := NewCollector(5)
+	c.Add("1", map[string]any{"n": int64(7)})
+	data := c.Build("o2", []string{"n"}, nil)
+	result, err := store.Create("o2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := `{"format":"datatug.query-result.meta","version":1,"id":"o2","createdAt":"2026-10-15T00:00:00Z","expiresAt":"` +
+		time.Now().Add(time.Hour).UTC().Format(time.RFC3339) + `","dataBytes":` + strconv.Itoa(len(data.Bytes)) +
+		`,"query":{"kind":"dtql","dtql":"x","policy":"none"}}`
+	if err := result.Write(data.Bytes, []byte(old)); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.Load("o2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Meta.Query.DTQL != "x" || loaded.Meta.Query.Text != "" || loaded.Meta.Query.Params != nil || loaded.Meta.Prompt != nil {
+		t.Fatalf("old meta %+v", loaded.Meta)
+	}
+	if err := store.Annotate("o2", "the prompt", false, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err = store.Load("o2")
+	if err != nil || loaded.Meta.Prompt == nil || loaded.Meta.Prompt.Text != "the prompt" || loaded.Meta.Query.DTQL != "x" {
+		t.Fatalf("annotated %+v %v", loaded.Meta, err)
+	}
+}

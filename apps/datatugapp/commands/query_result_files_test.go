@@ -81,6 +81,13 @@ type metaDoc struct {
 		SavedQueryType string                     `json:"savedQueryType"`
 		Parameters     map[string]json.RawMessage `json:"parameters"`
 		Policy         string                     `json:"policy"`
+		Text           string                     `json:"text"`
+		Language       string                     `json:"language"`
+		DBRef          string                     `json:"dbRef"`
+		Params         []struct {
+			Name  string          `json:"name"`
+			Value json.RawMessage `json:"value"`
+		} `json:"params"`
 	} `json:"query"`
 	Rows       queryresults.Rows        `json:"rows"`
 	Provenance *queryresults.Provenance `json:"provenance"`
@@ -124,6 +131,10 @@ func TestQueryRunResultFilesFromChinook(t *testing.T) {
 	assert.Equal(t, "none", meta.Query.Policy)
 	assert.Nil(t, meta.DB.Ref)
 	assert.Equal(t, "sqlite", meta.DB.Driver)
+	assert.Equal(t, "from:\n  name: Invoice\n", meta.Query.Text)
+	assert.Equal(t, "dtql", meta.Query.Language)
+	assert.Empty(t, meta.Query.DBRef, "not a project source: no dbRef")
+	assert.Empty(t, meta.Query.Params)
 	assert.Equal(t, "$key", recordset.Columns[0].Name)
 	assert.NotContains(t, metaText, "chinook.db", "meta.json names no path")
 
@@ -298,6 +309,11 @@ func TestQueryRunResultFromDTQLFileWithVariablesAndPolicies(t *testing.T) {
 	assert.JSONEq(t, `{"type":"integer","value":"10"}`, string(meta.Query.Parameters["minPrice"]))
 	assert.JSONEq(t, `{"type":"set","values":[{"type":"integer","value":"1"},{"type":"integer","value":"2"}]}`, string(meta.Query.Parameters["ids"]))
 	assert.Equal(t, "ingitdb", meta.DB.Driver)
+	assert.Equal(t, dtqlText, meta.Query.Text)
+	require.Len(t, meta.Query.Params, 2)
+	assert.Equal(t, "ids", meta.Query.Params[0].Name, "params are sorted by name")
+	assert.Equal(t, "minPrice", meta.Query.Params[1].Name)
+	assert.JSONEq(t, `{"type":"integer","value":"10"}`, string(meta.Query.Params[1].Value))
 
 	_, stderr, code = runQuery(t, "", "--db", url, "--from", "products", "--policies-dir", dir, "--policy", filepath.Join(dir, "pricing.yaml"), "--var", "minPrice=10", "--result-id", "q2")
 	require.Equal(t, 0, code, stderr)
@@ -358,6 +374,7 @@ func TestQueryRunResultByProjectReference(t *testing.T) {
 		assert.Equal(t, "shop", *meta.DB.Project)
 		assert.Equal(t, "local", *meta.DB.Env)
 		assert.Equal(t, "shop", *meta.DB.Source)
+		assert.Equal(t, "datatug://shop/shop?env=local", meta.Query.DBRef, ref)
 	}
 }
 
@@ -409,7 +426,11 @@ func TestQueryRunSavedResultFiles(t *testing.T) {
 		assert.Equal(t, tc.query, meta.Query.SavedQueryID)
 		assert.Equal(t, tc.kind, meta.Query.SavedQueryType)
 		assert.Equal(t, "project", meta.Query.Policy)
-		assert.Empty(t, meta.Query.DTQL, "the saved text is not copied")
+		assert.Empty(t, meta.Query.DTQL, "the legacy dtql member stays empty for a saved query; the person's own saved text is copied as query.text")
+		assert.Equal(t, tc.kind, meta.Query.Language)
+		assert.NotEmpty(t, meta.Query.Text)
+		assert.Empty(t, meta.Query.DBRef)
+		assert.Len(t, meta.Query.Params, len(tc.vars))
 		assert.Nil(t, meta.DB.Ref, "the project is not registered")
 		assert.Equal(t, "sqlite", meta.DB.Driver)
 		assert.NotEmpty(t, recordset.Rows)
@@ -422,6 +443,7 @@ func TestQueryRunSavedResultFiles(t *testing.T) {
 	meta, _, _ := readResult(t, root, "s3")
 	require.NotNil(t, meta.DB.Ref)
 	assert.Equal(t, "datatug://covc/main?env=local", *meta.DB.Ref)
+	assert.Equal(t, "datatug://covc/main?env=local", meta.Query.DBRef)
 	assert.Equal(t, queryresults.Rows{Kept: 1, HasMore: true, TruncatedBy: "rows"}, meta.Rows)
 
 	// a failing saved query writes nothing
@@ -454,6 +476,8 @@ func TestQueryRunSavedHTTPResultFiles(t *testing.T) {
 	require.Equal(t, 0, code, stderr)
 	meta, _, _ := readResult(t, root, "w1")
 	assert.Equal(t, "http", meta.Query.SavedQueryType)
+	assert.Equal(t, "http", meta.Query.Language)
+	assert.Empty(t, meta.Query.Text, "an HTTP query has no editable text")
 	assert.Equal(t, "http", meta.DB.Driver)
 	assert.Nil(t, meta.DB.Ref)
 	require.NotNil(t, meta.Provenance)

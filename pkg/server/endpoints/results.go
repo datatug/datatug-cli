@@ -27,6 +27,11 @@ func resultsRoutes(path string, router router, wrap wrapper, writeOnly bool) {
 type resultResponse struct {
 	Meta      json.RawMessage       `json:"meta"`
 	Recordset apicontract.Recordset `json:"recordset"`
+	// Query and Prompt repeat meta.query and the text of meta.prompt for
+	// readers that want them without parsing meta. Both are additive: Prompt
+	// is plain text and absent until `query results annotate` recorded one.
+	Query  queryresults.Query `json:"query"`
+	Prompt string             `json:"prompt,omitempty"`
 }
 
 // The messages of a refused result: reason codes, never an id or a path.
@@ -56,7 +61,7 @@ func resultHandler(w http.ResponseWriter, r *http.Request) {
 	loaded, err := store.Load(id)
 	switch queryresults.ReasonOf(err) {
 	case "":
-		writeContractResponse(w, r, nil, resultResponse{Meta: loaded.MetaJSON, Recordset: loaded.Recordset})
+		writeContractResponse(w, r, nil, resultResponseOf(loaded))
 	case queryresults.ReasonNotFound, queryresults.ReasonExpired:
 		writeContractError(w, r, newContractError(apicontract.ErrCodeNotFound, resultNotFound, "id"))
 	case queryresults.ReasonIncomplete:
@@ -68,4 +73,12 @@ func resultHandler(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeContractError(w, r, newContractError(apicontract.ErrCodeSourceUnavailable, resultStoreUnavailable, "results"))
 	}
+}
+
+func resultResponseOf(loaded queryresults.Loaded) resultResponse {
+	response := resultResponse{Meta: loaded.MetaJSON, Recordset: loaded.Recordset, Query: loaded.Meta.Query}
+	if loaded.Meta.Prompt != nil {
+		response.Prompt = loaded.Meta.Prompt.Text
+	}
+	return response
 }

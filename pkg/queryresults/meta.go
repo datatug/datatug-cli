@@ -2,6 +2,7 @@ package queryresults
 
 import (
 	"encoding/json"
+	"sort"
 	"time"
 
 	"github.com/datatug/datatug-core/pkg/apicontract"
@@ -12,6 +13,11 @@ const (
 	QueryKindFrom  = "from"
 	QueryKindDTQL  = "dtql"
 	QueryKindSaved = "saved"
+
+	// Languages of query.text: what the query editor reads it as.
+	LanguageDTQL = "dtql"
+	LanguageSQL  = "sql"
+	LanguageHTTP = "http"
 
 	PolicyNone       = "none"
 	PolicyDiscovered = "discovered"
@@ -52,6 +58,17 @@ type Meta struct {
 	Related      []Related     `json:"related"`
 	// Unavailable names, per part, why it is missing or cut short.
 	Unavailable Unavailable `json:"unavailable"`
+	// Prompt is the request that produced the result, set by `query results
+	// annotate`; absent until then and in results written before it existed.
+	Prompt *Prompt `json:"prompt,omitempty"`
+}
+
+// Prompt is the text a person or an agent asked for the result with.
+type Prompt struct {
+	Text      string `json:"text"`
+	Truncated bool   `json:"truncated"`
+	// At is when it was recorded, RFC 3339 in UTC.
+	At string `json:"at"`
 }
 
 // DB says which database the query ran on, by its project reference only.
@@ -74,6 +91,41 @@ type Query struct {
 	SavedQueryType string                                 `json:"savedQueryType,omitempty"`
 	Parameters     map[string]apicontract.TypedValueOrSet `json:"parameters,omitempty"`
 	Policy         string                                 `json:"policy"`
+	// Text, Language, DBRef and Params make the query openable in the query
+	// editor: the canonical text the editor accepts, its language ("dtql",
+	// "sql" or "http"), the datatug:// reference of the database (absent when
+	// the run was not against a project source) and the run's parameters as
+	// name/value pairs. They are additive: readers that predate them ignore
+	// them and results written before them lack them.
+	Text     string       `json:"text,omitempty"`
+	Language string       `json:"language,omitempty"`
+	DBRef    string       `json:"dbRef,omitempty"`
+	Params   []QueryParam `json:"params,omitempty"`
+}
+
+// QueryParam is one parameter of a run: its name and typed value (a scalar or
+// a set), as in query.parameters.
+type QueryParam struct {
+	Name  string                      `json:"name"`
+	Value apicontract.TypedValueOrSet `json:"value"`
+}
+
+// SetEditor fills the editor-ready fields of the query from what the run
+// already holds: db.ref and query.parameters. text is "" when the language
+// has no editable text.
+func (m *Meta) SetEditor(text, language string) {
+	m.Query.Text, m.Query.Language, m.Query.DBRef, m.Query.Params = text, language, "", nil
+	if m.DB.Ref != nil {
+		m.Query.DBRef = *m.DB.Ref
+	}
+	names := make([]string, 0, len(m.Query.Parameters))
+	for name := range m.Query.Parameters {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		m.Query.Params = append(m.Query.Params, QueryParam{Name: name, Value: m.Query.Parameters[name]})
+	}
 }
 
 // Rows says how many rows data.json keeps and whether more exist.
@@ -182,7 +234,11 @@ type RelatedField struct {
 
 // Unavailable holds a reason code per part of the metadata that is missing.
 type Unavailable struct {
-	Query         string `json:"query,omitempty"`
+	Query string `json:"query,omitempty"`
+	// Editor says query.text and query.params were dropped for size, so a
+	// consumer can tell dropped from absent; the legacy dtql and parameters
+	// are untouched by it.
+	Editor        string `json:"editor,omitempty"`
 	Columns       string `json:"columns,omitempty"`
 	Participants  string `json:"participants,omitempty"`
 	Related       string `json:"related,omitempty"`
@@ -225,15 +281,24 @@ func NewMeta(id, cliVersion string, data Data) Meta {
 
 // Encode applies the bounds of meta.json and encodes it: query.dtql and
 // query.parameters together within MaxQueryBytes (else both are dropped,
-// "too-large"), at most MaxMetaColumns columns, and the whole within
+// "too-large"), query.text and query.params together within their own
+// MaxQueryBytes (else just those two are dropped), at most MaxMetaColumns columns, and the whole within
 // MaxMetaBytes (else the column descriptions are dropped).
 func (m Meta) Encode() []byte {
 	// Both are measured as they are encoded, escapes included.
 	text, _ := json.Marshal(m.Query.DTQL)
 	parameters, _ := json.Marshal(m.Query.Parameters)
+	editorText, _ := json.Marshal(m.Query.Text)
+	params, _ := json.Marshal(m.Query.Params)
 	if len(text)+len(parameters) > MaxQueryBytes {
 		m.Query.DTQL, m.Query.Parameters = "", nil
 		m.Unavailable.Query = UnavailableTooLarge
+	}
+	// The editor-ready members have a bound of their own, so adding them did
+	// not shrink what the legacy members may hold; past it only they go.
+	if len(editorText)+len(params) > MaxQueryBytes {
+		m.Query.Text, m.Query.Params = "", nil
+		m.Unavailable.Editor = UnavailableTooLarge
 	}
 	if m.Participants == nil {
 		m.Participants = []Participant{}
@@ -254,7 +319,7 @@ func (m Meta) Encode() []byte {
 		m.Unavailable.Columns = UnavailableTooMany
 	}
 	encoded, _ := json.Marshal(m)
-	if len(encoded) > MaxMetaBytes {
+	if len(encoded) > MaxMetaBytes-MaxPromptJSONBytes {
 		m.Columns, m.Participants, m.Related = []Column{}, []Participant{}, []Related{}
 		m.Unavailable.Columns, m.Unavailable.Participants, m.Unavailable.Related = UnavailableTooMany, UnavailableTooMany, UnavailableTooMany
 		encoded, _ = json.Marshal(m)

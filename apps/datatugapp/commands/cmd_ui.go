@@ -26,10 +26,25 @@ func uiCommandArgs() *cobra.Command {
 		Short: "Starts Command Line UI",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			filePath, _ := cmd.Flags().GetString("file")
+			if cmd.Flags().Changed("result") {
+				if filePath != "" {
+					return Exit("--result and --file are mutually exclusive", exitCodeUsage)
+				}
+				id, _ := cmd.Flags().GetString("result")
+				var principal chatOptions
+				principal.as, _ = cmd.Flags().GetString("as")
+				principal.roles, _ = cmd.Flags().GetStringSlice("role")
+				principal.groups, _ = cmd.Flags().GetStringSlice("group")
+				return runUIResult(cmd, id, principal)
+			}
 			return runUI(filePath)
 		},
 	}
 	cmd.Flags().StringP("file", "f", "", "Specify a DB file to open")
+	cmd.Flags().String("result", "", "Open a result of `query run --result-id <id>` with its loaded rows, without running the query again")
+	cmd.Flags().String("as", "", "Principal ID for the project's access policies (with --result)")
+	cmd.Flags().StringSlice("role", nil, "Principal role (with --result; repeatable)")
+	cmd.Flags().StringSlice("group", nil, "Principal group (with --result; repeatable)")
 	return cmd
 }
 

@@ -119,6 +119,32 @@ load() {
 tables_in() { scalar "$1" "select count(*) from user_tables"; }
 marker_rows() { scalar "$1" "select count(*) from \"_demodb_import\""; }
 
+# urlencode percent-encodes a path for a query value (ASCII paths; anything outside [A-Za-z0-9._~/-] is escaped).
+urlencode() {
+	local s=$1 out= c i
+	for ((i = 0; i < ${#s}; i++)); do
+		c=${s:i:1}
+		case $c in [a-zA-Z0-9._~/-]) out+=$c ;; *) out+=$(printf '%%%02X' "'$c") ;; esac
+	done
+	printf '%s' "$out"
+}
+
+# The hostile multi-line licence notice (HOST and @ lines, SET and WHENEVER lines, a / line, &, a line ending in a hyphen,
+# */, CR LF, U+2028, a byte order mark ...) that the fixture and fuzz datasets carry in their header through notice-file=:
+# it must load, verify and change no line that is not a comment.
+hostile_notice=$work/hostile_notice.txt
+DATATUG_WRITE_HOSTILE_NOTICE="$hostile_notice" go test -count=1 -run '^TestWriteHostileNotice$' ./pkg/dbcopy/faithful/ >/dev/null
+[ -s "$hostile_notice" ] || { echo "the hostile notice was not written" >&2; exit 1; }
+pwned=/tmp/datatug-notice-pwned
+
+# Positive control: the hazard is real. A line that starts with HOST is a command of SQL*Plus and runs a program.
+create_user j_notice_control
+printf 'HOST touch %s\nSELECT 1 FROM DUAL;\n' "$pwned" >"$work/host.sql"
+load "$work/host.sql" j_notice_control >/dev/null 2>&1 || true
+docker exec "$name" test -e "$pwned" || { echo "notice control: SQL*Plus did not run HOST touch, so the notice check proves nothing" >&2; exit 1; }
+docker exec "$name" rm -f "$pwned"
+echo "notice control: a line that starts with HOST runs a program in this SQL*Plus (no notice line starts that way)"
+
 failures=0
 printf '%-15s %-8s %-9s %-11s %-9s %s\n' dataset tables rows values warnings result
 for ds in $datasets; do
@@ -139,10 +165,21 @@ for ds in $datasets; do
 	esac
 	file="$work/$ds.sqlite"
 	script="$work/$ds.oracle.sql"
-	url="sqlscript://$script?dialect=oracle&name=$ds&license=$license&edition=DemoDB%20contract%20edition"
+	notice_query=
+	case $ds in fixture | fuzz) notice_query="&notice-file=$(urlencode "$hostile_notice")" ;; esac
+	url="sqlscript://$script?dialect=oracle&name=$ds&license=$license&edition=DemoDB%20contract%20edition$notice_query"
 	"$work/datatug" db copy --from "sqlite://$file" --to "$url" --json >"$work/$ds.report.json"
 	"$work/datatug" db copy --from "sqlite://$file" --to "${url/$ds.oracle.sql/$ds.again.sql}" --json >/dev/null
 	cmp -s "$script" "$work/$ds.again.sql" || { echo "$ds: two exports are not byte for byte the same" >&2; failures=$((failures + 1)); continue; }
+	if [ -n "$notice_query" ]; then
+		# The notice is in the header, whole, and it added no line that is not a comment: the script is the one of the
+		# same export without a notice, plus comment lines.
+		grep -q 'Copyright (c) 2024 Hostile Notice Co\.' "$script" || { echo "$ds: the notice is not in the script" >&2; failures=$((failures + 1)); continue; }
+		plain_url=${url%&notice-file=*}
+		"$work/datatug" db copy --from "sqlite://$file" --to "${plain_url/$ds.oracle.sql/$ds.nonotice.sql}" --json >/dev/null
+		cmp -s <(grep -v '^--' "$script") <(grep -v '^--' "$work/$ds.nonotice.sql") || { echo "$ds: the notice added a line that is not a comment" >&2; failures=$((failures + 1)); continue; }
+		echo "    notice: ${hostile_notice##*/} is in the header, and every line it added is a comment"
+	fi
 	user=j_$ds
 	create_user "$user"
 	if ! load "$script" "$user" >"$work/$ds.load.out" 2>&1; then
@@ -170,6 +207,11 @@ for ds in $datasets; do
 		echo "$ds: the verifier did not pass:" >&2
 		grep -E 'DIFF|FAIL|SKIP|error' "$out" | head -20 >&2
 		failures=$((failures + 1)); continue
+	fi
+	if [ -n "$notice_query" ]; then
+		# SQL*Plus ran neither the HOST command nor the @ files of the notice: the file it would have made is not there.
+		if docker exec "$name" test -e "$pwned"; then echo "$ds: the notice ran a client command" >&2; failures=$((failures + 1)); continue; fi
+		echo "    notice: loaded; no client command ran"
 	fi
 	line=$(grep -o '[0-9]* tables, [0-9]* rows, [0-9]* values compared, [0-9]* warnings' "$out" | head -1)
 	read -r t _ r _ v _ _ w _ <<<"$line"
@@ -232,6 +274,11 @@ SQL
 		if load "$work/threat-slash.sql" j_threat >"$work/threat-slash.out" 2>&1; then echo "threat control: a raw newline and / inside a literal did not end the statement" >&2; failures=$((failures + 1)); continue; fi
 		grep -q 'ORA-01756' "$work/threat-slash.out" || { echo "threat control: the / inside a literal was not read as the end of the statement" >&2; failures=$((failures + 1)); continue; }
 		echo "    threat control: a raw newline and / inside a literal end the statement (the script never writes one)"
+		# A comment line that ends in a hyphen is no continuation: the SET or WHENEVER line after it still runs.
+		printf -- '-- a line that ends with a hyphen -\nWHENEVER SQLERROR EXIT FAILURE ROLLBACK\n-- and another -\nSELECT 1 FROM nosuch_table;\nSELECT 2 FROM DUAL;\n' >"$work/threat-hyphen.sql"
+		if load "$work/threat-hyphen.sql" j_threat >"$work/threat-hyphen.out" 2>&1; then echo "threat control: a comment ending in a hyphen swallowed the WHENEVER line" >&2; failures=$((failures + 1)); continue; fi
+		grep -q 'ORA-00942' "$work/threat-hyphen.out" || { echo "threat control: the statement after a hyphen comment did not run" >&2; failures=$((failures + 1)); continue; }
+		echo "    threat control: a comment line ending in a hyphen joins nothing (the WHENEVER line after it still stopped the load)"
 		# The script has its SET DEFINE OFF line: without it the load is not complete.
 		grep -v '^SET DEFINE OFF$' "$script" >"$work/nodefine.sql"
 		cmp -s "$script" "$work/nodefine.sql" && { echo "define control: the script has no SET DEFINE OFF line" >&2; failures=$((failures + 1)); continue; }

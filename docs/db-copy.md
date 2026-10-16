@@ -304,11 +304,11 @@ The path is percent-encoded like any value (`%20` for a space); a relative path 
 no NUL, at most 16 KiB (a leading byte order mark is dropped) and not empty; anything else is a usage error (exit 2) before
 anything is written, and the message never repeats the text. The same URL gives the same bytes on every run.
 
-Every line of the file becomes one comment line (`-- ` and the line), in both dialects. The text is verbatim except for what
+Every line of the file becomes one comment line (`-- ` and the line), in every dialect. The text is verbatim except for what
 could end the comment or start a script line: CR, LF, CR LF, VT, FF, U+001C to U+001F, U+0085, U+2028 and U+2029 all end a line;
 other control characters, a byte order mark, bidirectional controls and invalid bytes become spaces; a tab becomes four spaces;
-`*/` and `/*` get a space between the two characters; for `mssql` `$(` becomes `$ (`. Trailing spaces and the blank lines at both
-ends are dropped. So a notice line such as `GO`, `\! cmd`, `source x` or `/` stays a comment. The notice follows the
+`*/` and `/*` get a space between the two characters; for `mssql` `$(` becomes `$ (`, for `oracle` `&` becomes `& ` (the header comes before `SET DEFINE OFF`; a line ending in a hyphen joins nothing in a SQL*Plus comment, measured on 23.26.3). Trailing spaces and the blank lines at both
+ends are dropped. So a notice line such as `GO`, `\! cmd`, `source x`, `HOST cmd`, `@file` or `/` stays a comment. The notice follows the
 `license` and `attribution` lines, after a blank comment line.
 
 Flags: `--include`, `--exclude`, `--dry-run`, `--json`, `--fail-on-warning` work as for any copy (a key into a table that

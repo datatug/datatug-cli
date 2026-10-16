@@ -134,6 +134,12 @@ func oracleComment(s string) string {
 	return strings.ReplaceAll(commentText(s), "&", "& ")
 }
 
+// oracleNoticeLine is the Oracle rule for a line of the licence notice: the header comes before SET DEFINE OFF, so an
+// "&" (a substitution variable for a client that runs with DEFINE ON) is followed by a space, as in the other lines.
+// A line that ends in "-" is a continuation line in some SQL*Plus commands; in a "--" comment it was measured to join
+// nothing (SET and WHENEVER on the next line still ran, on 23.26.3), and the journey checks that on every run.
+func oracleNoticeLine(s string) string { return strings.ReplaceAll(s, "&", "& ") }
+
 func (d oracleDialect) Header(p *ScriptPlan, h Header) []string {
 	var l []string
 	add := func(format string, args ...any) {
@@ -154,6 +160,10 @@ func (d oracleDialect) Header(p *ScriptPlan, h Header) []string {
 	}
 	if h.Attribution != "" {
 		add("Attribution: %s", h.Attribution)
+	}
+	if h.Notice != "" {
+		raw("")
+		l = append(l, NoticeLines("-- ", h.Notice, oracleNoticeLine)...)
 	}
 	raw("")
 	raw("Requires Oracle Database 23ai or later (multi-row INSERT ... VALUES; COMPATIBLE 23 or later). Verified on Oracle AI Database 26ai Free 23.26.3 with SQL*Plus 23.26.3.")

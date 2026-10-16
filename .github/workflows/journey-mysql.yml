@@ -52,6 +52,10 @@ jobs:
       MYSQL_IMAGE: mysql:8.4@sha256:24989179f58856db763f418010c1169fecc944e3ec1ea7e921572d83eb070f70
     steps:
       - uses: actions/checkout@v7
+      - name: Authenticate private Core dependency
+        uses: ./.github/actions/private-core
+        with:
+          private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
       - uses: actions/setup-go@v7
         with:
           # Must be >= go.mod's `go` directive, same constraint as release.yml.

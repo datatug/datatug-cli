@@ -260,7 +260,7 @@ SQLite -> PostgreSQL -> SQLite and PostgreSQL -> SQLite -> PostgreSQL on the dem
 it reads every column's storage class and value through python's `sqlite3` or `psycopg`, and compares
 catalogs) that the journey test `TestPostgresExactValuesRoundTrip` runs when `python3` is available.
 
-## SQL script destination: `sqlscript://` (MySQL and SQL Server)
+## SQL script destination: `sqlscript://` (MySQL, SQL Server and Oracle)
 
 `datatug db copy --from sqlite://<file> --to 'sqlscript:///path/out.sql?dialect=mysql'` does not copy into a
 database: it writes a **SQL script** that creates the same database in an engine. The script is made from the
@@ -276,7 +276,7 @@ The destination is a path in the URL (`sqlscript:///abs/path.sql`, or `sqlscript
 
 | Parameter | Meaning |
 |---|---|
-| `dialect` | Required. `mysql` and `mssql` (SQL Server, see [below](#sql-server-dialect-mssql)) are implemented; `oracle`, `postgres` and `sqlite` are planned and refused with the list of the implemented ones. |
+| `dialect` | Required. `mysql`, `mssql` (SQL Server, see [below](#sql-server-dialect-mssql)) and `oracle` (see [below](#oracle-dialect-oracle)) are implemented; `postgres` and `sqlite` are planned and refused with the list of the implemented ones. |
 | `name` | Dataset name in the header and in the completion marker (default: the SQLite file name without its extension). At most 255 characters for `mysql` (the marker column); `mssql` takes any length. Neither takes invalid UTF-8 or a NUL. |
 | `edition` | A label for the header, such as `DemoDB contract edition, identical to the SQLite/CSV/JSON`. The same limits as `name`. |
 | `license`, `attribution` | Licence and attribution lines of the header (a demo database's `manifest.json` `source.license`). One line each. |
@@ -304,11 +304,11 @@ The path is percent-encoded like any value (`%20` for a space); a relative path 
 no NUL, at most 16 KiB (a leading byte order mark is dropped) and not empty; anything else is a usage error (exit 2) before
 anything is written, and the message never repeats the text. The same URL gives the same bytes on every run.
 
-Every line of the file becomes one comment line (`-- ` and the line), in both dialects. The text is verbatim except for what
+Every line of the file becomes one comment line (`-- ` and the line), in every dialect. The text is verbatim except for what
 could end the comment or start a script line: CR, LF, CR LF, VT, FF, U+001C to U+001F, U+0085, U+2028 and U+2029 all end a line;
 other control characters, a byte order mark, bidirectional controls and invalid bytes become spaces; a tab becomes four spaces;
-`*/` and `/*` get a space between the two characters; for `mssql` `$(` becomes `$ (`. Trailing spaces and the blank lines at both
-ends are dropped. So a notice line such as `GO`, `\! cmd`, `source x` or `/` stays a comment. The notice follows the
+`*/` and `/*` get a space between the two characters; for `mssql` `$(` becomes `$ (`, for `oracle` `&` becomes `& ` (the header comes before `SET DEFINE OFF`; a comment line that ends in a hyphen joins nothing, measured on 23.26.3; a statement line that ends in one is joined with the next, see the wrapping rule). Trailing spaces and the blank lines at both
+ends are dropped. So a notice line such as `GO`, `\! cmd`, `source x`, `HOST cmd`, `@file` or `/` stays a comment. The notice follows the
 `license` and `attribution` lines, after a blank comment line.
 
 Flags: `--include`, `--exclude`, `--dry-run`, `--json`, `--fail-on-warning` work as for any copy (a key into a table that
@@ -636,6 +636,108 @@ or key batch is then skipped by the batch guard and rolled back at the end, but 
 (a syntax error) is not part of any transaction the server can roll back, so always use `-b` as the header says. A database with
 another collation (`COLLATE` at `CREATE DATABASE`) compares text in its own way. SQL Server 2014 and earlier are not supported
 (`THROW`, 1,700-byte index keys). Azure SQL Database is the same engine but untested here.
+
+### Oracle dialect (`oracle`)
+
+`datatug db copy --from sqlite://<file> --to 'sqlscript:///path/out.sql?dialect=oracle'` writes a SQL*Plus script for **Oracle
+Database 23ai and later**: the script uses multi-row `INSERT ... VALUES` and 128-byte quoted identifiers, and its first
+block raises ORA-20001 on a database below version 23 or with `COMPATIBLE` below 23 (which also covers the 30-byte identifier
+limit of 12.1 and earlier). It was **verified on Oracle AI Database 26ai Free 23.26.3** (`compatible` 23.6.0, `AL32UTF8`,
+`MAX_STRING_SIZE=STANDARD`) with SQL*Plus 23.26.3, natively on arm64 and in CI on amd64. The dialect key is `oracle`.
+
+```sh
+datatug db copy --from sqlite://./chinook.sqlite --to 'sqlscript:///tmp/chinook.oracle.sql?dialect=oracle&license=MIT'
+NLS_LANG=.AL32UTF8 sqlplus -L -S user/password@//host/service @/tmp/chinook.oracle.sql < /dev/null
+```
+
+Load it with **SQL*Plus** from a file (`@file`), as the header says, with `NLS_LANG=.AL32UTF8` (any other client character
+set stops the load at the first statement with ORA-20003; the script is UTF-8 without a byte order mark). **SQLcl, SQL
+Developer, Windows clients and a non-default NLS setup are untested.** The script targets the schema of the connected user
+(it creates no user and no schema; that user needs `CREATE SESSION`, `CREATE TABLE`, `CREATE SEQUENCE` and a tablespace quota).
+
+#### How the script protects the load
+
+SQL*Plus continues after many errors and reads some data as commands, so the script avoids the hazards instead of relying on
+the client:
+
+* `SET DEFINE OFF` (an `&` or `&&` in data would be a prompt; the journey proves the control: without the line a load loses rows),
+  `SET ESCAPE OFF`, `SET CMDSEP OFF`, `SET SQLTERMINATOR ';'`, `SET SQLPREFIX #` and `NLS_COMP = BINARY`/`NLS_SORT = BINARY` for the
+  session. **No line of the script starts with a value** and **no literal holds a raw CR or LF**: a text with a line break or control character is written with `CHR()` pieces, and
+  any non-ASCII text as `TO_CHAR(UNISTR('\XXXX'))` escapes, so a lone `/`, `@`, `@@`, `EXIT` or a `SET` line cannot occur in data.
+* No line is over 2,300 characters (SQL*Plus refuses an overlong line and ignores it: SP2-0027, exit status 0, observed with a 6,000-character line; the
+  exact limit of each client is untested). Every statement is wrapped at a safe place: after a comma, or before a keyword, a quoted name, a literal or a number, outside
+  any quote, so a continuation line starts with a token the generator wrote. A wide `CHECK (x IN (...))`, a key over many long names or a composite foreign key is several lines. A
+  statement that cannot be wrapped makes the export **fail** (the writer refuses any line over the limit; a comment line is continued on another comment line).
+  **No line outside a `--` comment ends in a hyphen**: SQL*Plus drops a trailing hyphen (a trailing blank does not matter) and joins the next line (`SELECT 10 -` and `3` is `SELECT 10  3`, measured on 23.26.3; a trailing `+` or `\\` is no continuation), so a minus written apart from its number in a wrapped `CHECK` list would silently change its sign. The wrapper never cuts after a hyphen and the writer refuses such a line, so nothing is ever joined and the 4,999-character limit applies to each line as written.
+  Long literals are wrapped too, and a literal over 4,000 bytes is a `TO_CLOB` group of at most 3,500 bytes. A `BLOB`
+  over 2,000 bytes is written by a per-row PL/SQL block of `HEXTORAW` chunks.
+* `WHENEVER SQLERROR EXIT FAILURE ROLLBACK` stops at the first error. Oracle DDL commits, so the script is **not transactional**:
+  atomicity is by **guard**. The marker table `_demodb_import` is created first (a second load stops at it with ORA-00955), and the
+  last block counts, for every table, its rows and, in the catalog, its keys (primary, unique, foreign: enabled and validated), its check and NOT NULL
+  constraints and its indexes, and raises ORA-20000 before the marker row is inserted. A client that went on after an error (no `WHENEVER`) or skipped a line
+  therefore never writes the marker row. The marker proves rows and the presence of the objects; it does not compare the text of a default or of a check. A failed load leaves the tables it created: drop the schema's objects and load again.
+* A version check (ORA-20001), a database character set check (ORA-20002) and a client character set check (ORA-20003) run first.
+  The only `/` lines are the ones the generator writes to end its own PL/SQL blocks.
+
+#### Types
+
+| SQLite | Oracle | Notes |
+|---|---|---|
+| `INTEGER`, `INT2`, `INT4`, `BOOLEAN` | `NUMBER(p,0)` | sized from the values; there is no `BOOLEAN` before 23ai, so a boolean is `NUMBER(1,0)` |
+| `REAL`, `FLOAT` | `BINARY_DOUBLE` | infinities are carried; SQLite stores `-0.0` as `0` |
+| `NUMERIC(p,s)`, `DECIMAL` | `NUMBER(p,s)` | a value that does not fit, or over 38 digits, widens the column (`type-widened`) |
+| `DATE` | `DATE` | years 0001 to 9999, except 1582-10-05 to 1582-10-14, which Oracle's calendar skips (it stores them ten days later): a column that holds one is carried as text (`type-widened`) |
+| `DATETIME`, `TIMESTAMP` | `TIMESTAMP(0)` to `TIMESTAMP(9)` | the fraction digits the values need (the same days of 1582 are carried as text) |
+| `CHAR(n)`, `VARCHAR(n)`, `TEXT` | `VARCHAR2(n CHAR)` / `VARCHAR2(4000 BYTE)` / `CLOB` | char semantics for declared lengths; a text over 4,000 bytes is a `CLOB` |
+| `BLOB` | `BLOB` (`RAW(n)` in a key) | `HEXTORAW` chunks |
+
+A column with no Oracle equivalent (`TIME`, `TIMESTAMPTZ`, JSON, mixed or unknown types) is widened to text with a `type-widened`
+warning. Identity columns (`AUTOINCREMENT`) are `GENERATED BY DEFAULT AS IDENTITY` with `START WITH` the next value. A key
+text column with no declared length is `VARCHAR2(255 CHAR)` (`key-type-bounded`); an index key over 6,000 bytes or 32 columns is refused (primary or unique) or dropped (index).
+
+#### Differences a person must know
+
+* **The empty string is NULL.** Oracle stores `''` as `NULL`: every empty text is loaded as `NULL`, a `NOT NULL` column that
+  holds one is relaxed, and the column gets a `values-normalized` warning. The verifier models this (an empty source text must be NULL in Oracle).
+* **Trailing spaces and case** are kept (`VARCHAR2` comparison is exact in the default binary collation); `NLS_COMP`/`NLS_SORT` settings are untested.
+* **Foreign key actions** are limited to `ON DELETE CASCADE`, `SET NULL` and `NO ACTION`; `ON UPDATE` and `RESTRICT` are not carried
+  (`fk-action-not-carried`). `DEFERRABLE` is carried.
+* **Names** are quoted, case-preserving and up to 128 bytes (UTF-8). A name Oracle cannot store (empty, over 128 bytes, a NUL or control character, a quote
+  character, or one that differs from another only by what Oracle ignores) is renamed with a hash (`name-renamed`); a table or column named `ROWID` is renamed too. Two tables whose names differ only by case are two names in Oracle and are a `name-case-collision` note.
+* **Views** are not carried. A `CHECK` the translator cannot read, or that uses `GLOB`/collations Oracle lacks, is not carried (`check-not-carried`); a default
+  is translated when it is a literal or `CURRENT_TIMESTAMP` (to `SYS_EXTRACT_UTC(SYSTIMESTAMP)`), else `default-not-carried`.
+* **Unique keys over NULLs.** Oracle's composite unique key admits many rows whose columns are all NULL but not two with the same non-NULL
+  prefix and a NULL elsewhere, unlike SQLite; such a key is written as a function-based unique index (`CASE ... END`) and counted as `unique-filtered`.
+* **Foreign key columns** of one equivalence class get one type (ORA-02267 otherwise).
+* **Index limits.** A key row is at most 6,000 bytes and 32 columns. A unique key over nullable columns that holds several NULLs is a function-based index with one `CASE` per column, each repeating the
+  test of every nullable column, and Oracle counts every reference towards the 32 (ORA-01793; measured: 16 columns with one test load, 6 columns with 6 tests do not), so a key with
+  more than 32 references is not created and is reported as `index-not-carried` (its uniqueness over NULLs is then not enforced). A key that cannot be indexed at all (a CLOB, a BLOB, a text over 4,000 bytes) is refused for a primary or unique key.
+* **Names.** A name that starts with `BIN$` (any case) is renamed: such a table belongs to the recycle bin and hides from the data dictionary views.
+
+#### How it is proved
+
+`scripts/check-journey-oracle.sh` (the non-required, path-filtered workflow `.github/workflows/journey-oracle.yml`) starts the
+digest-pinned `gvenzl/oracle-free:23-slim` image and, for the edge-case fixture (`pkg/dbcopy/faithful/testdata/oracle_edge.sql`),
+a fuzz fixture of 4,000 hostile rows, a fixture of 80 random foreign key graphs and the six demo databases pinned in
+`scripts/journey-datasets.txt`: exports twice (the same bytes), loads with SQL*Plus inside the container, checks that a second
+load stops at the marker table, and runs the cross-engine verifier (`Engine: crossverify.EngineOracle`) through the pure-Go driver
+`github.com/sijms/go-ora/v2`. The verifier reads the `ALL_*` catalog (tables, columns, nullability, identity, keys, foreign keys with actions and
+deferrability, unique and function-based indexes, the marker) and every value with typed reads (a `NUMBER` as exact text, a `BLOB` by its length and bytes). It compares **only whether a default exists and the number of `CHECK` constraints, not their text**, so a translated `CHECK` or `DEFAULT` is covered by the unit tests and the golden script, not by the real-engine journey.
+Once per run it proves the controls: a client in another character set stops with no table, a failing statement stops the load,
+a client that goes on after an error gets no marker row (and with the counts removed it does), `&`, a long line and a raw
+newline plus `/` are real hazards, and the fuzz script needs its `SET DEFINE OFF`.
+
+#### Licence of the test image
+
+The database in the image is Oracle Database Free, used under the Oracle Free Use Terms and Conditions (development and
+testing use). The founder decided on 2026-10-16 (decision D10, answer "Yes, both") that CI may run it **for automated testing only**; the
+image is digest-pinned, pulled and thrown away with the runner, and **never redistributed**. The Apache-2.0 label of the gvenzl
+image covers its build scripts only. The generated scripts contain no Oracle code.
+
+#### Untested
+
+Oracle before 23ai (refused by the script's version check, which was not run on an older server), SQLcl, SQL Developer, Windows, a non-default
+`NLS_LANG`/`NLS_COMP`, small block sizes, `MAX_STRING_SIZE=EXTENDED`, and Autonomous Database.
 
 ## Local backup to a folder: `db export` and `--to ingitdb://`
 

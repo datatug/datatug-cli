@@ -45,7 +45,7 @@ func TestExportDryRunAndFilters(t *testing.T) {
 	if _, err := ExportScript(context.Background(), ScriptRequest{Dialect: "mysql", DB: e.DB, Exclude: []string{"a", "b", "c"}}, io.Discard); !errors.Is(err, ErrNoTables) {
 		t.Errorf("%v", err)
 	}
-	if _, err := ExportScript(context.Background(), ScriptRequest{Dialect: "oracle", DB: e.DB}, io.Discard); err == nil {
+	if _, err := ExportScript(context.Background(), ScriptRequest{Dialect: "postgres", DB: e.DB}, io.Discard); err == nil {
 		t.Error("an unknown dialect")
 	}
 }

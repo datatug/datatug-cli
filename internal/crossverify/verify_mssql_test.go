@@ -237,7 +237,7 @@ func TestVerifyMSSQLFailures(t *testing.T) {
 			}
 		})
 	}
-	if _, err := Verify(context.Background(), Input{Engine: "oracle"}); err == nil || !strings.Contains(err.Error(), "unknown engine") {
+	if _, err := Verify(context.Background(), Input{Engine: "db2"}); err == nil || !strings.Contains(err.Error(), "unknown engine") {
 		t.Errorf("%v", err)
 	}
 	if e, err := engineByName(""); err != nil || e.name != EngineMySQL {

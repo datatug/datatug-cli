@@ -88,6 +88,9 @@ func sourceRows(in Input, t *faithful.ScriptTable) rowSource {
 				if forms[i], err = canonSource(c.Choice, v); err != nil {
 					return fmt.Errorf("source column %q: %w", c.Src.Name, err)
 				}
+				if norm := in.engine().normalizeSource; norm != nil {
+					forms[i] = norm(c, forms[i])
+				}
 			}
 			return visit(forms)
 		})
@@ -103,7 +106,18 @@ func targetRows(in Input, t *faithful.ScriptTable) rowSource {
 		for i, c := range t.Columns {
 			names[i] = eng.quote(c.Name)
 		}
-		stmt, err := in.Target.PrepareContext(ctx, "SELECT "+strings.Join(names, ", ")+" FROM "+eng.quote(t.Name))
+		// lobs are the columns whose length is read too (see targetEngine.lobLength): their lengths follow the values.
+		var lobs []int
+		sel := append([]string(nil), names...)
+		if eng.lobLength != nil {
+			for i, c := range t.Columns {
+				if c.Choice.Family == "bytes" && c.Choice.Len == 0 {
+					lobs = append(lobs, i)
+					sel = append(sel, eng.lobLength(names[i]))
+				}
+			}
+		}
+		stmt, err := in.Target.PrepareContext(ctx, "SELECT "+strings.Join(sel, ", ")+" FROM "+eng.quote(t.Name))
 		if err != nil {
 			return err
 		}
@@ -113,8 +127,13 @@ func targetRows(in Input, t *faithful.ScriptTable) rowSource {
 			return err
 		}
 		defer func() { _ = rows.Close() }()
-		return eachRow(rows, len(names), func(vals []any) error {
+		return eachRow(rows, len(sel), func(vals []any) error {
 			forms := make([]string, len(names))
+			for k, i := range lobs {
+				if n := vals[len(names)+k]; n != nil && number(n) == 0 {
+					vals[i] = []byte{}
+				}
+			}
 			for i, c := range t.Columns {
 				var err error
 				if forms[i], err = eng.canon(c.Choice, vals[i]); err != nil {

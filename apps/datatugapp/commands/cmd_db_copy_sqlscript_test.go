@@ -140,7 +140,7 @@ func TestSQLScriptUsageErrors(t *testing.T) {
 		want string
 	}{
 		"no dialect":         {[]string{"--to", "sqlscript://" + out}, "dialect is missing"},
-		"unknown dialect":    {[]string{"--to", "sqlscript://" + out + "?dialect=oracle"}, "implemented: mssql, mysql"},
+		"unknown dialect":    {[]string{"--to", "sqlscript://" + out + "?dialect=postgres"}, "implemented: mssql, mysql, oracle"},
 		"unknown parameter":  {[]string{"--to", sqlscript(out, "&zip=1")}, `unknown parameter "zip"`},
 		"no path":            {[]string{"--to", "sqlscript:?dialect=mysql"}, "file path is missing"},
 		"a host":             {[]string{"--to", "sqlscript://host/x.sql?dialect=mysql"}, "path and a query only"},
@@ -198,7 +198,7 @@ func TestSQLScriptQueryParametersAreNeverDropped(t *testing.T) {
 	b, _ := os.ReadFile(out)
 	assert.Contains(t, string(b), "-- Attribution: Data by X; converted by Y")
 	// A parameter given twice is refused, whichever it is.
-	for _, query := range []string{"&dialect=oracle", "&name=a&name=b", "&license=MIT&license=GPL"} {
+	for _, query := range []string{"&dialect=postgres", "&name=a&name=b", "&license=MIT&license=GPL"} {
 		_, _, err = runCopy(t, "db", "copy", "--from", src, "--to", sqlscript(out, query), "--overwrite", "recreate")
 		require.Error(t, err, query)
 		assert.Equal(t, 2, exitCodeOf(t, err), query)

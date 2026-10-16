@@ -215,7 +215,7 @@ func TestMySQLPlanRefusals(t *testing.T) {
 			t.Errorf("%s: %v is not %v", name, err, c.is)
 		}
 	}
-	if _, err := PlanScript(context.Background(), "oracle", newSQLite(t).DB); err == nil {
+	if _, err := PlanScript(context.Background(), "postgres", newSQLite(t).DB); err == nil {
 		t.Error("an unknown dialect")
 	}
 }

@@ -56,6 +56,8 @@ type MyFK struct {
 	RefColumns []string
 	OnUpdate   string
 	OnDelete   string
+	// Deferrable and Deferred are the deferral of the key (Oracle).
+	Deferrable, Deferred bool
 }
 
 // MyTable is a table as MySQL reports it.

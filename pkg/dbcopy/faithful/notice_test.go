@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math/rand"
 	"os"
+	"sort"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -17,19 +18,20 @@ var noticeAtoms = []string{"\n", "\r", "\r\n", "\n\r", "\u0085", "\u2028", "\u20
 	"\u202e", "\u2066", "\u200f", "\t", " ", "  ", "GO", "\nGO", "\n\\! cmd", "\nsource x", "\n/", "\\", "\\g", "*/", "/*", "*", "/", "/*!", "*/ DROP TABLE x; /*", "$(", "$(x)", "-- ", "--", ";", "'", "\"",
 	"DELIMITER $$", ":r x", "!! cmd", "é", "日本", "😀", "Copyright (c) 2024 A", "0"}
 
-// hostileNoticeText is the notice the MySQL and SQL Server journeys carry in the header of their fixture and fuzz
+// hostileNoticeText is the notice the MySQL, SQL Server and Oracle journeys carry in the header of their fixture and fuzz
 // datasets (TestWriteHostileNotice writes it): every hazard of a line, a client command and a comment, a leading byte
 // order mark and CR LF line ends. It is built here, not kept as a file, because the repository's hooks refuse the
 // trailing whitespace of its CR characters.
 func hostileNoticeText() string {
 	lines := []string{"Copyright (c) 2024 Hostile Notice Co.", "GO", "\\! touch /tmp/datatug-notice-pwned", "\\g", "source /etc/passwd", "/", "*/ DROP DATABASE x; /*",
 		"DELIMITER $$", "exit", "quit", "!! touch /tmp/datatug-notice-pwned", ":r /etc/passwd", ":setvar x y", "$(ComSpec)", "USE master;", "SELECT 1; -- end",
-		"  indented\ttabbed", "x*/*y"}
+		"@/tmp/datatug-notice-pwned.sql", "@@/tmp/datatug-notice-pwned.sql", "HOST touch /tmp/datatug-notice-pwned", "SET DEFINE ON", "WHENEVER SQLERROR EXIT 9",
+		"a & b &x &&y &1", "a line that ends with a hyphen -", "SET SQLTERMINATOR OFF -", "  indented\ttabbed", "x*/*y"}
 	return "\ufeff" + strings.Join(lines, "\r\n") + "\u2028GO\u2029source y\u0085/\v\fGO\ufeffGO\u202eevil\x1b[31m\a\x1fGO\n"
 }
 
 // TestWriteHostileNotice writes hostileNoticeText to the file named by DATATUG_WRITE_HOSTILE_NOTICE; the journeys
-// (scripts/check-journey-mysql.sh and scripts/check-journey-mssql.sh) give it to notice-file=.
+// (scripts/check-journey-mysql.sh, check-journey-mssql.sh and check-journey-oracle.sh) give it to notice-file=.
 func TestWriteHostileNotice(t *testing.T) {
 	path := os.Getenv("DATATUG_WRITE_HOSTILE_NOTICE")
 	if path == "" {
@@ -181,8 +183,11 @@ func TestValidateNotice(t *testing.T) {
 func exportWithNotice(t testing.TB, dialect, notice string) string {
 	t.Helper()
 	e := edgeSQLite(t)
-	if dialect == "mssql" {
+	switch dialect {
+	case "mssql":
 		e = mssqlEdgeSQLite(t)
+	case "oracle":
+		e = oracleEdgeSQLite(t)
 	}
 	h := testHeader()
 	h.Notice = notice
@@ -195,7 +200,13 @@ func exportWithNotice(t testing.TB, dialect, notice string) string {
 
 func TestNoticeIsPartOfTheHeaderOnly(t *testing.T) {
 	notice := []byte(strings.TrimPrefix(hostileNoticeText(), "\ufeff"))
-	for _, dialect := range []string{"mysql", "mssql"} {
+	// Every registered dialect: one that forgets to write the notice fails here, and a new one must say its own rule.
+	names := make([]string, 0, len(dialects))
+	for name := range dialects {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, dialect := range names {
 		t.Run(dialect, func(t *testing.T) {
 			plain := exportWithNotice(t, dialect, "")
 			got := exportWithNotice(t, dialect, string(notice))
@@ -203,8 +214,14 @@ func TestNoticeIsPartOfTheHeaderOnly(t *testing.T) {
 				t.Fatal("two exports are not byte for byte the same")
 			}
 			var fn func(string) string
-			if dialect == "mssql" {
+			switch dialect {
+			case "mysql":
+			case "mssql":
 				fn = mssqlNoticeLine
+			case "oracle":
+				fn = oracleNoticeLine
+			default:
+				t.Fatalf("dialect %q: say which neutraliser its header uses for the notice", dialect)
 			}
 			block := append([]string{"-- "}, NoticeLines("-- ", string(notice), fn)...)
 			block[0] = "--"

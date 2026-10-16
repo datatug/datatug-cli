@@ -21,10 +21,13 @@ type ScriptStats struct {
 	NonFinite     int64 // infinite floats
 	Denormal      int64 // floats below the smallest normal double, which SQL Server flushes to zero
 	LowYear       int64 // dates and timestamps before year 1000
-	MaxFsp        int   // most decimals of a timestamp or time text
-	MaxIntDigits  int   // most integer digits of a value that is a decimal number
+	GregorianGap  int64 // dates and timestamps from 1582-10-05 to 1582-10-14, which the Julian-to-Gregorian switch skips (Oracle)
+	GapExample    string
+	MaxFsp        int // most decimals of a timestamp or time text
+	MaxIntDigits  int // most integer digits of a value that is a decimal number
 	MaxFracDigits int
 	Empty         int64 // empty texts
+	EmptyBlobs    int64 // empty blobs
 	// RealExample is the first REAL value the column holds, as its shortest decimal ("" when it holds none).
 	RealExample string
 	// Decimal texts: how many are not in canonical spelling (with the first), and how many canonical ones have each
@@ -33,6 +36,9 @@ type ScriptStats struct {
 	nonCanonExample  string
 	canonFrac        map[int]int64
 	canonFracExample map[int]string
+	// Decimal texts an engine that keeps no trailing zeros (Oracle's NUMBER) spells differently, with the first.
+	trimmed        int64
+	trimmedExample string
 }
 
 func newScriptStats(d declInfo) *ScriptStats { return &ScriptStats{colStats: newStats(d)} }
@@ -64,6 +70,9 @@ func (s *ScriptStats) add(v any) {
 		}
 	case []byte:
 		s.MaxBlob = max(s.MaxBlob, len(x))
+		if len(x) == 0 {
+			s.EmptyBlobs++
+		}
 	case string:
 		s.MaxBytes = max(s.MaxBytes, len(x))
 		s.MaxU16 = max(s.MaxU16, utf16Len(x))
@@ -78,10 +87,12 @@ func (s *ScriptStats) add(v any) {
 			if x < "1000" {
 				s.LowYear++
 			}
+			s.gap(x)
 		case reTS.MatchString(x):
 			if x < "1000" {
 				s.LowYear++
 			}
+			s.gap(x)
 			s.fsp(x)
 		case reTime.MatchString(x):
 			s.fsp(x)
@@ -90,6 +101,17 @@ func (s *ScriptStats) add(v any) {
 			s.digits(x)
 			s.spelling(x)
 		}
+	}
+}
+
+// gap counts a date or timestamp text in the days 1582-10-05 to 1582-10-14 that the Gregorian reform skipped: an engine
+// with the historical calendar (Oracle) stores it ten days later.
+func (s *ScriptStats) gap(x string) {
+	if len(x) >= 10 && x[:10] >= "1582-10-05" && x[:10] <= "1582-10-14" && x[:7] == "1582-10" {
+		if s.GregorianGap == 0 {
+			s.GapExample = x
+		}
+		s.GregorianGap++
 	}
 }
 
@@ -113,7 +135,23 @@ func utf16Len(x string) int {
 	return n
 }
 
+// trimmedDecimalText is a decimal text as a type that keeps no trailing zeros spells it: the canonical spelling
+// without the zeros after the point (1.50 is 1.5, 0.0000 is 0).
+func trimmedDecimalText(x string) string {
+	c := canonicalDecimalText(x)
+	if strings.Contains(c, ".") {
+		c = strings.TrimRight(strings.TrimRight(c, "0"), ".")
+	}
+	return c
+}
+
 func (s *ScriptStats) spelling(x string) {
+	if t := trimmedDecimalText(x); t != x {
+		s.trimmed++
+		if s.trimmedExample == "" {
+			s.trimmedExample = x + " -> " + t
+		}
+	}
 	if canon := canonicalDecimalText(x); canon != x {
 		s.textNonCanon++
 		if s.nonCanonExample == "" {

@@ -53,6 +53,7 @@ require (
 	github.com/openvaultdb/openvaultdb-go v0.6.2
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
 	github.com/posthog/posthog-go v1.24.3
+	github.com/sijms/go-ora/v2 v2.9.0
 	github.com/sneat-co/sneat-go-core v0.67.3
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10

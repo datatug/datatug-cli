@@ -22,6 +22,70 @@ type headerValidator interface {
 	ValidateHeader(h Header) error
 }
 
+// lineLimiter is implemented by a dialect whose client cannot read a line longer than some length (SQL*Plus): the
+// row writer starts a new line between two values when the next one would pass MaxLine.
+type lineLimiter interface {
+	MaxLine() int
+}
+
+// rowStatementer is implemented by a dialect that cannot write every row inside a multi-row insert: RowStatement
+// is a statement of its own for a row that needs one (ok), and the row is then left out of the batch.
+type rowStatementer interface {
+	RowStatement(t *ScriptTable, vals []any) (stmt string, ok bool, err error)
+}
+
+// everyCounter is implemented by a dialect whose identity counter does not follow the rows that were inserted with
+// a value of their own: its CounterSQL is written for every auto-numbered column, not only when SQLite keeps a counter.
+type everyCounter interface {
+	CountsEveryIdentity() bool
+}
+
+func countsEveryIdentity(d Dialect) bool {
+	e, ok := d.(everyCounter)
+	return ok && e.CountsEveryIdentity()
+}
+
+// hyphenContinuer is implemented by a dialect whose client reads a line that ends in a hyphen as continued on the next line
+// (SQL*Plus, outside a "--" comment): the writer refuses such a line, so nothing is ever joined.
+type hyphenContinuer interface {
+	HyphenContinues() bool
+}
+
+// lineGuard refuses a script that has a line longer than a client can read: the dialect wraps what it writes, and a line
+// that is over the limit anyway is a generator fault that must not become a skipped statement (SQL*Plus ignores an
+// overlong line, SP2-0027, and goes on). The error names the line.
+type lineGuard struct {
+	w        io.Writer
+	max      int
+	noHyphen bool   // a non-comment line may not end in a hyphen
+	cur      int    // bytes of the line being written
+	head     string // its first bytes
+	last     byte   // its last byte that is not a blank
+}
+
+func (g *lineGuard) Write(b []byte) (int, error) {
+	for _, c := range b {
+		if c == '\n' {
+			if g.noHyphen && g.last == '-' && !strings.HasPrefix(g.head, "--") {
+				return 0, fmt.Errorf("the script has a line that ends in a hyphen, which its client joins with the next line (it starts %q): the statement cannot be wrapped at a safe place", g.head)
+			}
+			g.cur, g.head, g.last = 0, "", 0
+			continue
+		}
+		if g.cur < 60 {
+			g.head += string(c)
+		}
+		if c != ' ' && c != '\t' {
+			g.last = c
+		}
+		g.cur++
+		if g.cur > g.max {
+			return 0, fmt.Errorf("the script has a line longer than the %d characters its client reads (it starts %q): the statement cannot be wrapped at a safe place", g.max, g.head)
+		}
+	}
+	return g.w.Write(b)
+}
+
 // WriteScript streams the script of a plan: the header, the session settings, every table, its rows (in a total
 // order, so the bytes are the same on every run), the counters of the auto-numbered columns, then indexes,
 // checks and foreign keys (keys follow the data), and last the marker row. The rows are read from src one
@@ -30,6 +94,10 @@ type headerValidator interface {
 // Every line starts with a token this function wrote; no value can start one (see Dialect.Literal).
 func WriteScript(ctx context.Context, w io.Writer, src Queryer, p *ScriptPlan, h Header) (int64, error) {
 	d := p.Dialect
+	if ll, ok := d.(lineLimiter); ok {
+		hc, _ := d.(hyphenContinuer)
+		w = &lineGuard{w: w, max: ll.MaxLine(), noHyphen: hc != nil && hc.HyphenContinues()}
+	}
 	bw := bufio.NewWriterSize(w, 1<<20)
 	line := func(s string) { _, _ = bw.WriteString(s); _ = bw.WriteByte('\n') }
 	lines := func(ls []string) {
@@ -54,7 +122,7 @@ func WriteScript(ctx context.Context, w io.Writer, src Queryer, p *ScriptPlan, h
 	}
 	for _, t := range p.Tables {
 		for _, c := range t.Columns {
-			if c.AutoInc && c.Src.SequenceStart > 0 {
+			if c.AutoInc && (c.Src.SequenceStart > 0 || countsEveryIdentity(d)) {
 				line(d.CounterSQL(t, c, c.Src.SequenceStart))
 			}
 		}
@@ -78,6 +146,33 @@ func WriteScript(ctx context.Context, w io.Writer, src Queryer, p *ScriptPlan, h
 	return total, bw.Flush()
 }
 
+// joinRow writes the values of a row as "(a,b,c)". With a limit, a value that would take its line past the limit
+// starts a line of its own: the line still starts with a value the writer wrote.
+func joinRow(lits []string, limit int) string {
+	var row strings.Builder
+	row.WriteByte('(')
+	cur := 1 // the length of the line being written
+	for i, lit := range lits {
+		if i > 0 {
+			row.WriteByte(',')
+			cur++
+		}
+		first, _, _ := strings.Cut(lit, "\n")
+		if limit > 0 && i > 0 && cur+len(first) > limit {
+			row.WriteByte('\n')
+			cur = 0
+		}
+		row.WriteString(lit)
+		if k := strings.LastIndexByte(lit, '\n'); k >= 0 {
+			cur = len(lit) - k - 1
+		} else {
+			cur += len(lit)
+		}
+	}
+	row.WriteByte(')')
+	return row.String()
+}
+
 func writeRows(ctx context.Context, bw *bufio.Writer, src Queryer, p *ScriptPlan, t *ScriptTable) (int64, error) {
 	d := p.Dialect
 	if t.Rows == 0 {
@@ -95,6 +190,11 @@ func writeRows(ctx context.Context, bw *bufio.Writer, src Queryer, p *ScriptPlan
 	maxRows, maxBytes := d.BatchLimits()
 	head := d.InsertHead(t)
 	vals, ptrs := sqliteRowBuffer(len(names))
+	limit := 0
+	if ll, ok := d.(lineLimiter); ok {
+		limit = ll.MaxLine()
+	}
+	own, _ := d.(rowStatementer)
 	var n int64
 	inBatch, size := 0, 0
 	var sb strings.Builder
@@ -119,19 +219,28 @@ func writeRows(ctx context.Context, bw *bufio.Writer, src Queryer, p *ScriptPlan
 			return n, err
 		}
 		fixEmptyBlobs(vals)
-		var row strings.Builder
-		row.WriteByte('(')
+		if own != nil {
+			stmt, ok, err := own.RowStatement(t, vals)
+			if err != nil {
+				return n, fmt.Errorf("row %d: %w", n+1, err)
+			}
+			if ok {
+				flush()
+				_, _ = bw.WriteString(stmt + "\n")
+				n++
+				continue
+			}
+		}
+		lits := make([]string, len(t.Columns))
 		for i, c := range t.Columns {
 			lit, err := d.Literal(c.Choice, vals[i])
 			if err != nil {
 				return n, fmt.Errorf("row %d, column %q: %w", n+1, c.Src.Name, err)
 			}
-			if i > 0 {
-				row.WriteByte(',')
-			}
-			row.WriteString(lit)
+			lits[i] = lit
 		}
-		row.WriteByte(')')
+		var row strings.Builder
+		row.WriteString(joinRow(lits, limit))
 		if inBatch > 0 {
 			sb.WriteString(",\n")
 		}

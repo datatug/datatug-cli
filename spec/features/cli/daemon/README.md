@@ -56,6 +56,10 @@ When the daemon is not running and could not be started, the wrapper MUST print 
 
 `datatug daemon url --project <id> --env <env> --db <db> --table <name> [--view] [--schema <s>] [--records [--limit N] | --record <pk-json>] [--format json|text]` (or `--db datatug://<project>/<db>[?env=<ENV>]` in place of `--project`, `--env` and `--db <id>`; giving both is exit `2`) MUST print the web UI deep link of `deep-link-contract` and MUST NOT start the daemon. JSON fields: `url`, `kind` (`table-metadata`, `table-records`, `record`), `running`, `uiSupport` (`available` or `pending`). `--records` and `--record` are mutually exclusive (exit `2`). Any identifier containing `://` or `@`, and any path identifier equal to `.` or `..`, MUST be refused with exit `2` so a connection URL can never reach a link or climb the path; `--db` is a plain source id or exactly a `datatug://` reference, any other scheme or a path is exit `2`. A reference with no `?env=` takes the one environment of the project registry on disk that lists the source (several: exit `2` naming them; none: exit `3`), with no network and no database connection; `datatug:///<db>` (no project) is exit `2`. A link longer than 2048 characters, a key value that is null, an object, an array, a boolean, a non-integer number (the error names the kind, never the value; the record lookup binds strings and exact integers only) or a string over 256 characters, are exit `2`. Every link's fragment starts with `code=<one-time code>` minted locally from the daemon's access key (see [serve](../serve/README.md) `origins-and-token`); a daemon that left no key gets a link without one. `running` is decided from the record, the pid and a TCP connect, without an HTTP request, so a check never resets the idle timer; a datatug API this CLI did not start (`external`) costs one `agent-info` request.
 
+#### REQ: result-link
+
+`datatug daemon url --result <id> [--view=table|record|columns|sources|related] [--row <n>] [--format json|text]` MUST print the link of a result stored by `query run --result-id` (see [query](../query/README.md)) and MUST NOT start the daemon or send a request. `--view` takes its value after `=` (a bare `--view` keeps meaning a view of a table link); the default view is `table`. `--row` is a 1-based position, at most 10000, never a key. The id follows the result id grammar (exit `2` otherwise); any table-link flag with `--result`, a view outside the list, and a view name on a table link are exit `2`. JSON fields: `url`, `kind` (`query-result`), `running`, `uiSupport`, `resultExists`. Whether the result exists is read from the store on disk (a complete, unexpired result whose directory is not a link and is the user's); when it does not, `url` is absent and no code is minted. The link carries no project, database, table, column, value or query text: the page reads them from the agent.
+
 ### Ownership and lifetime
 
 #### REQ: owner-and-teardown
@@ -101,10 +105,11 @@ The web UI address of an agent is `<uiBase>` = `https://datatug.app/store/http-<
 | Table metadata | `<uiBase>/project/<project>/env/<env>/db/<db>/table/<table>?schema=<s>` (`view/<name>` for a view; `schema` is always present, empty for a schemaless source) |
 | Table records (top N) | `<uiBase>/project/<project>/env/<env>/db/<db>/table/<table>/records?limit=<N>&schema=<s>` |
 | Single record | `<uiBase>/project/<project>/env/<env>/db/<db>/table/<table>/record?schema=<s>#pk=<encodeURIComponent of a JSON object column→value>` |
+| Query result | `<uiBase>/result/<id>?view=<view>[&row=<n>]` |
 
 The key is in the URL fragment so it is never sent to the web host. It is one JSON object with sorted keys and typed values; an integer above 2^53 − 1 in absolute value is written as a string so the UI never rounds it. The fragment is encoded like JavaScript's `encodeURIComponent`.
 
-`DATATUG_UI_BASE` MAY replace `https://datatug.app` (self-hosted or local build). The metadata route exists in the UI today (`env/:environmentId` → `db/:dbCatalogId` → `table|view/:tableType`, datatug-apps `datatug-routing-proj-env*.ts`); the `records` and `record` child routes do not, and the page does not yet read `schema` as authoritative, so `url` reports `uiSupport` `pending` for all three kinds until the UI ships the routes.
+`DATATUG_UI_BASE` MAY replace `https://datatug.app` (self-hosted or local build). The metadata route exists in the UI today (`env/:environmentId` → `db/:dbCatalogId` → `table|view/:tableType`, datatug-apps `datatug-routing-proj-env*.ts`); the `records` and `record` child routes do not, and the page does not yet read `schema` as authoritative, so `url` reports `uiSupport` `pending` for all three kinds until the UI ships the routes. The `result/<id>` route does not exist yet either, so `query-result` is `pending` too; the page reads the result from the agent's `GET /datatug/results/<id>` (see [serve](../serve/README.md) `result-route`).
 
 ## Acceptance Criteria
 
@@ -137,6 +142,12 @@ The spawned command line has `--host 127.0.0.1`, `--idle-timeout 2h` and none of
 **Requirements:** daemon#req:url, daemon#req:deep-link-contract, daemon#req:no-secrets
 
 `daemon url` returns the three shapes above (key in the fragment, `schema` always present), refuses `://`, `@`, `.` and `..` in identifiers, and flags all three kinds `pending`.
+
+### AC: result-link-shape
+
+**Requirements:** daemon#req:result-link, daemon#req:deep-link-contract, daemon#req:no-secrets
+
+For a stored result, `daemon url --result <id> --view=sources --row 2` prints `<uiBase>/result/<id>?view=sources&row=2` with `resultExists` `true`, `kind` `query-result` and `uiSupport` `pending`, and a running agent's code first in the fragment; for an id with no result it prints `resultExists` `false` and no `url`; a bad id or view, or `--result` with `--table`, is exit `2`.
 
 ## Follow-up (UI repository, datatug/datatug-apps — not done here)
 

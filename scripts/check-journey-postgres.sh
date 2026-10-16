@@ -50,9 +50,11 @@ required_tests=(
 	TestPostgresStatementTimeoutDoesNotCutASlowReload
 	TestPostgresReloadMovesTheCounterOfASequenceTheColumnDoesNotOwn
 	TestPostgresReloadRefusesAKeyItCannotPutBack
-	TestPostgresVerifyReadsEveryFieldOfAForeignKey
+	TestPostgresVerifyReadsDeferralMatchAndValidityOfAForeignKey
 	TestPostgresDecimalWarningsSayWhatTheServerDoes
 	TestPostgresNumericNaNIsKeptAsTextAndCounted
+	TestPostgresReloadNeverMovesASharedSequenceBack
+	TestPostgresCounterFollowsTheDefaultNotTheOwnedSequence
 )
 
 # Tests of a feature that only PostgreSQL 18 has. On 18 they must PASS like every other; on an older

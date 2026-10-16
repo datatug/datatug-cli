@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -66,8 +67,12 @@ func scriptTestNames(t *testing.T, script, array string) map[string]bool {
 	return nil
 }
 
-// serverTests returns the tests of the package in dir that need the PostgreSQL server of the journey: a
-// Test function that, directly or through the functions it calls, names the variable that holds its URL.
+// serverTests returns the tests of the package in dir that may need the PostgreSQL server of the journey: a
+// Test function that, directly or through what it mentions, names the variable that holds its URL. What a
+// function mentions is every identifier of its body, so a call to a function, to a method (by its name), a
+// function passed as a value, or a function held by a field of a table (the key of its literal) is followed;
+// over-approximation is the point: a test that is found and does not need the server is listed as an
+// exemption, with its reason, and is never missed.
 func serverTests(t *testing.T, dir string, vars ...string) []string {
 	t.Helper()
 	fset := token.NewFileSet()
@@ -75,7 +80,23 @@ func serverTests(t *testing.T, dir string, vars ...string) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	uses := map[string]map[string]bool{} // function -> identifiers and literals it mentions
+	uses := map[string]map[string]bool{} // function, method, variable or field -> identifiers and literals it mentions
+	mention := func(owner string, n ast.Node) {
+		m := uses[owner]
+		if m == nil {
+			m = map[string]bool{}
+			uses[owner] = m
+		}
+		ast.Inspect(n, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.Ident:
+				m[n.Name] = true
+			case *ast.BasicLit:
+				m[strings.Trim(n.Value, `"`)] = true
+			}
+			return true
+		})
+	}
 	for _, e := range entries {
 		if !strings.HasSuffix(e.Name(), "_test.go") {
 			continue
@@ -85,22 +106,29 @@ func serverTests(t *testing.T, dir string, vars ...string) []string {
 			t.Fatal(err)
 		}
 		for _, d := range f.Decls {
-			fd, ok := d.(*ast.FuncDecl)
-			if !ok || fd.Recv != nil || fd.Body == nil {
-				continue
-			}
-			m := map[string]bool{}
-			ast.Inspect(fd.Body, func(n ast.Node) bool {
-				switch n := n.(type) {
-				case *ast.Ident:
-					m[n.Name] = true
-				case *ast.BasicLit:
-					m[strings.Trim(n.Value, `"`)] = true
+			switch d := d.(type) {
+			case *ast.FuncDecl:
+				if d.Body != nil {
+					mention(d.Name.Name, d.Body)
 				}
-				return true
-			})
-			uses[fd.Name.Name] = m
+			case *ast.GenDecl:
+				for _, sp := range d.Specs {
+					if vs, ok := sp.(*ast.ValueSpec); ok {
+						for _, n := range vs.Names {
+							mention(n.Name, vs)
+						}
+					}
+				}
+			}
 		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			if kv, ok := n.(*ast.KeyValueExpr); ok {
+				if k, ok := kv.Key.(*ast.Ident); ok {
+					mention(k.Name, kv.Value) // a field that holds a function: s.run
+				}
+			}
+			return true
+		})
 	}
 	needs := map[string]bool{}
 	for changed := true; changed; {
@@ -140,9 +168,17 @@ func TestEveryPostgresTestOfTheJourneyIsRequired(t *testing.T) {
 		listed[n] = true
 	}
 	// Tests that need the server and are run by hand, or by another job, on purpose.
+	const replays = "reaches the server only to record a scenario (recordPG); the test replays the recording and runs without one"
 	notInTheJourney := map[string]string{
-		"TestRoundTripPGSQLitePG":     "needs the sample databases (DATATUG_PG_SAMPLES_DIR), which the CI job does not have",
-		"TestRoundTripSQLitePGSQLite": "needs the sample databases (DATATUG_DEMO_SQLITE), which the CI job does not have",
+		"TestRecordScenarios":        "records the scenarios against a server by hand (DATATUG_RECORD_SCENARIOS=1)",
+		"TestReplayScenarios":        replays,
+		"TestChaosSweep":             replays,
+		"TestCompileRowFilter":       replays,
+		"TestCountMismatchRollsBack": replays,
+		"TestFailedStatementsAreToleratedOnlyForTheirOwnReasons": replays,
+		"TestSnapshotRowCountMismatch":                           replays,
+		"TestRoundTripPGSQLitePG":                                "needs the sample databases (DATATUG_PG_SAMPLES_DIR), which the CI job does not have",
+		"TestRoundTripSQLitePGSQLite":                            "needs the sample databases (DATATUG_DEMO_SQLITE), which the CI job does not have",
 	}
 	found := append(serverTests(t, ".", "pgAdminEnv", "DATATUG_TEST_POSTGRES_URL"),
 		serverTests(t, "../../../apps/datatugapp/commands", "realPgAdminVar", "DATATUG_TEST_POSTGRES_URL")...)
@@ -152,6 +188,11 @@ func TestEveryPostgresTestOfTheJourneyIsRequired(t *testing.T) {
 	for _, name := range found {
 		if _, ok := notInTheJourney[name]; !ok && !listed[name] {
 			t.Errorf("%s needs the PostgreSQL server and is not in scripts/check-journey-postgres.sh: it never runs in CI", name)
+		}
+	}
+	for name := range notInTheJourney {
+		if !slices.Contains(found, name) {
+			t.Errorf("%s is an exemption of this test and the finder does not find it any more: remove it", name)
 		}
 	}
 	have := map[string]bool{}
@@ -194,9 +235,10 @@ func TestPostgresReloadRefusesAKeyItCannotPutBack(t *testing.T) {
 	}
 }
 
-// Verify tells two databases apart by every field of a foreign key: whether it is deferrable, deferred by
-// default, matches FULL, or is NOT VALID, besides its columns and actions.
-func TestPostgresVerifyReadsEveryFieldOfAForeignKey(t *testing.T) {
+// Verify tells two databases apart by the deferral, match type and validity of a foreign key (deferrable,
+// deferred by default, MATCH FULL, NOT VALID), besides its columns and actions. It does not compare
+// NOT ENFORCED (PostgreSQL 18): the catalog does not read it.
+func TestPostgresVerifyReadsDeferralMatchAndValidityOfAForeignKey(t *testing.T) {
 	const key = `ALTER TABLE child ADD CONSTRAINT k FOREIGN KEY (p) REFERENCES parent (id) `
 	build := func(clause string) Endpoint {
 		pg := newPGDatabase(t)
@@ -270,5 +312,42 @@ func TestPostgresNumericNaNIsKeptAsTextAndCounted(t *testing.T) {
 	var got string
 	if err := lite.DB.QueryRow(`SELECT group_concat(typeof(n) || ':' || n, ' ') FROM (SELECT n FROM nn ORDER BY id)`).Scan(&got); err != nil || got != "real:2.5 text:NaN text:NaN" {
 		t.Errorf("%q %v", got, err)
+	}
+}
+
+// A sequence that two tables share is only ever moved forward: reloading the one with few rows must not make
+// the other repeat an id (the counter of a sequence the column does not own used to be set to max(id)+1 of
+// the table that was reloaded).
+func TestPostgresReloadNeverMovesASharedSequenceBack(t *testing.T) {
+	src := newSQLite(t)
+	execAll(t, src.DB, `CREATE TABLE a (id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT)`, `INSERT INTO a (v) VALUES ('x'), ('y'), ('z')`)
+	pg := newPGDatabase(t)
+	execAll(t, pg.DB, `CREATE SEQUENCE shared_seq`,
+		`CREATE TABLE a (id integer PRIMARY KEY DEFAULT nextval('shared_seq'), v text)`, `CREATE TABLE b (id integer PRIMARY KEY DEFAULT nextval('shared_seq'), v text)`,
+		`INSERT INTO b (v) SELECT 'row' FROM generate_series(1, 100)`)
+	mustCopy(t, src, pg, Options{Overwrite: "reload", Include: []string{"a"}})
+	execAll(t, pg.DB, `INSERT INTO b (v) VALUES ('after the reload')`)
+	if got := pgText(t, pg.DB, `SELECT max(id) FROM b`); got != "101" {
+		t.Errorf("the shared sequence went back: next id of b is %s, want 101", got)
+	}
+	// A sequence that is behind is moved up to the copied rows.
+	execAll(t, pg.DB, `SELECT setval('shared_seq', 1, false)`)
+	mustCopy(t, src, pg, Options{Overwrite: "reload", Include: []string{"a"}})
+	if got := pgText(t, pg.DB, `SELECT nextval('shared_seq')`); got != "4" {
+		t.Errorf("a sequence behind the copied rows is moved to 4: %s", got)
+	}
+}
+
+// The sequence that numbers a column is the one its default takes values from, not the one the column owns: a
+// serial column whose default was changed to another sequence is numbered by that one.
+func TestPostgresCounterFollowsTheDefaultNotTheOwnedSequence(t *testing.T) {
+	src := newSQLite(t)
+	execAll(t, src.DB, `CREATE TABLE t (id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT)`, `INSERT INTO t (v) VALUES ('x'), ('y'), ('z')`)
+	pg := newPGDatabase(t)
+	execAll(t, pg.DB, `CREATE SEQUENCE other_seq`, `CREATE TABLE t (id serial PRIMARY KEY, v text)`, `ALTER TABLE t ALTER COLUMN id SET DEFAULT nextval('other_seq')`)
+	mustCopy(t, src, pg, Options{Overwrite: "reload"})
+	execAll(t, pg.DB, `INSERT INTO t (v) VALUES ('new')`)
+	if got := pgText(t, pg.DB, `SELECT max(id) FROM t`); got != "4" {
+		t.Errorf("the next id of the sequence the default uses: %s, want 4", got)
 	}
 }

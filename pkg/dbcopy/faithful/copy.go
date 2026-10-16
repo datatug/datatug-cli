@@ -1051,7 +1051,11 @@ func (x *executor) counters(q execer) error {
 					continue
 				}
 				// setval, not ALTER ... RESTART WITH: that one is refused while a deferred key of the table has pending checks (55006).
-				if _, err := q.ExecContext(ctx, "SELECT setval($1::text::regclass, $2, false)", seq, next); err != nil {
+				// Forward only, for every sequence: a sequence that other tables share, or that is already past the rows
+				// copied, is never moved back (a reload of one table must not make another one repeat an id). The next
+				// value of a sequence is its last value plus the step, or its start when it has not been used.
+				if _, err := q.ExecContext(ctx, `SELECT setval($1::text::regclass, GREATEST($2::bigint,
+  (SELECT COALESCE(pg_sequence_last_value(seqrelid) + seqincrement, seqstart) FROM pg_sequence WHERE seqrelid = $1::text::regclass)), false)`, seq, next); err != nil {
 					return fmt.Errorf("set the counter of %s.%s: %w", t.Name, c.Name, err)
 				}
 			} else if c.Identity == IdentityAutoincrement && next > 1 {
@@ -1067,9 +1071,10 @@ func (x *executor) counters(q execer) error {
 	return nil
 }
 
-// counterSequence names the sequence that numbers a column of the target: the one a serial or identity
-// column owns, or else the only one its DEFAULT takes values from (nextval('s') on a sequence the column
-// does not own). It is "" when there is none or more than one: the caller says so.
+// counterSequence names the sequence that numbers a column of the target: the one its DEFAULT takes values
+// from (nextval('s'), which is the owned one of a serial column that was left alone, and another one when the
+// default was changed later), or else, for a column with no such default, the one an identity column owns.
+// It is "" when the default uses more than one sequence, or there is none: the caller says so.
 func (x *executor) counterSequence(q execer, qualifiedTable, column string) (string, error) {
 	var seq sql.NullString
 	err := q.QueryRowContext(x.ctx, `
@@ -1080,7 +1085,7 @@ WITH s AS (
   JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S'
   WHERE ad.adrelid = $1::text::regclass
     AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2))
-SELECT COALESCE(pg_get_serial_sequence($1, $2), (SELECT min(name) FROM s WHERE (SELECT count(*) FROM s) = 1))`, qualifiedTable, column).Scan(&seq)
+SELECT CASE (SELECT count(*) FROM s) WHEN 0 THEN pg_get_serial_sequence($1, $2) WHEN 1 THEN (SELECT min(name) FROM s) END`, qualifiedTable, column).Scan(&seq)
 	return seq.String, err
 }
 

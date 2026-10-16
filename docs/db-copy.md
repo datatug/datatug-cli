@@ -155,9 +155,13 @@ than the loaded rows fails the reload, which is rolled back. A key to a table th
 (`--include child`) is not touched and stays enforced: a source row without its parent is then a
 failure of the reload (23503, nothing changes), not a `NOT VALID` key. The counters of auto-numbered
 columns are set with `setval` last in the transaction (a rollback does not undo a `setval`, so nothing
-that can fail comes after it), on the sequence the column owns (serial, identity) or else the only one its
-`DEFAULT nextval('s')` takes values from; a target column with no sequence, or with more than one, is an
-`identity-not-carried` warning (its counter is not moved), never silent. A source table the target lacks is created. Views and
+that can fail comes after it), on the sequence the column's `DEFAULT nextval('s')` takes values from (a serial
+column's own, or another one the default was changed to), or the one an identity column owns. A sequence is
+only ever moved *forward* (to the id after the highest copied one, or left where it is when it is already
+past it, counting its step and start): a sequence that several tables share, or one a reload of a single
+table finds ahead of that table's rows, is never moved back, so the other tables do not repeat an id (steps
+are assumed positive). A target column with no sequence, or with more than one, is an
+`identity-not-carried` warning (its counter is not moved), never silent. `Verify` compares the deferral, match type and validity of a foreign key; it does not compare PostgreSQL 18's NOT ENFORCED. A source table the target lacks is created. Views and
 triggers of a SQLite source are replaced by the source's.
 
 Reload takes `ACCESS EXCLUSIVE` locks (`TRUNCATE`, the dropped keys) and waits as long as another

@@ -117,7 +117,7 @@ func TestSQLScriptIncludeAndExclude(t *testing.T) {
 	assert.Equal(t, 2, exitCodeOf(t, err))
 	_, _, err = runCopy(t, "db", "copy", "--from", src, "--to", sqlscript(out, ""), "--include", "nope", "--overwrite", "recreate")
 	require.Error(t, err)
-	assert.Equal(t, 1, exitCodeOf(t, err))
+	assert.Equal(t, 2, exitCodeOf(t, err), "a table that does not exist is a usage error")
 	assert.Contains(t, err.Error(), `"nope" does not exist`)
 }
 
@@ -181,6 +181,54 @@ func TestSQLScriptUsageErrors(t *testing.T) {
 			assert.Contains(t, err.Error(), c.want)
 		})
 	}
+}
+
+func TestSQLScriptQueryParametersAreNeverDropped(t *testing.T) {
+	src := scriptSource(t)
+	out := filepath.Join(t.TempDir(), "out.sql")
+	// A ";" in a value used to make the parameter vanish without a word: the attribution a licence needs.
+	_, _, err := runCopy(t, "db", "copy", "--from", src, "--to", sqlscript(out, "&attribution=Data by X; converted by Y"))
+	require.Error(t, err)
+	assert.Equal(t, 2, exitCodeOf(t, err))
+	assert.Contains(t, err.Error(), "%3B")
+	_, statErr := os.Stat(out)
+	assert.True(t, os.IsNotExist(statErr))
+	_, _, err = runCopy(t, "db", "copy", "--from", src, "--to", sqlscript(out, "&attribution=Data%20by%20X%3B%20converted%20by%20Y"))
+	require.NoError(t, err)
+	b, _ := os.ReadFile(out)
+	assert.Contains(t, string(b), "-- Attribution: Data by X; converted by Y")
+	// A parameter given twice is refused, whichever it is.
+	for _, query := range []string{"&dialect=oracle", "&name=a&name=b", "&license=MIT&license=GPL"} {
+		_, _, err = runCopy(t, "db", "copy", "--from", src, "--to", sqlscript(out, query), "--overwrite", "recreate")
+		require.Error(t, err, query)
+		assert.Equal(t, 2, exitCodeOf(t, err), query)
+		assert.Contains(t, err.Error(), "times; give it once", query)
+	}
+}
+
+func TestSQLScriptSameFileIsReportedBeforeAnExistingFile(t *testing.T) {
+	src := scriptSource(t)
+	_, _, err := runCopy(t, "db", "copy", "--from", src, "--to", sqlscript(strings.TrimPrefix(src, "sqlite://"), ""))
+	require.Error(t, err)
+	assert.Equal(t, 2, exitCodeOf(t, err))
+	assert.Contains(t, err.Error(), "same file")
+}
+
+func TestSQLScriptRefusesAHeaderTheMarkerCannotHold(t *testing.T) {
+	src := scriptSource(t)
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out.sql")
+	long := strings.Repeat("x", 256)
+	for _, query := range []string{"&name=" + long, "&edition=" + long} {
+		stdout, _, err := runCopy(t, "db", "copy", "--from", src, "--to", sqlscript(out, query), "--json")
+		require.Error(t, err)
+		assert.Equal(t, 2, exitCodeOf(t, err))
+		assert.Contains(t, stdout.String(), "marker table")
+		entries, _ := os.ReadDir(dir)
+		assert.Empty(t, entries, "nothing is written or left behind")
+	}
+	_, _, err := runCopy(t, "db", "copy", "--from", src, "--to", sqlscript(out, "&name="+long[:255]))
+	require.NoError(t, err)
 }
 
 func TestSQLScriptJSONReportsUsageErrors(t *testing.T) {
@@ -252,6 +300,49 @@ func TestWriteSQLScriptFileSystemFailures(t *testing.T) {
 	req.DryRun = true
 	_, err = writeSQLScript(context.Background(), req, filepath.Join(file, "never"), false)
 	require.NoError(t, err)
+}
+
+func TestWriteSQLScriptOnAFileSystemWithoutHardLinks(t *testing.T) {
+	src := scriptSource(t)
+	db, err := sql.Open("sqlite3", strings.TrimPrefix(src, "sqlite://"))
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	req := faithful.ScriptRequest{Dialect: "mysql", DB: db}
+	old := linkFile
+	linkFile = func(string, string) error { return errors.New("operation not supported") }
+	defer func() { linkFile = old }()
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out.sql")
+	_, err = writeSQLScript(context.Background(), req, out, false)
+	require.NoError(t, err)
+	b, _ := os.ReadFile(out)
+	assert.Contains(t, string(b), "CREATE TABLE `p`")
+	entries, _ := os.ReadDir(dir)
+	assert.Len(t, entries, 1, "no temporary file is left")
+	// A file that is there is not replaced even then.
+	_, err = writeSQLScript(context.Background(), req, out, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "write out.sql")
+	// The copy that fails is removed again: from is a folder, which opens and cannot be read.
+	gone := filepath.Join(dir, "gone.sql")
+	require.Error(t, putInPlace(dir, gone))
+	_, statErr := os.Stat(gone)
+	assert.True(t, os.IsNotExist(statErr), "the half-made file is removed")
+	// A source that cannot be opened.
+	require.Error(t, putInPlace(filepath.Join(dir, "missing"), gone))
+	// Where the link fails with "exists", that is the answer.
+	linkFile = func(string, string) error { return os.ErrExist }
+	require.ErrorIs(t, putInPlace(out, filepath.Join(dir, "x.sql")), os.ErrExist)
+}
+
+func TestCreateExclusiveFailsWithoutRandomness(t *testing.T) {
+	old := randomBytes
+	randomBytes = func([]byte) error { return errors.New("no entropy") }
+	defer func() { randomBytes = old }()
+	_, err := createExclusive(t.TempDir(), ".x-")
+	require.Error(t, err)
+	_, err = writeSQLScript(context.Background(), faithful.ScriptRequest{Dialect: "mysql"}, filepath.Join(t.TempDir(), "o.sql"), false)
+	require.Error(t, err)
 }
 
 func TestFileSHA256(t *testing.T) {

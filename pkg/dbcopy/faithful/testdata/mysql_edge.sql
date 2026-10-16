@@ -13,6 +13,13 @@ CREATE TABLE "Ünï_t" (id INTEGER PRIMARY KEY, "Case" TEXT);
 CREATE TABLE "ünï_t" (id INTEGER PRIMARY KEY, "case" TEXT);
 CREATE TABLE "select" ("order" INTEGER PRIMARY KEY, "group" TEXT, "from" TEXT, "Comment" TEXT, "key" TEXT, "primary" TEXT);
 CREATE TABLE "ünïcode_日本語_😀" ("Ünï" TEXT, "ünï" TEXT, "ñ" INTEGER PRIMARY KEY, "😀" TEXT);
+-- columns that differ only by accents (or are ß and ẞ) are four different columns for MySQL 8.4: none is renamed
+CREATE TABLE "accents" (id INTEGER PRIMARY KEY, "e" VARCHAR(10), "é" VARCHAR(10), "uni" TEXT, "ünï" TEXT, "ß" TEXT, "ẞ" TEXT);
+CREATE INDEX "accents_ee" ON "accents" ("é", "e");
+INSERT INTO "accents" VALUES (1, 'e', 'é', 'uni', 'ünï', 'ss', 'SS');
+-- REAL values in columns carried as text (v) and bytes (w): SQLite's own text, not Go's ("1.0", "1.0e+21", "Inf", not "1", "1e+21", "+Inf")
+CREATE TABLE "reals_as_text" (id INTEGER PRIMARY KEY, v, w);
+INSERT INTO "reals_as_text" VALUES (1, 1.0, 1.0), (2, 1e21, 1e21), (3, 9e999, 9e999), (4, -9e999, -9e999), (5, 0.1 + 0.2, 0.1 + 0.2), (6, 5e-324, 5e-324), (7, 'text', x'ff'), (8, 12345678901234, 7), (9, -0.0, -0.0), (10, 100.0, 100.0);
 CREATE TABLE "a-very-long-table-name-that-is-more-than-sixty-four-characters-long-for-sure" ("a-very-long-column-name-that-is-more-than-sixty-four-characters-long-for-sure" INTEGER PRIMARY KEY, v TEXT);
 CREATE INDEX "an-index-name-that-is-more-than-sixty-four-characters-long-for-sure-yes" ON "a-very-long-table-name-that-is-more-than-sixty-four-characters-long-for-sure" (v);
 CREATE TABLE "back\slash/and;--/*x*/'q'" ("c\" INTEGER PRIMARY KEY, "d;" TEXT);

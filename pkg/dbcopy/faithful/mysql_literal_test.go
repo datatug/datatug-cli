@@ -70,7 +70,8 @@ func TestSafeNameAndFold(t *testing.T) {
 	if safeName(d, "a\nb") != "a_b_"+nameHash("a\nb") {
 		t.Errorf("%s", safeName(d, "a\nb"))
 	}
-	if foldName("Ünï") != foldName("ünï") || foldName("a") == foldName("b") || foldName("É") != "e" {
+	// MySQL compares column and index names without case and with every accent kept.
+	if foldName("Ünï") != foldName("ünï") || foldName("a") == foldName("b") || foldName("É") != "é" || foldName("e") == foldName("é") || foldName("ünï") == foldName("uni") {
 		t.Error("foldName")
 	}
 }
@@ -100,7 +101,6 @@ func TestMySQLLiteralFamilies(t *testing.T) {
 		{text, "it's", "'it''s'"},
 		{text, "", "''"},
 		{text, int64(12), "'12'"},
-		{text, 1.5, "'1.5'"},
 		{text, []byte("bytes"), "'bytes'"},
 		{text, "back\\slash", "_utf8mb4 X'" + hex.EncodeToString([]byte("back\\slash")) + "'"},
 		{text, "a\nb", "_utf8mb4 X'610a62'"},
@@ -110,7 +110,6 @@ func TestMySQLLiteralFamilies(t *testing.T) {
 		{Choice{Family: "bytes"}, []byte{}, "X''"},
 		{Choice{Family: "bytes"}, "txt", "X'747874'"},
 		{Choice{Family: "bytes"}, int64(12), "X'3132'"},
-		{Choice{Family: "bytes"}, 1.5, "X'312e35'"},
 		{Choice{Family: "bytes"}, nil, "NULL"},
 		{Choice{Family: "int"}, nil, "NULL"},
 	}
@@ -125,14 +124,14 @@ func TestMySQLLiteralFamilies(t *testing.T) {
 		v  any
 	}{
 		{Choice{Family: "int"}, "x"}, {Choice{Family: "float"}, "x"}, {Choice{Family: "decimal"}, "abc"}, {Choice{Family: "decimal"}, []byte("1")},
-		{Choice{Family: "date"}, int64(1)}, {Choice{Family: "date"}, "2024-02-29'; DROP"}, {text, []byte{0xff}}, {text, true}, {Choice{Family: "weird"}, int64(1)},
+		{Choice{Family: "date"}, int64(1)}, {Choice{Family: "date"}, "2024-02-29'; DROP"}, {text, []byte{0xff}}, {text, true}, {text, 1.5}, {Choice{Family: "bytes"}, 1.5}, {Choice{Family: "weird"}, int64(1)},
 	}
 	for _, c := range bad {
 		if got, err := d.Literal(c.ch, c.v); err == nil {
 			t.Errorf("Literal(%s, %#v) = %q, want an error", c.ch.Family, c.v, got)
 		}
 	}
-	if valueBytes(true) != nil {
+	if _, ok := valueBytes(true); ok {
 		t.Error("valueBytes of a bool")
 	}
 }

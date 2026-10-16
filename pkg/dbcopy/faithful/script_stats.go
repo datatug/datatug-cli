@@ -23,6 +23,8 @@ type ScriptStats struct {
 	MaxIntDigits  int   // most integer digits of a value that is a decimal number
 	MaxFracDigits int
 	Empty         int64 // empty texts
+	// RealExample is the first REAL value the column holds, as its shortest decimal ("" when it holds none).
+	RealExample string
 	// Decimal texts: how many are not in canonical spelling (with the first), and how many canonical ones have each
 	// number of decimals (with the first of each), to count what a DECIMAL of a given scale spells differently.
 	textNonCanon     int64
@@ -43,13 +45,18 @@ func (s *ScriptStats) add(v any) {
 	s.colStats.add(v)
 	switch x := v.(type) {
 	case int64:
-		s.digits(strconv.FormatInt(x, 10))
+		text := strconv.FormatInt(x, 10)
+		s.digits(text)
+		s.textLength(text) // an INTEGER in a column carried as text or bytes is written as its decimal text
 	case float64:
 		if math.IsNaN(x) || math.IsInf(x, 0) {
 			s.NonFinite++
 			return
 		}
 		s.digits(strconv.FormatFloat(x, 'f', -1, 64))
+		if s.RealExample == "" {
+			s.RealExample = strconv.FormatFloat(x, 'f', -1, 64)
+		}
 	case []byte:
 		s.MaxBlob = max(s.MaxBlob, len(x))
 	case string:
@@ -78,6 +85,13 @@ func (s *ScriptStats) add(v any) {
 			s.spelling(x)
 		}
 	}
+}
+
+// textLength notes the length of the text a value of another storage class is written as, when its column is
+// carried as text or bytes: a bounded type must hold it.
+func (s *ScriptStats) textLength(text string) {
+	s.maxLen = max(s.maxLen, utf8.RuneCountInString(text))
+	s.MaxBytes = max(s.MaxBytes, len(text))
 }
 
 func (s *ScriptStats) spelling(x string) {
@@ -115,11 +129,21 @@ func scanScriptStats(ctx context.Context, db Queryer, cat *Catalog) (map[string]
 			names[i] = c.Name
 		}
 		out[t.Name] = sts
-		rows, err := db.QueryContext(ctx, "SELECT "+sqliteSelectList(names)+" FROM "+quoteIdent(t.Name))
+		// After the values and the empty-blob flags comes, per column, the text SQLite makes of a REAL (NULL for any
+		// other value): the length of what a column carried as text or bytes will hold.
+		exprs := []string{sqliteSelectList(names)}
+		for _, n := range names {
+			exprs = append(exprs, "CASE WHEN typeof("+quoteIdent(n)+") = 'real' THEN CAST("+quoteIdent(n)+" AS TEXT) END")
+		}
+		rows, err := db.QueryContext(ctx, "SELECT "+strings.Join(exprs, ", ")+" FROM "+quoteIdent(t.Name))
 		if err != nil {
 			return nil, fmt.Errorf("table %q: %w", t.Name, err)
 		}
 		vals, ptrs := sqliteRowBuffer(len(names))
+		realText := make([]any, len(names))
+		for i := range realText {
+			ptrs = append(ptrs, &realText[i])
+		}
 		for rows.Next() {
 			if err := rows.Scan(ptrs...); err != nil {
 				_ = rows.Close()
@@ -128,6 +152,9 @@ func scanScriptStats(ctx context.Context, db Queryer, cat *Catalog) (map[string]
 			fixEmptyBlobs(vals)
 			for i := range names {
 				sts[i].add(vals[i])
+				if txt, ok := realText[i].(string); ok {
+					sts[i].textLength(txt)
+				}
 			}
 		}
 		if err := rows.Err(); err != nil {
@@ -137,4 +164,31 @@ func scanScriptStats(ctx context.Context, db Queryer, cat *Catalog) (map[string]
 		_ = rows.Close()
 	}
 	return out, nil
+}
+
+// realAsText is the SQLite expression that reads a column so a REAL arrives as the text SQLite itself makes of it
+// (CAST(x AS TEXT): ".0" kept on a whole number, an exponent as "1.0e+21", "Inf"; how many digits it prints is the
+// SQLite version's), not as a float64 that Go would spell 1, 1e+21, +Inf and -0. Any other value arrives as it is (the unary plus
+// has the value of its operand and no declared type, so the driver does not turn a DATE or DATETIME text into a time).
+func realAsText(name string) string {
+	q := quoteIdent(name)
+	return "CASE WHEN typeof(" + q + ") = 'real' THEN CAST(" + q + " AS TEXT) ELSE +" + q + " END"
+}
+
+// scriptSelectList reads the columns of a table value for value, as sqliteSelectList does, except that a column
+// the script carries as text or bytes gives a REAL as SQLite's own text. It ends with the empty-blob flags.
+func scriptSelectList(t *ScriptTable) string {
+	exprs := make([]string, 0, 2*len(t.Columns))
+	for _, c := range t.Columns {
+		if c.Choice.Family == "text" || c.Choice.Family == "bytes" {
+			exprs = append(exprs, realAsText(c.Src.Name))
+		} else {
+			exprs = append(exprs, "+"+quoteIdent(c.Src.Name))
+		}
+	}
+	for _, c := range t.Columns {
+		q := quoteIdent(c.Src.Name)
+		exprs = append(exprs, "(typeof("+q+") = 'blob' AND length("+q+") = 0)")
+	}
+	return strings.Join(exprs, ", ")
 }

@@ -20,7 +20,8 @@ import (
 //	                                    shortest decimal that identifies it, FormatFloat(x, 'f', -1, 64):
 //	                                    Chinook's NUMERIC(10,2) holds REAL values) or a text; the target a DECIMAL text
 //	text        t<len>:<bytes>          the UTF-8 bytes; an INTEGER of the source is its decimal text, a REAL is
-//	                                    FormatFloat(x, 'g', -1, 64)
+//	                                    the text SQLite makes of it (CAST(x AS TEXT): 1.0, 1.0e+21, Inf, -0.0; the
+//	                                    source reader asks SQLite, see sourceRows)
 //	bytes       b<len>:<bytes>          the bytes; a text of the source is its UTF-8 bytes (a column carried as bytes)
 //	date        D<yyyy-mm-dd>
 //	datetime    T<yyyy-mm-dd hh:mm:ss[.f]>   trailing zeros of the fraction removed on both sides, as the column's
@@ -51,9 +52,8 @@ func sourceText(v any) (string, error) {
 		return string(x), nil
 	case int64:
 		return strconv.FormatInt(x, 10), nil
-	case float64:
-		return strconv.FormatFloat(x, 'g', -1, 64), nil
 	}
+	// A float64 is no text: the reader gives a REAL of a text column as SQLite's own text, never as a float.
 	return "", fmt.Errorf("value %v (%T) is not text", v, v)
 }
 

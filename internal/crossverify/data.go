@@ -37,13 +37,21 @@ func eachRow(rows *sql.Rows, width int, visit func(vals []any) error) error {
 }
 
 // sourceRows reads the SQLite side. A column is read as +"c" so the driver gives the value with its storage
-// class and no declared type, and an empty blob, which the driver reads as NULL, is told apart by a flag.
+// class and no declared type, and an empty blob, which the driver reads as NULL, is told apart by a flag. A
+// REAL that the plan carries in a text or bytes column is read as CAST("c" AS TEXT): the text SQLite itself makes
+// of it (1.0, 1.0e+21, Inf, -0.0), which is what the script must hold, not a spelling this package or the
+// writer could choose.
 func sourceRows(in Input, t *faithful.ScriptTable) rowSource {
 	return func(ctx context.Context, visit func([]string) error) error {
 		n := len(t.Columns)
 		exprs := make([]string, 0, 2*n)
 		for _, c := range t.Columns {
-			exprs = append(exprs, "+"+quoteSQLite(c.Src.Name))
+			q := quoteSQLite(c.Src.Name)
+			if c.Choice.Family == "text" || c.Choice.Family == "bytes" {
+				exprs = append(exprs, "CASE WHEN typeof("+q+") = 'real' THEN CAST("+q+" AS TEXT) ELSE +"+q+" END")
+			} else {
+				exprs = append(exprs, "+"+q)
+			}
 		}
 		for _, c := range t.Columns {
 			q := quoteSQLite(c.Src.Name)

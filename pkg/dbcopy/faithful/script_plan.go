@@ -140,8 +140,31 @@ func PlanSQLiteTo(ctx context.Context, d Dialect, db Queryer, cat *Catalog, stat
 		translateDefaults(d, p, t)
 		translateChecks(d, p, t)
 	}
+	warnRealsNormalized(p)
+	if err := warnKeyCollisions(ctx, d, db, p); err != nil {
+		return nil, err
+	}
 	sortWarnings(p.Warnings)
 	return p, nil
+}
+
+// warnRealsNormalized says what a DECIMAL column does to the REAL values it takes. SQLite keeps a REAL as a binary
+// float (and an INTEGER and a REAL of one number apart, 5 and 5.0); a DECIMAL holds the exact decimal of its
+// shortest spelling, and both spellings of one number become one value.
+func warnRealsNormalized(p *ScriptPlan) {
+	for _, t := range p.Tables {
+		for _, c := range t.Columns {
+			st := c.Stats
+			if c.Choice.Family != "decimal" || st.reals == 0 {
+				continue
+			}
+			if st.ints > 0 {
+				p.warn(WarnValuesNormalized, t.Name+"."+c.Name, "%d REAL and %d INTEGER value(s) share one %s column: SQLite keeps them apart (5 and 5.0), %s does not; each REAL is written as the exact decimal of its shortest spelling, for example %s", st.reals, st.ints, c.Choice.Type, c.Choice.Type, st.RealExample)
+			} else {
+				p.warn(WarnValuesNormalized, t.Name+"."+c.Name, "%d REAL value(s) are written as the exact decimal of their shortest spelling, for example %s: SQLite stores a binary float, %s an exact decimal", st.reals, st.RealExample, c.Choice.Type)
+			}
+		}
+	}
 }
 
 // orphans counts the rows of t whose foreign key has no parent row, by SQLite's own comparison.
@@ -193,7 +216,7 @@ func planNames(d Dialect, p *ScriptPlan, cat *Catalog) (*namePlan, error) {
 			cn := c.Name
 			why := d.StorableName(cn)
 			if why == "" && used[foldName(cn)] {
-				why = "it differs only by case or accents from another column of the table, and MySQL compares column names without them"
+				why = "it differs only by case from another column of the table, and MySQL compares column names without case"
 			}
 			if why != "" {
 				cn = safeName(d, cn)

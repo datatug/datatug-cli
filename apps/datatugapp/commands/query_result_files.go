@@ -352,7 +352,7 @@ func fullDatatugRef(ctx context.Context, arg string) (dbcopy.DatatugRef, bool) {
 	}
 	env := reference.Env
 	if env == "" {
-		envs, err := api.SourceEnvironments(ctx, base.store.GetProjectStore(base.projectID), reference.DB)
+		envs, err := api.EnvironmentsListingSource(ctx, base.store.GetProjectStore(base.projectID), reference.DB)
 		if err != nil || len(envs) != 1 {
 			return dbcopy.DatatugRef{}, false
 		}

@@ -174,7 +174,7 @@ func TestDaemonURL(t *testing.T) {
 	var link daemon.Link
 	if err != nil || json.Unmarshal([]byte(out), &link) != nil ||
 		link.URL != "https://datatug.app/store/http-127.0.0.1:8989/project/demo/env/dev/db/Chinook/table/Album?schema=" ||
-		link.Kind != daemon.KindTableMetadata || link.Running {
+		link.Kind != daemon.KindTableMetadata || link.Running || link.Contract != 1 || !strings.Contains(out, `"contract": 1`) {
 		t.Fatalf("%s %v", out, err)
 	}
 	out, err = runDaemon(t, append(args, "--records", "--limit", "10", "--format", "text")...)

@@ -87,6 +87,10 @@ func foldName(s string) string {
 	return b.String()
 }
 
+// MySQLNameFold is foldName for the verifier of the export: a name as MySQL 8.4 compares the names of columns,
+// indexes and checks.
+func MySQLNameFold(s string) string { return foldName(s) }
+
 func foldsCase(r rune) bool {
 	i := sort.Search(len(mysqlFoldsCase), func(i int) bool { return mysqlFoldsCase[i] >= r })
 	return i < len(mysqlFoldsCase) && mysqlFoldsCase[i] == r

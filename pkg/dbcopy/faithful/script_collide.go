@@ -1,9 +1,11 @@
 package faithful
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -26,9 +28,10 @@ type keySet struct {
 
 // warnKeyCollisions finds, for every unique key that holds a text column, the rows whose key equals another
 // row's after the dialect's folding, and says how many with the first pair. The load of such a script stops at
-// the second row with "Duplicate entry". It reads each table once, and keeps one 16-byte digest per row of a
-// key, not the key. Only text is folded: a decimal text spelled two ways or an INTEGER and its text in one
-// column are not looked for.
+// the second row with "Duplicate entry". It reads each table once and keeps 16 bytes per row of a key (a digest
+// of the folded key, in one slice that is sorted at the end, so memory is 16 bytes a row and nothing else); only
+// when a key has collisions does it read the table a second time, to show the first pair. Only text is folded: a
+// decimal text spelled two ways or an INTEGER and its text in one column are not looked for.
 func warnKeyCollisions(ctx context.Context, d Dialect, db Queryer, p *ScriptPlan) error {
 	kf, ok := d.(keyFolder)
 	if !ok {
@@ -39,7 +42,7 @@ func warnKeyCollisions(ctx context.Context, d Dialect, db Queryer, p *ScriptPlan
 		if len(sets) == 0 || t.Rows == 0 {
 			continue
 		}
-		if err := scanKeyCollisions(ctx, kf, db, p, t, sets); err != nil {
+		if err := checkKeyCollisions(ctx, kf, db, p, t, sets); err != nil {
 			return fmt.Errorf("table %q: %w", t.Name, err)
 		}
 	}
@@ -81,53 +84,89 @@ func uniqueKeySets(t *ScriptTable) []keySet {
 	return sets
 }
 
-type collision struct {
-	seen        map[[16]byte]string
-	rows        int64
-	first, also string
+// keyDigest is the digest of a folded key: 16 bytes.
+func keyDigest(folded string) [16]byte {
+	sum := sha256.Sum256([]byte(folded))
+	var k [16]byte
+	copy(k[:], sum[:16])
+	return k
 }
 
-func scanKeyCollisions(ctx context.Context, kf keyFolder, db Queryer, p *ScriptPlan, t *ScriptTable, sets []keySet) error {
+// eachKey reads the table and hands every row's keys to visit: for each key set the digest of the folded key and
+// the key as it is shown in a warning, skipping a key with a NULL part (a NULL in a unique key never collides).
+func eachKey(ctx context.Context, kf keyFolder, db Queryer, t *ScriptTable, sets []keySet, visit func(set int, digest [16]byte, shown string)) error {
 	rows, err := db.QueryContext(ctx, "SELECT "+scriptSelectList(t)+" FROM "+quoteIdent(t.Src.Name))
 	if err != nil {
 		return err
 	}
 	defer func() { _ = rows.Close() }()
 	vals, ptrs := sqliteRowBuffer(len(t.Columns))
-	states := make([]*collision, len(sets))
-	for i := range states {
-		states[i] = &collision{seen: map[[16]byte]string{}}
-	}
 	for rows.Next() {
 		if err := rows.Scan(ptrs...); err != nil {
 			return err
 		}
 		fixEmptyBlobs(vals)
 		for i, ks := range sets {
-			folded, shown, ok := foldKey(kf, t, ks, vals)
-			if !ok {
-				continue // a NULL in a unique key never collides
+			if folded, shown, ok := foldKey(kf, t, ks, vals); ok {
+				visit(i, keyDigest(folded), shown)
 			}
-			sum := sha256.Sum256([]byte(folded))
-			var k [16]byte
-			copy(k[:], sum[:16])
-			st := states[i]
-			if prev, dup := st.seen[k]; dup {
-				st.rows++
-				if st.first == "" {
-					st.first, st.also = prev, shown
-				}
-				continue
-			}
-			st.seen[k] = shown
 		}
 	}
-	if err := rows.Err(); err != nil {
+	return rows.Err()
+}
+
+// scanKeyDigests is the first pass: the digests of every key of every set, in row order.
+func scanKeyDigests(ctx context.Context, kf keyFolder, db Queryer, t *ScriptTable, sets []keySet) ([][][16]byte, error) {
+	digests := make([][][16]byte, len(sets))
+	err := eachKey(ctx, kf, db, t, sets, func(i int, d [16]byte, _ string) { digests[i] = append(digests[i], d) })
+	return digests, err
+}
+
+func checkKeyCollisions(ctx context.Context, kf keyFolder, db Queryer, p *ScriptPlan, t *ScriptTable, sets []keySet) error {
+	digests, err := scanKeyDigests(ctx, kf, db, t, sets)
+	if err != nil {
+		return err
+	}
+	// Per set: how many rows repeat an earlier digest, and the smallest digest that is repeated.
+	rows := make([]int64, len(sets))
+	repeated := make([]*[16]byte, len(sets))
+	for i := range digests {
+		ds := digests[i]
+		sort.Slice(ds, func(a, b int) bool { return bytes.Compare(ds[a][:], ds[b][:]) < 0 })
+		for n := 1; n < len(ds); n++ {
+			if ds[n] == ds[n-1] {
+				rows[i]++
+				if repeated[i] == nil {
+					repeated[i] = &ds[n]
+				}
+			}
+		}
+	}
+	// The second pass is for the sets that collide, and keeps the first two rows of the one digest.
+	var want [][16]byte
+	for i := range sets {
+		if repeated[i] != nil {
+			want = append(want, *repeated[i])
+		}
+	}
+	if len(want) == 0 {
+		return nil
+	}
+	first := make([][]string, len(sets))
+	err = eachKey(ctx, kf, db, t, sets, func(i int, d [16]byte, shown string) {
+		if repeated[i] != nil && d == *repeated[i] && len(first[i]) < 2 {
+			first[i] = append(first[i], shown)
+		}
+	})
+	if err != nil {
 		return err
 	}
 	for i, ks := range sets {
-		if st := states[i]; st.rows > 0 {
-			p.warn(WarnKeyValuesCollide, ks.label, "%d row(s) have a key equal to another row's under MySQL's default text collation (case- and accent-insensitive), for example %s and %s: MySQL refuses the second with Duplicate entry and the load stops; make the keys differ or load into a column with a binary collation", st.rows, st.first, st.also)
+		if rows[i] > 0 {
+			if len(first[i]) < 2 {
+				return fmt.Errorf("key %s changed while it was read", ks.label)
+			}
+			p.warn(WarnKeyValuesCollide, ks.label, "%d row(s) have a key equal to another row's under MySQL's default text collation (case- and accent-insensitive), for example %s and %s: MySQL refuses the second with Duplicate entry and the load stops; make the keys differ or load into a column with a binary collation", rows[i], first[i][0], first[i][1])
 		}
 	}
 	return nil

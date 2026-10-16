@@ -328,6 +328,19 @@ func TestWriteSQLScriptOnAFileSystemWithoutHardLinks(t *testing.T) {
 	require.Error(t, putInPlace(dir, gone))
 	_, statErr := os.Stat(gone)
 	assert.True(t, os.IsNotExist(statErr), "the half-made file is removed")
+	// A file that somebody moved onto the name during the copy is not the file this call made: it stays.
+	linkFile = func(string, string) error { return errors.New("operation not supported") }
+	stolen := filepath.Join(dir, "stolen.sql")
+	other := filepath.Join(dir, "other.sql")
+	require.NoError(t, os.WriteFile(other, []byte("theirs"), 0o644))
+	copyContents = func(io.Writer, io.Reader) (int64, error) {
+		require.NoError(t, os.Rename(other, stolen))
+		return 0, errors.New("disk full")
+	}
+	require.Error(t, putInPlace(out, stolen))
+	b2, _ := os.ReadFile(stolen)
+	assert.Equal(t, "theirs", string(b2), "the file of somebody else is not removed")
+	copyContents = io.Copy
 	// A source that cannot be opened.
 	require.Error(t, putInPlace(filepath.Join(dir, "missing"), gone))
 	// Where the link fails with "exists", that is the answer.

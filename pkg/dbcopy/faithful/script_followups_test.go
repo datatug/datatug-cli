@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -327,3 +328,124 @@ func TestHardLinkFreeFileSystemsAreNotNeededHere(t *testing.T) {
 
 var _ = sql.ErrNoRows
 var _ driver.Value
+
+// MySQL compares the names of foreign keys without accents and with ß as s (error 1826 otherwise); the names of
+// columns, indexes and checks keep their accents. The pairs below were refused by a real 8.4.11 server.
+func TestForeignKeyNamesAreComparedWithoutAccents(t *testing.T) {
+	for _, pair := range [][2]string{{"fk_a", "fk_ä"}, {"fk_s", "fk_ß"}, {"fk_e", "FK_É"}, {"fk_a", "FK_A"}} {
+		if fkFoldName(pair[0]) != fkFoldName(pair[1]) {
+			t.Errorf("%q and %q should be one name", pair[0], pair[1])
+		}
+	}
+	for _, pair := range [][2]string{{"fk_a", "fk_b"}, {"fk_a", "fk_ab"}, {"日本", "日本語"}} {
+		if fkFoldName(pair[0]) == fkFoldName(pair[1]) {
+			t.Errorf("%q and %q should be two names", pair[0], pair[1])
+		}
+	}
+	for r, w := range mysqlFKNameWeight {
+		if r < 0x80 || r == w {
+			t.Fatalf("entry %04X -> %04X", r, w)
+		}
+	}
+	p := planMySQL(t, sqliteWith(t,
+		`CREATE TABLE par (id INTEGER PRIMARY KEY)`,
+		`CREATE TABLE c1 (pid INTEGER, CONSTRAINT fk_a FOREIGN KEY (pid) REFERENCES par(id))`,
+		`CREATE TABLE c2 (pid INTEGER, CONSTRAINT "fk_ä" FOREIGN KEY (pid) REFERENCES par(id))`,
+		`CREATE TABLE c3 (pid INTEGER, CONSTRAINT fk_s FOREIGN KEY (pid) REFERENCES par(id))`,
+		`CREATE TABLE c4 (pid INTEGER, CONSTRAINT "fk_ß" FOREIGN KEY (pid) REFERENCES par(id))`,
+		`CREATE TABLE c5 (pid INTEGER, CONSTRAINT "other" FOREIGN KEY (pid) REFERENCES par(id))`))
+	kept := map[string]string{}
+	for _, tb := range p.Tables {
+		for _, fk := range tb.FKs {
+			kept[tb.Name] = fk.Name
+		}
+	}
+	if kept["c1"] != "fk_a" || kept["c2"] != "" || kept["c3"] != "fk_s" || kept["c4"] != "" || kept["c5"] != "other" {
+		t.Errorf("kept names %v", kept)
+	}
+	if n := len(warningsOf(p, WarnConstraintNameLost)); n != 2 {
+		t.Errorf("%d names lost, want 2", n)
+	}
+}
+
+// Check names are unique in the whole schema, a key and a check may share a name, and accents keep two checks apart.
+func TestCheckNamesAreUniqueInTheSchemaOnly(t *testing.T) {
+	p := planMySQL(t, sqliteWith(t,
+		`CREATE TABLE par (id INTEGER PRIMARY KEY)`,
+		`CREATE TABLE a (n INTEGER, CONSTRAINT shared CHECK (n > 0), CONSTRAINT "ck_ä" CHECK (n > 1), CONSTRAINT ck_a CHECK (n > 2))`,
+		`CREATE TABLE b (n INTEGER, CONSTRAINT shared CHECK (n > 3))`,
+		`CREATE TABLE c (pid INTEGER, CONSTRAINT shared FOREIGN KEY (pid) REFERENCES par(id))`))
+	names := map[string]string{}
+	for _, tb := range p.Tables {
+		for _, ck := range tb.Checks {
+			names[tb.Name+":"+ck.Expr] = ck.Name
+		}
+		for _, fk := range tb.FKs {
+			names[tb.Name+":fk"] = fk.Name
+		}
+	}
+	if names["a:`n` > 0"] != "shared" || names["b:`n` > 3"] != "" || names["c:fk"] != "shared" || names["a:`n` > 1"] != "ck_ä" || names["a:`n` > 2"] != "ck_a" {
+		t.Errorf("%v", names)
+	}
+}
+
+// The key-collision scan keeps 16 bytes a row and nothing else: the retained heap of a 200,000-row scan stays under
+// 48 bytes a row (the scan that kept the key to show it kept about 200).
+func TestKeyCollisionScanKeepsDigestsOnly(t *testing.T) {
+	e := sqliteWith(t, `CREATE TABLE big (k TEXT PRIMARY KEY)`)
+	if _, err := e.DB.Exec(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 200000) INSERT INTO big SELECT 'a-key-of-some-length-' || i FROM n`); err != nil {
+		t.Fatal(err)
+	}
+	p := planMySQL(t, e)
+	tb := p.Table("big")
+	sets := uniqueKeySets(tb)
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	digests, err := scanKeyDigests(context.Background(), mysqlDialect{}, e.DB, tb, sets)
+	runtime.GC()
+	runtime.ReadMemStats(&after)
+	if err != nil || len(digests) != 1 || len(digests[0]) != 200000 {
+		t.Fatalf("%v %d", err, len(digests))
+	}
+	retained := int64(after.HeapAlloc) - int64(before.HeapAlloc)
+	t.Logf("retained %d bytes a row", retained/200000)
+	if perRow := retained / 200000; perRow > 48 {
+		t.Errorf("the scan retains %d bytes a row", perRow)
+	}
+	runtime.KeepAlive(digests)
+}
+
+func TestKeyCollisionSecondPassFailures(t *testing.T) {
+	ctx := context.Background()
+	e := sqliteWith(t, `CREATE TABLE pk (k TEXT PRIMARY KEY)`, `INSERT INTO pk VALUES ('a'), ('A')`)
+	p := planMySQL(t, e)
+	p.Warnings = nil
+	tb := p.Table("pk")
+	collide := func() *sqlmock.Rows {
+		return sqlmock.NewRows([]string{"k", "f"}).AddRow("a", false).AddRow("A", false)
+	}
+	for name, second := range map[string]func(m sqlmock.Sqlmock){
+		"query fails": func(m sqlmock.Sqlmock) { m.ExpectQuery("SELECT").WillReturnError(errors.New("boom")) },
+		"a row is missing": func(m sqlmock.Sqlmock) {
+			m.ExpectQuery("SELECT").WillReturnRows(sqlmock.NewRows([]string{"k", "f"}).AddRow("a", false))
+		},
+	} {
+		db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+		if err != nil {
+			t.Fatal(err)
+		}
+		mock.ExpectQuery("SELECT").WillReturnRows(collide())
+		second(mock)
+		if err := checkKeyCollisions(ctx, mysqlDialect{}, db, p, tb, uniqueKeySets(tb)); err == nil {
+			t.Errorf("%s: no error", name)
+		}
+		_ = db.Close()
+	}
+}
+
+func TestMySQLNameFoldIsFoldName(t *testing.T) {
+	if MySQLNameFold("ÄBc") != "äbc" || MySQLNameFold("é") == MySQLNameFold("e") {
+		t.Error("MySQLNameFold")
+	}
+}

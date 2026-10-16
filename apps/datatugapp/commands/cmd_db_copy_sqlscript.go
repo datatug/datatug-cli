@@ -258,6 +258,10 @@ func createExclusive(dir, prefix string) (*os.File, error) {
 	return os.OpenFile(filepath.Join(dir, prefix+hex.EncodeToString(rnd[:])), os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o666)
 }
 
+// copyContents copies the script into its destination; a test replaces it to fail the copy or to move a file onto the
+// destination in the middle of it.
+var copyContents = io.Copy
+
 // putInPlace gives the finished file at from the name to, failing when to exists.
 func putInPlace(from, to string) error {
 	err := linkFile(from, to)
@@ -274,12 +278,17 @@ func putInPlace(from, to string) error {
 	if createErr != nil {
 		return createErr
 	}
-	_, copyErr := io.Copy(dst, src)
+	_, copyErr := copyContents(dst, src)
+	made, statErr := dst.Stat()
 	if closeErr := dst.Close(); copyErr == nil {
 		copyErr = closeErr
 	}
 	if copyErr != nil {
-		_ = os.Remove(to) // this call made the file; nothing of anybody's is lost
+		// Remove the file this call made, and only that one: if somebody renamed another file onto the name
+		// meanwhile, it stays.
+		if now, err := os.Lstat(to); err == nil && statErr == nil && os.SameFile(made, now) {
+			_ = os.Remove(to)
+		}
 	}
 	return copyErr
 }

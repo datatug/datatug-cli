@@ -3,8 +3,11 @@ package crossverify
 import (
 	"context"
 	"database/sql"
+	"math"
 	"strings"
 	"testing"
+
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy/faithful"
 )
@@ -73,7 +76,7 @@ func TestVerifyComparesDefaultValuesAndCheckClauses(t *testing.T) {
 		return "UPDATE information_schema.COLUMNS SET COLUMN_DEFAULT = '" + strings.ReplaceAll(value, "'", "''") + "' WHERE TABLE_NAME = 'dflt' AND COLUMN_NAME = '" + name + "'"
 	}
 	clause := func(name, from, to string) string {
-		return "UPDATE information_schema.CHECK_CONSTRAINTS SET CHECK_CLAUSE = replace(CHECK_CLAUSE, '" + from + "', '" + to + "') WHERE CONSTRAINT_NAME = '" + name + "'"
+		return "UPDATE information_schema.CHECK_CONSTRAINTS SET CHECK_CLAUSE = replace(CHECK_CLAUSE, '" + strings.ReplaceAll(from, "'", "''") + "', '" + strings.ReplaceAll(to, "'", "''") + "') WHERE CONSTRAINT_NAME = '" + name + "'"
 	}
 	cases := []struct {
 		name   string
@@ -104,6 +107,7 @@ func TestVerifyComparesDefaultValuesAndCheckClauses(t *testing.T) {
 		{"current time as text", []string{col("ttime", "curtime()")}, "default expression dflt.ttime"},
 		{"a check without COLLATE", []string{clause("chk_chk_1", "collate utf8mb4_bin", "")}, "check binary comparisons chk.check #1"},
 		{"a named check without COLLATE", []string{clause("named_chk", "regexp_like", "rlike")}, "check regular expressions chk.named_chk"},
+		{"a case-insensitive regular expression", []string{clause("named_chk", `cn\')`, `in\')`)}, "check regular expression match type chk.named_chk"},
 		{"a check literal that changed", []string{clause("chk_chk_1", "B", "C")}, "check literal chk.check #1"},
 		{"a check that is gone", []string{"DELETE FROM information_schema.CHECK_CONSTRAINTS WHERE CONSTRAINT_NAME = 'named_chk'"}, "check constraint chk.named_chk"},
 		{"an unnamed check that is gone", []string{"DELETE FROM information_schema.CHECK_CONSTRAINTS WHERE CONSTRAINT_NAME = 'chk_chk_3'"}, "check constraint chk.check #4"},
@@ -221,3 +225,54 @@ func TestDefaultHelpers(t *testing.T) {
 }
 
 var _ = sql.ErrNoRows
+
+func TestReadsBack(t *testing.T) {
+	a, b := 0.1, 0.2
+	sum := a + b // not the constant 0.3: the float64 sum
+	for _, c := range []struct {
+		text any
+		real float64
+		ok   bool
+	}{
+		{"1.0", 1, true}, {"1.0e+21", 1e21, true}, {"Inf", math.Inf(1), true}, {"-Inf", math.Inf(-1), true}, {"0.0", math.Copysign(0, -1), true},
+		{"0.30000000000000004", sum, true},
+		{"0.3", sum, false},     // a CAST that keeps 15 digits loses the number
+		{"1.0e+2", 1e21, false}, // another number
+		{"one", 1, false}, {int64(1), 1, false},
+	} {
+		if err := readsBack(c.text, c.real); (err == nil) != c.ok {
+			t.Errorf("readsBack(%v, %v) = %v", c.text, c.real, err)
+		}
+	}
+	// A REAL in a text column goes through the check on every read of the source.
+	src := openSource(t, `CREATE TABLE r (id INTEGER PRIMARY KEY, v)`, `INSERT INTO r VALUES (1, 0.1 + 0.2), (2, 1e21), (3, 'text')`)
+	p := plan(t, src)
+	var got []string
+	if err := sourceRows(Input{Source: src}, p.Table("r"))(context.Background(), func(forms []string) error { got = append(got, forms[1]); return nil }); err != nil || len(got) != 3 {
+		t.Fatalf("%v %v", err, got)
+	}
+	// A source whose text of a REAL does not read back is an error, not a quiet comparison of two lossy texts.
+	db, mock, _ := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	defer func() { _ = db.Close() }()
+	mock.ExpectQuery("SELECT").WillReturnRows(sqlmock.NewRows([]string{"a", "b", "c", "d", "e", "f"}).AddRow(int64(1), "0.3", false, false, nil, sum))
+	err := sourceRows(Input{Source: db}, p.Table("r"))(context.Background(), func([]string) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "does not read back") {
+		t.Errorf("%v", err)
+	}
+}
+
+// A rename needs MySQL's reason: ß and ẞ are one name to Unicode and two to MySQL.
+func TestVerifyRenameOfUnicodeTwinsNeedsMySQLsReason(t *testing.T) {
+	src := openSource(t, `CREATE TABLE tw (id INTEGER PRIMARY KEY, "ß", "ẞ")`)
+	p := plan(t, src)
+	for _, c := range p.Table("tw").Columns {
+		if c.Src.Name == "ẞ" {
+			c.Name = "ẞ_12345678"
+		}
+	}
+	p.Warnings = append(p.Warnings, faithful.Warning{Kind: faithful.WarnNameRenamed, Object: "tw.ẞ", Message: "mutation"})
+	dst := emulate(t, src, p)
+	if _, ok := aspects(t, Input{Plan: p, Source: src, Target: dst, Schema: "db"})["rename justified tw.ẞ"]; !ok {
+		t.Error("a rename of ẞ next to ß passed the gate")
+	}
+}

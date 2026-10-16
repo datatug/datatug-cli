@@ -10,7 +10,7 @@ func TestEdgeFixtureGolden(t *testing.T) {
 	script, rep := exportMySQL(t, edgeSQLite(t))
 	golden(t, "mysql_edge.golden.sql", script)
 	golden(t, "mysql_edge.warnings.json", jsonOf(t, rep.Warnings))
-	if rep.Status != "ok-with-warnings" || rep.To.Engine != "mysql" || rep.Totals.Tables != 48 {
+	if rep.Status != "ok-with-warnings" || rep.To.Engine != "mysql" || rep.Totals.Tables != 57 {
 		t.Errorf("report: %s %s %+v", rep.Status, rep.To.Engine, rep.Totals)
 	}
 }

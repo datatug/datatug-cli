@@ -131,6 +131,7 @@ func PlanSQLiteTo(ctx context.Context, d Dialect, db Queryer, cat *Catalog, stat
 	if err := d.Adjust(p); err != nil {
 		return nil, err
 	}
+	checkNames := map[string]bool{} // check names are unique in the whole schema
 	for _, t := range p.Tables {
 		for _, c := range t.Columns {
 			if c.Choice.Normalized > 0 {
@@ -138,7 +139,7 @@ func PlanSQLiteTo(ctx context.Context, d Dialect, db Queryer, cat *Catalog, stat
 			}
 		}
 		translateDefaults(d, p, t)
-		translateChecks(d, p, t)
+		translateChecks(d, p, t, checkNames)
 	}
 	warnRealsNormalized(p)
 	if err := warnKeyCollisions(ctx, d, db, p); err != nil {
@@ -358,15 +359,9 @@ func translateDefaults(d Dialect, p *ScriptPlan, t *ScriptTable) {
 	}
 }
 
-func translateChecks(d Dialect, p *ScriptPlan, t *ScriptTable) {
-	usedNames := map[string]bool{}
-	for _, o := range p.Tables {
-		for _, fk := range o.FKs {
-			if fk.Name != "" {
-				usedNames[foldName(fk.Name)] = true
-			}
-		}
-	}
+// translateChecks carries the checks of a table. usedNames holds the names of the checks written so far: MySQL keeps
+// check names unique in the whole schema, apart from the names of foreign keys (a check and a key may share one).
+func translateChecks(d Dialect, p *ScriptPlan, t *ScriptTable, usedNames map[string]bool) {
 	for i, ck := range t.Src.Checks {
 		obj := fmt.Sprintf("%s.check #%d", t.Name, i+1)
 		if ck.Name != "" {
@@ -396,19 +391,19 @@ func translateChecks(d Dialect, p *ScriptPlan, t *ScriptTable) {
 // dedupeFKNames keeps the name of a foreign key when MySQL can use it: a constraint name is unique in the
 // whole schema, at most 64 characters and storable; otherwise MySQL names the key itself.
 func dedupeFKNames(d Dialect, p *ScriptPlan) {
-	used := map[string]bool{}
+	used := map[string]bool{} // by fkFoldName: MySQL compares the names of foreign keys without accents and with ß as s
 	for _, t := range p.Tables {
 		for i := range t.FKs {
 			fk := &t.FKs[i]
 			if fk.Name == "" {
 				continue
 			}
-			if why := d.StorableName(fk.Name); why != "" || used[foldName(fk.Name)] {
+			if why := d.StorableName(fk.Name); why != "" || used[fkFoldName(fk.Name)] {
 				p.warn(WarnConstraintNameLost, t.Name+"."+fk.Name, "foreign key name is not carried (%s): MySQL names the key itself", firstNonEmpty(why, "the name is taken by another constraint of the schema"))
 				fk.Name = ""
 				continue
 			}
-			used[foldName(fk.Name)] = true
+			used[fkFoldName(fk.Name)] = true
 		}
 	}
 }

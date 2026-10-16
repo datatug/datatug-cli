@@ -153,6 +153,8 @@ func compareChecks(in Input, t *faithful.ScriptTable, mt *MyTable, add func(obj,
 		clause := strings.ToLower(strings.ReplaceAll(got.Clause, `\`, ""))
 		add(obj, "check binary comparisons", fmt.Sprint(want.binary), fmt.Sprint(strings.Count(clause, "collate utf8mb4_bin")))
 		add(obj, "check regular expressions", fmt.Sprint(want.globs), fmt.Sprint(strings.Count(clause, "regexp_like(")))
+		// GLOB is case-sensitive: the match type of every REGEXP_LIKE is 'cn' (case-sensitive), never 'in'.
+		add(obj, "check regular expression match type", fmt.Sprint(want.globs), fmt.Sprint(strings.Count(clause, "'cn')")))
 		plain := strings.ReplaceAll(got.Clause, `\`, "")
 		for _, lit := range want.literals {
 			if !strings.Contains(plain, "'"+lit+"'") {

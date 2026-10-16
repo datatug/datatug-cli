@@ -327,11 +327,11 @@ func unstorableName(name string) string {
 	return ""
 }
 
-// hasCaseTwin is true when another column of the table is the same name up to case (Unicode simple folding, which
-// takes in every case equality of MySQL's names). Accents alone make no twin: MySQL keeps e and é apart.
+// hasCaseTwin is true when another column of the table is the same name up to the case MySQL folds (its table, not
+// Unicode's: ß and ẞ, ς and σ are no twins there). Accents alone make no twin: MySQL keeps e and é apart.
 func hasCaseTwin(t *faithful.ScriptTable, c *faithful.ScriptColumn) bool {
 	for _, o := range t.Columns {
-		if o != c && strings.EqualFold(o.Src.Name, c.Src.Name) {
+		if o != c && faithful.MySQLNameFold(o.Src.Name) == faithful.MySQLNameFold(c.Src.Name) {
 			return true
 		}
 	}

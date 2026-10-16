@@ -1,4 +1,4 @@
-// Package device provides DataTug's shared auth.sneat.co device-login command.
+// Package device provides DataTug's shared Sneat device-login command.
 package device
 
 import (
@@ -22,10 +22,25 @@ import (
 )
 
 const (
-	defaultIssuer   = "https://auth.sneat.co"
-	clientID        = "datatug-cli"
-	customTokenType = "urn:ietf:params:oauth:token-type:firebase-custom-token"
-	firebaseAPIKey  = "AIzaSyCeQu1WC182yD0VHrRm4nHUxVf27fY-MLQ"
+	// defaultIssuer is the Sneat OAuth server. It moved here from
+	// previousIssuer, which now serves Firebase sign-in only.
+	defaultIssuer = "https://oauth.sneat.co"
+	// previousIssuer is where the Sneat OAuth server answered before the
+	// move. With the default issuer, a login saved for it is reported as
+	// moved and replaced by the next login, and requests fall back to it
+	// only while defaultIssuer is not serving yet (DNS/connection failure or
+	// HTTP 404). An operator override (DATATUG_AUTH_HOST or --auth-host)
+	// never falls back.
+	previousIssuer = "https://auth.sneat.co"
+	// loginMovedNotice is printed once when login replaces a login saved for
+	// previousIssuer.
+	loginMovedNotice = "Sneat sign-in moved to oauth.sneat.co — starting a fresh sign-in."
+	// signInMovedMessage is the error every other command reports for a
+	// login saved for previousIssuer.
+	signInMovedMessage = "Sneat sign-in moved to oauth.sneat.co — please run `datatug auth login` again"
+	clientID           = "datatug-cli"
+	customTokenType    = "urn:ietf:params:oauth:token-type:firebase-custom-token"
+	firebaseAPIKey     = "AIzaSyCeQu1WC182yD0VHrRm4nHUxVf27fY-MLQ"
 )
 
 var scopes = []string{"openid", "profile", "datatug:projects:read", "datatug:projects:write"}
@@ -56,7 +71,7 @@ type dependencies struct {
 	newClient   func(string, bool) (*deviceauth.Client, deviceauth.Store, string, error)
 }
 
-// Command returns the DataTug auth.sneat.co commands. It is separate from
+// Command returns the DataTug Sneat sign-in commands. It is separate from
 // auth google and the GitHub repository authorization flow, which grant
 // different provider permissions and remain unchanged.
 func Command() *cobra.Command {
@@ -79,11 +94,17 @@ func LoginCommand() *cobra.Command  { return directCommand(loginCommand) }
 func StatusCommand() *cobra.Command { return directCommand(statusCommand) }
 func LogoutCommand() *cobra.Command { return directCommand(logoutCommand) }
 
-func directCommand(factory func(*string, *bool, dependencies) *cobra.Command) *cobra.Command {
-	issuer := strings.TrimSpace(os.Getenv("DATATUG_AUTH_HOST"))
-	if issuer == "" {
-		issuer = defaultIssuer
+// resolveIssuer returns $DATATUG_AUTH_HOST, else defaultIssuer. The
+// --auth-host flag overrides both.
+func resolveIssuer() string {
+	if issuer := strings.TrimSpace(os.Getenv("DATATUG_AUTH_HOST")); issuer != "" {
+		return issuer
 	}
+	return defaultIssuer
+}
+
+func directCommand(factory func(*string, *bool, dependencies) *cobra.Command) *cobra.Command {
+	issuer := resolveIssuer()
 	var insecure bool
 	cmd := factory(&issuer, &insecure, defaultDependencies())
 	cmd.Flags().StringVar(&issuer, "auth-host", issuer, "shared authorization server URL (HTTP loopback only for development)")
@@ -92,12 +113,9 @@ func directCommand(factory func(*string, *bool, dependencies) *cobra.Command) *c
 }
 
 func newCommand(deps dependencies) *cobra.Command {
-	issuer := strings.TrimSpace(os.Getenv("DATATUG_AUTH_HOST"))
-	if issuer == "" {
-		issuer = defaultIssuer
-	}
+	issuer := resolveIssuer()
 	var insecure bool
-	cmd := &cobra.Command{Use: "device", Short: "Manage DataTug sign-in through auth.sneat.co"}
+	cmd := &cobra.Command{Use: "device", Short: "Manage DataTug sign-in through oauth.sneat.co"}
 	cmd.PersistentFlags().StringVar(&issuer, "auth-host", issuer, "shared authorization server URL (HTTP loopback only for development)")
 	cmd.PersistentFlags().BoolVar(&insecure, "insecure-storage", false, "store the Firebase session in a plaintext 0600 file for headless environments")
 	cmd.AddCommand(loginCommand(&issuer, &insecure, deps), statusCommand(&issuer, &insecure, deps), logoutCommand(&issuer, &insecure, deps))
@@ -117,6 +135,7 @@ func loginCommand(rawIssuer *string, insecure *bool, deps dependencies) *cobra.C
 			}
 			auth, err := client.DeviceLoginAndStore(context.WithValue(cmd.Context(), oauth2.HTTPClient, deps.httpClient), deviceauth.DeviceLoginOptions{
 				DeviceInfo: deviceInfo(), OpenBrowser: deps.openBrowser, Output: cmd.OutOrStdout(), ErrorOutput: cmd.ErrOrStderr(),
+				IssuerMovedNotice: loginMovedNotice,
 				TokenTransformer: func(ctx context.Context, token *oauth2.Token) (*oauth2.Token, error) {
 					if !strings.EqualFold(token.TokenType, customTokenType) {
 						return nil, errors.New("authorization server returned an unexpected token type")
@@ -148,6 +167,9 @@ func statusCommand(rawIssuer *string, insecure *bool, deps dependencies) *cobra.
 		if errors.Is(err, deviceauth.ErrCredentialNotFound) {
 			return fmt.Errorf("not logged in to %s; run 'datatug auth login'", client.Issuer())
 		}
+		if errors.Is(err, deviceauth.ErrCredentialIssuerMoved) {
+			return err
+		}
 		if err != nil {
 			return fmt.Errorf("load Firebase session: %w", err)
 		}
@@ -166,7 +188,20 @@ func logoutCommand(rawIssuer *string, insecure *bool, deps dependencies) *cobra.
 		if err != nil {
 			return fmt.Errorf("configure credential storage: %w", err)
 		}
-		if _, err := newTokenSource(cmd.Context(), client, store, deps.refresh).Token(); errors.Is(err, deviceauth.ErrCredentialNotFound) {
+		tokens := newTokenSource(cmd.Context(), client, store, deps.refresh)
+		_, err = tokens.Token()
+		var moved *deviceauth.IssuerMovedError
+		if errors.As(err, &moved) {
+			// The same service answers at the new issuer: rebind the saved
+			// login there, then refresh and revoke it like any other.
+			credential := moved.Credential
+			credential.Issuer = client.Issuer()
+			if err := client.ScopedStore(store).Save(credential); err != nil {
+				return fmt.Errorf("move saved login to %s: %w", client.Issuer(), err)
+			}
+			_, err = tokens.Token()
+		}
+		if errors.Is(err, deviceauth.ErrCredentialNotFound) {
 			return fmt.Errorf("not logged in to %s", client.Issuer())
 		} else if err != nil {
 			return fmt.Errorf("refresh Firebase session before logout: %w", err)
@@ -252,15 +287,26 @@ func refreshFirebaseSession(ctx context.Context, refreshToken string) (session, 
 	return session{IDToken: out.IDToken, RefreshToken: out.RefreshToken, UID: out.UserID, ExpiresAt: time.Now().Add(seconds)}, nil
 }
 
-func newClient(rawIssuer string, insecure bool) (*deviceauth.Client, deviceauth.Store, string, error) {
-	client, err := deviceauth.NewClient(deviceauth.ClientConfig{
+// clientConfig configures the shared device client. Only the default issuer
+// knows previousIssuer, so an override never reaches production.
+func clientConfig(rawIssuer string) deviceauth.ClientConfig {
+	config := deviceauth.ClientConfig{
 		Issuer:         rawIssuer,
 		ClientID:       clientID,
 		Scopes:         scopes,
 		RequiredScopes: scopes,
 		KeyringService: "datatug-cli",
 		KeyringAccount: "firebase-session",
-	})
+	}
+	if strings.TrimSpace(rawIssuer) == defaultIssuer {
+		config.PreviousIssuers = []string{previousIssuer}
+		config.FallbackIssuers = []string{previousIssuer}
+	}
+	return config
+}
+
+func newClient(rawIssuer string, insecure bool) (*deviceauth.Client, deviceauth.Store, string, error) {
+	client, err := deviceauth.NewClient(clientConfig(rawIssuer))
 	if err != nil {
 		return nil, nil, "", err
 	}
@@ -276,9 +322,21 @@ func newClient(rawIssuer string, insecure bool) (*deviceauth.Client, deviceauth.
 	if err != nil {
 		return nil, nil, "", err
 	}
-	path := filepath.Join(dir, "datatug", "auth", base64.RawURLEncoding.EncodeToString([]byte(issuerHost.Host))+".json")
-	store, err := deviceauth.NewFileStore(path)
-	return client, store, path, err
+	path := credentialFilePath(dir, issuerHost.Host)
+	// The path is non-empty, so NewFileStore cannot fail.
+	current, _ := deviceauth.NewFileStore(path)
+	previous := make([]deviceauth.Store, 0, len(client.PreviousIssuers()))
+	for _, issuer := range client.PreviousIssuers() {
+		// PreviousIssuers are canonical absolute URLs.
+		previousURL, _ := url.Parse(issuer)
+		store, _ := deviceauth.NewFileStore(credentialFilePath(dir, previousURL.Host))
+		previous = append(previous, store)
+	}
+	return client, deviceauth.NewMigratingStore(current, previous...), path, nil
+}
+
+func credentialFilePath(dir, host string) string {
+	return filepath.Join(dir, "datatug", "auth", base64.RawURLEncoding.EncodeToString([]byte(host))+".json")
 }
 
 func deviceInfo() deviceauth.DeviceInfo {

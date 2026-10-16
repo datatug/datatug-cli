@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/strongo/deviceauth"
@@ -16,11 +14,7 @@ import (
 // login. It never borrows a Sneat or Google credential. The insecure flag
 // must match the explicit --insecure-storage choice made during auth login.
 func SavedTokenSource(ctx context.Context, insecure bool) (oauth2.TokenSource, error) {
-	issuer := strings.TrimSpace(os.Getenv("DATATUG_AUTH_HOST"))
-	if issuer == "" {
-		issuer = defaultIssuer
-	}
-	client, store, _, err := newClient(issuer, insecure)
+	client, store, _, err := newClient(resolveIssuer(), insecure)
 	if err != nil {
 		return nil, err
 	}
@@ -57,6 +51,9 @@ func (s *TokenSource) TokenContext(ctx context.Context) (*oauth2.Token, error) {
 		return nil, errors.New("datatug device auth: token source is not configured")
 	}
 	credential, err := s.client.ScopedStore(s.store).Load()
+	if errors.Is(err, deviceauth.ErrCredentialIssuerMoved) {
+		return nil, signInMovedError{cause: err}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -76,3 +73,11 @@ func (s *TokenSource) TokenContext(ctx context.Context) (*oauth2.Token, error) {
 	}
 	return &oauth2.Token{AccessToken: credential.AccessToken, TokenType: credential.TokenType, Expiry: credential.Expiry}, nil
 }
+
+// signInMovedError reports a login saved before the Sneat OAuth server moved.
+// Its text is the one message users see; errors.Is/As still reach the
+// deviceauth cause.
+type signInMovedError struct{ cause error }
+
+func (e signInMovedError) Error() string { return signInMovedMessage }
+func (e signInMovedError) Unwrap() error { return e.cause }

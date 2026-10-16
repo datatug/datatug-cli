@@ -487,3 +487,17 @@ func TestVerifyOracleRenamesNeedAReason(t *testing.T) {
 		t.Errorf("%v", res.Diffs)
 	}
 }
+
+// The Oracle engine reads the length of every BLOB beside its value: the driver gives an empty BLOB as NULL. The emulated
+// catalog swaps the function for SQLite's, so this pins the real one.
+func TestOracleEngineReadsLobLengths(t *testing.T) {
+	if oracleEngine.lobLength == nil {
+		t.Fatal("the Oracle engine does not read LOB lengths")
+	}
+	if got := oracleEngine.lobLength(`"b"`); got != `DBMS_LOB.GETLENGTH("b")` {
+		t.Errorf("%s", got)
+	}
+	if got := unstorableOracle("bin$abc"); got == "" {
+		t.Error("a BIN$ name is storable")
+	}
+}

@@ -364,7 +364,13 @@ func (d oracleDialect) dropUnsupportedFKs(p *ScriptPlan) {
 				}
 			}
 			if !ok {
-				p.warn(WarnFKNotCarried, label, "the referenced columns (%s) of %s are no primary key or unique constraint, which Oracle requires", strings.Join(fk.RefColumns, ", "), parent.Name)
+				why := "are no primary key or unique constraint, which Oracle requires"
+				for _, ix := range parent.Indexes {
+					if ix.Unique && ix.Where != "" && sameCols(ixColumns(ix), fk.RefColumns) {
+						why = "are a unique key over nullable columns that holds several NULLs: it is written as a unique index that holds no row with a NULL, and Oracle takes only a primary key or a unique constraint as the parent of a key"
+					}
+				}
+				p.warn(WarnFKNotCarried, label, "the referenced columns (%s) of %s %s", strings.Join(fk.RefColumns, ", "), parent.Name, why)
 				continue
 			}
 			switch fk.OnUpdate {
@@ -506,8 +512,11 @@ func (d oracleDialect) mergeClass(cl *oracleClass) {
 // oracleKeyBytes is the bytes a column adds to a key row: the longest value of a text or a binary column, as Oracle checks
 // the key of a row (ORA-01450) and not the declared width, and the width of a number or a date. A CLOB, a BLOB and a text of
 // more than 4,000 bytes cannot be indexed.
+// oracleUnindexable is the cost the key budget gives a column that cannot be in an index at all.
+const oracleUnindexable = 1 << 20
+
 func oracleKeyBytes(c Choice, size int) int {
-	const unindexable = 1 << 20
+	const unindexable = oracleUnindexable
 	switch c.Family {
 	case "int", "bool", "decimal":
 		return 22
@@ -529,6 +538,25 @@ func oracleKeyBytes(c Choice, size int) int {
 	return max(size, 1)
 }
 
+// oracleIndexRefs is how many column references an index has for Oracle's limit: one per column, and with a Where one
+// test of every nullable column inside each of them.
+func oracleIndexRefs(ix Index) int {
+	if ix.Where == "" {
+		return len(ix.Columns)
+	}
+	return len(ix.Columns) * (1 + strings.Count(ix.Where, " IS NOT NULL"))
+}
+
+func ixColumns(ix Index) []string {
+	names := make([]string, len(ix.Columns))
+	for i, c := range ix.Columns {
+		names[i] = c.Name
+	}
+	return names
+}
+
+func ixColumnNames(ix Index) string { return strings.Join(ixColumns(ix), ", ") }
+
 func oracleKeyCost(cols []*ScriptColumn) int {
 	n := 0
 	for _, c := range cols {
@@ -549,6 +577,20 @@ func (d oracleDialect) fitKeys(p *ScriptPlan, classes []*oracleClass) error {
 				oracleRender(&m.Choice)
 			}
 		}
+	}
+	// A unique index over nullable columns is written as one CASE expression per column, each repeating the test of every
+	// nullable column, and Oracle counts every column reference towards the limit of 32 index columns (ORA-01793; measured:
+	// 16 columns with one test load, 6 with 6 tests do not).
+	for _, t := range p.Tables {
+		var keep []Index
+		for _, ix := range t.Indexes {
+			if refs := oracleIndexRefs(ix); refs > oracleMaxKeyColumns {
+				p.warn(WarnIndexNotCarried, t.Name+"."+ix.Name, "the unique key over (%s) is written with %d column references, and Oracle takes at most %d in an index (ORA-01793): the uniqueness of rows with NULLs is not enforced", ixColumnNames(ix), refs, oracleMaxKeyColumns)
+				continue
+			}
+			keep = append(keep, ix)
+		}
+		t.Indexes = keep
 	}
 	fits := func(cols []*ScriptColumn) bool {
 		return oracleKeyCost(cols) <= oracleMaxKeyBytes && len(cols) <= oracleMaxKeyColumns
@@ -573,7 +615,10 @@ func (d oracleDialect) fitKeys(p *ScriptPlan, classes []*oracleClass) error {
 				i = -1
 				continue
 			}
-			return fmt.Errorf("%s of table %q is longer than Oracle allows (%d bytes, at most %d, at most %d columns) with the longest values of its columns, or holds a column that cannot be indexed; Oracle cannot carry it",
+			if oracleKeyCost(sets[i]) >= oracleUnindexable {
+				return fmt.Errorf("%s of table %q holds a column that cannot be indexed in Oracle (a CLOB, a BLOB, a text over %d bytes or a binary over %d bytes); Oracle cannot carry it", kinds[i], t.Name, oracleMaxVarchar, oracleMaxRaw)
+			}
+			return fmt.Errorf("%s of table %q is longer than Oracle allows (%d bytes, at most %d, at most %d columns) with the longest values of its columns; Oracle cannot carry it",
 				kinds[i], t.Name, oracleKeyCost(sets[i]), oracleMaxKeyBytes, oracleMaxKeyColumns)
 		}
 	}

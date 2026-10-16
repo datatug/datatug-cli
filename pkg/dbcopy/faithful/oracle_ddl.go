@@ -43,7 +43,7 @@ func (d oracleDialect) CreateTable(t *ScriptTable) string {
 		}
 		parts = append(parts, s+"UNIQUE ("+d.quoteList(u.Columns)+")")
 	}
-	return "CREATE TABLE " + d.QuoteIdent(t.Name) + " (\n  " + strings.Join(parts, ",\n  ") + "\n);"
+	return oracleWrap("CREATE TABLE " + d.QuoteIdent(t.Name) + " (\n  " + strings.Join(parts, ",\n  ") + "\n);")
 }
 
 // IndexSQL writes an index. A unique index that carries a Where is the Oracle form of a key over columns that hold NULLs
@@ -64,7 +64,7 @@ func (d oracleDialect) IndexSQL(t *ScriptTable, ix Index) string {
 	if ix.Unique {
 		s += "UNIQUE "
 	}
-	return s + "INDEX " + d.QuoteIdent(ix.Name) + " ON " + d.QuoteIdent(t.Name) + " (" + strings.Join(cols, ", ") + ");"
+	return oracleWrap(s + "INDEX " + d.QuoteIdent(ix.Name) + " ON " + d.QuoteIdent(t.Name) + " (" + strings.Join(cols, ", ") + ");")
 }
 
 func (d oracleDialect) CheckSQL(t *ScriptTable, ck Check) string {
@@ -72,7 +72,7 @@ func (d oracleDialect) CheckSQL(t *ScriptTable, ck Check) string {
 	if ck.Name != "" {
 		s += "CONSTRAINT " + d.QuoteIdent(ck.Name) + " "
 	}
-	return s + "CHECK (" + ck.Expr + ");"
+	return oracleWrap(s + "CHECK (" + ck.Expr + ");")
 }
 
 func (d oracleDialect) FKSQL(p *ScriptPlan, t *ScriptTable, fk ForeignKey) string {
@@ -90,7 +90,7 @@ func (d oracleDialect) FKSQL(p *ScriptPlan, t *ScriptTable, fk ForeignKey) strin
 			s = strings.TrimSuffix(s, "IMMEDIATE") + "DEFERRED"
 		}
 	}
-	return s + ";"
+	return oracleWrap(s + ";")
 }
 
 // oracleNextIdentity is the number the identity column of a table gives its next row: the counter SQLite keeps when
@@ -116,7 +116,7 @@ func (d oracleDialect) InsertHead(t *ScriptTable) string {
 	for i, c := range t.Columns {
 		names[i] = c.Name
 	}
-	return "INSERT INTO " + d.QuoteIdent(t.Name) + " (" + d.quoteList(names) + ") VALUES"
+	return oracleWrap("INSERT INTO " + d.QuoteIdent(t.Name) + " (" + d.quoteList(names) + ") VALUES")
 }
 
 // BatchLimits are the most rows of one INSERT ... VALUES and its size. Oracle takes 65,535 rows (ORA-63805 above), but
@@ -139,6 +139,27 @@ func oracleComment(s string) string {
 // A line that ends in "-" is a continuation line in some SQL*Plus commands; in a "--" comment it was measured to join
 // nothing (SET and WHENEVER on the next line still ran, on 23.26.3), and the journey checks that on every run.
 func oracleNoticeLine(s string) string { return strings.ReplaceAll(s, "&", "& ") }
+
+// oracleWrapComments continues a comment line that is over the line limit on further comment lines, at a space when there is
+// one (a warning or a notice line can be as long as its text).
+func oracleWrapComments(ls []string) []string {
+	var out []string
+	for _, l := range ls {
+		for len(l) > oracleMaxLine {
+			cut := strings.LastIndexByte(l[:oracleMaxLine], ' ')
+			if cut < 4 {
+				cut = oracleMaxLine
+				for !utf8.RuneStart(l[cut]) {
+					cut--
+				}
+			}
+			out = append(out, strings.TrimRight(l[:cut], " "))
+			l = "-- " + strings.TrimLeft(l[cut:], " ")
+		}
+		out = append(out, l)
+	}
+	return out
+}
 
 func (d oracleDialect) Header(p *ScriptPlan, h Header) []string {
 	var l []string
@@ -174,8 +195,9 @@ func (d oracleDialect) Header(p *ScriptPlan, h Header) []string {
 	raw("No data in this file can start a line, so a line is never a SQL*Plus command or a '/'; no line is longer than " + strconv.Itoa(oracleMaxLine) + " characters (SQL*Plus refuses 2,499 in older versions).")
 	raw("The script sets DEFINE OFF (a & in a value is no substitution variable) and stops at the first error (WHENEVER SQLERROR EXIT FAILURE ROLLBACK).")
 	raw("Oracle commits every DDL statement: the script is NOT one transaction, and a failed load leaves the tables it had created (drop them, and the marker, before loading again).")
-	raw("The first statement creates the table " + MySQLMarkerTable + " and fails when it exists (a second load stops there); the last one counts every table and writes the")
-	raw("marker row in one PL/SQL block that raises first when a count is wrong: a row there means the load completed, whatever the client did after an error.")
+	raw("The first statement creates the table " + MySQLMarkerTable + " and fails when it exists (a second load stops there); the last one counts every table's rows, keys, checks and indexes in the catalog")
+	raw("and writes the marker row in one PL/SQL block that raises first when a count is wrong: a row there means every table holds its rows and has its keys, checks and indexes,")
+	raw("whatever the client did after an error (it does not compare the text of a default or of a check).")
 	raw("DROP TABLE " + d.QuoteIdent(MySQLMarkerTable) + " removes the marker once you no longer need it.")
 	raw("The empty text is NULL in Oracle: a column that holds an empty text is created without NOT NULL and holds NULL there. Text comparison is binary by default (NLS_COMP=BINARY).")
 	raw("A unique key over several columns treats NULLs as equal in Oracle, unlike SQLite: such a key is written as a unique function-based index.")
@@ -191,7 +213,7 @@ func (d oracleDialect) Header(p *ScriptPlan, h Header) []string {
 			add("  [%s] %s: %s", w.Kind, w.Object, w.Message)
 		}
 	}
-	return l
+	return oracleWrapComments(l)
 }
 
 // oraclePlsql is a PL/SQL block: its lines start with a word the generator wrote, and the block ends with a line of
@@ -249,6 +271,29 @@ func (d oracleDialect) Epilogue(p *ScriptPlan, h Header) []string {
 			"  SELECT COUNT(*) INTO n FROM "+d.QuoteIdent(t.Name)+";",
 			fmt.Sprintf("  IF n <> %d THEN RAISE_APPLICATION_ERROR(-20000, %s); END IF;", t.Rows,
 				oracleTextExpr("the load is incomplete: table "+t.Name+" does not hold "+strconv.FormatInt(t.Rows, 10)+" rows", false)))
+		// The objects of the table: its keys (primary, unique, foreign), its checks and NOT NULLs, and its indexes, all enabled
+		// and validated. A statement that failed or was skipped leaves one missing.
+		keys := len(t.Uniques) + len(t.FKs)
+		idx := len(t.Uniques) + len(t.Indexes)
+		if len(t.PK) > 0 {
+			keys++
+			idx++
+		}
+		name := oracleTextExpr(t.Name, false)
+		for _, c := range []struct {
+			what  string
+			n     int
+			query string
+		}{
+			{"keys", keys, "user_constraints WHERE table_name = " + name + " AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED'"},
+			{"checks", oracleCheckCount(t), "user_constraints WHERE table_name = " + name + " AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED'"},
+			{"indexes", idx, "user_indexes WHERE table_name = " + name + " AND index_type <> 'LOB'"},
+		} {
+			block = append(block,
+				"  SELECT COUNT(*) INTO n FROM "+c.query+";",
+				fmt.Sprintf("  IF n <> %d THEN RAISE_APPLICATION_ERROR(-20000, %s); END IF;", c.n,
+					oracleTextExpr("the load is incomplete: table "+t.Name+" does not have its "+strconv.Itoa(c.n)+" "+c.what, false)))
+		}
 	}
 	block = append(block,
 		fmt.Sprintf("  INSERT INTO %s VALUES\n%s;", d.QuoteIdent(MySQLMarkerTable),
@@ -258,6 +303,24 @@ func (d oracleDialect) Epilogue(p *ScriptPlan, h Header) []string {
 	out := []string{"COMMIT;"}
 	out = append(out, oraclePlsql(block...)...)
 	return append(out, "-- end of script")
+}
+
+// oracleCheckCount is the check constraints the table has in the catalog: its checks, and one NOT NULL constraint for
+// every column that is NOT NULL, a primary key column or the identity column (measured on 23.26.3: the engine gives a primary
+// key column and an identity column a NOT NULL constraint of their own).
+func oracleCheckCount(t *ScriptTable) int {
+	id := oracleIdentity(t)
+	pk := map[string]bool{}
+	for _, n := range t.PK {
+		pk[n] = true
+	}
+	n := len(t.Checks)
+	for _, c := range t.Columns {
+		if c.NotNull || c == id || pk[c.Name] {
+			n++
+		}
+	}
+	return n
 }
 
 // oracleOptText is a text of the marker row: NULL when it is empty (Oracle has no empty text).

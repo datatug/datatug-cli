@@ -253,6 +253,24 @@ for ds in $datasets; do
 		load "$work/uncounted.sql" j_uncounted >"$work/uncounted.out" 2>&1 || true
 		[ "$(marker_rows j_uncounted)" = 1 ] || { echo "atomicity: without the counts the load got no marker row, so the control proves nothing" >&2; failures=$((failures + 1)); continue; }
 		echo "    atomicity: a client that goes on after an error creates all $total tables and gets no marker row; control: without the counts the marker row is written"
+		# The marker proves the objects too: a client that goes on after an error, or skips a line (SP2-0027), and loses a
+		# foreign key, an index or a check, gets no marker row (the block that writes it counts them in the catalog).
+		skip_pad=$(head -c 6000 /dev/zero | tr '\0' ' ')
+		for lost in fk index check skip; do
+			case $lost in
+			fk) grep -v '^WHENEVER ' "$script" | awk '/^ALTER TABLE ".*FOREIGN KEY/ && !done { sub(/^ALTER TABLE "/, "ALTER TABLE \"nope_"); done = 1 } { print }' >"$work/lost.sql"; want='ORA-00942' ;;
+			index) grep -v '^WHENEVER ' "$script" | awk '/^CREATE (UNIQUE )?INDEX "/ && !done { sub(/ ON "/, " ON \"nope_"); done = 1 } { print }' >"$work/lost.sql"; want='ORA-00942' ;;
+			check) grep -v '^WHENEVER ' "$script" | awk '/^ALTER TABLE ".* ADD (CONSTRAINT ".*" )?CHECK / && !done { sub(/^ALTER TABLE "/, "ALTER TABLE \"nope_"); done = 1 } { print }' >"$work/lost.sql"; want='ORA-00942' ;;
+			skip) awk -v pad="$skip_pad" '/^ALTER TABLE ".* ADD (CONSTRAINT ".*" )?CHECK / && !done { sub(/CHECK \(/, "CHECK (" pad); done = 1 } { print }' "$script" >"$work/lost.sql"; want='SP2-0027' ;;
+			esac
+			cmp -s "$script" "$work/lost.sql" && { echo "objects: the $lost statement could not be damaged" >&2; failures=$((failures + 1)); continue 2; }
+			create_user j_lost
+			load "$work/lost.sql" j_lost >"$work/lost.out" 2>&1 || true
+			grep -q "$want" "$work/lost.out" && grep -q 'ORA-20000' "$work/lost.out" || { echo "objects: losing a $lost did not raise ($want, then ORA-20000):" >&2; grep -v '^$' "$work/lost.out" | head -6 >&2; failures=$((failures + 1)); continue 2; }
+			[ "$(marker_rows j_lost)" = 0 ] || { echo "objects: a load that lost a $lost got a marker row" >&2; failures=$((failures + 1)); continue 2; }
+			sql_root <<<"drop user j_lost cascade;" >/dev/null
+		done
+		echo "    objects: a load that lost a foreign key, an index or a check (an error, or a skipped overlong line) gets no marker row"
 		;;
 	fuzz)
 		# Positive controls: the hazards are real.

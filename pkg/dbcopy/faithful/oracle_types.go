@@ -193,11 +193,11 @@ func (d oracleDialect) Choose(c *Column, st *ScriptStats, use ColumnUse) Choice 
 			return oracleChoice(Choice{Kind: KindBool, Family: "bool"})
 		}
 	case declDate:
-		if st.only("text") && st.dateOK == st.texts {
+		if st.only("text") && st.dateOK == st.texts && st.GregorianGap == 0 {
 			return oracleDate(st, "date", KindDate)
 		}
 	case declTimestamp:
-		if st.only("text") && st.tsOK == st.texts {
+		if st.only("text") && st.tsOK == st.texts && st.GregorianGap == 0 {
 			return oracleDate(st, "datetime", KindTimestamp)
 		}
 	case declTime:
@@ -235,6 +235,9 @@ func (d oracleDialect) Choose(c *Column, st *ScriptStats, use ColumnUse) Choice 
 		ch.Note = fmt.Sprintf("declared %q, which has no Oracle equivalent: carried as %s", declared, ch.Type)
 	default:
 		ch.Note = fmt.Sprintf("declared %q but its values are not all of that type: carried as %s", declared, ch.Type)
+		if (ds.class == declDate || ds.class == declTimestamp) && st.GregorianGap > 0 {
+			ch.Note = fmt.Sprintf("declared %q but %d value(s), the first %q, fall in the days 1582-10-05 to 1582-10-14 that Oracle's calendar skips (it would store them ten days later): carried as %s", declared, st.GregorianGap, st.GapExample, ch.Type)
+		}
 	}
 	switch {
 	case st.textWithNUL > 0:

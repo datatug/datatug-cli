@@ -45,6 +45,33 @@ func countsEveryIdentity(d Dialect) bool {
 	return ok && e.CountsEveryIdentity()
 }
 
+// lineGuard refuses a script that has a line longer than a client can read: the dialect wraps what it writes, and a line
+// that is over the limit anyway is a generator fault that must not become a skipped statement (SQL*Plus ignores an
+// overlong line, SP2-0027, and goes on). The error names the line.
+type lineGuard struct {
+	w    io.Writer
+	max  int
+	cur  int    // bytes of the line being written
+	head string // its first bytes
+}
+
+func (g *lineGuard) Write(b []byte) (int, error) {
+	for _, c := range b {
+		if c == '\n' {
+			g.cur, g.head = 0, ""
+			continue
+		}
+		if g.cur < 60 {
+			g.head += string(c)
+		}
+		g.cur++
+		if g.cur > g.max {
+			return 0, fmt.Errorf("the script has a line longer than the %d characters its client reads (it starts %q): the statement cannot be wrapped at a safe place", g.max, g.head)
+		}
+	}
+	return g.w.Write(b)
+}
+
 // WriteScript streams the script of a plan: the header, the session settings, every table, its rows (in a total
 // order, so the bytes are the same on every run), the counters of the auto-numbered columns, then indexes,
 // checks and foreign keys (keys follow the data), and last the marker row. The rows are read from src one
@@ -53,6 +80,9 @@ func countsEveryIdentity(d Dialect) bool {
 // Every line starts with a token this function wrote; no value can start one (see Dialect.Literal).
 func WriteScript(ctx context.Context, w io.Writer, src Queryer, p *ScriptPlan, h Header) (int64, error) {
 	d := p.Dialect
+	if ll, ok := d.(lineLimiter); ok {
+		w = &lineGuard{w: w, max: ll.MaxLine()}
+	}
 	bw := bufio.NewWriterSize(w, 1<<20)
 	line := func(s string) { _, _ = bw.WriteString(s); _ = bw.WriteByte('\n') }
 	lines := func(ls []string) {

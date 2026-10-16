@@ -12,16 +12,18 @@
 -- No data in this file can start a line, so a line is never a SQL*Plus command or a '/'; no line is longer than 2300 characters (SQL*Plus refuses 2,499 in older versions).
 -- The script sets DEFINE OFF (a & in a value is no substitution variable) and stops at the first error (WHENEVER SQLERROR EXIT FAILURE ROLLBACK).
 -- Oracle commits every DDL statement: the script is NOT one transaction, and a failed load leaves the tables it had created (drop them, and the marker, before loading again).
--- The first statement creates the table _demodb_import and fails when it exists (a second load stops there); the last one counts every table and writes the
--- marker row in one PL/SQL block that raises first when a count is wrong: a row there means the load completed, whatever the client did after an error.
+-- The first statement creates the table _demodb_import and fails when it exists (a second load stops there); the last one counts every table's rows, keys, checks and indexes in the catalog
+-- and writes the marker row in one PL/SQL block that raises first when a count is wrong: a row there means every table holds its rows and has its keys, checks and indexes,
+-- whatever the client did after an error (it does not compare the text of a default or of a check).
 -- DROP TABLE "_demodb_import" removes the marker once you no longer need it.
 -- The empty text is NULL in Oracle: a column that holds an empty text is created without NOT NULL and holds NULL there. Text comparison is binary by default (NLS_COMP=BINARY).
 -- A unique key over several columns treats NULLs as equal in Oracle, unlike SQLite: such a key is written as a unique function-based index.
--- Tables (104): Order Details, Production.Product, back`tick, trailing , line_break_697affca, _e3b0c442, Ünï_t, ünï_t, select, ünïcode_日本語_😀, a-very-long-table-name-that-is-more-than-sixty-four-characters-long-for-sure, back\slash/and;--/*x*/'q', ix_names, types_edge, hostile, hostile_nul, hostile_utf8, binary_edge, parent_txt, child_txt, parent_int, child_int, child_named, tree, comp...
+-- Tables (111): Order Details, Production.Product, back`tick, trailing , line_break_697affca, _e3b0c442, Ünï_t, ünï_t, select, ünïcode_日本語_😀, a-very-long-table-name-that-is-more-than-sixty-four-characters-long-for-sure, back\slash/and;--/*x*/'q', ix_names, types_edge, hostile, hostile_nul, hostile_utf8, binary_edge, parent_txt, child_txt, parent_int, child_int, child_named, tree, comp...
 --
--- 184 thing(s) are not carried exactly:
+-- 202 thing(s) are not carried exactly:
 -- [name-renamed] : table name cannot be stored (the name is empty): created as "_e3b0c442"
 -- [name-renamed] .: column name cannot be stored (the name is empty): created as "_e3b0c442"
+-- [name-renamed] BIN$abc: table name cannot be stored (a name that starts with BIN$ belongs to the recycle bin, which hides such tables from the data dictionary views): created as "BIN_abc_4d60a51f"
 -- [values-normalized] Order Details.Unit Price: 2 REAL value(s) are written as the exact decimal of their shortest spelling, for example 9.99: SQLite stores a binary float, NUMBER(10,2) an exact decimal
 -- [key-type-bounded] Production.Product.Color: a key column is carried as VARCHAR2(255 CHAR) (declared "TEXT"): Oracle cannot index a CLOB or a BLOB; its longest value is 4
 -- [key-type-bounded] Production.Product.Name.Full: a key column is carried as VARCHAR2(255 CHAR) (declared "TEXT"): Oracle cannot index a CLOB or a BLOB; its longest value is 6
@@ -56,6 +58,7 @@
 -- [fk-action-not-carried] child_txt(code): ON UPDATE CASCADE does not exist in Oracle: the key is carried without it
 -- [key-type-bounded] child_txt.code: a key column is carried as VARCHAR2(255 CHAR) (declared "TEXT"): Oracle cannot index a CLOB or a BLOB; its longest value is 5
 -- [type-widened] child_txt.code: declared "TEXT" and carried as VARCHAR2(5 CHAR), but it joins the columns of its foreign keys, which Oracle requires to be of one type family: carried as VARCHAR2(255 CHAR)
+-- [collation-not-carried] ck_wide.check #1: a comparison or pattern of text in this check follows the NLS_COMP and NLS_SORT of the session that writes a row (BINARY, like SQLite, unless it changes them); the script loads with BINARY
 -- [key-type-bounded] comp_child.b: a key column is carried as VARCHAR2(255 CHAR) (declared "TEXT"): Oracle cannot index a CLOB or a BLOB; its longest value is 1
 -- [type-widened] comp_child.b: declared "TEXT" and carried as VARCHAR2(1 CHAR), but it joins the columns of its foreign keys, which Oracle requires to be of one type family: carried as VARCHAR2(255 CHAR)
 -- [key-type-bounded] comp_parent.b: a key column is carried as VARCHAR2(255 CHAR) (declared "TEXT"): Oracle cannot index a CLOB or a BLOB; its longest value is 1
@@ -101,6 +104,8 @@
 -- [fk-not-carried] fk_nonunique_child(v): the referenced columns (v) of fk_nonunique are no primary key or unique constraint, which Oracle requires
 -- [fk-violations-in-source] fk_orphans(p): 1 row(s) have no parent in parent_int: the key is not created, because Oracle would refuse it
 -- [fk-action-not-carried] fk_setnull_notnull(p): ON UPDATE SET DEFAULT does not exist in Oracle: the key is carried without it
+-- [type-widened] gap_t.d: declared "DATE" but 1 value(s), the first "1582-10-10", fall in the days 1582-10-05 to 1582-10-14 that Oracle's calendar skips (it would store them ten days later): carried as VARCHAR2(4000 BYTE)
+-- [type-widened] gap_t.ts: declared "TIMESTAMP" but 1 value(s), the first "1582-10-12 12:00:00", fall in the days 1582-10-05 to 1582-10-14 that Oracle's calendar skips (it would store them ten days later): carried as VARCHAR2(4000 BYTE)
 -- [values-normalized] hostile.v: 1 empty value(s) become NULL, because Oracle has no empty text
 -- [default-not-carried] hostile.w: default expression '' cannot be translated to Oracle and is not carried
 -- [type-widened] hostile_nul.v: declared "TEXT" but its values are not all of that type: carried as BLOB; a text with a NUL byte is carried as bytes, and a copy back returns BLOBs
@@ -142,6 +147,12 @@
 -- [key-type-bounded] named_keys.b: a key column is carried as VARCHAR2(255 CHAR) (declared "TEXT"): Oracle cannot index a CLOB or a BLOB; its longest value is 1
 -- [key-type-bounded] named_keys2.a: a key column is carried as VARCHAR2(255 CHAR) (declared "TEXT"): Oracle cannot index a CLOB or a BLOB; its longest value is 1
 -- [constraint-name-not-carried] named_keys2.shared_name: unique constraint name is not carried (the name is taken by another constraint or index of the schema): Oracle names the key itself
+-- [unique-filtered] nulls_wide.UQ_nulls_wide_n0_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk_25261c65: the unique key (n0_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk, n1_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk...
+-- [key-type-bounded] nulls_wide.n0_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk: a key column is carried as VARCHAR2(255 CHAR) (declared "TEXT"): Oracle cannot index a CLOB or a BLOB; its longest value is 1
+-- [key-type-bounded] nulls_wide.n1_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk: a key column is carried as VARCHAR2(255 CHAR) (declared "TEXT"): Oracle cannot index a CLOB or a BLOB; its longest value is 1
+-- [key-type-bounded] nulls_wide.n2_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk: a key column is carried as VARCHAR2(255 CHAR) (declared "TEXT"): Oracle cannot index a CLOB or a BLOB; its longest value is 0
+-- [key-type-bounded] nulls_wide.n3_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk: a key column is carried as VARCHAR2(255 CHAR) (declared "TEXT"): Oracle cannot index a CLOB or a BLOB; its longest value is 0
+-- [key-type-bounded] nulls_wide.n4_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk: a key column is carried as VARCHAR2(255 CHAR) (declared "TEXT"): Oracle cannot index a CLOB or a BLOB; its longest value is 0
 -- [type-widened] parent_int.id: declared "INT4" and carried as NUMBER(10,0), but it joins the columns of its foreign keys, which Oracle requires to be of one type family: carried as NUMBER(19,0)
 -- [key-type-bounded] parent_txt.code: a key column is carried as VARCHAR2(255 CHAR) (declared "VARCHAR(5)"): Oracle cannot index a CLOB or a BLOB; its longest value is 5
 -- [type-widened] parent_txt.code: declared "VARCHAR(5)" and carried as VARCHAR2(5 CHAR), but it joins the columns of its foreign keys, which Oracle requires to be of one type family: carried as VARCHAR2(255 CHAR)
@@ -186,6 +197,14 @@
 -- [values-normalized] types_o.n: 1 REAL value(s) are written as the exact decimal of their shortest spelling, for example 123.456: SQLite stores a binary float, NUMBER(6,3) an exact decimal
 -- [type-widened] types_o.t: declared "TIME" but Oracle has no time of day type: carried as VARCHAR2(11 CHAR)
 -- [type-widened] types_o.tz: declared "TIMESTAMPTZ" but the script has no such type: carried as VARCHAR2(4000 BYTE)
+-- [index-not-carried] uniq6.UQ_uniq6_a_b_c_d_e_f: the unique key over (a, b, c, d, e, f) is written with 42 column references, and Oracle takes at most 32 in an index (ORA-01793): the uniqueness of rows with NULLs is not enforced
+-- [unique-filtered] uniq6.UQ_uniq6_a_b_c_d_e_f: the unique key (a, b, c, d, e, f) allows several NULLs in SQLite, and Oracle treats NULLs in a multi-column unique key as equal: it is written as a unique function-based index that holds no row with a NULL, which a foreign key cannot reference
+-- [key-type-bounded] uniq6.a: a key column is carried as VARCHAR2(255 CHAR) (declared "TEXT"): Oracle cannot index a CLOB or a BLOB; its longest value is 1
+-- [key-type-bounded] uniq6.b: a key column is carried as VARCHAR2(255 CHAR) (declared "TEXT"): Oracle cannot index a CLOB or a BLOB; its longest value is 0
+-- [key-type-bounded] uniq6.c: a key column is carried as VARCHAR2(255 CHAR) (declared "TEXT"): Oracle cannot index a CLOB or a BLOB; its longest value is 0
+-- [key-type-bounded] uniq6.d: a key column is carried as VARCHAR2(255 CHAR) (declared "TEXT"): Oracle cannot index a CLOB or a BLOB; its longest value is 0
+-- [key-type-bounded] uniq6.e: a key column is carried as VARCHAR2(255 CHAR) (declared "TEXT"): Oracle cannot index a CLOB or a BLOB; its longest value is 0
+-- [key-type-bounded] uniq6.f: a key column is carried as VARCHAR2(255 CHAR) (declared "TEXT"): Oracle cannot index a CLOB or a BLOB; its longest value is 0
 -- [unique-filtered] uniq_many_null.UQ_uniq_many_null_a_b: the unique key (a, b) allows several NULLs in SQLite, and Oracle treats NULLs in a multi-column unique key as equal: it is written as a unique function-based index that holds no row with a NULL, which a foreign key cannot reference
 -- [key-type-bounded] uniq_many_null.a: a key column is carried as VARCHAR2(255 CHAR) (declared "TEXT"): Oracle cannot index a CLOB or a BLOB; its longest value is 1
 -- [key-type-bounded] uniq_many_null.c: a key column is carried as VARCHAR2(255 CHAR) (declared "TEXT"): Oracle cannot index a CLOB or a BLOB; its longest value is 1
@@ -904,6 +923,89 @@ CREATE TABLE "types_o" (
   "money" NUMBER(3,1),
   PRIMARY KEY ("id")
 );
+CREATE TABLE "ck_wide" (
+  "id" NUMBER(19,0) GENERATED BY DEFAULT AS IDENTITY,
+  "s" VARCHAR2(4000 BYTE),
+  PRIMARY KEY ("id")
+);
+CREATE TABLE "nulls_wide" (
+  "id" NUMBER(19,0) GENERATED BY DEFAULT AS IDENTITY,
+  "n0_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" VARCHAR2(255 CHAR),
+  "n1_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" VARCHAR2(255 CHAR),
+  "n2_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" VARCHAR2(255 CHAR),
+  "n3_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" VARCHAR2(255 CHAR),
+  "n4_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" VARCHAR2(255 CHAR),
+  PRIMARY KEY ("id")
+);
+CREATE TABLE "uniq6" (
+  "id" NUMBER(19,0) GENERATED BY DEFAULT AS IDENTITY,
+  "a" VARCHAR2(255 CHAR),
+  "b" VARCHAR2(255 CHAR),
+  "c" VARCHAR2(255 CHAR),
+  "d" VARCHAR2(255 CHAR),
+  "e" VARCHAR2(255 CHAR),
+  "f" VARCHAR2(255 CHAR),
+  PRIMARY KEY ("id")
+);
+CREATE TABLE "wide_t" (
+  "w00_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" NUMBER(19,0) NOT NULL,
+  "w01_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" NUMBER(19,0) NOT NULL,
+  "w02_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" NUMBER(19,0) NOT NULL,
+  "w03_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" NUMBER(19,0) NOT NULL,
+  "w04_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" NUMBER(19,0) NOT NULL,
+  "w05_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" NUMBER(19,0) NOT NULL,
+  "w06_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" NUMBER(19,0) NOT NULL,
+  "w07_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" NUMBER(19,0) NOT NULL,
+  "w08_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" NUMBER(19,0) NOT NULL,
+  "w09_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" NUMBER(19,0) NOT NULL,
+  "w10_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" NUMBER(19,0) NOT NULL,
+  "w11_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" NUMBER(19,0) NOT NULL,
+  "w12_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" NUMBER(19,0) NOT NULL,
+  "w13_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" NUMBER(19,0) NOT NULL,
+  "w14_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" NUMBER(19,0) NOT NULL,
+  "w15_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" NUMBER(19,0) NOT NULL,
+  "w16_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" NUMBER(19,0) NOT NULL,
+  "w17_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" NUMBER(19,0) NOT NULL,
+  "w18_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" NUMBER(19,0) NOT NULL,
+  "w19_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" NUMBER(19,0) NOT NULL,
+  PRIMARY KEY ("w00_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w01_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w02_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w03_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w04_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w05_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w06_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w07_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w08_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w09_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w10_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w11_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w12_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w13_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w14_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w15_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w16_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+"w17_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w18_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w19_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+);
+CREATE TABLE "wide_child" (
+  "id" NUMBER(19,0) GENERATED BY DEFAULT AS IDENTITY,
+  "f00_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" NUMBER(19,0),
+  "f01_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" NUMBER(19,0),
+  "f02_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" NUMBER(19,0),
+  "f03_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" NUMBER(19,0),
+  "f04_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" NUMBER(19,0),
+  "f05_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" NUMBER(19,0),
+  "f06_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" NUMBER(19,0),
+  "f07_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" NUMBER(19,0),
+  "f08_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" NUMBER(19,0),
+  "f09_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" NUMBER(19,0),
+  "f10_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" NUMBER(19,0),
+  "f11_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" NUMBER(19,0),
+  "f12_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" NUMBER(19,0),
+  "f13_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" NUMBER(19,0),
+  "f14_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" NUMBER(19,0),
+  "f15_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" NUMBER(19,0),
+  "f16_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" NUMBER(19,0),
+  "f17_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" NUMBER(19,0),
+  "f18_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" NUMBER(19,0),
+  "f19_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" NUMBER(19,0),
+  PRIMARY KEY ("id")
+);
+CREATE TABLE "gap_t" (
+  "id" NUMBER(19,0) GENERATED BY DEFAULT AS IDENTITY,
+  "d" VARCHAR2(4000 BYTE),
+  "ts" VARCHAR2(4000 BYTE),
+  "ok_d" DATE,
+  PRIMARY KEY ("id")
+);
+CREATE TABLE "BIN_abc_4d60a51f" (
+  "id" NUMBER(19,0) GENERATED BY DEFAULT AS IDENTITY,
+  PRIMARY KEY ("id")
+);
 INSERT INTO "Order Details" ("Order ID", "Product ID", "Unit Price", "Quantity") VALUES
 (1,1,9.99,2),
 (1,2,1.5,1);
@@ -1577,6 +1679,36 @@ INSERT INTO "types_o" ("id", "t", "tz", "js", "n", "b", "f4", "money") VALUES
 (1,'12:30:45.25','2024-01-01 00:00:00+00','{"a": [1, 2]}',123.456,1,1.5e+00d,12.5),
 (2,'00:00:00',NULL,NULL,NULL,0,NULL,NULL);
 COMMIT;
+INSERT INTO "ck_wide" ("id", "s") VALUES
+(1,'v0001'),
+(2,'v0699');
+COMMIT;
+INSERT INTO "nulls_wide" ("id", "n0_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk", "n1_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk", "n2_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk", "n3_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk", "n4_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk") VALUES
+(1,'a',NULL,NULL,NULL,NULL),
+(2,'a',NULL,NULL,NULL,NULL),
+(3,'a','b',NULL,NULL,NULL),
+(4,NULL,NULL,NULL,NULL,NULL);
+COMMIT;
+INSERT INTO "uniq6" ("id", "a", "b", "c", "d", "e", "f") VALUES
+(1,'x',NULL,NULL,NULL,NULL,NULL),
+(2,'x',NULL,NULL,NULL,NULL,NULL);
+COMMIT;
+INSERT INTO "wide_t" ("w00_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w01_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w02_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w03_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w04_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w05_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w06_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w07_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w08_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w09_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w10_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w11_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w12_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w13_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w14_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w15_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w16_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+"w17_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w18_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w19_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc") VALUES
+(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19),
+(100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119);
+COMMIT;
+INSERT INTO "wide_child" ("id", "f00_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f01_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f02_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f03_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f04_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f05_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f06_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f07_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f08_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f09_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f10_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f11_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f12_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f13_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f14_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f15_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f16_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+"f17_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f18_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f19_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd") VALUES
+(1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19);
+COMMIT;
+INSERT INTO "gap_t" ("id", "d", "ts", "ok_d") VALUES
+(1,'1582-10-10','1582-10-12 12:00:00',DATE '1582-10-15'),
+(2,'1582-10-04','1582-10-15 00:00:00',DATE '1582-10-04');
+COMMIT;
+INSERT INTO "BIN_abc_4d60a51f" ("id") VALUES
+(1);
+COMMIT;
 ALTER TABLE "Production.Product" MODIFY ("ProductID" GENERATED BY DEFAULT AS IDENTITY (START WITH 3));
 ALTER TABLE "back`tick" MODIFY ("co`l" GENERATED BY DEFAULT AS IDENTITY (START WITH 2));
 ALTER TABLE "trailing " MODIFY ("id" GENERATED BY DEFAULT AS IDENTITY (START WITH 2));
@@ -1667,6 +1799,12 @@ ALTER TABLE "checks_o" MODIFY ("id" GENERATED BY DEFAULT AS IDENTITY (START WITH
 ALTER TABLE "defaults_o" MODIFY ("id" GENERATED BY DEFAULT AS IDENTITY (START WITH 2));
 ALTER TABLE "index_long_o" MODIFY ("id" GENERATED BY DEFAULT AS IDENTITY (START WITH 2));
 ALTER TABLE "types_o" MODIFY ("id" GENERATED BY DEFAULT AS IDENTITY (START WITH 3));
+ALTER TABLE "ck_wide" MODIFY ("id" GENERATED BY DEFAULT AS IDENTITY (START WITH 3));
+ALTER TABLE "nulls_wide" MODIFY ("id" GENERATED BY DEFAULT AS IDENTITY (START WITH 5));
+ALTER TABLE "uniq6" MODIFY ("id" GENERATED BY DEFAULT AS IDENTITY (START WITH 3));
+ALTER TABLE "wide_child" MODIFY ("id" GENERATED BY DEFAULT AS IDENTITY (START WITH 2));
+ALTER TABLE "gap_t" MODIFY ("id" GENERATED BY DEFAULT AS IDENTITY (START WITH 3));
+ALTER TABLE "BIN_abc_4d60a51f" MODIFY ("id" GENERATED BY DEFAULT AS IDENTITY (START WITH 2));
 CREATE INDEX "Production.Product.IX_Color" ON "Production.Product" ("Color" DESC, "Name.Full");
 CREATE INDEX "an-index-name-that-is-more-than-sixty-four-characters-long-for-sure-yes" ON "a-very-long-table-name-that-is-more-than-sixty-four-characters-long-for-sure" ("v");
 CREATE INDEX "IX_É" ON "ix_names" ("a", "b");
@@ -1681,6 +1819,10 @@ CREATE UNIQUE INDEX "dup_ix_c2" ON "dup_ix" ("c");
 CREATE INDEX "dup_ix_d1" ON "dup_ix" ("d" DESC, "a");
 CREATE INDEX "dup_ix_d3" ON "dup_ix" ("d", "a");
 CREATE UNIQUE INDEX "ref_ui_other" ON "ref_ui" ("other" DESC);
+CREATE UNIQUE INDEX "UQ_nulls_wide_n0_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk_25261c65" ON "nulls_wide" (CASE WHEN "n0_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" IS NOT NULL AND "n1_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" IS NOT NULL AND "n2_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" IS NOT NULL AND "n3_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" IS NOT NULL AND "n4_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" IS NOT NULL THEN "n0_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" END, CASE WHEN "n0_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" IS NOT NULL AND "n1_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" IS NOT NULL AND "n2_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" IS NOT NULL AND "n3_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" IS NOT NULL AND "n4_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" IS NOT NULL THEN "n1_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" END, CASE WHEN "n0_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" IS NOT NULL AND "n1_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" IS NOT NULL AND "n2_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" IS NOT NULL AND "n3_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" IS NOT NULL AND
+"n4_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" IS NOT NULL THEN "n2_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" END, CASE WHEN "n0_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" IS NOT NULL AND "n1_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" IS NOT NULL AND "n2_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" IS NOT NULL AND "n3_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" IS NOT NULL AND "n4_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" IS NOT NULL THEN "n3_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" END, CASE WHEN "n0_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" IS NOT NULL AND "n1_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" IS NOT NULL AND "n2_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" IS NOT NULL AND "n3_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" IS NOT NULL AND "n4_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" IS NOT NULL THEN "n4_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" END);
+CREATE INDEX "wide_t_ix" ON "wide_t" ("w19_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w18_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w17_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w16_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w15_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w14_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w13_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w12_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w11_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w10_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w09_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w08_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w07_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w06_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w05_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w04_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w03_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+"w02_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w01_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w00_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
 ALTER TABLE "checks_t" ADD CHECK ("g" IN ( 'M' , 'F' ));
 ALTER TABLE "checks_t" ADD CHECK (REGEXP_LIKE("code", '^[A-Z][A-Z].*$', 'cn'));
 ALTER TABLE "checks_t" ADD CONSTRAINT "n_positive" CHECK ("n" >= 0);
@@ -1692,6 +1834,10 @@ ALTER TABLE "checks_o" ADD CHECK (LENGTH( "s" ) < 10 AND UPPER( "s" ) <> 'X');
 ALTER TABLE "checks_o" ADD CHECK (NVL( "t" , 'x' ) = 'x' OR NOT REGEXP_LIKE("t", '^.*z.*$', 'cn'));
 ALTER TABLE "checks_o" ADD CONSTRAINT "named_o" CHECK ("n" <> 5);
 ALTER TABLE "checks_o" ADD CHECK ("n" < 100 AND ( "code" IS NULL OR "s" IS NOT NULL ));
+ALTER TABLE "ck_wide" ADD CHECK ("s" IN ( 'v0000' , 'v0001' , 'v0002' , 'v0003' , 'v0004' , 'v0005' , 'v0006' , 'v0007' , 'v0008' , 'v0009' , 'v0010' , 'v0011' , 'v0012' , 'v0013' , 'v0014' , 'v0015' , 'v0016' , 'v0017' , 'v0018' , 'v0019' , 'v0020' , 'v0021' , 'v0022' , 'v0023' , 'v0024' , 'v0025' , 'v0026' , 'v0027' , 'v0028' , 'v0029' , 'v0030' , 'v0031' , 'v0032' , 'v0033' , 'v0034' , 'v0035' , 'v0036' , 'v0037' , 'v0038' , 'v0039' , 'v0040' , 'v0041' , 'v0042' , 'v0043' , 'v0044' , 'v0045' , 'v0046' , 'v0047' , 'v0048' , 'v0049' , 'v0050' , 'v0051' , 'v0052' , 'v0053' , 'v0054' , 'v0055' , 'v0056' , 'v0057' , 'v0058' , 'v0059' , 'v0060' , 'v0061' , 'v0062' , 'v0063' , 'v0064' , 'v0065' , 'v0066' , 'v0067' , 'v0068' , 'v0069' , 'v0070' , 'v0071' , 'v0072' , 'v0073' , 'v0074' , 'v0075' , 'v0076' , 'v0077' , 'v0078' , 'v0079' , 'v0080' , 'v0081' , 'v0082' , 'v0083' , 'v0084' , 'v0085' , 'v0086' , 'v0087' , 'v0088' , 'v0089' , 'v0090' , 'v0091' , 'v0092' , 'v0093' , 'v0094' , 'v0095' , 'v0096' , 'v0097' , 'v0098' , 'v0099' , 'v0100' , 'v0101' , 'v0102' , 'v0103' , 'v0104' , 'v0105' , 'v0106' , 'v0107' , 'v0108' , 'v0109' , 'v0110' , 'v0111' , 'v0112' , 'v0113' , 'v0114' , 'v0115' , 'v0116' , 'v0117' , 'v0118' , 'v0119' , 'v0120' , 'v0121' , 'v0122' , 'v0123' , 'v0124' , 'v0125' , 'v0126' , 'v0127' , 'v0128' , 'v0129' , 'v0130' , 'v0131' , 'v0132' , 'v0133' , 'v0134' , 'v0135' , 'v0136' , 'v0137' , 'v0138' , 'v0139' , 'v0140' , 'v0141' , 'v0142' , 'v0143' , 'v0144' , 'v0145' , 'v0146' , 'v0147' , 'v0148' , 'v0149' , 'v0150' , 'v0151' , 'v0152' , 'v0153' , 'v0154' , 'v0155' , 'v0156' , 'v0157' , 'v0158' , 'v0159' , 'v0160' , 'v0161' , 'v0162' , 'v0163' , 'v0164' , 'v0165' , 'v0166' , 'v0167' , 'v0168' , 'v0169' , 'v0170' , 'v0171' , 'v0172' , 'v0173' , 'v0174' , 'v0175' , 'v0176' , 'v0177' , 'v0178' , 'v0179' , 'v0180' , 'v0181' , 'v0182' , 'v0183' , 'v0184' , 'v0185' , 'v0186' , 'v0187' , 'v0188' , 'v0189' , 'v0190' , 'v0191' , 'v0192' , 'v0193' , 'v0194' , 'v0195' , 'v0196' , 'v0197' , 'v0198' , 'v0199' , 'v0200' , 'v0201' , 'v0202' , 'v0203' , 'v0204' , 'v0205' , 'v0206' , 'v0207' , 'v0208' , 'v0209' , 'v0210' , 'v0211' , 'v0212' , 'v0213' , 'v0214' , 'v0215' , 'v0216' , 'v0217' , 'v0218' , 'v0219' , 'v0220' , 'v0221' , 'v0222' , 'v0223' , 'v0224' ,
+'v0225' , 'v0226' , 'v0227' , 'v0228' , 'v0229' , 'v0230' , 'v0231' , 'v0232' , 'v0233' , 'v0234' , 'v0235' , 'v0236' , 'v0237' , 'v0238' , 'v0239' , 'v0240' , 'v0241' , 'v0242' , 'v0243' , 'v0244' , 'v0245' , 'v0246' , 'v0247' , 'v0248' , 'v0249' , 'v0250' , 'v0251' , 'v0252' , 'v0253' , 'v0254' , 'v0255' , 'v0256' , 'v0257' , 'v0258' , 'v0259' , 'v0260' , 'v0261' , 'v0262' , 'v0263' , 'v0264' , 'v0265' , 'v0266' , 'v0267' , 'v0268' , 'v0269' , 'v0270' , 'v0271' , 'v0272' , 'v0273' , 'v0274' , 'v0275' , 'v0276' , 'v0277' , 'v0278' , 'v0279' , 'v0280' , 'v0281' , 'v0282' , 'v0283' , 'v0284' , 'v0285' , 'v0286' , 'v0287' , 'v0288' , 'v0289' , 'v0290' , 'v0291' , 'v0292' , 'v0293' , 'v0294' , 'v0295' , 'v0296' , 'v0297' , 'v0298' , 'v0299' , 'v0300' , 'v0301' , 'v0302' , 'v0303' , 'v0304' , 'v0305' , 'v0306' , 'v0307' , 'v0308' , 'v0309' , 'v0310' , 'v0311' , 'v0312' , 'v0313' , 'v0314' , 'v0315' , 'v0316' , 'v0317' , 'v0318' , 'v0319' , 'v0320' , 'v0321' , 'v0322' , 'v0323' , 'v0324' , 'v0325' , 'v0326' , 'v0327' , 'v0328' , 'v0329' , 'v0330' , 'v0331' , 'v0332' , 'v0333' , 'v0334' , 'v0335' , 'v0336' , 'v0337' , 'v0338' , 'v0339' , 'v0340' , 'v0341' , 'v0342' , 'v0343' , 'v0344' , 'v0345' , 'v0346' , 'v0347' , 'v0348' , 'v0349' , 'v0350' , 'v0351' , 'v0352' , 'v0353' , 'v0354' , 'v0355' , 'v0356' , 'v0357' , 'v0358' , 'v0359' , 'v0360' , 'v0361' , 'v0362' , 'v0363' , 'v0364' , 'v0365' , 'v0366' , 'v0367' , 'v0368' , 'v0369' , 'v0370' , 'v0371' , 'v0372' , 'v0373' , 'v0374' , 'v0375' , 'v0376' , 'v0377' , 'v0378' , 'v0379' , 'v0380' , 'v0381' , 'v0382' , 'v0383' , 'v0384' , 'v0385' , 'v0386' , 'v0387' , 'v0388' , 'v0389' , 'v0390' , 'v0391' , 'v0392' , 'v0393' , 'v0394' , 'v0395' , 'v0396' , 'v0397' , 'v0398' , 'v0399' , 'v0400' , 'v0401' , 'v0402' , 'v0403' , 'v0404' , 'v0405' , 'v0406' , 'v0407' , 'v0408' , 'v0409' , 'v0410' , 'v0411' , 'v0412' , 'v0413' , 'v0414' , 'v0415' , 'v0416' , 'v0417' , 'v0418' , 'v0419' , 'v0420' , 'v0421' , 'v0422' , 'v0423' , 'v0424' , 'v0425' , 'v0426' , 'v0427' , 'v0428' , 'v0429' , 'v0430' , 'v0431' , 'v0432' , 'v0433' , 'v0434' , 'v0435' , 'v0436' , 'v0437' , 'v0438' , 'v0439' , 'v0440' , 'v0441' , 'v0442' , 'v0443' , 'v0444' , 'v0445' , 'v0446' , 'v0447' , 'v0448' , 'v0449' , 'v0450' , 'v0451' , 'v0452' , 'v0453' , 'v0454' ,
+'v0455' , 'v0456' , 'v0457' , 'v0458' , 'v0459' , 'v0460' , 'v0461' , 'v0462' , 'v0463' , 'v0464' , 'v0465' , 'v0466' , 'v0467' , 'v0468' , 'v0469' , 'v0470' , 'v0471' , 'v0472' , 'v0473' , 'v0474' , 'v0475' , 'v0476' , 'v0477' , 'v0478' , 'v0479' , 'v0480' , 'v0481' , 'v0482' , 'v0483' , 'v0484' , 'v0485' , 'v0486' , 'v0487' , 'v0488' , 'v0489' , 'v0490' , 'v0491' , 'v0492' , 'v0493' , 'v0494' , 'v0495' , 'v0496' , 'v0497' , 'v0498' , 'v0499' , 'v0500' , 'v0501' , 'v0502' , 'v0503' , 'v0504' , 'v0505' , 'v0506' , 'v0507' , 'v0508' , 'v0509' , 'v0510' , 'v0511' , 'v0512' , 'v0513' , 'v0514' , 'v0515' , 'v0516' , 'v0517' , 'v0518' , 'v0519' , 'v0520' , 'v0521' , 'v0522' , 'v0523' , 'v0524' , 'v0525' , 'v0526' , 'v0527' , 'v0528' , 'v0529' , 'v0530' , 'v0531' , 'v0532' , 'v0533' , 'v0534' , 'v0535' , 'v0536' , 'v0537' , 'v0538' , 'v0539' , 'v0540' , 'v0541' , 'v0542' , 'v0543' , 'v0544' , 'v0545' , 'v0546' , 'v0547' , 'v0548' , 'v0549' , 'v0550' , 'v0551' , 'v0552' , 'v0553' , 'v0554' , 'v0555' , 'v0556' , 'v0557' , 'v0558' , 'v0559' , 'v0560' , 'v0561' , 'v0562' , 'v0563' , 'v0564' , 'v0565' , 'v0566' , 'v0567' , 'v0568' , 'v0569' , 'v0570' , 'v0571' , 'v0572' , 'v0573' , 'v0574' , 'v0575' , 'v0576' , 'v0577' , 'v0578' , 'v0579' , 'v0580' , 'v0581' , 'v0582' , 'v0583' , 'v0584' , 'v0585' , 'v0586' , 'v0587' , 'v0588' , 'v0589' , 'v0590' , 'v0591' , 'v0592' , 'v0593' , 'v0594' , 'v0595' , 'v0596' , 'v0597' , 'v0598' , 'v0599' , 'v0600' , 'v0601' , 'v0602' , 'v0603' , 'v0604' , 'v0605' , 'v0606' , 'v0607' , 'v0608' , 'v0609' , 'v0610' , 'v0611' , 'v0612' , 'v0613' , 'v0614' , 'v0615' , 'v0616' , 'v0617' , 'v0618' , 'v0619' , 'v0620' , 'v0621' , 'v0622' , 'v0623' , 'v0624' , 'v0625' , 'v0626' , 'v0627' , 'v0628' , 'v0629' , 'v0630' , 'v0631' , 'v0632' , 'v0633' , 'v0634' , 'v0635' , 'v0636' , 'v0637' , 'v0638' , 'v0639' , 'v0640' , 'v0641' , 'v0642' , 'v0643' , 'v0644' , 'v0645' , 'v0646' , 'v0647' , 'v0648' , 'v0649' , 'v0650' , 'v0651' , 'v0652' , 'v0653' , 'v0654' , 'v0655' , 'v0656' , 'v0657' , 'v0658' , 'v0659' , 'v0660' , 'v0661' , 'v0662' , 'v0663' , 'v0664' , 'v0665' , 'v0666' , 'v0667' , 'v0668' , 'v0669' , 'v0670' , 'v0671' , 'v0672' , 'v0673' , 'v0674' , 'v0675' , 'v0676' , 'v0677' , 'v0678' , 'v0679' , 'v0680' , 'v0681' , 'v0682' , 'v0683' , 'v0684' ,
+'v0685' , 'v0686' , 'v0687' , 'v0688' , 'v0689' , 'v0690' , 'v0691' , 'v0692' , 'v0693' , 'v0694' , 'v0695' , 'v0696' , 'v0697' , 'v0698' , 'v0699' ));
 ALTER TABLE "child_txt" ADD FOREIGN KEY ("code") REFERENCES "parent_txt" ("code") ON DELETE SET NULL;
 ALTER TABLE "child_int" ADD FOREIGN KEY ("pid2") REFERENCES "parent_int" ("id");
 ALTER TABLE "child_int" ADD FOREIGN KEY ("pid") REFERENCES "parent_int" ("id") ON DELETE CASCADE;
@@ -1719,220 +1865,903 @@ ALTER TABLE "act_c" ADD FOREIGN KEY ("d") REFERENCES "act_p" ("id");
 ALTER TABLE "act_c" ADD FOREIGN KEY ("c") REFERENCES "act_p" ("id");
 ALTER TABLE "act_c" ADD FOREIGN KEY ("b") REFERENCES "act_p" ("id") ON DELETE SET NULL;
 ALTER TABLE "act_c" ADD FOREIGN KEY ("a") REFERENCES "act_p" ("id") ON DELETE CASCADE;
+ALTER TABLE "wide_child" ADD FOREIGN KEY ("f00_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f01_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f02_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f03_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f04_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f05_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f06_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f07_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f08_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f09_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f10_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f11_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f12_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f13_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f14_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f15_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f16_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+"f17_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f18_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "f19_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd") REFERENCES "wide_t" ("w00_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w01_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w02_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w03_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w04_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w05_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w06_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w07_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w08_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w09_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w10_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w11_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w12_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w13_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+"w14_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w15_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w16_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w17_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w18_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "w19_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
 COMMIT;
 DECLARE
   n NUMBER;
 BEGIN
   SELECT COUNT(*) INTO n FROM "Order Details";
   IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table Order Details does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'Order Details' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table Order Details does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'Order Details' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 4 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table Order Details does not have its 4 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'Order Details' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table Order Details does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "Production.Product";
   IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table Production.Product does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'Production.Product' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table Production.Product does not have its 2 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'Production.Product' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 3 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table Production.Product does not have its 3 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'Production.Product' AND index_type <> 'LOB';
+  IF n <> 3 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table Production.Product does not have its 3 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "back`tick";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table back`tick does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'back`tick' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table back`tick does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'back`tick' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table back`tick does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'back`tick' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table back`tick does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "trailing ";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table trailing  does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'trailing ' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table trailing  does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'trailing ' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table trailing  does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'trailing ' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table trailing  does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "line_break_697affca";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table line_break_697affca does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'line_break_697affca' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table line_break_697affca does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'line_break_697affca' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table line_break_697affca does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'line_break_697affca' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table line_break_697affca does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "_e3b0c442";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table _e3b0c442 does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = '_e3b0c442' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table _e3b0c442 does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = '_e3b0c442' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table _e3b0c442 does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = '_e3b0c442' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table _e3b0c442 does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "Ünï_t";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table Ünï_t does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'Ünï_t' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table Ünï_t does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'Ünï_t' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table Ünï_t does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'Ünï_t' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table Ünï_t does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "ünï_t";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ünï_t does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'ünï_t' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ünï_t does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'ünï_t' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ünï_t does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'ünï_t' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ünï_t does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "select";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table select does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'select' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table select does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'select' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table select does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'select' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table select does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "ünïcode_日本語_😀";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ünïcode_日本語_😀 does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'ünïcode_日本語_😀' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ünïcode_日本語_😀 does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'ünïcode_日本語_😀' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ünïcode_日本語_😀 does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'ünïcode_日本語_😀' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ünïcode_日本語_😀 does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "a-very-long-table-name-that-is-more-than-sixty-four-characters-long-for-sure";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table a-very-long-table-name-that-is-more-than-sixty-four-characters-long-for-sure does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'a-very-long-table-name-that-is-more-than-sixty-four-characters-long-for-sure' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table a-very-long-table-name-that-is-more-than-sixty-four-characters-long-for-sure does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'a-very-long-table-name-that-is-more-than-sixty-four-characters-long-for-sure' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table a-very-long-table-name-that-is-more-than-sixty-four-characters-long-for-sure does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'a-very-long-table-name-that-is-more-than-sixty-four-characters-long-for-sure' AND index_type <> 'LOB';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table a-very-long-table-name-that-is-more-than-sixty-four-characters-long-for-sure does not have its 2 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "back\slash/and;--/*x*/'q'";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table back\slash/and;--/*x*/''q'' does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'back\slash/and;--/*x*/''q''' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table back\slash/and;--/*x*/''q'' does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'back\slash/and;--/*x*/''q''' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table back\slash/and;--/*x*/''q'' does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'back\slash/and;--/*x*/''q''' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table back\slash/and;--/*x*/''q'' does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "ix_names";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ix_names does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'ix_names' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ix_names does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'ix_names' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ix_names does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'ix_names' AND index_type <> 'LOB';
+  IF n <> 5 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ix_names does not have its 5 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "types_edge";
   IF n <> 3 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table types_edge does not hold 3 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'types_edge' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table types_edge does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'types_edge' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table types_edge does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'types_edge' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table types_edge does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "hostile";
   IF n <> 21 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table hostile does not hold 21 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'hostile' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table hostile does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'hostile' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table hostile does not have its 2 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'hostile' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table hostile does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "hostile_nul";
   IF n <> 3 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table hostile_nul does not hold 3 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'hostile_nul' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table hostile_nul does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'hostile_nul' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table hostile_nul does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'hostile_nul' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table hostile_nul does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "hostile_utf8";
   IF n <> 3 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table hostile_utf8 does not hold 3 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'hostile_utf8' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table hostile_utf8 does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'hostile_utf8' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table hostile_utf8 does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'hostile_utf8' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table hostile_utf8 does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "binary_edge";
   IF n <> 3 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table binary_edge does not hold 3 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'binary_edge' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table binary_edge does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'binary_edge' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table binary_edge does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'binary_edge' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table binary_edge does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "parent_txt";
   IF n <> 3 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table parent_txt does not hold 3 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'parent_txt' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table parent_txt does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'parent_txt' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table parent_txt does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'parent_txt' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table parent_txt does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "child_txt";
   IF n <> 3 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table child_txt does not hold 3 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'child_txt' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table child_txt does not have its 2 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'child_txt' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table child_txt does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'child_txt' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table child_txt does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "parent_int";
   IF n <> 3 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table parent_int does not hold 3 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'parent_int' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table parent_int does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'parent_int' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table parent_int does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'parent_int' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table parent_int does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "child_int";
   IF n <> 3 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table child_int does not hold 3 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'child_int' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 3 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table child_int does not have its 3 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'child_int' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table child_int does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'child_int' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table child_int does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "child_named";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table child_named does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'child_named' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table child_named does not have its 2 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'child_named' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table child_named does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'child_named' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table child_named does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "tree";
   IF n <> 4 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table tree does not hold 4 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'tree' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 3 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table tree does not have its 3 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'tree' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table tree does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'tree' AND index_type <> 'LOB';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table tree does not have its 2 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "comp_parent";
   IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table comp_parent does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'comp_parent' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table comp_parent does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'comp_parent' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table comp_parent does not have its 2 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'comp_parent' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table comp_parent does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "comp_child";
   IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table comp_child does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'comp_child' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table comp_child does not have its 2 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'comp_child' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table comp_child does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'comp_child' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table comp_child does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "fk_missing_parent";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table fk_missing_parent does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'fk_missing_parent' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table fk_missing_parent does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'fk_missing_parent' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table fk_missing_parent does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'fk_missing_parent' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table fk_missing_parent does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "fk_nonunique";
   IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table fk_nonunique does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'fk_nonunique' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table fk_nonunique does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'fk_nonunique' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table fk_nonunique does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'fk_nonunique' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table fk_nonunique does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "fk_nonunique_child";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table fk_nonunique_child does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'fk_nonunique_child' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table fk_nonunique_child does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'fk_nonunique_child' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table fk_nonunique_child does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'fk_nonunique_child' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table fk_nonunique_child does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "fk_setnull_notnull";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table fk_setnull_notnull does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'fk_setnull_notnull' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table fk_setnull_notnull does not have its 2 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'fk_setnull_notnull' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table fk_setnull_notnull does not have its 2 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'fk_setnull_notnull' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table fk_setnull_notnull does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "fk_orphans";
   IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table fk_orphans does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'fk_orphans' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table fk_orphans does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'fk_orphans' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table fk_orphans does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'fk_orphans' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table fk_orphans does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "no_pk";
   IF n <> 4 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table no_pk does not hold 4 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'no_pk' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 0 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table no_pk does not have its 0 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'no_pk' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 0 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table no_pk does not have its 0 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'no_pk' AND index_type <> 'LOB';
+  IF n <> 0 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table no_pk does not have its 0 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "no_pk_dup";
   IF n <> 3 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table no_pk_dup does not hold 3 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'no_pk_dup' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 0 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table no_pk_dup does not have its 0 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'no_pk_dup' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 0 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table no_pk_dup does not have its 0 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'no_pk_dup' AND index_type <> 'LOB';
+  IF n <> 0 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table no_pk_dup does not have its 0 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "without_rowid_t";
   IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table without_rowid_t does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'without_rowid_t' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table without_rowid_t does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'without_rowid_t' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table without_rowid_t does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'without_rowid_t' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table without_rowid_t does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "autoinc_gap";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table autoinc_gap does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'autoinc_gap' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table autoinc_gap does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'autoinc_gap' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table autoinc_gap does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'autoinc_gap' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table autoinc_gap does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "zero_id";
   IF n <> 3 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table zero_id does not hold 3 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'zero_id' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table zero_id does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'zero_id' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table zero_id does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'zero_id' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table zero_id does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "checks_t";
   IF n <> 3 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table checks_t does not hold 3 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'checks_t' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table checks_t does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'checks_t' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 5 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table checks_t does not have its 5 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'checks_t' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table checks_t does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "defaults_t";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table defaults_t does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'defaults_t' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table defaults_t does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'defaults_t' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table defaults_t does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'defaults_t' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table defaults_t does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "wide_row";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table wide_row does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'wide_row' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table wide_row does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'wide_row' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table wide_row does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'wide_row' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table wide_row does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "long_key";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table long_key does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'long_key' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table long_key does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'long_key' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 3 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table long_key does not have its 3 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'long_key' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table long_key does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "long_index";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table long_index does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'long_index' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table long_index does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'long_index' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table long_index does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'long_index' AND index_type <> 'LOB';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table long_index does not have its 2 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "partial_ix";
   IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table partial_ix does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'partial_ix' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table partial_ix does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'partial_ix' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table partial_ix does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'partial_ix' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table partial_ix does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "uniq_t";
   IF n <> 4 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table uniq_t does not hold 4 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'uniq_t' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table uniq_t does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'uniq_t' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table uniq_t does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'uniq_t' AND index_type <> 'LOB';
+  IF n <> 3 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table uniq_t does not have its 3 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "ts_default_frac";
   IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ts_default_frac does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'ts_default_frac' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ts_default_frac does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'ts_default_frac' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ts_default_frac does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'ts_default_frac' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ts_default_frac does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "inf_t";
   IF n <> 3 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table inf_t does not hold 3 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'inf_t' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table inf_t does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'inf_t' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table inf_t does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'inf_t' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table inf_t does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "type_changes";
   IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table type_changes does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'type_changes' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table type_changes does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'type_changes' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table type_changes does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'type_changes' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table type_changes does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "br]acket";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table br]acket does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'br]acket' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table br]acket does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'br]acket' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table br]acket does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'br]acket' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table br]acket does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "dollar$(name)";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table dollar$(name) does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'dollar$(name)' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table dollar$(name) does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'dollar$(name)' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table dollar$(name) does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'dollar$(name)' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table dollar$(name) does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "Trailing";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table Trailing does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'Trailing' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table Trailing does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'Trailing' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table Trailing does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'Trailing' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table Trailing does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "only spaces";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table only spaces does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'only spaces' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table only spaces does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'only spaces' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table only spaces does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'only spaces' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table only spaces does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "name-of-exactly-128-characters-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table name-of-exactly-128-characters-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'name-of-exactly-128-characters-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table name-of-exactly-128-characters-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'name-of-exactly-128-characters-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table name-of-exactly-128-characters-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'name-of-exactly-128-characters-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table name-of-exactly-128-characters-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "name-of-129-characters-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_ef202833";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table name-of-129-characters-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_ef202833 does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'name-of-129-characters-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_ef202833' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table name-of-129-characters-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_ef202833 does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'name-of-129-characters-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_ef202833' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table name-of-129-characters-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_ef202833 does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'name-of-129-characters-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_ef202833' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table name-of-129-characters-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_ef202833 does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "named_keys";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table named_keys does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'named_keys' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 3 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table named_keys does not have its 3 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'named_keys' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table named_keys does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'named_keys' AND index_type <> 'LOB';
+  IF n <> 3 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table named_keys does not have its 3 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "named_keys2";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table named_keys2 does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'named_keys2' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table named_keys2 does not have its 2 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'named_keys2' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table named_keys2 does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'named_keys2' AND index_type <> 'LOB';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table named_keys2 does not have its 2 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "cas_p";
   IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_p does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'cas_p' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_p does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'cas_p' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_p does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'cas_p' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_p does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "cas_a";
   IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_a does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'cas_a' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_a does not have its 2 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'cas_a' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_a does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'cas_a' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_a does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "cas_b";
   IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_b does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'cas_b' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_b does not have its 2 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'cas_b' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_b does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'cas_b' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_b does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "cas_g";
   IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_g does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'cas_g' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 3 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_g does not have its 3 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'cas_g' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_g does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'cas_g' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_g does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "cas_x";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_x does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'cas_x' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_x does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'cas_x' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_x does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'cas_x' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_x does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "cas_y";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_y does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'cas_y' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_y does not have its 2 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'cas_y' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_y does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'cas_y' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_y does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "cas_self";
   IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_self does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'cas_self' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_self does not have its 2 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'cas_self' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_self does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'cas_self' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_self does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "cas_two";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_two does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'cas_two' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 3 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_two does not have its 3 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'cas_two' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_two does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'cas_two' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table cas_two does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "key_text";
   IF n <> 4 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table key_text does not hold 4 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'key_text' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table key_text does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'key_text' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table key_text does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'key_text' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table key_text does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "key_child";
   IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table key_child does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'key_child' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table key_child does not have its 2 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'key_child' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table key_child does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'key_child' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table key_child does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "range_t";
   IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table range_t does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'range_t' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table range_t does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'range_t' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table range_t does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'range_t' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table range_t does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "uniq_one_null";
   IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table uniq_one_null does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'uniq_one_null' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table uniq_one_null does not have its 2 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'uniq_one_null' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table uniq_one_null does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'uniq_one_null' AND index_type <> 'LOB';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table uniq_one_null does not have its 2 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "uniq_ref";
   IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table uniq_ref does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'uniq_ref' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table uniq_ref does not have its 2 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'uniq_ref' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table uniq_ref does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'uniq_ref' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table uniq_ref does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "uniq_many_null";
   IF n <> 4 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table uniq_many_null does not hold 4 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'uniq_many_null' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table uniq_many_null does not have its 2 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'uniq_many_null' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table uniq_many_null does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'uniq_many_null' AND index_type <> 'LOB';
+  IF n <> 3 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table uniq_many_null does not have its 3 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "uniq_ref_many";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table uniq_ref_many does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'uniq_ref_many' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table uniq_ref_many does not have its 2 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'uniq_ref_many' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table uniq_ref_many does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'uniq_ref_many' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table uniq_ref_many does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "q_uote_158ef06c";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table q_uote_158ef06c does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'q_uote_158ef06c' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table q_uote_158ef06c does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'q_uote_158ef06c' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table q_uote_158ef06c does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'q_uote_158ef06c' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table q_uote_158ef06c does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "ROWID_ef2a45f7";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ROWID_ef2a45f7 does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'ROWID_ef2a45f7' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ROWID_ef2a45f7 does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'ROWID_ef2a45f7' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ROWID_ef2a45f7 does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'ROWID_ef2a45f7' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ROWID_ef2a45f7 does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "____________________________________________________________c8a2666a";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ____________________________________________________________c8a2666a does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = '____________________________________________________________c8a2666a' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ____________________________________________________________c8a2666a does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = '____________________________________________________________c8a2666a' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ____________________________________________________________c8a2666a does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = '____________________________________________________________c8a2666a' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ____________________________________________________________c8a2666a does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "mixed_case_o";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table mixed_case_o does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'mixed_case_o' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table mixed_case_o does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'mixed_case_o' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table mixed_case_o does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'mixed_case_o' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table mixed_case_o does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "empties";
   IF n <> 3 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table empties does not hold 3 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'empties' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table empties does not have its 2 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'empties' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table empties does not have its 2 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'empties' AND index_type <> 'LOB';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table empties does not have its 2 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "empty_key_ok";
   IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table empty_key_ok does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'empty_key_ok' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table empty_key_ok does not have its 2 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'empty_key_ok' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table empty_key_ok does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'empty_key_ok' AND index_type <> 'LOB';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table empty_key_ok does not have its 2 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "empty_raw_key";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table empty_raw_key does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'empty_raw_key' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table empty_raw_key does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'empty_raw_key' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table empty_raw_key does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'empty_raw_key' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table empty_raw_key does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "floats_o";
   IF n <> 4 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table floats_o does not hold 4 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'floats_o' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table floats_o does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'floats_o' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table floats_o does not have its 2 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'floats_o' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table floats_o does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "dup_ix";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table dup_ix does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'dup_ix' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table dup_ix does not have its 2 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'dup_ix' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table dup_ix does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'dup_ix' AND index_type <> 'LOB';
+  IF n <> 5 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table dup_ix does not have its 5 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "dup_pk";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table dup_pk does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'dup_pk' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table dup_pk does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'dup_pk' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table dup_pk does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'dup_pk' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table dup_pk does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "ref_ui";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ref_ui does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'ref_ui' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ref_ui does not have its 2 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'ref_ui' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ref_ui does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'ref_ui' AND index_type <> 'LOB';
+  IF n <> 3 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ref_ui does not have its 3 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "ref_ui_child";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ref_ui_child does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'ref_ui_child' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ref_ui_child does not have its 2 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'ref_ui_child' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ref_ui_child does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'ref_ui_child' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ref_ui_child does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "fam_parent";
   IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table fam_parent does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'fam_parent' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table fam_parent does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'fam_parent' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table fam_parent does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'fam_parent' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table fam_parent does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "fam_child";
   IF n <> 3 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table fam_child does not hold 3 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'fam_child' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table fam_child does not have its 2 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'fam_child' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table fam_child does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'fam_child' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table fam_child does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "ident_big";
   IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ident_big does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'ident_big' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ident_big does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'ident_big' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ident_big does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'ident_big' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ident_big does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "ident_neg";
   IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ident_neg does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'ident_neg' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ident_neg does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'ident_neg' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ident_neg does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'ident_neg' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ident_neg does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "ident_plain";
   IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ident_plain does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'ident_plain' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ident_plain does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'ident_plain' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ident_plain does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'ident_plain' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ident_plain does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "ident_empty";
   IF n <> 0 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ident_empty does not hold 0 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'ident_empty' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ident_empty does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'ident_empty' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ident_empty does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'ident_empty' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ident_empty does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "blob_edges";
   IF n <> 7 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table blob_edges does not hold 7 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'blob_edges' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table blob_edges does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'blob_edges' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table blob_edges does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'blob_edges' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table blob_edges does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "two_blobs";
   IF n <> 3 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table two_blobs does not hold 3 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'two_blobs' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table two_blobs does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'two_blobs' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table two_blobs does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'two_blobs' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table two_blobs does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "text_edges";
   IF n <> 4 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table text_edges does not hold 4 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'text_edges' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table text_edges does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'text_edges' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table text_edges does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'text_edges' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table text_edges does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "text_edges_big";
   IF n <> 3 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table text_edges_big does not hold 3 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'text_edges_big' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table text_edges_big does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'text_edges_big' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table text_edges_big does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'text_edges_big' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table text_edges_big does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "text_many_specials";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table text_many_specials does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'text_many_specials' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table text_many_specials does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'text_many_specials' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table text_many_specials does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'text_many_specials' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table text_many_specials does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "sqlplus_hazards";
   IF n <> 27 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table sqlplus_hazards does not hold 27 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'sqlplus_hazards' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table sqlplus_hazards does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'sqlplus_hazards' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table sqlplus_hazards does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'sqlplus_hazards' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table sqlplus_hazards does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "key_twins";
   IF n <> 5 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table key_twins does not hold 5 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'key_twins' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table key_twins does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'key_twins' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table key_twins does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'key_twins' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table key_twins does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "key_twins_child";
   IF n <> 3 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table key_twins_child does not hold 3 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'key_twins_child' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table key_twins_child does not have its 2 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'key_twins_child' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table key_twins_child does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'key_twins_child' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table key_twins_child does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "act_p";
   IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table act_p does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'act_p' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table act_p does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'act_p' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table act_p does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'act_p' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table act_p does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "act_c";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table act_c does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'act_c' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 7 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table act_c does not have its 7 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'act_c' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table act_c does not have its 2 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'act_c' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table act_c does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "checks_o";
   IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table checks_o does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'checks_o' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table checks_o does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'checks_o' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 8 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table checks_o does not have its 8 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'checks_o' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table checks_o does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "defaults_o";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table defaults_o does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'defaults_o' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table defaults_o does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'defaults_o' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table defaults_o does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'defaults_o' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table defaults_o does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "key_big_bytes";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table key_big_bytes does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'key_big_bytes' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table key_big_bytes does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'key_big_bytes' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table key_big_bytes does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'key_big_bytes' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table key_big_bytes does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "key_long_o";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table key_long_o does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'key_long_o' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table key_long_o does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'key_long_o' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 6 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table key_long_o does not have its 6 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'key_long_o' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table key_long_o does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "index_long_o";
   IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table index_long_o does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'index_long_o' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table index_long_o does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'index_long_o' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table index_long_o does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'index_long_o' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table index_long_o does not have its 1 indexes'); END IF;
   SELECT COUNT(*) INTO n FROM "types_o";
   IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table types_o does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'types_o' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table types_o does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'types_o' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table types_o does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'types_o' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table types_o does not have its 1 indexes'); END IF;
+  SELECT COUNT(*) INTO n FROM "ck_wide";
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ck_wide does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'ck_wide' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ck_wide does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'ck_wide' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ck_wide does not have its 2 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'ck_wide' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table ck_wide does not have its 1 indexes'); END IF;
+  SELECT COUNT(*) INTO n FROM "nulls_wide";
+  IF n <> 4 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table nulls_wide does not hold 4 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'nulls_wide' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table nulls_wide does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'nulls_wide' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table nulls_wide does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'nulls_wide' AND index_type <> 'LOB';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table nulls_wide does not have its 2 indexes'); END IF;
+  SELECT COUNT(*) INTO n FROM "uniq6";
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table uniq6 does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'uniq6' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table uniq6 does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'uniq6' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table uniq6 does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'uniq6' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table uniq6 does not have its 1 indexes'); END IF;
+  SELECT COUNT(*) INTO n FROM "wide_t";
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table wide_t does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'wide_t' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table wide_t does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'wide_t' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 20 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table wide_t does not have its 20 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'wide_t' AND index_type <> 'LOB';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table wide_t does not have its 2 indexes'); END IF;
+  SELECT COUNT(*) INTO n FROM "wide_child";
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table wide_child does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'wide_child' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table wide_child does not have its 2 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'wide_child' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table wide_child does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'wide_child' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table wide_child does not have its 1 indexes'); END IF;
+  SELECT COUNT(*) INTO n FROM "gap_t";
+  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table gap_t does not hold 2 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'gap_t' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table gap_t does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'gap_t' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table gap_t does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'gap_t' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table gap_t does not have its 1 indexes'); END IF;
+  SELECT COUNT(*) INTO n FROM "BIN_abc_4d60a51f";
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table BIN_abc_4d60a51f does not hold 1 rows'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'BIN_abc_4d60a51f' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table BIN_abc_4d60a51f does not have its 1 keys'); END IF;
+  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'BIN_abc_4d60a51f' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table BIN_abc_4d60a51f does not have its 1 checks'); END IF;
+  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'BIN_abc_4d60a51f' AND index_type <> 'LOB';
+  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table BIN_abc_4d60a51f does not have its 1 indexes'); END IF;
   INSERT INTO "_demodb_import" VALUES
-('fixture','DemoDB contract edition','abababababababababababababababababababababababababababababababab','v0.0.0-test',104,241);
+('fixture','DemoDB contract edition','abababababababababababababababababababababababababababababababab','v0.0.0-test',111,255);
   COMMIT;
 END;
 /

@@ -109,7 +109,7 @@ func checkOracleLines(t testing.TB, script string) {
 		t.Fatal("the script starts with a byte order mark")
 	}
 	for i, l := range strings.Split(script, "\n") {
-		if !oracleAllowedLine.MatchString(l) {
+		if !oracleAllowedLine.MatchString(l) && !oracleWrapStart(l) {
 			t.Fatalf("line %d starts with a token the generator did not write: %.80q", i+1, l)
 		}
 		if sqlplusCommand.MatchString(l) && !oracleCommandLine(l) {
@@ -196,7 +196,9 @@ func TestOracleScriptFraming(t *testing.T) {
 		"\nSET DEFINE OFF\nSET ESCAPE OFF\nSET CMDSEP OFF\nSET SQLTERMINATOR ';'\nSET SQLPREFIX #\nSET ECHO OFF\nSET FEEDBACK OFF\nSET VERIFY OFF\nWHENEVER SQLERROR EXIT FAILURE ROLLBACK\nWHENEVER OSERROR EXIT FAILURE ROLLBACK\nALTER SESSION SET NLS_COMP = BINARY NLS_SORT = BINARY;\nDECLARE\n",
 		"IF DBMS_DB_VERSION.VERSION < 23 THEN", "IF 'é€😀' <> TO_CHAR(UNISTR('\\00E9\\20AC\\D83D\\DE00')) THEN", "IF cs <> 'AL32UTF8' THEN",
 		"\nCREATE TABLE \"_demodb_import\" (\"dataset\" VARCHAR2(4000 BYTE), \"edition\" VARCHAR2(4000 BYTE), \"source_sha256\" VARCHAR2(64 CHAR) NOT NULL, \"datatug_version\" VARCHAR2(4000 BYTE), \"tables_count\" NUMBER(10,0) NOT NULL, \"rows_count\" NUMBER(19,0) NOT NULL);\n\nCREATE TABLE \"a\"",
-		"COMMIT;\nDECLARE\n  n NUMBER;\nBEGIN\n  SELECT COUNT(*) INTO n FROM \"a\";\n  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table a does not hold 2 rows'); END IF;\n  SELECT COUNT(*) INTO n FROM \"b'c\";\n  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table b''c does not hold 1 rows'); END IF;\n  INSERT INTO \"_demodb_import\" VALUES\n('fixture','DemoDB contract edition','" + strings.Repeat("ab", 32) + "','v0.0.0-test',2,3);\n  COMMIT;\nEND;\n/\n-- end of script\n",
+		"COMMIT;\nDECLARE\n  n NUMBER;\nBEGIN\n  SELECT COUNT(*) INTO n FROM \"a\";\n  IF n <> 2 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table a does not hold 2 rows'); END IF;\n  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'a' AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED';\n  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table a does not have its 1 keys'); END IF;\n  SELECT COUNT(*) INTO n FROM user_constraints WHERE table_name = 'a' AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED';\n  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table a does not have its 1 checks'); END IF;\n  SELECT COUNT(*) INTO n FROM user_indexes WHERE table_name = 'a' AND index_type <> 'LOB';\n  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table a does not have its 1 indexes'); END IF;\n  SELECT COUNT(*) INTO n FROM \"b'c\";\n  IF n <> 1 THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: table b''c does not hold 1 rows'); END IF;\n",
+		"table_name = 'b''c' AND constraint_type IN ('P','U','R')",
+		"  INSERT INTO \"_demodb_import\" VALUES\n('fixture','DemoDB contract edition','" + strings.Repeat("ab", 32) + "','v0.0.0-test',2,3);\n  COMMIT;\nEND;\n/\n-- end of script\n",
 	} {
 		if !strings.Contains(script, want) {
 			t.Errorf("no %q in\n%s", want, script)

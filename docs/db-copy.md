@@ -665,13 +665,16 @@ the client:
   session. **No line of the script starts with a value** and **no literal holds a raw CR or LF**: a text with a line break or control character is written with `CHR()` pieces, and
   any non-ASCII text as `TO_CHAR(UNISTR('\XXXX'))` escapes, so a lone `/`, `@`, `@@`, `EXIT` or a `SET` line cannot occur in data.
 * No line is over 2,300 characters (SQL*Plus refuses an overlong line and ignores it: SP2-0027, exit status 0, observed with a 6,000-character line; the
-  exact limit of each client is untested);
-  the generator wraps long literals, and a literal over 4,000 bytes is a `TO_CLOB` group of at most 3,500 characters. A `BLOB`
+  exact limit of each client is untested). Every statement is wrapped at a safe place: after a comma, or before a keyword, a quoted name, a literal or a number, outside
+  any quote, so a continuation line starts with a token the generator wrote. A wide `CHECK (x IN (...))`, a key over many long names or a composite foreign key is several lines. A
+  statement that cannot be wrapped makes the export **fail** (the writer refuses any line over the limit; a comment line is continued on another comment line).
+  Long literals are wrapped too, and a literal over 4,000 bytes is a `TO_CLOB` group of at most 3,500 bytes. A `BLOB`
   over 2,000 bytes is written by a per-row PL/SQL block of `HEXTORAW` chunks.
 * `WHENEVER SQLERROR EXIT FAILURE ROLLBACK` stops at the first error. Oracle DDL commits, so the script is **not transactional**:
   atomicity is by **guard**. The marker table `_demodb_import` is created first (a second load stops at it with ORA-00955), and the
-  last block counts every table and raises ORA-20000 before the marker row is inserted, so a client that went on after an error
-  (no `WHENEVER`) never writes the marker row. A failed load leaves the tables it created: drop the schema's objects and load again.
+  last block counts, for every table, its rows and, in the catalog, its keys (primary, unique, foreign: enabled and validated), its check and NOT NULL
+  constraints and its indexes, and raises ORA-20000 before the marker row is inserted. A client that went on after an error (no `WHENEVER`) or skipped a line
+  therefore never writes the marker row. The marker proves rows and the presence of the objects; it does not compare the text of a default or of a check. A failed load leaves the tables it created: drop the schema's objects and load again.
 * A version check (ORA-20001), a database character set check (ORA-20002) and a client character set check (ORA-20003) run first.
   The only `/` lines are the ones the generator writes to end its own PL/SQL blocks.
 
@@ -682,8 +685,8 @@ the client:
 | `INTEGER`, `INT2`, `INT4`, `BOOLEAN` | `NUMBER(p,0)` | sized from the values; there is no `BOOLEAN` before 23ai, so a boolean is `NUMBER(1,0)` |
 | `REAL`, `FLOAT` | `BINARY_DOUBLE` | infinities are carried; SQLite stores `-0.0` as `0` |
 | `NUMERIC(p,s)`, `DECIMAL` | `NUMBER(p,s)` | a value that does not fit, or over 38 digits, widens the column (`type-widened`) |
-| `DATE` | `DATE` | years 0001 to 9999 |
-| `DATETIME`, `TIMESTAMP` | `TIMESTAMP(0/3/6)` | the fraction digits the values need |
+| `DATE` | `DATE` | years 0001 to 9999, except 1582-10-05 to 1582-10-14, which Oracle's calendar skips (it stores them ten days later): a column that holds one is carried as text (`type-widened`) |
+| `DATETIME`, `TIMESTAMP` | `TIMESTAMP(0)` to `TIMESTAMP(9)` | the fraction digits the values need (the same days of 1582 are carried as text) |
 | `CHAR(n)`, `VARCHAR(n)`, `TEXT` | `VARCHAR2(n CHAR)` / `VARCHAR2(4000 BYTE)` / `CLOB` | char semantics for declared lengths; a text over 4,000 bytes is a `CLOB` |
 | `BLOB` | `BLOB` (`RAW(n)` in a key) | `HEXTORAW` chunks |
 
@@ -705,6 +708,10 @@ text column with no declared length is `VARCHAR2(255 CHAR)` (`key-type-bounded`)
 * **Unique keys over NULLs.** Oracle's composite unique key admits many rows whose columns are all NULL but not two with the same non-NULL
   prefix and a NULL elsewhere, unlike SQLite; such a key is written as a function-based unique index (`CASE ... END`) and counted as `unique-filtered`.
 * **Foreign key columns** of one equivalence class get one type (ORA-02267 otherwise).
+* **Index limits.** A key row is at most 6,000 bytes and 32 columns. A unique key over nullable columns that holds several NULLs is a function-based index with one `CASE` per column, each repeating the
+  test of every nullable column, and Oracle counts every reference towards the 32 (ORA-01793; measured: 16 columns with one test load, 6 columns with 6 tests do not), so a key with
+  more than 32 references is not created and is reported as `index-not-carried` (its uniqueness over NULLs is then not enforced). A key that cannot be indexed at all (a CLOB, a BLOB, a text over 4,000 bytes) is refused for a primary or unique key.
+* **Names.** A name that starts with `BIN$` (any case) is renamed: such a table belongs to the recycle bin and hides from the data dictionary views.
 
 #### How it is proved
 
@@ -714,7 +721,7 @@ a fuzz fixture of 4,000 hostile rows, a fixture of 80 random foreign key graphs 
 `scripts/journey-datasets.txt`: exports twice (the same bytes), loads with SQL*Plus inside the container, checks that a second
 load stops at the marker table, and runs the cross-engine verifier (`Engine: crossverify.EngineOracle`) through the pure-Go driver
 `github.com/sijms/go-ora/v2`. The verifier reads the `ALL_*` catalog (tables, columns, nullability, identity, keys, foreign keys with actions and
-deferrability, unique and function-based indexes, the marker) and every value with typed reads (a `NUMBER` as exact text, a `BLOB` by its length and bytes).
+deferrability, unique and function-based indexes, the marker) and every value with typed reads (a `NUMBER` as exact text, a `BLOB` by its length and bytes). It compares **only whether a default exists and the number of `CHECK` constraints, not their text**, so a translated `CHECK` or `DEFAULT` is covered by the unit tests and the golden script, not by the real-engine journey.
 Once per run it proves the controls: a client in another character set stops with no table, a failing statement stops the load,
 a client that goes on after an error gets no marker row (and with the counts removed it does), `&`, a long line and a raw
 newline plus `/` are real hazards, and the fuzz script needs its `SET DEFINE OFF`.

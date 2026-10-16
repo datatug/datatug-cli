@@ -69,6 +69,8 @@ func (d oracleDialect) StorableName(name string) string {
 		return fmt.Sprintf("the name is %d bytes and Oracle takes at most %d", len(name), d.MaxIdentLen())
 	case strings.Contains(name, `"`):
 		return `the name holds a double quotation mark, which Oracle refuses in a name even when it is quoted`
+	case strings.HasPrefix(strings.ToUpper(name), "BIN$"):
+		return "a name that starts with BIN$ belongs to the recycle bin, which hides such tables from the data dictionary views"
 	case name == "ROWID":
 		return "ROWID is a reserved word that Oracle refuses as a name even when it is quoted"
 	}
@@ -632,4 +634,88 @@ func (d oracleDialect) Check(expr string, t *ScriptTable) (string, string, bool)
 		note = "a comparison or pattern of text in this check follows the NLS_COMP and NLS_SORT of the session that writes a row (BINARY, like SQLite, unless it changes them); the script loads with BINARY"
 	}
 	return strings.Join(out, " "), note, true
+}
+
+// ---- wrapping of statements ----
+
+// oracleWrapWords are the words a continuation line of a statement may start with, besides a quoted name, a literal or a
+// parenthesis: words of the statements the generator writes that no SQL*Plus command shares (START, DESC and the like
+// are left out).
+var oracleWrapWords = map[string]bool{
+	"AND": true, "OR": true, "NOT": true, "IS": true, "IN": true, "NULL": true, "THEN": true, "WHEN": true, "ELSE": true, "END": true,
+	"CASE": true, "CAST": true, "ON": true, "REFERENCES": true, "DEFERRABLE": true, "INITIALLY": true, "CHECK": true, "AS": true,
+	"DEFAULT": true, "CONSTRAINT": true, "UNIQUE": true, "PRIMARY": true, "FOREIGN": true, "KEY": true, "LIKE": true, "BETWEEN": true,
+	"COLLATE": true, "CHR": true, "TO_CHAR": true, "TO_CLOB": true, "TO_BLOB": true, "UNISTR": true, "HEXTORAW": true,
+	"TIMESTAMP": true, "DATE": true, "SYS_EXTRACT_UTC": true, "SYSTIMESTAMP": true, "REGEXP_LIKE": true, "LENGTH": true,
+	"INSTR": true, "SUBSTR": true, "UPPER": true, "LOWER": true, "ABS": true, "TRIM": true, "NVL": true,
+}
+
+// oracleWrapStart is true when a line may start with s: a quoted name, a literal, a number, a parenthesis or one of oracleWrapWords.
+func oracleWrapStart(s string) bool {
+	if s == "" {
+		return false
+	}
+	switch c := s[0]; {
+	case c == '"', c == '\'', c == '(', c >= '0' && c <= '9':
+		return true // a number may start a line inside a statement (measured on SQL*Plus 23.26.3)
+	case (c == '-' || c == '.') && len(s) > 1 && (s[1] >= '0' && s[1] <= '9' || s[1] == '.' && len(s) > 2 && s[2] >= '0' && s[2] <= '9'):
+		return true
+	}
+	end := 0
+	for end < len(s) && (s[end] == '_' || s[end] == '$' || s[end] >= 'A' && s[end] <= 'Z' || s[end] >= '0' && s[end] <= '9') {
+		end++
+	}
+	return oracleWrapWords[s[:end]] && (end == len(s) || s[end] == ' ' || s[end] == '(' || s[end] == ',' || s[end] == ')')
+}
+
+// oracleBreak is where line l, which is longer than limit, is cut: the start of the continuation line, after a comma or a
+// space that is outside a quoted name or literal and that a line may start after (oracleWrapStart); 0 when there is none.
+func oracleBreak(l string, limit int) int {
+	best := 0
+	inS, inD := false, false
+	for i := 0; i < len(l) && i < limit; i++ {
+		switch c := l[i]; {
+		case c == '\'' && !inD:
+			inS = !inS
+		case c == '"' && !inS:
+			inD = !inD
+		case inS || inD:
+		case c == ',' || c == ' ':
+			cut := i + 1
+			if c == ' ' {
+				cut = i
+			}
+			start := cut
+			for start < len(l) && l[start] == ' ' {
+				start++
+			}
+			if cut <= limit && cut > 0 && oracleWrapStart(l[start:]) {
+				best = start
+			}
+		}
+	}
+	return best
+}
+
+// oracleWrap cuts every line of a statement that is longer than oracleMaxLine into lines that each start with a token the
+// generator wrote (see oracleWrapStart): SQL*Plus takes a statement of several lines, and ignores a line over its limit
+// (SP2-0027) without failing the load. A line that cannot be cut is left whole: the writer refuses a script with a line
+// over the limit.
+func oracleWrap(s string) string {
+	if len(s) <= oracleMaxLine {
+		return s
+	}
+	var out []string
+	for _, l := range strings.Split(s, "\n") {
+		for len(l) > oracleMaxLine {
+			cut := oracleBreak(l, oracleMaxLine)
+			if cut == 0 {
+				break
+			}
+			out = append(out, strings.TrimRight(l[:cut], " "))
+			l = l[cut:]
+		}
+		out = append(out, l)
+	}
+	return strings.Join(out, "\n")
 }

@@ -133,6 +133,8 @@ func unstorableOracle(name string) string {
 		return "holds a double quotation mark"
 	case name == "ROWID":
 		return "ROWID"
+	case strings.HasPrefix(strings.ToUpper(name), "BIN$"):
+		return "starts with BIN$ (the recycle bin)"
 	}
 	for _, r := range name {
 		if r < 0x20 || r == 0x7f || r >= 0x80 && r <= 0x9f || r == 0x2028 || r == 0x2029 || r == 0xFEFF || r == utf8.RuneError {

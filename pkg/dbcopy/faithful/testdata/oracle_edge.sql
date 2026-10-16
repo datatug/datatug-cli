@@ -235,6 +235,9 @@ CREATE INDEX dup_ix_d1 ON dup_ix (d DESC, a);
 CREATE INDEX dup_ix_d2 ON dup_ix (d DESC, a);
 CREATE INDEX dup_ix_d3 ON dup_ix (d, a);
 INSERT INTO dup_ix VALUES (1, 'a', 'b', 'c', 'd');
+-- A UNIQUE key on the primary key column repeats it (ORA-02261): it is not created again.
+CREATE TABLE dup_pk (id INTEGER PRIMARY KEY, x TEXT, UNIQUE (id));
+INSERT INTO dup_pk VALUES (1, 'x');
 CREATE TABLE ref_ui (id INTEGER PRIMARY KEY, code TEXT, other TEXT);
 CREATE UNIQUE INDEX ref_ui_code ON ref_ui (code);
 CREATE UNIQUE INDEX ref_ui_other ON ref_ui (other DESC);

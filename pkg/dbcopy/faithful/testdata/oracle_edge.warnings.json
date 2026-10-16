@@ -305,6 +305,11 @@
     "message": "the index has the columns of the unique key (a,b), which Oracle refuses (ORA-01408): it is not created"
   },
   {
+    "kind": "index-not-carried",
+    "object": "dup_pk.(id)",
+    "message": "the unique key (id) repeats the primary key, which Oracle refuses (ORA-02261): it is not created again"
+  },
+  {
     "kind": "values-normalized",
     "object": "empties.a",
     "message": "2 empty value(s) become NULL, because Oracle has no empty text: the column is created without NOT NULL"

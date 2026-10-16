@@ -104,7 +104,16 @@ load() {
 	local file=$1 user=$2 nls=${3:-.AL32UTF8} base
 	base=$(basename "$file")
 	docker cp "$file" "$name:/tmp/$base" >/dev/null
-	docker exec -e NLS_LANG="$nls" "$name" sqlplus -L -S "$user/$password@//localhost/$service" "@/tmp/$base" </dev/null
+	# A client that waits for input (an unterminated statement) would hang the job: stop it after LOAD_TIMEOUT seconds
+	# (exit status 124) and kill the sqlplus left in the container.
+	local pid dog rc
+	docker exec -e NLS_LANG="$nls" "$name" sqlplus -L -S "$user/$password@//localhost/$service" "@/tmp/$base" </dev/null &
+	pid=$!
+	( sleep "${LOAD_TIMEOUT:-1200}"; kill "$pid" 2>/dev/null && echo "load timed out after ${LOAD_TIMEOUT:-1200}s" >&2; docker exec "$name" pkill sqlplus 2>/dev/null ) &
+	dog=$!
+	rc=0; wait "$pid" || rc=$?
+	kill "$dog" 2>/dev/null || true; wait "$dog" 2>/dev/null || true
+	return "$rc"
 }
 
 tables_in() { scalar "$1" "select count(*) from user_tables"; }

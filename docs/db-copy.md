@@ -260,7 +260,7 @@ SQLite -> PostgreSQL -> SQLite and PostgreSQL -> SQLite -> PostgreSQL on the dem
 it reads every column's storage class and value through python's `sqlite3` or `psycopg`, and compares
 catalogs) that the journey test `TestPostgresExactValuesRoundTrip` runs when `python3` is available.
 
-## SQL script destination: `sqlscript://` (MySQL)
+## SQL script destination: `sqlscript://` (MySQL and SQL Server)
 
 `datatug db copy --from sqlite://<file> --to 'sqlscript:///path/out.sql?dialect=mysql'` does not copy into a
 database: it writes a **SQL script** that creates the same database in an engine. The script is made from the
@@ -276,9 +276,9 @@ The destination is a path in the URL (`sqlscript:///abs/path.sql`, or `sqlscript
 
 | Parameter | Meaning |
 |---|---|
-| `dialect` | Required. `mysql` is implemented; `mssql`, `oracle`, `postgres` and `sqlite` are planned and refused with the list of the implemented ones. |
-| `name` | Dataset name in the header and in the completion marker (default: the SQLite file name without its extension). At most 255 characters. |
-| `edition` | A label for the header, such as `DemoDB contract edition, identical to the SQLite/CSV/JSON`. At most 255 characters. |
+| `dialect` | Required. `mysql` and `mssql` (SQL Server, see [below](#sql-server-dialect-mssql)) are implemented; `oracle`, `postgres` and `sqlite` are planned and refused with the list of the implemented ones. |
+| `name` | Dataset name in the header and in the completion marker (default: the SQLite file name without its extension). At most 255 characters for `mysql` (the marker column); `mssql` takes any length. Neither takes invalid UTF-8 or a NUL. |
+| `edition` | A label for the header, such as `DemoDB contract edition, identical to the SQLite/CSV/JSON`. The same limits as `name`. |
 | `license`, `attribution` | Licence and attribution lines of the header (a demo database's `manifest.json` `source.license`). |
 
 The query is parsed strictly (`net/url.ParseQuery`): a value is never dropped silently. A `;` or a stray `&` inside a value
@@ -319,6 +319,8 @@ and `--progress` are refused with exit 2: a script holds every row of the tables
   same database stops at once; **the last statement inserts its row** (dataset, label, source SHA-256, version, tables,
   rows): a row means the load completed. MySQL commits DDL, so a failed load is not rolled back: drop the database (or the
   tables) and load again. `DROP TABLE _demodb_import` removes the marker.
+  The marker name is compared like table names are, case-insensitively and ignoring trailing spaces: a SQLite table named
+  `_DEMODB_IMPORT` (or `_demodb_import `) is refused (an earlier version compared the name exactly; SQL Server's default collation merges the case as well).
 * `CREATE TABLE` (columns, primary key, unique keys, `ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`, no collation named), the rows
   of each table in one transaction per batch of at most 1000 rows or about 1 MiB, in a **total order** (primary key and
   then the rowid, so a table without a key has an order too), the counters of the auto-numbered columns, **then**
@@ -440,6 +442,177 @@ literal holds a raw control character and every literal reads back as its text, 
 * **Duplication debt.** Identifier quoting and reserved-word knowledge now exist twice: here (`mysqlDialect.QuoteIdent`,
   `StorableName`) and in `dalgo2sql`'s `typed_dialect.go`. Sharing them is a follow-up once the script dialects settle.
 * **Done.** `datatug db export` (inGitDB) is now a shortcut over `db copy --to ingitdb://` (see below).
+
+### SQL Server dialect (`mssql`)
+
+`datatug db copy --from sqlite://<file> --to 'sqlscript:///path/out.sql?dialect=mssql'` writes a T-SQL script for **SQL Server 2016
+and later** (verified on SQL Server 2022, Developer edition). The dialect key is `mssql`; the demo-db site names the same
+format `sqlserver` (`<id>.sqlserver.sql` in a provider's `manifest.json` `exports`), so the site's `sqlserver` export is this
+dialect's output.
+
+```sh
+datatug db copy --from sqlite://./chinook.sqlite --to 'sqlscript:///tmp/chinook.mssql.sql?dialect=mssql&license=MIT'
+sqlcmd -S localhost -d chinook -X -x -b -f 65001 -i /tmp/chinook.mssql.sql
+```
+
+Load it with `-i <file>`, **not** with a redirect (`< file`): the script is UTF-8 **with a byte order mark** (what SQL Server
+Management Studio expects), `sqlcmd -i` skips it, and a redirect hands it to the server as a syntax error. `-f 65001` reads
+UTF-8, `-b` stops at the first error, `-X` turns off the commands that run programs (`!!`, `ED`) and `-x` turns off
+`$(variable)` substitution. The script also loads without `-x` and `-X`, because no value holds `$(` and none starts a line.
+Lines end in LF; there is no CR anywhere.
+
+**No data byte can start a line**, so a line is never a `sqlcmd` command (`GO`, `:r`, `:!!`, `!!`, `EXIT`, `QUIT`, `RESET`, `ED`):
+every line starts with a token the generator wrote (`--`, `SET`, `GO`, `IF`, `CREATE`, `INSERT`, `(`, `ALTER`, `DBCC`,
+`COMMIT`, `BEGIN`, or two spaces inside `CREATE TABLE`) and no literal holds a raw CR, LF or other control character. A text
+with a control character, a Unicode line or paragraph separator, the byte order mark or a non-character is written in pieces,
+`CAST(N'a' AS NVARCHAR(MAX))+NCHAR(13)+NCHAR(10)+N'b'` (the first piece is `NVARCHAR(MAX)`: T-SQL silently stops a
+concatenation of two plain `NVARCHAR` pieces at 4,000 characters); a text with more than 200 such characters (the T-SQL parser
+fails on a few thousand terms), or with a NUL, as `CONVERT(NVARCHAR(MAX),0x<UTF-16LE hex>)`. The `(` of a `$(` is its own piece.
+A blob is `0x..`, a float an exponent literal (`1.5e+00`), a date `'2024-01-01'` (the ISO form, which no `SET LANGUAGE` changes).
+
+#### One transaction, and how it stays one
+
+SQL Server has transactional DDL, so the whole script is **one transaction**: `SET XACT_ABORT ON`, `BEGIN TRANSACTION`, every
+statement its own batch ended by a `GO` line the generator wrote (SQL Server refuses more than 1,000 rows in one
+`INSERT ... VALUES`, so a table is loaded in batches of at most 1,000 rows or about 1 MiB), and `COMMIT TRANSACTION` last. A
+failed statement rolls everything back, and the database is left as it was. The prelude sets `QUOTED_IDENTIFIER`, `ANSI_NULLS`,
+`ANSI_PADDING`, `ANSI_WARNINGS`, `ARITHABORT`, `CONCAT_NULL_YIELDS_NULL` ON and `NUMERIC_ROUNDABORT` OFF (sqlcmd starts with
+`QUOTED_IDENTIFIER` OFF, and filtered indexes need these).
+
+A client that goes on after an error (`sqlcmd` without `-b`, a tool that sends each batch on its own) would run the rest of
+the script **outside** the transaction and keep half the data, so **every batch after `BEGIN TRANSACTION` starts with the guard
+`IF @@TRANCOUNT=0 SET NOEXEC ON`**: once the transaction is gone, every later batch only compiles. The last batches
+check that every table holds exactly the rows the script wrote (`IF (SELECT COUNT_BIG(*) FROM [t]) <> n THROW ..`, which rolls
+back too), fill the marker, `COMMIT`, and end with `SET NOEXEC OFF`.
+
+**The first statement creates the marker table `_demodb_import`** and fails when it exists, so a second load stops there and
+changes nothing; the last one inserts its row (dataset, label, source SHA-256, version, tables, rows): a row means the load
+completed. `DROP TABLE [_demodb_import]` removes it. The script never says `USE` or `DROP DATABASE`: it creates into the
+current database.
+
+#### Types (the declared type wins when every value fits it)
+
+| SQLite | SQL Server | Notes |
+|---|---|---|
+| `INTEGER`... / `INT2` / `INT4` | `BIGINT` / `SMALLINT` / `INT` | wider when a value does not fit (`type-widened`); an `INTEGER PRIMARY KEY` is `IDENTITY(1,1)` loaded under `SET IDENTITY_INSERT`, then `DBCC CHECKIDENT (.., RESEED, n)` puts the counter where SQLite's is (RESEED sets the last number used, except in a table with no row, where it sets the first to use) |
+| `REAL`, `FLOAT`, `DOUBLE` | `FLOAT(53)` | an infinite value, or a value below 2.2250738585072014E-308 (SQL Server flushes it to zero), makes the column `NVARCHAR(MAX)` (`type-widened`) |
+| `NUMERIC(p,s)`, `DECIMAL(p,s)`, `DECIMAL_TEXT(p,s)` | `DECIMAL(p,s)` | when every value fits; otherwise, and for a bare `NUMERIC`/`DECIMAL`/`MONEY`, computed from the values; beyond 38 digits `NVARCHAR(MAX)`. `values-normalized` counts the texts DECIMAL spells differently |
+| `BOOLEAN` | `BIT` | |
+| `DATE` / `DATETIME`, `TIMESTAMP` / `TIME` | `DATE` / `DATETIME2(f)` / `TIME(f)` | `f` is the longest fraction (never `DATETIME`, which rounds to 3.33 ms); a value that is not in the form of its type, or year 0000, makes the column text |
+| `TIMESTAMPTZ`, `JSON_TEXT`, `UUID_TEXT` | `NVARCHAR(MAX)` | `type-widened` |
+| `CHAR(n)`, `VARCHAR(n)`, `NVARCHAR(n)` | `NVARCHAR(n)` | n up to 4,000 UTF-16 code units (a character outside the Basic Multilingual Plane is two); longer is `NVARCHAR(MAX)` |
+| `TEXT` | `NVARCHAR(MAX)` | |
+| `BLOB` | `VARBINARY(MAX)` | |
+| any text or blob in a **key** | `NVARCHAR(n)`, `VARBINARY(n)` | `key-type-bounded`: SQL Server cannot index `MAX`. 255 characters when the key fits, the longest value otherwise; the limits are 900 bytes for the clustered primary key and 1,700 for any other key (and 32 columns): a primary or unique key beyond that is refused, a plain index is dropped (`index-not-carried`) |
+| text with a NUL byte, text that is not valid UTF-8, a column of text and blobs | `VARBINARY(MAX)` | `type-widened`; **policy**: an `NVARCHAR` cannot hold such a text, so the whole column is bytes and the values are exact |
+
+All the columns of a foreign key equivalence class get one type first (SQL Server refuses a key between columns whose type or
+length differ): the widest integer, the longest text, the most decimals; bytes if any member is bytes, text if the families
+differ (`type-widened` for each member that changed).
+
+#### Names
+
+Every name is kept **byte for byte** as one bracket-quoted identifier (`[Order Details]`, `[Production.Product]`, `]` doubled,
+reserved words, Unicode). A name SQL Server cannot store, or the script cannot carry safely, is the only reason to change one,
+and every change is a counted `name-renamed` / `index-renamed` warning: an empty name or one of only spaces, a name longer than
+128 UTF-16 code units, a name with a control or line-break character or the byte order mark, a name with `$(`, a table that
+differs from an earlier one only by case or trailing spaces (SQL Server compares names under the database's collation:
+case-insensitive by default, and a trailing space does not count), and a column that does. The new name is the old one with
+each unusable character replaced by `_`, cut to fit and ended by `_` and 8 hex digits of its SHA-256. SQL Server keeps one list of
+names for tables and constraints: a unique key or foreign key named like a table or like another constraint loses its name
+(`constraint-name-not-carried`) and SQL Server names it.
+
+#### Keys, defaults, checks
+
+* **Unique keys over NULLs.** SQLite never treats two NULLs as equal; SQL Server's `UNIQUE` does. A unique key (or unique index)
+  whose nullable columns hold more than one NULL is written as a unique index **filtered** to the rows without NULL
+  (`unique-filtered`), which is exactly SQLite's rule but cannot be referenced by a foreign key (`fk-not-carried`); one whose
+  columns hold at most one NULL stays a `UNIQUE` constraint, which differs from SQLite only for rows added later.
+* **Foreign keys** are added after the data `WITH CHECK`, so they are trusted. T-SQL has no `RESTRICT`: it is `NO ACTION`
+  (`fk-action-not-carried`, the same refusal for a key that is not deferred). `SET DEFAULT`, `SET NULL` on a `NOT NULL`
+  column and `DEFERRABLE` are carried as the nearest thing and say so.
+* **Cascade paths.** SQL Server refuses a foreign key that makes a cycle or a second cascade path from one table to another
+  (error 1785), at the first key it cannot place. The script decides that statically and deterministically
+  (`mssqlDialect.limitCascades`): the keys are taken in the order of the plan (tables as planned, keys as the table lists
+  them); a key keeps both of its actions when the graph of cascades stays valid, otherwise its `ON UPDATE` action goes, then
+  (keeping the update) its `ON DELETE` action, then both; the first that fits is kept; each lost action is a counted
+  `fk-action-not-carried` with the reason. A `DELETE` follows `CASCADE` keys and a `SET NULL` key updates the child rows, from
+  where the update goes on through the keys that cascade updates; an `UPDATE` follows the keys with an `ON UPDATE` action. A
+  table may be reached at most once by one change, and never again. For Sakila, 8 of the 22 `ON UPDATE CASCADE` keys lose their
+  action (`film.language_id`, `rental` x3, `staff` x2, `store` x2), and its 21 `ON DELETE RESTRICT` keys become `NO ACTION`. **The rule is measured, not derived from
+  SQL Server's source**: a SET NULL key is also counted among the keys that update. It was checked on SQL Server 2022 against 400
+  random foreign key graphs (every downgraded action, 1,245 of them, was tried back on the loaded database and refused with error
+  1785 by the server, except 28, and no script failed to load); the 28 (2%) are in graphs with an `ON DELETE SET NULL` key, where the
+  analysis keeps NO ACTION on an action SQL Server would have taken. The rule errs towards the downgrade, never towards a script that
+  cannot load.
+* **Defaults**: numbers, `N'text'` (the same literal rules as values), booleans; `CURRENT_TIMESTAMP`/`CURRENT_DATE`/`CURRENT_TIME`
+  become `SYSUTCDATETIME()`-based defaults in the column's own form (`DATETIME2` gets `SYSUTCDATETIME()`, a text column gets
+  `CONVERT(NVARCHAR(19), SYSUTCDATETIME(), 120)`, SQLite's text format in UTC; `default-translated`). Anything else is
+  `default-not-carried`.
+* **Checks** are added `WITH CHECK`. `GLOB` becomes `LIKE` (`*` `?` `[..]`; a literal `%` or `_` becomes `[%]`/`[_]`) on an operand
+  with `COLLATE Latin1_General_100_BIN2`, and a comparison, `IN` or `BETWEEN` of a text column gets the same collation (SQLite
+  compares exactly; the default collation ignores case). `UPPER`, `LOWER`, `RTRIM`, `LTRIM`, `ABS`, `COALESCE`, `NULLIF` and
+  `REPLACE` carry over; anything else (`length`, `typeof`, `||`, a hexadecimal literal, a `LIKE` pattern with `[`) is
+  `check-not-carried`; a comparison that stays case-insensitive is `collation-not-carried`.
+* Not carried: views and triggers (`view-not-carried`, `trigger-not-carried`), partial indexes other than the filtered unique
+  ones above, expression indexes, `WITHOUT ROWID`.
+
+#### What a person must know about SQL Server's defaults
+
+The script uses the database's **default collation** (`SQL_Latin1_General_CP1_CI_AS` on a default install), as users of the
+engine expect. Text comparison is **case-insensitive**, and `=`, `UNIQUE` and a foreign key **ignore trailing spaces**, unlike
+SQLite's exact comparison, so keys that differ only by case or by a trailing space in SQLite are duplicates and stop the load
+(and roll it back); the demo databases have none. `LEN()` ignores trailing spaces too. Text is `NVARCHAR` (UTF-16).
+
+#### How it is proved
+
+`scripts/check-journey-mssql.sh` (the non-required, path-filtered workflow `.github/workflows/journey-mssql.yml`) starts the
+digest-pinned `mcr.microsoft.com/mssql/server:2022-latest` image and, for the edge-case fixture
+(`pkg/dbcopy/faithful/testdata/mssql_edge.sql`), a fuzz fixture of 4,000 rows of hostile text, bytes and names, a fixture of 80
+random foreign key graphs, and the six demo databases pinned in `scripts/journey-datasets.txt`: exports twice (the same bytes),
+loads the script with `sqlcmd -X -x -b -f 65001 -i` inside the container, checks that a second load stops at the marker table,
+and runs the cross-engine verifier. Once per run it also proves **atomicity** (a script with a failing batch loaded with
+`sqlcmd` *without* `-b` leaves no table behind, and the same script with its guard lines removed does), the **threat** (without `-x`, `sqlcmd`
+replaces `$(NAME)` inside a literal with the environment variable `NAME`, which is why no value or name of the script ever holds `$(`)
+and that the fuzz script loads without `-X` and `-x`. (The `sqlcmd` of `mssql-tools18` keeps a multi-line literal whole across a
+`GO` line, which SQL Server Management Studio and plain batch splitters do not; the script does not rely on it, and the journey only reports
+which it saw.) The verifier (`internal/crossverify`,
+`Engine: crossverify.EngineMSSQL`) reads the `sys` catalog and compares it with the plan: tables, columns (`nvarchar(255)`,
+`datetime2(3)`, ... spelled as the plan spells them, nullability, identity, whether there is a default), primary key, foreign keys (columns, parent,
+actions, **trusted**), unique keys and indexes (a `PRIMARY KEY` or `UNIQUE` constraint's backing index is the key, not an index;
+a filtered index must be filtered), check constraints (their number, and that they are trusted), the marker, renames, row counts, the **identity counter**, and
+every value read through `github.com/microsoft/go-mssqldb` (int64, a bit as a bool, the 64 bits of a float, a decimal as an exact
+rational, `time.Time` for a date or time, written with an explicit format and the column's own number of decimals).
+The verifier does **not** compare the text of a default or of a `CHECK`, so the `COLLATE Latin1_General_100_BIN2` of a translated
+`CHECK` is covered by the unit tests and the golden script, not by the real-engine journey.
+
+SQL Server runs only on amd64: on an Apple-silicon Mac the container runs as `linux/amd64` under emulation (OrbStack uses Rosetta;
+Docker Desktop needs Rosetta or QEMU enabled) and AdventureWorks takes minutes instead of seconds.
+
+#### Licence of the test image
+
+`ACCEPT_EULA=Y` accepts the end-user licence of the SQL Server image. The founder decided on 2026-10-16 (decision D10) that CI may
+accept it **for automated testing only** (record: the founder answered "Yes, both" on 2026-10-16 to the question whether CI may accept the SQL Server Developer EULA with `ACCEPT_EULA=Y` and the Oracle Free Use Terms for test-only containers, with no redistribution of any image; the same decision is cited in `.github/workflows/journey-mssql.yml` and `scripts/check-journey-mssql.sh`): the Developer edition is licensed for development and testing, never production,
+and the image is pulled and thrown away with the runner, **never redistributed**. The generated scripts contain no Microsoft
+code.
+
+#### Known limits
+
+A unique constraint whose columns hold one NULL admits one NULL in later inserts, not many. A `CHECK` the translator cannot read is
+not carried.
+
+**Names that SQL Server's default collation merges.** At export time two tables, or two columns of one table, are treated as the
+same name when they differ by case (`Abc` / `abc`) or by trailing spaces, and one of them is renamed with a `name-renamed`
+warning. The default collation (`SQL_Latin1_General_CP1_CI_AS`, `Latin1_General_*_CI_AS`) merges more than that, and the
+export does **not** catch it: `ß` and `SS` (`straße` / `STRASSE`), full-width and half-width letters (`ａbc` / `abc`), and the
+other expansions and compatibility forms of the Unicode comparison rules. Two such table names fail the load with Msg 2714, two such column names with
+Msg 2705, and so can two key values (a unique or primary key that is distinct in SQLite). The load runs in one transaction with `-b`, so
+the failure rolls back and leaves nothing behind (see below); rename one of the names in SQLite and export again. A case-sensitive or
+binary database collation does not merge any of these. Loading **without `-b`** continues after a batch fails: a failed data
+or key batch is then skipped by the batch guard and rolled back at the end, but a statement that fails to compile
+(a syntax error) is not part of any transaction the server can roll back, so always use `-b` as the header says. A database with
+another collation (`COLLATE` at `CREATE DATABASE`) compares text in its own way. SQL Server 2014 and earlier are not supported
+(`THROW`, 1,700-byte index keys). Azure SQL Database is the same engine but untested here.
 
 ## Local backup to a folder: `db export` and `--to ingitdb://`
 

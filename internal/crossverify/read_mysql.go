@@ -41,9 +41,11 @@ type MyIndexColumn struct {
 
 // MyIndex is an index (a unique constraint is a unique index in MySQL).
 type MyIndex struct {
-	Name    string
-	Unique  bool
-	Columns []MyIndexColumn
+	Name   string
+	Unique bool
+	// Filtered is true for an index with a WHERE clause (SQL Server).
+	Filtered bool
+	Columns  []MyIndexColumn
 }
 
 // MyFK is a foreign key.
@@ -66,6 +68,8 @@ type MyTable struct {
 	Checks  int
 	// CheckClauses are the check constraints, ordered by name.
 	CheckClauses []MyCheck
+	// Untrusted names the constraints the engine reports as disabled or not checked against the rows (SQL Server).
+	Untrusted []string
 }
 
 // MySQLCatalog is the catalog of one MySQL database.

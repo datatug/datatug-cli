@@ -27,7 +27,7 @@ The command currently dispatches the registered URL schemes above; it does not a
 
 **Between SQLite and PostgreSQL (and SQLite to SQLite) the copy is faithful** (amended 2026-10-15, see [SQLite and PostgreSQL copies](#sqlite-and-postgresql-copies)): tables, columns with their declared types, primary keys, foreign keys with their actions, unique constraints, indexes, check constraints, defaults, auto-number counters and every value are carried, in one transaction on a snapshot of the source; whatever an engine cannot carry is a warning, never a silent loss. The other pairs keep the DALgo path described below.
 
-**SQL script destination** (added 2026-10-16, founder direction: not a second command): `--to 'sqlscript:///path/out.sql?dialect=mysql'` writes a deterministic MySQL script from a SQLite `--from` instead of copying into a database, with the same warnings, `--json`, `--dry-run`, `--fail-on-warning`, `--include` and `--exclude` (see [SQL script destinations](#sql-script-destinations)).
+**SQL script destination** (added 2026-10-16, founder direction: not a second command): `--to 'sqlscript:///path/out.sql?dialect=mysql'` (or `dialect=mssql`, a SQL Server script) writes a deterministic script from a SQLite `--from` instead of copying into a database, with the same warnings, `--json`, `--dry-run`, `--fail-on-warning`, `--include` and `--exclude` (see [SQL script destinations](#sql-script-destinations)). `datatug db export` is unchanged.
 
 **Native inGitDB destination and `datatug db export`** (added 2026-10-16, founder decision): `datatug db export` is a shortcut for `datatug db copy --to ingitdb://<folder>`: one engine, with a plain folder path and a default folder name added (see [Native inGitDB destination](#native-ingitdb-destination-and-datatug-db-export)).
 
@@ -84,7 +84,7 @@ The MVP URL parser MUST accept these schemes:
 | `sqlite` | `sqlite:///absolute/path.db` or `sqlite://./relative/path.db` | `dalgo2sqlite` (lives in `dal-go/dalgo2sqlite`) | E2E-tested |
 | `ingitdb` | `ingitdb://./path-to-project` (local-filesystem path) | `dalgo2ingitdb` (lives in `ingitdb/ingitdb-cli`) | E2E-tested |
 | `postgres` | `postgres://user:pw@host:port/dbname?sslmode=...` | `dalgo2postgres` (lives in `dal-go/dalgo2postgres`) | **Preview** — while `DATATUG_PREVIEW_POSTGRES` is not `1`, opening MUST exit `4` with one fixed sentence that says PostgreSQL sources are a preview and names the variable, before the URL is read any further and without a connection. A URL on either side whose query sets `host`, `port`, `dbname` or `database` is refused by the URL parser with exit `2` whether the variable is set or not, because `db copy` parses both URLs before it opens anything. With it set, `--from` opens through a read-only session (a `--from` URL that turns `default_transaction_read_only` off is refused, and so is one whose query sets `service` or `servicefile`) and `--to` opens for writing. Not in the MVP E2E bar. |
-| `sqlscript` | `sqlscript:///abs/path.sql?dialect=mysql` or `sqlscript:rel/path.sql?dialect=mysql` | none: a file writer in `pkg/dbcopy/faithful` | **Destination only**, from a `sqlite://` source; `dialect=mysql` is implemented (see [SQL script destinations](#sql-script-destinations)) |
+| `sqlscript` | `sqlscript:///abs/path.sql?dialect=mysql` or `sqlscript:rel/path.sql?dialect=mysql` | none: a file writer in `pkg/dbcopy/faithful` | **Destination only**, from a `sqlite://` source; `dialect=mysql` and `dialect=mssql` are implemented (see [SQL script destinations](#sql-script-destinations)) |
 | `bigquery` | `bigquery://PROJECT/DATASET?location=LOCATION` | `dalgo2bigquery` load writer | Supported destination; uses local Google Application Default Credentials with BigQuery write scope. The project is the billing project. Location is mandatory. Existing tables are never replaced, and `--overwrite` is rejected. |
 
 #### REQ: bigquery-destination-transfer
@@ -260,11 +260,11 @@ The target MUST be written in one transaction. Indexes, checks and foreign keys 
 
 ### SQL script destinations
 
-Added 2026-10-16 (founder direction: the script is a destination of `db copy`, not a flag of `db export`). The package is `pkg/dbcopy/faithful` (`PlanSQLiteTo`, `WriteScript`, the `Dialect` interface and the `mysql` dialect); the user guide is `docs/db-copy.md`; the cross-engine verifier is the internal package `internal/crossverify`.
+Added 2026-10-16 (founder direction: the script is a destination of `db copy`, not a flag of `db export`). The package is `pkg/dbcopy/faithful` (`PlanSQLiteTo`, `WriteScript`, the `Dialect` interface and the `mysql` and `mssql` dialects); the user guide is `docs/db-copy.md`; the cross-engine verifier is the internal package `internal/crossverify`.
 
 #### REQ: sqlscript-destination
 
-A `--to` whose scheme is `sqlscript` MUST write a SQL script file from a `sqlite://` `--from` (any other source is rejected with exit `2`). The URL carries the file path and the query parameters `dialect` (required; `mysql` is implemented, any other name MUST be refused with exit `2` and the list of implemented dialects), `name`, `edition`, `license` and `attribution` (header text); any other parameter, a parameter given twice, a query that cannot be parsed (a `;` in a value, which a lenient parser would drop silently from the header, licence attribution included), a host, user information or a fragment MUST be rejected with exit `2`; a `name` or `edition` the marker row cannot hold (over 255 characters, not valid UTF-8, with a NUL) MUST be rejected with exit `2` before anything is written. The script MUST be written from the SQLite file alone (no server is opened), MUST be the same bytes on every run of one datatug version, and MUST be put in place only when complete (a failure leaves no file and no temporary file).
+A `--to` whose scheme is `sqlscript` MUST write a SQL script file from a `sqlite://` `--from` (any other source is rejected with exit `2`). The URL carries the file path and the query parameters `dialect` (required; `mysql` and `mssql` are implemented, any other name MUST be refused with exit `2` and the list of implemented dialects), `name`, `edition`, `license` and `attribution` (header text); any other parameter, a parameter given twice, a query that cannot be parsed (a `;` in a value, which a lenient parser would drop silently from the header, licence attribution included), a host, user information or a fragment MUST be rejected with exit `2`; a `name` or `edition` the marker row cannot hold (over 255 characters for MySQL, not valid UTF-8, with a NUL) MUST be rejected with exit `2` before anything is written. The script MUST be written from the SQLite file alone (no server is opened), MUST be the same bytes on every run of one datatug version, and MUST be put in place only when complete (a failure leaves no file and no temporary file).
 
 #### REQ: sqlscript-flags
 
@@ -272,7 +272,7 @@ A `--to` whose scheme is `sqlscript` MUST write a SQL script file from a `sqlite
 
 #### REQ: sqlscript-no-data-starts-a-line
 
-No literal of a script MAY contain a raw CR or LF in any dialect, and no value MAY start a line of a script: every line starts with a token the generator wrote. A text with a line break, another control character, a Unicode line or paragraph separator, a NUL byte or a backslash (the mysql client reads a backslash as an escape in every quoted string) MUST be written as a hex literal. The header MUST recommend the safe client flags. A name that holds a control or line-break character MUST be renamed with a warning (REQ:sqlscript-names).
+No literal of a script MAY contain a raw CR or LF in any dialect, and no value MAY start a line of a script: every line starts with a token the generator wrote. A text with a line break, another control character, a Unicode line or paragraph separator, a NUL byte or a backslash (the mysql client reads a backslash as an escape in every quoted string) MUST be written as a hex literal; for SQL Server, which has no escape, a text with a control character or line separator MUST be written in pieces (`CAST(N'a' AS NVARCHAR(MAX))+NCHAR(13)+NCHAR(10)+N'b'`, the first piece `NVARCHAR(MAX)`), or as the hex of its UTF-16 code units when it has many or a NUL, and a `$(` MUST be broken (a `sqlcmd` variable). The header MUST recommend the safe client flags (`mysql --skip-commands`; `sqlcmd -X -x -b -f 65001 -i <file>`). A SQL Server script MUST be UTF-8 with a byte order mark, and its header MUST say to load it with `-i` (a redirect passes the mark to the server). A name that holds a control or line-break character MUST be renamed with a warning (REQ:sqlscript-names).
 
 #### REQ: sqlscript-marker
 
@@ -280,11 +280,19 @@ The first statement that creates anything MUST create the marker table `_demodb_
 
 #### REQ: sqlscript-names
 
-Table, column and index names MUST be written byte for byte as one quoted identifier, including spaces, dots, backticks (doubled), reserved words, Unicode and names of up to 64 characters. A name the engine cannot store (empty, ending in a space, longer than the limit, with a control or line-break character, outside the Basic Multilingual Plane for MySQL, or a column that differs from another by a case that the engine folds; accents alone MUST NOT rename a column, because MySQL keeps `e` and `é` apart) MUST be the only reason to change one, MUST be changed to a name derived from the original and a hash of it, and MUST be a `name-renamed` (`index-renamed` for an index) warning. Table names that differ only by case MUST be a `name-case-collision` warning.
+Table, column and index names MUST be written byte for byte as one quoted identifier, including spaces, dots, the quote character (doubled: a backtick for MySQL, `]` for SQL Server), reserved words, Unicode and names of up to the engine's limit (64 characters for MySQL, 128 UTF-16 code units for SQL Server). A name the engine cannot store (empty, ending in a space, longer than the limit, with a control or line-break character, outside the Basic Multilingual Plane for MySQL, `$(` for SQL Server, or a column or (SQL Server) table that differs from another only by what the engine ignores: case for MySQL columns, never accents (`e` and `é` stay apart), case and trailing spaces for SQL Server) MUST be the only reason to change one, MUST be changed to a name derived from the original and a hash of it, and MUST be a `name-renamed` (`index-renamed` for an index) warning. Table names that differ only by case MUST be a `name-case-collision` warning on MySQL (whose table names are case-sensitive on Linux) and MUST be renamed on SQL Server (whose are not under the default collation).
 
 #### REQ: sqlscript-types
 
 Types MUST be chosen from the declared type and every value, as for PostgreSQL: a column whose values do not fit its declared type MUST be carried in a type that holds them, with a `type-widened` warning; text that a utf8mb4 column cannot hold (a NUL byte, invalid UTF-8) MUST make the column bytes. A text or blob in a key MUST get a bounded type (`key-type-bounded`). The columns of a foreign key equivalence class MUST have one type before any statement is written. A row over the engine's row size MUST fall back to TEXT columns (`row-size-bounded`), and a key over the engine's key size MUST be refused (primary, unique, foreign) or dropped with a warning (plain index). A REAL value of a column the script carries as text or bytes MUST be written as the text the source engine itself makes of it (SQLite `CAST(x AS TEXT)`), read from the engine, never as the spelling of the host language. The REAL values of a column carried as DECIMAL MUST be a `values-normalized` warning. A unique key whose text values collide under the engine's default collation MUST be a `key-values-collide` warning at export time, within the limits the documentation lists.
+
+#### REQ: sqlscript-mssql-transaction
+
+A SQL Server script MUST be one transaction (`SET XACT_ABORT ON`, `BEGIN TRANSACTION`, one statement per batch ended by a `GO` line the generator wrote, `COMMIT TRANSACTION` last). Every batch after `BEGIN TRANSACTION` MUST start with `IF @@TRANCOUNT=0 SET NOEXEC ON`, so a client that continues after an error runs nothing outside the rolled-back transaction, and a batch before the commit MUST check that every table holds the rows written. No batch holds more than 1,000 rows of one `INSERT ... VALUES`.
+
+#### REQ: sqlscript-mssql-cascades
+
+A SQL Server script MUST NOT contain a foreign key action that makes a cycle or a second cascade path (error 1785). The actions that would MUST be downgraded to `NO ACTION` by a deterministic static analysis of the whole plan, each a counted `fk-action-not-carried` warning with the reason; T-SQL's missing `RESTRICT` MUST be `NO ACTION` with the same warning. A unique key whose nullable columns hold more than one NULL MUST be written as a unique index filtered to the rows without NULL (`unique-filtered`). SQL Server's `ACCEPT_EULA=Y` for the Developer-edition test image is accepted for automated testing only (founder decision D10, 2026-10-16) and the image MUST NOT be redistributed.
 
 #### REQ: sqlscript-verified
 
@@ -662,6 +670,14 @@ A SQLite or inGitDB target accepts source names under its existing rules, includ
 **Given** an existing `out.sql`
 **When** the user runs the copy with the same destination
 **Then** the command exits `1` and the file is untouched; with `--overwrite=recreate` it is replaced; with `--where` it exits `2`.
+
+### AC: sqlscript-loads-into-sql-server-and-verifies
+
+**Requirements:** copy#req:sqlscript-verified, copy#req:sqlscript-mssql-transaction, copy#req:sqlscript-mssql-cascades, copy#req:sqlscript-names, copy#req:sqlscript-types, copy#req:sqlscript-no-data-starts-a-line
+
+**Given** the SQL Server edge-case fixture, the fuzz fixture, a fixture of random foreign key graphs and the six pinned demo databases
+**When** `scripts/check-journey-mssql.sh` loads each script into SQL Server 2022 with `sqlcmd -X -x -b -f 65001 -i` and runs the verifier
+**Then** every dataset passes with no difference, a second load stops at the marker table, a script with a failing batch loaded without `-b` leaves no table behind, and the fuzz script also loads without `-X` and `-x`.
 
 ### AC: sqlscript-loads-into-mysql-and-verifies
 

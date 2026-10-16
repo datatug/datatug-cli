@@ -98,11 +98,12 @@ func sourceRows(in Input, t *faithful.ScriptTable) rowSource {
 // protocol: integers come back as int64 and doubles as float64, exactly.
 func targetRows(in Input, t *faithful.ScriptTable) rowSource {
 	return func(ctx context.Context, visit func([]string) error) error {
+		eng := in.engine()
 		names := make([]string, len(t.Columns))
 		for i, c := range t.Columns {
-			names[i] = quoteMySQL(c.Name)
+			names[i] = eng.quote(c.Name)
 		}
-		stmt, err := in.Target.PrepareContext(ctx, "SELECT "+strings.Join(names, ", ")+" FROM "+quoteMySQL(t.Name))
+		stmt, err := in.Target.PrepareContext(ctx, "SELECT "+strings.Join(names, ", ")+" FROM "+eng.quote(t.Name))
 		if err != nil {
 			return err
 		}
@@ -116,7 +117,7 @@ func targetRows(in Input, t *faithful.ScriptTable) rowSource {
 			forms := make([]string, len(names))
 			for i, c := range t.Columns {
 				var err error
-				if forms[i], err = canonTarget(c.Choice, vals[i]); err != nil {
+				if forms[i], err = eng.canon(c.Choice, vals[i]); err != nil {
 					return fmt.Errorf("target column %q: %w", c.Name, err)
 				}
 			}
@@ -176,7 +177,7 @@ func compareData(ctx context.Context, in Input, t *faithful.ScriptTable, add fun
 		return 0, 0, fmt.Errorf("read the source: %w", err)
 	}
 	var got int64
-	if err := in.Target.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+quoteMySQL(t.Name)).Scan(&got); err != nil {
+	if err := in.Target.QueryRowContext(ctx, in.engine().count(t.Name)).Scan(&got); err != nil {
 		return 0, 0, fmt.Errorf("count the target rows: %w", err)
 	}
 	add(t.Name, "row count", fmt.Sprint(srcN), fmt.Sprint(got))

@@ -195,6 +195,7 @@ func TestMySQLPlanRefusals(t *testing.T) {
 		"no tables":      {[]string{`CREATE VIEW v AS SELECT 1`}, "no tables", ErrNoTables},
 		"pk with a null": {[]string{`CREATE TABLE t (a TEXT PRIMARY KEY)`, `INSERT INTO t VALUES (NULL)`}, "holds 1 NULL", nil},
 		"marker table":   {[]string{`CREATE TABLE _demodb_import (a)`}, "completion marker", nil},
+		"marker case":    {[]string{`CREATE TABLE _DEMODB_Import (a)`}, "completion marker", nil},
 		"hidden rowid":   {[]string{`CREATE TABLE t (rowid TEXT, _rowid_ TEXT, oid TEXT)`}, "hides its rowid", nil},
 		"long primary":   {[]string{`CREATE TABLE t (k TEXT PRIMARY KEY)`, `INSERT INTO t VALUES (` + long(800) + `)`}, "primary key of table", nil},
 		"long unique":    {[]string{`CREATE TABLE t (id INTEGER PRIMARY KEY, k TEXT UNIQUE)`, `INSERT INTO t VALUES (1, ` + long(800) + `)`}, "unique key of table", nil},

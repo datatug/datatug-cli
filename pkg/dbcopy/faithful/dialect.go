@@ -21,6 +21,8 @@ const (
 	WarnFKActionNotCarried = "fk-action-not-carried"
 	// WarnNameRenamed: a table or column name the engine cannot store was written under another name.
 	WarnNameRenamed = "name-renamed"
+	// WarnUniqueFiltered: a unique key over nullable columns that hold several NULLs is carried as a unique index filtered to the rows without NULL.
+	WarnUniqueFiltered = "unique-filtered"
 	// WarnNameCaseCollision: two names differ only by case and collide on an engine with case-insensitive names.
 	WarnNameCaseCollision = "name-case-collision"
 )

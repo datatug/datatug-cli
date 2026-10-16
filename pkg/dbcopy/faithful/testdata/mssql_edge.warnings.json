@@ -1,0 +1,547 @@
+[
+  {
+    "kind": "name-renamed",
+    "object": "",
+    "message": "table name cannot be stored (the name is empty): created as \"_e3b0c442\""
+  },
+  {
+    "kind": "name-renamed",
+    "object": ".",
+    "message": "column name cannot be stored (the name is empty): created as \"_e3b0c442\""
+  },
+  {
+    "kind": "values-normalized",
+    "object": "Order Details.Unit Price",
+    "message": "2 REAL value(s) are written as the exact decimal of their shortest spelling, for example 9.99: SQLite stores a binary float, DECIMAL(10,2) an exact decimal"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "Production.Product.Color",
+    "message": "a key column is carried as NVARCHAR(255) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 4"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "Production.Product.Name.Full",
+    "message": "a key column is carried as NVARCHAR(255) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 6"
+  },
+  {
+    "kind": "name-renamed",
+    "object": "Trailing",
+    "message": "table name cannot be stored (it differs only by case from another table, and SQL Server compares table names without case): created as \"Trailing_4d998ac2\""
+  },
+  {
+    "kind": "name-renamed",
+    "object": "Trailing.x ",
+    "message": "column name cannot be stored (it differs only by case or trailing spaces from another column of the table, and SQL Server compares column names without case or trailing spaces): created as \"x _2ac3e029\""
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "a-very-long-table-name-that-is-more-than-sixty-four-characters-long-for-sure.v",
+    "message": "a key column is carried as NVARCHAR(255) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 1"
+  },
+  {
+    "kind": "fk-action-not-carried",
+    "object": "cas_g(a)",
+    "message": "ON DELETE CASCADE is not carried: SQL Server refuses a foreign key that makes a cycle or a second cascade path (a DELETE of a row of cas_p reaches cas_g by two paths): the key is carried with NO ACTION"
+  },
+  {
+    "kind": "fk-action-not-carried",
+    "object": "cas_g(a)",
+    "message": "ON UPDATE SET NULL is not carried: SQL Server refuses a foreign key that makes a cycle or a second cascade path (a DELETE of a row of cas_p reaches cas_g by two paths): the key is carried with NO ACTION"
+  },
+  {
+    "kind": "fk-action-not-carried",
+    "object": "cas_self(up)",
+    "message": "ON DELETE SET NULL is not carried: SQL Server refuses a foreign key that makes a cycle or a second cascade path (a DELETE of a row of cas_self reaches cas_self again, a cycle): the key is carried with NO ACTION"
+  },
+  {
+    "kind": "fk-action-not-carried",
+    "object": "cas_self(up)",
+    "message": "ON UPDATE CASCADE is not carried: SQL Server refuses a foreign key that makes a cycle or a second cascade path (a DELETE of a row of cas_self reaches cas_self again, a cycle): the key is carried with NO ACTION"
+  },
+  {
+    "kind": "fk-action-not-carried",
+    "object": "cas_two(p1)",
+    "message": "ON DELETE CASCADE is not carried: SQL Server refuses a foreign key that makes a cycle or a second cascade path (a DELETE of a row of cas_p reaches cas_two by two paths): the key is carried with NO ACTION"
+  },
+  {
+    "kind": "check-not-carried",
+    "object": "checks_t.check #4",
+    "message": "check constraint \"length(s) \u003c 10 AND s \u003c\u003e ''\" is not carried: the function length has no T-SQL equivalent the translator knows"
+  },
+  {
+    "kind": "check-not-carried",
+    "object": "checks_t.check #5",
+    "message": "check constraint \"typeof(bad) = 'text'\" is not carried: the function typeof has no T-SQL equivalent the translator knows"
+  },
+  {
+    "kind": "type-widened",
+    "object": "child_int.pid2",
+    "message": "declared \"INT2\" and carried as SMALLINT, but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as BIGINT"
+  },
+  {
+    "kind": "fk-action-not-carried",
+    "object": "child_named.fk_child_named",
+    "message": "ON UPDATE RESTRICT does not exist in T-SQL: the key is carried with NO ACTION, which refuses the same change when the key is not deferred"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "child_txt.code",
+    "message": "a key column is carried as NVARCHAR(255) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 5"
+  },
+  {
+    "kind": "type-widened",
+    "object": "child_txt.code",
+    "message": "declared \"TEXT\" and carried as NVARCHAR(5), but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as NVARCHAR(255)"
+  },
+  {
+    "kind": "fk-action-not-carried",
+    "object": "comp_child(a,b)",
+    "message": "DEFERRABLE is not supported by SQL Server: the key is checked at once"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "comp_child.b",
+    "message": "a key column is carried as NVARCHAR(255) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 1"
+  },
+  {
+    "kind": "type-widened",
+    "object": "comp_child.b",
+    "message": "declared \"TEXT\" and carried as NVARCHAR(1), but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as NVARCHAR(255)"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "comp_parent.b",
+    "message": "a key column is carried as NVARCHAR(255) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 1"
+  },
+  {
+    "kind": "type-widened",
+    "object": "comp_parent.b",
+    "message": "declared \"TEXT\" and carried as NVARCHAR(1), but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as NVARCHAR(255)"
+  },
+  {
+    "kind": "default-not-carried",
+    "object": "defaults_t.blobd",
+    "message": "default expression x'01' cannot be translated to SQL Server and is not carried"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "defaults_t.dec",
+    "message": "1 REAL value(s) are written as the exact decimal of their shortest spelling, for example 0.1: SQLite stores a binary float, DECIMAL(5,2) an exact decimal"
+  },
+  {
+    "kind": "default-not-carried",
+    "object": "defaults_t.expr",
+    "message": "default expression 1+2 cannot be translated to SQL Server and is not carried"
+  },
+  {
+    "kind": "default-translated",
+    "object": "defaults_t.tdec",
+    "message": "text default '0.00' of a decimal text column became the numeric default (0.00)"
+  },
+  {
+    "kind": "default-translated",
+    "object": "defaults_t.ts",
+    "message": "default CURRENT_TIMESTAMP on a text column is written as a UTC expression in the same text format"
+  },
+  {
+    "kind": "name-renamed",
+    "object": "dollar$(name)",
+    "message": "table name cannot be stored (the name holds \"$(\", which sqlcmd reads as a variable when it runs without -x): created as \"dollar__name__5f30600d\""
+  },
+  {
+    "kind": "name-renamed",
+    "object": "dollar$(name).c$(x)",
+    "message": "column name cannot be stored (the name holds \"$(\", which sqlcmd reads as a variable when it runs without -x): created as \"c__x__c44b0eb5\""
+  },
+  {
+    "kind": "fk-not-carried",
+    "object": "fk_missing_parent",
+    "message": "foreign key (x) references \"not_a_table\", which is not part of this copy"
+  },
+  {
+    "kind": "fk-not-carried",
+    "object": "fk_nonunique_child(v)",
+    "message": "the referenced columns (v) of fk_nonunique are no primary key, unique constraint or unfiltered unique index, which SQL Server requires"
+  },
+  {
+    "kind": "fk-violations-in-source",
+    "object": "fk_orphans(p)",
+    "message": "1 row(s) have no parent in parent_int: the key is not created, because SQL Server would refuse it"
+  },
+  {
+    "kind": "fk-action-not-carried",
+    "object": "fk_setnull_notnull(p)",
+    "message": "ON UPDATE SET DEFAULT is not carried: the key is carried with NO ACTION"
+  },
+  {
+    "kind": "fk-action-not-carried",
+    "object": "fk_setnull_notnull(p)",
+    "message": "ON DELETE SET NULL needs nullable columns and p is NOT NULL: the key is carried with NO ACTION"
+  },
+  {
+    "kind": "type-widened",
+    "object": "hostile_nul.v",
+    "message": "declared \"TEXT\" but its values are not all of that type: carried as VARBINARY(MAX); a text with a NUL byte is carried as bytes, and a copy back returns BLOBs"
+  },
+  {
+    "kind": "type-widened",
+    "object": "hostile_utf8.v",
+    "message": "declared \"TEXT\" but its values are not all of that type: carried as VARBINARY(MAX); a text that is not valid UTF-8 cannot be stored in an NVARCHAR column and is carried as bytes"
+  },
+  {
+    "kind": "type-widened",
+    "object": "inf_t.v",
+    "message": "declared \"REAL\" but its values are not all of that type: carried as NVARCHAR(MAX); SQL Server has no infinity"
+  },
+  {
+    "kind": "index-renamed",
+    "object": "ix_names.PRIMARY",
+    "message": "index name cannot be used (the name is taken by another key of the table): created as \"PRIMARY_bc9a6688\""
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "ix_names.a",
+    "message": "a key column is carried as NVARCHAR(255) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 1"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "ix_names.b",
+    "message": "a key column is carried as NVARCHAR(255) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 1"
+  },
+  {
+    "kind": "index-renamed",
+    "object": "ix_names.ix_é",
+    "message": "index name cannot be used (the name is taken by another key of the table): created as \"ix_é_655309af\""
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "key_child.code",
+    "message": "a key column is carried as NVARCHAR(255) (declared \"VARCHAR(4)\"): SQL Server cannot index an unbounded type; its longest value is 5"
+  },
+  {
+    "kind": "type-widened",
+    "object": "key_child.code",
+    "message": "declared \"VARCHAR(4)\" but some values are longer than that: carried as NVARCHAR(5)"
+  },
+  {
+    "kind": "type-widened",
+    "object": "key_child.code",
+    "message": "declared \"VARCHAR(4)\" and carried as NVARCHAR(5), but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as NVARCHAR(255)"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "key_text.code",
+    "message": "a key column is carried as NVARCHAR(255) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 11"
+  },
+  {
+    "kind": "type-widened",
+    "object": "key_text.code",
+    "message": "declared \"TEXT\" and carried as NVARCHAR(11), but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as NVARCHAR(255)"
+  },
+  {
+    "kind": "name-renamed",
+    "object": "line\nbreak",
+    "message": "table name cannot be stored (the name holds the control, line-break or byte-order-mark character U+000A, which a script line must never carry): created as \"line_break_697affca\""
+  },
+  {
+    "kind": "name-renamed",
+    "object": "line\nbreak.co\nl",
+    "message": "column name cannot be stored (the name holds the control, line-break or byte-order-mark character U+000A, which a script line must never carry): created as \"co_l_dc072b2b\""
+  },
+  {
+    "kind": "name-renamed",
+    "object": "line\nbreak.tab\tcol",
+    "message": "column name cannot be stored (the name holds the control, line-break or byte-order-mark character U+0009, which a script line must never carry): created as \"tab_col_ab1cfc8c\""
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "long_index.a",
+    "message": "a key column is carried as NVARCHAR(300) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 300"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "long_index.b",
+    "message": "a key column is carried as NVARCHAR(300) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 300"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "long_index.c",
+    "message": "a key column is carried as NVARCHAR(300) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 300"
+  },
+  {
+    "kind": "index-not-carried",
+    "object": "long_index.long_index_abc",
+    "message": "the key is longer than the 1700 bytes SQL Server allows in an index key even with every column at the length of its longest value"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "long_key.a",
+    "message": "a key column is carried as NVARCHAR(100) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 100"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "long_key.b",
+    "message": "a key column is carried as NVARCHAR(100) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 100"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "long_key.c",
+    "message": "a key column is carried as NVARCHAR(100) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 100"
+  },
+  {
+    "kind": "name-renamed",
+    "object": "name-of-129-characters-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "message": "table name cannot be stored (the name is 129 characters and SQL Server takes at most 128): created as \"name-of-129-characters-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_ef202833\""
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "named_keys.a",
+    "message": "a key column is carried as NVARCHAR(255) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 1"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "named_keys.b",
+    "message": "a key column is carried as NVARCHAR(255) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 1"
+  },
+  {
+    "kind": "constraint-name-not-carried",
+    "object": "named_keys.tree",
+    "message": "unique constraint name is not carried (the name is taken by another object of the schema): SQL Server names the key itself"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "named_keys2.a",
+    "message": "a key column is carried as NVARCHAR(255) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 1"
+  },
+  {
+    "kind": "constraint-name-not-carried",
+    "object": "named_keys2.shared_name",
+    "message": "unique constraint name is not carried (the name is taken by another object of the schema): SQL Server names the key itself"
+  },
+  {
+    "kind": "name-renamed",
+    "object": "only spaces. ",
+    "message": "column name cannot be stored (the name is only spaces, which SQL Server compares as empty): created as \" _36a9e7f1\""
+  },
+  {
+    "kind": "name-renamed",
+    "object": "only spaces.   ",
+    "message": "column name cannot be stored (the name is only spaces, which SQL Server compares as empty): created as \"   _0aad7da7\""
+  },
+  {
+    "kind": "type-widened",
+    "object": "parent_int.id",
+    "message": "declared \"INT4\" and carried as INT, but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as BIGINT"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "parent_txt.code",
+    "message": "a key column is carried as NVARCHAR(255) (declared \"VARCHAR(5)\"): SQL Server cannot index an unbounded type; its longest value is 5"
+  },
+  {
+    "kind": "type-widened",
+    "object": "parent_txt.code",
+    "message": "declared \"VARCHAR(5)\" and carried as NVARCHAR(5), but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as NVARCHAR(255)"
+  },
+  {
+    "kind": "index-not-carried",
+    "object": "partial_ix.partial_ix_a",
+    "message": "partial index (WHERE a IS NOT NULL) is not carried: the script does not write filtered indexes for a SQLite partial index"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "range_t.big",
+    "message": "1 REAL and 1 INTEGER value(s) share one DECIMAL(20,0) column: SQLite keeps them apart (5 and 5.0), DECIMAL(20,0) does not; each REAL is written as the exact decimal of its shortest spelling, for example 12345678901234567000"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "range_t.n",
+    "message": "2 REAL value(s) are written as the exact decimal of their shortest spelling, for example 12345678901234568000000000: SQLite stores a binary float, DECIMAL(38,10) an exact decimal"
+  },
+  {
+    "kind": "fk-action-not-carried",
+    "object": "tree(parent)",
+    "message": "ON DELETE RESTRICT does not exist in T-SQL: the key is carried with NO ACTION, which refuses the same change when the key is not deferred"
+  },
+  {
+    "kind": "unique-filtered",
+    "object": "tree.UQ_tree_name",
+    "message": "the unique key (name) allows many NULLs in SQLite and one in SQL Server: it is written as a unique index filtered to the rows without NULL, which a foreign key cannot reference"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "tree.name",
+    "message": "a key column is carried as NVARCHAR(255) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 4"
+  },
+  {
+    "kind": "type-widened",
+    "object": "type_changes.decl_char",
+    "message": "declared \"CHAR(3)\" but some values are longer than that: carried as NVARCHAR(MAX)"
+  },
+  {
+    "kind": "type-widened",
+    "object": "type_changes.mixed_n",
+    "message": "declared \"NUMERIC(4,1)\" but some values do not fit that precision and scale exactly, or its default does not: carried as DECIMAL(3,2)"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "type_changes.mixed_n",
+    "message": "1 REAL and 1 INTEGER value(s) share one DECIMAL(3,2) column: SQLite keeps them apart (5 and 5.0), DECIMAL(3,2) does not; each REAL is written as the exact decimal of its shortest spelling, for example 1.25"
+  },
+  {
+    "kind": "type-widened",
+    "object": "type_changes.nodecl",
+    "message": "has no declared type: carried as NVARCHAR(MAX) from its values"
+  },
+  {
+    "kind": "type-widened",
+    "object": "type_changes.small",
+    "message": "declared \"INT2\" but its values do not fit SMALLINT: carried as BIGINT"
+  },
+  {
+    "kind": "type-widened",
+    "object": "types_edge.big_b",
+    "message": "declared \"BLOB\" but its values are not all of that type: carried as VARBINARY(MAX)"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "types_edge.d_bare",
+    "message": "2 REAL and 1 INTEGER value(s) share one DECIMAL(3,2) column: SQLite keeps them apart (5 and 5.0), DECIMAL(3,2) does not; each REAL is written as the exact decimal of its shortest spelling, for example 1.25"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "types_edge.d_fixed",
+    "message": "2 REAL and 1 INTEGER value(s) share one DECIMAL(10,2) column: SQLite keeps them apart (5 and 5.0), DECIMAL(10,2) does not; each REAL is written as the exact decimal of its shortest spelling, for example 12.5"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "types_edge.d_money",
+    "message": "1 REAL and 1 INTEGER value(s) share one DECIMAL(2,1) column: SQLite keeps them apart (5 and 5.0), DECIMAL(2,1) does not; each REAL is written as the exact decimal of its shortest spelling, for example 3.5"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "types_edge.d_text",
+    "message": "3 text value(s) are written in the spelling of DECIMAL(12,4) (.0000 -\u003e 0.0000)"
+  },
+  {
+    "kind": "type-widened",
+    "object": "types_edge.dt_dateonly",
+    "message": "declared \"DATETIME\" but its values are not all of that type: carried as NVARCHAR(MAX)"
+  },
+  {
+    "kind": "type-widened",
+    "object": "types_edge.js",
+    "message": "declared \"JSON_TEXT\" but the script has no such type: carried as NVARCHAR(MAX)"
+  },
+  {
+    "kind": "type-widened",
+    "object": "types_edge.mixed",
+    "message": "has no declared type: carried as VARBINARY(MAX) from its values"
+  },
+  {
+    "kind": "type-widened",
+    "object": "types_edge.r",
+    "message": "declared \"REAL\" but its values are not all of that type: carried as NVARCHAR(MAX); SQL Server flushes a float below 2.2250738585072014E-308 to zero"
+  },
+  {
+    "kind": "type-widened",
+    "object": "types_edge.tz",
+    "message": "declared \"TIMESTAMPTZ\" but the script has no such type: carried as NVARCHAR(MAX)"
+  },
+  {
+    "kind": "type-widened",
+    "object": "types_edge.untyped",
+    "message": "has no declared type: carried as VARBINARY(MAX) from its values"
+  },
+  {
+    "kind": "unique-filtered",
+    "object": "uniq_many_null.UQ_uniq_many_null_a_b",
+    "message": "the unique key (a, b) allows many NULLs in SQLite and one in SQL Server: it is written as a unique index filtered to the rows without NULL, which a foreign key cannot reference"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "uniq_many_null.a",
+    "message": "a key column is carried as NVARCHAR(255) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 1"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "uniq_many_null.c",
+    "message": "a key column is carried as NVARCHAR(255) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 1"
+  },
+  {
+    "kind": "unique-filtered",
+    "object": "uniq_many_null.uniq_many_null_c",
+    "message": "the unique index (c) allows many NULLs in SQLite and one in SQL Server: it is filtered to the rows without NULL, which a foreign key cannot reference"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "uniq_one_null.a",
+    "message": "a key column is carried as NVARCHAR(255) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 1"
+  },
+  {
+    "kind": "type-widened",
+    "object": "uniq_one_null.a",
+    "message": "declared \"TEXT\" and carried as NVARCHAR(1), but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as NVARCHAR(255)"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "uniq_ref.a",
+    "message": "a key column is carried as NVARCHAR(255) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 1"
+  },
+  {
+    "kind": "type-widened",
+    "object": "uniq_ref.a",
+    "message": "declared \"TEXT\" and carried as NVARCHAR(1), but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as NVARCHAR(255)"
+  },
+  {
+    "kind": "fk-not-carried",
+    "object": "uniq_ref_many(c)",
+    "message": "the referenced columns (c) of uniq_many_null are no primary key, unique constraint or unfiltered unique index, which SQL Server requires"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "uniq_ref_many.c",
+    "message": "a key column is carried as NVARCHAR(255) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 1"
+  },
+  {
+    "kind": "unique-filtered",
+    "object": "uniq_t.UQ_uniq_t_a_b",
+    "message": "the unique key (a, b) allows many NULLs in SQLite and one in SQL Server: it is written as a unique index filtered to the rows without NULL, which a foreign key cannot reference"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "uniq_t.a",
+    "message": "a key column is carried as NVARCHAR(255) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 1"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "uniq_t.b",
+    "message": "a key column is carried as NVARCHAR(255) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 1"
+  },
+  {
+    "kind": "unique-filtered",
+    "object": "uniq_t.uniq_t_b",
+    "message": "the unique index (b) allows many NULLs in SQLite and one in SQL Server: it is filtered to the rows without NULL, which a foreign key cannot reference"
+  },
+  {
+    "kind": "storage-option-not-carried",
+    "object": "without_rowid_t",
+    "message": "WITHOUT ROWID is a SQLite storage option and is not carried"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "without_rowid_t.k",
+    "message": "a key column is carried as NVARCHAR(255) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 2"
+  },
+  {
+    "kind": "name-renamed",
+    "object": "ünï_t",
+    "message": "table name cannot be stored (it differs only by case from another table, and SQL Server compares table names without case): created as \"ünï_t_96802b60\""
+  },
+  {
+    "kind": "name-renamed",
+    "object": "ünïcode_日本語_😀.ünï",
+    "message": "column name cannot be stored (it differs only by case or trailing spaces from another column of the table, and SQL Server compares column names without case or trailing spaces): created as \"ünï_e975a529\""
+  }
+]

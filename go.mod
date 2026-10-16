@@ -35,7 +35,6 @@ require (
 	github.com/datatug/cliformat v0.0.3
 	github.com/datatug/datatug-core v0.57.1
 	github.com/datatug/sql2csv v0.0.1
-	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/gofrs/flock v0.13.1
@@ -49,6 +48,7 @@ require (
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/mattn/go-sqlite3 v1.14.50
+	github.com/microsoft/go-mssqldb v1.11.2
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/openvaultdb/openvaultdb-go v0.6.2
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
@@ -168,6 +168,7 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sahilm/fuzzy v0.1.3 // indirect
 	github.com/sergi/go-diff v1.4.0 // indirect
+	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/skeema/knownhosts v1.3.2 // indirect
 	github.com/strongo/analytics v0.2.8 // indirect
 	github.com/strongo/decimal v0.1.2 // indirect

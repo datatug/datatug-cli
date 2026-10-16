@@ -140,7 +140,7 @@ func TestSQLScriptUsageErrors(t *testing.T) {
 		want string
 	}{
 		"no dialect":         {[]string{"--to", "sqlscript://" + out}, "dialect is missing"},
-		"unknown dialect":    {[]string{"--to", "sqlscript://" + out + "?dialect=oracle"}, "implemented: mysql"},
+		"unknown dialect":    {[]string{"--to", "sqlscript://" + out + "?dialect=oracle"}, "implemented: mssql, mysql"},
 		"unknown parameter":  {[]string{"--to", sqlscript(out, "&zip=1")}, `unknown parameter "zip"`},
 		"no path":            {[]string{"--to", "sqlscript:?dialect=mysql"}, "file path is missing"},
 		"a host":             {[]string{"--to", "sqlscript://host/x.sql?dialect=mysql"}, "path and a query only"},

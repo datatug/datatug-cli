@@ -1,0 +1,9 @@
+# The demo databases the MySQL journey loads, pinned: id, demo-db repository commit, file in data-source/,
+# SHA-256 of the decoded SQLite file (config/databases.json of demo-db/websites names the commits), licence.
+# A file name ending in .gz is decoded before the hash is checked.
+chinook        3e7bb316d8a438eb7e5930067997a4e4543a275c  source.sqlite     7651ba378ac2fcd0dfc3c66fb101f7a7eed3ba39a612ec642b96e20702061f15  MIT
+northwind      c07b4666734a3445b2b0c2fbaf84305dcdb1bf45  source.sqlite     279b34136771aee75d802094b3329515a2b01da65d2a20a4a9e3b58c29b4fd20  MIT
+pubs           e99ca33330a043e23b2c5a665356fb8ad8d0b508  source.sqlite     b45b08b7c06441cc0b138b031ea5bd32bd5866aebf874c89d2ebf7fc6abb3691  MIT
+sakila         113e54ad83c3e003a4fd195c893f2b19a921435c  source.sqlite     9bebeee50fecb1fee115c206a4f380f2f6d1f009e7796b18b8a8cfba7c810454  BSD-3-Clause
+employees      add7744ddc5cefc535a7cbb09b3dffee41811ade  source.sqlite.gz  46b49dd0e141cd8db66d57680a10febfccc15e6f54dc7b8f3c2316b55e11c5f0  CC-BY-SA-3.0
+adventureworks c91e06e9c12380e7709f66ab1e69cf7f858f67c1  source.sqlite.gz  6a105e1982becfe003fc7a307d7cad9d738390cedd79d166c2167fd817168109  MIT

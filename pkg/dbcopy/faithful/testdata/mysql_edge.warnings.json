@@ -1,0 +1,357 @@
+[
+  {
+    "kind": "name-renamed",
+    "object": "",
+    "message": "table name cannot be stored (the name is empty): created as \"_e3b0c442\""
+  },
+  {
+    "kind": "name-renamed",
+    "object": ".",
+    "message": "column name cannot be stored (the name is empty): created as \"_e3b0c442\""
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "Production.Product.Color",
+    "message": "a key column is carried as VARCHAR(255) (declared \"TEXT\"): MySQL cannot index an unbounded type; its longest value is 4"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "Production.Product.Name.Full",
+    "message": "a key column is carried as VARCHAR(255) (declared \"TEXT\"): MySQL cannot index an unbounded type; its longest value is 6"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "a-very-long-table-name-that-is-more-than-sixty-four-cha_e4c1d4c0.v",
+    "message": "a key column is carried as VARCHAR(255) (declared \"TEXT\"): MySQL cannot index an unbounded type; its longest value is 1"
+  },
+  {
+    "kind": "name-renamed",
+    "object": "a-very-long-table-name-that-is-more-than-sixty-four-characters-long-for-sure",
+    "message": "table name cannot be stored (the name is 76 characters and MySQL takes at most 64): created as \"a-very-long-table-name-that-is-more-than-sixty-four-cha_e4c1d4c0\""
+  },
+  {
+    "kind": "name-renamed",
+    "object": "a-very-long-table-name-that-is-more-than-sixty-four-characters-long-for-sure.a-very-long-column-name-that-is-more-than-sixty-four-characters-long-for-sure",
+    "message": "column name cannot be stored (the name is 77 characters and MySQL takes at most 64): created as \"a-very-long-column-name-that-is-more-than-sixty-four-ch_1c966960\""
+  },
+  {
+    "kind": "index-renamed",
+    "object": "a-very-long-table-name-that-is-more-than-sixty-four-characters-long-for-sure.an-index-name-that-is-more-than-sixty-four-characters-long-for-sure-yes",
+    "message": "index name cannot be used (the name is 71 characters and MySQL takes at most 64): created as \"an-index-name-that-is-more-than-sixty-four-characters-l_9e93f86c\""
+  },
+  {
+    "kind": "collation-not-carried",
+    "object": "checks_t.check #4",
+    "message": "a comparison of text in this check ignores case and accents under MySQL's default collation, where SQLite compares exactly"
+  },
+  {
+    "kind": "check-not-carried",
+    "object": "checks_t.check #5",
+    "message": "check constraint \"typeof(bad) = 'text'\" is not carried: the function typeof has no MySQL equivalent the translator knows"
+  },
+  {
+    "kind": "type-widened",
+    "object": "child_int.pid2",
+    "message": "declared \"INT2\" and carried as SMALLINT, but it joins the columns of its foreign keys, which MySQL requires to have one type: carried as BIGINT"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "child_txt.code",
+    "message": "a key column is carried as VARCHAR(255) (declared \"TEXT\"): MySQL cannot index an unbounded type; its longest value is 5"
+  },
+  {
+    "kind": "fk-action-not-carried",
+    "object": "comp_child(a,b)",
+    "message": "DEFERRABLE is not supported by MySQL: the key is checked at once"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "comp_child.b",
+    "message": "a key column is carried as VARCHAR(255) (declared \"TEXT\"): MySQL cannot index an unbounded type; its longest value is 1"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "comp_parent.b",
+    "message": "a key column is carried as VARCHAR(255) (declared \"TEXT\"): MySQL cannot index an unbounded type; its longest value is 1"
+  },
+  {
+    "kind": "default-not-carried",
+    "object": "defaults_t.blobd",
+    "message": "default expression x'01' cannot be translated to MySQL and is not carried"
+  },
+  {
+    "kind": "default-not-carried",
+    "object": "defaults_t.expr",
+    "message": "default expression 1+2 cannot be translated to MySQL and is not carried"
+  },
+  {
+    "kind": "default-translated",
+    "object": "defaults_t.tdec",
+    "message": "text default '0.00' of a decimal text column became the numeric default 0.00"
+  },
+  {
+    "kind": "default-translated",
+    "object": "defaults_t.ts",
+    "message": "default CURRENT_TIMESTAMP on a text column is written as a UTC expression in the same text format"
+  },
+  {
+    "kind": "fk-not-carried",
+    "object": "fk_missing_parent",
+    "message": "foreign key (x) references \"not_a_table\", which is not part of this copy"
+  },
+  {
+    "kind": "fk-not-carried",
+    "object": "fk_nonunique_child(v)",
+    "message": "the referenced columns (v) of fk_nonunique are no primary key or unique key, which MySQL requires"
+  },
+  {
+    "kind": "fk-violations-in-source",
+    "object": "fk_orphans(p)",
+    "message": "1 row(s) have no parent in parent_int: the key is not created, because MySQL would refuse it"
+  },
+  {
+    "kind": "fk-action-not-carried",
+    "object": "fk_setnull_notnull(p)",
+    "message": "ON UPDATE SET DEFAULT is not supported by InnoDB: the key is carried with NO ACTION"
+  },
+  {
+    "kind": "fk-action-not-carried",
+    "object": "fk_setnull_notnull(p)",
+    "message": "ON DELETE SET NULL needs nullable columns and p is NOT NULL: the key is carried with NO ACTION"
+  },
+  {
+    "kind": "type-widened",
+    "object": "hostile_nul.v",
+    "message": "declared \"TEXT\" but its values are not all of that type: carried as BLOB; a text with a NUL byte is carried as bytes, and a copy back returns BLOBs"
+  },
+  {
+    "kind": "type-widened",
+    "object": "hostile_utf8.v",
+    "message": "declared \"TEXT\" but its values are not all of that type: carried as BLOB; a text that is not valid UTF-8 cannot be stored in a utf8mb4 column and is carried as bytes"
+  },
+  {
+    "kind": "type-widened",
+    "object": "inf_t.v",
+    "message": "declared \"REAL\" but its values are not all of that type: carried as TEXT; MySQL has no infinity"
+  },
+  {
+    "kind": "index-renamed",
+    "object": "ix_names.PRIMARY",
+    "message": "index name cannot be used (the name is taken by another key of the table): created as \"PRIMARY_bc9a6688\""
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "ix_names.a",
+    "message": "a key column is carried as VARCHAR(255) (declared \"TEXT\"): MySQL cannot index an unbounded type; its longest value is 1"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "ix_names.b",
+    "message": "a key column is carried as VARCHAR(255) (declared \"TEXT\"): MySQL cannot index an unbounded type; its longest value is 1"
+  },
+  {
+    "kind": "index-renamed",
+    "object": "ix_names.ix ",
+    "message": "index name cannot be used (MySQL does not accept a name that ends in a space): created as \"ix _0dd940ed\""
+  },
+  {
+    "kind": "index-renamed",
+    "object": "ix_names.ix_é",
+    "message": "index name cannot be used (the name is taken by another key of the table): created as \"ix_é_655309af\""
+  },
+  {
+    "kind": "name-renamed",
+    "object": "line\nbreak",
+    "message": "table name cannot be stored (the name holds the control or line-break character U+000A, which a script line must never carry): created as \"line_break_697affca\""
+  },
+  {
+    "kind": "name-renamed",
+    "object": "line\nbreak.co\nl",
+    "message": "column name cannot be stored (the name holds the control or line-break character U+000A, which a script line must never carry): created as \"co_l_dc072b2b\""
+  },
+  {
+    "kind": "name-renamed",
+    "object": "line\nbreak.tab\tcol",
+    "message": "column name cannot be stored (the name holds the control or line-break character U+0009, which a script line must never carry): created as \"tab_col_ab1cfc8c\""
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "long_index.a",
+    "message": "a key column is carried as VARCHAR(300) (declared \"TEXT\"): MySQL cannot index an unbounded type; its longest value is 300"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "long_index.b",
+    "message": "a key column is carried as VARCHAR(300) (declared \"TEXT\"): MySQL cannot index an unbounded type; its longest value is 300"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "long_index.c",
+    "message": "a key column is carried as VARCHAR(300) (declared \"TEXT\"): MySQL cannot index an unbounded type; its longest value is 300"
+  },
+  {
+    "kind": "index-not-carried",
+    "object": "long_index.long_index_abc",
+    "message": "the key is longer than the 3072 bytes InnoDB allows even with every column at the length of its longest value"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "long_key.a",
+    "message": "a key column is carried as VARCHAR(255) (declared \"TEXT\"): MySQL cannot index an unbounded type; its longest value is 200"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "long_key.b",
+    "message": "a key column is carried as VARCHAR(255) (declared \"TEXT\"): MySQL cannot index an unbounded type; its longest value is 200"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "long_key.c",
+    "message": "a key column is carried as VARCHAR(255) (declared \"TEXT\"): MySQL cannot index an unbounded type; its longest value is 200"
+  },
+  {
+    "kind": "type-widened",
+    "object": "parent_int.id",
+    "message": "declared \"INT4\" and carried as INT, but it joins the columns of its foreign keys, which MySQL requires to have one type: carried as BIGINT"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "parent_txt.code",
+    "message": "a key column is carried as VARCHAR(255) (declared \"VARCHAR(5)\"): MySQL cannot index an unbounded type; its longest value is 5"
+  },
+  {
+    "kind": "index-not-carried",
+    "object": "partial_ix.partial_ix_a",
+    "message": "partial index (WHERE a IS NOT NULL) is not carried: MySQL has no partial indexes"
+  },
+  {
+    "kind": "name-renamed",
+    "object": "trailing ",
+    "message": "table name cannot be stored (MySQL does not accept a name that ends in a space): created as \"trailing _b1635c0a\""
+  },
+  {
+    "kind": "name-renamed",
+    "object": "trailing .c ",
+    "message": "column name cannot be stored (MySQL does not accept a name that ends in a space): created as \"c _677021e9\""
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "tree.name",
+    "message": "a key column is carried as VARCHAR(255) (declared \"TEXT\"): MySQL cannot index an unbounded type; its longest value is 4"
+  },
+  {
+    "kind": "type-widened",
+    "object": "type_changes.decl_char",
+    "message": "declared \"CHAR(3)\" but some values are longer than that: carried as TEXT"
+  },
+  {
+    "kind": "type-widened",
+    "object": "type_changes.mixed_n",
+    "message": "declared \"NUMERIC(4,1)\" but some values do not fit that precision and scale exactly, or its default does not: carried as DECIMAL(3,2)"
+  },
+  {
+    "kind": "type-widened",
+    "object": "type_changes.nodecl",
+    "message": "has no declared type: carried as TEXT from its values"
+  },
+  {
+    "kind": "type-widened",
+    "object": "type_changes.small",
+    "message": "declared \"INT2\" but its values do not fit SMALLINT: carried as BIGINT"
+  },
+  {
+    "kind": "type-widened",
+    "object": "types_edge.big_b",
+    "message": "declared \"BLOB\" but its values are not all of that type: carried as BLOB"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "types_edge.d_text",
+    "message": "3 text value(s) are written in the spelling of DECIMAL(12,4) (.0000 -\u003e 0.0000)"
+  },
+  {
+    "kind": "type-widened",
+    "object": "types_edge.dt_dateonly",
+    "message": "declared \"DATETIME\" but its values are not all of that type: carried as TEXT"
+  },
+  {
+    "kind": "type-widened",
+    "object": "types_edge.js",
+    "message": "declared \"JSON_TEXT\" but MySQL has no such type: carried as TEXT"
+  },
+  {
+    "kind": "type-widened",
+    "object": "types_edge.mixed",
+    "message": "has no declared type: carried as BLOB from its values"
+  },
+  {
+    "kind": "type-widened",
+    "object": "types_edge.tz",
+    "message": "declared \"TIMESTAMPTZ\" but MySQL has no such type: carried as TEXT"
+  },
+  {
+    "kind": "type-widened",
+    "object": "types_edge.untyped",
+    "message": "has no declared type: carried as BLOB from its values"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "uniq_t.a",
+    "message": "a key column is carried as VARCHAR(255) (declared \"TEXT\"): MySQL cannot index an unbounded type; its longest value is 1"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "uniq_t.b",
+    "message": "a key column is carried as VARCHAR(255) (declared \"TEXT\"): MySQL cannot index an unbounded type; its longest value is 1"
+  },
+  {
+    "kind": "row-size-bounded",
+    "object": "wide_row.a",
+    "message": "VARCHAR(16000) is carried as TEXT so a row fits MySQL's 65,535 byte row size limit"
+  },
+  {
+    "kind": "row-size-bounded",
+    "object": "wide_row.b",
+    "message": "VARCHAR(16000) is carried as TEXT so a row fits MySQL's 65,535 byte row size limit"
+  },
+  {
+    "kind": "row-size-bounded",
+    "object": "wide_row.c",
+    "message": "VARCHAR(16000) is carried as TEXT so a row fits MySQL's 65,535 byte row size limit"
+  },
+  {
+    "kind": "row-size-bounded",
+    "object": "wide_row.d",
+    "message": "VARCHAR(16000) is carried as TEXT so a row fits MySQL's 65,535 byte row size limit"
+  },
+  {
+    "kind": "storage-option-not-carried",
+    "object": "without_rowid_t",
+    "message": "WITHOUT ROWID is a SQLite storage option and is not carried"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "without_rowid_t.k",
+    "message": "a key column is carried as VARCHAR(255) (declared \"TEXT\"): MySQL cannot index an unbounded type; its longest value is 2"
+  },
+  {
+    "kind": "name-case-collision",
+    "object": "Ünï_t / ünï_t",
+    "message": "these table names differ only by case: the script loads on a server with case-sensitive table names (lower_case_table_names=0, the Linux default) and fails on one with case-insensitive names (macOS and Windows)"
+  },
+  {
+    "kind": "name-renamed",
+    "object": "ünïcode_日本語_😀",
+    "message": "table name cannot be stored (the name holds U+1F600, outside the Basic Multilingual Plane, which MySQL silently stores as '?'): created as \"ünïcode_日本語___30d7c467\""
+  },
+  {
+    "kind": "name-renamed",
+    "object": "ünïcode_日本語_😀.ünï",
+    "message": "column name cannot be stored (it differs only by case or accents from another column of the table, and MySQL compares column names without them): created as \"ünï_e975a529\""
+  },
+  {
+    "kind": "name-renamed",
+    "object": "ünïcode_日本語_😀.😀",
+    "message": "column name cannot be stored (the name holds U+1F600, outside the Basic Multilingual Plane, which MySQL silently stores as '?'): created as \"__f0443a34\""
+  }
+]

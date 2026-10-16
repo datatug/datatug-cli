@@ -134,17 +134,19 @@ func LoadForeignKeySnapshot(ctx context.Context, db dal.DB, source string) (Fore
 		}
 		described = append(described, pending{schema: refs[i].Schema(), def: def})
 	}
+	sqlite := isSQLite(db)
 	for _, entry := range described {
 		for i, fk := range entry.def.ForeignKeys {
+			schema := entry.schema
 			toSchema := fk.ReferencedNamespace
 			if toSchema == "" {
-				toSchema = entry.schema
+				toSchema = schema
 			}
-			id := fk.Name
-			if id == "" {
-				id = fmt.Sprintf("fk:%s:%d", entry.def.Name, i)
+			if sqlite {
+				schema, toSchema = schemaOrMain(schema), schemaOrMain(toSchema)
 			}
-			key := ForeignKey{ConstraintID: id, Schema: entry.schema, FromRelation: entry.def.Name, ToSchema: toSchema, ToRelation: fk.ReferencedCollection}
+			id := constraintID(sqlite, schema, entry.def.Name, fk.Name, i)
+			key := ForeignKey{ConstraintID: id, Schema: schema, FromRelation: entry.def.Name, ToSchema: toSchema, ToRelation: fk.ReferencedCollection}
 			for _, field := range fk.Fields {
 				key.FromFields = append(key.FromFields, string(field))
 			}
@@ -164,6 +166,43 @@ func LoadForeignKeySnapshot(ctx context.Context, db dal.DB, source string) (Fore
 		}
 	}
 	return snapshot, nil
+}
+
+// sqliteAdapter is the name dalgo2sqlite reports for its adapter.
+const sqliteAdapter = "dalgo2sqlite"
+
+func isSQLite(db dal.DB) bool {
+	adapter := db.Adapter()
+	return adapter != nil && adapter.Name() == sqliteAdapter
+}
+
+func schemaOrMain(schema string) string {
+	if schema == "" {
+		return "main"
+	}
+	return schema
+}
+
+// constraintID is a foreign key's ID, unique within its database, which chat
+// sessions store with every applied JOIN, so it must not change across
+// versions. A SQLite key keeps the "sqlite:<table>:<id>" of the PRAGMA reader
+// it replaces (dalgo2sqlite names it "<table>_fk_<id>"). Any other engine's
+// constraint name is only unique per table, so it is qualified by the table;
+// a key with no name gets its position.
+func constraintID(sqlite bool, schema, table, name string, i int) string {
+	if sqlite {
+		if n, ok := strings.CutPrefix(name, table+"_fk_"); ok && n != "" && strings.Trim(n, "0123456789") == "" {
+			return fmt.Sprintf("sqlite:%s:%s", table, n)
+		}
+		return fmt.Sprintf("sqlite:%s:fk%d", table, i)
+	}
+	if name == "" {
+		name = fmt.Sprintf("fk:%d", i)
+	}
+	if schema == "" {
+		return table + ":" + name
+	}
+	return schema + "." + table + ":" + name
 }
 
 // RelationInstances walks a DTQL FROM/JOIN tree into its source occurrences,

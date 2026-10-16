@@ -458,21 +458,27 @@ var scenarios = []scenario{
 		e.copy(src, pg, Options{Overwrite: "reload"})
 		// A table is reloaded alone: its key to a table that is not part of the copy stays on the target and is not said to be missing.
 		e.copy(src, pg, Options{Overwrite: "reload", Include: []string{"child"}})
-		// The counter of a column that takes its numbers from a sequence it does not own is moved too; a column with none is said.
-		family := []string{"Parent", "child", "grandchild"}
-		quiet(pg.DB, `ALTER TABLE "public"."Parent" ALTER COLUMN id DROP IDENTITY`, `CREATE SEQUENCE "public".shared_seq`,
-			`ALTER TABLE "public"."Parent" ALTER COLUMN id SET DEFAULT nextval('shared_seq')`)
-		e.copy(src, pg, Options{Overwrite: "reload", Include: family})
-		quiet(pg.DB, `ALTER TABLE "public"."Parent" ALTER COLUMN id DROP DEFAULT`)
-		e.copy(src, pg, Options{Overwrite: "reload", Include: family})
-		// A sequence that is used and already past the rows is not moved back.
-		quiet(pg.DB, `ALTER TABLE "public"."Parent" ALTER COLUMN id SET DEFAULT nextval('shared_seq')`, `SELECT setval('"public".shared_seq', 50)`)
-		e.copy(src, pg, Options{Overwrite: "reload", Include: family})
-		// A sequence that cannot be set to the next id (beyond its maximum) or that counts down is left alone, and said.
-		quiet(pg.DB, `ALTER TABLE "public"."Parent" ALTER COLUMN id SET DEFAULT nextval('shared_seq')`, `ALTER SEQUENCE "public".shared_seq RESTART 1 MAXVALUE 5`)
-		e.copy(src, pg, Options{Overwrite: "reload", Include: family})
+	}},
+	{name: "sequence_counters", pgs: 1, run: func(e *scenarioEnv) {
+		// A small scenario of its own (the chaos sweep replays a scenario once per call it makes): the counter of
+		// a column that takes its numbers from a sequence it does not own.
+		src := e.fixture(`CREATE TABLE a (id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT)`, `INSERT INTO a (v) VALUES ('x'), ('y'), ('z')`)
+		pg := e.pg()
+		e.copy(src, pg, Options{})
+		reload := Options{Overwrite: "reload"}
+		quiet(pg.DB, `ALTER TABLE "public".a ALTER COLUMN id DROP IDENTITY`, `CREATE SEQUENCE "public".shared_seq`,
+			`ALTER TABLE "public".a ALTER COLUMN id SET DEFAULT nextval('shared_seq')`)
+		e.copy(src, pg, reload) // behind the rows: set
+		quiet(pg.DB, `ALTER TABLE "public".a ALTER COLUMN id DROP DEFAULT`)
+		e.copy(src, pg, reload) // no sequence: said
+		quiet(pg.DB, `ALTER TABLE "public".a ALTER COLUMN id SET DEFAULT nextval('shared_seq')`, `SELECT setval('"public".shared_seq', 50)`)
+		e.copy(src, pg, reload) // used and past the rows: not touched
+		quiet(pg.DB, `ALTER SEQUENCE "public".shared_seq RESTART 1 MAXVALUE 4`)
+		e.copy(src, pg, reload) // the next id is the maximum: set
+		quiet(pg.DB, `ALTER SEQUENCE "public".shared_seq RESTART 1 MAXVALUE 3`)
+		e.copy(src, pg, reload) // beyond the maximum: said
 		quiet(pg.DB, `ALTER SEQUENCE "public".shared_seq INCREMENT BY -1 MINVALUE 1 MAXVALUE 100 RESTART 100`)
-		e.copy(src, pg, Options{Overwrite: "reload", Include: family})
+		e.copy(src, pg, reload) // counts down: said
 	}},
 	{name: "filters_from_pg", pgs: 1, run: func(e *scenarioEnv) {
 		// From a PostgreSQL source: where and limit read through the server.

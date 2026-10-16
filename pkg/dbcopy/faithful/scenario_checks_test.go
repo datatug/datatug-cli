@@ -91,7 +91,7 @@ var scenarioChecks = map[string]func(t *testing.T, e *scenarioEnv){
 	},
 	"filters_and_reload": func(t *testing.T, e *scenarioEnv) {
 		c := e.copies
-		if len(c) != 21 {
+		if len(c) != 16 {
 			t.Fatalf("copies %d", len(c))
 		}
 		if c[0].err != nil || !hasWarning(c[0].rep, WarnFKNotValidated, "child(parent_id)") {
@@ -132,20 +132,23 @@ var scenarioChecks = map[string]func(t *testing.T, e *scenarioEnv){
 		if c[15].rep == nil || hasWarningText(c[15].rep, "child", "not part of this copy") {
 			t.Errorf("the key to a table that is not part of the copy is on the target: %v", c[15].rep)
 		}
-		if c[16].err != nil || hasWarning(c[16].rep, WarnIdentityNotCarried, "Parent.id") {
-			t.Errorf("the counter of a sequence the column does not own is moved: %v %v", c[16].err, c[16].rep.Warnings)
+	},
+	"sequence_counters": func(t *testing.T, e *scenarioEnv) {
+		c := e.copies
+		if len(c) != 7 {
+			t.Fatalf("copies %d", len(c))
 		}
-		if c[17].err != nil || !hasWarningText(c[17].rep, "Parent.id", "exactly one sequence") {
-			t.Errorf("a column with no sequence is said: %v %v", c[17].err, c[17].rep.Warnings)
+		// The replay answers with what was recorded and refuses any call that was not made then: a counter that
+		// the copy sets when it must not (setval of a sequence that is past the rows) fails the replay.
+		for i, want := range map[int]string{2: "exactly one sequence", 5: "is beyond the maximum 3", 6: "counts down"} {
+			if c[i].err != nil || !hasWarningText(c[i].rep, "a.id", want) {
+				t.Errorf("copy %d: %v %v", i+1, c[i].err, c[i].rep.Warnings)
+			}
 		}
-		if c[18].err != nil || hasWarning(c[18].rep, WarnIdentityNotCarried, "Parent.id") {
-			t.Errorf("a sequence already past the rows is left where it is: %v %v", c[18].err, c[18].rep.Warnings)
-		}
-		if c[19].err != nil || !hasWarningText(c[19].rep, "Parent.id", "is beyond the maximum 5") {
-			t.Errorf("a sequence that cannot be set is left alone and said: %v %v", c[19].err, c[19].rep.Warnings)
-		}
-		if c[20].err != nil || !hasWarningText(c[20].rep, "Parent.id", "counts down") {
-			t.Errorf("a sequence that counts down is left alone and said: %v %v", c[20].err, c[20].rep.Warnings)
+		for _, i := range []int{1, 3, 4} {
+			if c[i].err != nil || hasWarning(c[i].rep, WarnIdentityNotCarried, "a.id") {
+				t.Errorf("copy %d moves or keeps the counter without a word: %v %v", i+1, c[i].err, c[i].rep.Warnings)
+			}
 		}
 	},
 	"filters_from_pg": func(t *testing.T, e *scenarioEnv) {

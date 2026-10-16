@@ -403,6 +403,13 @@ func TestPostgresReloadCountsTheStepAndTheStartOfASequence(t *testing.T) {
 	if got := pgText(t, pg.DB, `SELECT nextval('s')`); got != "1001" {
 		t.Errorf("after 100 values of step 10 the next one is 1001: %s", got)
 	}
+	// One value taken at step 10 is 1, and the next is 11: past the rows' next id 4, not behind it.
+	pg = newPGDatabase(t)
+	execAll(t, pg.DB, `CREATE SEQUENCE s INCREMENT 10`, `CREATE TABLE a (id integer PRIMARY KEY DEFAULT nextval('s'), v text)`, `SELECT nextval('s')`)
+	reloadA(t, pg)
+	if got := pgText(t, pg.DB, `SELECT nextval('s')`); got != "11" {
+		t.Errorf("the step is part of the next value: %s", got)
+	}
 	pg = newPGDatabase(t)
 	execAll(t, pg.DB, `CREATE SEQUENCE s START 1000`, `CREATE TABLE a (id integer PRIMARY KEY DEFAULT nextval('s'), v text)`)
 	reloadA(t, pg)
@@ -441,5 +448,32 @@ func TestPostgresReloadLeavesASequenceItCannotSetAndSaysSo(t *testing.T) {
 	reloadA(t, pg)
 	if got := pgText(t, pg.DB, `SELECT nextval('s')`); got != "1000" {
 		t.Errorf("a sequence that counts down is left alone: %s", got)
+	}
+}
+
+// A sequence that is already past the rows is not touched at all: a setval, even to where it is, rewrites its
+// state (last_value 100 called becomes 101 not called) and would undo a nextval that another session made
+// between the read and the write. The state is what shows it, deterministically.
+func TestPostgresReloadDoesNotTouchASequenceThatIsPastTheRows(t *testing.T) {
+	pg := newPGDatabase(t)
+	execAll(t, pg.DB, `CREATE SEQUENCE shared_seq`,
+		`CREATE TABLE a (id integer PRIMARY KEY DEFAULT nextval('shared_seq'), v text)`, `CREATE TABLE b (id integer PRIMARY KEY DEFAULT nextval('shared_seq'), v text)`,
+		`INSERT INTO b (v) SELECT 'row' FROM generate_series(1, 100)`)
+	reloadA(t, pg)
+	if got := pgText(t, pg.DB, `SELECT last_value || '/' || is_called FROM shared_seq`); got != "100/true" {
+		t.Errorf("the state of a sequence past the rows is left as it was: %s", got)
+	}
+}
+
+// The next id may be the maximum of the sequence: it is set, not refused as beyond the maximum.
+func TestPostgresReloadSetsASequenceToItsMaximum(t *testing.T) {
+	pg := newPGDatabase(t)
+	execAll(t, pg.DB, `CREATE SEQUENCE s MAXVALUE 4`, `CREATE TABLE a (id integer PRIMARY KEY DEFAULT nextval('s'), v text)`)
+	rep := reloadA(t, pg)
+	if findWarning(rep, WarnIdentityNotCarried, "a.id") != nil {
+		t.Errorf("4 is within the sequence: %v", rep.Warnings)
+	}
+	if got := pgText(t, pg.DB, `SELECT nextval('s')`); got != "4" {
+		t.Errorf("the sequence is set to its maximum: %s", got)
 	}
 }

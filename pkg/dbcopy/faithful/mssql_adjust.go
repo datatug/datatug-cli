@@ -341,7 +341,11 @@ func (d mssqlDialect) limitCascades(p *ScriptPlan) {
 
 // ---- one type for the columns of a foreign key ----
 
-type mssqlClass struct{ members []*ScriptColumn }
+// mssqlClass is one equivalence class; before holds each member's type before the class was unified.
+type mssqlClass struct {
+	members []*ScriptColumn
+	before  []string
+}
 
 // unifyFKClasses gives every column of a foreign key equivalence class (the child columns and the parent
 // columns they reference, transitively) one type: SQL Server refuses a key between columns whose types or
@@ -399,9 +403,9 @@ func (d mssqlDialect) mergeClass(p *ScriptPlan, cl *mssqlClass) {
 			same = false
 		}
 	}
-	before := make([]string, len(cl.members))
+	cl.before = make([]string, len(cl.members))
 	for i, m := range cl.members {
-		before[i] = m.Choice.Type
+		cl.before[i] = m.Choice.Type
 	}
 	merged := cl.members[0].Choice
 	if same {
@@ -433,7 +437,7 @@ func (d mssqlDialect) mergeClass(p *ScriptPlan, cl *mssqlClass) {
 			merged = Choice{Kind: KindBytes, Family: "bytes", Len: need, Bounded: true, Tight: need}
 		}
 	}
-	for i, m := range cl.members {
+	for _, m := range cl.members {
 		n, ex, note, bounded := m.Choice.Normalized, m.Choice.Example, m.Choice.Note, m.Choice.Bounded
 		ch := merged
 		ch.Normalized, ch.Example, ch.Note = n, ex, note
@@ -443,9 +447,6 @@ func (d mssqlDialect) mergeClass(p *ScriptPlan, cl *mssqlClass) {
 		ch.MaxSize = m.Choice.MaxSize
 		mssqlRender(&ch)
 		m.Choice = ch
-		if ch.Type != before[i] {
-			p.warn(WarnTypeWidened, m.Object, "declared %q and carried as %s, but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as %s", strings.TrimSpace(m.Src.SourceType), before[i], ch.Type)
-		}
 	}
 }
 
@@ -562,6 +563,14 @@ func (d mssqlDialect) fitKeys(p *ScriptPlan, classes []*mssqlClass) error {
 			}
 			return fmt.Errorf("%s of table %q is longer than SQL Server allows (%d bytes, at most %d, at most %d columns), even with every column at the length of its longest value; SQL Server cannot carry it",
 				kinds[i], t.Name, mssqlKeyCost(sets[i]), map[bool]int{true: mssqlMaxClusteredKey, false: mssqlMaxIndexKey}[kinds[i] == "primary key"], mssqlMaxKeyColumns)
+		}
+	}
+	// The unification warning names the final type, after the key budgets had their say.
+	for _, cl := range classes {
+		for i, m := range cl.members {
+			if len(cl.before) > i && m.Choice.Type != cl.before[i] {
+				p.warn(WarnTypeWidened, m.Object, "declared %q and carried as %s, but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as %s", strings.TrimSpace(m.Src.SourceType), cl.before[i], m.Choice.Type)
+			}
 		}
 	}
 	for _, t := range p.Tables {

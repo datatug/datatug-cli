@@ -85,6 +85,11 @@
     "message": "a key column is carried as NVARCHAR(255) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 5"
   },
   {
+    "kind": "type-widened",
+    "object": "child_txt.code",
+    "message": "declared \"TEXT\" and carried as NVARCHAR(5), but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as NVARCHAR(255)"
+  },
+  {
     "kind": "fk-action-not-carried",
     "object": "comp_child(a,b)",
     "message": "DEFERRABLE is not supported by SQL Server: the key is checked at once"
@@ -95,9 +100,19 @@
     "message": "a key column is carried as NVARCHAR(255) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 1"
   },
   {
+    "kind": "type-widened",
+    "object": "comp_child.b",
+    "message": "declared \"TEXT\" and carried as NVARCHAR(1), but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as NVARCHAR(255)"
+  },
+  {
     "kind": "key-type-bounded",
     "object": "comp_parent.b",
     "message": "a key column is carried as NVARCHAR(255) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 1"
+  },
+  {
+    "kind": "type-widened",
+    "object": "comp_parent.b",
+    "message": "declared \"TEXT\" and carried as NVARCHAR(1), but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as NVARCHAR(255)"
   },
   {
     "kind": "default-not-carried",
@@ -202,12 +217,17 @@
   {
     "kind": "type-widened",
     "object": "key_child.code",
-    "message": "declared \"VARCHAR(4)\" and carried as NVARCHAR(5), but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as NVARCHAR(11)"
+    "message": "declared \"VARCHAR(4)\" and carried as NVARCHAR(5), but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as NVARCHAR(255)"
   },
   {
     "kind": "key-type-bounded",
     "object": "key_text.code",
     "message": "a key column is carried as NVARCHAR(255) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 11"
+  },
+  {
+    "kind": "type-widened",
+    "object": "key_text.code",
+    "message": "declared \"TEXT\" and carried as NVARCHAR(11), but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as NVARCHAR(255)"
   },
   {
     "kind": "name-renamed",
@@ -308,6 +328,11 @@
     "kind": "key-type-bounded",
     "object": "parent_txt.code",
     "message": "a key column is carried as NVARCHAR(255) (declared \"VARCHAR(5)\"): SQL Server cannot index an unbounded type; its longest value is 5"
+  },
+  {
+    "kind": "type-widened",
+    "object": "parent_txt.code",
+    "message": "declared \"VARCHAR(5)\" and carried as NVARCHAR(5), but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as NVARCHAR(255)"
   },
   {
     "kind": "index-not-carried",
@@ -415,9 +440,19 @@
     "message": "a key column is carried as NVARCHAR(255) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 1"
   },
   {
+    "kind": "type-widened",
+    "object": "uniq_one_null.a",
+    "message": "declared \"TEXT\" and carried as NVARCHAR(1), but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as NVARCHAR(255)"
+  },
+  {
     "kind": "key-type-bounded",
     "object": "uniq_ref.a",
     "message": "a key column is carried as NVARCHAR(255) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 1"
+  },
+  {
+    "kind": "type-widened",
+    "object": "uniq_ref.a",
+    "message": "declared \"TEXT\" and carried as NVARCHAR(1), but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as NVARCHAR(255)"
   },
   {
     "kind": "fk-not-carried",

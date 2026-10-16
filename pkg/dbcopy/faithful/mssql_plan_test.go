@@ -446,3 +446,13 @@ func TestMSSQLKeyBytes(t *testing.T) {
 		}
 	}
 }
+
+// The marker table name is compared the way SQL Server compares table names: by case and trailing spaces.
+func TestMSSQLMarkerNameIsFolded(t *testing.T) {
+	for _, name := range []string{"_demodb_import", "_DemoDB_Import", "_demodb_import  "} {
+		_, err := PlanScript(t.Context(), "mssql", sqliteWith(t, `CREATE TABLE "`+name+`" (a)`).DB)
+		if err == nil || !strings.Contains(err.Error(), "completion marker") {
+			t.Errorf("%q: %v", name, err)
+		}
+	}
+}

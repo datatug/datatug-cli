@@ -17,7 +17,7 @@
 -- A unique key over nullable columns allows one NULL in SQL Server and many in SQLite; a key whose columns hold several NULLs is written as a filtered unique index.
 -- Tables (69): Order Details, Production.Product, back`tick, trailing , line_break_697affca, _e3b0c442, Ünï_t, ünï_t_96802b60, select, ünïcode_日本語_😀, a-very-long-table-name-that-is-more-than-sixty-four-characters-long-for-sure, back\slash/and;--/*x*/'q', ix_names, types_edge, hostile, hostile_nul, hostile_utf8, binary_edge, parent_txt, child_txt, parent_int, child_int, child_named, tr...
 --
--- 94 thing(s) are not carried exactly:
+-- 101 thing(s) are not carried exactly:
 -- [name-renamed] : table name cannot be stored (the name is empty): created as "_e3b0c442"
 -- [name-renamed] .: column name cannot be stored (the name is empty): created as "_e3b0c442"
 -- [key-type-bounded] Production.Product.Color: a key column is carried as NVARCHAR(255) (declared "TEXT"): SQL Server cannot index an unbounded type; its longest value is 4
@@ -35,9 +35,12 @@
 -- [type-widened] child_int.pid2: declared "INT2" and carried as SMALLINT, but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as BIGINT
 -- [fk-action-not-carried] child_named.fk_child_named: ON UPDATE RESTRICT does not exist in T-SQL: the key is carried with NO ACTION, which refuses the same change when the key is not deferred
 -- [key-type-bounded] child_txt.code: a key column is carried as NVARCHAR(255) (declared "TEXT"): SQL Server cannot index an unbounded type; its longest value is 5
+-- [type-widened] child_txt.code: declared "TEXT" and carried as NVARCHAR(5), but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as NVARCHAR(255)
 -- [fk-action-not-carried] comp_child(a,b): DEFERRABLE is not supported by SQL Server: the key is checked at once
 -- [key-type-bounded] comp_child.b: a key column is carried as NVARCHAR(255) (declared "TEXT"): SQL Server cannot index an unbounded type; its longest value is 1
+-- [type-widened] comp_child.b: declared "TEXT" and carried as NVARCHAR(1), but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as NVARCHAR(255)
 -- [key-type-bounded] comp_parent.b: a key column is carried as NVARCHAR(255) (declared "TEXT"): SQL Server cannot index an unbounded type; its longest value is 1
+-- [type-widened] comp_parent.b: declared "TEXT" and carried as NVARCHAR(1), but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as NVARCHAR(255)
 -- [default-not-carried] defaults_t.blobd: default expression x'01' cannot be translated to SQL Server and is not carried
 -- [default-not-carried] defaults_t.expr: default expression 1+2 cannot be translated to SQL Server and is not carried
 -- [default-translated] defaults_t.tdec: text default '0.00' of a decimal text column became the numeric default (0.00)
@@ -58,8 +61,9 @@
 -- [index-renamed] ix_names.ix_é: index name cannot be used (the name is taken by another key of the table): created as "ix_é_655309af"
 -- [key-type-bounded] key_child.code: a key column is carried as NVARCHAR(255) (declared "VARCHAR(4)"): SQL Server cannot index an unbounded type; its longest value is 5
 -- [type-widened] key_child.code: declared "VARCHAR(4)" but some values are longer than that: carried as NVARCHAR(5)
--- [type-widened] key_child.code: declared "VARCHAR(4)" and carried as NVARCHAR(5), but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as NVARCHAR(11)
+-- [type-widened] key_child.code: declared "VARCHAR(4)" and carried as NVARCHAR(5), but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as NVARCHAR(255)
 -- [key-type-bounded] key_text.code: a key column is carried as NVARCHAR(255) (declared "TEXT"): SQL Server cannot index an unbounded type; its longest value is 11
+-- [type-widened] key_text.code: declared "TEXT" and carried as NVARCHAR(11), but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as NVARCHAR(255)
 -- [name-renamed] line break: table name cannot be stored (the name holds the control, line-break or byte-order-mark character U+000A, which a script line must never carry): created as "line_break_697affca"
 -- [name-renamed] line break.co l: column name cannot be stored (the name holds the control, line-break or byte-order-mark character U+000A, which a script line must never carry): created as "co_l_dc072b2b"
 -- [name-renamed] line break.tab col: column name cannot be stored (the name holds the control, line-break or byte-order-mark character U+0009, which a script line must never carry): created as "tab_col_ab1cfc8c"
@@ -80,6 +84,7 @@
 -- [name-renamed] only spaces. : column name cannot be stored (the name is only spaces, which SQL Server compares as empty): created as " _0aad7da7"
 -- [type-widened] parent_int.id: declared "INT4" and carried as INT, but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as BIGINT
 -- [key-type-bounded] parent_txt.code: a key column is carried as NVARCHAR(255) (declared "VARCHAR(5)"): SQL Server cannot index an unbounded type; its longest value is 5
+-- [type-widened] parent_txt.code: declared "VARCHAR(5)" and carried as NVARCHAR(5), but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as NVARCHAR(255)
 -- [index-not-carried] partial_ix.partial_ix_a: partial index (WHERE a IS NOT NULL) is not carried: the script does not write filtered indexes for a SQLite partial index
 -- [fk-action-not-carried] tree(parent): ON DELETE RESTRICT does not exist in T-SQL: the key is carried with NO ACTION, which refuses the same change when the key is not deferred
 -- [unique-filtered] tree.UQ_tree_name: the unique key (name) allows many NULLs in SQLite and one in SQL Server: it is written as a unique index filtered to the rows without NULL, which a foreign key cannot reference
@@ -101,7 +106,9 @@
 -- [key-type-bounded] uniq_many_null.c: a key column is carried as NVARCHAR(255) (declared "TEXT"): SQL Server cannot index an unbounded type; its longest value is 1
 -- [unique-filtered] uniq_many_null.uniq_many_null_c: the unique index (c) allows many NULLs in SQLite and one in SQL Server: it is filtered to the rows without NULL, which a foreign key cannot reference
 -- [key-type-bounded] uniq_one_null.a: a key column is carried as NVARCHAR(255) (declared "TEXT"): SQL Server cannot index an unbounded type; its longest value is 1
+-- [type-widened] uniq_one_null.a: declared "TEXT" and carried as NVARCHAR(1), but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as NVARCHAR(255)
 -- [key-type-bounded] uniq_ref.a: a key column is carried as NVARCHAR(255) (declared "TEXT"): SQL Server cannot index an unbounded type; its longest value is 1
+-- [type-widened] uniq_ref.a: declared "TEXT" and carried as NVARCHAR(1), but it joins the columns of its foreign keys, which SQL Server requires to have one type: carried as NVARCHAR(255)
 -- [fk-not-carried] uniq_ref_many(c): the referenced columns (c) of uniq_many_null are no primary key, unique constraint or unfiltered unique index, which SQL Server requires
 -- [key-type-bounded] uniq_ref_many.c: a key column is carried as NVARCHAR(255) (declared "TEXT"): SQL Server cannot index an unbounded type; its longest value is 1
 -- [unique-filtered] uniq_t.UQ_uniq_t_a_b: the unique key (a, b) allows many NULLs in SQLite and one in SQL Server: it is written as a unique index filtered to the rows without NULL, which a foreign key cannot reference

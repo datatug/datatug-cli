@@ -319,6 +319,8 @@ and `--progress` are refused with exit 2: a script holds every row of the tables
   same database stops at once; **the last statement inserts its row** (dataset, label, source SHA-256, version, tables,
   rows): a row means the load completed. MySQL commits DDL, so a failed load is not rolled back: drop the database (or the
   tables) and load again. `DROP TABLE _demodb_import` removes the marker.
+  The marker name is compared like table names are, case-insensitively and ignoring trailing spaces: a SQLite table named
+  `_DEMODB_IMPORT` (or `_demodb_import `) is refused (an earlier version compared the name exactly; SQL Server's default collation merges the case as well).
 * `CREATE TABLE` (columns, primary key, unique keys, `ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`, no collation named), the rows
   of each table in one transaction per batch of at most 1000 rows or about 1 MiB, in a **total order** (primary key and
   then the rowid, so a table without a key has an order too), the counters of the auto-numbered columns, **then**
@@ -576,11 +578,13 @@ and that the fuzz script loads without `-X` and `-x`. (The `sqlcmd` of `mssql-to
 `GO` line, which SQL Server Management Studio and plain batch splitters do not; the script does not rely on it, and the journey only reports
 which it saw.) The verifier (`internal/crossverify`,
 `Engine: crossverify.EngineMSSQL`) reads the `sys` catalog and compares it with the plan: tables, columns (`nvarchar(255)`,
-`datetime2(3)`, ... spelled as the plan spells them, nullability, identity, default), primary key, foreign keys (columns, parent,
+`datetime2(3)`, ... spelled as the plan spells them, nullability, identity, whether there is a default), primary key, foreign keys (columns, parent,
 actions, **trusted**), unique keys and indexes (a `PRIMARY KEY` or `UNIQUE` constraint's backing index is the key, not an index;
-a filtered index must be filtered), check constraints (trusted), the marker, renames, row counts, the **identity counter**, and
+a filtered index must be filtered), check constraints (their number, and that they are trusted), the marker, renames, row counts, the **identity counter**, and
 every value read through `github.com/microsoft/go-mssqldb` (int64, a bit as a bool, the 64 bits of a float, a decimal as an exact
 rational, `time.Time` for a date or time, written with an explicit format and the column's own number of decimals).
+The verifier does **not** compare the text of a default or of a `CHECK`, so the `COLLATE Latin1_General_100_BIN2` of a translated
+`CHECK` is covered by the unit tests and the golden script, not by the real-engine journey.
 
 SQL Server runs only on amd64: on an Apple-silicon Mac the container runs as `linux/amd64` under emulation (OrbStack uses Rosetta;
 Docker Desktop needs Rosetta or QEMU enabled) and AdventureWorks takes minutes instead of seconds.
@@ -588,16 +592,26 @@ Docker Desktop needs Rosetta or QEMU enabled) and AdventureWorks takes minutes i
 #### Licence of the test image
 
 `ACCEPT_EULA=Y` accepts the end-user licence of the SQL Server image. The founder decided on 2026-10-16 (decision D10) that CI may
-accept it **for automated testing only**: the Developer edition is licensed for development and testing, never production,
+accept it **for automated testing only** (record: the founder answered "Yes, both" on 2026-10-16 to the question whether CI may accept the SQL Server Developer EULA with `ACCEPT_EULA=Y` and the Oracle Free Use Terms for test-only containers, with no redistribution of any image; the same decision is cited in `.github/workflows/journey-mssql.yml` and `scripts/check-journey-mssql.sh`): the Developer edition is licensed for development and testing, never production,
 and the image is pulled and thrown away with the runner, **never redistributed**. The generated scripts contain no Microsoft
 code.
 
 #### Known limits
 
 A unique constraint whose columns hold one NULL admits one NULL in later inserts, not many. A `CHECK` the translator cannot read is
-not carried. A name only SQL Server's default collation would merge (two tables or columns that differ by case) is renamed, so
-the script loads on a case-insensitive database; on a case-sensitive one the names are still different and still load. A database
-with another collation (`COLLATE` at `CREATE DATABASE`) compares text in its own way. SQL Server 2014 and earlier are not supported
+not carried.
+
+**Names that SQL Server's default collation merges.** At export time two tables, or two columns of one table, are treated as the
+same name when they differ by case (`Abc` / `abc`) or by trailing spaces, and one of them is renamed with a `name-renamed`
+warning. The default collation (`SQL_Latin1_General_CP1_CI_AS`, `Latin1_General_*_CI_AS`) merges more than that, and the
+export does **not** catch it: `ß` and `SS` (`straße` / `STRASSE`), full-width and half-width letters (`ａbc` / `abc`), and the
+other expansions and compatibility forms of the Unicode comparison rules. Two such table names fail the load with Msg 2714, two such column names with
+Msg 2705, and so can two key values (a unique or primary key that is distinct in SQLite). The load runs in one transaction with `-b`, so
+the failure rolls back and leaves nothing behind (see below); rename one of the names in SQLite and export again. A case-sensitive or
+binary database collation does not merge any of these. Loading **without `-b`** continues after a batch fails: a failed data
+or key batch is then skipped by the batch guard and rolled back at the end, but a statement that fails to compile
+(a syntax error) is not part of any transaction the server can roll back, so always use `-b` as the header says. A database with
+another collation (`COLLATE` at `CREATE DATABASE`) compares text in its own way. SQL Server 2014 and earlier are not supported
 (`THROW`, 1,700-byte index keys). Azure SQL Database is the same engine but untested here.
 
 ## Local backup to a folder: `db export` and `--to ingitdb://`

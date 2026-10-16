@@ -105,11 +105,11 @@ load() {
 	base=$(basename "$file")
 	docker cp "$file" "$name:/tmp/$base" >/dev/null
 	# A client that waits for input (an unterminated statement) would hang the job: stop it after LOAD_TIMEOUT seconds
-	# (exit status 124) and kill the sqlplus left in the container.
+	# and let the container (removed at the end) discard the sqlplus left in it.
 	local pid dog rc
 	docker exec -e NLS_LANG="$nls" "$name" sqlplus -L -S "$user/$password@//localhost/$service" "@/tmp/$base" </dev/null &
 	pid=$!
-	( sleep "${LOAD_TIMEOUT:-1200}"; kill "$pid" 2>/dev/null && echo "load timed out after ${LOAD_TIMEOUT:-1200}s" >&2; docker exec "$name" pkill sqlplus 2>/dev/null ) &
+	( sleep "${LOAD_TIMEOUT:-1200}"; kill "$pid" 2>/dev/null && echo "load timed out after ${LOAD_TIMEOUT:-1200}s" >&2 ) &
 	dog=$!
 	rc=0; wait "$pid" || rc=$?
 	kill "$dog" 2>/dev/null || true; wait "$dog" 2>/dev/null || true
@@ -248,7 +248,7 @@ for ds in $datasets; do
 		grep -q 'ORA-00942' "$work/continue.out" && grep -q 'ORA-20000' "$work/continue.out" || { echo "atomicity: the failing insert or the count check did not raise" >&2; grep -v '^$' "$work/continue.out" | head -6 >&2; failures=$((failures + 1)); continue; }
 		[ "$(tables_in j_continue)" = "$total" ] || { echo "atomicity: the client did not go on after the error ($(tables_in j_continue) of $total tables)" >&2; failures=$((failures + 1)); continue; }
 		[ "$(marker_rows j_continue)" = 0 ] || { echo "atomicity: a load that lost rows got a marker row" >&2; failures=$((failures + 1)); continue; }
-		grep -v -E '^  (SELECT COUNT|IF n <>)' "$work/continue.sql" >"$work/uncounted.sql"
+		awk '/^  (SELECT COUNT|IF n <>)/ { skip = 1 } skip { if ($0 ~ /;$/) skip = 0; next } { print }' "$work/continue.sql" >"$work/uncounted.sql"
 		create_user j_uncounted
 		load "$work/uncounted.sql" j_uncounted >"$work/uncounted.out" 2>&1 || true
 		[ "$(marker_rows j_uncounted)" = 1 ] || { echo "atomicity: without the counts the load got no marker row, so the control proves nothing" >&2; failures=$((failures + 1)); continue; }

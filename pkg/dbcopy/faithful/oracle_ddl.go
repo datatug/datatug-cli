@@ -262,6 +262,9 @@ func (d oracleDialect) Prelude(p *ScriptPlan, h Header) []string {
 	return append(out, "CREATE TABLE "+q+` ("dataset" VARCHAR2(4000 BYTE), "edition" VARCHAR2(4000 BYTE), "source_sha256" VARCHAR2(64 CHAR) NOT NULL, "datatug_version" VARCHAR2(4000 BYTE), "tables_count" NUMBER(10,0) NOT NULL, "rows_count" NUMBER(19,0) NOT NULL);`)
 }
 
+// oracleCountChunk is the most tables whose objects one catalog query counts (an IN list takes at most 1,000 expressions).
+const oracleCountChunk = 400
+
 func (d oracleDialect) Epilogue(p *ScriptPlan, h Header) []string {
 	var rows int64
 	block := []string{"DECLARE", "  n NUMBER;", "BEGIN"}
@@ -271,28 +274,42 @@ func (d oracleDialect) Epilogue(p *ScriptPlan, h Header) []string {
 			"  SELECT COUNT(*) INTO n FROM "+d.QuoteIdent(t.Name)+";",
 			fmt.Sprintf("  IF n <> %d THEN RAISE_APPLICATION_ERROR(-20000, %s); END IF;", t.Rows,
 				oracleTextExpr("the load is incomplete: table "+t.Name+" does not hold "+strconv.FormatInt(t.Rows, 10)+" rows", false)))
-		// The objects of the table: its keys (primary, unique, foreign), its checks and NOT NULLs, and its indexes, all enabled
-		// and validated. A statement that failed or was skipped leaves one missing.
-		keys := len(t.Uniques) + len(t.FKs)
-		idx := len(t.Uniques) + len(t.Indexes)
-		if len(t.PK) > 0 {
-			keys++
-			idx++
+	}
+	// The objects of the tables, in the catalog and in a few queries (one per kind for every oracleCountChunk tables: a query
+	// per table takes minutes for hundreds of tables): their keys (primary, unique, foreign), their checks and NOT NULLs and their
+	// indexes, all enabled and validated. A statement that failed or was skipped leaves one missing.
+	for from := 0; from < len(p.Tables); from += oracleCountChunk {
+		chunk := p.Tables[from:min(from+oracleCountChunk, len(p.Tables))]
+		var names []string
+		keys, checks, idx := 0, 0, 0
+		for _, t := range chunk {
+			names = append(names, oracleTextExpr(t.Name, false))
+			keys += len(t.Uniques) + len(t.FKs)
+			idx += len(t.Uniques) + len(t.Indexes)
+			if len(t.PK) > 0 {
+				keys++
+				idx++
+			}
+			checks += oracleCheckCount(t)
 		}
-		name := oracleTextExpr(t.Name, false)
+		in := "table_name IN (" + strings.Join(names, ", ") + ")"
+		span := chunk[0].Name
+		if len(chunk) > 1 {
+			span += " to " + chunk[len(chunk)-1].Name
+		}
 		for _, c := range []struct {
 			what  string
 			n     int
 			query string
 		}{
-			{"keys", keys, "user_constraints WHERE table_name = " + name + " AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED'"},
-			{"checks", oracleCheckCount(t), "user_constraints WHERE table_name = " + name + " AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED'"},
-			{"indexes", idx, "user_indexes WHERE table_name = " + name + " AND index_type <> 'LOB'"},
+			{"keys", keys, "user_constraints WHERE " + in + " AND constraint_type IN ('P','U','R') AND status = 'ENABLED' AND validated = 'VALIDATED'"},
+			{"checks", checks, "user_constraints WHERE " + in + " AND constraint_type = 'C' AND status = 'ENABLED' AND validated = 'VALIDATED'"},
+			{"indexes", idx, "user_indexes WHERE " + in + " AND index_type <> 'LOB'"},
 		} {
 			block = append(block,
-				"  SELECT COUNT(*) INTO n FROM "+c.query+";",
-				fmt.Sprintf("  IF n <> %d THEN RAISE_APPLICATION_ERROR(-20000, %s); END IF;", c.n,
-					oracleTextExpr("the load is incomplete: table "+t.Name+" does not have its "+strconv.Itoa(c.n)+" "+c.what, false)))
+				oracleWrap("  SELECT COUNT(*) INTO n FROM "+c.query+";"),
+				oracleWrap(fmt.Sprintf("  IF n <> %d THEN RAISE_APPLICATION_ERROR(-20000, 'the load is incomplete: '||n||%s); END IF;", c.n,
+					oracleTextExpr(" "+c.what+" in the catalog, not the "+strconv.Itoa(c.n)+" of the tables "+span, false))))
 		}
 	}
 	block = append(block,

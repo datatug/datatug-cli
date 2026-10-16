@@ -243,12 +243,29 @@ func TestOracleEpilogueCountsObjects(t *testing.T) {
 		`CREATE INDEX c_v ON c (v)`, `INSERT INTO p VALUES (1, 'a', 1)`))
 	block := script[strings.LastIndex(script, "DECLARE\n  n NUMBER;"):]
 	for _, want := range []string{
-		`table_name = 'p' AND constraint_type IN ('P','U','R')`, "table p does not have its 2 keys", "table p does not have its 3 checks", "table p does not have its 2 indexes",
-		"table c does not have its 2 keys", "table c does not have its 2 checks", "table c does not have its 2 indexes",
+		`table_name IN ('p', 'c') AND constraint_type IN ('P','U','R')`, "keys in the catalog, not the 4 of the tables p to c", "checks in the catalog, not the 5 of the tables p to c",
+		"indexes in the catalog, not the 4 of the tables p to c", "table_name IN ('p', 'c') AND index_type <> 'LOB'",
 	} {
 		if !strings.Contains(block, want) {
 			t.Errorf("no %q in\n%s", want, block)
 		}
+	}
+}
+
+// More tables than one catalog query takes (an IN list holds 1,000 expressions): the counts go in chunks, each line wrapped.
+func TestOracleEpilogueCountsInChunks(t *testing.T) {
+	var stmts []string
+	for i := 0; i < oracleCountChunk+3; i++ {
+		stmts = append(stmts, fmt.Sprintf(`CREATE TABLE "t%04d" (id INTEGER PRIMARY KEY)`, i))
+	}
+	script, _ := exportOracle(t, sqliteWith(t, stmts...))
+	checkOracleLines(t, script)
+	block := script[strings.LastIndex(script, "DECLARE\n  n NUMBER;"):]
+	if got := strings.Count(block, "FROM user_indexes"); got != 2 {
+		t.Errorf("%d index queries, want 2 chunks", got)
+	}
+	if !strings.Contains(block, fmt.Sprintf("not the %d of the tables t0000 to t0399", oracleCountChunk)) || !strings.Contains(block, "not the 3 of the tables t0400 to t0402") {
+		t.Errorf("chunk labels: %.400s", block)
 	}
 }
 

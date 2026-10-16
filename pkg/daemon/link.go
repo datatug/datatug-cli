@@ -31,13 +31,15 @@ const (
 	MaxLimit     = 1000
 )
 
-// uiSupport is per kind. All three kinds are available: the deployed web UI
-// serves the table and the view route of each (datatug-apps
-// datatug-routing-proj-env-db.ts), so a kind is never half available.
+// uiSupport is per kind. The three table kinds are available: the deployed web
+// UI serves the table and the view route of each (datatug-apps
+// datatug-routing-proj-env-db.ts), so a kind is never half available. A query
+// result is pending until the UI serves its result/<id> route.
 var uiSupport = map[string]string{
 	KindTableMetadata: UISupportAvailable,
 	KindTableRecords:  UISupportAvailable,
 	KindRecord:        UISupportAvailable,
+	KindQueryResult:   UISupportPending,
 }
 
 const (

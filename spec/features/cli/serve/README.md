@@ -101,6 +101,10 @@ On signal receipt, the HTTP server MUST perform a graceful shutdown: stop accept
 
 The server admits exactly two browser origins: `https://datatug.app` and the host `datatug.localhost` (`http` or `https`, no port or a numeric one); `localhost:*`, `127.0.0.1:*`, `*.datatug.app` and `app.incidentius.com` are refused, and no flag or variable adds one. Every route but a CORS preflight (answered by origin only, with `Access-Control-Allow-Private-Network: true` when the preflight asks and the origin is listed) and `POST /datatug/session/exchange` requires the session token, `Authorization: Bearer <token>`. At start the server creates a random secret and keeps it in `~/datatug/daemon/access-<port>.key` (`$DATATUG_DAEMON_DIR`, mode `0600`), removed when it exits; the CLI's own clients (`incident`, `execution`, `compare`, `query` lookups) and `datatug daemon url` read it from there. A one-time code, `v1.<expiry>.<nonce>.<signature>`, valid 10 minutes and accepted once, is minted from the secret locally; the web UI reads it from the link's URL fragment, posts `{"code": ...}` to the exchange route and receives `{"token": ...}`, then sends the token on every request. A hand-started `datatug serve` prints its web UI link with `#code=<code>`; a server started with `--idle-timeout` (the daemon) prints none into its log. **Consequences:** local web UI development runs at `http://datatug.localhost:<port>` (no longer `localhost:4200`), a page of another product's UI loses access, and a client of the agent that is not one of the CLI's own (curl, a script) must send the token from the key file.
 
+#### REQ: result-route
+
+The API MUST answer `GET /datatug/results/<id>` with `{"meta": <meta.json as written>, "recordset": <data.json's recordset>}` of a result stored by `query run --result-id` (see [query](../query/README.md)), behind the request guard and the session token like every route, and MUST NOT open a database or run a query for it. A write-only server has no such route. Refusals carry a reason code and never the id or a path: an id outside the grammar is `400` (`bad-result-id`), a missing or expired result `404` (`result-not-found`), one whose files are not complete `404` (`result-incomplete`), an unknown format version `400` (`result-version-unsupported`), a result directory that is a link or not the user's `403` (`result-refused`, nothing is read through it), and a store that cannot be read `503` (`results-store-unavailable`). The request log writes the path with `:id` in place of the id.
+
 ### Execution evidence storage
 
 #### REQ: execution-receipts-follow-incident-routing
@@ -173,6 +177,12 @@ The URL the agent navigates the browser to MUST embed the agent's listening addr
 | [ui](../ui/README.md) | Independent. TUI does not consume the HTTP API. |
 
 ## Acceptance Criteria
+
+### AC: result-route-reads-the-files
+
+**Requirements:** serve#req:result-route, serve#req:origins-and-token
+
+With a stored result, `GET /datatug/results/<id>` with the session token from a listed origin answers its meta and rows; without the token it is `401`, from another origin `403`; a bad id, a missing, expired, incomplete or unknown-version result, a linked result directory and an unreadable store answer their reason codes with no id, path or value; the request log holds no result id.
 
 ### AC: execution-evidence-stays-out-of-git
 

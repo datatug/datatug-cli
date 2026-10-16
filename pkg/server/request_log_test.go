@@ -43,3 +43,23 @@ func TestLogRequests_NamesTheMethodAndThePathNeverTheQueryString(t *testing.T) {
 		t.Errorf("the wrapped handler ran %d times, want 2", served)
 	}
 }
+
+// A stored result's id is not logged: the path of GET /datatug/results/:id is
+// logged with :id in its place.
+func TestLogRequests_NeverLogsAResultID(t *testing.T) {
+	var logged bytes.Buffer
+	saved := log.Writer()
+	log.SetOutput(&logged)
+	t.Cleanup(func() { log.SetOutput(saved) })
+	handler := logRequests(func(http.ResponseWriter, *http.Request) {})
+	handler(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/datatug/results/invoice-total-9f2", nil))
+	if line := logged.String(); strings.Contains(line, "invoice-total-9f2") || !strings.Contains(line, "GET 0 /datatug/results/:id\n") {
+		t.Errorf("the log line %q", line)
+	}
+	if got := loggedPath("/x/datatug/results/a/b"); got != "/x/datatug/results/:id" {
+		t.Errorf("loggedPath = %q", got)
+	}
+	if got := loggedPath("/datatug/ping"); got != "/datatug/ping" {
+		t.Errorf("loggedPath = %q", got)
+	}
+}

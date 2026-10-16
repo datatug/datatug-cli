@@ -274,12 +274,14 @@ for ds in $datasets; do
 		# A wrapped CHECK over negative numbers holds them as written: -297 is accepted and 297 refused (a line cut after a minus is a
 		# continuation line for SQL*Plus, which drops the hyphen and would have made the list positive; the verifier compares
 		# only the number of checks, so the constraint is probed).
-		neg_ok=$(printf 'insert into "neg_in" values (10, -297);\ncommit;\n' | sql_as j_fixture 2>&1 || true)
-		neg_bad=$(printf 'insert into "neg_in" values (11, 297);\n' | sql_as j_fixture 2>&1 || true)
-		case $neg_ok in *ORA-*) echo "negative check: -297 was refused: $neg_ok" >&2; failures=$((failures + 1)); continue ;; esac
-		case $neg_bad in *ORA-02290*) ;; *) echo "negative check: 297 was accepted by a list of negative numbers" >&2; failures=$((failures + 1)); continue ;; esac
-		awk '/^ALTER TABLE "neg_in" ADD CHECK/ { on = 1 } on { n++ } on && /;$/ { on = 0 } END { exit !(n > 1) }' "$script" || { echo "negative check: the list was not wrapped, so the probe proves nothing" >&2; failures=$((failures + 1)); continue; }
-		echo "    negative check: a wrapped IN list of negative numbers keeps its signs (-297 accepted, 297 refused)"
+		for w in 1 2 3 4 5 6 7 8 9; do
+			neg_ok=$(printf 'insert into "neg_in%s" values (10, -297);\ncommit;\n' "$w" | sql_as j_fixture 2>&1 || true)
+			neg_bad=$(printf 'insert into "neg_in%s" values (11, 297);\n' "$w" | sql_as j_fixture 2>&1 || true)
+			case $neg_ok in *ORA-*) echo "negative check: -297 was refused by neg_in$w: $neg_ok" >&2; failures=$((failures + 1)); continue 2 ;; esac
+			case $neg_bad in *ORA-02290*) ;; *) echo "negative check: 297 was accepted by the list of negative numbers of neg_in$w" >&2; failures=$((failures + 1)); continue 2 ;; esac
+			awk -v t="\"neg_in$w\"" 'index($0, "ALTER TABLE " t " ADD CHECK") == 1 { on = 1 } on { n++ } on && /;$/ { on = 0 } END { exit !(n > 1) }' "$script" || { echo "negative check: the list of neg_in$w was not wrapped, so the probe proves nothing" >&2; failures=$((failures + 1)); continue 2; }
+		done
+		echo "    negative check: nine wrapped IN lists of negative numbers keep their signs (-297 accepted, 297 refused)"
 		;;
 	fuzz)
 		# Positive controls: the hazards are real.

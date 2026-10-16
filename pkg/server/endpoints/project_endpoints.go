@@ -34,6 +34,24 @@ func (ProjectAgentEndpoints) deleteProject(w http.ResponseWriter, _ *http.Reques
 // (project.service.ts's getProjectSummaryRequest) sends the project id as
 // `?id=`, not `?project=` — see projectRefByID.
 func getProjectSummary(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Has("branch") {
+		if err := api.RequireLocalReadPrincipal(); err != nil {
+			writeProjectMutationError(w, r, err)
+			return
+		}
+		ref, err := projectRefByID(r.URL.Query())
+		if err != nil {
+			writeProjectMutationError(w, r, err)
+			return
+		}
+		summary, err := api.LocalProjectSummary(r.Context(), ref, r.URL.Query().Get("branch"))
+		if err != nil {
+			writeProjectMutationError(w, r, err)
+			return
+		}
+		writeProjectMutationJSON(w, r, http.StatusOK, summary)
+		return
+	}
 	ref, err := projectRefByID(r.URL.Query())
 	if err != nil {
 		handleError(err, w, r)

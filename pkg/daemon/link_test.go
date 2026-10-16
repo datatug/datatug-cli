@@ -107,19 +107,12 @@ func TestEncodeComponent(t *testing.T) {
 	}
 }
 
-// The three table kinds are available; a query result is pending until the
-// web UI serves its result/<id> route.
+// Every kind is available: the web UI serves all three table kinds and the result/<id> route.
 func TestStatusUISupportIsAvailable(t *testing.T) {
 	if len(uiSupport) != 4 {
 		t.Fatalf("uiSupport covers %d kinds, want 4", len(uiSupport))
 	}
 	for kind, v := range uiSupport {
-		if kind == KindQueryResult {
-			if v != UISupportPending {
-				t.Errorf("%s: %s", kind, v)
-			}
-			continue
-		}
 		if v != UISupportAvailable {
 			t.Errorf("%s: %s", kind, v)
 		}

@@ -172,6 +172,9 @@ func ExportScript(ctx context.Context, req ScriptRequest, w io.Writer) (*Report,
 	if err != nil {
 		return nil, err
 	}
+	if err := ValidateNotice(req.Header.Notice); err != nil {
+		return nil, &ScriptUsageError{err}
+	}
 	if v, ok := d.(headerValidator); ok {
 		if err := v.ValidateHeader(req.Header); err != nil {
 			return nil, &ScriptUsageError{err}

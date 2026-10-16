@@ -279,14 +279,37 @@ The destination is a path in the URL (`sqlscript:///abs/path.sql`, or `sqlscript
 | `dialect` | Required. `mysql` and `mssql` (SQL Server, see [below](#sql-server-dialect-mssql)) are implemented; `oracle`, `postgres` and `sqlite` are planned and refused with the list of the implemented ones. |
 | `name` | Dataset name in the header and in the completion marker (default: the SQLite file name without its extension). At most 255 characters for `mysql` (the marker column); `mssql` takes any length. Neither takes invalid UTF-8 or a NUL. |
 | `edition` | A label for the header, such as `DemoDB contract edition, identical to the SQLite/CSV/JSON`. The same limits as `name`. |
-| `license`, `attribution` | Licence and attribution lines of the header (a demo database's `manifest.json` `source.license`). |
+| `license`, `attribution` | Licence and attribution lines of the header (a demo database's `manifest.json` `source.license`). One line each. |
+| `notice-file` | Path of a text file with the multi-line licence notice, written in the header after those lines (see [below](#licence-notice)). |
 
 The query is parsed strictly (`net/url.ParseQuery`): a value is never dropped silently. A `;` or a stray `&` inside a value
 (`attribution=Data by X; converted by Y`) is an error (exit 2), because a parser that ignores what it cannot read would
 lose the attribution a licence requires from the header: write `%3B` for `;` and `%26` for `&`. A parameter given twice is
-refused (exit 2), `dialect` included. A `name` or `edition` that is too long, not valid UTF-8 or that holds a NUL is refused
+refused (exit 2), `dialect` and `notice-file` included. A `name` or `edition` that is too long, not valid UTF-8 or that holds a NUL is refused
 up front (exit 2): the marker row is the last statement of the script, and one that cannot hold it would fail after every row
 was loaded. The datatug version in the marker is cut to the marker's 64 characters (the header comment has it whole).
+
+#### Licence notice
+
+A script travels without the website that carries its licence, so the header can hold the whole notice a licence asks for:
+the copyright line, the permission notice and the disclaimer (MIT); the copyright line, the three conditions and the
+disclaimer (BSD-3-Clause); the licence name and link, the copyright notice, the authors, the title, the source link and the
+adaptation statement (CC BY-SA 3.0). Put the text in a file and name it:
+
+```sh
+datatug db copy --from sqlite://./sakila.sqlite --to 'sqlscript:///tmp/sakila.mysql.sql?dialect=mysql&license=BSD-3-Clause&notice-file=/abs/path/sakila-NOTICE.txt'
+```
+
+The path is percent-encoded like any value (`%20` for a space); a relative path is the current folder's. The file is UTF-8 with
+no NUL, at most 16 KiB (a leading byte order mark is dropped) and not empty; anything else is a usage error (exit 2) before
+anything is written, and the message never repeats the text. The same URL gives the same bytes on every run.
+
+Every line of the file becomes one comment line (`-- ` and the line), in both dialects. The text is verbatim except for what
+could end the comment or start a script line: CR, LF, CR LF, VT, FF, U+001C to U+001F, U+0085, U+2028 and U+2029 all end a line;
+other control characters, a byte order mark, bidirectional controls and invalid bytes become spaces; a tab becomes four spaces;
+`*/` and `/*` get a space between the two characters; for `mssql` `$(` becomes `$ (`. Trailing spaces and the blank lines at both
+ends are dropped. So a notice line such as `GO`, `\! cmd`, `source x` or `/` stays a comment. The notice follows the
+`license` and `attribution` lines, after a blank comment line.
 
 Flags: `--include`, `--exclude`, `--dry-run`, `--json`, `--fail-on-warning` work as for any copy (a key into a table that
 is not written is not created, with a warning). The source must be `sqlite://`. A script file is never replaced silently:
@@ -310,8 +333,8 @@ and `--progress` are refused with exit 2: a script holds every row of the tables
   The header recommends `--skip-commands` (mysql 8.4.6 and later) and `--skip-system-command` on top of that, and says that a
   blob is written in hex (twice its size), so one value over about 8 MB needs `--max-allowed-packet=1G`: the client's
   default is 16 MB.
-* A header of comments: the label, dataset, datatug version and the SHA-256 of the SQLite file, licence and attribution,
-  the minimum MySQL version (8.0.16, where CHECK constraints are enforced; verified on MySQL 8.4 LTS), how to load it
+* A header of comments: the label, dataset, datatug version and the SHA-256 of the SQLite file, licence and attribution
+  (and the multi-line notice of `notice-file`), the minimum MySQL version (8.0.16, where CHECK constraints are enforced; verified on MySQL 8.4 LTS), how to load it
   safely, the tables, and every warning.
 * `SET NAMES utf8mb4` and a session `sql_mode` of `STRICT_ALL_TABLES,NO_AUTO_VALUE_ON_ZERO,NO_ENGINE_SUBSTITUTION,NO_ZERO_DATE,NO_ZERO_IN_DATE`
   (`NO_AUTO_VALUE_ON_ZERO` because SQLite allows an id of 0 and MySQL would number it otherwise).

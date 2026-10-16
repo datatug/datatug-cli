@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -25,7 +26,7 @@ import (
 const sqlScriptScheme = "sqlscript"
 
 // sqlScriptQuery are the query parameters of a sqlscript URL.
-var sqlScriptQuery = map[string]bool{"dialect": true, "name": true, "edition": true, "license": true, "attribution": true}
+var sqlScriptQuery = map[string]bool{"dialect": true, "name": true, "edition": true, "license": true, "attribution": true, "notice-file": true}
 
 // sqlScriptVersion is the version the script header names.
 var sqlScriptVersion = func() string { return versionOf(debug.ReadBuildInfo()) }
@@ -73,7 +74,7 @@ func parseSQLScriptTarget(raw string) (sqlScriptTarget, error) {
 	}
 	for k, vs := range q {
 		if !sqlScriptQuery[k] {
-			return t, fmt.Errorf("unknown parameter %q (known: dialect, name, edition, license, attribution)", k)
+			return t, fmt.Errorf("unknown parameter %q (known: dialect, name, edition, license, attribution, notice-file)", k)
 		}
 		if len(vs) > 1 {
 			return t, fmt.Errorf("parameter %q is given %d times; give it once", k, len(vs))
@@ -87,7 +88,52 @@ func parseSQLScriptTarget(raw string) (sqlScriptTarget, error) {
 		return t, err
 	}
 	t.header = faithful.Header{Name: q.Get("name"), Edition: q.Get("edition"), License: q.Get("license"), Attribution: q.Get("attribution")}
+	if q.Has("notice-file") {
+		if t.header.Notice, err = readNoticeFile(q.Get("notice-file")); err != nil {
+			return t, err
+		}
+	}
 	return t, nil
+}
+
+// readNoticeBytes reads at most limit bytes of r; a test replaces it to fail the read.
+var readNoticeBytes = func(r io.Reader, limit int64) ([]byte, error) { return io.ReadAll(io.LimitReader(r, limit)) }
+
+// readNoticeFile reads the multi-line licence notice of a script header from a regular file (a relative path is
+// the current folder's): UTF-8, no NUL, at most faithful.MaxNoticeBytes, not empty. One leading byte order mark,
+// which editors add, is dropped. Every failure is a usage error of the request (exit 2); the text itself is
+// never repeated in the error.
+func readNoticeFile(path string) (string, error) {
+	if path == "" {
+		return "", errors.New("notice-file is empty: give the path of the notice, as in notice-file=/path/to/NOTICE.txt")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("notice-file: %v", err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("notice-file %s is not a regular file", filepath.Base(path))
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("notice-file: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+	b, err := readNoticeBytes(f, faithful.MaxNoticeBytes+4) // room for a byte order mark and one byte over
+	if err != nil {
+		return "", fmt.Errorf("notice-file %s: %v", filepath.Base(path), err)
+	}
+	b = bytes.TrimPrefix(b, []byte("\xef\xbb\xbf"))
+	if len(b) > faithful.MaxNoticeBytes {
+		return "", fmt.Errorf("notice-file %s is larger than %d bytes", filepath.Base(path), faithful.MaxNoticeBytes)
+	}
+	if err := faithful.ValidateNotice(string(b)); err != nil {
+		return "", fmt.Errorf("notice-file %s: %v", filepath.Base(path), err)
+	}
+	if strings.TrimSpace(string(b)) == "" {
+		return "", fmt.Errorf("notice-file %s is empty", filepath.Base(path))
+	}
+	return string(b), nil
 }
 
 // sqlScriptRefusedFlags are the copy flags that mean nothing for a script file.

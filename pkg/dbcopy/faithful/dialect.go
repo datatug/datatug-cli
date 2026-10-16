@@ -158,8 +158,11 @@ func (p *ScriptPlan) warn(kind, object, format string, args ...any) {
 type Header struct {
 	// Name is the dataset name, Edition the contract edition label, License and Attribution as the provider gives them.
 	Name, Edition, License, Attribution string
-	SourceSHA256                        string
-	Version                             string
+	// Notice is the multi-line licence notice (copyright line, permission notice, disclaimer, attribution) the
+	// script header carries whole, as supplied. A dialect writes it with NoticeLines; ExportScript validates it.
+	Notice       string
+	SourceSHA256 string
+	Version      string
 }
 
 var dialects = map[string]Dialect{}

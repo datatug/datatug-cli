@@ -269,7 +269,7 @@ func TestCollectResultRowsReadsAtMostKeptPlusOne(t *testing.T) {
 	collector := queryresults.NewCollector(queryresults.DefaultRows)
 	require.NoError(t, collectResultRows(reader, collector))
 	assert.Equal(t, queryresults.DefaultRows+1, reader.reads)
-	data := collector.Build("t3", []string{"v"})
+	data := collector.Build("t3", []string{"v"}, nil)
 	assert.Equal(t, queryresults.Rows{Kept: 2000, HasMore: true, TruncatedBy: "rows"}, data.Rows)
 
 	assert.NoError(t, collectResultRows(nil, collector))
@@ -277,7 +277,7 @@ func TestCollectResultRowsReadsAtMostKeptPlusOne(t *testing.T) {
 	assert.Error(t, collectResultRows(&countingReader{n: 5, data: "not an object"}, queryresults.NewCollector(5)))
 	missing := queryresults.NewCollector(5)
 	require.NoError(t, collectResultRows(&countingReader{n: 2, missing: true}, missing))
-	assert.Equal(t, 2, missing.Build("m", nil).Rows.Kept)
+	assert.Equal(t, 2, missing.Build("m", nil, nil).Rows.Kept)
 }
 
 func TestQueryRunResultFromDTQLFileWithVariablesAndPolicies(t *testing.T) {

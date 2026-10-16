@@ -30,6 +30,12 @@ const (
 	ErrPhraseNoBinary = "cannot locate the datatug binary"
 	ErrPhraseSpawn    = "cannot launch the server"
 	ErrPhraseState    = "cannot write the daemon state directory"
+	// ErrPhrasePolicyPrincipal accompanies StartPolicyPrincipalRequired: a policy set exists but
+	// the daemon has no principal to serve as. It never carries the policy path or contents.
+	ErrPhrasePolicyPrincipal = "a policy set exists but no principal was named for the daemon"
+
+	// StartPolicyPrincipalRequired is the stable machine-readable Status.StartError value.
+	StartPolicyPrincipalRequired = "policy-principal-required"
 
 	startedByExternal = "external"
 	lockStaleAfter    = 30 * time.Second
@@ -69,6 +75,9 @@ type Status struct {
 	LogFile     string `json:"logFile"`
 	IdleTimeout string `json:"idleTimeout"`
 	Error       string `json:"error,omitempty"`
+	// StartError is the stable machine-readable reason a start failed, when one is named
+	// (StartPolicyPrincipalRequired); omitted when empty.
+	StartError string `json:"startError,omitempty"`
 }
 
 // Manager holds the state directory and every seam over the OS, so tests drive
@@ -89,6 +98,9 @@ type Manager struct {
 	Spawn func(exe string, args []string, logPath string) (pid int, exited <-chan struct{}, err error)
 	Now   func() time.Time
 	Sleep func(time.Duration)
+	// PolicySetPresent says whether `serve` would find a policy set and so refuse to start
+	// without a named principal; nil means no. It reads nothing beyond existence/validity.
+	PolicySetPresent func() bool
 	// StartWait bounds the readiness wait; Poll is its interval.
 	StartWait time.Duration
 	Poll      time.Duration
@@ -189,6 +201,11 @@ func (m *Manager) Start(caller string) (Status, error) {
 	// Re-check: the other starter may have finished before the lock was taken.
 	if st := m.Status(); st.Running {
 		return st, nil
+	}
+	if m.PolicySetPresent != nil && m.PolicySetPresent() {
+		st := m.statusOf(DefaultPort)
+		st.StartError = StartPolicyPrincipalRequired
+		return fail(st, ErrPhrasePolicyPrincipal)
 	}
 	port := 0
 	for p := DefaultPort; p <= MaxPort && port == 0; p++ {

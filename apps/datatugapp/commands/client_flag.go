@@ -8,6 +8,8 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+
+	"github.com/datatug/datatug-cli/pkg/daemon"
 )
 
 // knownCallers are the AI-agent mods allowed to ask for the daemon.
@@ -20,6 +22,10 @@ var noDaemonCommands = map[string]bool{
 	"daemon": true, "serve": true, "version": true, "help": true, "completion": true,
 	"self-update": true, "install": true, "upgrade": true,
 }
+
+// policyPrincipalWarning is the one stderr line printed when the daemon cannot start because a
+// policy set exists but no principal was named. It never names the policy path or contents.
+const policyPrincipalWarning = "datatug: warning: a policy set exists but no principal was named for the daemon; run `datatug serve --as <principal>` yourself, or remove the policy set"
 
 func addClientFlag(root *cobra.Command) {
 	root.PersistentFlags().String(ClientFlag, "", "Caller id, e.g. claude-mod: after the command, make sure the local DataTug API daemon runs ($"+ClientEnv+" is the fallback). Never changes stdout")
@@ -66,6 +72,10 @@ func EnsureDaemonForCaller(root *cobra.Command, args []string, stderr io.Writer)
 	}
 	m := newDaemonManager()
 	if st, startErr := m.Start(caller); startErr != nil {
+		if st.StartError == daemon.StartPolicyPrincipalRequired {
+			_, _ = fmt.Fprintln(stderr, policyPrincipalWarning)
+			return
+		}
 		_, _ = fmt.Fprintf(stderr, "datatug: warning: DataTug daemon is not running and could not be started (%s); web UI links will not work. See %s\n", st.Error, m.LogFile())
 	}
 }

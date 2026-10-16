@@ -6,7 +6,6 @@ import (
 	"github.com/datatug/datatug-cli/pkg/agentaccess"
 	"log"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -166,13 +165,7 @@ func resolveServeAddr(host string, port int, config dtconfig.Settings) (string, 
 // at all runs Unrestricted, defaulting the reported principal to "admin"
 // unless the caller named one explicitly.
 func resolveServeSession(projectDir string, flags serveFlags) (secureread.Session, error) {
-	policiesDir := ""
-	if projectDir != "" {
-		candidate := filepath.Join(projectDir, "policies")
-		if info, statErr := os.Stat(candidate); statErr == nil && info.IsDir() {
-			policiesDir = candidate
-		}
-	}
+	policiesDir := accesspolicies.ServePoliciesDir(projectDir)
 	hasPrincipal := flags.as != "" || len(flags.roles) > 0 || len(flags.groups) > 0
 
 	_, err := accesspolicies.Load(accesspolicies.LoadOptions{Dir: policiesDir})
@@ -197,6 +190,19 @@ func resolveServeSession(projectDir string, flags serveFlags) (secureread.Sessio
 	}
 }
 
+// unrestrictedServeLog is the startup line when no policy files were found. It names the
+// principal the session really runs as, never the (possibly empty) --as flag.
+func unrestrictedServeLog(session secureread.Session) string {
+	id := ""
+	if session.Principal != nil {
+		id, _ = session.Principal.ID.(string)
+	}
+	if id == "" {
+		id = "(roles/groups only)"
+	}
+	return "serve: no access policy files found; serving as the unrestricted principal " + id
+}
+
 // serveOpenURL and serveStartHTTP are test seams: they default to the real
 // browser opener and the real (blocking) HTTP server start.
 var (
@@ -217,7 +223,7 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 		return Exit(err.Error(), exitCodeUsage)
 	}
 	if session.Unrestricted {
-		log.Printf("serve: running without access policy enforcement (principal=%v)", flags.as)
+		log.Print(unrestrictedServeLog(session))
 	} else {
 		log.Printf("serve: %d access policy document(s) loaded; serving as principal %+v", len(session.Policies), session.Principal)
 	}

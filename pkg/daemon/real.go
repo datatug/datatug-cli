@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/agentaccess"
 )
 
@@ -22,7 +23,8 @@ func NewManager() *Manager {
 	return &Manager{
 		Dir: dir, Exe: os.Executable, Probe: probeAgent, Dial: dialLoopback, PortFree: portFree,
 		Alive: processAlive, Owns: processOwns, Terminate: terminateProcess, Spawn: spawnDetached,
-		Now: time.Now, Sleep: time.Sleep, StartWait: 5 * time.Second, Poll: 100 * time.Millisecond,
+		PolicySetPresent: accesspolicies.ServePolicySetPresent,
+		Now:              time.Now, Sleep: time.Sleep, StartWait: 5 * time.Second, Poll: 100 * time.Millisecond,
 	}
 }
 

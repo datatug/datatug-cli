@@ -123,7 +123,7 @@ The web UI address of an agent is `<uiBase>` = `https://datatug.app/store/http-<
 
 The key is in the URL fragment so it is never sent to the web host. It is one JSON object with sorted keys and typed values; an integer above 2^53 − 1 in absolute value is written as a string so the UI never rounds it. The fragment is encoded like JavaScript's `encodeURIComponent`.
 
-`DATATUG_UI_BASE` MAY replace `https://datatug.app` (self-hosted or local build). The deployed UI serves all three kinds on both `table` and `view` (datatug-apps `libs/datatug/main/src/lib/routes/datatug-routing-proj-env-db.ts`: `table|view/:tableType`, `…/records`, `…/record`; `schema` is authoritative in `agent-links/table-identity.ts`, `limit` is read in `link-route.ts`, `pk` is the last part of the fragment in `record-key.ts`, the code is taken out first by `main.ts`), so `url` reports `uiSupport` `available` for all three kinds. A kind is flipped only when both its `table` and `view` routes are served. The `result/<id>` route of a query result is not served yet, so `query-result` is `pending`; the page will read the result from the agent's `GET /datatug/results/<id>` (see [serve](../serve/README.md) `result-route`).
+`DATATUG_UI_BASE` MAY replace `https://datatug.app` (self-hosted or local build). The deployed UI serves all three kinds on both `table` and `view` (datatug-apps `libs/datatug/main/src/lib/routes/datatug-routing-proj-env-db.ts`: `table|view/:tableType`, `…/records`, `…/record`; `schema` is authoritative in `agent-links/table-identity.ts`, `limit` is read in `link-route.ts`, `pk` is the last part of the fragment in `record-key.ts`, the code is taken out first by `main.ts`), so `url` reports `uiSupport` `available` for all three kinds. A kind is flipped only when both its `table` and `view` routes are served. The deployed UI also serves the `result/<id>` route of a query result (datatug-apps `routes/datatug-routing-store.ts`: `store/:storeId/result/:resultId`; `agent-links/query-result/query-result.ts` reads `view` (`table|record|columns|sources|related`, `table` otherwise) and `row` (1 to 6 digits); the code is taken out of the fragment first by `main.ts`), so `query-result` is `available`; the page reads the result from the agent's `GET /datatug/results/<id>` (see [serve](../serve/README.md) `result-route`).
 
 ## Acceptance Criteria
 
@@ -173,7 +173,7 @@ Against a scanned project, `daemon url` refuses an unknown table (exit 3), `--vi
 
 **Requirements:** daemon#req:result-link, daemon#req:deep-link-contract, daemon#req:no-secrets
 
-For a stored result, `daemon url --result <id> --view=sources --row 2` prints `<uiBase>/result/<id>?view=sources&row=2` with `resultExists` `true`, `kind` `query-result` and `uiSupport` `pending`, and a running agent's code first in the fragment; for an id with no result it prints `resultExists` `false` and no `url`; a bad id or view, or `--result` with `--table`, is exit `2`.
+For a stored result, `daemon url --result <id> --view=sources --row 2` prints `<uiBase>/result/<id>?view=sources&row=2` with `resultExists` `true`, `kind` `query-result` and `uiSupport` `available`, and a running agent's code first in the fragment; for an id with no result it prints `resultExists` `false` and no `url`; a bad id or view, or `--result` with `--table`, is exit `2`.
 
 ## Follow-up
 

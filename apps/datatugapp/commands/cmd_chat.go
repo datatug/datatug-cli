@@ -46,6 +46,8 @@ type chatOptions struct {
 	cloudAPI        string // saved preference's API base, verified at cloud preflight
 	roles           []string
 	groups          []string
+	// result is a stored query result the workspace opens on (`ui --result`).
+	result *resultOpen
 }
 
 func chatCommand() *cobra.Command {
@@ -334,6 +336,11 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	if joinApplication != nil {
 		foreignKeys = foreignKeyLinks(joinApplication.Snapshot.Keys)
 	}
+	if options.result != nil {
+		if err := seedResult(ctx, store, sourceURL, options.result); err != nil {
+			return "", Exit(fmt.Sprintf("open the query result: %v", err), exitCodeUsage)
+		}
+	}
 	sessions, err := newSessionChat(ctx, store, conversation, sourceURL, projectCatalog)
 	if err != nil {
 		return "", Exit(fmt.Sprintf("restore chat session: %v", err), exitCodeUsage)
@@ -371,8 +378,12 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	}
 	defer func() { _ = bridge.Close() }()
 	ui.SetBrowserURL(bridge.URL)
-	if err := saveLastChatOptions(cmd, options); err != nil {
-		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: save chat options: %v\n", err)
+	// Opening a stored result is not a choice of project, environment or
+	// database for the next chat, so it leaves the saved choices as they were.
+	if options.result == nil {
+		if err := saveLastChatOptions(cmd, options); err != nil {
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: save chat options: %v\n", err)
+		}
 	}
 	ui.SetProjectChoices(chatProjectChoices(options.project, projectDir, projectCatalog))
 	if options.workspace != nil {

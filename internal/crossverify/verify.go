@@ -370,10 +370,12 @@ func unstorableName(name string) string {
 }
 
 // hasCaseTwin is true when another column of the table is the same name up to the case MySQL folds (its table, not
-// Unicode's: ß and ẞ, ς and σ are no twins there). Accents alone make no twin: MySQL keeps e and é apart.
+// Unicode's: ß and ẞ, ς and σ are no twins there) and keeps its own spelling: of a pair of twins the exporter renames
+// only the later one, so a pair with both names renamed has a needless rename. Accents alone make no twin: MySQL keeps
+// e and é apart.
 func hasCaseTwin(t *faithful.ScriptTable, c *faithful.ScriptColumn) bool {
 	for _, o := range t.Columns {
-		if o != c && faithful.MySQLNameFold(o.Src.Name) == faithful.MySQLNameFold(c.Src.Name) {
+		if o != c && o.Name == o.Src.Name && faithful.MySQLNameFold(o.Src.Name) == faithful.MySQLNameFold(c.Src.Name) {
 			return true
 		}
 	}
@@ -417,19 +419,21 @@ func unstorableMSSQL(name string) string {
 func mssqlFold(name string) string { return strings.ToLower(strings.TrimRight(name, " ")) }
 
 // mssqlTableTwin is true when another table has the name SQL Server's default collation would merge with this
-// one: the table is renamed, which is justified.
+// one and keeps its own spelling: the table is renamed, which is justified. Of a pair of twins only the later one is
+// renamed, so a pair with both names renamed is a needless rename.
 func mssqlTableTwin(p *faithful.ScriptPlan, t *faithful.ScriptTable) bool {
 	for _, o := range p.Tables {
-		if o != t && mssqlFold(o.Src.Name) == mssqlFold(t.Src.Name) {
+		if o != t && o.Name == o.Src.Name && mssqlFold(o.Src.Name) == mssqlFold(t.Src.Name) {
 			return true
 		}
 	}
 	return false
 }
 
+// mssqlColumnTwin is mssqlTableTwin for the columns of a table.
 func mssqlColumnTwin(t *faithful.ScriptTable, c *faithful.ScriptColumn) bool {
 	for _, o := range t.Columns {
-		if o != c && mssqlFold(o.Src.Name) == mssqlFold(c.Src.Name) {
+		if o != c && o.Name == o.Src.Name && mssqlFold(o.Src.Name) == mssqlFold(c.Src.Name) {
 			return true
 		}
 	}

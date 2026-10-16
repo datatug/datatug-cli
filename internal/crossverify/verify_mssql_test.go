@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"math"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -474,5 +475,36 @@ func TestMSSQLRenamesNeedAReason(t *testing.T) {
 	checkNames(p, mssqlEngine, add)
 	if len(diffs) != 2 || diffs[0] != "rename justified ok" && diffs[1] != "rename justified ok" {
 		t.Errorf("%v", diffs)
+	}
+}
+
+// Of a pair of twins the exporter renames only the later one: when both names of a pair are renamed (the first one
+// needlessly), the verifier objects to both, for a table and for a column.
+func TestMSSQLRenamingBothNamesOfAPairIsNeedless(t *testing.T) {
+	src := openSource(t, `CREATE TABLE "Tw" (id INTEGER PRIMARY KEY, "a", "a ")`, `CREATE TABLE "tw " (id INTEGER PRIMARY KEY)`)
+	p := planMSSQLFor(t, src)
+	var found []string
+	collect := func(obj, aspect, want, got string) {
+		if want != got && aspect == "rename justified" {
+			found = append(found, obj)
+		}
+	}
+	checkNames(p, mssqlEngine, collect)
+	if len(found) != 0 {
+		t.Fatalf("the exporter's own renames are refused: %v", found)
+	}
+	// The mutation: the first name of each pair is renamed as well, with its warning.
+	p.Table("Tw").Name = "Tw_x"
+	p.Warnings = append(p.Warnings, faithful.Warning{Kind: faithful.WarnNameRenamed, Object: "Tw", Message: "mutation"})
+	for _, c := range p.Table("Tw_x").Columns {
+		if c.Src.Name == "a" {
+			c.Name = "a_x"
+		}
+	}
+	p.Warnings = append(p.Warnings, faithful.Warning{Kind: faithful.WarnNameRenamed, Object: "Tw.a", Message: "mutation"})
+	checkNames(p, mssqlEngine, collect)
+	sort.Strings(found)
+	if got := strings.Join(found, ","); got != "Tw,Tw.a,Tw.a ,tw " {
+		t.Errorf("objections: %s", got)
 	}
 }

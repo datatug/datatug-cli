@@ -145,6 +145,36 @@
     "message": "ON DELETE SET NULL needs nullable columns and p is NOT NULL: the key is carried with NO ACTION"
   },
   {
+    "kind": "constraint-name-not-carried",
+    "object": "gen_c2.GEN_C1_IBFK_2",
+    "message": "foreign key name is not carried (it has the form MySQL gives to the name of a key without one, \u003ctable\u003e_ibfk_\u003cn\u003e, and a table of the script has one: the load would fail with error 1826): MySQL names the key itself"
+  },
+  {
+    "kind": "constraint-name-not-carried",
+    "object": "gen_c2.gen_c1_ibfk_1",
+    "message": "foreign key name is not carried (it has the form MySQL gives to the name of a key without one, \u003ctable\u003e_ibfk_\u003cn\u003e, and a table of the script has one: the load would fail with error 1826): MySQL names the key itself"
+  },
+  {
+    "kind": "constraint-name-not-carried",
+    "object": "gen_own.gen_own_chk_1",
+    "message": "check constraint name is not carried (it has the form MySQL gives to the name of a check without one, \u003ctable\u003e_chk_\u003cn\u003e, and a table of the script has one: the load would fail with error 3822): MySQL names the check itself"
+  },
+  {
+    "kind": "constraint-name-not-carried",
+    "object": "gen_own.gen_own_ibfk_1",
+    "message": "foreign key name is not carried (it has the form MySQL gives to the name of a key without one, \u003ctable\u003e_ibfk_\u003cn\u003e, and a table of the script has one: the load would fail with error 1826): MySQL names the key itself"
+  },
+  {
+    "kind": "constraint-name-not-carried",
+    "object": "gen_u.GEN_T_CHK_22",
+    "message": "check constraint name is not carried (it has the form MySQL gives to the name of a check without one, \u003ctable\u003e_chk_\u003cn\u003e, and a table of the script has one: the load would fail with error 3822): MySQL names the check itself"
+  },
+  {
+    "kind": "constraint-name-not-carried",
+    "object": "gen_u.gen_t_chk_1",
+    "message": "check constraint name is not carried (it has the form MySQL gives to the name of a check without one, \u003ctable\u003e_chk_\u003cn\u003e, and a table of the script has one: the load would fail with error 3822): MySQL names the check itself"
+  },
+  {
     "kind": "type-widened",
     "object": "hostile_nul.v",
     "message": "declared \"TEXT\" but its values are not all of that type: carried as BLOB; a text with a NUL byte is carried as bytes, and a copy back returns BLOBs"

@@ -179,15 +179,19 @@ func ExportInGitDBReport(ctx context.Context, source dal.DB, destination string,
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	// A dry run builds the whole project to check every row, and throws it away: it stays
-	// where nothing is published and the destination's folder is not touched.
+	// The destination's folder must exist, for a dry run as much as for a real run: the dry run says what the real run
+	// would say.
 	parent := filepath.Dir(path)
-	if opts.DryRun {
-		parent = os.TempDir()
-	} else if _, err := os.Stat(parent); err != nil {
+	if _, err := os.Stat(parent); err != nil {
 		return nil, fmt.Errorf("destination parent: %w", err)
 	}
-	stage, err := exportOSMkdirTemp(parent, ".datatug-export-*")
+	// A dry run builds the whole project to check every row, and throws it away: it stays
+	// where nothing is published and the destination's folder is not touched.
+	stageParent := parent
+	if opts.DryRun {
+		stageParent = os.TempDir()
+	}
+	stage, err := exportOSMkdirTemp(stageParent, ".datatug-export-*")
 	if err != nil {
 		return nil, fmt.Errorf("create export staging directory: %w", err)
 	}

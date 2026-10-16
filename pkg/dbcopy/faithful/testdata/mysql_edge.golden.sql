@@ -15,9 +15,9 @@
 -- DROP TABLE _demodb_import removes the marker once you no longer need it.
 -- Text comparison in MySQL is case- and accent-insensitive by default, unlike SQLite's exact comparison: keys that differ only by case or accents in SQLite are duplicates here and stop the load.
 -- The export warns about the key values it finds that collide that way (key-values-collide); it cannot find every kind of collision MySQL's collation makes.
--- Tables (57): Order Details, Production.Product, back`tick, trailing _b1635c0a, line_break_697affca, _e3b0c442, Ünï_t, ünï_t, select, ünïcode_日本語___30d7c467, accents, reals_as_text, fk_parent, fk_c1, fk_c2, fk_c3, fk_c4, ck_c1, ck_c2, ck_c3, ck_c4, a-very-long-table-name-that-is-more-than-sixty-four-cha_e4c1d4c0, back\slash/and;--/*x*/'q', ix_names, types_edge, hostile, hostile_nul, hos...
+-- Tables (63): Order Details, Production.Product, back`tick, trailing _b1635c0a, line_break_697affca, _e3b0c442, Ünï_t, ünï_t, select, ünïcode_日本語___30d7c467, accents, reals_as_text, fk_parent, fk_c1, fk_c2, fk_c3, fk_c4, ck_c1, ck_c2, ck_c3, ck_c4, a-very-long-table-name-that-is-more-than-sixty-four-cha_e4c1d4c0, back\slash/and;--/*x*/'q', ix_names, types_edge, hostile, hostile_nul, hos...
 --
--- 82 thing(s) are not carried exactly:
+-- 88 thing(s) are not carried exactly:
 -- [name-renamed] : table name cannot be stored (the name is empty): created as "_e3b0c442"
 -- [name-renamed] .: column name cannot be stored (the name is empty): created as "_e3b0c442"
 -- [values-normalized] Order Details.Unit Price: 2 REAL value(s) are written as the exact decimal of their shortest spelling, for example 9.99: SQLite stores a binary float, DECIMAL(10,2) an exact decimal
@@ -47,6 +47,12 @@
 -- [fk-violations-in-source] fk_orphans(p): 1 row(s) have no parent in parent_int: the key is not created, because MySQL would refuse it
 -- [fk-action-not-carried] fk_setnull_notnull(p): ON UPDATE SET DEFAULT is not supported by InnoDB: the key is carried with NO ACTION
 -- [fk-action-not-carried] fk_setnull_notnull(p): ON DELETE SET NULL needs nullable columns and p is NOT NULL: the key is carried with NO ACTION
+-- [constraint-name-not-carried] gen_c2.GEN_C1_IBFK_2: foreign key name is not carried (it has the form MySQL gives to the name of a key without one, <table>_ibfk_<n>, and a table of the script has one: the load would fail with error 1826): MySQL names the key itself
+-- [constraint-name-not-carried] gen_c2.gen_c1_ibfk_1: foreign key name is not carried (it has the form MySQL gives to the name of a key without one, <table>_ibfk_<n>, and a table of the script has one: the load would fail with error 1826): MySQL names the key itself
+-- [constraint-name-not-carried] gen_own.gen_own_chk_1: check constraint name is not carried (it has the form MySQL gives to the name of a check without one, <table>_chk_<n>, and a table of the script has one: the load would fail with error 3822): MySQL names the check itself
+-- [constraint-name-not-carried] gen_own.gen_own_ibfk_1: foreign key name is not carried (it has the form MySQL gives to the name of a key without one, <table>_ibfk_<n>, and a table of the script has one: the load would fail with error 1826): MySQL names the key itself
+-- [constraint-name-not-carried] gen_u.GEN_T_CHK_22: check constraint name is not carried (it has the form MySQL gives to the name of a check without one, <table>_chk_<n>, and a table of the script has one: the load would fail with error 3822): MySQL names the check itself
+-- [constraint-name-not-carried] gen_u.gen_t_chk_1: check constraint name is not carried (it has the form MySQL gives to the name of a check without one, <table>_chk_<n>, and a table of the script has one: the load would fail with error 3822): MySQL names the check itself
 -- [type-widened] hostile_nul.v: declared "TEXT" but its values are not all of that type: carried as BLOB; a text with a NUL byte is carried as bytes, and a copy back returns BLOBs
 -- [type-widened] hostile_utf8.v: declared "TEXT" but its values are not all of that type: carried as BLOB; a text that is not valid UTF-8 cannot be stored in a utf8mb4 column and is carried as bytes
 -- [type-widened] inf_t.v: declared "REAL" but its values are not all of that type: carried as TEXT; MySQL has no infinity
@@ -452,6 +458,47 @@ CREATE TABLE `type_changes` (
   `mixed_n` DECIMAL(3,2),
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE `gen_t` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `n` BIGINT,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE `gen_u` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `n` BIGINT,
+  `m` BIGINT,
+  `k` BIGINT,
+  `j` BIGINT,
+  `i` BIGINT,
+  `h` BIGINT,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE `gen_c1` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `p` BIGINT,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE `gen_c2` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `p` BIGINT,
+  `q` BIGINT,
+  `r` BIGINT,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE `gen_own` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `p` BIGINT,
+  `q` BIGINT,
+  `n` BIGINT,
+  `m` BIGINT,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE `gen_named` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `n` BIGINT,
+  `p` BIGINT,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 START TRANSACTION;
 INSERT INTO `Order Details` (`Order ID`, `Product ID`, `Unit Price`, `Quantity`) VALUES
 (1,1,9.99,2),
@@ -720,6 +767,14 @@ INSERT INTO `type_changes` (`id`, `small`, `wide`, `decl_char`, `nodecl`, `mixed
 (1,40000,'x','abcd','1',1.25),
 (2,5,'y','a','two',2);
 COMMIT;
+START TRANSACTION;
+INSERT INTO `gen_t` (`id`, `n`) VALUES
+(1,1);
+COMMIT;
+START TRANSACTION;
+INSERT INTO `gen_u` (`id`, `n`, `m`, `k`, `j`, `i`, `h`) VALUES
+(1,2,2,2,2,2,2);
+COMMIT;
 ALTER TABLE `Production.Product` AUTO_INCREMENT = 3;
 ALTER TABLE `autoinc_gap` AUTO_INCREMENT = 4;
 CREATE INDEX `Production.Product.IX_Color` ON `Production.Product` (`Color` DESC, `Name.Full`);
@@ -739,6 +794,16 @@ ALTER TABLE `checks_t` ADD CHECK (REGEXP_LIKE(`code`, '^[A-Z][A-Z].*$', 'cn'));
 ALTER TABLE `checks_t` ADD CONSTRAINT `n_positive` CHECK (`n` >= 0);
 ALTER TABLE `checks_t` ADD CHECK (CHAR_LENGTH( `s` ) < 10 AND `s` COLLATE utf8mb4_bin <> '');
 ALTER TABLE `checks_t` ADD CHECK (`n` < 1000 OR `g` IS NULL);
+ALTER TABLE `gen_t` ADD CHECK (`n` > 0);
+ALTER TABLE `gen_u` ADD CHECK (`n` > 1);
+ALTER TABLE `gen_u` ADD CHECK (`m` > 1);
+ALTER TABLE `gen_u` ADD CONSTRAINT `gen_t_chk_x` CHECK (`k` > 1);
+ALTER TABLE `gen_u` ADD CONSTRAINT `gen_t_chk_01` CHECK (`j` > 1);
+ALTER TABLE `gen_u` ADD CONSTRAINT `gen_t_chk_` CHECK (`i` > 1);
+ALTER TABLE `gen_u` ADD CONSTRAINT `gen_t_chk` CHECK (`h` > 1);
+ALTER TABLE `gen_own` ADD CHECK (`n` > 0);
+ALTER TABLE `gen_own` ADD CHECK (`m` > 0);
+ALTER TABLE `gen_named` ADD CONSTRAINT `gen_named_chk_1` CHECK (`n` > 0);
 ALTER TABLE `fk_c1` ADD CONSTRAINT `fk_a` FOREIGN KEY (`pid`) REFERENCES `fk_parent` (`id`);
 ALTER TABLE `fk_c2` ADD FOREIGN KEY (`pid`) REFERENCES `fk_parent` (`id`);
 ALTER TABLE `fk_c3` ADD CONSTRAINT `fk_s` FOREIGN KEY (`pid`) REFERENCES `fk_parent` (`id`);
@@ -751,5 +816,12 @@ ALTER TABLE `child_named` ADD CONSTRAINT `fk_child_named` FOREIGN KEY (`pid`) RE
 ALTER TABLE `tree` ADD FOREIGN KEY (`parent`) REFERENCES `tree` (`id`) ON DELETE RESTRICT;
 ALTER TABLE `comp_child` ADD FOREIGN KEY (`a`, `b`) REFERENCES `comp_parent` (`a`, `b`);
 ALTER TABLE `fk_setnull_notnull` ADD FOREIGN KEY (`p`) REFERENCES `parent_int` (`id`);
-INSERT INTO `_demodb_import` VALUES ('fixture', 'DemoDB contract edition', 'abababababababababababababababababababababababababababababababab', 'v0.0.0-test', 57, 121);
+ALTER TABLE `gen_c1` ADD FOREIGN KEY (`p`) REFERENCES `gen_t` (`id`);
+ALTER TABLE `gen_c2` ADD CONSTRAINT `gen_c1_ibfk_x` FOREIGN KEY (`r`) REFERENCES `gen_t` (`id`);
+ALTER TABLE `gen_c2` ADD FOREIGN KEY (`q`) REFERENCES `gen_t` (`id`);
+ALTER TABLE `gen_c2` ADD FOREIGN KEY (`p`) REFERENCES `gen_t` (`id`);
+ALTER TABLE `gen_own` ADD FOREIGN KEY (`q`) REFERENCES `gen_t` (`id`);
+ALTER TABLE `gen_own` ADD FOREIGN KEY (`p`) REFERENCES `gen_t` (`id`);
+ALTER TABLE `gen_named` ADD CONSTRAINT `gen_named_ibfk_1` FOREIGN KEY (`p`) REFERENCES `gen_t` (`id`);
+INSERT INTO `_demodb_import` VALUES ('fixture', 'DemoDB contract edition', 'abababababababababababababababababababababababababababababababab', 'v0.0.0-test', 63, 123);
 -- end of script

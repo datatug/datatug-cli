@@ -13,7 +13,7 @@ import (
 const MaxNoticeBytes = 16 << 10
 
 // ValidateNotice refuses a notice the script header must not carry: one over MaxNoticeBytes, one that is not valid
-// UTF-8 and one with a NUL. It is the check of the request; NoticeLines is safe for any text regardless.
+// UTF-8 and one with a NUL and one that holds no text (an empty notice means none). It is the check of the request; NoticeLines is safe for any text regardless.
 func ValidateNotice(s string) error {
 	switch {
 	case len(s) > MaxNoticeBytes:
@@ -22,6 +22,8 @@ func ValidateNotice(s string) error {
 		return errors.New("the notice is not valid UTF-8")
 	case strings.IndexByte(s, 0) >= 0:
 		return errors.New("the notice holds a NUL character")
+	case s != "" && len(NoticeLines("", s, nil)) == 0:
+		return errors.New("the notice holds no text, only blanks or control characters")
 	}
 	return nil
 }

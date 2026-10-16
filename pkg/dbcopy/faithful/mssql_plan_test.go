@@ -106,6 +106,44 @@ func TestMSSQLObjectNamesShareOneNamespace(t *testing.T) {
 	}
 }
 
+// SQL Server keeps the names of CHECK constraints, foreign keys, unique keys and tables in one list: a CHECK named like a
+// foreign key (case aside) loses its name, and the foreign key keeps its own. Leaving the foreign key names out of
+// ObjectNames fails this test (and the load, with Msg 2714 or 1750).
+func TestMSSQLForeignKeyNamesShareTheNamespaceWithChecks(t *testing.T) {
+	p := planMSSQL(t,
+		`CREATE TABLE p (id INTEGER PRIMARY KEY, n INTEGER CONSTRAINT "DUP" CHECK (n > 0), m INTEGER CONSTRAINT keep_me CHECK (m > 0))`,
+		`CREATE TABLE c (id INTEGER PRIMARY KEY, pid INTEGER, CONSTRAINT dup FOREIGN KEY (pid) REFERENCES p(id))`)
+	if fk := tableFK(p, "c", 0); fk.Name != "dup" {
+		t.Errorf("the foreign key keeps its name: %+v", fk)
+	}
+	names := map[string]string{}
+	for _, ck := range p.Table("p").Checks {
+		names[strings.Trim(ck.Expr[:strings.Index(ck.Expr, " ")], "[]")] = ck.Name
+	}
+	if len(names) != 2 || names["n"] != "" {
+		t.Errorf("a CHECK named like a foreign key keeps its name: %v", names)
+	}
+	if names["m"] != "keep_me" {
+		t.Errorf("a CHECK nothing else is named like loses its name: %v", names)
+	}
+	lost := 0
+	for _, w := range p.Warnings {
+		if w.Kind == WarnConstraintNameLost && strings.Contains(w.Object, "DUP") {
+			lost++
+		}
+	}
+	if lost != 1 {
+		t.Errorf("%d name-lost warnings for the CHECK, want 1: %+v", lost, p.Warnings)
+	}
+	found := false
+	for _, n := range (mssqlDialect{}).ObjectNames(p) {
+		found = found || n == "dup"
+	}
+	if !found {
+		t.Error("the foreign key name is not among the object names")
+	}
+}
+
 func TestMSSQLForeignKeysSQLServerCannotCreate(t *testing.T) {
 	p := planMSSQL(t,
 		`CREATE TABLE parent (id INTEGER PRIMARY KEY, u TEXT UNIQUE, plain INTEGER)`,

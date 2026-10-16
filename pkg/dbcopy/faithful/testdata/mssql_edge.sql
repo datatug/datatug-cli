@@ -201,3 +201,8 @@ CREATE UNIQUE INDEX uniq_many_null_c ON uniq_many_null (c);
 INSERT INTO uniq_many_null VALUES (1, NULL, 1, NULL), (2, NULL, 1, NULL), (3, 'a', NULL, 'q'), (4, 'a', NULL, 'r');
 CREATE TABLE uniq_ref_many (id INTEGER PRIMARY KEY, c TEXT REFERENCES uniq_many_null(c));
 INSERT INTO uniq_ref_many VALUES (1, 'q');
+-- Foreign key names share the namespace of constraint names with CHECK names (SQL Server Msg 2714 / 1750): a CHECK named like a foreign key, like a table or like a unique key loses its name; the foreign key keeps its own.
+CREATE TABLE fkns_p (id INTEGER PRIMARY KEY, n INTEGER CONSTRAINT "FKNS_DUP" CHECK (n > 0), m INTEGER CONSTRAINT "FKNS_C" CHECK (m > 0));
+CREATE TABLE fkns_c (id INTEGER PRIMARY KEY, pid INTEGER, CONSTRAINT fkns_dup FOREIGN KEY (pid) REFERENCES fkns_p(id));
+INSERT INTO fkns_p VALUES (1, 1, 1);
+INSERT INTO fkns_c VALUES (1, 1);

@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/dbcopy/faithful"
@@ -113,12 +114,22 @@ func parseExportDestination(cmd *cobra.Command, to string) (dbcopy.BackendRef, s
 		ref, _, err := parseSourceArg(cmd.Context(), base)
 		return ref, format, err
 	}
+	if strings.Contains(strings.TrimPrefix(to, `\\?\`), "?") { // `\\?\C:\dir` is a Windows path, not a query
+		return dbcopy.BackendRef{}, "", errors.New(`a "?" in a plain folder path is not an option: write ingitdb://FOLDER?records-format=jsonl to pick a format, or --records-format`)
+	}
 	ref, err := dbcopy.Parse(dbcopy.LocalSourceURL("ingitdb", to))
 	return ref, "", err
 }
 
-// exportFolderMaxLen is the longest folder name derived from a source name.
-const exportFolderMaxLen = 100
+// exportFolderMaxLen is the most characters of a folder name derived from a source name, and exportFolderMaxBytes the
+// most bytes: with the ".ingitdb" that follows, a file system takes at most 255 bytes in a name (100 CJK characters are 300).
+const (
+	exportFolderMaxLen   = 100
+	exportFolderMaxBytes = 255 - len(".ingitdb")
+)
+
+// absFolder makes the path of a local source absolute; a test replaces it to fail.
+var absFolder = filepath.Abs
 
 // defaultExportFolder is the folder `db export` writes to without --to: <database name>.ingitdb in the
 // working folder. The name is the SQLite file name without its extension, the PostgreSQL database name, or
@@ -136,7 +147,14 @@ func defaultExportFolder(src dbcopy.BackendRef) (string, error) {
 		stem = strings.Trim(u.Path, "/")
 	case "sqlite":
 		stem = fileStem(src.Path)
-	case "ingitdb", "openvaultdb", "http", "https":
+	case "ingitdb":
+		// The folder is named by its own name, also for "." or ".." (run inside the project).
+		path := src.Path
+		if abs, err := absFolder(path); err == nil {
+			path = abs
+		}
+		stem = strings.TrimSuffix(fileStem(path), ".ingitdb")
+	case "openvaultdb", "http", "https":
 		stem = strings.TrimSuffix(fileStem(src.Path), ".ingitdb")
 	}
 	name := folderSafe(stem)
@@ -152,7 +170,9 @@ func fileStem(path string) string {
 }
 
 // folderSafe keeps letters, digits, ".", "_" and "-" of name, writes "_" for any other character, strips
-// "." "_" and "-" from both ends and cuts the result to exportFolderMaxLen characters.
+// "." "_" and "-" from both ends, puts "_" before a name Windows reserves for a device (CON, NUL, COM1, ... with or
+// without an extension), and cuts the result to exportFolderMaxLen characters and exportFolderMaxBytes bytes, on a
+// character boundary.
 func folderSafe(name string) string {
 	var b strings.Builder
 	for _, r := range name {
@@ -162,11 +182,32 @@ func folderSafe(name string) string {
 			b.WriteRune('_')
 		}
 	}
-	safe := []rune(strings.Trim(b.String(), "._-"))
-	if len(safe) > exportFolderMaxLen {
-		safe = safe[:exportFolderMaxLen]
+	safe := strings.Trim(b.String(), "._-")
+	if windowsDeviceName(safe) {
+		safe = "_" + safe
 	}
-	return strings.TrimRight(string(safe), "._-")
+	runes := []rune(safe)
+	if len(runes) > exportFolderMaxLen {
+		runes = runes[:exportFolderMaxLen]
+	}
+	safe = string(runes)
+	for len(safe) > exportFolderMaxBytes {
+		_, size := utf8.DecodeLastRuneInString(safe)
+		safe = safe[:len(safe)-size]
+	}
+	return strings.TrimRight(safe, "._-")
+}
+
+// windowsDeviceName reports a name Windows reserves for a device: CON, PRN, AUX, NUL, COM1-9 and LPT1-9, in any case,
+// also when an extension follows ("nul.txt", "COM1.ingitdb").
+func windowsDeviceName(name string) bool {
+	base, _, _ := strings.Cut(name, ".")
+	switch strings.ToUpper(base) {
+	case "CON", "PRN", "AUX", "NUL":
+		return true
+	}
+	upper := strings.ToUpper(base)
+	return len(upper) == 4 && (strings.HasPrefix(upper, "COM") || strings.HasPrefix(upper, "LPT")) && upper[3] >= '1' && upper[3] <= '9'
 }
 
 // An env:NAME source keeps only its variable name in the CLI argument. The

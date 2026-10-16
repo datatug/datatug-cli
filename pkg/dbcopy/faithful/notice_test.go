@@ -172,6 +172,9 @@ func TestValidateNotice(t *testing.T) {
 		{"invalid utf-8", "a\xffb", true},
 		{"nul", "a\x00b", true},
 		{"hostile but valid", "\nGO\n\\! x\r\n\u2028*/", false},
+		{"blanks only", " \t\r\n ", true},
+		{"control characters and byte order marks only", "\x1f\x01\ufeff\ufeff\u200e\x7f", true},
+		{"one letter among control characters", "\x1f\ufeffx\x01", false},
 	} {
 		if err := ValidateNotice(c.in); (err != nil) != c.bad {
 			t.Errorf("%s: %v", c.name, err)
@@ -179,16 +182,58 @@ func TestValidateNotice(t *testing.T) {
 	}
 }
 
+// noticeNeutraliser is the dialect's own rule for one line of the notice, as the dialect's Header passes it to
+// NoticeLines; ok is false for a dialect that has not declared one. Adding a dialect means adding it here: every test
+// below that walks the registry fails for a dialect this function does not know.
+func noticeNeutraliser(dialect string) (fn func(string) string, ok bool) {
+	switch dialect {
+	case "mysql":
+		return nil, true
+	case "mssql":
+		return mssqlNoticeLine, true
+	case "oracle":
+		return oracleNoticeLine, true
+	}
+	return nil, false
+}
+
+// registeredDialects are the names of every registered dialect, sorted.
+func registeredDialects() []string {
+	names := make([]string, 0, len(dialects))
+	for name := range dialects {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// edgeFixture is the edge-case fixture of a dialect.
+func edgeFixture(t testing.TB, dialect string) Endpoint {
+	t.Helper()
+	switch dialect {
+	case "mssql":
+		return mssqlEdgeSQLite(t)
+	case "oracle":
+		return oracleEdgeSQLite(t)
+	}
+	return edgeSQLite(t)
+}
+
+func TestEveryRegisteredDialectDeclaresANoticeNeutraliser(t *testing.T) {
+	for _, name := range registeredDialects() {
+		if _, ok := noticeNeutraliser(name); !ok {
+			t.Errorf("dialect %q: say which neutraliser its header uses for the notice (noticeNeutraliser)", name)
+		}
+	}
+	if _, ok := noticeNeutraliser("nonesuch"); ok {
+		t.Error("an unknown dialect has a neutraliser")
+	}
+}
+
 // exportWithNotice exports the edge fixture of a dialect with a header that carries the notice.
 func exportWithNotice(t testing.TB, dialect, notice string) string {
 	t.Helper()
-	e := edgeSQLite(t)
-	switch dialect {
-	case "mssql":
-		e = mssqlEdgeSQLite(t)
-	case "oracle":
-		e = oracleEdgeSQLite(t)
-	}
+	e := edgeFixture(t, dialect)
 	h := testHeader()
 	h.Notice = notice
 	var buf bytes.Buffer
@@ -201,27 +246,16 @@ func exportWithNotice(t testing.TB, dialect, notice string) string {
 func TestNoticeIsPartOfTheHeaderOnly(t *testing.T) {
 	notice := []byte(strings.TrimPrefix(hostileNoticeText(), "\ufeff"))
 	// Every registered dialect: one that forgets to write the notice fails here, and a new one must say its own rule.
-	names := make([]string, 0, len(dialects))
-	for name := range dialects {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, dialect := range names {
+	for _, dialect := range registeredDialects() {
 		t.Run(dialect, func(t *testing.T) {
 			plain := exportWithNotice(t, dialect, "")
 			got := exportWithNotice(t, dialect, string(notice))
 			if again := exportWithNotice(t, dialect, string(notice)); again != got {
 				t.Fatal("two exports are not byte for byte the same")
 			}
-			var fn func(string) string
-			switch dialect {
-			case "mysql":
-			case "mssql":
-				fn = mssqlNoticeLine
-			case "oracle":
-				fn = oracleNoticeLine
-			default:
-				t.Fatalf("dialect %q: say which neutraliser its header uses for the notice", dialect)
+			fn, ok := noticeNeutraliser(dialect)
+			if !ok {
+				t.Fatalf("dialect %q: say which neutraliser its header uses for the notice (noticeNeutraliser)", dialect)
 			}
 			block := append([]string{"-- "}, NoticeLines("-- ", string(notice), fn)...)
 			block[0] = "--"
@@ -256,12 +290,12 @@ func TestNoticeIsPartOfTheHeaderOnly(t *testing.T) {
 
 func TestNoticeHostileRandomScriptsKeepEveryLineOurs(t *testing.T) {
 	rng := rand.New(rand.NewSource(7))
-	for _, dialect := range []string{"mysql", "mssql"} {
-		plain := exportWithNotice(t, dialect, "")
+	for _, dialect := range registeredDialects() {
+		write := noticeWriter(t, dialect)
+		plain := write("")
 		for i := 0; i < 150; i++ {
 			n := hostileNotice(rng)
-			// WriteScript does not validate: it must be safe for any text, valid or not
-			got := exportWithNoticeUnchecked(t, dialect, n)
+			got := write(n)
 			ps := strings.Split(plain, "\n")
 			gs := strings.Split(got, "\n")
 			var nonc []string
@@ -291,29 +325,29 @@ func TestNoticeHostileRandomScriptsKeepEveryLineOurs(t *testing.T) {
 	}
 }
 
-// exportWithNoticeUnchecked plans the edge fixture and calls WriteScript, which does not validate the notice.
-func exportWithNoticeUnchecked(t testing.TB, dialect, notice string) string {
+// noticeWriter plans the edge fixture of a dialect once and returns a function that calls WriteScript with a notice,
+// which does not validate it: the writer must be safe for any text, valid or not.
+func noticeWriter(t testing.TB, dialect string) func(notice string) string {
 	t.Helper()
-	e := edgeSQLite(t)
-	if dialect == "mssql" {
-		e = mssqlEdgeSQLite(t)
-	}
+	e := edgeFixture(t, dialect)
 	p, err := PlanScript(context.Background(), dialect, e.DB)
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := testHeader()
-	h.Notice = notice
-	var buf bytes.Buffer
-	if _, err := WriteScript(context.Background(), &buf, e.DB, p, h); err != nil {
-		t.Fatal(err)
+	return func(notice string) string {
+		h := testHeader()
+		h.Notice = notice
+		var buf bytes.Buffer
+		if _, err := WriteScript(context.Background(), &buf, e.DB, p, h); err != nil {
+			t.Fatal(err)
+		}
+		return buf.String()
 	}
-	return buf.String()
 }
 
 func TestExportRefusesABadNoticeAsAUsageError(t *testing.T) {
 	for name, n := range map[string]string{"nul": "a\x00b", "utf8": "a\xffb", "size": strings.Repeat("x", MaxNoticeBytes+1)} {
-		for _, dialect := range []string{"mysql", "mssql"} {
+		for _, dialect := range registeredDialects() {
 			e := sqliteWith(t, "CREATE TABLE t (a INTEGER)")
 			h := testHeader()
 			h.Notice = n

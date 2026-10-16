@@ -3,6 +3,7 @@ package crossverify
 import (
 	"context"
 	"database/sql"
+	"sort"
 	"strings"
 	"testing"
 
@@ -261,6 +262,33 @@ func TestVerifyRenamesNeedAReason(t *testing.T) {
 	}
 	if !found["acc.é"] || !found["plain"] || len(found) != 2 {
 		t.Errorf("%v", res.Diffs)
+	}
+}
+
+// Of a pair of case twins the exporter renames only the later one: with both names renamed the first rename is needless.
+func TestVerifyRenamingBothColumnsOfAPairIsNeedless(t *testing.T) {
+	src := openSource(t, `CREATE TABLE tw (id INTEGER PRIMARY KEY, "Ä", "ä")`)
+	p := plan(t, src)
+	var found []string
+	collect := func(obj, aspect, want, got string) {
+		if want != got && aspect == "rename justified" {
+			found = append(found, obj)
+		}
+	}
+	checkNames(p, mysqlEngine, collect)
+	if len(found) != 0 {
+		t.Fatalf("the exporter's own rename is refused: %v", found)
+	}
+	for _, c := range p.Table("tw").Columns {
+		if c.Src.Name == "Ä" {
+			c.Name = "Ä_x"
+		}
+	}
+	p.Warnings = append(p.Warnings, faithful.Warning{Kind: faithful.WarnNameRenamed, Object: "tw.Ä", Message: "mutation"})
+	checkNames(p, mysqlEngine, collect)
+	sort.Strings(found)
+	if got := strings.Join(found, ","); got != "tw.Ä,tw.ä" {
+		t.Errorf("objections: %s", got)
 	}
 }
 

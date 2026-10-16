@@ -144,6 +144,9 @@ func PlanSQLiteTo(ctx context.Context, d Dialect, db Queryer, cat *Catalog, stat
 		translateDefaults(d, p, t)
 		translateChecks(d, p, t, checkNames)
 	}
+	if d.Name() == "mysql" {
+		reserveGeneratedNames(d, p)
+	}
 	warnRealsNormalized(p)
 	if err := warnKeyCollisions(ctx, d, db, p); err != nil {
 		return nil, err

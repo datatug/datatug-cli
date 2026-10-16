@@ -97,8 +97,12 @@ func (mysqlDialect) BeginData(*ScriptTable) []string { return []string{"START TR
 
 func (mysqlDialect) EndData(*ScriptTable) []string { return []string{"COMMIT;"} }
 
-// commentText makes text safe for a "-- " comment line: no control or line-break character survives.
-func commentText(s string) string {
+// headerLineMax is the most bytes of a header comment line; a longer one is cut (see commentText).
+const headerLineMax = 400
+
+// normalizeComment makes text safe for a "-- " comment line: no control or line-break character survives and runs of
+// blanks are one space. It does not shorten the text.
+func normalizeComment(s string) string {
 	var b strings.Builder
 	for _, r := range s {
 		if unicode.IsControl(r) || r == 0x2028 || r == 0x2029 || r == utf8.RuneError {
@@ -106,15 +110,39 @@ func commentText(s string) string {
 		}
 		b.WriteRune(r)
 	}
-	out := strings.Join(strings.Fields(b.String()), " ")
-	if len(out) > 400 {
-		out = out[:400]
+	return strings.Join(strings.Fields(b.String()), " ")
+}
+
+// commentText makes text safe for a "-- " comment line: no control or line-break character survives, and a line over
+// headerLineMax bytes is cut there and ends in "...". The value of a header field (name, edition, licence, attribution)
+// is never cut: ValidateHeaderLines refuses a request that would, so only a machine-made line (a warning, the list of
+// tables) can be shortened.
+func commentText(s string) string {
+	out := normalizeComment(s)
+	if len(out) > headerLineMax {
+		out = out[:headerLineMax]
 		for !utf8.ValidString(out) {
 			out = out[:len(out)-1]
 		}
 		out += "..."
 	}
 	return out
+}
+
+// ValidateHeaderLines refuses a name, edition, licence or attribution whose header line would be cut at headerLineMax
+// bytes: a licence or attribution that the licence requires must not be shortened silently. The long text of a licence
+// belongs in a notice file, which is written whole.
+func ValidateHeaderLines(h Header) error {
+	for _, f := range []struct{ param, prefix, value string }{
+		{"name", "Dataset: ", h.Name}, {"edition", "", h.Edition}, {"license", "Licence: ", h.License}, {"attribution", "Attribution: ", h.Attribution},
+	} {
+		if n := len(normalizeComment(f.prefix + f.value)); n > headerLineMax {
+			return fmt.Errorf("the %s would be cut in the script header: its header line is %d bytes (blank runs counted as one space) and a line holds at most %d; "+
+				"shorten it, and put a long text (a licence, an attribution) in a notice file (notice-file=PATH, up to %d bytes, written whole)",
+				f.param, n, headerLineMax, MaxNoticeBytes)
+		}
+	}
+	return nil
 }
 
 func (d mysqlDialect) Header(p *ScriptPlan, h Header) []string {

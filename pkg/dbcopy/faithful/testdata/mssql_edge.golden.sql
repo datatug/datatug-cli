@@ -15,9 +15,9 @@
 -- Text comparison in SQL Server is case-insensitive by default, and = and UNIQUE ignore trailing spaces, unlike SQLite's exact comparison:
 -- keys that differ only by case or by trailing spaces in SQLite are duplicates here and stop the load. Text columns are NVARCHAR (UTF-16 code units).
 -- A unique key over nullable columns allows one NULL in SQL Server and many in SQLite; a key whose columns hold several NULLs is written as a filtered unique index.
--- Tables (69): Order Details, Production.Product, back`tick, trailing , line_break_697affca, _e3b0c442, Ünï_t, ünï_t_96802b60, select, ünïcode_日本語_😀, a-very-long-table-name-that-is-more-than-sixty-four-characters-long-for-sure, back\slash/and;--/*x*/'q', ix_names, types_edge, hostile, hostile_nul, hostile_utf8, binary_edge, parent_txt, child_txt, parent_int, child_int, child_named, tr...
+-- Tables (71): Order Details, Production.Product, back`tick, trailing , line_break_697affca, _e3b0c442, Ünï_t, ünï_t_96802b60, select, ünïcode_日本語_😀, a-very-long-table-name-that-is-more-than-sixty-four-characters-long-for-sure, back\slash/and;--/*x*/'q', ix_names, types_edge, hostile, hostile_nul, hostile_utf8, binary_edge, parent_txt, child_txt, parent_int, child_int, child_named, tr...
 --
--- 109 thing(s) are not carried exactly:
+-- 111 thing(s) are not carried exactly:
 -- [name-renamed] : table name cannot be stored (the name is empty): created as "_e3b0c442"
 -- [name-renamed] .: column name cannot be stored (the name is empty): created as "_e3b0c442"
 -- [values-normalized] Order Details.Unit Price: 2 REAL value(s) are written as the exact decimal of their shortest spelling, for example 9.99: SQLite stores a binary float, DECIMAL(10,2) an exact decimal
@@ -54,6 +54,8 @@
 -- [fk-violations-in-source] fk_orphans(p): 1 row(s) have no parent in parent_int: the key is not created, because SQL Server would refuse it
 -- [fk-action-not-carried] fk_setnull_notnull(p): ON UPDATE SET DEFAULT is not carried: the key is carried with NO ACTION
 -- [fk-action-not-carried] fk_setnull_notnull(p): ON DELETE SET NULL needs nullable columns and p is NOT NULL: the key is carried with NO ACTION
+-- [constraint-name-not-carried] fkns_p.FKNS_C: check constraint name is not carried (the name is taken by another constraint of the schema)
+-- [constraint-name-not-carried] fkns_p.FKNS_DUP: check constraint name is not carried (the name is taken by another constraint of the schema)
 -- [type-widened] hostile_nul.v: declared "TEXT" but its values are not all of that type: carried as VARBINARY(MAX); a text with a NUL byte is carried as bytes, and a copy back returns BLOBs
 -- [type-widened] hostile_utf8.v: declared "TEXT" but its values are not all of that type: carried as VARBINARY(MAX); a text that is not valid UTF-8 cannot be stored in an NVARCHAR column and is carried as bytes
 -- [type-widened] inf_t.v: declared "REAL" but its values are not all of that type: carried as NVARCHAR(MAX); SQL Server has no infinity
@@ -705,6 +707,21 @@ CREATE TABLE [uniq_ref_many] (
 );
 GO
 IF @@TRANCOUNT=0 SET NOEXEC ON
+CREATE TABLE [fkns_p] (
+  [id] BIGINT IDENTITY(1,1) NOT NULL,
+  [n] BIGINT NULL,
+  [m] BIGINT NULL,
+  PRIMARY KEY ([id])
+);
+GO
+IF @@TRANCOUNT=0 SET NOEXEC ON
+CREATE TABLE [fkns_c] (
+  [id] BIGINT IDENTITY(1,1) NOT NULL,
+  [pid] BIGINT NULL,
+  PRIMARY KEY ([id])
+);
+GO
+IF @@TRANCOUNT=0 SET NOEXEC ON
 INSERT INTO [Order Details] ([Order ID], [Product ID], [Unit Price], [Quantity]) VALUES
 (1,1,9.99,2),
 (1,2,1.5,1);
@@ -1179,6 +1196,18 @@ INSERT INTO [uniq_ref_many] ([id], [c]) VALUES
 SET IDENTITY_INSERT [uniq_ref_many] OFF;
 GO
 IF @@TRANCOUNT=0 SET NOEXEC ON
+SET IDENTITY_INSERT [fkns_p] ON;
+INSERT INTO [fkns_p] ([id], [n], [m]) VALUES
+(1,1,1);
+SET IDENTITY_INSERT [fkns_p] OFF;
+GO
+IF @@TRANCOUNT=0 SET NOEXEC ON
+SET IDENTITY_INSERT [fkns_c] ON;
+INSERT INTO [fkns_c] ([id], [pid]) VALUES
+(1,1);
+SET IDENTITY_INSERT [fkns_c] OFF;
+GO
+IF @@TRANCOUNT=0 SET NOEXEC ON
 DBCC CHECKIDENT (N'[Production.Product]', RESEED, 2) WITH NO_INFOMSGS;
 GO
 IF @@TRANCOUNT=0 SET NOEXEC ON
@@ -1230,6 +1259,12 @@ IF @@TRANCOUNT=0 SET NOEXEC ON
 ALTER TABLE [checks_t] WITH CHECK ADD CHECK ([n] < 1000 OR [g] IS NULL);
 GO
 IF @@TRANCOUNT=0 SET NOEXEC ON
+ALTER TABLE [fkns_p] WITH CHECK ADD CHECK ([n] > 0);
+GO
+IF @@TRANCOUNT=0 SET NOEXEC ON
+ALTER TABLE [fkns_p] WITH CHECK ADD CHECK ([m] > 0);
+GO
+IF @@TRANCOUNT=0 SET NOEXEC ON
 ALTER TABLE [child_txt] WITH CHECK ADD FOREIGN KEY ([code]) REFERENCES [parent_txt] ([code]) ON DELETE SET NULL ON UPDATE CASCADE;
 GO
 IF @@TRANCOUNT=0 SET NOEXEC ON
@@ -1279,6 +1314,9 @@ ALTER TABLE [key_child] WITH CHECK ADD FOREIGN KEY ([code]) REFERENCES [key_text
 GO
 IF @@TRANCOUNT=0 SET NOEXEC ON
 ALTER TABLE [uniq_ref] WITH CHECK ADD FOREIGN KEY ([a]) REFERENCES [uniq_one_null] ([a]);
+GO
+IF @@TRANCOUNT=0 SET NOEXEC ON
+ALTER TABLE [fkns_c] WITH CHECK ADD CONSTRAINT [fkns_dup] FOREIGN KEY ([pid]) REFERENCES [fkns_p] ([id]);
 GO
 IF @@TRANCOUNT=0 SET NOEXEC ON
 IF (SELECT COUNT_BIG(*) FROM [Order Details]) <> 2 THROW 50000, N'the load is incomplete: table Order Details does not hold 2 rows', 1;
@@ -1350,9 +1388,11 @@ IF (SELECT COUNT_BIG(*) FROM [uniq_one_null]) <> 2 THROW 50000, N'the load is in
 IF (SELECT COUNT_BIG(*) FROM [uniq_ref]) <> 2 THROW 50000, N'the load is incomplete: table uniq_ref does not hold 2 rows', 1;
 IF (SELECT COUNT_BIG(*) FROM [uniq_many_null]) <> 4 THROW 50000, N'the load is incomplete: table uniq_many_null does not hold 4 rows', 1;
 IF (SELECT COUNT_BIG(*) FROM [uniq_ref_many]) <> 1 THROW 50000, N'the load is incomplete: table uniq_ref_many does not hold 1 rows', 1;
+IF (SELECT COUNT_BIG(*) FROM [fkns_p]) <> 1 THROW 50000, N'the load is incomplete: table fkns_p does not hold 1 rows', 1;
+IF (SELECT COUNT_BIG(*) FROM [fkns_c]) <> 1 THROW 50000, N'the load is incomplete: table fkns_c does not hold 1 rows', 1;
 GO
 IF @@TRANCOUNT=0 SET NOEXEC ON
-INSERT INTO [_demodb_import] VALUES (N'fixture', N'DemoDB contract edition', N'abababababababababababababababababababababababababababababababab', N'v0.0.0-test', 69, 147);
+INSERT INTO [_demodb_import] VALUES (N'fixture', N'DemoDB contract edition', N'abababababababababababababababababababababababababababababababab', N'v0.0.0-test', 71, 149);
 GO
 IF @@TRANCOUNT=0 SET NOEXEC ON
 COMMIT TRANSACTION;

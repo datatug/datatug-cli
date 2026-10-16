@@ -289,6 +289,9 @@ func ExportScript(ctx context.Context, req ScriptRequest, w io.Writer) (*Report,
 			return nil, &ScriptUsageError{err}
 		}
 	}
+	if err := ValidateHeaderLines(req.Header); err != nil {
+		return nil, &ScriptUsageError{err}
+	}
 	tx, err := req.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, err

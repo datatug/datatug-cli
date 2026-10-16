@@ -27,7 +27,7 @@ func writeNotice(t *testing.T, content []byte) string {
 func TestSQLScriptNoticeFileIsWrittenLineByLineInBothDialects(t *testing.T) {
 	src := scriptSource(t)
 	notice := writeNotice(t, []byte("\xef\xbb\xbfMIT License\r\n\r\nCopyright (c) 2024 Example\r\nGO\r\n\\! cmd\r\n*/\r\n"))
-	for _, dialect := range []string{"mysql", "mssql"} {
+	for _, dialect := range []string{"mysql", "mssql", "oracle"} {
 		out := filepath.Join(t.TempDir(), "out.sql")
 		_, _, err := runCopy(t, "db", "copy", "--from", src, "--to", "sqlscript://"+out+"?dialect="+dialect+"&license=MIT"+noticeQuery(notice))
 		require.NoError(t, err, dialect)
@@ -67,7 +67,9 @@ func TestSQLScriptNoticeFileIsRefusedAsAUsageError(t *testing.T) {
 		"nul":           {noticeQuery(writeNotice(t, []byte("a\x00b"))), "NUL"},
 		"invalid utf-8": {noticeQuery(writeNotice(t, []byte("a\xffb"))), "not valid UTF-8"},
 		"too large":     {noticeQuery(writeNotice(t, big)), "larger than 16384 bytes"},
-		"blank":         {noticeQuery(writeNotice(t, []byte("\xef\xbb\xbf \r\n\t\n"))), "is empty"},
+		"blank":         {noticeQuery(writeNotice(t, []byte("\xef\xbb\xbf \r\n\t\n"))), "holds no text"},
+		"inert only":    {noticeQuery(writeNotice(t, []byte("\x1f\x01\ufeff\u200e \x7f\ufeff"))), "holds no text"},
+		"empty file":    {noticeQuery(writeNotice(t, nil)), "is empty"},
 		"twice":         {noticeQuery(writeNotice(t, []byte("a"))) + noticeQuery(writeNotice(t, []byte("b"))), "times; give it once"},
 		"semicolon":     {"&notice-file=/a;b", "%3B"},
 	}
@@ -132,4 +134,61 @@ func TestHostileNoticeIsAcceptedAndWrittenAsComments(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, strings.HasPrefix(s, "GO"), "one leading byte order mark was dropped")
 	assert.Equal(t, []string{"-- GO", "-- \\! cmd", "-- source x", "-- /", "-- * /", "-- !! cmd"}, faithful.NoticeLines("-- ", s, nil))
+}
+
+// A notice file of control characters and byte order marks only is not a notice: it would write a bare "--" line and
+// no text. The test counts the lines the header would carry, in every dialect.
+func TestSQLScriptNoticeFileOfInertCharactersAddsNothing(t *testing.T) {
+	for _, content := range []string{"\x1f\x01", "\ufeff\ufeff", "\u2028\u0085 \t\r\n", "\ufffd"} {
+		_, err := readNoticeFile(writeNotice(t, []byte(content)))
+		require.Error(t, err, "%q", content)
+		assert.Contains(t, err.Error(), "no text")
+	}
+	// a single real character among them is a notice
+	got, err := readNoticeFile(writeNotice(t, []byte("\x1f\ufeffx\x01")))
+	require.NoError(t, err)
+	assert.Contains(t, got, "x")
+}
+
+func TestSQLScriptNoticeFileStatFails(t *testing.T) {
+	orig := statNoticeFile
+	defer func() { statNoticeFile = orig }()
+	statNoticeFile = func(*os.File) (os.FileInfo, error) { return nil, errors.New("stat on fire") }
+	_, err := readNoticeFile(writeNotice(t, []byte("a")))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "stat on fire")
+}
+
+// A licence, attribution or edition whose header line would be cut is refused (exit 2) and nothing is written; the same
+// text in a notice file is written whole.
+func TestSQLScriptLongHeaderValuesAreRefusedNotCut(t *testing.T) {
+	src := scriptSource(t)
+	long := strings.Repeat("Attribution text. ", 40) // 720 bytes
+	for _, dialect := range []string{"mysql", "mssql", "oracle"} {
+		for _, param := range []string{"license", "attribution", "edition", "name"} {
+			out := filepath.Join(t.TempDir(), "out", "out.sql")
+			stdout, _, err := runCopy(t, "db", "copy", "--from", src, "--to", "sqlscript://"+out+"?dialect="+dialect+"&"+param+"="+url.QueryEscape(long), "--json")
+			require.Error(t, err, dialect+param)
+			assert.Equal(t, 2, exitCodeOf(t, err), dialect+param)
+			if dialect == "mysql" && (param == "name" || param == "edition") {
+				assert.Contains(t, err.Error(), "marker table", "the marker row's 255 characters come first")
+			} else {
+				assert.Contains(t, err.Error(), "would be cut", dialect+param)
+				assert.Contains(t, err.Error(), "notice-file", dialect+param)
+			}
+			assert.Contains(t, err.Error(), param)
+			assert.Contains(t, stdout.String(), `"status": "failed"`)
+			entries, _ := os.ReadDir(filepath.Dir(out)) // the folder may have been made; no script and no temporary file is left in it
+			assert.Empty(t, entries, "nothing is written")
+			_, _, err = runCopy(t, "db", "copy", "--from", src, "--to", "sqlscript://"+out+"?dialect="+dialect+"&"+param+"="+url.QueryEscape(long), "--dry-run")
+			assert.Equal(t, 2, exitCodeOf(t, err), "the dry run says the same")
+		}
+		// the long text as a notice file is written whole
+		notice := writeNotice(t, []byte(long))
+		out := filepath.Join(t.TempDir(), "out.sql")
+		_, _, err := runCopy(t, "db", "copy", "--from", src, "--to", "sqlscript://"+out+"?dialect="+dialect+"&license=MIT"+noticeQuery(notice))
+		require.NoError(t, err)
+		b, _ := os.ReadFile(out)
+		assert.Contains(t, string(b), strings.TrimSpace(long))
+	}
 }

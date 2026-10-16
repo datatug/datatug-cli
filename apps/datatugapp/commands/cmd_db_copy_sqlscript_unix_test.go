@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy/faithful"
 	"github.com/stretchr/testify/assert"
@@ -54,4 +55,45 @@ func TestWriteSQLScriptRespectsTheUmask(t *testing.T) {
 	syscall.Umask(old)
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o644), mode(dangling))
+}
+
+// A FIFO as the notice file is refused at once, whether it is one when the command looks or becomes one between a look
+// and the open: the file is opened without blocking and the open handle is checked.
+func TestSQLScriptNoticeFileFIFOIsRefusedWithoutHanging(t *testing.T) {
+	dir := t.TempDir()
+	fifo := filepath.Join(dir, "fifo")
+	require.NoError(t, syscall.Mkfifo(fifo, 0o600))
+	regular := filepath.Join(dir, "regular")
+	require.NoError(t, os.WriteFile(regular, []byte("MIT"), 0o600))
+	swapped := filepath.Join(dir, "swapped")
+	require.NoError(t, os.WriteFile(swapped, []byte("MIT"), 0o600))
+
+	orig := openNoticeFile
+	defer func() { openNoticeFile = orig }()
+	// the path is a regular file until the moment of the open, then a FIFO
+	openNoticeFile = func(path string) (*os.File, error) {
+		if path == swapped {
+			if err := os.Remove(swapped); err != nil {
+				return nil, err
+			}
+			if err := syscall.Mkfifo(swapped, 0o600); err != nil {
+				return nil, err
+			}
+		}
+		return orig(path)
+	}
+	for name, path := range map[string]string{"fifo": fifo, "swapped to a fifo at the open": swapped} {
+		done := make(chan error, 1)
+		go func() { _, err := readNoticeFile(path); done <- err }()
+		select {
+		case err := <-done:
+			require.Error(t, err, name)
+			assert.Contains(t, err.Error(), "not a regular file", name)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s: reading the notice file hangs", name)
+		}
+	}
+	got, err := readNoticeFile(regular)
+	require.NoError(t, err)
+	assert.Equal(t, "MIT", got)
 }

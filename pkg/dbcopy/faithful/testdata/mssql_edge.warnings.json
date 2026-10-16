@@ -180,6 +180,16 @@
     "message": "ON DELETE SET NULL needs nullable columns and p is NOT NULL: the key is carried with NO ACTION"
   },
   {
+    "kind": "constraint-name-not-carried",
+    "object": "fkns_p.FKNS_C",
+    "message": "check constraint name is not carried (the name is taken by another constraint of the schema)"
+  },
+  {
+    "kind": "constraint-name-not-carried",
+    "object": "fkns_p.FKNS_DUP",
+    "message": "check constraint name is not carried (the name is taken by another constraint of the schema)"
+  },
+  {
     "kind": "type-widened",
     "object": "hostile_nul.v",
     "message": "declared \"TEXT\" but its values are not all of that type: carried as VARBINARY(MAX); a text with a NUL byte is carried as bytes, and a copy back returns BLOBs"

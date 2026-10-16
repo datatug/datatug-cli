@@ -130,17 +130,31 @@ func inGitDBEndpoints(src, tgt dbcopy.BackendRef) func() (faithful.EndpointInfo,
 
 // runNativeInGitDB copies the source into a new native inGitDB project at req.tgt and reports it.
 func runNativeInGitDB(cmd *cobra.Command, req nativeInGitDBRequest) error {
-	ctx := cmd.Context()
+	// SIGINT and SIGTERM stop the export through its own return path, which removes the staging folder (a dry run's too).
+	ctx, interrupted, stop := interruptContext(cmd.Context())
+	defer stop()
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	asJSON, _ := cmd.Flags().GetBool("json")
 	failOnWarning, _ := cmd.Flags().GetBool("fail-on-warning")
 	fail := req.fail
+	// stopped is the failure of a run that a signal ended: nothing was published and nothing is left behind.
+	stopped := func(sig os.Signal) error {
+		return fail(1, "interrupted (%v): the %s was stopped, its staging folder removed and nothing published", sig, req.command)
+	}
 	srcRef := req.src.WithFlag("--from")
 	src, err := openExportSource(ctx, srcRef, req.fromSchema)
 	if err != nil {
+		if sig := interrupted(); sig != nil {
+			return stopped(sig)
+		}
 		return fail(4, "open --from: %v", srcRef.OpenFailure(err))
 	}
 	result, err := runNativeExport(ctx, src, req.tgt.Path, dbcopy.ExportOptions{RecordsFormat: req.recordsFormat, Filters: req.directives, DryRun: dryRun})
+	if err != nil {
+		if sig := interrupted(); sig != nil {
+			return stopped(sig)
+		}
+	}
 	if errors.Is(err, dbcopy.ErrSourceHasNoTables) || errors.Is(err, dbcopy.ErrNoCollectionsSelected) {
 		if req.quietWhenEmpty {
 			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "source has no tables; nothing to copy")

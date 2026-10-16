@@ -7,7 +7,6 @@ package commands
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -21,8 +20,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
+	"github.com/dal-go/dalgo/dal"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/chat"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
@@ -889,7 +890,7 @@ func TestLoadChatJoinApplicationOpenMetadataDBErrorReported(t *testing.T) {
 	restore := openJoinMetadataDB
 	t.Cleanup(func() { openJoinMetadataDB = restore })
 	injected := errors.New("injected sql.Open failure")
-	openJoinMetadataDB = func(driverName, dataSourceName string) (*sql.DB, error) { return nil, injected }
+	openJoinMetadataDB = func(context.Context, dbcopy.BackendRef) (dal.DB, error) { return nil, injected }
 
 	real, err := filepath.Abs(filepath.Join("..", "..", "..", "pkg", "dbcopy", "testdata", "chinook.db"))
 	if err != nil {

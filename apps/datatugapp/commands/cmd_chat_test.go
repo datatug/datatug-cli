@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/chat"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
@@ -297,17 +298,28 @@ func TestSameProjectDirectoryHandlesMissingPaths(t *testing.T) {
 }
 
 // TestLoadChatJoinApplicationUnavailableSourceIsANoop covers
-// loadChatJoinApplication's "unavailable://" and non-sqlite early returns:
-// neither is an error (JOIN discovery is simply skipped).
-func TestLoadChatJoinApplicationSkipsUnavailableAndNonSQLiteSources(t *testing.T) {
+// loadChatJoinApplication's "unavailable://" early return (JOIN discovery is
+// simply skipped), and that a source of another engine is read too.
+func TestLoadChatJoinApplicationSkipsUnavailableAndReadsOtherEngines(t *testing.T) {
 	ctx := context.Background()
 	app, closeFn, err := loadChatJoinApplication(ctx, "unavailable://chinook-local", nil, false)
 	if app != nil || closeFn != nil || err != nil {
 		t.Fatalf("unavailable source: app=%v close=%v err=%v, want all nil/zero", app, closeFn != nil, err)
 	}
-	app, closeFn, err = loadChatJoinApplication(ctx, "ingitdb:///some/project", nil, false)
-	if app != nil || closeFn != nil || err != nil {
-		t.Fatalf("non-sqlite source: app=%v close=%v err=%v, want all nil/zero", app, closeFn != nil, err)
+	// a source of another engine is read through the same schema calls
+	ingit := setupQueryDB(t)
+	app, closeFn, err = loadChatJoinApplication(ctx, ingit, nil, true)
+	if app == nil || closeFn == nil || err != nil {
+		t.Fatalf("inGitDB source: app=%v close=%v err=%v", app, closeFn != nil, err)
+	}
+	defer closeFn()
+	if app.Snapshot.Columns["main.products"] == nil {
+		t.Fatalf("inGitDB snapshot: %+v", app.Snapshot)
+	}
+	// a PostgreSQL source is not read while its preview is off
+	t.Setenv(dbcopy.PostgresPreviewEnv, "")
+	if _, _, err = loadChatJoinApplication(ctx, "postgres://u@h/d", nil, true); err == nil {
+		t.Fatal("a PostgreSQL source was read with its preview off")
 	}
 }
 

@@ -3,8 +3,8 @@ package commands
 import (
 	tea "charm.land/bubbletea/v2"
 	"context"
-	"database/sql"
 	"fmt"
+	"github.com/dal-go/dalgo/dal"
 	"io"
 	"net/url"
 	"os"
@@ -16,6 +16,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/chat"
 	"github.com/datatug/datatug-cli/pkg/chat/narrowing"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/datatug/datatug-cli/pkg/joinmeta"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/spf13/cobra"
@@ -408,11 +409,17 @@ func (c unavailableSchemaConversation) AskWithContext(context.Context, string, s
 
 // JOIN discovery is optional: a failed metadata read should disable JOIN
 // suggestions for this source, not prevent chat or other sources from loading.
-// openJoinMetadataDB is a seam over sql.Open: modernc.org/sqlite's driver
-// never errors eagerly for a syntactically valid DSN (the connection itself
-// is lazy), so no real fixture reaches loadChatJoinApplication's sql.Open
-// error branch. Always sql.Open in production.
-var openJoinMetadataDB = sql.Open
+// The source is opened as `query run` opens it (read-only for SQLite and
+// PostgreSQL) and its foreign keys are read through DALgo's engine-neutral
+// schema calls, so every engine whose provider reports them gets JOINs.
+// openJoinMetadataDB is that opener; a package var so tests can make it fail.
+// A PostgreSQL source is read only behind its preview switch.
+var openJoinMetadataDB = func(ctx context.Context, backend dbcopy.BackendRef) (dal.DB, error) {
+	if err := dbcopy.CheckPostgresRead(backend, 0); err != nil {
+		return nil, err
+	}
+	return openBackend(ctx, backend)
+}
 
 func loadChatJoinApplication(ctx context.Context, sourceURL string, executor *secureread.Executor, unrestricted bool) (*chat.ForeignKeyJoinApplication, func(), error) {
 	if strings.HasPrefix(sourceURL, "unavailable://") {
@@ -422,31 +429,31 @@ func loadChatJoinApplication(ctx context.Context, sourceURL string, executor *se
 	if err != nil {
 		return nil, nil, err
 	}
-	if joinSource.Scheme != "sqlite" {
-		return nil, nil, nil
-	}
-	if err := dbcopy.CheckSourceFile(joinSource.Path); err != nil {
-		return nil, nil, err
-	}
-	readOnlyURL := dbcopy.SQLiteFileURIMode(joinSource.Path, dbcopy.SQLiteReadOnly)
-	metadataDB, err := openJoinMetadataDB("sqlite", readOnlyURL)
+	metadataDB, err := openJoinMetadataDB(ctx, joinSource)
 	if err != nil {
 		return nil, nil, err
 	}
-	closeDB := func() { _ = metadataDB.Close() }
+	closeDB := func() {
+		if closer, ok := metadataDB.(io.Closer); ok {
+			_ = closer.Close()
+		}
+	}
 	refresh := func(ctx context.Context) (chat.ForeignKeySnapshot, error) {
-		return chat.LoadSQLiteForeignKeySnapshot(ctx, sourceURL, metadataDB)
+		return joinmeta.LoadForeignKeySnapshot(ctx, metadataDB, sourceURL)
 	}
 	snapshot, err := refresh(ctx)
 	if err != nil {
 		closeDB()
 		return nil, nil, err
 	}
+	// CanReadWholeCollection checks a relation by name only, so a target in
+	// another schema than the source's default one is refused.
+	defaultSchema := api.DefaultSchemaForDriver(joinSource.Scheme)
 	application := &chat.ForeignKeyJoinApplication{
 		Source: sourceURL, Snapshot: snapshot, Refresh: refresh,
 		Executor: executor, Secure: !unrestricted,
 		CanReadTarget: func(ctx context.Context, target chat.RelationInstance) error {
-			if target.Schema != "" && !strings.EqualFold(target.Schema, "main") {
+			if target.Schema != "" && !strings.EqualFold(target.Schema, defaultSchema) {
 				return fmt.Errorf("JOIN target schema is not supported by this policy preflight")
 			}
 			return executor.CanReadWholeCollection(ctx, target.Relation)

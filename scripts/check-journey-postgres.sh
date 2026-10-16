@@ -61,6 +61,7 @@ required_tests=(
 	TestPostgresReloadDoesNotTouchASequenceThatIsPastTheRows
 	TestPostgresReloadSetsASequenceToItsMaximum
 	TestPostgresCounterFollowsTheDefaultNotTheOwnedSequence
+	TestPostgresResultMetaMatchesSQLite
 )
 
 # Tests of a feature that only PostgreSQL 18 has. On 18 they must PASS like every other; on an older

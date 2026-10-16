@@ -11,6 +11,7 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dtql"
+	"github.com/datatug/datatug-cli/pkg/joinmeta"
 )
 
 var (
@@ -25,40 +26,18 @@ var (
 	canExpandQueryFn = (ForeignKeyJoinApplication).canExpandQuery
 )
 
-// RelationInstanceID identifies a node in the DTQL source tree. It is stable
-// for a given document: root is "root" and child joins append their index.
-type RelationInstanceID string
+// The relation and foreign-key types live in pkg/joinmeta, which the chat
+// shares with `query run --result-id`.
+type (
+	RelationInstanceID = joinmeta.RelationInstanceID
+	RelationInstance   = joinmeta.RelationInstance
+	ForeignKey         = joinmeta.ForeignKey
+	ForeignKeySnapshot = joinmeta.ForeignKeySnapshot
+)
 
 // JoinCandidateID is opaque. Callers must pass the value selected from the
 // catalog back to ApplyJoinCandidate instead of reconstructing an edge.
 type JoinCandidateID string
-
-type RelationInstance struct {
-	ID       RelationInstanceID
-	Schema   string
-	Relation string
-	Alias    string
-}
-
-// ForeignKey is source-scoped schema evidence. Fields are paired by index and
-// are intentionally not flattened: a composite FK remains one relationship.
-type ForeignKey struct {
-	ConstraintID string
-	Schema       string
-	FromRelation string
-	FromFields   []string
-	ToSchema     string
-	ToRelation   string
-	ToFields     []string
-}
-
-type ForeignKeySnapshot struct {
-	Source string
-	Keys   []ForeignKey
-	// Columns contains the source's ordered physical columns, keyed by
-	// lowercase schema.relation. It is used to expand wildcards before a JOIN.
-	Columns map[string][]string
-}
 
 type JoinFieldPair struct{ SourceField, TargetField string }
 
@@ -333,12 +312,8 @@ func LoadSQLiteForeignKeySnapshot(ctx context.Context, source string, db *sql.DB
 	return snapshot, nil
 }
 
-func relationKey(schema, relation string) string {
-	if schema == "" {
-		schema = "main"
-	}
-	return strings.ToLower(schema + "." + relation)
-}
+// relationKey is joinmeta.RelationKey.
+var relationKey = joinmeta.RelationKey
 
 // DiscoverJoinCandidates walks only the query's actual relation tree. It does
 // not recursively walk metadata targets, so cyclic schemas cannot recurse.
@@ -709,30 +684,8 @@ func fromAtPath(from dal.FromSource, id RelationInstanceID) dal.FromSource {
 	return node
 }
 
-func relationInstances(from dal.FromSource) []RelationInstance {
-	if from == nil {
-		return nil
-	}
-	var out []RelationInstance
-	var walk func(dal.FromSource, string)
-	walk = func(node dal.FromSource, path string) {
-		base := node.Base()
-		instance := RelationInstance{ID: RelationInstanceID(path), Relation: base.Name(), Alias: base.Alias()}
-		if qualified, ok := base.(dal.CollectionRef); ok {
-			instance.Schema = qualified.Schema()
-		}
-		out = append(out, instance)
-		for i, join := range node.Joins() {
-			child := join.From()
-			if child == nil {
-				child = dal.From(join.RecordsetSource)
-			}
-			walk(child, fmt.Sprintf("%s/%d", path, i))
-		}
-	}
-	walk(from, "root")
-	return out
-}
+// relationInstances is joinmeta.RelationInstances.
+var relationInstances = joinmeta.RelationInstances
 
 func sameRelation(schema, relation, otherSchema, otherRelation string) bool {
 	if schema == "" {

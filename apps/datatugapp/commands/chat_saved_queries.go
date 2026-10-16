@@ -2,9 +2,9 @@ package commands
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"sort"
 	"strings"
@@ -15,6 +15,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/chat"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/datatug/datatug-cli/pkg/joinmeta"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/google/uuid"
@@ -157,8 +158,7 @@ func dtqlUsesParameters(node *yaml.Node) bool {
 // Package-level seams so tests can reach the branches a healthy sqlite driver
 // and snapshot loader never take; production always uses these defaults.
 var (
-	chatOpenSQLite             = sql.Open
-	chatLoadForeignKeySnapshot = chat.LoadSQLiteForeignKeySnapshot
+	chatLoadForeignKeySnapshot = joinmeta.LoadForeignKeySnapshot
 	// chatParseSource: the source of a SQLite catalog is written with every character
 	// of its path that a URL does not read as part of a path escaped (see
 	// api.LocalSQLiteSourceURL), so no catalog of a project names a source that does
@@ -202,13 +202,14 @@ func (s chatSavedQueries) LookupParameter(ctx context.Context, queryID, paramete
 	if err := dbcopy.CheckSourceFile(ref.Path); err != nil {
 		return nil, err
 	}
-	readOnlyURL := dbcopy.SQLiteFileURIMode(ref.Path, dbcopy.SQLiteReadOnly)
-	db, err := chatOpenSQLite("sqlite", readOnlyURL)
+	db, err := openJoinMetadataDB(ctx, ref)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = db.Close() }()
-	snapshot, err := chatLoadForeignKeySnapshot(ctx, source, db)
+	if closer, ok := db.(io.Closer); ok {
+		defer func() { _ = closer.Close() }()
+	}
+	snapshot, err := chatLoadForeignKeySnapshot(ctx, db, source)
 	if err != nil {
 		return nil, err
 	}

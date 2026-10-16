@@ -127,7 +127,7 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		provenance = newQueryProvenance(*result.Provenance)
 	}
 	if o.sink != nil {
-		o.sink.describeSaved(ctx, projStore, projectDir, o, canonicalID, queryDef, variables)
+		o.sink.describeSaved(ctx, projStore, projectDir, o, canonicalID, queryDef, variables, result)
 		if result.Provenance != nil {
 			o.sink.meta.Provenance = resultProvenance(*result.Provenance)
 		}

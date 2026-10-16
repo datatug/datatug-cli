@@ -250,20 +250,11 @@ func TestPostgresCopyIsIndependentOfTheServersOutputSettings(t *testing.T) {
 	plain, odd := newPGDatabase(t), newPGDatabase(t)
 	fixture(plain)
 	fixture(odd)
-	odd = pgSetDatabase(t, odd, `datestyle = 'SQL, DMY'`, `intervalstyle = 'sql_standard'`, `extra_float_digits = -3`, `timezone = 'Asia/Tokyo'`, `statement_timeout = '1ms'`)
-	// The check is made with the timeout lifted for this one transaction: 1ms is too short for a slow runner.
-	var inForce string
-	if tx, err := odd.DB.Begin(); err != nil {
-		t.Fatal(err)
-	} else {
-		if _, err := tx.Exec(`SET LOCAL statement_timeout = 0`); err != nil {
-			t.Fatal(err)
-		}
-		if err := tx.QueryRow(`SELECT dt::text FROM fl WHERE id = 1`).Scan(&inForce); err != nil {
-			t.Fatal(err)
-		}
-		_ = tx.Rollback()
-	}
+	// Only the output settings are odd here. A statement timeout is the business of the tests of its own
+	// (TestPostgresStatementTimeout...): at 1ms it cuts the copy's own session setup whenever the machine is
+	// slow, which says nothing about the copy.
+	odd = pgSetDatabase(t, odd, `datestyle = 'SQL, DMY'`, `intervalstyle = 'sql_standard'`, `extra_float_digits = -3`, `timezone = 'Asia/Tokyo'`)
+	inForce := pgText(t, odd.DB, `SELECT dt::text FROM fl WHERE id = 1`)
 	if inForce != "02/01/2020" {
 		t.Fatalf("the settings are not in force: %s", inForce)
 	}

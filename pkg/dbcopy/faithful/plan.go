@@ -203,6 +203,8 @@ func chooseSQLiteToPG(c *Column, st *colStats, decimalsText bool) pgChoice {
 			}
 			why := "some values do not fit that precision and scale exactly"
 			if st.decFit == st.decOK {
+				// The column is a plain numeric because of its default: it pads nothing, whatever fits the scale.
+				norm, ex = st.decBare, st.decBareExample
 				why = fmt.Sprintf("its default %s does not fit that precision and scale exactly (PostgreSQL would round it or refuse it)", strings.TrimSpace(c.Default))
 			}
 			return widen(pgChoice{typ: "numeric", cast: "numeric", enc: encDecimal, kind: KindDecimal, normalized: norm, example: ex}, why)
@@ -382,7 +384,10 @@ func defaultFitsDecimal(def string, d declInfo) bool {
 	if !reDefNumber.MatchString(e) {
 		return true
 	}
-	r, _ := new(big.Rat).SetString(e) // reDefNumber is a form Rat reads
+	r, ok := new(big.Rat).SetString(e)
+	if !ok {
+		return false // an exponent too large for Rat to read: not a number numeric(p,s) holds
+	}
 	scaled := new(big.Rat).Mul(r, new(big.Rat).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(d.s)), nil)))
 	if !scaled.IsInt() {
 		return false

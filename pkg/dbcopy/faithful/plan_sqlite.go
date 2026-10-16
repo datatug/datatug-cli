@@ -139,7 +139,7 @@ func sqliteTextAffinity(decl string) bool {
 }
 
 // lossCount counts the values of a column that the target cannot hold as they are.
-type lossCount struct{ nan, negZero, rounded int64 }
+type lossCount struct{ nan, negZero, rounded, special int64 }
 
 var reIntegral = regexp.MustCompile(`^(-?\d+)(\.0*)?$`)
 
@@ -156,7 +156,8 @@ func decimalToNumericAffinity(loss *lossCount) encoder {
 		case !ok:
 			return nil, errType(v, "a decimal")
 		case !reDec.MatchString(x):
-			return x, nil // NaN, Infinity: the text stays
+			loss.special++ // NaN, Infinity: the text stays, and is counted
+			return x, nil
 		}
 		if m := reIntegral.FindStringSubmatch(x); m != nil {
 			if n, err := strconv.ParseInt(m[1], 10, 64); err == nil {

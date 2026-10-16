@@ -17,12 +17,15 @@ import (
 
 func sessionContextRoutes(path string, router router, wrap wrapper, writeOnly bool, caps Capabilities) {
 	if !writeOnly {
+		route(router, wrap, http.MethodGet, path+"/session-context/detective/operations/:clientOpId", sessionContextDetectiveHandler)
 		for _, suffix := range []string{"capabilities", "sessions", "sessions/:id", "operations/:id", "inputs/:id", "runs/:id", "sessions/:id/runs", "sessions/:id/messages", "sessions/:id/entries/:entryId/revisions", "sessions/:id/entries/:entryId/revisions/:revisionId"} {
 			route(router, wrap, http.MethodGet, path+"/session-context/"+suffix, sessionContextHandler)
 		}
 	}
 	route(router, wrap, http.MethodPost, path+"/session-context/commands", requireWriteCapability(caps, sessionContextHandler))
 	route(router, wrap, http.MethodPost, path+"/session-context/query", requireWriteCapability(caps, sessionContextQueryHandler))
+	route(router, wrap, http.MethodPost, path+"/session-context/detective", requireWriteCapability(caps, sessionContextDetectiveHandler))
+	route(router, wrap, http.MethodPost, path+"/session-context/detective/reconcile", requireWriteCapability(caps, sessionContextDetectiveHandler))
 }
 
 func sessionContextHandler(w http.ResponseWriter, r *http.Request) {

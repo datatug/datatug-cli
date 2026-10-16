@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 
+	"context"
+	"github.com/datatug/datatug-cli/pkg/privateadmission"
 	"github.com/datatug/datatug-core/pkg/sessioncontext"
 	"github.com/openvaultdb/openvaultdb-go/pkg/core"
 	"github.com/openvaultdb/openvaultdb-go/pkg/mount"
@@ -154,6 +156,38 @@ func (m *Manager) Repository(project, projectDir string) (*sessioncontext.DALRep
 	}
 	m.mounts[id] = mounted
 	return sessioncontext.NewDALRepository(mounted, nil)
+}
+
+// NativeRepository wraps ALL session mutations in the same native project
+// admission as Detective. View stays unlocked so native finalization can check
+// its fence under admission without trying to reacquire it. Never call Transact
+// while already holding native admission (lock order: admission, then SQLite).
+func (m *Manager) NativeRepository(project, projectDir, privateBase string) (*NativeRepository, error) {
+	path, err := privateadmission.ProjectPath(projectDir, privateBase)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := m.Repository(project, projectDir)
+	if err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	mounted := m.mounts[raw.DatabaseID()]
+	m.mu.Unlock()
+	native, err := sessioncontext.NewNativePinRepository(mounted, nil, "local", "", project)
+	if err != nil {
+		return nil, err
+	}
+	return &NativeRepository{DALRepository: native, admissionPath: path}, nil
+}
+
+type NativeRepository struct {
+	*sessioncontext.DALRepository
+	admissionPath string
+}
+
+func (r *NativeRepository) Transact(ctx context.Context, fn func(sessioncontext.Transaction) error) error {
+	return privateadmission.With(ctx, r.admissionPath, func() error { return r.DALRepository.Transact(ctx, fn) })
 }
 
 func (m *Manager) Close() error {

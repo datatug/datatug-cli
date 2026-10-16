@@ -685,7 +685,15 @@ func (r BackendRef) openSource(ctx context.Context, mode openMode) (dal.DB, erro
 	case "openvaultdb":
 		return openvaultdb.OpenSource(r.Path)
 	case "sqlite":
-		if err := r.CheckFile(); err != nil {
+		// A SQLite file that is written (the target of `db copy`) is created when it is missing;
+		// one that is read must exist.
+		fileMode := SQLiteReadWrite
+		if mode.forWrite {
+			if err := r.prepareNewSQLiteFile(); err != nil {
+				return nil, err
+			}
+			fileMode = "rwc"
+		} else if err := r.CheckFile(); err != nil {
 			return nil, err
 		}
 		// Every SQLite open, protected or not, compiles structured reads
@@ -698,7 +706,7 @@ func (r BackendRef) openSource(ctx context.Context, mode openMode) (dal.DB, erro
 		opts := dalgo2sql.DbOptions{StructuredQueryDialect: "sqlite"}
 		// The driver is given the path as a "file:" URI (see SQLiteFileURI): a bare path
 		// with a "?" in it is read as the file before it and its parameters.
-		db, err := newSQLiteDatabaseWithOptions(SQLiteFileURI(r.Path), dal.NewSchema(nil, nil), opts)
+		db, err := newSQLiteDatabaseWithOptions(SQLiteFileURIMode(r.Path, fileMode), dal.NewSchema(nil, nil), opts)
 		if err != nil {
 			return nil, err
 		}

@@ -15,7 +15,9 @@ import (
 	"time"
 
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/privateadmission"
 	core "github.com/datatug/datatug-core/pkg/detective"
+	"github.com/datatug/datatug-core/pkg/sessioncontext"
 	"github.com/gofrs/flock"
 )
 
@@ -66,6 +68,7 @@ var (
 	auditOpenFile       = func(path string, flag int, perm os.FileMode) (syncCloserWriter, error) {
 		return os.OpenFile(path, flag, perm)
 	}
+	writeItemSyncDir    = syncPrivateDirectory
 	writeItemCreateTemp = func(dir, pattern string) (tempFile, error) {
 		return os.CreateTemp(dir, pattern)
 	}
@@ -76,11 +79,12 @@ type localJSONLAudit struct{ path string }
 // LocalStore keeps reviewable definitions in the project and sensitive case,
 // run and audit material in a separate server-private directory.
 type LocalStore struct {
-	projectDir string
-	privateDir string
-	projectID  string
-	lock       fileLocker
-	audit      AuditStore
+	projectDir  string
+	privateDir  string
+	projectID   string
+	lock        fileLocker
+	audit       AuditStore
+	nativeFence func(context.Context, sessioncontext.DetectiveFence) error
 }
 
 func NewLocalStore(projectID, projectDir, privateBase string) (*LocalStore, error) {
@@ -103,6 +107,14 @@ func NewLocalStore(projectID, projectDir, privateBase string) (*LocalStore, erro
 		return nil, err
 	}
 	base, err = storeEvalSymlinks(base)
+	if err != nil {
+		return nil, err
+	}
+	project, err = privateadmission.PhysicalDirectory(project)
+	if err != nil {
+		return nil, err
+	}
+	base, err = privateadmission.PhysicalDirectory(base)
 	if err != nil {
 		return nil, err
 	}
@@ -249,15 +261,17 @@ func ensureDirIfExists(path string) error {
 }
 
 func (s *LocalStore) withLock(ctx context.Context, fn func() error) error {
-	ok, err := s.lock.TryLockContext(ctx, 50*time.Millisecond)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return context.DeadlineExceeded
-	}
-	defer func() { _ = s.lock.Unlock() }()
-	return fn()
+	return privateadmission.Local(ctx, filepath.Join(s.privateDir, "store.lock"), func() error {
+		ok, err := s.lock.TryLockContext(ctx, 50*time.Millisecond)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return context.DeadlineExceeded
+		}
+		defer func() { _ = s.lock.Unlock() }()
+		return fn()
+	})
 }
 
 func (s *LocalStore) definitionDir(kind string) string  { return filepath.Join(s.projectDir, kind) }
@@ -306,6 +320,16 @@ func readItems[T any](dir string) ([]T, error) {
 }
 
 func writeItem(dir, id string, item any) error {
+	return writeItemDurability(dir, id, item, false)
+}
+
+// writeDurableItem acknowledges journal acceptance only after both the file
+// rename and directory entries are durable on supported bridge platforms.
+func writeDurableItem(dir, id string, item any) error {
+	return writeItemDurability(dir, id, item, true)
+}
+
+func writeItemDurability(dir, id string, item any, syncDirectory bool) error {
 	if !validSlug(id) {
 		return ErrInvalid
 	}
@@ -350,7 +374,16 @@ func writeItem(dir, id string, item any) error {
 	if err = tmp.Close(); err != nil {
 		return err
 	}
-	return storeRename(tmp.Name(), path)
+	if err = storeRename(tmp.Name(), path); err != nil {
+		return err
+	}
+	if !syncDirectory {
+		return nil
+	}
+	if err = writeItemSyncDir(dir); err != nil {
+		return err
+	}
+	return writeItemSyncDir(filepath.Dir(dir))
 }
 
 func (s *LocalStore) State(ctx context.Context) (State, error) { return s.StatePage(ctx, "") }

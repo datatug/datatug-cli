@@ -59,7 +59,7 @@ An `env:NAME` source MUST be recorded with driver `postgres`, a catalog whose pa
 
 #### REQ: default-env
 
-`--env` defaults to the project's environment when the project has exactly one. With none, or more than one, `--env` is required and the command MUST exit `2` (naming the environments when there are several). An `--env` that the project does not have is made, as a scan makes it.
+When `--env` is omitted it defaults to: the project's environment when the project has exactly one; the environment whose id is `local` when the project has several and one of them is `local`; otherwise `--env` is required and the command MUST exit `2`, with a fixed message that lists the environment ids when there are several (an environment is never made by default), or says the project has no environment yet when there is none. An explicit `--env` is used as given: one that the project does not have is made, as a scan makes it. The `env` field of the [JSON result](#req-json-shape) reports the environment used.
 
 #### REQ: idempotent
 
@@ -93,7 +93,7 @@ No credential, URL or connection string appears in stdout, stderr, an error or a
 |---|---|---|---|---|
 | `--project` | `-p` | string | yes | Registered project id/name the source is added to. |
 | `--db` | | string | yes | SQLite file path or `sqlite://` URL, or `env:NAME` naming the variable that holds a PostgreSQL URL. |
-| `--env` | | string | when the project has not exactly one environment | Environment of the project; made when the project has none of that id. |
+| `--env` | | string | when the project has none, or several without `local` | Environment of the project; made when the project has none of that id. Default: its only environment, or `local` when it has several. |
 | `--name` | | string | for `env:NAME`, or when the file name is not a plain name | Id of the source: a plain name. |
 | `--format` | | string | no | `json` (default) or `text`. |
 
@@ -152,7 +152,7 @@ Adding another file, or an `env:NAME` source, under the `--name` of an existing 
 
 **Requirements:** db/add#req:default-env, db/add#req:default-name
 
-In a project with one environment `--env` may be left out; with two it exits `2`. `--db ./My Shop.sqlite` is `My-Shop`; `--db env:DATATUG_X` without `--name` exits `2`.
+In a project with one environment `--env` may be left out; with several it uses `local` when the project has it, and exits `2` listing the ids when it does not. `--db ./My Shop.sqlite` is `My-Shop`; `--db env:DATATUG_X` without `--name` exits `2`.
 
 ### AC: db-ref-opens-the-source
 

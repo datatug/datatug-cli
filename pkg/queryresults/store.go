@@ -274,6 +274,18 @@ func (r *Result) Write(data, meta []byte) error {
 func (r *Result) Discard() { _ = osRemoveAll(r.dir) }
 
 func writeAtomic(dir, name string, content []byte) error {
+	if err := replaceFile(dir, name, content); err != nil {
+		return err
+	}
+	if err := syncDir(dir); err != nil {
+		return fail(ReasonUnwritable)
+	}
+	return nil
+}
+
+// replaceFile writes content as a private temporary file, syncs it and renames
+// it over dir/name; it does not sync the directory.
+func replaceFile(dir, name string, content []byte) error {
 	// os.CreateTemp opens with O_CREATE|O_EXCL and mode 0600.
 	f, err := osCreateTemp(dir, "."+name+"-*.tmp")
 	if err != nil {
@@ -289,9 +301,6 @@ func writeAtomic(dir, name string, content []byte) error {
 	}
 	if err := osRename(tmp, filepath.Join(dir, name)); err != nil {
 		_ = osRemove(tmp)
-		return fail(ReasonUnwritable)
-	}
-	if err := syncDir(dir); err != nil {
 		return fail(ReasonUnwritable)
 	}
 	return nil

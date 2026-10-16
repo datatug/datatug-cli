@@ -146,12 +146,42 @@ func TestSetEditor(t *testing.T) {
 		t.Fatalf("encoded query %v", query)
 	}
 
-	// the editor text counts toward the query bound and is dropped with the rest
+	// the editor members have a bound of their own: past it only they go
 	meta = Meta{}
 	meta.SetEditor(strings.Repeat("x", MaxQueryBytes), LanguageSQL)
+	meta.Query.DTQL = "from:\n  name: T\n"
 	_ = json.Unmarshal(meta.Encode(), &decoded)
 	query = decoded["query"].(map[string]any)
-	if query["text"] != nil || decoded["unavailable"].(map[string]any)["query"] != UnavailableTooLarge {
-		t.Fatalf("too-large editor text %v", query)
+	if query["text"] != nil || query["dtql"] == nil || decoded["unavailable"].(map[string]any)["query"] != nil {
+		t.Fatalf("editor members over their bound %v %v", query, decoded["unavailable"])
+	}
+
+	// the legacy bound is not shared with them: 200 KiB of each is kept
+	meta = Meta{}
+	meta.SetEditor(strings.Repeat("x", 200<<10), LanguageDTQL)
+	meta.Query.DTQL = strings.Repeat("y", 200<<10)
+	encoded := meta.Encode()
+	_ = json.Unmarshal(encoded, &decoded)
+	query = decoded["query"].(map[string]any)
+	if query["text"] == nil || query["dtql"] == nil || decoded["unavailable"].(map[string]any)["query"] != nil {
+		t.Fatalf("both within their own bounds %v", decoded["unavailable"])
+	}
+
+	// the legacy members over theirs go alone, the editor members stay
+	meta.Query.DTQL = strings.Repeat("y", MaxQueryBytes)
+	_ = json.Unmarshal(meta.Encode(), &decoded)
+	query = decoded["query"].(map[string]any)
+	if query["dtql"] != nil || query["text"] == nil || decoded["unavailable"].(map[string]any)["query"] != UnavailableTooLarge {
+		t.Fatalf("legacy over its bound %v %v", query, decoded["unavailable"])
+	}
+
+	// both at their maximum still leave room for the prompt in 1 MiB
+	meta.Query.DTQL = strings.Repeat("y", MaxQueryBytes-100)
+	meta.Query.Text = strings.Repeat("x", MaxQueryBytes-100)
+	for i := 0; i < MaxMetaColumns; i++ {
+		meta.Columns = append(meta.Columns, Column{Name: strings.Repeat("c", 1000), Type: "string"})
+	}
+	if size := len(meta.Encode()); size > MaxMetaBytes-MaxPromptJSONBytes {
+		t.Fatalf("meta.json %d leaves no room for the prompt", size)
 	}
 }

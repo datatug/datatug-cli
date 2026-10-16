@@ -277,7 +277,8 @@ func NewMeta(id, cliVersion string, data Data) Meta {
 
 // Encode applies the bounds of meta.json and encodes it: query.dtql and
 // query.parameters together within MaxQueryBytes (else both are dropped,
-// "too-large"), at most MaxMetaColumns columns, and the whole within
+// "too-large"), query.text and query.params together within their own
+// MaxQueryBytes (else just those two are dropped), at most MaxMetaColumns columns, and the whole within
 // MaxMetaBytes (else the column descriptions are dropped).
 func (m Meta) Encode() []byte {
 	// Both are measured as they are encoded, escapes included.
@@ -285,9 +286,14 @@ func (m Meta) Encode() []byte {
 	parameters, _ := json.Marshal(m.Query.Parameters)
 	editorText, _ := json.Marshal(m.Query.Text)
 	params, _ := json.Marshal(m.Query.Params)
-	if len(text)+len(parameters)+len(editorText)+len(params) > MaxQueryBytes {
-		m.Query.DTQL, m.Query.Parameters, m.Query.Text, m.Query.Params = "", nil, "", nil
+	if len(text)+len(parameters) > MaxQueryBytes {
+		m.Query.DTQL, m.Query.Parameters = "", nil
 		m.Unavailable.Query = UnavailableTooLarge
+	}
+	// The editor-ready members have a bound of their own, so adding them did
+	// not shrink what the legacy members may hold; past it only they go.
+	if len(editorText)+len(params) > MaxQueryBytes {
+		m.Query.Text, m.Query.Params = "", nil
 	}
 	if m.Participants == nil {
 		m.Participants = []Participant{}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,6 +75,31 @@ func TestQueryResultsAnnotate(t *testing.T) {
 	require.Equal(t, 0, code)
 	assert.JSONEq(t, `{"id":"p1","truncated":true,"bytes":8190}`, out)
 
+	// an unknown id is answered before stdin is read, empty or not
+	_, _, code = runAnnotate(t, "", "--id", "nope", "--prompt-stdin")
+	assert.Equal(t, exitCodeNotFound, code)
+
+	// stdin that is a terminal is refused without being read
+	origTTY := stdinIsTerminal
+	t.Cleanup(func() { stdinIsTerminal = origTTY })
+	stdinIsTerminal = func(io.Reader) bool { return true }
+	_, stderr, code = runAnnotate(t, "never read", "--id", "p1", "--prompt-stdin")
+	assert.Equal(t, exitCodeUsage, code)
+	assert.Contains(t, stderr, "pipe the text on stdin")
+	_, _, code = runAnnotate(t, "", "--id", "nope", "--prompt-stdin")
+	assert.Equal(t, exitCodeNotFound, code, "the lookup comes before the terminal check")
+	stdinIsTerminal = origTTY
+
+	// a meta.json of a version this CLI does not know is refused
+	good, err := os.ReadFile(metaPath)
+	require.NoError(t, err)
+	future := strings.Replace(string(good), `"version":1`, `"version":2`, 1)
+	require.NoError(t, os.WriteFile(metaPath, []byte(future), 0o600))
+	_, stderr, code = runAnnotate(t, "x", "--id", "p1", "--prompt-stdin")
+	assert.Equal(t, exitCodeUsage, code)
+	assert.Contains(t, stderr, "unsupported-version")
+	require.NoError(t, os.WriteFile(metaPath, good, 0o600))
+
 	// refusals
 	_, stderr, code = runAnnotate(t, "x", "--id", "p1")
 	assert.Equal(t, exitCodeUsage, code)
@@ -96,6 +122,8 @@ func TestQueryResultsAnnotate(t *testing.T) {
 	require.NoError(t, os.Remove(metaPath))
 	_, _, code = runAnnotate(t, "x", "--id", "p1", "--prompt-stdin")
 	assert.Equal(t, exitCodeUsage, code)
+
+	require.NoError(t, os.WriteFile(metaPath, good, 0o600))
 
 	// stdin that cannot be read
 	root2 := &cobra.Command{Use: "datatug", SilenceUsage: true, SilenceErrors: true}
@@ -121,3 +149,12 @@ func TestQueryResultsAnnotate(t *testing.T) {
 type errReader struct{}
 
 func (errReader) Read([]byte) (int, error) { return 0, errors.New("boom") }
+
+// With the real check, a reader that is not a file is not a terminal.
+func TestStdinIsTerminal(t *testing.T) {
+	assert.False(t, stdinIsTerminal(strings.NewReader("x")))
+	file, err := os.Open(os.DevNull)
+	require.NoError(t, err)
+	defer func() { _ = file.Close() }()
+	assert.False(t, stdinIsTerminal(file))
+}

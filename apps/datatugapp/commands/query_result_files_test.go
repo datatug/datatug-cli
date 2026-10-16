@@ -426,7 +426,7 @@ func TestQueryRunSavedResultFiles(t *testing.T) {
 		assert.Equal(t, tc.query, meta.Query.SavedQueryID)
 		assert.Equal(t, tc.kind, meta.Query.SavedQueryType)
 		assert.Equal(t, "project", meta.Query.Policy)
-		assert.Empty(t, meta.Query.DTQL, "the saved text is not copied into the legacy member")
+		assert.Empty(t, meta.Query.DTQL, "the legacy dtql member stays empty for a saved query; the person's own saved text is copied as query.text")
 		assert.Equal(t, tc.kind, meta.Query.Language)
 		assert.NotEmpty(t, meta.Query.Text)
 		assert.Empty(t, meta.Query.DBRef)

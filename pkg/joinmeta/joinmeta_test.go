@@ -111,10 +111,36 @@ func TestLoadForeignKeySnapshotFailures(t *testing.T) {
 		})
 	snapshot, err := LoadForeignKeySnapshot(ctx, db, "x")
 	require.NoError(t, err)
-	assert.Equal(t, ForeignKey{ConstraintID: "fk:B:0", FromRelation: "B", FromFields: []string{"a_id"}, ToRelation: "A", ToFields: []string{"id"}}, snapshot.Keys[0])
+	assert.Equal(t, ForeignKey{ConstraintID: "sqlite:B:fk0", Schema: "main", FromRelation: "B", FromFields: []string{"a_id"}, ToSchema: "main", ToRelation: "A", ToFields: []string{"id"}}, snapshot.Keys[0])
+	snapshot, err = LoadForeignKeySnapshot(ctx, otherEngine{db}, "x")
+	require.NoError(t, err)
+	assert.Equal(t, ForeignKey{ConstraintID: "B:fk:0", FromRelation: "B", FromFields: []string{"a_id"}, ToRelation: "A", ToFields: []string{"id"}}, snapshot.Keys[0])
 	defs["B"].ForeignKeys[0].ReferencedCollection = "Missing"
 	_, err = LoadForeignKeySnapshot(ctx, db, "x")
 	assert.ErrorContains(t, err, "no resolvable target primary key")
+}
+
+// otherEngine is a database whose adapter is not SQLite's.
+type otherEngine struct{ dal.DB }
+
+func (otherEngine) Adapter() dal.Adapter { return dal.NewAdapter("other", "0") }
+
+type noAdapter struct{ dal.DB }
+
+func (noAdapter) Adapter() dal.Adapter { return nil }
+
+// A SQLite key keeps the ID of the PRAGMA reader that chat sessions stored; a
+// constraint name of another engine is qualified by its table, as PostgreSQL
+// only keeps names unique per table.
+func TestConstraintID(t *testing.T) {
+	assert.Equal(t, "sqlite:Invoice:0", constraintID(true, "main", "Invoice", "Invoice_fk_0", 3))
+	assert.Equal(t, "sqlite:Invoice:fk3", constraintID(true, "main", "Invoice", "Invoice_fk_x", 3))
+	assert.Equal(t, "sqlite:Invoice:fk3", constraintID(true, "main", "Invoice", "Invoice_fk_", 3))
+	assert.Equal(t, "public.orders:fk_customer", constraintID(false, "public", "orders", "fk_customer", 0))
+	assert.NotEqual(t, constraintID(false, "public", "orders", "fk_customer", 0), constraintID(false, "public", "invoices", "fk_customer", 0))
+	assert.Equal(t, "orders:fk:2", constraintID(false, "", "orders", "", 2))
+	assert.False(t, isSQLite(noAdapter{chinook(t)}))
+	assert.True(t, isSQLite(chinook(t)))
 }
 
 func TestRelationInstances(t *testing.T) {

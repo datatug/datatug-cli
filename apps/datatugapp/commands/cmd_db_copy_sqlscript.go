@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"syscall"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/dbcopy/faithful"
@@ -99,26 +100,35 @@ func parseSQLScriptTarget(raw string) (sqlScriptTarget, error) {
 // readNoticeBytes reads at most limit bytes of r; a test replaces it to fail the read.
 var readNoticeBytes = func(r io.Reader, limit int64) ([]byte, error) { return io.ReadAll(io.LimitReader(r, limit)) }
 
+// openNoticeFile opens the notice file without blocking: a path that was a regular file a moment ago and is a FIFO now
+// opens at once (O_NONBLOCK) and is refused by the stat of the open handle. A test replaces it to swap the path at that
+// moment.
+var openNoticeFile = func(path string) (*os.File, error) { return os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0) }
+
+// statNoticeFile stats the open notice file; a test replaces it to fail the stat.
+var statNoticeFile = func(f *os.File) (os.FileInfo, error) { return f.Stat() }
+
 // readNoticeFile reads the multi-line licence notice of a script header from a regular file (a relative path is
-// the current folder's): UTF-8, no NUL, at most faithful.MaxNoticeBytes, not empty. One leading byte order mark,
-// which editors add, is dropped. Every failure is a usage error of the request (exit 2); the text itself is
-// never repeated in the error.
+// the current folder's): UTF-8, no NUL, at most faithful.MaxNoticeBytes, with text in it. One leading byte order
+// mark, which editors add, is dropped. The file is opened first and the open handle is checked (a regular file), so a
+// path swapped for a FIFO between a check and the open cannot hang the command. Every failure is a usage error of the
+// request (exit 2); the text itself is never repeated in the error.
 func readNoticeFile(path string) (string, error) {
 	if path == "" {
 		return "", errors.New("notice-file is empty: give the path of the notice, as in notice-file=/path/to/NOTICE.txt")
 	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return "", fmt.Errorf("notice-file: %v", err)
-	}
-	if !info.Mode().IsRegular() {
-		return "", fmt.Errorf("notice-file %s is not a regular file", filepath.Base(path))
-	}
-	f, err := os.Open(path)
+	f, err := openNoticeFile(path)
 	if err != nil {
 		return "", fmt.Errorf("notice-file: %v", err)
 	}
 	defer func() { _ = f.Close() }()
+	info, err := statNoticeFile(f)
+	if err != nil {
+		return "", fmt.Errorf("notice-file %s: %v", filepath.Base(path), err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("notice-file %s is not a regular file", filepath.Base(path))
+	}
 	b, err := readNoticeBytes(f, faithful.MaxNoticeBytes+4) // room for a byte order mark and one byte over
 	if err != nil {
 		return "", fmt.Errorf("notice-file %s: %v", filepath.Base(path), err)
@@ -127,11 +137,13 @@ func readNoticeFile(path string) (string, error) {
 	if len(b) > faithful.MaxNoticeBytes {
 		return "", fmt.Errorf("notice-file %s is larger than %d bytes", filepath.Base(path), faithful.MaxNoticeBytes)
 	}
+	if len(b) == 0 {
+		return "", fmt.Errorf("notice-file %s is empty", filepath.Base(path))
+	}
+	// ValidateNotice judges what the header would carry: a file of blanks, byte order marks and control characters holds no
+	// text, and would be written as nothing but a bare comment line.
 	if err := faithful.ValidateNotice(string(b)); err != nil {
 		return "", fmt.Errorf("notice-file %s: %v", filepath.Base(path), err)
-	}
-	if strings.TrimSpace(string(b)) == "" {
-		return "", fmt.Errorf("notice-file %s is empty", filepath.Base(path))
 	}
 	return string(b), nil
 }

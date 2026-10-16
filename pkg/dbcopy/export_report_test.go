@@ -222,3 +222,83 @@ func TestExportTableReportAndHelpersWithNoFilters(t *testing.T) {
 		t.Fatalf("kept = %v, warnings = %v", kept, result.Warnings)
 	}
 }
+
+// The destination's folder must exist for a dry run as for a real run: --dry-run says what the real run would say.
+func TestExportDryRunChecksTheDestinationParent(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", t.TempDir())
+	for name, destination := range map[string]string{
+		"missing parent":      filepath.Join(tmp, "nopar", "x", "y"),
+		"missing parent, one": filepath.Join(tmp, "nopar", "out"),
+	} {
+		for _, dry := range []bool{false, true} {
+			_, err := ExportInGitDBReport(context.Background(), reportSource(t), destination, ExportOptions{DryRun: dry})
+			if err == nil || !strings.Contains(err.Error(), "destination parent") {
+				t.Errorf("%s (dry run %v): %v", name, dry, err)
+			}
+		}
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "nopar")); err == nil {
+		t.Error("the destination's parent was created")
+	}
+}
+
+// An export that is cancelled (an interrupt) stops at the next row and leaves nothing behind: no staging folder beside the
+// destination, none in the temporary folder (dry run), and no destination.
+func TestExportCancelledLeavesNoStagingFolder(t *testing.T) {
+	for _, dry := range []bool{false, true} {
+		tmp := t.TempDir()
+		t.Setenv("TMPDIR", tmp)
+		parent := t.TempDir()
+		destination := filepath.Join(parent, "out")
+		ctx, cancel := context.WithCancel(context.Background())
+		orig := exportOSCreate
+		exportOSCreate = func(name string) (*os.File, error) { cancel(); return os.Create(name) } // the interrupt arrives while the records are written
+		_, err := ExportInGitDBReport(ctx, reportSource(t), destination, ExportOptions{DryRun: dry})
+		exportOSCreate = orig
+		cancel()
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("dry run %v: %v", dry, err)
+		}
+		for _, dir := range []string{parent, tmp} {
+			entries, _ := os.ReadDir(dir)
+			for _, entry := range entries {
+				t.Errorf("dry run %v: %s was left in %s", dry, entry.Name(), dir)
+			}
+		}
+	}
+}
+
+// A real run stages beside the destination, so the final rename stays on one file system; a dry run stages in the temporary
+// folder and never touches the destination's folder.
+func TestExportStagesWhereItPublishes(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	for _, dry := range []bool{false, true} {
+		parent := t.TempDir()
+		var stagedIn string
+		orig := exportOSMkdirTemp
+		exportOSMkdirTemp = func(dir, pattern string) (string, error) { stagedIn = dir; return orig(dir, pattern) }
+		_, err := ExportInGitDBReport(context.Background(), reportSource(t), filepath.Join(parent, "out"), ExportOptions{DryRun: dry})
+		exportOSMkdirTemp = orig
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := parent
+		if dry {
+			want = tmp
+		}
+		if got, _ := filepath.EvalSymlinks(stagedIn); got != mustEval(t, want) {
+			t.Errorf("dry run %v: staged in %s, want %s", dry, stagedIn, want)
+		}
+	}
+}
+
+func mustEval(t *testing.T, path string) string {
+	t.Helper()
+	p, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}

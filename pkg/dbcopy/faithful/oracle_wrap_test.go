@@ -344,3 +344,44 @@ func TestLineGuardRefusesAHyphenEnd(t *testing.T) {
 		t.Error("Oracle's client joins hyphen lines")
 	}
 }
+
+// Oracle backs a key with an index that already covers the same columns in another order, so the marker block counts the
+// distinct column sets of the keys, not the keys: a correct load of PRIMARY KEY (a,b) with UNIQUE (b,a) must get its marker.
+func TestOracleEpilogueCountsSharedKeyIndexes(t *testing.T) {
+	list := func(n int, reverse bool) string {
+		var s []string
+		for i := 0; i < n; i++ {
+			j := i
+			if reverse {
+				j = n - 1 - i
+			}
+			s = append(s, fmt.Sprintf("c%02d", j))
+		}
+		return strings.Join(s, ", ")
+	}
+	table := func(keys string, n int) string {
+		var defs []string
+		for i := 0; i < n; i++ {
+			defs = append(defs, fmt.Sprintf("c%02d INTEGER NOT NULL", i))
+		}
+		return "CREATE TABLE t (" + strings.Join(defs, ", ") + ", " + keys + ")"
+	}
+	for _, c := range []struct {
+		name  string
+		stmts []string
+		want  int // indexes the catalog holds
+	}{
+		{"pk and reversed unique", []string{table("PRIMARY KEY (c00, c01), UNIQUE (c01, c00)", 2)}, 1},
+		{"two reversed uniques", []string{table("UNIQUE (c00, c01), UNIQUE (c01, c00)", 2)}, 1},
+		{"16 columns", []string{table("PRIMARY KEY ("+list(16, false)+"), UNIQUE ("+list(16, true)+")", 16)}, 1},
+		{"prefix is another set", []string{table("PRIMARY KEY (c00, c01), UNIQUE (c00)", 2)}, 2},
+		{"three orders", []string{table("UNIQUE (c00, c01, c02), UNIQUE (c02, c01, c00), UNIQUE (c01, c00, c02)", 3)}, 1},
+		{"plain index is its own index", []string{table("PRIMARY KEY (c00, c01)", 2), "CREATE INDEX t_ix ON t (c01, c00)"}, 2},
+	} {
+		script, _ := exportOracle(t, sqliteWith(t, c.stmts...))
+		block := script[strings.LastIndex(script, "DECLARE\n  n NUMBER;"):]
+		if want := fmt.Sprintf("indexes in the catalog, not the %d of the tables t", c.want); !strings.Contains(block, want) {
+			t.Errorf("%s: no %q in\n%s", c.name, want, block)
+		}
+	}
+}

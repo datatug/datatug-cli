@@ -166,3 +166,12 @@ INSERT INTO "ünïcode_日本語_😀" VALUES ('A', 'a', 1, 'smile');
 INSERT INTO "a-very-long-table-name-that-is-more-than-sixty-four-characters-long-for-sure" VALUES (1, 'v');
 INSERT INTO "back\slash/and;--/*x*/'q'" VALUES (1, 'd');
 INSERT INTO ix_names VALUES (1, 'a', 'b');
+-- Names MySQL generates for a constraint without one (<table>_chk_<n>, <table>_ibfk_<n>): a name of that shape given to another constraint would fail the load (error 3822 / 1826), so it is not carried.
+CREATE TABLE gen_t (id INTEGER PRIMARY KEY, n INTEGER CHECK (n > 0));
+CREATE TABLE gen_u (id INTEGER PRIMARY KEY, n INTEGER CONSTRAINT gen_t_chk_1 CHECK (n > 1), m INTEGER CONSTRAINT "GEN_T_CHK_22" CHECK (m > 1), k INTEGER CONSTRAINT gen_t_chk_x CHECK (k > 1), j INTEGER CONSTRAINT gen_t_chk_01 CHECK (j > 1), i INTEGER CONSTRAINT gen_t_chk_ CHECK (i > 1), h INTEGER CONSTRAINT gen_t_chk CHECK (h > 1));
+CREATE TABLE gen_c1 (id INTEGER PRIMARY KEY, p INTEGER REFERENCES gen_t(id));
+CREATE TABLE gen_c2 (id INTEGER PRIMARY KEY, p INTEGER, q INTEGER, r INTEGER, CONSTRAINT gen_c1_ibfk_1 FOREIGN KEY (p) REFERENCES gen_t(id), CONSTRAINT "GEN_C1_IBFK_2" FOREIGN KEY (q) REFERENCES gen_t(id), CONSTRAINT gen_c1_ibfk_x FOREIGN KEY (r) REFERENCES gen_t(id));
+CREATE TABLE gen_own (id INTEGER PRIMARY KEY, p INTEGER, q INTEGER, n INTEGER CHECK (n > 0), m INTEGER CONSTRAINT gen_own_chk_1 CHECK (m > 0), FOREIGN KEY (p) REFERENCES gen_t(id), CONSTRAINT gen_own_ibfk_1 FOREIGN KEY (q) REFERENCES gen_t(id));
+CREATE TABLE gen_named (id INTEGER PRIMARY KEY, n INTEGER CONSTRAINT gen_named_chk_1 CHECK (n > 0), p INTEGER, CONSTRAINT gen_named_ibfk_1 FOREIGN KEY (p) REFERENCES gen_t(id));
+INSERT INTO gen_t VALUES (1, 1);
+INSERT INTO gen_u VALUES (1, 2, 2, 2, 2, 2, 2);

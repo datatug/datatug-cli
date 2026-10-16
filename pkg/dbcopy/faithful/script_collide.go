@@ -118,6 +118,11 @@ func eachKey(ctx context.Context, kf keyFolder, db Queryer, t *ScriptTable, sets
 // scanKeyDigests is the first pass: the digests of every key of every set, in row order.
 func scanKeyDigests(ctx context.Context, kf keyFolder, db Queryer, t *ScriptTable, sets []keySet) ([][][16]byte, error) {
 	digests := make([][][16]byte, len(sets))
+	for i := range digests {
+		// The table's row count up front: growing a slice by appending holds the old and the new array at once, which
+		// about doubles the transient peak of a table with millions of rows.
+		digests[i] = make([][16]byte, 0, max(t.Rows, 0))
+	}
 	err := eachKey(ctx, kf, db, t, sets, func(i int, d [16]byte, _ string) { digests[i] = append(digests[i], d) })
 	return digests, err
 }

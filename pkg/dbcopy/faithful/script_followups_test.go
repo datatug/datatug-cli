@@ -206,9 +206,10 @@ func TestExportRefusesAHeaderTheMarkerCannotHold(t *testing.T) {
 			}
 		}
 	}
-	// 255 characters fit, and the version is cut to the marker's 64 characters.
+	// 255 characters fit (ASCII ones: a header line holds 400 bytes, see TestHeaderValuesThatWouldBeCutAreRefused), and the
+	// version is cut to the marker's 64 characters.
 	h := ok
-	h.Name, h.Edition = strings.Repeat("é", 255), strings.Repeat("é", 255)
+	h.Name, h.Edition = strings.Repeat("x", 255), strings.Repeat("x", 255)
 	h.Version = strings.Repeat("v", 80)
 	var buf bytes.Buffer
 	if _, err := ExportScript(context.Background(), ScriptRequest{Dialect: "mysql", DB: e.DB, Header: h}, &buf); err != nil {
@@ -447,5 +448,22 @@ func TestKeyCollisionSecondPassFailures(t *testing.T) {
 func TestMySQLNameFoldIsFoldName(t *testing.T) {
 	if MySQLNameFold("ÄBc") != "äbc" || MySQLNameFold("é") == MySQLNameFold("e") {
 		t.Error("MySQLNameFold")
+	}
+}
+
+// The digests of a set are collected into a slice of the table's row count, so appending never copies it (the old and the
+// new array at once about double the transient peak): after the scan the capacity is exactly the row count, where growing
+// by appending would leave a larger one.
+func TestKeyCollisionScanPresizesItsDigests(t *testing.T) {
+	e := sqliteWith(t, `CREATE TABLE sized (k TEXT PRIMARY KEY)`, `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 1000) INSERT INTO sized SELECT 'key-' || i FROM n`)
+	tb := planMySQL(t, e).Table("sized")
+	digests, err := scanKeyDigests(context.Background(), mysqlDialect{}, e.DB, tb, uniqueKeySets(tb))
+	if err != nil || len(digests) != 1 || len(digests[0]) != 1000 || cap(digests[0]) != 1000 {
+		t.Fatalf("%v: %d sets, %d digests, capacity %d", err, len(digests), len(digests[0]), cap(digests[0]))
+	}
+	tb.Rows = -1 // a count that was never read must not break the scan
+	digests, err = scanKeyDigests(context.Background(), mysqlDialect{}, e.DB, tb, uniqueKeySets(tb))
+	if err != nil || len(digests[0]) != 1000 {
+		t.Fatalf("%v %d", err, len(digests[0]))
 	}
 }

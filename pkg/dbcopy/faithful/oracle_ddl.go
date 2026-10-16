@@ -2,6 +2,7 @@ package faithful
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -285,10 +286,9 @@ func (d oracleDialect) Epilogue(p *ScriptPlan, h Header) []string {
 		for _, t := range chunk {
 			names = append(names, oracleTextExpr(t.Name, false))
 			keys += len(t.Uniques) + len(t.FKs)
-			idx += len(t.Uniques) + len(t.Indexes)
+			idx += oracleKeyIndexCount(t) + len(t.Indexes)
 			if len(t.PK) > 0 {
 				keys++
-				idx++
 			}
 			checks += oracleCheckCount(t)
 		}
@@ -320,6 +320,25 @@ func (d oracleDialect) Epilogue(p *ScriptPlan, h Header) []string {
 	out := []string{"COMMIT;"}
 	out = append(out, oraclePlsql(block...)...)
 	return append(out, "-- end of script")
+}
+
+// oracleKeyIndexCount is the indexes the primary key and the unique constraints of the table make in the catalog. Oracle backs
+// a key with an index that already covers the same columns, in whatever order (measured on 23.26.3: PRIMARY KEY (a,b) with
+// UNIQUE (b,a) makes one index, and so does UNIQUE (a,b) with UNIQUE (b,a)), so the count is the number of distinct column sets.
+func oracleKeyIndexCount(t *ScriptTable) int {
+	sets := map[string]bool{}
+	add := func(cols []string) {
+		sorted := slices.Clone(cols)
+		slices.Sort(sorted)
+		sets[strings.Join(sorted, "\x00")] = true
+	}
+	if len(t.PK) > 0 {
+		add(t.PK)
+	}
+	for _, u := range t.Uniques {
+		add(u.Columns)
+	}
+	return len(sets)
 }
 
 // oracleCheckCount is the check constraints the table has in the catalog: its checks, and one NOT NULL constraint for

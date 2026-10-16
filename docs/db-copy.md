@@ -279,7 +279,7 @@ The destination is a path in the URL (`sqlscript:///abs/path.sql`, or `sqlscript
 | `dialect` | Required. `mysql`, `mssql` (SQL Server, see [below](#sql-server-dialect-mssql)) and `oracle` (see [below](#oracle-dialect-oracle)) are implemented; `postgres` and `sqlite` are planned and refused with the list of the implemented ones. |
 | `name` | Dataset name in the header and in the completion marker (default: the SQLite file name without its extension). At most 255 characters for `mysql` (the marker column); `mssql` takes any length. Neither takes invalid UTF-8 or a NUL. |
 | `edition` | A label for the header, such as `DemoDB contract edition, identical to the SQLite/CSV/JSON`. The same limits as `name`. |
-| `license`, `attribution` | Licence and attribution lines of the header (a demo database's `manifest.json` `source.license`). One line each. |
+| `license`, `attribution` | Licence and attribution lines of the header (a demo database's `manifest.json` `source.license`). One line each, written whole: a value that would not fit a header line (see below) is refused. |
 | `notice-file` | Path of a text file with the multi-line licence notice, written in the header after those lines (see [below](#licence-notice)). |
 
 The query is parsed strictly (`net/url.ParseQuery`): a value is never dropped silently. A `;` or a stray `&` inside a value
@@ -288,6 +288,13 @@ lose the attribution a licence requires from the header: write `%3B` for `;` and
 refused (exit 2), `dialect` and `notice-file` included. A `name` or `edition` that is too long, not valid UTF-8 or that holds a NUL is refused
 up front (exit 2): the marker row is the last statement of the script, and one that cannot hold it would fail after every row
 was loaded. The datatug version in the marker is cut to the marker's 64 characters (the header comment has it whole).
+
+**A header line is never cut.** A header comment line holds at most 400 bytes (after control characters become spaces and runs
+of blanks one space; the label counts: `Licence: `, `Attribution: `, `Dataset: `). A `license`, `attribution`, `edition` or `name` whose line would be longer is
+refused up front (exit 2, in every dialect, before anything is written), because the exporter used to cut such a line silently
+at 400 bytes and end it in `...`: a legally required attribution could be shortened with no warning. The message names the parameter and the size and
+points at `notice-file`, which takes up to 16 KiB and is written whole (see below). Values whose line fits are written exactly as before; only inputs over 400 bytes behave
+differently (they were cut, they are refused). The machine-made lines of the header (the warnings, the list of tables) can still be cut at 400 bytes; the full list is in `--json`.
 
 #### Licence notice
 
@@ -300,9 +307,16 @@ adaptation statement (CC BY-SA 3.0). Put the text in a file and name it:
 datatug db copy --from sqlite://./sakila.sqlite --to 'sqlscript:///tmp/sakila.mysql.sql?dialect=mysql&license=BSD-3-Clause&notice-file=/abs/path/sakila-NOTICE.txt'
 ```
 
-The path is percent-encoded like any value (`%20` for a space); a relative path is the current folder's. The file is UTF-8 with
-no NUL, at most 16 KiB (a leading byte order mark is dropped) and not empty; anything else is a usage error (exit 2) before
-anything is written, and the message never repeats the text. The same URL gives the same bytes on every run.
+The path is percent-encoded like any value: write `%20` for a space and `%2B` for a `+` (a literal `+` in the query is read as
+a space, so a path with a `+` in it would name another file or none); a relative path is the current folder's. The file is
+opened first and the open handle is checked, so it must be a regular file (a FIFO, a device or a folder is refused at once, also
+when the path is swapped between a check and the open). It is UTF-8 with no NUL, at most 16 KiB (a leading byte order mark is dropped) and has text in it: a file of
+only blanks, byte order marks and control characters is empty. Anything else is a usage error (exit 2) before anything is written,
+and the message never repeats the text. The same URL gives the same bytes on every run.
+
+**Whatever text file the path names is copied into the script.** The notice is read from the path in the `--to` URL and written, line by line, into the header: any readable text file up to 16 KiB
+(a configuration file, a key, a note) would end up in a script that is then shared. So give datatug a `--to` URL only from a source you trust: an untrusted URL
+with a `notice-file` is a way to read a local text file, which is why the command never takes the path from anywhere else than the URL you typed.
 
 Every line of the file becomes one comment line (`-- ` and the line), in every dialect. The text is verbatim except for what
 could end the comment or start a script line: CR, LF, CR LF, VT, FF, U+001C to U+001F, U+0085, U+2028 and U+2029 all end a line;
@@ -392,7 +406,10 @@ server with case-sensitive table names (`lower_case_table_names=0`, the Linux de
 defaults: a `name-case-collision` warning says so. An index name that is `PRIMARY` or taken by another key of the table is
 renamed. A primary key's own name is not carried (MySQL calls it `PRIMARY`); the name of a foreign key, unique key or check
 is carried when MySQL can use it (unique in the schema for a foreign key or check, at most 64 characters) and is
-`constraint-name-not-carried` otherwise.
+`constraint-name-not-carried` otherwise. MySQL names a check without a name `<table>_chk_<n>` and a foreign key without one `<table>_ibfk_<n>`, in the
+same list as the names given: a given name of that shape (case aside, `n` a number without a leading zero) is not carried while a table of the script has a
+check (a foreign key) without a name, because the load would fail with error 3822 (1826). The constraint is then written without a name and MySQL names it itself; a table whose names were dropped
+this way has an unnamed constraint too, so the rule runs until nothing changes. Names of any other shape (`t_chk_x`, `t_chk_01`) and names of a table with no unnamed constraint of that kind are kept.
 
 ### Keys, defaults, checks
 
@@ -675,7 +692,7 @@ the client:
   atomicity is by **guard**. The marker table `_demodb_import` is created first (a second load stops at it with ORA-00955), and the
   last block counts, for every table, its rows and, in the catalog, its keys (primary, unique, foreign: enabled and validated), its check and NOT NULL
   constraints and its indexes, and raises ORA-20000 before the marker row is inserted. A client that went on after an error (no `WHENEVER`) or skipped a line
-  therefore never writes the marker row. The marker proves rows and the presence of the objects; it does not compare the text of a default or of a check. A failed load leaves the tables it created: drop the schema's objects and load again.
+  therefore never writes the marker row. The index count is the number of distinct column sets of the primary key and the unique constraints of a table (Oracle backs a `UNIQUE (b, a)` with the index of a `PRIMARY KEY (a, b)`, measured on 23.26.3: one index, not two), plus its plain and filtered indexes. The marker proves rows and the presence of the objects; it does not compare the text of a default or of a check. A failed load leaves the tables it created: drop the schema's objects and load again.
 * A version check (ORA-20001), a database character set check (ORA-20002) and a client character set check (ORA-20003) run first.
   The only `/` lines are the ones the generator writes to end its own PL/SQL blocks.
 
@@ -767,8 +784,20 @@ datatug db export --from sqlite://$PWD/shop.db --include orders,customers --wher
   exists is copied into as before; a folder that does not exist is this native export.
 * **Default folder.** Without `--to`, `export` writes `./<name>.ingitdb` in the working folder, where the name comes from
   `--from` only: the SQLite file name without its extension, or the PostgreSQL database name (never a host, a user, a
-  password or a query). Characters other than letters, digits, `.`, `_` and `-` become `_`; the name is at most 100
-  characters. A source with no name (an in-memory SQLite, a PostgreSQL URL without a database) is exit 2: pass `--to`.
+  password or a query). Characters other than letters, digits, `.`, `_` and `-` become `_`; leading and trailing `.`, `_`
+  and `-` are stripped; the name is at most 100 characters and 247 bytes (a file system takes 255 bytes of a name, `.ingitdb`
+  included: 100 CJK characters are 300 bytes), cut on a character boundary. A name Windows reserves for a device (`CON`, `PRN`,
+  `AUX`, `NUL`, `COM1`-`COM9`, `LPT1`-`LPT9`, in any case, also before a `.`) gets a `_` in front (`_CON.ingitdb`). For
+  an `ingitdb://` source the name is that of the folder itself, also for `ingitdb://.` run inside the project (the absolute
+  path is used). A source with no name (an in-memory SQLite, a PostgreSQL URL without a database) is exit 2: pass `--to`.
+* **Interrupts.** SIGINT (Ctrl-C) and SIGTERM stop the export at the next row through its own return path: the staging folder is
+  removed (for `--dry-run` too, which stages in the temporary folder), nothing is published, and the command exits 1 saying
+  `interrupted (interrupt)` or `(terminated)`. A second signal while it winds down ends the process as usual.
+* **The destination's folder** must exist, for `--dry-run` as for a real run (`--to nopar/x/y` is exit 1 either way).
+* **`?` in a path.** `--to` is a plain folder path or an `ingitdb://` URL. A `?` in a plain path is exit 2 (it used to make a
+  folder named with the query, write JSON and print another path): write `ingitdb://FOLDER?records-format=jsonl` (or `--records-format jsonl`).
+  **Changed:** `ingitdb://DIR?records-format=jsonl` used to create a folder literally named `DIR?records-format=jsonl` with JSON records; it
+  now creates `DIR` in jsonl. This is the one exception to "byte for byte as before" below.
 * **Filters and report.** `--include`, `--exclude`, `--where`, `--limit` and `--filter-config` are those of `copy`;
   `--json`, `--dry-run` and `--fail-on-warning` print and exit as for the other destinations (`--json` report: the same
   fields; `command` is `db export` or `db copy`). A foreign key to a table `--include`/`--exclude` leaves out is not carried
@@ -780,7 +809,7 @@ datatug db export --from sqlite://$PWD/shop.db --include orders,customers --wher
 * **Differences between the two commands.** `export` refuses a folder that exists (exit 1), takes a plain path and the
   default folder, and exits 1 on a source with nothing to write; `copy` into a missing folder prints "source has no tables;
   nothing to copy" and exits 0, like every other copy of an empty source.
-* **Compatibility.** `datatug db export --from URL --to ingitdb://DIR [--records-format F]` writes the same bytes, prints
+* **Compatibility.** `datatug db export --from URL --to ingitdb://DIR [--records-format F]` (with no `?` in the URL) writes the same bytes, prints
   the same `db export: exported N collections and M rows to ...` line and exits with the same code as before; the test
   `TestExportOldInvocationIsByteIdentical` holds the digests of the earlier binary's output.
 * **Not here: cloud or remote backup.** `export` writes a local folder. A backup to a bucket, another server or on a

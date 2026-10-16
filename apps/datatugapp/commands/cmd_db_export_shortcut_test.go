@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/dbcopy/faithful"
@@ -182,6 +184,32 @@ func TestDefaultExportFolderNames(t *testing.T) {
 		{name: "openvaultdb descriptor", scheme: "openvaultdb", path: "/v/vault.json", want: "vault.ingitdb"},
 		{name: "long name", scheme: "sqlite", path: "/d/" + strings.Repeat("a", 150) + ".db", want: strings.Repeat("a", 100) + ".ingitdb"},
 		{name: "unsupported scheme", scheme: "bigquery", path: "x", fail: true},
+		// leading and trailing ".", "_" and "-" are stripped, and a name of nothing else has no folder
+		{name: "leading dot", scheme: "sqlite", path: "/d/.hidden.db", want: "hidden.ingitdb"},
+		{name: "leading dashes", scheme: "sqlite", path: "/d/--x.db", want: "x.ingitdb"},
+		{name: "leading underscores", scheme: "sqlite", path: "/d/__a.db", want: "a.ingitdb"},
+		{name: "trailing separators", scheme: "sqlite", path: "/d/a-_..db", want: "a.ingitdb"},
+		{name: "separators inside stay", scheme: "sqlite", path: "/d/a-b_c.d.db", want: "a-b_c.d.ingitdb"},
+		{name: "separators only", scheme: "sqlite", path: "/d/-_..db", fail: true},
+		{name: "characters that become underscores at the ends", scheme: "sqlite", path: "/d/(x).db", want: "x.ingitdb"},
+		// names Windows reserves for a device, with or without an extension, in any case
+		{name: "CON", scheme: "sqlite", path: "/d/CON.db", want: "_CON.ingitdb"},
+		{name: "nul", scheme: "sqlite", path: "/d/nul.sqlite", want: "_nul.ingitdb"},
+		{name: "Prn", scheme: "sqlite", path: "/d/Prn.db", want: "_Prn.ingitdb"},
+		{name: "AUX", scheme: "postgres", path: "postgres://h/AUX", want: "_AUX.ingitdb"},
+		{name: "COM1", scheme: "sqlite", path: "/d/com1.db", want: "_com1.ingitdb"},
+		{name: "LPT9", scheme: "sqlite", path: "/d/LPT9.db", want: "_LPT9.ingitdb"},
+		{name: "device name with a dot", scheme: "sqlite", path: "/d/con.v2.db", want: "_con.v2.ingitdb"},
+		{name: "COM0 is not reserved", scheme: "sqlite", path: "/d/COM0.db", want: "COM0.ingitdb"},
+		{name: "COM10 is not reserved", scheme: "sqlite", path: "/d/COM10.db", want: "COM10.ingitdb"},
+		{name: "console is not reserved", scheme: "sqlite", path: "/d/console.db", want: "console.ingitdb"},
+		{name: "connection is not reserved", scheme: "sqlite", path: "/d/connection.db", want: "connection.ingitdb"},
+		{name: "NULL is not reserved", scheme: "sqlite", path: "/d/NULL.db", want: "NULL.ingitdb"},
+		{name: "device name behind a prefix is fine", scheme: "sqlite", path: "/d/x.con.db", want: "x.con.ingitdb"},
+		// a file system takes 255 bytes of a name: 100 CJK characters are 300 bytes
+		{name: "100 CJK characters", scheme: "sqlite", path: "/d/" + strings.Repeat("日", 100) + ".db", want: strings.Repeat("日", 82) + ".ingitdb"},
+		{name: "cut lands after a dot", scheme: "sqlite", path: "/d/" + strings.Repeat("日", 81) + "x." + strings.Repeat("日", 10) + ".db", want: strings.Repeat("日", 81) + "x.ingitdb"},
+		{name: "2-byte characters", scheme: "sqlite", path: "/d/" + strings.Repeat("é", 100) + ".db", want: strings.Repeat("é", 100) + ".ingitdb"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -193,6 +221,8 @@ func TestDefaultExportFolderNames(t *testing.T) {
 			}
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
+			assert.LessOrEqual(t, len(got), 255, "a file system takes 255 bytes of a name")
+			assert.True(t, utf8.ValidString(got))
 			assert.NotContains(t, got, "s3cret")
 			assert.NotContains(t, got, "alice")
 		})
@@ -402,4 +432,85 @@ func TestExportOpenFailureReportsJSON(t *testing.T) {
 	assert.Equal(t, "failed", rep.Status)
 	assert.Equal(t, 4, rep.ExitCode)
 	assert.NoDirExists(t, filepath.Join(root, "o"))
+}
+
+// A source folder named "." (run inside a project) is named by its absolute folder; a failing Abs leaves the path as it is.
+func TestDefaultExportFolderOfTheCurrentFolder(t *testing.T) {
+	src := chinookURL(t) // an absolute path: the test changes folder
+	cwd := filepath.Join(t.TempDir(), "my-project")
+	require.NoError(t, os.Mkdir(cwd, 0o755))
+	t.Chdir(cwd)
+	for _, path := range []string{".", "./", "../my-project", filepath.Join(cwd, "..", "my-project")} {
+		got, err := defaultExportFolder(dbcopy.BackendRef{Scheme: "ingitdb", Path: path})
+		require.NoError(t, err, path)
+		assert.Equal(t, "my-project.ingitdb", got, path)
+	}
+	got, err := defaultExportFolder(dbcopy.BackendRef{Scheme: "ingitdb", Path: "shop.ingitdb"})
+	require.NoError(t, err)
+	assert.Equal(t, "shop.ingitdb", got)
+	// The root has no name of its own.
+	_, err = defaultExportFolder(dbcopy.BackendRef{Scheme: "ingitdb", Path: string(filepath.Separator)})
+	assert.Error(t, err)
+
+	orig := absFolder
+	defer func() { absFolder = orig }()
+	absFolder = func(string) (string, error) { return "", errors.New("no working folder") }
+	got, err = defaultExportFolder(dbcopy.BackendRef{Scheme: "ingitdb", Path: "/backups/shop.ingitdb"})
+	require.NoError(t, err)
+	assert.Equal(t, "shop.ingitdb", got)
+	_, err = defaultExportFolder(dbcopy.BackendRef{Scheme: "ingitdb", Path: "."})
+	assert.Error(t, err)
+
+	// end to end: `db export --from ingitdb://.` run inside the project
+	absFolder = orig
+	proj := filepath.Join(t.TempDir(), "chinook-copy")
+	_, _, err = runCopy(t, "db", "export", "--from", src, "--to", proj)
+	require.NoError(t, err)
+	t.Chdir(proj)
+	out := t.TempDir()
+	t.Chdir(out)
+	_, _, err = runCopy(t, "db", "export", "--from", "ingitdb://"+proj)
+	require.NoError(t, err)
+	assert.DirExists(t, filepath.Join(out, "chinook-copy.ingitdb"))
+}
+
+// A "?" in a plain folder path is refused (exit 2) where it used to make a folder named with the query and print another
+// path; ingitdb://FOLDER?records-format=jsonl is the way to pick a format, and it names its folder without the query.
+func TestExportPlainPathWithAQuestionMarkIsRefused(t *testing.T) {
+	src := sqliteFixture(t, `CREATE TABLE p (id INTEGER PRIMARY KEY)`, `INSERT INTO p VALUES (1)`)
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	for _, to := range []string{"u3?records-format=jsonl", "a?b", "./x?", "?"} {
+		stdout, _, err := runCopy(t, "db", "export", "--from", src, "--to", to)
+		assert.Equal(t, 2, exportExitCode(t, err), to)
+		assert.Contains(t, err.Error(), "ingitdb://FOLDER?records-format=jsonl", to)
+		assert.Empty(t, stdout.String())
+	}
+	entries, _ := os.ReadDir(cwd)
+	assert.Empty(t, entries, "no folder was made")
+	// The URL form creates the folder without the query, in the format asked for.
+	_, stderr, err := runCopy(t, "db", "export", "--from", src, "--to", "ingitdb://u3?records-format=jsonl")
+	require.NoError(t, err)
+	assert.Contains(t, stderr.String(), "to ingitdb://u3\n")
+	assert.DirExists(t, filepath.Join(cwd, "u3"))
+	assert.NoDirExists(t, filepath.Join(cwd, "u3?records-format=jsonl"))
+	// A Windows extended path starts with \\?\ and is a path.
+	_, _, err = parseExportDestination(dbExportCommand(), `\\?\C:\backups\shop`)
+	if err != nil {
+		assert.NotContains(t, err.Error(), "plain folder path")
+	}
+}
+
+// --dry-run says what the real run would say about the destination's folder.
+func TestExportDryRunChecksTheDestinationFolder(t *testing.T) {
+	src := sqliteFixture(t, `CREATE TABLE p (id INTEGER PRIMARY KEY)`, `INSERT INTO p VALUES (1)`)
+	root := t.TempDir()
+	to := filepath.Join(root, "nopar", "x", "y")
+	_, _, realErr := runCopy(t, "db", "export", "--from", src, "--to", to)
+	_, _, dryErr := runCopy(t, "db", "export", "--from", src, "--to", to, "--dry-run")
+	assert.Equal(t, 1, exportExitCode(t, realErr))
+	assert.Equal(t, 1, exportExitCode(t, dryErr))
+	assert.ErrorContains(t, dryErr, "destination parent")
+	entries, _ := os.ReadDir(root)
+	assert.Empty(t, entries)
 }

@@ -10,7 +10,7 @@ func TestMSSQLEdgeFixtureGolden(t *testing.T) {
 	script, rep := exportMSSQL(t, mssqlEdgeSQLite(t))
 	golden(t, "mssql_edge.golden.sql", script)
 	golden(t, "mssql_edge.warnings.json", jsonOf(t, rep.Warnings))
-	if rep.Status != "ok-with-warnings" || rep.To.Engine != "mssql" || rep.Totals.Tables != 69 {
+	if rep.Status != "ok-with-warnings" || rep.To.Engine != "mssql" || rep.Totals.Tables != 71 {
 		t.Errorf("report: %s %s %+v", rep.Status, rep.To.Engine, rep.Totals)
 	}
 }

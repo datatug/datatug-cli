@@ -7,29 +7,43 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/datatug/datatug-cli/pkg/executionstore"
 	"github.com/datatug/datatug-cli/pkg/sessionstore"
 	"github.com/datatug/datatug-core/pkg/sessioncontext"
 )
 
+// SessionContextQuerySource is an admitted identity for UI scope routing, not
+// a source grant. Execution still performs its ordinary current policy checks.
+type SessionContextQuerySource struct {
+	Kind            string `json:"kind"`
+	ConnectionID    string `json:"connectionId,omitempty"`
+	DatabaseID      string `json:"databaseId"`
+	FixtureSHA256   string `json:"fixtureSha256"`
+	Origin          string `json:"origin,omitempty"`
+	CatalogRevision string `json:"catalogRevision,omitempty"`
+}
+
 type SessionContextEnvironment struct {
-	EnvironmentID  string `json:"environmentId"`
-	IdentityDomain string `json:"identityDomain"`
-	Title          string `json:"title,omitempty"`
+	EnvironmentID  string                      `json:"environmentId"`
+	IdentityDomain string                      `json:"identityDomain"`
+	Title          string                      `json:"title,omitempty"`
+	QuerySources   []SessionContextQuerySource `json:"querySources,omitempty"`
 }
 type SessionContextCapabilities struct {
-	ActorID       string                      `json:"actorId"`
-	SchemaVersion int                         `json:"schemaVersion"`
-	DatabaseID    string                      `json:"databaseId"`
-	ProjectID     string                      `json:"projectId"`
-	Environments  []SessionContextEnvironment `json:"environments"`
-	Actions       []string                    `json:"actions"`
-	Subjects      []SessionContextSubject     `json:"subjects,omitempty"`
+	ActorID         string                          `json:"actorId"`
+	SchemaVersion   int                             `json:"schemaVersion"`
+	DatabaseID      string                          `json:"databaseId"`
+	ProjectID       string                          `json:"projectId"`
+	Environments    []SessionContextEnvironment     `json:"environments"`
+	Actions         []string                        `json:"actions"`
+	OperationScope  *SessionDetectiveOperationScope `json:"operationScope,omitempty"`
+	NativeDetective bool                            `json:"nativeDetective"`
+	Subjects        []SessionContextSubject         `json:"subjects,omitempty"`
 }
 
 var contextManager struct {
 	sync.Mutex
-	manager *sessionstore.Manager
+	manager     *sessionstore.Manager
+	privateBase string
 }
 
 var (
@@ -46,6 +60,7 @@ func CloseSessionContext() error {
 	}
 	err := contextManager.manager.Close()
 	contextManager.manager = nil
+	contextManager.privateBase = ""
 	return err
 }
 
@@ -103,25 +118,12 @@ func ResolveSessionContext(ctx context.Context, storage, project string) (*sessi
 		}
 
 	}
-	contextManager.Lock()
-	if contextManager.manager == nil {
-		var root string
-		root, err = executionstore.ResolvePrivateDir(GetCapabilities().EvidencePrivateDir)
-		if err == nil {
-			contextManager.manager, err = sessionstoreNew(filepath.Join(root, "session-context"))
-		}
-	}
-	manager := contextManager.manager
-	contextManager.Unlock()
-	if err != nil || manager == nil {
-		return nil, sessioncontext.Principal{}, caps, sessioncontext.ErrUnavailable
-	}
-	repo, err := manager.Repository(project, dir)
+	repo, err := localSessionRepository(project, dir)
 	if err != nil {
-		return nil, sessioncontext.Principal{}, caps, sessioncontext.ErrUnavailable
+		return nil, sessioncontext.Principal{}, caps, err
 	}
 	principal := sessioncontext.Principal{Actor: actor, DatabaseID: repo.DatabaseID(), ProjectID: project}
-	service, err := sessioncontext.NewService(repo, func(_ context.Context, access sessioncontext.Access) error {
+	service, err := sessioncontext.NewNativePinService(repo, func(_ context.Context, access sessioncontext.Access) error {
 		if access.Principal.Actor != SecurePrincipalID() || access.Principal.DatabaseID != principal.DatabaseID || access.Principal.ProjectID != project || access.Scope != nil && !admitted[*access.Scope] {
 			return sessioncontext.ErrForbidden
 		}
@@ -131,7 +133,22 @@ func ResolveSessionContext(ctx context.Context, storage, project string) (*sessi
 		return nil
 	})
 	caps.SchemaVersion, caps.DatabaseID, caps.ProjectID, caps.ActorID = 1, principal.DatabaseID, project, principal.Actor
+	n := repo.NativeNamespace()
+	sourceStorage := storage
+	if sourceStorage == "" {
+		sourceStorage = "local"
+	}
+	caps.OperationScope = &SessionDetectiveOperationScope{Storage: sourceStorage, Project: project, DatabaseID: n.DatabaseID, ProjectID: n.ProjectID, NamespaceID: n.NamespaceID}
+	caps.NativeDetective = GetCapabilities().NativeSessionDetective
 	caps.Subjects = localSessionSampleSubjects(dir, sampleEnvironments)
+	for i := range caps.Environments {
+		for _, subject := range caps.Subjects {
+			if subject.Scope.EnvironmentID == caps.Environments[i].EnvironmentID && subject.Scope.IdentityDomain == caps.Environments[i].IdentityDomain {
+				caps.Environments[i].QuerySources = []SessionContextQuerySource{{Kind: "public-sqlite", ConnectionID: "chinook-sqlite", DatabaseID: "chinook", FixtureSHA256: "7651ba378ac2fcd0dfc3c66fb101f7a7eed3ba39a612ec642b96e20702061f15"}}
+				break
+			}
+		}
+	}
 	caps.Actions = []string{}
 	if GetCapabilities().AllowWrites {
 		caps.Actions = []string{"createSession", "createBag", "putEntry", "applyContext", "clearBag", "transitionSession", "pinInput", "reportDashboard", "reportClientRun", "recordRunExecution", "renameSession", "renameBag", "importLegacy"}

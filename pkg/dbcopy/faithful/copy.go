@@ -652,6 +652,9 @@ func (x *executor) warnLosses(t *TargetTable) {
 		if c.loss.rounded > 0 {
 			x.plan.warn(WarnValuesNormalized, obj, "%d value(s) have more digits than a SQLite number holds and were rounded: the declared type has numeric affinity", c.loss.rounded)
 		}
+		if c.loss.special > 0 {
+			x.plan.warn(WarnValuesNormalized, obj, "%d numeric NaN / Infinity value(s) are kept as their text: SQLite has no such number", c.loss.special)
+		}
 		if c.loss.negZero > 0 {
 			x.plan.warn(WarnValuesNormalized, obj, "%d negative zero value(s) became 0: SQLite does not keep the sign of a zero", c.loss.negZero)
 		}
@@ -1023,8 +1026,17 @@ func (x *executor) counters(q execer) error {
 				continue
 			}
 			var maxID sql.NullInt64
+			var seq sql.NullString
 			qn := x.qualifiedTarget(t.Name)
-			if err := q.QueryRowContext(ctx, "SELECT max("+quoteIdent(c.Name)+") FROM "+qn).Scan(&maxID); err != nil {
+			maxSQL := "SELECT max(" + quoteIdent(c.Name) + ")"
+			dest := []any{&maxID}
+			args := []any{}
+			if x.to.Engine == Postgres {
+				// The sequence is looked up in the same statement: one call, as the maximum alone was.
+				maxSQL += ", (" + counterSequenceSQL + ")"
+				dest, args = append(dest, &seq), []any{qn, c.Name}
+			}
+			if err := q.QueryRowContext(ctx, maxSQL+" FROM "+qn, args...).Scan(dest...); err != nil {
 				return err
 			}
 			next := c.Src.SequenceStart
@@ -1038,9 +1050,13 @@ func (x *executor) counters(q execer) error {
 				continue
 			}
 			if x.to.Engine == Postgres {
-				// setval, not ALTER ... RESTART WITH: that one is refused while a deferred key of the table has pending checks (55006).
-				if _, err := q.ExecContext(ctx, "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)", qn, c.Name, next); err != nil {
-					return fmt.Errorf("set the counter of %s.%s: %w", t.Name, c.Name, err)
+				if !seq.Valid {
+					// setval(NULL, ...) does nothing and says nothing: the counter is not moved, and that is said.
+					x.plan.warn(WarnIdentityNotCarried, t.Name+"."+c.Name, "the target column does not take its values from exactly one sequence (serial, identity or a nextval default): its counter is not set to %d, so a new row may get an id that a copied row has", next)
+					continue
+				}
+				if err := x.moveCounter(q, t.Name+"."+c.Name, seq.String, next); err != nil {
+					return err
 				}
 			} else if c.Identity == IdentityAutoincrement && next > 1 {
 				if _, err := q.ExecContext(ctx, "DELETE FROM sqlite_sequence WHERE name = ?", t.Name); err != nil {
@@ -1051,6 +1067,60 @@ func (x *executor) counters(q execer) error {
 				}
 			}
 		}
+	}
+	return nil
+}
+
+// counterSequenceSQL finds the sequence that numbers a column ($1 the qualified table, $2 the column): the one
+// its DEFAULT takes values from (nextval('s'), which is the owned one of a serial column that was left alone,
+// and another one when the default was changed later), or else, for a column with no such default, the one an
+// identity column owns. It is NULL when the default uses more than one sequence, or there is none: the caller
+// says so. The name is as the server writes it, quoted.
+const counterSequenceSQL = `
+WITH s AS (
+  SELECT d.refobjid::regclass::text AS name
+  FROM pg_attrdef ad
+  JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass
+  JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S'
+  WHERE ad.adrelid = $1::text::regclass
+    AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2))
+SELECT CASE (SELECT count(*) FROM s) WHEN 0 THEN pg_get_serial_sequence($1, $2) WHEN 1 THEN (SELECT min(name) FROM s) END`
+
+// moveCounter sets the sequence seq of a reloaded column so that its next value is next. setval and not
+// ALTER ... RESTART WITH: that one is refused while a deferred key of the table has pending checks (55006).
+// It is one statement that reads the sequence (its last value, plus the step once it has been used) and
+// decides, so that a sequence is only ever moved forward:
+//   - one that is already past the rows (also one that is set and not called yet) is not touched at all: a
+//     setval would undo a nextval that another session made since (a table that shares the sequence keeps
+//     writing during a reload), and the copy only locks the tables it reloads;
+//   - one behind the rows is set, in the same statement that found it behind. That narrows the window for a
+//     nextval of another session to the statement; it does not close it, the sequence is not locked, so a
+//     sequence shared with a writer is best reloaded while it is quiet;
+//   - one that would have to go beyond its maximum (a CYCLE sequence at its MAXVALUE, a bigint at the top), or
+//     that counts down, is left alone and the copy says so.
+//
+// Reading the sequence needs the SELECT privilege on it, as setval needs UPDATE.
+func (x *executor) moveCounter(q execer, obj, seq string, next int64) error {
+	var outcome, ahead, maxValue string
+	err := q.QueryRowContext(x.ctx, `
+SELECT CASE
+    WHEN p.seqincrement < 0 THEN 'down'
+    WHEN GREATEST(c.cur, $2::numeric) > p.seqmax THEN 'max'
+    WHEN c.cur >= $2::numeric THEN 'past'
+    ELSE 'set' || setval($1::text::regclass, $2::bigint, false)::text
+  END,
+  GREATEST(c.cur, $2::numeric)::text, p.seqmax::text
+FROM pg_sequence p, `+seq+` s,
+  LATERAL (SELECT CASE WHEN s.is_called THEN s.last_value::numeric + p.seqincrement ELSE s.last_value::numeric END AS cur) c
+WHERE p.seqrelid = $1::text::regclass`, seq, next).Scan(&outcome, &ahead, &maxValue)
+	if err != nil {
+		return fmt.Errorf("set the counter of %s: %w", obj, err)
+	}
+	switch outcome {
+	case "down":
+		x.plan.warn(WarnIdentityNotCarried, obj, "the sequence %s counts down: its counter is not moved, a new row may get an id that a copied row has", seq)
+	case "max":
+		x.plan.warn(WarnIdentityNotCarried, obj, "the next id %s is beyond the maximum %s of the sequence %s: its counter is not moved, a new row may get an id that a copied row has", ahead, maxValue, seq)
 	}
 	return nil
 }

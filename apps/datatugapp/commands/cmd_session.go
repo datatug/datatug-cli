@@ -43,7 +43,7 @@ func sessionCommand() *cobra.Command {
 	cmd.PersistentFlags().String("identity-domain", "", "Explicit identity domain when an environment has multiple domains")
 	cmd.PersistentFlags().String("op", "", "Operation ID for this command; use operation to recover an uncertain response")
 	cmd.AddCommand(sessionReadCommand("capabilities"), sessionReadCommand("list"), sessionReadCommand("show"), sessionReadCommand("operation"), sessionReadCommand("runs"), sessionReadCommand("messages"), sessionReadCommand("input"), sessionReadCommand("run"), sessionReadCommand("revisions"), sessionPinCommand(false), sessionPinCommand(true), sessionCreateCommand(), sessionBagCommand(), sessionPutCommand(), sessionApplyCommand(), sessionClearCommand(), sessionRawCommand())
-	cmd.AddCommand(sessionQueryCommand(), sessionDashboardCommand(), sessionResultCommand(), sessionImportCommand(), sessionRenameCommand(false), sessionRenameCommand(true))
+	cmd.AddCommand(sessionDetectiveCommand(), sessionQueryCommand(), sessionDashboardCommand(), sessionResultCommand(), sessionImportCommand(), sessionRenameCommand(false), sessionRenameCommand(true))
 	for _, transition := range []string{"start", "stop", "archive", "restore", "delete"} {
 		cmd.AddCommand(sessionTransitionCommand(transition))
 	}
@@ -51,6 +51,10 @@ func sessionCommand() *cobra.Command {
 }
 
 func newSessionCLI(cmd *cobra.Command) (sessionCLI, error) {
+	return newSessionTransport(cmd, true)
+}
+
+func newSessionTransport(cmd *cobra.Command, capabilities bool) (sessionCLI, error) {
 	base, _ := cmd.Flags().GetString("agent")
 	parsed, err := url.Parse(base)
 	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
@@ -76,6 +80,9 @@ func newSessionCLI(cmd *cobra.Command) (sessionCLI, error) {
 	}
 	if cli.query.Get("project") == "" {
 		return cli, errors.New("--project is required")
+	}
+	if !capabilities {
+		return cli, nil
 	}
 	if _, err = cli.request(cmd.Context(), http.MethodGet, "/capabilities", nil, &cli.caps); err != nil {
 		return cli, err

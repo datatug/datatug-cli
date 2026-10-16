@@ -86,6 +86,7 @@ The viewer MUST connect read-only by default, mirroring [scan REQ: connection-st
 |---|---|
 | [CLI](../README.md) | Parent. |
 | [ui](../ui/README.md) | The viewer this command launches SHOULD be the same DB viewer the TUI uses. |
+| [backup](../backup/README.md) | `backup` keeps named, repeatable restore points of a project source on top of `db copy`; `db copy` and `db export` stay one-shot, and remote or cloud destinations belong to `backup` only. |
 | [scan](../scan/README.md) | Independent. `scan` updates a project; `db` only opens a viewer. The subcommand [`db add`](add/README.md) is the exception to "no project": it registers a database in a project, and writes the files a scan writes. |
 
 ## Acceptance Criteria

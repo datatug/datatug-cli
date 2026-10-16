@@ -44,9 +44,11 @@ type Capabilities struct {
 	// Access, when set, is the agent's shared-token access: every route but a preflight and the
 	// exchange of a one-time code requires its session token (pkg/agentaccess). `datatug serve`
 	// always sets it.
-	Access         *agentaccess.Access
-	AllowWrites    bool
-	AllowOpaqueSQL bool
+	Access      *agentaccess.Access
+	AllowWrites bool
+	// NativeSessionDetective remains opt-in until local and hosted conformance are proven.
+	NativeSessionDetective bool
+	AllowOpaqueSQL         bool
 	// AllowLiveConnections is `datatug serve --allow-live-connections`: the routes that connect
 	// to a database server that the served project records (dbserver-databases) answer 403
 	// without it. It is off by default: such a connection is made under the identity of the

@@ -51,6 +51,29 @@ func (s *Store) Load(id string) (Loaded, error) {
 	if data.Format != DataFormat || data.Version != Version {
 		return Loaded{}, fail(ReasonVersion)
 	}
+	if !wellFormed(data.Recordset, loaded.Meta.Query.Parameters) {
+		return Loaded{}, fail(ReasonIncomplete)
+	}
 	loaded.Recordset, loaded.MetaJSON, loaded.DataJSON = data.Recordset, metaJSON, dataJSON
 	return loaded, nil
+}
+
+// wellFormed is whether a recordset and the parameters have the shape this
+// package writes: the key column first, every row as long as the columns,
+// and every parameter a scalar or a set.
+func wellFormed(recordset apicontract.Recordset, parameters map[string]apicontract.TypedValueOrSet) bool {
+	if len(recordset.Columns) == 0 || recordset.Columns[0].Name != KeyColumn {
+		return false
+	}
+	for _, row := range recordset.Rows {
+		if len(row) != len(recordset.Columns) {
+			return false
+		}
+	}
+	for _, value := range parameters {
+		if (value.Scalar == nil) == (value.Set == nil) {
+			return false
+		}
+	}
+	return true
 }

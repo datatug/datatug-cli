@@ -378,8 +378,12 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	}
 	defer func() { _ = bridge.Close() }()
 	ui.SetBrowserURL(bridge.URL)
-	if err := saveLastChatOptions(cmd, options); err != nil {
-		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: save chat options: %v\n", err)
+	// Opening a stored result is not a choice of project, environment or
+	// database for the next chat, so it leaves the saved choices as they were.
+	if options.result == nil {
+		if err := saveLastChatOptions(cmd, options); err != nil {
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: save chat options: %v\n", err)
+		}
 	}
 	ui.SetProjectChoices(chatProjectChoices(options.project, projectDir, projectCatalog))
 	if options.workspace != nil {

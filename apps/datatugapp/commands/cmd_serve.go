@@ -281,17 +281,18 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 	httpServer := server.NewHttpServer()
 	httpServer.IdleTimeout = flags.idleTimeout
 	caps := api.Capabilities{
-		Access:               agentaccess.New(secret),
-		AllowWrites:          flags.allowWrites,
-		AllowOpaqueSQL:       flags.allowOpaqueSQL,
-		AllowLiveConnections: flags.allowLiveConns,
-		HTTPOffline:          flags.httpOffline,
-		ExecTimeout:          flags.execTimeout,
-		IncidentStores:       runtimeSettings.Server.IncidentStores,
-		EvidencePrivateDir:   firstNonEmpty(flags.evidenceDir, runtimeSettings.Server.EvidenceDir),
-		EvidenceByteCap:      firstNonZero(flags.snapshotByteCap, runtimeSettings.Server.SnapshotByteCap),
-		EvidenceRetention:    firstNonZeroDuration(flags.snapshotRetention, runtimeSettings.Server.SnapshotRetention),
-		SnapshotPolicies:     runtimeSettings.Server.SnapshotPolicies,
+		NativeSessionDetective: nativeContextFixtureEnabled,
+		Access:                 agentaccess.New(secret),
+		AllowWrites:            flags.allowWrites,
+		AllowOpaqueSQL:         flags.allowOpaqueSQL,
+		AllowLiveConnections:   flags.allowLiveConns,
+		HTTPOffline:            flags.httpOffline,
+		ExecTimeout:            flags.execTimeout,
+		IncidentStores:         runtimeSettings.Server.IncidentStores,
+		EvidencePrivateDir:     firstNonEmpty(flags.evidenceDir, runtimeSettings.Server.EvidenceDir),
+		EvidenceByteCap:        firstNonZero(flags.snapshotByteCap, runtimeSettings.Server.SnapshotByteCap),
+		EvidenceRetention:      firstNonZeroDuration(flags.snapshotRetention, runtimeSettings.Server.SnapshotRetention),
+		SnapshotPolicies:       runtimeSettings.Server.SnapshotPolicies,
 	}
 	if flags.detectiveAIProfile != "" {
 		if config.AI == nil {

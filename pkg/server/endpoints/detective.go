@@ -1,7 +1,9 @@
 package endpoints
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"reflect"
@@ -80,6 +82,9 @@ func detectiveStore(project, securityContextID string) (*detective.LocalStore, s
 		return nil, "", err
 	}
 	store, err := detective.NewLocalStore(project, projectDir, base)
+	if err == nil && api.GetCapabilities().NativeSessionDetective {
+		store, _, _, _, _, err = sessionDetectiveNativeStore(context.Background(), project, "local")
+	}
 	return store, actor, err
 }
 
@@ -310,12 +315,24 @@ func recordedDetectiveInputs(record apicontract.ExecutionRecord) (map[string]det
 
 var (
 	detectiveAdmittedQueryRevision      = detective.AdmittedQueryRevision
+	detectiveAcceptedQuery              = detective.NativeAcceptedQuery
 	detectiveComputeRunQueryWithOptions = computeRunQueryWithOptions
 )
 
 func detectiveQueryRunner(project, securityContextID string) detective.QueryRunner {
 	return func(ctx context.Context, queryID, environment string, params map[string]apicontract.TypedValueOrSet) (apicontract.Result, error) {
 		revision, admitted := detectiveAdmittedQueryRevision(ctx, queryID)
+		var acceptedDefinition *datatug.QueryDefWithFolderPath
+		if accepted, ok := detectiveAcceptedQuery(ctx, queryID); ok {
+			var definition datatug.QueryDefWithFolderPath
+			decoder := json.NewDecoder(bytes.NewReader(accepted.DefinitionJSON))
+			decoder.UseNumber()
+			if decoder.Decode(&definition) != nil {
+				return apicontract.Result{}, &detective.QueryFailure{Code: "SOURCE_UNAVAILABLE"}
+			}
+			acceptedDefinition = &definition
+			revision, admitted = accepted.Revision, true
+		}
 		if !admitted {
 			return apicontract.Result{}, &detective.QueryFailure{Code: "SOURCE_UNAVAILABLE"}
 		}
@@ -324,7 +341,7 @@ func detectiveQueryRunner(project, securityContextID string) detective.QueryRunn
 			origins = append(origins, apicontract.BindingOriginEntry{ParameterID: name, Origin: apicontract.BindingOriginManual})
 		}
 		limit := 500
-		result, runErr := detectiveComputeRunQueryWithOptions(ctx, apicontract.ExecutionRequest{Project: project, Environment: environment, SecurityContextID: securityContextID, QueryID: queryID, Parameters: params, BindingOrigins: origins, Mode: apicontract.ProvenanceModeLive, Limit: &limit, Record: true}, runQueryOptions{expectedQueryRevision: revision})
+		result, runErr := detectiveComputeRunQueryWithOptions(ctx, apicontract.ExecutionRequest{Project: project, Environment: environment, SecurityContextID: securityContextID, QueryID: queryID, Parameters: params, BindingOrigins: origins, Mode: apicontract.ProvenanceModeLive, Limit: &limit, Record: true}, runQueryOptions{expectedQueryRevision: revision, acceptedQuery: acceptedDefinition})
 		if runErr != nil {
 			var contract *contractError
 			if errors.As(runErr, &contract) {

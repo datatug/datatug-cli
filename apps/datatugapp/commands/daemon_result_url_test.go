@@ -23,7 +23,7 @@ func TestDaemonURLOfAResult(t *testing.T) {
 	require.NoError(t, err)
 	var link daemon.ResultLink
 	require.NoError(t, json.Unmarshal([]byte(out), &link))
-	assert.Equal(t, daemon.ResultLink{URL: "https://datatug.app/store/http-127.0.0.1:8989/result/t4?view=sources&row=2", Kind: "query-result", UISupport: "pending", ResultExists: true}, link)
+	assert.Equal(t, daemon.ResultLink{Contract: daemon.ContractVersion, Warnings: []string{}, URL: "https://datatug.app/store/http-127.0.0.1:8989/result/t4?view=sources&row=2", Kind: "query-result", UISupport: "pending", ResultExists: true}, link)
 	assert.NotContains(t, out, root)
 
 	out, err = runDaemon(t, "url", "--result", "t4", "--format", "text")
@@ -44,6 +44,8 @@ func TestDaemonURLOfAResult(t *testing.T) {
 		{"url", "--result", "t4", "--table", "Genre"},
 		{"url", "--result", "t4", "--records"},
 		{"url", "--result", "t4", "--format", "x"},
+		{"url", "--result", "t4", "--row", "0"},
+		{"url", "--project", "p", "--env", "e", "--db", "d", "--table", "t", "--row", "5"},
 		{"url", "--project", "p", "--env", "e", "--db", "d", "--table", "t", "--view=sources"},
 	} {
 		_, err := runDaemon(t, argv...)

@@ -30,11 +30,14 @@ type ResultLinkRequest struct {
 // ResultLink is the `daemon url --result` answer: the link is absent when the
 // result is not there.
 type ResultLink struct {
+	Contract     int    `json:"contract"`
 	URL          string `json:"url,omitempty"`
 	Kind         string `json:"kind"`
 	Running      bool   `json:"running"`
 	UISupport    string `json:"uiSupport"`
 	ResultExists bool   `json:"resultExists"`
+	// Warnings is always present ([] when empty), as on every daemon url link.
+	Warnings []string `json:"warnings"`
 }
 
 // BuildResultLink builds <uiBase>/result/<id>?view=<view>[&row=<n>]#code=<code>.
@@ -59,7 +62,7 @@ func BuildResultLink(st Status, req ResultLinkRequest, validID func(string) bool
 	if req.Row < 0 || req.Row > MaxResultRow {
 		return ResultLink{}, UsageError{fmt.Sprintf("--row must be between 1 and %d", MaxResultRow)}
 	}
-	out := ResultLink{Kind: KindQueryResult, Running: st.Running, UISupport: uiSupport[KindQueryResult], ResultExists: req.Exists}
+	out := ResultLink{Contract: ContractVersion, Warnings: []string{}, Kind: KindQueryResult, Running: st.Running, UISupport: uiSupport[KindQueryResult], ResultExists: req.Exists}
 	if !req.Exists {
 		return out, nil
 	}

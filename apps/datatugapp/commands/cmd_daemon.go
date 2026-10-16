@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"time"
 
 	"github.com/datatug/datatug-cli/pkg/agentaccess"
@@ -140,6 +141,9 @@ func daemonURLCommand() *cobra.Command {
 			if f.Changed("result") {
 				return writeResultLink(cmd, format)
 			}
+			if f.Changed("row") {
+				return Exit("--row is the position of a row of a result: it goes with --result", exitCodeUsage)
+			}
 			view, err := tableViewFlag(cmd)
 			if err != nil {
 				return err
@@ -159,8 +163,12 @@ func daemonURLCommand() *cobra.Command {
 			}
 			st := newDaemonManager().Status()
 			req.Code = linkCode(st)
+			req.Metadata = func() *daemon.Metadata { return linkMetadata(req) }
 			link, err := daemon.BuildLink(st, req)
-			if err != nil {
+			var notFound daemon.NotFoundError
+			if errors.As(err, &notFound) {
+				return Exit(err.Error(), exitCodeNotFound)
+			} else if err != nil {
 				return Exit(err.Error(), exitCodeUsage)
 			}
 			if format == daemonFormatText {
@@ -216,6 +224,9 @@ func writeResultLink(cmd *cobra.Command, format string) error {
 	req.ID, _ = f.GetString("result")
 	req.View, _ = f.GetString("view")
 	req.Row, _ = f.GetInt("row")
+	if f.Changed("row") && req.Row == 0 {
+		return Exit(fmt.Sprintf("--row must be between 1 and %d", daemon.MaxResultRow), exitCodeUsage)
+	}
 	if queryresults.ValidID(req.ID) {
 		if store, err := openResultsStore(); err == nil {
 			_, err = store.Locate(req.ID)
@@ -279,6 +290,41 @@ func resolveLinkDB(ctx context.Context, req daemon.LinkRequest) (daemon.LinkRequ
 		return req, nil
 	}
 	return req, Exit((&api.AmbiguousSourceError{Environments: holding}).Error(), exitCodeUsage)
+}
+
+// linkMetadata reads the scanned relations named like the request's table from the project on disk
+// (the files `show` lists, but only the columns file of that name), with no network and no database
+// connection. nil when the project holds none for it: an unknown project, source or environment, a
+// source never scanned or with no relation at all, or files that cannot be read (or are too large).
+// Nothing of the failure is reported (a text of it would quote a path).
+func linkMetadata(req daemon.LinkRequest) *daemon.Metadata {
+	if api.ValidateCatalogIdentifiers(req.Env, req.DB) != nil {
+		return nil
+	}
+	base, err := openProjectForRead(req.Project, "")
+	if err != nil {
+		return nil
+	}
+	found, scanned, err := api.FindCatalogRelations(base.ProjectDir, req.Env, req.DB, req.Table)
+	if err != nil || !scanned {
+		return nil
+	}
+	meta := &daemon.Metadata{Relations: make([]daemon.Relation, 0, len(found))}
+	for _, r := range found {
+		rel := daemon.Relation{Schema: r.Schema, Name: r.Name, View: r.DbType == "VIEW"}
+		keyed := make([]api.CatalogColumn, 0, len(r.Columns))
+		for _, c := range r.Columns {
+			if c.PrimaryKeyPosition > 0 {
+				keyed = append(keyed, c)
+			}
+		}
+		sort.Slice(keyed, func(i, j int) bool { return keyed[i].PrimaryKeyPosition < keyed[j].PrimaryKeyPosition })
+		for _, c := range keyed {
+			rel.PrimaryKey = append(rel.PrimaryKey, c.Name)
+		}
+		meta.Relations = append(meta.Relations, rel)
+	}
+	return meta
 }
 
 // linkCode mints the one-time code of the link from the access key that the agent on st's port left

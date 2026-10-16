@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"path/filepath"
 	"strconv"
 
 	tea "charm.land/bubbletea/v2"
@@ -10,6 +11,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/queryresults"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
+	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/spf13/cobra"
 )
 
@@ -65,7 +67,7 @@ func loadResultForUI(ctx context.Context, id string) (resultOpen, error) {
 	if meta.DB.Ref == nil || meta.DB.Project == nil || meta.DB.Env == nil || meta.DB.Source == nil {
 		return resultOpen{}, Exit("query result: its database is not a source of a registered project; add the database to a project to open the result in the terminal UI", exitCodeUsage)
 	}
-	projectDir, projectStore, err := resolveQueryProject(*meta.DB.Project)
+	projectDir, projectStore, err := resolveRegisteredProject(*meta.DB.Project)
 	if err != nil {
 		return resultOpen{}, Exit("query result: the project of this result is not registered on this machine", exitCodeNotFound)
 	}
@@ -77,6 +79,22 @@ func loadResultForUI(ctx context.Context, id string) (resultOpen, error) {
 		}
 	}
 	return resultOpen{projectDir: projectDir, env: *meta.DB.Env, database: *meta.DB.Source, query: query}, nil
+}
+
+// resolveRegisteredProject resolves a result's project only as a project id
+// registered in ~/.datatug.yaml, to the absolute directory registered for it:
+// never as a directory of that name in the current folder (which a result
+// would otherwise write its rows into), and never as a relative or remote
+// location.
+func resolveRegisteredProject(id string) (string, datatug.ProjectStore, error) {
+	v := projectBaseCommand{ProjectName: id}
+	if err := v.initProjectCommand(projectCommandOptions{projNameRequired: true}); err != nil {
+		return "", nil, err
+	}
+	if !filepath.IsAbs(v.ProjectDir) {
+		return "", nil, ErrUnknownProjectName
+	}
+	return filepath.Clean(v.ProjectDir), v.store.GetProjectStore(v.projectID), nil
 }
 
 // resultRows is data.json's recordset as a chat result: $key is the record

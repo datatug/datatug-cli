@@ -91,7 +91,7 @@ var scenarioChecks = map[string]func(t *testing.T, e *scenarioEnv){
 	},
 	"filters_and_reload": func(t *testing.T, e *scenarioEnv) {
 		c := e.copies
-		if len(c) != 18 {
+		if len(c) != 21 {
 			t.Fatalf("copies %d", len(c))
 		}
 		if c[0].err != nil || !hasWarning(c[0].rep, WarnFKNotValidated, "child(parent_id)") {
@@ -137,6 +137,15 @@ var scenarioChecks = map[string]func(t *testing.T, e *scenarioEnv){
 		}
 		if c[17].err != nil || !hasWarningText(c[17].rep, "Parent.id", "exactly one sequence") {
 			t.Errorf("a column with no sequence is said: %v %v", c[17].err, c[17].rep.Warnings)
+		}
+		if c[18].err != nil || hasWarning(c[18].rep, WarnIdentityNotCarried, "Parent.id") {
+			t.Errorf("a sequence already past the rows is left where it is: %v %v", c[18].err, c[18].rep.Warnings)
+		}
+		if c[19].err != nil || !hasWarningText(c[19].rep, "Parent.id", "is beyond the maximum 5") {
+			t.Errorf("a sequence that cannot be set is left alone and said: %v %v", c[19].err, c[19].rep.Warnings)
+		}
+		if c[20].err != nil || !hasWarningText(c[20].rep, "Parent.id", "counts down") {
+			t.Errorf("a sequence that counts down is left alone and said: %v %v", c[20].err, c[20].rep.Warnings)
 		}
 	},
 	"filters_from_pg": func(t *testing.T, e *scenarioEnv) {

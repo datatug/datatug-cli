@@ -465,6 +465,14 @@ var scenarios = []scenario{
 		e.copy(src, pg, Options{Overwrite: "reload", Include: family})
 		quiet(pg.DB, `ALTER TABLE "public"."Parent" ALTER COLUMN id DROP DEFAULT`)
 		e.copy(src, pg, Options{Overwrite: "reload", Include: family})
+		// A sequence that is used and already past the rows is not moved back.
+		quiet(pg.DB, `ALTER TABLE "public"."Parent" ALTER COLUMN id SET DEFAULT nextval('shared_seq')`, `SELECT setval('"public".shared_seq', 50)`)
+		e.copy(src, pg, Options{Overwrite: "reload", Include: family})
+		// A sequence that cannot be set to the next id (beyond its maximum) or that counts down is left alone, and said.
+		quiet(pg.DB, `ALTER TABLE "public"."Parent" ALTER COLUMN id SET DEFAULT nextval('shared_seq')`, `ALTER SEQUENCE "public".shared_seq RESTART 1 MAXVALUE 5`)
+		e.copy(src, pg, Options{Overwrite: "reload", Include: family})
+		quiet(pg.DB, `ALTER SEQUENCE "public".shared_seq INCREMENT BY -1 MINVALUE 1 MAXVALUE 100 RESTART 100`)
+		e.copy(src, pg, Options{Overwrite: "reload", Include: family})
 	}},
 	{name: "filters_from_pg", pgs: 1, run: func(e *scenarioEnv) {
 		// From a PostgreSQL source: where and limit read through the server.

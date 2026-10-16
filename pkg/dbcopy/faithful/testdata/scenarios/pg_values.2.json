@@ -270,8 +270,53 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "SELECT seqrelid::regclass::text, seqincrement, seqmax FROM pg_sequence WHERE seqrelid = $1::text::regclass",
+  "cols": [
+   "seqrelid",
+   "seqincrement",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "fl_id_seq"
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 9223372036854775807
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM fl_id_seq",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
   "kind": "exec",
-  "sql": "SELECT setval($1::text::regclass, GREATEST($2::bigint, (SELECT COALESCE(pg_sequence_last_value(seqrelid) + seqincrement, seqstart) FROM pg_sequence WHERE seqrelid = $1::text::regclass)), false)",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
   "affected": 1
  },
  {
@@ -305,8 +350,53 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "SELECT seqrelid::regclass::text, seqincrement, seqmax FROM pg_sequence WHERE seqrelid = $1::text::regclass",
+  "cols": [
+   "seqrelid",
+   "seqincrement",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "sq_called_id_seq"
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 9223372036854775807
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM sq_called_id_seq",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
   "kind": "exec",
-  "sql": "SELECT setval($1::text::regclass, GREATEST($2::bigint, (SELECT COALESCE(pg_sequence_last_value(seqrelid) + seqincrement, seqstart) FROM pg_sequence WHERE seqrelid = $1::text::regclass)), false)",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
   "affected": 1
  },
  {
@@ -340,8 +430,53 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "SELECT seqrelid::regclass::text, seqincrement, seqmax FROM pg_sequence WHERE seqrelid = $1::text::regclass",
+  "cols": [
+   "seqrelid",
+   "seqincrement",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "sq_clash_id_seq"
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 9223372036854775807
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM sq_clash_id_seq",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
   "kind": "exec",
-  "sql": "SELECT setval($1::text::regclass, GREATEST($2::bigint, (SELECT COALESCE(pg_sequence_last_value(seqrelid) + seqincrement, seqstart) FROM pg_sequence WHERE seqrelid = $1::text::regclass)), false)",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
   "affected": 1
  },
  {
@@ -388,8 +523,53 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "SELECT seqrelid::regclass::text, seqincrement, seqmax FROM pg_sequence WHERE seqrelid = $1::text::regclass",
+  "cols": [
+   "seqrelid",
+   "seqincrement",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "sq_new_id_seq"
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 9223372036854775807
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM sq_new_id_seq",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
   "kind": "exec",
-  "sql": "SELECT setval($1::text::regclass, GREATEST($2::bigint, (SELECT COALESCE(pg_sequence_last_value(seqrelid) + seqincrement, seqstart) FROM pg_sequence WHERE seqrelid = $1::text::regclass)), false)",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
   "affected": 1
  },
  {
@@ -437,8 +617,53 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "SELECT seqrelid::regclass::text, seqincrement, seqmax FROM pg_sequence WHERE seqrelid = $1::text::regclass",
+  "cols": [
+   "seqrelid",
+   "seqincrement",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "sq_used_id_seq"
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 9223372036854775807
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM sq_used_id_seq",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
   "kind": "exec",
-  "sql": "SELECT setval($1::text::regclass, GREATEST($2::bigint, (SELECT COALESCE(pg_sequence_last_value(seqrelid) + seqincrement, seqstart) FROM pg_sequence WHERE seqrelid = $1::text::regclass)), false)",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
   "affected": 1
  },
  {
@@ -458,7 +683,7 @@
    [
     {
      "t": "i",
-     "v": 32843
+     "v": 43407
     },
     {
      "t": "s",
@@ -480,7 +705,7 @@
    [
     {
      "t": "i",
-     "v": 32851
+     "v": 43415
     },
     {
      "t": "s",
@@ -502,7 +727,7 @@
    [
     {
      "t": "i",
-     "v": 32857
+     "v": 43421
     },
     {
      "t": "s",
@@ -524,7 +749,7 @@
    [
     {
      "t": "i",
-     "v": 32863
+     "v": 43427
     },
     {
      "t": "s",
@@ -546,7 +771,7 @@
    [
     {
      "t": "i",
-     "v": 32871
+     "v": 43435
     },
     {
      "t": "s",
@@ -568,7 +793,7 @@
    [
     {
      "t": "i",
-     "v": 32879
+     "v": 43443
     },
     {
      "t": "s",
@@ -590,7 +815,7 @@
    [
     {
      "t": "i",
-     "v": 32885
+     "v": 43449
     },
     {
      "t": "s",

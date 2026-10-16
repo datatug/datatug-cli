@@ -157,10 +157,13 @@ failure of the reload (23503, nothing changes), not a `NOT VALID` key. The count
 columns are set with `setval` last in the transaction (a rollback does not undo a `setval`, so nothing
 that can fail comes after it), on the sequence the column's `DEFAULT nextval('s')` takes values from (a serial
 column's own, or another one the default was changed to), or the one an identity column owns. A sequence is
-only ever moved *forward* (to the id after the highest copied one, or left where it is when it is already
-past it, counting its step and start): a sequence that several tables share, or one a reload of a single
-table finds ahead of that table's rows, is never moved back, so the other tables do not repeat an id (steps
-are assumed positive). A target column with no sequence, or with more than one, is an
+only ever moved *forward*: its next value is read from the sequence itself (its last value, plus its step
+once it has been used; its start, which is its last value, while it has not), and the counter is set to the
+greater of that and the id after the highest copied one. A sequence that several tables share, or one that is
+already past the rows (also when it is set but not called yet), is left where it is, so the other tables do
+not repeat an id. A sequence that cannot be set to that value (it would be beyond its maximum, as a `CYCLE`
+sequence at its `MAXVALUE` or a `bigint` at the top) or that counts down (a negative step) is left alone and
+an `identity-not-carried` warning says so; the copy does not fail. A target column with no sequence, or with more than one, is an
 `identity-not-carried` warning (its counter is not moved), never silent. `Verify` compares the deferral, match type and validity of a foreign key; it does not compare PostgreSQL 18's NOT ENFORCED. A source table the target lacks is created. Views and
 triggers of a SQLite source are replaced by the source's.
 

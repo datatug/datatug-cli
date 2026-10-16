@@ -351,3 +351,95 @@ func TestPostgresCounterFollowsTheDefaultNotTheOwnedSequence(t *testing.T) {
 		t.Errorf("the next id of the sequence the default uses: %s, want 4", got)
 	}
 }
+
+// reloadA reloads a table "a" of three rows (ids 1..3) alone, into a target where it takes its ids from a
+// sequence it does not own, and returns the report.
+func reloadA(t *testing.T, pg Endpoint) *Report {
+	t.Helper()
+	src := newSQLite(t)
+	execAll(t, src.DB, `CREATE TABLE a (id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT)`, `INSERT INTO a (v) VALUES ('x'), ('y'), ('z')`)
+	return mustCopy(t, src, pg, Options{Overwrite: "reload", Include: []string{"a"}})
+}
+
+// A shared sequence that is not called yet (is_called = false), the state setval(..., false) leaves, is as
+// much a position as a used one: the next value is its last_value, not its start.
+func TestPostgresReloadKeepsASharedSequenceThatIsNotCalled(t *testing.T) {
+	pg := newPGDatabase(t)
+	execAll(t, pg.DB, `CREATE SEQUENCE shared_seq`,
+		`CREATE TABLE a (id integer PRIMARY KEY DEFAULT nextval('shared_seq'), v text)`, `CREATE TABLE b (id integer PRIMARY KEY DEFAULT nextval('shared_seq'), v text)`,
+		`INSERT INTO b (id, v) SELECT g, 'row' FROM generate_series(1, 100) g`, `SELECT setval('shared_seq', 101, false)`)
+	reloadA(t, pg)
+	execAll(t, pg.DB, `INSERT INTO b (v) VALUES ('after')`)
+	if got := pgText(t, pg.DB, `SELECT max(id) FROM b`); got != "101" {
+		t.Errorf("the next id of b: %s, want 101", got)
+	}
+}
+
+// The same, with the position left by the copy itself: b is reloaded (the counter is set to 101 and not
+// called), then a is.
+func TestPostgresReloadOfTwoTablesThatShareASequenceOneAfterTheOther(t *testing.T) {
+	src := newSQLite(t)
+	execAll(t, src.DB, `CREATE TABLE a (id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT)`, `INSERT INTO a (v) VALUES ('x'), ('y'), ('z')`,
+		`CREATE TABLE b (id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT)`,
+		`WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 100) INSERT INTO b (v) SELECT 'r' FROM c`)
+	pg := newPGDatabase(t)
+	execAll(t, pg.DB, `CREATE SEQUENCE shared_seq`,
+		`CREATE TABLE a (id integer PRIMARY KEY DEFAULT nextval('shared_seq'), v text)`, `CREATE TABLE b (id integer PRIMARY KEY DEFAULT nextval('shared_seq'), v text)`)
+	mustCopy(t, src, pg, Options{Overwrite: "reload", Include: []string{"b"}})
+	mustCopy(t, src, pg, Options{Overwrite: "reload", Include: []string{"a"}})
+	execAll(t, pg.DB, `INSERT INTO b (v) VALUES ('after')`)
+	if got := pgText(t, pg.DB, `SELECT max(id) FROM b`); got != "101" {
+		t.Errorf("the next id of b: %s, want 101", got)
+	}
+}
+
+// The next value counts the step of the sequence, and a sequence that has not been used starts where it was
+// told to, not at 1.
+func TestPostgresReloadCountsTheStepAndTheStartOfASequence(t *testing.T) {
+	pg := newPGDatabase(t)
+	execAll(t, pg.DB, `CREATE SEQUENCE s INCREMENT 10`, `CREATE TABLE a (id integer PRIMARY KEY DEFAULT nextval('s'), v text)`,
+		`CREATE TABLE b (id integer PRIMARY KEY DEFAULT nextval('s'), v text)`, `INSERT INTO b (v) SELECT 'row' FROM generate_series(1, 100)`)
+	reloadA(t, pg)
+	if got := pgText(t, pg.DB, `SELECT nextval('s')`); got != "1001" {
+		t.Errorf("after 100 values of step 10 the next one is 1001: %s", got)
+	}
+	pg = newPGDatabase(t)
+	execAll(t, pg.DB, `CREATE SEQUENCE s START 1000`, `CREATE TABLE a (id integer PRIMARY KEY DEFAULT nextval('s'), v text)`)
+	reloadA(t, pg)
+	if got := pgText(t, pg.DB, `SELECT nextval('s')`); got != "1000" {
+		t.Errorf("a sequence that starts at 1000 above the copied ids stays there: %s", got)
+	}
+}
+
+// A sequence that cannot be set to the next id (it would be beyond its maximum: a CYCLE sequence at its
+// MAXVALUE, or a bigint at the top) or that counts down is left alone, and the copy says so; it does not fail.
+func TestPostgresReloadLeavesASequenceItCannotSetAndSaysSo(t *testing.T) {
+	for _, c := range []struct{ name, setup, typ, text string }{
+		{"cycle at its maximum", `CREATE SEQUENCE s MAXVALUE 100 CYCLE`, "integer", "is beyond the maximum 100"},
+		{"bigint at the top", `CREATE SEQUENCE s CYCLE`, "bigint", "is beyond the maximum 9223372036854775807"},
+		{"counts down", `CREATE SEQUENCE s INCREMENT -1 MINVALUE 1 MAXVALUE 1000 START 1000`, "integer", "counts down"},
+	} {
+		pg := newPGDatabase(t)
+		execAll(t, pg.DB, c.setup, `CREATE TABLE a (id `+c.typ+` PRIMARY KEY DEFAULT nextval('s'), v text)`)
+		switch c.name {
+		case "cycle at its maximum":
+			execAll(t, pg.DB, `SELECT setval('s', 100, true)`)
+		case "bigint at the top":
+			execAll(t, pg.DB, `SELECT setval('s', 9223372036854775807, true)`)
+		}
+		rep := reloadA(t, pg)
+		if w := findWarning(rep, WarnIdentityNotCarried, "a.id"); w == nil || !strings.Contains(w.Message, c.text) {
+			t.Errorf("%s: %v", c.name, rep.Warnings)
+		}
+		if got := pgText(t, pg.DB, `SELECT count(*) FROM a`); got != "3" {
+			t.Errorf("%s: the rows are loaded: %s", c.name, got)
+		}
+	}
+	// The descending one was not moved.
+	pg := newPGDatabase(t)
+	execAll(t, pg.DB, `CREATE SEQUENCE s INCREMENT -1 MINVALUE 1 MAXVALUE 1000 START 1000`, `CREATE TABLE a (id integer PRIMARY KEY DEFAULT nextval('s'), v text)`)
+	reloadA(t, pg)
+	if got := pgText(t, pg.DB, `SELECT nextval('s')`); got != "1000" {
+		t.Errorf("a sequence that counts down is left alone: %s", got)
+	}
+}

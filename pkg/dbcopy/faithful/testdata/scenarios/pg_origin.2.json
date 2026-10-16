@@ -341,8 +341,53 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "SELECT seqrelid::regclass::text, seqincrement, seqmax FROM pg_sequence WHERE seqrelid = $1::text::regclass",
+  "cols": [
+   "seqrelid",
+   "seqincrement",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "dept_id_seq"
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 9223372036854775807
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM dept_id_seq",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
   "kind": "exec",
-  "sql": "SELECT setval($1::text::regclass, GREATEST($2::bigint, (SELECT COALESCE(pg_sequence_last_value(seqrelid) + seqincrement, seqstart) FROM pg_sequence WHERE seqrelid = $1::text::regclass)), false)",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
   "affected": 1
  },
  {
@@ -376,8 +421,53 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "SELECT seqrelid::regclass::text, seqincrement, seqmax FROM pg_sequence WHERE seqrelid = $1::text::regclass",
+  "cols": [
+   "seqrelid",
+   "seqincrement",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "emp_id_seq"
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 9223372036854775807
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM emp_id_seq",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
   "kind": "exec",
-  "sql": "SELECT setval($1::text::regclass, GREATEST($2::bigint, (SELECT COALESCE(pg_sequence_last_value(seqrelid) + seqincrement, seqstart) FROM pg_sequence WHERE seqrelid = $1::text::regclass)), false)",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
   "affected": 1
  },
  {
@@ -397,7 +487,7 @@
    [
     {
      "t": "i",
-     "v": 32516
+     "v": 43080
     },
     {
      "t": "s",
@@ -419,7 +509,7 @@
    [
     {
      "t": "i",
-     "v": 32532
+     "v": 43096
     },
     {
      "t": "s",
@@ -441,7 +531,7 @@
    [
     {
      "t": "i",
-     "v": 32539
+     "v": 43103
     },
     {
      "t": "s",
@@ -463,7 +553,7 @@
    [
     {
      "t": "i",
-     "v": 32544
+     "v": 43108
     },
     {
      "t": "s",
@@ -3338,11 +3428,11 @@
     },
     {
      "t": "s",
-     "v": "2026-10-16 00:29:21"
+     "v": "2026-10-16 00:50:59"
     },
     {
      "t": "s",
-     "v": "2026-10-16 01:29:21.76137+01"
+     "v": "2026-10-16 01:50:59.876718+01"
     }
    ],
    [
@@ -3408,11 +3498,11 @@
     },
     {
      "t": "s",
-     "v": "2026-10-16 00:29:21"
+     "v": "2026-10-16 00:50:59"
     },
     {
      "t": "s",
-     "v": "2026-10-16 01:29:21.76137+01"
+     "v": "2026-10-16 01:50:59.876718+01"
     }
    ]
   ]

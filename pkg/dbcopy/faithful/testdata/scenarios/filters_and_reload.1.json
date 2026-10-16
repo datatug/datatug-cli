@@ -350,8 +350,53 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "SELECT seqrelid::regclass::text, seqincrement, seqmax FROM pg_sequence WHERE seqrelid = $1::text::regclass",
+  "cols": [
+   "seqrelid",
+   "seqincrement",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "\"Parent_id_seq\""
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 9223372036854775807
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM \"Parent_id_seq\"",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
   "kind": "exec",
-  "sql": "SELECT setval($1::text::regclass, GREATEST($2::bigint, (SELECT COALESCE(pg_sequence_last_value(seqrelid) + seqincrement, seqstart) FROM pg_sequence WHERE seqrelid = $1::text::regclass)), false)",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
   "affected": 1
  },
  {
@@ -385,8 +430,53 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "SELECT seqrelid::regclass::text, seqincrement, seqmax FROM pg_sequence WHERE seqrelid = $1::text::regclass",
+  "cols": [
+   "seqrelid",
+   "seqincrement",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "grandchild_n_seq"
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 9223372036854775807
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM grandchild_n_seq",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
   "kind": "exec",
-  "sql": "SELECT setval($1::text::regclass, GREATEST($2::bigint, (SELECT COALESCE(pg_sequence_last_value(seqrelid) + seqincrement, seqstart) FROM pg_sequence WHERE seqrelid = $1::text::regclass)), false)",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
   "affected": 1
  },
  {
@@ -467,7 +557,7 @@
    [
     {
      "t": "i",
-     "v": 32894
+     "v": 43458
     },
     {
      "t": "s",
@@ -489,7 +579,7 @@
    [
     {
      "t": "i",
-     "v": 32907
+     "v": 43471
     },
     {
      "t": "s",
@@ -511,7 +601,7 @@
    [
     {
      "t": "i",
-     "v": 32926
+     "v": 43490
     },
     {
      "t": "s",
@@ -533,7 +623,7 @@
    [
     {
      "t": "i",
-     "v": 32915
+     "v": 43479
     },
     {
      "t": "s",
@@ -555,7 +645,7 @@
    [
     {
      "t": "i",
-     "v": 32920
+     "v": 43484
     },
     {
      "t": "s",
@@ -3541,8 +3631,53 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "SELECT seqrelid::regclass::text, seqincrement, seqmax FROM pg_sequence WHERE seqrelid = $1::text::regclass",
+  "cols": [
+   "seqrelid",
+   "seqincrement",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "\"Parent_id_seq\""
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 9223372036854775807
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM \"Parent_id_seq\"",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
   "kind": "exec",
-  "sql": "SELECT setval($1::text::regclass, GREATEST($2::bigint, (SELECT COALESCE(pg_sequence_last_value(seqrelid) + seqincrement, seqstart) FROM pg_sequence WHERE seqrelid = $1::text::regclass)), false)",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
   "affected": 1
  },
  {
@@ -3576,8 +3711,53 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "SELECT seqrelid::regclass::text, seqincrement, seqmax FROM pg_sequence WHERE seqrelid = $1::text::regclass",
+  "cols": [
+   "seqrelid",
+   "seqincrement",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "grandchild_n_seq"
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 9223372036854775807
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM grandchild_n_seq",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
   "kind": "exec",
-  "sql": "SELECT setval($1::text::regclass, GREATEST($2::bigint, (SELECT COALESCE(pg_sequence_last_value(seqrelid) + seqincrement, seqstart) FROM pg_sequence WHERE seqrelid = $1::text::regclass)), false)",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
   "affected": 1
  },
  {
@@ -3666,7 +3846,7 @@
    [
     {
      "t": "i",
-     "v": 32894
+     "v": 43458
     },
     {
      "t": "s",
@@ -3688,7 +3868,7 @@
    [
     {
      "t": "i",
-     "v": 32907
+     "v": 43471
     },
     {
      "t": "s",
@@ -3710,7 +3890,7 @@
    [
     {
      "t": "i",
-     "v": 32926
+     "v": 43490
     },
     {
      "t": "s",
@@ -3732,7 +3912,7 @@
    [
     {
      "t": "i",
-     "v": 32915
+     "v": 43479
     },
     {
      "t": "s",
@@ -3754,7 +3934,7 @@
    [
     {
      "t": "i",
-     "v": 32920
+     "v": 43484
     },
     {
      "t": "s",
@@ -6496,7 +6676,7 @@
    [
     {
      "t": "i",
-     "v": 32894
+     "v": 43458
     },
     {
      "t": "s",
@@ -6518,7 +6698,7 @@
    [
     {
      "t": "i",
-     "v": 32907
+     "v": 43471
     },
     {
      "t": "s",
@@ -6540,7 +6720,7 @@
    [
     {
      "t": "i",
-     "v": 32926
+     "v": 43490
     },
     {
      "t": "s",
@@ -6562,7 +6742,7 @@
    [
     {
      "t": "i",
-     "v": 32915
+     "v": 43479
     },
     {
      "t": "s",
@@ -6584,7 +6764,7 @@
    [
     {
      "t": "i",
-     "v": 32920
+     "v": 43484
     },
     {
      "t": "s",
@@ -9468,7 +9648,7 @@
    [
     {
      "t": "i",
-     "v": 32894
+     "v": 43458
     },
     {
      "t": "s",
@@ -9490,7 +9670,7 @@
    [
     {
      "t": "i",
-     "v": 32907
+     "v": 43471
     },
     {
      "t": "s",
@@ -9512,7 +9692,7 @@
    [
     {
      "t": "i",
-     "v": 32926
+     "v": 43490
     },
     {
      "t": "s",
@@ -9534,7 +9714,7 @@
    [
     {
      "t": "i",
-     "v": 32915
+     "v": 43479
     },
     {
      "t": "s",
@@ -9556,7 +9736,7 @@
    [
     {
      "t": "i",
-     "v": 32920
+     "v": 43484
     },
     {
      "t": "s",
@@ -12438,7 +12618,7 @@
    [
     {
      "t": "i",
-     "v": 32894
+     "v": 43458
     },
     {
      "t": "s",
@@ -12460,7 +12640,7 @@
    [
     {
      "t": "i",
-     "v": 32907
+     "v": 43471
     },
     {
      "t": "s",
@@ -12482,7 +12662,7 @@
    [
     {
      "t": "i",
-     "v": 32926
+     "v": 43490
     },
     {
      "t": "s",
@@ -12504,7 +12684,7 @@
    [
     {
      "t": "i",
-     "v": 32915
+     "v": 43479
     },
     {
      "t": "s",
@@ -12526,7 +12706,7 @@
    [
     {
      "t": "i",
-     "v": 32920
+     "v": 43484
     },
     {
      "t": "s",
@@ -15255,7 +15435,7 @@
    [
     {
      "t": "i",
-     "v": 32894
+     "v": 43458
     },
     {
      "t": "s",
@@ -15277,7 +15457,7 @@
    [
     {
      "t": "i",
-     "v": 32907
+     "v": 43471
     },
     {
      "t": "s",
@@ -15299,7 +15479,7 @@
    [
     {
      "t": "i",
-     "v": 32926
+     "v": 43490
     },
     {
      "t": "s",
@@ -15321,7 +15501,7 @@
    [
     {
      "t": "i",
-     "v": 32915
+     "v": 43479
     },
     {
      "t": "s",
@@ -15343,7 +15523,7 @@
    [
     {
      "t": "i",
-     "v": 32920
+     "v": 43484
     },
     {
      "t": "s",
@@ -18383,8 +18563,53 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "SELECT seqrelid::regclass::text, seqincrement, seqmax FROM pg_sequence WHERE seqrelid = $1::text::regclass",
+  "cols": [
+   "seqrelid",
+   "seqincrement",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "\"Parent_id_seq\""
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 9223372036854775807
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM \"Parent_id_seq\"",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
   "kind": "exec",
-  "sql": "SELECT setval($1::text::regclass, GREATEST($2::bigint, (SELECT COALESCE(pg_sequence_last_value(seqrelid) + seqincrement, seqstart) FROM pg_sequence WHERE seqrelid = $1::text::regclass)), false)",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
   "affected": 1
  },
  {
@@ -18418,8 +18643,53 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "SELECT seqrelid::regclass::text, seqincrement, seqmax FROM pg_sequence WHERE seqrelid = $1::text::regclass",
+  "cols": [
+   "seqrelid",
+   "seqincrement",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "grandchild_n_seq"
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 9223372036854775807
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM grandchild_n_seq",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
   "kind": "exec",
-  "sql": "SELECT setval($1::text::regclass, GREATEST($2::bigint, (SELECT COALESCE(pg_sequence_last_value(seqrelid) + seqincrement, seqstart) FROM pg_sequence WHERE seqrelid = $1::text::regclass)), false)",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
   "affected": 1
  },
  {
@@ -18500,7 +18770,7 @@
    [
     {
      "t": "i",
-     "v": 32894
+     "v": 43458
     },
     {
      "t": "s",
@@ -18522,7 +18792,7 @@
    [
     {
      "t": "i",
-     "v": 32907
+     "v": 43471
     },
     {
      "t": "s",
@@ -18544,7 +18814,7 @@
    [
     {
      "t": "i",
-     "v": 32926
+     "v": 43490
     },
     {
      "t": "s",
@@ -18566,7 +18836,7 @@
    [
     {
      "t": "i",
-     "v": 32915
+     "v": 43479
     },
     {
      "t": "s",
@@ -18588,7 +18858,7 @@
    [
     {
      "t": "i",
-     "v": 32920
+     "v": 43484
     },
     {
      "t": "s",
@@ -21634,8 +21904,53 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "SELECT seqrelid::regclass::text, seqincrement, seqmax FROM pg_sequence WHERE seqrelid = $1::text::regclass",
+  "cols": [
+   "seqrelid",
+   "seqincrement",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "\"Parent_id_seq\""
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 9223372036854775807
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM \"Parent_id_seq\"",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
   "kind": "exec",
-  "sql": "SELECT setval($1::text::regclass, GREATEST($2::bigint, (SELECT COALESCE(pg_sequence_last_value(seqrelid) + seqincrement, seqstart) FROM pg_sequence WHERE seqrelid = $1::text::regclass)), false)",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
   "affected": 1
  },
  {
@@ -21669,8 +21984,53 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "SELECT seqrelid::regclass::text, seqincrement, seqmax FROM pg_sequence WHERE seqrelid = $1::text::regclass",
+  "cols": [
+   "seqrelid",
+   "seqincrement",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "grandchild_n_seq"
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 9223372036854775807
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM grandchild_n_seq",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
   "kind": "exec",
-  "sql": "SELECT setval($1::text::regclass, GREATEST($2::bigint, (SELECT COALESCE(pg_sequence_last_value(seqrelid) + seqincrement, seqstart) FROM pg_sequence WHERE seqrelid = $1::text::regclass)), false)",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
   "affected": 1
  },
  {
@@ -21759,7 +22119,7 @@
    [
     {
      "t": "i",
-     "v": 32894
+     "v": 43458
     },
     {
      "t": "s",
@@ -21781,7 +22141,7 @@
    [
     {
      "t": "i",
-     "v": 32907
+     "v": 43471
     },
     {
      "t": "s",
@@ -21803,7 +22163,7 @@
    [
     {
      "t": "i",
-     "v": 32926
+     "v": 43490
     },
     {
      "t": "s",
@@ -21825,7 +22185,7 @@
    [
     {
      "t": "i",
-     "v": 32915
+     "v": 43479
     },
     {
      "t": "s",
@@ -21847,7 +22207,7 @@
    [
     {
      "t": "i",
-     "v": 33061
+     "v": 43625
     },
     {
      "t": "s",
@@ -24571,7 +24931,7 @@
    [
     {
      "t": "i",
-     "v": 32894
+     "v": 43458
     },
     {
      "t": "s",
@@ -24593,7 +24953,7 @@
    [
     {
      "t": "i",
-     "v": 32907
+     "v": 43471
     },
     {
      "t": "s",
@@ -24615,7 +24975,7 @@
    [
     {
      "t": "i",
-     "v": 32926
+     "v": 43490
     },
     {
      "t": "s",
@@ -24637,7 +24997,7 @@
    [
     {
      "t": "i",
-     "v": 32915
+     "v": 43479
     },
     {
      "t": "s",
@@ -24659,7 +25019,7 @@
    [
     {
      "t": "i",
-     "v": 33061
+     "v": 43625
     },
     {
      "t": "s",
@@ -27349,7 +27709,7 @@
    [
     {
      "t": "i",
-     "v": 32894
+     "v": 43458
     },
     {
      "t": "s",
@@ -27371,7 +27731,7 @@
    [
     {
      "t": "i",
-     "v": 32907
+     "v": 43471
     },
     {
      "t": "s",
@@ -27393,7 +27753,7 @@
    [
     {
      "t": "i",
-     "v": 32926
+     "v": 43490
     },
     {
      "t": "s",
@@ -27415,7 +27775,7 @@
    [
     {
      "t": "i",
-     "v": 32915
+     "v": 43479
     },
     {
      "t": "s",
@@ -27437,7 +27797,7 @@
    [
     {
      "t": "i",
-     "v": 33061
+     "v": 43625
     },
     {
      "t": "s",
@@ -30188,8 +30548,53 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "SELECT seqrelid::regclass::text, seqincrement, seqmax FROM pg_sequence WHERE seqrelid = $1::text::regclass",
+  "cols": [
+   "seqrelid",
+   "seqincrement",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "shared_seq"
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 9223372036854775807
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM shared_seq",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
   "kind": "exec",
-  "sql": "SELECT setval($1::text::regclass, GREATEST($2::bigint, (SELECT COALESCE(pg_sequence_last_value(seqrelid) + seqincrement, seqstart) FROM pg_sequence WHERE seqrelid = $1::text::regclass)), false)",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
   "affected": 1
  },
  {
@@ -30223,8 +30628,53 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "SELECT seqrelid::regclass::text, seqincrement, seqmax FROM pg_sequence WHERE seqrelid = $1::text::regclass",
+  "cols": [
+   "seqrelid",
+   "seqincrement",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "grandchild_n_seq"
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 9223372036854775807
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM grandchild_n_seq",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
   "kind": "exec",
-  "sql": "SELECT setval($1::text::regclass, GREATEST($2::bigint, (SELECT COALESCE(pg_sequence_last_value(seqrelid) + seqincrement, seqstart) FROM pg_sequence WHERE seqrelid = $1::text::regclass)), false)",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
   "affected": 1
  },
  {
@@ -30283,7 +30733,7 @@
    [
     {
      "t": "i",
-     "v": 32894
+     "v": 43458
     },
     {
      "t": "s",
@@ -30305,7 +30755,7 @@
    [
     {
      "t": "i",
-     "v": 32907
+     "v": 43471
     },
     {
      "t": "s",
@@ -30327,7 +30777,7 @@
    [
     {
      "t": "i",
-     "v": 32926
+     "v": 43490
     },
     {
      "t": "s",
@@ -30349,7 +30799,7 @@
    [
     {
      "t": "i",
-     "v": 32915
+     "v": 43479
     },
     {
      "t": "s",
@@ -30371,7 +30821,7 @@
    [
     {
      "t": "i",
-     "v": 33061
+     "v": 43625
     },
     {
      "t": "s",
@@ -33143,8 +33593,9124 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "SELECT seqrelid::regclass::text, seqincrement, seqmax FROM pg_sequence WHERE seqrelid = $1::text::regclass",
+  "cols": [
+   "seqrelid",
+   "seqincrement",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "grandchild_n_seq"
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 9223372036854775807
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM grandchild_n_seq",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
   "kind": "exec",
-  "sql": "SELECT setval($1::text::regclass, GREATEST($2::bigint, (SELECT COALESCE(pg_sequence_last_value(seqrelid) + seqincrement, seqstart) FROM pg_sequence WHERE seqrelid = $1::text::regclass)), false)",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
+  "affected": 1
+ },
+ {
+  "kind": "commit"
+ },
+ {
+  "kind": "exec",
+  "sql": "ALTER TABLE \"public\".\"Parent\" ALTER COLUMN id SET DEFAULT nextval('shared_seq')"
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT setval('\"public\".shared_seq', 50)",
+  "affected": 1
+ },
+ {
+  "kind": "begin"
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT set_config('datestyle', 'ISO, MDY', true), set_config('intervalstyle', 'postgres', true), set_config('extra_float_digits', '3', true), set_config('timezone', 'UTC', true), set_config('statement_timeout', '0', true), set_config('idle_in_transaction_session_timeout', '0', true), set_config('standard_conforming_strings', 'on', true), set_config('escape_string_warning', 'off', true)",
+  "affected": 1
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relkind IN ('r','p','v','m','f') AND c.relname = ANY($2) ORDER BY 1",
+  "cols": [
+   "relname"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "Parent"
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "child"
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "grandchild"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.oid::bigint, c.relname, c.relkind::text, c.relispartition, c.relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relkind IN ('r','p','v','m','f') ORDER BY c.relname",
+  "cols": [
+   "oid",
+   "relname",
+   "relkind",
+   "relispartition",
+   "relrowsecurity"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 43458
+    },
+    {
+     "t": "s",
+     "v": "Parent"
+    },
+    {
+     "t": "s",
+     "v": "r"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 43471
+    },
+    {
+     "t": "s",
+     "v": "child"
+    },
+    {
+     "t": "s",
+     "v": "r"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 43490
+    },
+    {
+     "t": "s",
+     "v": "emptyauto"
+    },
+    {
+     "t": "s",
+     "v": "r"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 43479
+    },
+    {
+     "t": "s",
+     "v": "grandchild"
+    },
+    {
+     "t": "s",
+     "v": "r"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 43625
+    },
+    {
+     "t": "s",
+     "v": "keyless"
+    },
+    {
+     "t": "s",
+     "v": "v"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT a.attnum, a.attname, format_type(a.atttypid, a.atttypmod), tt.typname, tt.typtype::text, tt.typcategory::text, a.attnotnull, COALESCE(pg_get_expr(d.adbin, d.adrelid), ''), a.attidentity::text, a.attgenerated::text, COALESCE(col_description(a.attrelid, a.attnum), ''), (a.attcollation \u003c\u003e 0 AND a.attcollation \u003c\u003e tt.typcollation) FROM pg_attribute a JOIN pg_type tt ON tt.oid = a.atttypid LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum WHERE a.attrelid = $1 AND a.attnum \u003e 0 AND NOT a.attisdropped ORDER BY a.attnum",
+  "cols": [
+   "attnum",
+   "attname",
+   "format_type",
+   "typname",
+   "typtype",
+   "typcategory",
+   "attnotnull",
+   "coalesce",
+   "attidentity",
+   "attgenerated",
+   "coalesce",
+   "?column?"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "bigint"
+    },
+    {
+     "t": "s",
+     "v": "int8"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "nextval('shared_seq'::regclass)"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\",\"identity\":\"autoincrement\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "s",
+     "v": "name"
+    },
+    {
+     "t": "s",
+     "v": "character varying(20)"
+    },
+    {
+     "t": "s",
+     "v": "varchar"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "S"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"VARCHAR(20)\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 3
+    },
+    {
+     "t": "s",
+     "v": "code"
+    },
+    {
+     "t": "s",
+     "v": "character varying(3)"
+    },
+    {
+     "t": "s",
+     "v": "varchar"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "S"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": "'ABC'::character varying"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"CHAR(3)\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 4
+    },
+    {
+     "t": "s",
+     "v": "born"
+    },
+    {
+     "t": "s",
+     "v": "date"
+    },
+    {
+     "t": "s",
+     "v": "date"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "D"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"DATE\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 5
+    },
+    {
+     "t": "s",
+     "v": "seen"
+    },
+    {
+     "t": "s",
+     "v": "timestamp without time zone"
+    },
+    {
+     "t": "s",
+     "v": "timestamp"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "D"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"DATETIME\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 6
+    },
+    {
+     "t": "s",
+     "v": "odd"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "S"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"DATETIME\",\"widened\":\"text\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 7
+    },
+    {
+     "t": "s",
+     "v": "price"
+    },
+    {
+     "t": "s",
+     "v": "numeric(10,2)"
+    },
+    {
+     "t": "s",
+     "v": "numeric"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "0"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"DECIMAL(10,2)\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 8
+    },
+    {
+     "t": "s",
+     "v": "exact"
+    },
+    {
+     "t": "s",
+     "v": "numeric(10,2)"
+    },
+    {
+     "t": "s",
+     "v": "numeric"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"DECIMAL_TEXT(10,2)\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 9
+    },
+    {
+     "t": "s",
+     "v": "ok"
+    },
+    {
+     "t": "s",
+     "v": "boolean"
+    },
+    {
+     "t": "s",
+     "v": "bool"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "B"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": "true"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"BOOLEAN\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 10
+    },
+    {
+     "t": "s",
+     "v": "photo"
+    },
+    {
+     "t": "s",
+     "v": "bytea"
+    },
+    {
+     "t": "s",
+     "v": "bytea"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "U"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"BLOB\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 11
+    },
+    {
+     "t": "s",
+     "v": "small"
+    },
+    {
+     "t": "s",
+     "v": "smallint"
+    },
+    {
+     "t": "s",
+     "v": "int2"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"INT2\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 12
+    },
+    {
+     "t": "s",
+     "v": "ratio"
+    },
+    {
+     "t": "s",
+     "v": "double precision"
+    },
+    {
+     "t": "s",
+     "v": "float8"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"REAL\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 13
+    },
+    {
+     "t": "s",
+     "v": "note"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "S"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"TEXT\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 14
+    },
+    {
+     "t": "s",
+     "v": "loose"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "S"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"\",\"widened\":\"text\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 15
+    },
+    {
+     "t": "s",
+     "v": "doc"
+    },
+    {
+     "t": "s",
+     "v": "json"
+    },
+    {
+     "t": "s",
+     "v": "json"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "U"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"JSON_TEXT\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 16
+    },
+    {
+     "t": "s",
+     "v": "created"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "S"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "to_char((CURRENT_TIMESTAMP AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"TEXT\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 17
+    },
+    {
+     "t": "s",
+     "v": "expr"
+    },
+    {
+     "t": "s",
+     "v": "bigint"
+    },
+    {
+     "t": "s",
+     "v": "int8"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT sn.nspname, s.relname FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S' JOIN pg_namespace sn ON sn.oid = s.relnamespace WHERE d.refobjid = $1 AND d.refobjsubid = $2 AND d.deptype IN ('a','i') LIMIT 1",
+  "cols": [
+   "nspname",
+   "relname"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.conname, c.contype::text, (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n), COALESCE(rn.nspname, ''), COALESCE(rc.relname, ''), (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.confkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.n), c.confupdtype::text, c.confdeltype::text, c.condeferrable, c.condeferred, c.convalidated, pg_get_constraintdef(c.oid), c.confmatchtype::text FROM pg_constraint c LEFT JOIN pg_class rc ON rc.oid = c.confrelid LEFT JOIN pg_namespace rn ON rn.oid = rc.relnamespace WHERE c.conrelid = $1 ORDER BY c.conname",
+  "cols": [
+   "conname",
+   "contype",
+   "string_agg",
+   "coalesce",
+   "coalesce",
+   "string_agg",
+   "confupdtype",
+   "confdeltype",
+   "condeferrable",
+   "condeferred",
+   "convalidated",
+   "pg_get_constraintdef",
+   "confmatchtype"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "Parent_code_check"
+    },
+    {
+     "t": "s",
+     "v": "c"
+    },
+    {
+     "t": "s",
+     "v": "code"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "n"
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "CHECK (((code)::text ~ '^[A-Z][A-Z][A-Z]$'::text))"
+    },
+    {
+     "t": "s",
+     "v": " "
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "Parent_name_code_key"
+    },
+    {
+     "t": "s",
+     "v": "u"
+    },
+    {
+     "t": "s",
+     "v": "name\u001fcode"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "n"
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "UNIQUE (name, code)"
+    },
+    {
+     "t": "s",
+     "v": " "
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "Parent_pkey"
+    },
+    {
+     "t": "s",
+     "v": "p"
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "n"
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "PRIMARY KEY (id)"
+    },
+    {
+     "t": "s",
+     "v": " "
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "chk_price"
+    },
+    {
+     "t": "s",
+     "v": "c"
+    },
+    {
+     "t": "s",
+     "v": "price"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "n"
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "CHECK ((price \u003e= (0)::numeric))"
+    },
+    {
+     "t": "s",
+     "v": " "
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT ic.relname, i.indisunique, am.amname, i.indpred IS NOT NULL, COALESCE(pg_get_expr(i.indpred, i.indrelid), ''), i.indnkeyatts, i.indnatts, (SELECT string_agg(CASE WHEN k.n = 0 THEN '' ELSE a.attname END, E'\\037' ORDER BY k.ord) FROM unnest(i.indkey::int2[]) WITH ORDINALITY k(n, ord) LEFT JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.n), array_to_string(i.indoption::int2[], ','), i.indexprs IS NOT NULL, EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conindid = i.indexrelid AND c.contype IN ('p','u','x')) FROM pg_index i JOIN pg_class ic ON ic.oid = i.indexrelid JOIN pg_am am ON am.oid = ic.relam WHERE i.indrelid = $1 ORDER BY ic.relname",
+  "cols": [
+   "relname",
+   "indisunique",
+   "amname",
+   "?column?",
+   "coalesce",
+   "indnkeyatts",
+   "indnatts",
+   "string_agg",
+   "array_to_string",
+   "?column?",
+   "exists"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "Parent_name_code_key"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "btree"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "s",
+     "v": "name\u001fcode"
+    },
+    {
+     "t": "s",
+     "v": "0,0"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "Parent_pkey"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "btree"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "0"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "parent_born"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": "btree"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "s",
+     "v": "born\u001fname"
+    },
+    {
+     "t": "s",
+     "v": "3,0"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "parent_loose"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "btree"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "(note IS NOT NULL)"
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "note"
+    },
+    {
+     "t": "s",
+     "v": "0"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT tgname FROM pg_trigger WHERE tgrelid = $1 AND NOT tgisinternal",
+  "cols": [
+   "tgname"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT count(*) FROM \"public\".\"Parent\"",
+  "cols": [
+   "count"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 2
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT a.attnum, a.attname, format_type(a.atttypid, a.atttypmod), tt.typname, tt.typtype::text, tt.typcategory::text, a.attnotnull, COALESCE(pg_get_expr(d.adbin, d.adrelid), ''), a.attidentity::text, a.attgenerated::text, COALESCE(col_description(a.attrelid, a.attnum), ''), (a.attcollation \u003c\u003e 0 AND a.attcollation \u003c\u003e tt.typcollation) FROM pg_attribute a JOIN pg_type tt ON tt.oid = a.atttypid LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum WHERE a.attrelid = $1 AND a.attnum \u003e 0 AND NOT a.attisdropped ORDER BY a.attnum",
+  "cols": [
+   "attnum",
+   "attname",
+   "format_type",
+   "typname",
+   "typtype",
+   "typcategory",
+   "attnotnull",
+   "coalesce",
+   "attidentity",
+   "attgenerated",
+   "coalesce",
+   "?column?"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "parent_id"
+    },
+    {
+     "t": "s",
+     "v": "bigint"
+    },
+    {
+     "t": "s",
+     "v": "int8"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "s",
+     "v": "seq"
+    },
+    {
+     "t": "s",
+     "v": "bigint"
+    },
+    {
+     "t": "s",
+     "v": "int8"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 4
+    },
+    {
+     "t": "s",
+     "v": "label"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "S"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 5
+    },
+    {
+     "t": "s",
+     "v": "extra"
+    },
+    {
+     "t": "s",
+     "v": "integer"
+    },
+    {
+     "t": "s",
+     "v": "int4"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": "1"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.conname, c.contype::text, (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n), COALESCE(rn.nspname, ''), COALESCE(rc.relname, ''), (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.confkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.n), c.confupdtype::text, c.confdeltype::text, c.condeferrable, c.condeferred, c.convalidated, pg_get_constraintdef(c.oid), c.confmatchtype::text FROM pg_constraint c LEFT JOIN pg_class rc ON rc.oid = c.confrelid LEFT JOIN pg_namespace rn ON rn.oid = rc.relnamespace WHERE c.conrelid = $1 ORDER BY c.conname",
+  "cols": [
+   "conname",
+   "contype",
+   "string_agg",
+   "coalesce",
+   "coalesce",
+   "string_agg",
+   "confupdtype",
+   "confdeltype",
+   "condeferrable",
+   "condeferred",
+   "convalidated",
+   "pg_get_constraintdef",
+   "confmatchtype"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "child_pkey"
+    },
+    {
+     "t": "s",
+     "v": "p"
+    },
+    {
+     "t": "s",
+     "v": "parent_id\u001fseq"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "n"
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "PRIMARY KEY (parent_id, seq)"
+    },
+    {
+     "t": "s",
+     "v": " "
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "fk_parent"
+    },
+    {
+     "t": "s",
+     "v": "f"
+    },
+    {
+     "t": "s",
+     "v": "parent_id"
+    },
+    {
+     "t": "s",
+     "v": "public"
+    },
+    {
+     "t": "s",
+     "v": "Parent"
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "a"
+    },
+    {
+     "t": "s",
+     "v": "c"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "FOREIGN KEY (parent_id) REFERENCES \"Parent\"(id) ON DELETE CASCADE"
+    },
+    {
+     "t": "s",
+     "v": "s"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT ic.relname, i.indisunique, am.amname, i.indpred IS NOT NULL, COALESCE(pg_get_expr(i.indpred, i.indrelid), ''), i.indnkeyatts, i.indnatts, (SELECT string_agg(CASE WHEN k.n = 0 THEN '' ELSE a.attname END, E'\\037' ORDER BY k.ord) FROM unnest(i.indkey::int2[]) WITH ORDINALITY k(n, ord) LEFT JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.n), array_to_string(i.indoption::int2[], ','), i.indexprs IS NOT NULL, EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conindid = i.indexrelid AND c.contype IN ('p','u','x')) FROM pg_index i JOIN pg_class ic ON ic.oid = i.indexrelid JOIN pg_am am ON am.oid = ic.relam WHERE i.indrelid = $1 ORDER BY ic.relname",
+  "cols": [
+   "relname",
+   "indisunique",
+   "amname",
+   "?column?",
+   "coalesce",
+   "indnkeyatts",
+   "indnatts",
+   "string_agg",
+   "array_to_string",
+   "?column?",
+   "exists"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "child_pkey"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "btree"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "s",
+     "v": "parent_id\u001fseq"
+    },
+    {
+     "t": "s",
+     "v": "0,0"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT tgname FROM pg_trigger WHERE tgrelid = $1 AND NOT tgisinternal",
+  "cols": [
+   "tgname"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT count(*) FROM \"public\".\"child\"",
+  "cols": [
+   "count"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 3
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT a.attnum, a.attname, format_type(a.atttypid, a.atttypmod), tt.typname, tt.typtype::text, tt.typcategory::text, a.attnotnull, COALESCE(pg_get_expr(d.adbin, d.adrelid), ''), a.attidentity::text, a.attgenerated::text, COALESCE(col_description(a.attrelid, a.attnum), ''), (a.attcollation \u003c\u003e 0 AND a.attcollation \u003c\u003e tt.typcollation) FROM pg_attribute a JOIN pg_type tt ON tt.oid = a.atttypid LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum WHERE a.attrelid = $1 AND a.attnum \u003e 0 AND NOT a.attisdropped ORDER BY a.attnum",
+  "cols": [
+   "attnum",
+   "attname",
+   "format_type",
+   "typname",
+   "typtype",
+   "typcategory",
+   "attnotnull",
+   "coalesce",
+   "attidentity",
+   "attgenerated",
+   "coalesce",
+   "?column?"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "bigint"
+    },
+    {
+     "t": "s",
+     "v": "int8"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "d"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\",\"identity\":\"autoincrement\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT sn.nspname, s.relname FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S' JOIN pg_namespace sn ON sn.oid = s.relnamespace WHERE d.refobjid = $1 AND d.refobjsubid = $2 AND d.deptype IN ('a','i') LIMIT 1",
+  "cols": [
+   "nspname",
+   "relname"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "public"
+    },
+    {
+     "t": "s",
+     "v": "emptyauto_id_seq"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM \"public\".\"emptyauto_id_seq\"",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT seqstart, seqincrement FROM pg_sequence s JOIN pg_class c ON c.oid = s.seqrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = $2",
+  "cols": [
+   "seqstart",
+   "seqincrement"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.conname, c.contype::text, (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n), COALESCE(rn.nspname, ''), COALESCE(rc.relname, ''), (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.confkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.n), c.confupdtype::text, c.confdeltype::text, c.condeferrable, c.condeferred, c.convalidated, pg_get_constraintdef(c.oid), c.confmatchtype::text FROM pg_constraint c LEFT JOIN pg_class rc ON rc.oid = c.confrelid LEFT JOIN pg_namespace rn ON rn.oid = rc.relnamespace WHERE c.conrelid = $1 ORDER BY c.conname",
+  "cols": [
+   "conname",
+   "contype",
+   "string_agg",
+   "coalesce",
+   "coalesce",
+   "string_agg",
+   "confupdtype",
+   "confdeltype",
+   "condeferrable",
+   "condeferred",
+   "convalidated",
+   "pg_get_constraintdef",
+   "confmatchtype"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "emptyauto_pkey"
+    },
+    {
+     "t": "s",
+     "v": "p"
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "n"
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "PRIMARY KEY (id)"
+    },
+    {
+     "t": "s",
+     "v": " "
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT ic.relname, i.indisunique, am.amname, i.indpred IS NOT NULL, COALESCE(pg_get_expr(i.indpred, i.indrelid), ''), i.indnkeyatts, i.indnatts, (SELECT string_agg(CASE WHEN k.n = 0 THEN '' ELSE a.attname END, E'\\037' ORDER BY k.ord) FROM unnest(i.indkey::int2[]) WITH ORDINALITY k(n, ord) LEFT JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.n), array_to_string(i.indoption::int2[], ','), i.indexprs IS NOT NULL, EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conindid = i.indexrelid AND c.contype IN ('p','u','x')) FROM pg_index i JOIN pg_class ic ON ic.oid = i.indexrelid JOIN pg_am am ON am.oid = ic.relam WHERE i.indrelid = $1 ORDER BY ic.relname",
+  "cols": [
+   "relname",
+   "indisunique",
+   "amname",
+   "?column?",
+   "coalesce",
+   "indnkeyatts",
+   "indnatts",
+   "string_agg",
+   "array_to_string",
+   "?column?",
+   "exists"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "emptyauto_pkey"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "btree"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "0"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT tgname FROM pg_trigger WHERE tgrelid = $1 AND NOT tgisinternal",
+  "cols": [
+   "tgname"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT count(*) FROM \"public\".\"emptyauto\"",
+  "cols": [
+   "count"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 0
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT a.attnum, a.attname, format_type(a.atttypid, a.atttypmod), tt.typname, tt.typtype::text, tt.typcategory::text, a.attnotnull, COALESCE(pg_get_expr(d.adbin, d.adrelid), ''), a.attidentity::text, a.attgenerated::text, COALESCE(col_description(a.attrelid, a.attnum), ''), (a.attcollation \u003c\u003e 0 AND a.attcollation \u003c\u003e tt.typcollation) FROM pg_attribute a JOIN pg_type tt ON tt.oid = a.atttypid LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum WHERE a.attrelid = $1 AND a.attnum \u003e 0 AND NOT a.attisdropped ORDER BY a.attnum",
+  "cols": [
+   "attnum",
+   "attname",
+   "format_type",
+   "typname",
+   "typtype",
+   "typcategory",
+   "attnotnull",
+   "coalesce",
+   "attidentity",
+   "attgenerated",
+   "coalesce",
+   "?column?"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "a"
+    },
+    {
+     "t": "s",
+     "v": "bigint"
+    },
+    {
+     "t": "s",
+     "v": "int8"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "bigint"
+    },
+    {
+     "t": "s",
+     "v": "int8"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 3
+    },
+    {
+     "t": "s",
+     "v": "n"
+    },
+    {
+     "t": "s",
+     "v": "bigint"
+    },
+    {
+     "t": "s",
+     "v": "int8"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "d"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\",\"identity\":\"rowid\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT sn.nspname, s.relname FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S' JOIN pg_namespace sn ON sn.oid = s.relnamespace WHERE d.refobjid = $1 AND d.refobjsubid = $2 AND d.deptype IN ('a','i') LIMIT 1",
+  "cols": [
+   "nspname",
+   "relname"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "public"
+    },
+    {
+     "t": "s",
+     "v": "grandchild_n_seq"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM \"public\".\"grandchild_n_seq\"",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 4
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT seqstart, seqincrement FROM pg_sequence s JOIN pg_class c ON c.oid = s.seqrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = $2",
+  "cols": [
+   "seqstart",
+   "seqincrement"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.conname, c.contype::text, (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n), COALESCE(rn.nspname, ''), COALESCE(rc.relname, ''), (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.confkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.n), c.confupdtype::text, c.confdeltype::text, c.condeferrable, c.condeferred, c.convalidated, pg_get_constraintdef(c.oid), c.confmatchtype::text FROM pg_constraint c LEFT JOIN pg_class rc ON rc.oid = c.confrelid LEFT JOIN pg_namespace rn ON rn.oid = rc.relnamespace WHERE c.conrelid = $1 ORDER BY c.conname",
+  "cols": [
+   "conname",
+   "contype",
+   "string_agg",
+   "coalesce",
+   "coalesce",
+   "string_agg",
+   "confupdtype",
+   "confdeltype",
+   "condeferrable",
+   "condeferred",
+   "convalidated",
+   "pg_get_constraintdef",
+   "confmatchtype"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "grandchild_a_b_fkey"
+    },
+    {
+     "t": "s",
+     "v": "f"
+    },
+    {
+     "t": "s",
+     "v": "a\u001fb"
+    },
+    {
+     "t": "s",
+     "v": "public"
+    },
+    {
+     "t": "s",
+     "v": "child"
+    },
+    {
+     "t": "s",
+     "v": "parent_id\u001fseq"
+    },
+    {
+     "t": "s",
+     "v": "c"
+    },
+    {
+     "t": "s",
+     "v": "n"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "FOREIGN KEY (a, b) REFERENCES child(parent_id, seq) ON UPDATE CASCADE ON DELETE SET NULL"
+    },
+    {
+     "t": "s",
+     "v": "s"
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "grandchild_pkey"
+    },
+    {
+     "t": "s",
+     "v": "p"
+    },
+    {
+     "t": "s",
+     "v": "n"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "n"
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "PRIMARY KEY (n)"
+    },
+    {
+     "t": "s",
+     "v": " "
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT ic.relname, i.indisunique, am.amname, i.indpred IS NOT NULL, COALESCE(pg_get_expr(i.indpred, i.indrelid), ''), i.indnkeyatts, i.indnatts, (SELECT string_agg(CASE WHEN k.n = 0 THEN '' ELSE a.attname END, E'\\037' ORDER BY k.ord) FROM unnest(i.indkey::int2[]) WITH ORDINALITY k(n, ord) LEFT JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.n), array_to_string(i.indoption::int2[], ','), i.indexprs IS NOT NULL, EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conindid = i.indexrelid AND c.contype IN ('p','u','x')) FROM pg_index i JOIN pg_class ic ON ic.oid = i.indexrelid JOIN pg_am am ON am.oid = ic.relam WHERE i.indrelid = $1 ORDER BY ic.relname",
+  "cols": [
+   "relname",
+   "indisunique",
+   "amname",
+   "?column?",
+   "coalesce",
+   "indnkeyatts",
+   "indnatts",
+   "string_agg",
+   "array_to_string",
+   "?column?",
+   "exists"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "grandchild_pkey"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "btree"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "n"
+    },
+    {
+     "t": "s",
+     "v": "0"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT tgname FROM pg_trigger WHERE tgrelid = $1 AND NOT tgisinternal",
+  "cols": [
+   "tgname"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT count(*) FROM \"public\".\"grandchild\"",
+  "cols": [
+   "count"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 3
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.conname, rc.relname, pg_get_constraintdef(c.oid), COALESCE(to_jsonb(c)-\u003e\u003e'conenforced', 'true') = 'true', COALESCE(obj_description(c.oid, 'pg_constraint'), ''), (SELECT string_agg(a.attname, ',' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace JOIN pg_class rc ON rc.oid = c.confrelid JOIN pg_namespace rn ON rn.oid = rc.relnamespace WHERE c.contype = 'f' AND n.nspname = $1 AND t.relname = $2 AND rn.nspname = $1 ORDER BY c.conname",
+  "cols": [
+   "conname",
+   "relname",
+   "pg_get_constraintdef",
+   "?column?",
+   "coalesce",
+   "string_agg"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.conname, rc.relname, pg_get_constraintdef(c.oid), COALESCE(to_jsonb(c)-\u003e\u003e'conenforced', 'true') = 'true', COALESCE(obj_description(c.oid, 'pg_constraint'), ''), (SELECT string_agg(a.attname, ',' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace JOIN pg_class rc ON rc.oid = c.confrelid JOIN pg_namespace rn ON rn.oid = rc.relnamespace WHERE c.contype = 'f' AND n.nspname = $1 AND t.relname = $2 AND rn.nspname = $1 ORDER BY c.conname",
+  "cols": [
+   "conname",
+   "relname",
+   "pg_get_constraintdef",
+   "?column?",
+   "coalesce",
+   "string_agg"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "fk_parent"
+    },
+    {
+     "t": "s",
+     "v": "Parent"
+    },
+    {
+     "t": "s",
+     "v": "FOREIGN KEY (parent_id) REFERENCES \"Parent\"(id) ON DELETE CASCADE"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "the key that matters"
+    },
+    {
+     "t": "s",
+     "v": "parent_id"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.conname, rc.relname, pg_get_constraintdef(c.oid), COALESCE(to_jsonb(c)-\u003e\u003e'conenforced', 'true') = 'true', COALESCE(obj_description(c.oid, 'pg_constraint'), ''), (SELECT string_agg(a.attname, ',' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace JOIN pg_class rc ON rc.oid = c.confrelid JOIN pg_namespace rn ON rn.oid = rc.relnamespace WHERE c.contype = 'f' AND n.nspname = $1 AND t.relname = $2 AND rn.nspname = $1 ORDER BY c.conname",
+  "cols": [
+   "conname",
+   "relname",
+   "pg_get_constraintdef",
+   "?column?",
+   "coalesce",
+   "string_agg"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "grandchild_a_b_fkey"
+    },
+    {
+     "t": "s",
+     "v": "child"
+    },
+    {
+     "t": "s",
+     "v": "FOREIGN KEY (a, b) REFERENCES child(parent_id, seq) ON UPDATE CASCADE ON DELETE SET NULL"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "a,b"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "exec",
+  "sql": "ALTER TABLE \"public\".\"child\" DROP CONSTRAINT \"fk_parent\""
+ },
+ {
+  "kind": "exec",
+  "sql": "ALTER TABLE \"public\".\"grandchild\" DROP CONSTRAINT \"grandchild_a_b_fkey\""
+ },
+ {
+  "kind": "exec",
+  "sql": "TRUNCATE \"public\".\"Parent\", \"public\".\"child\", \"public\".\"grandchild\" RESTART IDENTITY"
+ },
+ {
+  "kind": "exec",
+  "sql": "INSERT INTO \"public\".\"Parent\" (\"id\", \"name\", \"code\", \"born\", \"seen\", \"odd\", \"price\", \"exact\", \"ok\", \"photo\", \"small\", \"ratio\", \"note\", \"loose\", \"doc\", \"created\", \"expr\") VALUES ($1, $2, $3, $4::text::date, $5::text::timestamp without time zone, $6, $7::text::numeric(10,2), $8::text::numeric(10,2), $9, $10, $11, $12, $13, $14, $15::text::json, $16, $17), ($18, $19, $20, $21::text::date, $22::text::timestamp without time zone, $23, $24::text::numeric(10,2), $25::text::numeric(10,2), $26, $27, $28, $29, $30, $31, $32::text::json, $33, $34)",
+  "affected": 2
+ },
+ {
+  "kind": "exec",
+  "sql": "INSERT INTO \"public\".\"child\" (\"parent_id\", \"seq\", \"label\") VALUES ($1, $2, $3), ($4, $5, $6), ($7, $8, $9)",
+  "affected": 3
+ },
+ {
+  "kind": "exec",
+  "sql": "INSERT INTO \"public\".\"grandchild\" (\"a\", \"b\", \"n\") VALUES ($1, $2, $3), ($4, $5, $6), ($7, $8, $9)",
+  "affected": 3
+ },
+ {
+  "kind": "exec",
+  "sql": "SAVEPOINT dt_try"
+ },
+ {
+  "kind": "exec",
+  "sql": "ALTER TABLE \"public\".\"child\" ADD CONSTRAINT \"fk_parent\" FOREIGN KEY (parent_id) REFERENCES \"Parent\"(id) ON DELETE CASCADE"
+ },
+ {
+  "kind": "exec",
+  "sql": "RELEASE SAVEPOINT dt_try"
+ },
+ {
+  "kind": "exec",
+  "sql": "COMMENT ON CONSTRAINT \"fk_parent\" ON \"public\".\"child\" IS 'the key that matters'"
+ },
+ {
+  "kind": "exec",
+  "sql": "SAVEPOINT dt_try"
+ },
+ {
+  "kind": "exec",
+  "sql": "ALTER TABLE \"public\".\"grandchild\" ADD CONSTRAINT \"grandchild_a_b_fkey\" FOREIGN KEY (a, b) REFERENCES child(parent_id, seq) ON UPDATE CASCADE ON DELETE SET NULL"
+ },
+ {
+  "kind": "exec",
+  "sql": "RELEASE SAVEPOINT dt_try"
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT count(*) FROM \"public\".\"Parent\"",
+  "cols": [
+   "count"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 2
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT count(*) FROM \"public\".\"child\"",
+  "cols": [
+   "count"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 3
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT count(*) FROM \"public\".\"grandchild\"",
+  "cols": [
+   "count"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 3
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT max(\"id\") FROM \"public\".\"Parent\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 2
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT CASE (SELECT count(*) FROM s) WHEN 0 THEN pg_get_serial_sequence($1, $2) WHEN 1 THEN (SELECT min(name) FROM s) END",
+  "cols": [
+   "case"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "shared_seq"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT seqrelid::regclass::text, seqincrement, seqmax FROM pg_sequence WHERE seqrelid = $1::text::regclass",
+  "cols": [
+   "seqrelid",
+   "seqincrement",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "shared_seq"
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 9223372036854775807
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM shared_seq",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 50
+    },
+    {
+     "t": "b",
+     "v": true
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
+  "affected": 1
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT max(\"n\") FROM \"public\".\"grandchild\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 3
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT CASE (SELECT count(*) FROM s) WHEN 0 THEN pg_get_serial_sequence($1, $2) WHEN 1 THEN (SELECT min(name) FROM s) END",
+  "cols": [
+   "case"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "public.grandchild_n_seq"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT seqrelid::regclass::text, seqincrement, seqmax FROM pg_sequence WHERE seqrelid = $1::text::regclass",
+  "cols": [
+   "seqrelid",
+   "seqincrement",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "grandchild_n_seq"
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 9223372036854775807
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM grandchild_n_seq",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
+  "affected": 1
+ },
+ {
+  "kind": "commit"
+ },
+ {
+  "kind": "exec",
+  "sql": "ALTER TABLE \"public\".\"Parent\" ALTER COLUMN id SET DEFAULT nextval('shared_seq')"
+ },
+ {
+  "kind": "exec",
+  "sql": "ALTER SEQUENCE \"public\".shared_seq RESTART 1 MAXVALUE 5"
+ },
+ {
+  "kind": "begin"
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT set_config('datestyle', 'ISO, MDY', true), set_config('intervalstyle', 'postgres', true), set_config('extra_float_digits', '3', true), set_config('timezone', 'UTC', true), set_config('statement_timeout', '0', true), set_config('idle_in_transaction_session_timeout', '0', true), set_config('standard_conforming_strings', 'on', true), set_config('escape_string_warning', 'off', true)",
+  "affected": 1
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relkind IN ('r','p','v','m','f') AND c.relname = ANY($2) ORDER BY 1",
+  "cols": [
+   "relname"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "Parent"
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "child"
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "grandchild"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.oid::bigint, c.relname, c.relkind::text, c.relispartition, c.relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relkind IN ('r','p','v','m','f') ORDER BY c.relname",
+  "cols": [
+   "oid",
+   "relname",
+   "relkind",
+   "relispartition",
+   "relrowsecurity"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 43458
+    },
+    {
+     "t": "s",
+     "v": "Parent"
+    },
+    {
+     "t": "s",
+     "v": "r"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 43471
+    },
+    {
+     "t": "s",
+     "v": "child"
+    },
+    {
+     "t": "s",
+     "v": "r"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 43490
+    },
+    {
+     "t": "s",
+     "v": "emptyauto"
+    },
+    {
+     "t": "s",
+     "v": "r"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 43479
+    },
+    {
+     "t": "s",
+     "v": "grandchild"
+    },
+    {
+     "t": "s",
+     "v": "r"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 43625
+    },
+    {
+     "t": "s",
+     "v": "keyless"
+    },
+    {
+     "t": "s",
+     "v": "v"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT a.attnum, a.attname, format_type(a.atttypid, a.atttypmod), tt.typname, tt.typtype::text, tt.typcategory::text, a.attnotnull, COALESCE(pg_get_expr(d.adbin, d.adrelid), ''), a.attidentity::text, a.attgenerated::text, COALESCE(col_description(a.attrelid, a.attnum), ''), (a.attcollation \u003c\u003e 0 AND a.attcollation \u003c\u003e tt.typcollation) FROM pg_attribute a JOIN pg_type tt ON tt.oid = a.atttypid LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum WHERE a.attrelid = $1 AND a.attnum \u003e 0 AND NOT a.attisdropped ORDER BY a.attnum",
+  "cols": [
+   "attnum",
+   "attname",
+   "format_type",
+   "typname",
+   "typtype",
+   "typcategory",
+   "attnotnull",
+   "coalesce",
+   "attidentity",
+   "attgenerated",
+   "coalesce",
+   "?column?"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "bigint"
+    },
+    {
+     "t": "s",
+     "v": "int8"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "nextval('shared_seq'::regclass)"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\",\"identity\":\"autoincrement\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "s",
+     "v": "name"
+    },
+    {
+     "t": "s",
+     "v": "character varying(20)"
+    },
+    {
+     "t": "s",
+     "v": "varchar"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "S"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"VARCHAR(20)\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 3
+    },
+    {
+     "t": "s",
+     "v": "code"
+    },
+    {
+     "t": "s",
+     "v": "character varying(3)"
+    },
+    {
+     "t": "s",
+     "v": "varchar"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "S"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": "'ABC'::character varying"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"CHAR(3)\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 4
+    },
+    {
+     "t": "s",
+     "v": "born"
+    },
+    {
+     "t": "s",
+     "v": "date"
+    },
+    {
+     "t": "s",
+     "v": "date"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "D"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"DATE\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 5
+    },
+    {
+     "t": "s",
+     "v": "seen"
+    },
+    {
+     "t": "s",
+     "v": "timestamp without time zone"
+    },
+    {
+     "t": "s",
+     "v": "timestamp"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "D"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"DATETIME\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 6
+    },
+    {
+     "t": "s",
+     "v": "odd"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "S"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"DATETIME\",\"widened\":\"text\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 7
+    },
+    {
+     "t": "s",
+     "v": "price"
+    },
+    {
+     "t": "s",
+     "v": "numeric(10,2)"
+    },
+    {
+     "t": "s",
+     "v": "numeric"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "0"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"DECIMAL(10,2)\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 8
+    },
+    {
+     "t": "s",
+     "v": "exact"
+    },
+    {
+     "t": "s",
+     "v": "numeric(10,2)"
+    },
+    {
+     "t": "s",
+     "v": "numeric"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"DECIMAL_TEXT(10,2)\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 9
+    },
+    {
+     "t": "s",
+     "v": "ok"
+    },
+    {
+     "t": "s",
+     "v": "boolean"
+    },
+    {
+     "t": "s",
+     "v": "bool"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "B"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": "true"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"BOOLEAN\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 10
+    },
+    {
+     "t": "s",
+     "v": "photo"
+    },
+    {
+     "t": "s",
+     "v": "bytea"
+    },
+    {
+     "t": "s",
+     "v": "bytea"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "U"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"BLOB\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 11
+    },
+    {
+     "t": "s",
+     "v": "small"
+    },
+    {
+     "t": "s",
+     "v": "smallint"
+    },
+    {
+     "t": "s",
+     "v": "int2"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"INT2\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 12
+    },
+    {
+     "t": "s",
+     "v": "ratio"
+    },
+    {
+     "t": "s",
+     "v": "double precision"
+    },
+    {
+     "t": "s",
+     "v": "float8"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"REAL\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 13
+    },
+    {
+     "t": "s",
+     "v": "note"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "S"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"TEXT\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 14
+    },
+    {
+     "t": "s",
+     "v": "loose"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "S"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"\",\"widened\":\"text\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 15
+    },
+    {
+     "t": "s",
+     "v": "doc"
+    },
+    {
+     "t": "s",
+     "v": "json"
+    },
+    {
+     "t": "s",
+     "v": "json"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "U"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"JSON_TEXT\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 16
+    },
+    {
+     "t": "s",
+     "v": "created"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "S"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "to_char((CURRENT_TIMESTAMP AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"TEXT\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 17
+    },
+    {
+     "t": "s",
+     "v": "expr"
+    },
+    {
+     "t": "s",
+     "v": "bigint"
+    },
+    {
+     "t": "s",
+     "v": "int8"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT sn.nspname, s.relname FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S' JOIN pg_namespace sn ON sn.oid = s.relnamespace WHERE d.refobjid = $1 AND d.refobjsubid = $2 AND d.deptype IN ('a','i') LIMIT 1",
+  "cols": [
+   "nspname",
+   "relname"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.conname, c.contype::text, (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n), COALESCE(rn.nspname, ''), COALESCE(rc.relname, ''), (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.confkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.n), c.confupdtype::text, c.confdeltype::text, c.condeferrable, c.condeferred, c.convalidated, pg_get_constraintdef(c.oid), c.confmatchtype::text FROM pg_constraint c LEFT JOIN pg_class rc ON rc.oid = c.confrelid LEFT JOIN pg_namespace rn ON rn.oid = rc.relnamespace WHERE c.conrelid = $1 ORDER BY c.conname",
+  "cols": [
+   "conname",
+   "contype",
+   "string_agg",
+   "coalesce",
+   "coalesce",
+   "string_agg",
+   "confupdtype",
+   "confdeltype",
+   "condeferrable",
+   "condeferred",
+   "convalidated",
+   "pg_get_constraintdef",
+   "confmatchtype"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "Parent_code_check"
+    },
+    {
+     "t": "s",
+     "v": "c"
+    },
+    {
+     "t": "s",
+     "v": "code"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "n"
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "CHECK (((code)::text ~ '^[A-Z][A-Z][A-Z]$'::text))"
+    },
+    {
+     "t": "s",
+     "v": " "
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "Parent_name_code_key"
+    },
+    {
+     "t": "s",
+     "v": "u"
+    },
+    {
+     "t": "s",
+     "v": "name\u001fcode"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "n"
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "UNIQUE (name, code)"
+    },
+    {
+     "t": "s",
+     "v": " "
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "Parent_pkey"
+    },
+    {
+     "t": "s",
+     "v": "p"
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "n"
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "PRIMARY KEY (id)"
+    },
+    {
+     "t": "s",
+     "v": " "
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "chk_price"
+    },
+    {
+     "t": "s",
+     "v": "c"
+    },
+    {
+     "t": "s",
+     "v": "price"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "n"
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "CHECK ((price \u003e= (0)::numeric))"
+    },
+    {
+     "t": "s",
+     "v": " "
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT ic.relname, i.indisunique, am.amname, i.indpred IS NOT NULL, COALESCE(pg_get_expr(i.indpred, i.indrelid), ''), i.indnkeyatts, i.indnatts, (SELECT string_agg(CASE WHEN k.n = 0 THEN '' ELSE a.attname END, E'\\037' ORDER BY k.ord) FROM unnest(i.indkey::int2[]) WITH ORDINALITY k(n, ord) LEFT JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.n), array_to_string(i.indoption::int2[], ','), i.indexprs IS NOT NULL, EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conindid = i.indexrelid AND c.contype IN ('p','u','x')) FROM pg_index i JOIN pg_class ic ON ic.oid = i.indexrelid JOIN pg_am am ON am.oid = ic.relam WHERE i.indrelid = $1 ORDER BY ic.relname",
+  "cols": [
+   "relname",
+   "indisunique",
+   "amname",
+   "?column?",
+   "coalesce",
+   "indnkeyatts",
+   "indnatts",
+   "string_agg",
+   "array_to_string",
+   "?column?",
+   "exists"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "Parent_name_code_key"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "btree"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "s",
+     "v": "name\u001fcode"
+    },
+    {
+     "t": "s",
+     "v": "0,0"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "Parent_pkey"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "btree"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "0"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "parent_born"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": "btree"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "s",
+     "v": "born\u001fname"
+    },
+    {
+     "t": "s",
+     "v": "3,0"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "parent_loose"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "btree"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "(note IS NOT NULL)"
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "note"
+    },
+    {
+     "t": "s",
+     "v": "0"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT tgname FROM pg_trigger WHERE tgrelid = $1 AND NOT tgisinternal",
+  "cols": [
+   "tgname"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT count(*) FROM \"public\".\"Parent\"",
+  "cols": [
+   "count"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 2
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT a.attnum, a.attname, format_type(a.atttypid, a.atttypmod), tt.typname, tt.typtype::text, tt.typcategory::text, a.attnotnull, COALESCE(pg_get_expr(d.adbin, d.adrelid), ''), a.attidentity::text, a.attgenerated::text, COALESCE(col_description(a.attrelid, a.attnum), ''), (a.attcollation \u003c\u003e 0 AND a.attcollation \u003c\u003e tt.typcollation) FROM pg_attribute a JOIN pg_type tt ON tt.oid = a.atttypid LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum WHERE a.attrelid = $1 AND a.attnum \u003e 0 AND NOT a.attisdropped ORDER BY a.attnum",
+  "cols": [
+   "attnum",
+   "attname",
+   "format_type",
+   "typname",
+   "typtype",
+   "typcategory",
+   "attnotnull",
+   "coalesce",
+   "attidentity",
+   "attgenerated",
+   "coalesce",
+   "?column?"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "parent_id"
+    },
+    {
+     "t": "s",
+     "v": "bigint"
+    },
+    {
+     "t": "s",
+     "v": "int8"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "s",
+     "v": "seq"
+    },
+    {
+     "t": "s",
+     "v": "bigint"
+    },
+    {
+     "t": "s",
+     "v": "int8"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 4
+    },
+    {
+     "t": "s",
+     "v": "label"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "S"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 5
+    },
+    {
+     "t": "s",
+     "v": "extra"
+    },
+    {
+     "t": "s",
+     "v": "integer"
+    },
+    {
+     "t": "s",
+     "v": "int4"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": "1"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.conname, c.contype::text, (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n), COALESCE(rn.nspname, ''), COALESCE(rc.relname, ''), (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.confkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.n), c.confupdtype::text, c.confdeltype::text, c.condeferrable, c.condeferred, c.convalidated, pg_get_constraintdef(c.oid), c.confmatchtype::text FROM pg_constraint c LEFT JOIN pg_class rc ON rc.oid = c.confrelid LEFT JOIN pg_namespace rn ON rn.oid = rc.relnamespace WHERE c.conrelid = $1 ORDER BY c.conname",
+  "cols": [
+   "conname",
+   "contype",
+   "string_agg",
+   "coalesce",
+   "coalesce",
+   "string_agg",
+   "confupdtype",
+   "confdeltype",
+   "condeferrable",
+   "condeferred",
+   "convalidated",
+   "pg_get_constraintdef",
+   "confmatchtype"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "child_pkey"
+    },
+    {
+     "t": "s",
+     "v": "p"
+    },
+    {
+     "t": "s",
+     "v": "parent_id\u001fseq"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "n"
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "PRIMARY KEY (parent_id, seq)"
+    },
+    {
+     "t": "s",
+     "v": " "
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "fk_parent"
+    },
+    {
+     "t": "s",
+     "v": "f"
+    },
+    {
+     "t": "s",
+     "v": "parent_id"
+    },
+    {
+     "t": "s",
+     "v": "public"
+    },
+    {
+     "t": "s",
+     "v": "Parent"
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "a"
+    },
+    {
+     "t": "s",
+     "v": "c"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "FOREIGN KEY (parent_id) REFERENCES \"Parent\"(id) ON DELETE CASCADE"
+    },
+    {
+     "t": "s",
+     "v": "s"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT ic.relname, i.indisunique, am.amname, i.indpred IS NOT NULL, COALESCE(pg_get_expr(i.indpred, i.indrelid), ''), i.indnkeyatts, i.indnatts, (SELECT string_agg(CASE WHEN k.n = 0 THEN '' ELSE a.attname END, E'\\037' ORDER BY k.ord) FROM unnest(i.indkey::int2[]) WITH ORDINALITY k(n, ord) LEFT JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.n), array_to_string(i.indoption::int2[], ','), i.indexprs IS NOT NULL, EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conindid = i.indexrelid AND c.contype IN ('p','u','x')) FROM pg_index i JOIN pg_class ic ON ic.oid = i.indexrelid JOIN pg_am am ON am.oid = ic.relam WHERE i.indrelid = $1 ORDER BY ic.relname",
+  "cols": [
+   "relname",
+   "indisunique",
+   "amname",
+   "?column?",
+   "coalesce",
+   "indnkeyatts",
+   "indnatts",
+   "string_agg",
+   "array_to_string",
+   "?column?",
+   "exists"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "child_pkey"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "btree"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "s",
+     "v": "parent_id\u001fseq"
+    },
+    {
+     "t": "s",
+     "v": "0,0"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT tgname FROM pg_trigger WHERE tgrelid = $1 AND NOT tgisinternal",
+  "cols": [
+   "tgname"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT count(*) FROM \"public\".\"child\"",
+  "cols": [
+   "count"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 3
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT a.attnum, a.attname, format_type(a.atttypid, a.atttypmod), tt.typname, tt.typtype::text, tt.typcategory::text, a.attnotnull, COALESCE(pg_get_expr(d.adbin, d.adrelid), ''), a.attidentity::text, a.attgenerated::text, COALESCE(col_description(a.attrelid, a.attnum), ''), (a.attcollation \u003c\u003e 0 AND a.attcollation \u003c\u003e tt.typcollation) FROM pg_attribute a JOIN pg_type tt ON tt.oid = a.atttypid LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum WHERE a.attrelid = $1 AND a.attnum \u003e 0 AND NOT a.attisdropped ORDER BY a.attnum",
+  "cols": [
+   "attnum",
+   "attname",
+   "format_type",
+   "typname",
+   "typtype",
+   "typcategory",
+   "attnotnull",
+   "coalesce",
+   "attidentity",
+   "attgenerated",
+   "coalesce",
+   "?column?"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "bigint"
+    },
+    {
+     "t": "s",
+     "v": "int8"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "d"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\",\"identity\":\"autoincrement\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT sn.nspname, s.relname FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S' JOIN pg_namespace sn ON sn.oid = s.relnamespace WHERE d.refobjid = $1 AND d.refobjsubid = $2 AND d.deptype IN ('a','i') LIMIT 1",
+  "cols": [
+   "nspname",
+   "relname"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "public"
+    },
+    {
+     "t": "s",
+     "v": "emptyauto_id_seq"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM \"public\".\"emptyauto_id_seq\"",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT seqstart, seqincrement FROM pg_sequence s JOIN pg_class c ON c.oid = s.seqrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = $2",
+  "cols": [
+   "seqstart",
+   "seqincrement"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.conname, c.contype::text, (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n), COALESCE(rn.nspname, ''), COALESCE(rc.relname, ''), (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.confkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.n), c.confupdtype::text, c.confdeltype::text, c.condeferrable, c.condeferred, c.convalidated, pg_get_constraintdef(c.oid), c.confmatchtype::text FROM pg_constraint c LEFT JOIN pg_class rc ON rc.oid = c.confrelid LEFT JOIN pg_namespace rn ON rn.oid = rc.relnamespace WHERE c.conrelid = $1 ORDER BY c.conname",
+  "cols": [
+   "conname",
+   "contype",
+   "string_agg",
+   "coalesce",
+   "coalesce",
+   "string_agg",
+   "confupdtype",
+   "confdeltype",
+   "condeferrable",
+   "condeferred",
+   "convalidated",
+   "pg_get_constraintdef",
+   "confmatchtype"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "emptyauto_pkey"
+    },
+    {
+     "t": "s",
+     "v": "p"
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "n"
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "PRIMARY KEY (id)"
+    },
+    {
+     "t": "s",
+     "v": " "
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT ic.relname, i.indisunique, am.amname, i.indpred IS NOT NULL, COALESCE(pg_get_expr(i.indpred, i.indrelid), ''), i.indnkeyatts, i.indnatts, (SELECT string_agg(CASE WHEN k.n = 0 THEN '' ELSE a.attname END, E'\\037' ORDER BY k.ord) FROM unnest(i.indkey::int2[]) WITH ORDINALITY k(n, ord) LEFT JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.n), array_to_string(i.indoption::int2[], ','), i.indexprs IS NOT NULL, EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conindid = i.indexrelid AND c.contype IN ('p','u','x')) FROM pg_index i JOIN pg_class ic ON ic.oid = i.indexrelid JOIN pg_am am ON am.oid = ic.relam WHERE i.indrelid = $1 ORDER BY ic.relname",
+  "cols": [
+   "relname",
+   "indisunique",
+   "amname",
+   "?column?",
+   "coalesce",
+   "indnkeyatts",
+   "indnatts",
+   "string_agg",
+   "array_to_string",
+   "?column?",
+   "exists"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "emptyauto_pkey"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "btree"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "0"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT tgname FROM pg_trigger WHERE tgrelid = $1 AND NOT tgisinternal",
+  "cols": [
+   "tgname"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT count(*) FROM \"public\".\"emptyauto\"",
+  "cols": [
+   "count"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 0
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT a.attnum, a.attname, format_type(a.atttypid, a.atttypmod), tt.typname, tt.typtype::text, tt.typcategory::text, a.attnotnull, COALESCE(pg_get_expr(d.adbin, d.adrelid), ''), a.attidentity::text, a.attgenerated::text, COALESCE(col_description(a.attrelid, a.attnum), ''), (a.attcollation \u003c\u003e 0 AND a.attcollation \u003c\u003e tt.typcollation) FROM pg_attribute a JOIN pg_type tt ON tt.oid = a.atttypid LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum WHERE a.attrelid = $1 AND a.attnum \u003e 0 AND NOT a.attisdropped ORDER BY a.attnum",
+  "cols": [
+   "attnum",
+   "attname",
+   "format_type",
+   "typname",
+   "typtype",
+   "typcategory",
+   "attnotnull",
+   "coalesce",
+   "attidentity",
+   "attgenerated",
+   "coalesce",
+   "?column?"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "a"
+    },
+    {
+     "t": "s",
+     "v": "bigint"
+    },
+    {
+     "t": "s",
+     "v": "int8"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "bigint"
+    },
+    {
+     "t": "s",
+     "v": "int8"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 3
+    },
+    {
+     "t": "s",
+     "v": "n"
+    },
+    {
+     "t": "s",
+     "v": "bigint"
+    },
+    {
+     "t": "s",
+     "v": "int8"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "d"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\",\"identity\":\"rowid\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT sn.nspname, s.relname FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S' JOIN pg_namespace sn ON sn.oid = s.relnamespace WHERE d.refobjid = $1 AND d.refobjsubid = $2 AND d.deptype IN ('a','i') LIMIT 1",
+  "cols": [
+   "nspname",
+   "relname"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "public"
+    },
+    {
+     "t": "s",
+     "v": "grandchild_n_seq"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM \"public\".\"grandchild_n_seq\"",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 4
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT seqstart, seqincrement FROM pg_sequence s JOIN pg_class c ON c.oid = s.seqrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = $2",
+  "cols": [
+   "seqstart",
+   "seqincrement"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.conname, c.contype::text, (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n), COALESCE(rn.nspname, ''), COALESCE(rc.relname, ''), (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.confkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.n), c.confupdtype::text, c.confdeltype::text, c.condeferrable, c.condeferred, c.convalidated, pg_get_constraintdef(c.oid), c.confmatchtype::text FROM pg_constraint c LEFT JOIN pg_class rc ON rc.oid = c.confrelid LEFT JOIN pg_namespace rn ON rn.oid = rc.relnamespace WHERE c.conrelid = $1 ORDER BY c.conname",
+  "cols": [
+   "conname",
+   "contype",
+   "string_agg",
+   "coalesce",
+   "coalesce",
+   "string_agg",
+   "confupdtype",
+   "confdeltype",
+   "condeferrable",
+   "condeferred",
+   "convalidated",
+   "pg_get_constraintdef",
+   "confmatchtype"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "grandchild_a_b_fkey"
+    },
+    {
+     "t": "s",
+     "v": "f"
+    },
+    {
+     "t": "s",
+     "v": "a\u001fb"
+    },
+    {
+     "t": "s",
+     "v": "public"
+    },
+    {
+     "t": "s",
+     "v": "child"
+    },
+    {
+     "t": "s",
+     "v": "parent_id\u001fseq"
+    },
+    {
+     "t": "s",
+     "v": "c"
+    },
+    {
+     "t": "s",
+     "v": "n"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "FOREIGN KEY (a, b) REFERENCES child(parent_id, seq) ON UPDATE CASCADE ON DELETE SET NULL"
+    },
+    {
+     "t": "s",
+     "v": "s"
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "grandchild_pkey"
+    },
+    {
+     "t": "s",
+     "v": "p"
+    },
+    {
+     "t": "s",
+     "v": "n"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "n"
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "PRIMARY KEY (n)"
+    },
+    {
+     "t": "s",
+     "v": " "
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT ic.relname, i.indisunique, am.amname, i.indpred IS NOT NULL, COALESCE(pg_get_expr(i.indpred, i.indrelid), ''), i.indnkeyatts, i.indnatts, (SELECT string_agg(CASE WHEN k.n = 0 THEN '' ELSE a.attname END, E'\\037' ORDER BY k.ord) FROM unnest(i.indkey::int2[]) WITH ORDINALITY k(n, ord) LEFT JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.n), array_to_string(i.indoption::int2[], ','), i.indexprs IS NOT NULL, EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conindid = i.indexrelid AND c.contype IN ('p','u','x')) FROM pg_index i JOIN pg_class ic ON ic.oid = i.indexrelid JOIN pg_am am ON am.oid = ic.relam WHERE i.indrelid = $1 ORDER BY ic.relname",
+  "cols": [
+   "relname",
+   "indisunique",
+   "amname",
+   "?column?",
+   "coalesce",
+   "indnkeyatts",
+   "indnatts",
+   "string_agg",
+   "array_to_string",
+   "?column?",
+   "exists"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "grandchild_pkey"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "btree"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "n"
+    },
+    {
+     "t": "s",
+     "v": "0"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT tgname FROM pg_trigger WHERE tgrelid = $1 AND NOT tgisinternal",
+  "cols": [
+   "tgname"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT count(*) FROM \"public\".\"grandchild\"",
+  "cols": [
+   "count"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 3
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.conname, rc.relname, pg_get_constraintdef(c.oid), COALESCE(to_jsonb(c)-\u003e\u003e'conenforced', 'true') = 'true', COALESCE(obj_description(c.oid, 'pg_constraint'), ''), (SELECT string_agg(a.attname, ',' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace JOIN pg_class rc ON rc.oid = c.confrelid JOIN pg_namespace rn ON rn.oid = rc.relnamespace WHERE c.contype = 'f' AND n.nspname = $1 AND t.relname = $2 AND rn.nspname = $1 ORDER BY c.conname",
+  "cols": [
+   "conname",
+   "relname",
+   "pg_get_constraintdef",
+   "?column?",
+   "coalesce",
+   "string_agg"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.conname, rc.relname, pg_get_constraintdef(c.oid), COALESCE(to_jsonb(c)-\u003e\u003e'conenforced', 'true') = 'true', COALESCE(obj_description(c.oid, 'pg_constraint'), ''), (SELECT string_agg(a.attname, ',' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace JOIN pg_class rc ON rc.oid = c.confrelid JOIN pg_namespace rn ON rn.oid = rc.relnamespace WHERE c.contype = 'f' AND n.nspname = $1 AND t.relname = $2 AND rn.nspname = $1 ORDER BY c.conname",
+  "cols": [
+   "conname",
+   "relname",
+   "pg_get_constraintdef",
+   "?column?",
+   "coalesce",
+   "string_agg"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "fk_parent"
+    },
+    {
+     "t": "s",
+     "v": "Parent"
+    },
+    {
+     "t": "s",
+     "v": "FOREIGN KEY (parent_id) REFERENCES \"Parent\"(id) ON DELETE CASCADE"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "the key that matters"
+    },
+    {
+     "t": "s",
+     "v": "parent_id"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.conname, rc.relname, pg_get_constraintdef(c.oid), COALESCE(to_jsonb(c)-\u003e\u003e'conenforced', 'true') = 'true', COALESCE(obj_description(c.oid, 'pg_constraint'), ''), (SELECT string_agg(a.attname, ',' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace JOIN pg_class rc ON rc.oid = c.confrelid JOIN pg_namespace rn ON rn.oid = rc.relnamespace WHERE c.contype = 'f' AND n.nspname = $1 AND t.relname = $2 AND rn.nspname = $1 ORDER BY c.conname",
+  "cols": [
+   "conname",
+   "relname",
+   "pg_get_constraintdef",
+   "?column?",
+   "coalesce",
+   "string_agg"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "grandchild_a_b_fkey"
+    },
+    {
+     "t": "s",
+     "v": "child"
+    },
+    {
+     "t": "s",
+     "v": "FOREIGN KEY (a, b) REFERENCES child(parent_id, seq) ON UPDATE CASCADE ON DELETE SET NULL"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "a,b"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "exec",
+  "sql": "ALTER TABLE \"public\".\"child\" DROP CONSTRAINT \"fk_parent\""
+ },
+ {
+  "kind": "exec",
+  "sql": "ALTER TABLE \"public\".\"grandchild\" DROP CONSTRAINT \"grandchild_a_b_fkey\""
+ },
+ {
+  "kind": "exec",
+  "sql": "TRUNCATE \"public\".\"Parent\", \"public\".\"child\", \"public\".\"grandchild\" RESTART IDENTITY"
+ },
+ {
+  "kind": "exec",
+  "sql": "INSERT INTO \"public\".\"Parent\" (\"id\", \"name\", \"code\", \"born\", \"seen\", \"odd\", \"price\", \"exact\", \"ok\", \"photo\", \"small\", \"ratio\", \"note\", \"loose\", \"doc\", \"created\", \"expr\") VALUES ($1, $2, $3, $4::text::date, $5::text::timestamp without time zone, $6, $7::text::numeric(10,2), $8::text::numeric(10,2), $9, $10, $11, $12, $13, $14, $15::text::json, $16, $17), ($18, $19, $20, $21::text::date, $22::text::timestamp without time zone, $23, $24::text::numeric(10,2), $25::text::numeric(10,2), $26, $27, $28, $29, $30, $31, $32::text::json, $33, $34)",
+  "affected": 2
+ },
+ {
+  "kind": "exec",
+  "sql": "INSERT INTO \"public\".\"child\" (\"parent_id\", \"seq\", \"label\") VALUES ($1, $2, $3), ($4, $5, $6), ($7, $8, $9)",
+  "affected": 3
+ },
+ {
+  "kind": "exec",
+  "sql": "INSERT INTO \"public\".\"grandchild\" (\"a\", \"b\", \"n\") VALUES ($1, $2, $3), ($4, $5, $6), ($7, $8, $9)",
+  "affected": 3
+ },
+ {
+  "kind": "exec",
+  "sql": "SAVEPOINT dt_try"
+ },
+ {
+  "kind": "exec",
+  "sql": "ALTER TABLE \"public\".\"child\" ADD CONSTRAINT \"fk_parent\" FOREIGN KEY (parent_id) REFERENCES \"Parent\"(id) ON DELETE CASCADE"
+ },
+ {
+  "kind": "exec",
+  "sql": "RELEASE SAVEPOINT dt_try"
+ },
+ {
+  "kind": "exec",
+  "sql": "COMMENT ON CONSTRAINT \"fk_parent\" ON \"public\".\"child\" IS 'the key that matters'"
+ },
+ {
+  "kind": "exec",
+  "sql": "SAVEPOINT dt_try"
+ },
+ {
+  "kind": "exec",
+  "sql": "ALTER TABLE \"public\".\"grandchild\" ADD CONSTRAINT \"grandchild_a_b_fkey\" FOREIGN KEY (a, b) REFERENCES child(parent_id, seq) ON UPDATE CASCADE ON DELETE SET NULL"
+ },
+ {
+  "kind": "exec",
+  "sql": "RELEASE SAVEPOINT dt_try"
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT count(*) FROM \"public\".\"Parent\"",
+  "cols": [
+   "count"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 2
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT count(*) FROM \"public\".\"child\"",
+  "cols": [
+   "count"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 3
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT count(*) FROM \"public\".\"grandchild\"",
+  "cols": [
+   "count"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 3
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT max(\"id\") FROM \"public\".\"Parent\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 2
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT CASE (SELECT count(*) FROM s) WHEN 0 THEN pg_get_serial_sequence($1, $2) WHEN 1 THEN (SELECT min(name) FROM s) END",
+  "cols": [
+   "case"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "shared_seq"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT seqrelid::regclass::text, seqincrement, seqmax FROM pg_sequence WHERE seqrelid = $1::text::regclass",
+  "cols": [
+   "seqrelid",
+   "seqincrement",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "shared_seq"
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 5
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM shared_seq",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT max(\"n\") FROM \"public\".\"grandchild\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 3
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT CASE (SELECT count(*) FROM s) WHEN 0 THEN pg_get_serial_sequence($1, $2) WHEN 1 THEN (SELECT min(name) FROM s) END",
+  "cols": [
+   "case"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "public.grandchild_n_seq"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT seqrelid::regclass::text, seqincrement, seqmax FROM pg_sequence WHERE seqrelid = $1::text::regclass",
+  "cols": [
+   "seqrelid",
+   "seqincrement",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "grandchild_n_seq"
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 9223372036854775807
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM grandchild_n_seq",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
+  "affected": 1
+ },
+ {
+  "kind": "commit"
+ },
+ {
+  "kind": "exec",
+  "sql": "ALTER SEQUENCE \"public\".shared_seq INCREMENT BY -1 MINVALUE 1 MAXVALUE 100 RESTART 100"
+ },
+ {
+  "kind": "begin"
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT set_config('datestyle', 'ISO, MDY', true), set_config('intervalstyle', 'postgres', true), set_config('extra_float_digits', '3', true), set_config('timezone', 'UTC', true), set_config('statement_timeout', '0', true), set_config('idle_in_transaction_session_timeout', '0', true), set_config('standard_conforming_strings', 'on', true), set_config('escape_string_warning', 'off', true)",
+  "affected": 1
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relkind IN ('r','p','v','m','f') AND c.relname = ANY($2) ORDER BY 1",
+  "cols": [
+   "relname"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "Parent"
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "child"
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "grandchild"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.oid::bigint, c.relname, c.relkind::text, c.relispartition, c.relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relkind IN ('r','p','v','m','f') ORDER BY c.relname",
+  "cols": [
+   "oid",
+   "relname",
+   "relkind",
+   "relispartition",
+   "relrowsecurity"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 43458
+    },
+    {
+     "t": "s",
+     "v": "Parent"
+    },
+    {
+     "t": "s",
+     "v": "r"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 43471
+    },
+    {
+     "t": "s",
+     "v": "child"
+    },
+    {
+     "t": "s",
+     "v": "r"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 43490
+    },
+    {
+     "t": "s",
+     "v": "emptyauto"
+    },
+    {
+     "t": "s",
+     "v": "r"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 43479
+    },
+    {
+     "t": "s",
+     "v": "grandchild"
+    },
+    {
+     "t": "s",
+     "v": "r"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 43625
+    },
+    {
+     "t": "s",
+     "v": "keyless"
+    },
+    {
+     "t": "s",
+     "v": "v"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT a.attnum, a.attname, format_type(a.atttypid, a.atttypmod), tt.typname, tt.typtype::text, tt.typcategory::text, a.attnotnull, COALESCE(pg_get_expr(d.adbin, d.adrelid), ''), a.attidentity::text, a.attgenerated::text, COALESCE(col_description(a.attrelid, a.attnum), ''), (a.attcollation \u003c\u003e 0 AND a.attcollation \u003c\u003e tt.typcollation) FROM pg_attribute a JOIN pg_type tt ON tt.oid = a.atttypid LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum WHERE a.attrelid = $1 AND a.attnum \u003e 0 AND NOT a.attisdropped ORDER BY a.attnum",
+  "cols": [
+   "attnum",
+   "attname",
+   "format_type",
+   "typname",
+   "typtype",
+   "typcategory",
+   "attnotnull",
+   "coalesce",
+   "attidentity",
+   "attgenerated",
+   "coalesce",
+   "?column?"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "bigint"
+    },
+    {
+     "t": "s",
+     "v": "int8"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "nextval('shared_seq'::regclass)"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\",\"identity\":\"autoincrement\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "s",
+     "v": "name"
+    },
+    {
+     "t": "s",
+     "v": "character varying(20)"
+    },
+    {
+     "t": "s",
+     "v": "varchar"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "S"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"VARCHAR(20)\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 3
+    },
+    {
+     "t": "s",
+     "v": "code"
+    },
+    {
+     "t": "s",
+     "v": "character varying(3)"
+    },
+    {
+     "t": "s",
+     "v": "varchar"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "S"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": "'ABC'::character varying"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"CHAR(3)\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 4
+    },
+    {
+     "t": "s",
+     "v": "born"
+    },
+    {
+     "t": "s",
+     "v": "date"
+    },
+    {
+     "t": "s",
+     "v": "date"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "D"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"DATE\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 5
+    },
+    {
+     "t": "s",
+     "v": "seen"
+    },
+    {
+     "t": "s",
+     "v": "timestamp without time zone"
+    },
+    {
+     "t": "s",
+     "v": "timestamp"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "D"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"DATETIME\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 6
+    },
+    {
+     "t": "s",
+     "v": "odd"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "S"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"DATETIME\",\"widened\":\"text\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 7
+    },
+    {
+     "t": "s",
+     "v": "price"
+    },
+    {
+     "t": "s",
+     "v": "numeric(10,2)"
+    },
+    {
+     "t": "s",
+     "v": "numeric"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "0"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"DECIMAL(10,2)\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 8
+    },
+    {
+     "t": "s",
+     "v": "exact"
+    },
+    {
+     "t": "s",
+     "v": "numeric(10,2)"
+    },
+    {
+     "t": "s",
+     "v": "numeric"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"DECIMAL_TEXT(10,2)\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 9
+    },
+    {
+     "t": "s",
+     "v": "ok"
+    },
+    {
+     "t": "s",
+     "v": "boolean"
+    },
+    {
+     "t": "s",
+     "v": "bool"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "B"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": "true"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"BOOLEAN\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 10
+    },
+    {
+     "t": "s",
+     "v": "photo"
+    },
+    {
+     "t": "s",
+     "v": "bytea"
+    },
+    {
+     "t": "s",
+     "v": "bytea"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "U"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"BLOB\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 11
+    },
+    {
+     "t": "s",
+     "v": "small"
+    },
+    {
+     "t": "s",
+     "v": "smallint"
+    },
+    {
+     "t": "s",
+     "v": "int2"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"INT2\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 12
+    },
+    {
+     "t": "s",
+     "v": "ratio"
+    },
+    {
+     "t": "s",
+     "v": "double precision"
+    },
+    {
+     "t": "s",
+     "v": "float8"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"REAL\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 13
+    },
+    {
+     "t": "s",
+     "v": "note"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "S"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"TEXT\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 14
+    },
+    {
+     "t": "s",
+     "v": "loose"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "S"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"\",\"widened\":\"text\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 15
+    },
+    {
+     "t": "s",
+     "v": "doc"
+    },
+    {
+     "t": "s",
+     "v": "json"
+    },
+    {
+     "t": "s",
+     "v": "json"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "U"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"JSON_TEXT\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 16
+    },
+    {
+     "t": "s",
+     "v": "created"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "S"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "to_char((CURRENT_TIMESTAMP AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"TEXT\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 17
+    },
+    {
+     "t": "s",
+     "v": "expr"
+    },
+    {
+     "t": "s",
+     "v": "bigint"
+    },
+    {
+     "t": "s",
+     "v": "int8"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT sn.nspname, s.relname FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S' JOIN pg_namespace sn ON sn.oid = s.relnamespace WHERE d.refobjid = $1 AND d.refobjsubid = $2 AND d.deptype IN ('a','i') LIMIT 1",
+  "cols": [
+   "nspname",
+   "relname"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.conname, c.contype::text, (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n), COALESCE(rn.nspname, ''), COALESCE(rc.relname, ''), (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.confkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.n), c.confupdtype::text, c.confdeltype::text, c.condeferrable, c.condeferred, c.convalidated, pg_get_constraintdef(c.oid), c.confmatchtype::text FROM pg_constraint c LEFT JOIN pg_class rc ON rc.oid = c.confrelid LEFT JOIN pg_namespace rn ON rn.oid = rc.relnamespace WHERE c.conrelid = $1 ORDER BY c.conname",
+  "cols": [
+   "conname",
+   "contype",
+   "string_agg",
+   "coalesce",
+   "coalesce",
+   "string_agg",
+   "confupdtype",
+   "confdeltype",
+   "condeferrable",
+   "condeferred",
+   "convalidated",
+   "pg_get_constraintdef",
+   "confmatchtype"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "Parent_code_check"
+    },
+    {
+     "t": "s",
+     "v": "c"
+    },
+    {
+     "t": "s",
+     "v": "code"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "n"
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "CHECK (((code)::text ~ '^[A-Z][A-Z][A-Z]$'::text))"
+    },
+    {
+     "t": "s",
+     "v": " "
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "Parent_name_code_key"
+    },
+    {
+     "t": "s",
+     "v": "u"
+    },
+    {
+     "t": "s",
+     "v": "name\u001fcode"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "n"
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "UNIQUE (name, code)"
+    },
+    {
+     "t": "s",
+     "v": " "
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "Parent_pkey"
+    },
+    {
+     "t": "s",
+     "v": "p"
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "n"
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "PRIMARY KEY (id)"
+    },
+    {
+     "t": "s",
+     "v": " "
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "chk_price"
+    },
+    {
+     "t": "s",
+     "v": "c"
+    },
+    {
+     "t": "s",
+     "v": "price"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "n"
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "CHECK ((price \u003e= (0)::numeric))"
+    },
+    {
+     "t": "s",
+     "v": " "
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT ic.relname, i.indisunique, am.amname, i.indpred IS NOT NULL, COALESCE(pg_get_expr(i.indpred, i.indrelid), ''), i.indnkeyatts, i.indnatts, (SELECT string_agg(CASE WHEN k.n = 0 THEN '' ELSE a.attname END, E'\\037' ORDER BY k.ord) FROM unnest(i.indkey::int2[]) WITH ORDINALITY k(n, ord) LEFT JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.n), array_to_string(i.indoption::int2[], ','), i.indexprs IS NOT NULL, EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conindid = i.indexrelid AND c.contype IN ('p','u','x')) FROM pg_index i JOIN pg_class ic ON ic.oid = i.indexrelid JOIN pg_am am ON am.oid = ic.relam WHERE i.indrelid = $1 ORDER BY ic.relname",
+  "cols": [
+   "relname",
+   "indisunique",
+   "amname",
+   "?column?",
+   "coalesce",
+   "indnkeyatts",
+   "indnatts",
+   "string_agg",
+   "array_to_string",
+   "?column?",
+   "exists"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "Parent_name_code_key"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "btree"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "s",
+     "v": "name\u001fcode"
+    },
+    {
+     "t": "s",
+     "v": "0,0"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "Parent_pkey"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "btree"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "0"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "parent_born"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": "btree"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "s",
+     "v": "born\u001fname"
+    },
+    {
+     "t": "s",
+     "v": "3,0"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "parent_loose"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "btree"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "(note IS NOT NULL)"
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "note"
+    },
+    {
+     "t": "s",
+     "v": "0"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT tgname FROM pg_trigger WHERE tgrelid = $1 AND NOT tgisinternal",
+  "cols": [
+   "tgname"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT count(*) FROM \"public\".\"Parent\"",
+  "cols": [
+   "count"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 2
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT a.attnum, a.attname, format_type(a.atttypid, a.atttypmod), tt.typname, tt.typtype::text, tt.typcategory::text, a.attnotnull, COALESCE(pg_get_expr(d.adbin, d.adrelid), ''), a.attidentity::text, a.attgenerated::text, COALESCE(col_description(a.attrelid, a.attnum), ''), (a.attcollation \u003c\u003e 0 AND a.attcollation \u003c\u003e tt.typcollation) FROM pg_attribute a JOIN pg_type tt ON tt.oid = a.atttypid LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum WHERE a.attrelid = $1 AND a.attnum \u003e 0 AND NOT a.attisdropped ORDER BY a.attnum",
+  "cols": [
+   "attnum",
+   "attname",
+   "format_type",
+   "typname",
+   "typtype",
+   "typcategory",
+   "attnotnull",
+   "coalesce",
+   "attidentity",
+   "attgenerated",
+   "coalesce",
+   "?column?"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "parent_id"
+    },
+    {
+     "t": "s",
+     "v": "bigint"
+    },
+    {
+     "t": "s",
+     "v": "int8"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "s",
+     "v": "seq"
+    },
+    {
+     "t": "s",
+     "v": "bigint"
+    },
+    {
+     "t": "s",
+     "v": "int8"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 4
+    },
+    {
+     "t": "s",
+     "v": "label"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "S"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 5
+    },
+    {
+     "t": "s",
+     "v": "extra"
+    },
+    {
+     "t": "s",
+     "v": "integer"
+    },
+    {
+     "t": "s",
+     "v": "int4"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": "1"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.conname, c.contype::text, (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n), COALESCE(rn.nspname, ''), COALESCE(rc.relname, ''), (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.confkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.n), c.confupdtype::text, c.confdeltype::text, c.condeferrable, c.condeferred, c.convalidated, pg_get_constraintdef(c.oid), c.confmatchtype::text FROM pg_constraint c LEFT JOIN pg_class rc ON rc.oid = c.confrelid LEFT JOIN pg_namespace rn ON rn.oid = rc.relnamespace WHERE c.conrelid = $1 ORDER BY c.conname",
+  "cols": [
+   "conname",
+   "contype",
+   "string_agg",
+   "coalesce",
+   "coalesce",
+   "string_agg",
+   "confupdtype",
+   "confdeltype",
+   "condeferrable",
+   "condeferred",
+   "convalidated",
+   "pg_get_constraintdef",
+   "confmatchtype"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "child_pkey"
+    },
+    {
+     "t": "s",
+     "v": "p"
+    },
+    {
+     "t": "s",
+     "v": "parent_id\u001fseq"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "n"
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "PRIMARY KEY (parent_id, seq)"
+    },
+    {
+     "t": "s",
+     "v": " "
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "fk_parent"
+    },
+    {
+     "t": "s",
+     "v": "f"
+    },
+    {
+     "t": "s",
+     "v": "parent_id"
+    },
+    {
+     "t": "s",
+     "v": "public"
+    },
+    {
+     "t": "s",
+     "v": "Parent"
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "a"
+    },
+    {
+     "t": "s",
+     "v": "c"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "FOREIGN KEY (parent_id) REFERENCES \"Parent\"(id) ON DELETE CASCADE"
+    },
+    {
+     "t": "s",
+     "v": "s"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT ic.relname, i.indisunique, am.amname, i.indpred IS NOT NULL, COALESCE(pg_get_expr(i.indpred, i.indrelid), ''), i.indnkeyatts, i.indnatts, (SELECT string_agg(CASE WHEN k.n = 0 THEN '' ELSE a.attname END, E'\\037' ORDER BY k.ord) FROM unnest(i.indkey::int2[]) WITH ORDINALITY k(n, ord) LEFT JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.n), array_to_string(i.indoption::int2[], ','), i.indexprs IS NOT NULL, EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conindid = i.indexrelid AND c.contype IN ('p','u','x')) FROM pg_index i JOIN pg_class ic ON ic.oid = i.indexrelid JOIN pg_am am ON am.oid = ic.relam WHERE i.indrelid = $1 ORDER BY ic.relname",
+  "cols": [
+   "relname",
+   "indisunique",
+   "amname",
+   "?column?",
+   "coalesce",
+   "indnkeyatts",
+   "indnatts",
+   "string_agg",
+   "array_to_string",
+   "?column?",
+   "exists"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "child_pkey"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "btree"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "s",
+     "v": "parent_id\u001fseq"
+    },
+    {
+     "t": "s",
+     "v": "0,0"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT tgname FROM pg_trigger WHERE tgrelid = $1 AND NOT tgisinternal",
+  "cols": [
+   "tgname"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT count(*) FROM \"public\".\"child\"",
+  "cols": [
+   "count"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 3
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT a.attnum, a.attname, format_type(a.atttypid, a.atttypmod), tt.typname, tt.typtype::text, tt.typcategory::text, a.attnotnull, COALESCE(pg_get_expr(d.adbin, d.adrelid), ''), a.attidentity::text, a.attgenerated::text, COALESCE(col_description(a.attrelid, a.attnum), ''), (a.attcollation \u003c\u003e 0 AND a.attcollation \u003c\u003e tt.typcollation) FROM pg_attribute a JOIN pg_type tt ON tt.oid = a.atttypid LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum WHERE a.attrelid = $1 AND a.attnum \u003e 0 AND NOT a.attisdropped ORDER BY a.attnum",
+  "cols": [
+   "attnum",
+   "attname",
+   "format_type",
+   "typname",
+   "typtype",
+   "typcategory",
+   "attnotnull",
+   "coalesce",
+   "attidentity",
+   "attgenerated",
+   "coalesce",
+   "?column?"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "bigint"
+    },
+    {
+     "t": "s",
+     "v": "int8"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "d"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\",\"identity\":\"autoincrement\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT sn.nspname, s.relname FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S' JOIN pg_namespace sn ON sn.oid = s.relnamespace WHERE d.refobjid = $1 AND d.refobjsubid = $2 AND d.deptype IN ('a','i') LIMIT 1",
+  "cols": [
+   "nspname",
+   "relname"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "public"
+    },
+    {
+     "t": "s",
+     "v": "emptyauto_id_seq"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM \"public\".\"emptyauto_id_seq\"",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT seqstart, seqincrement FROM pg_sequence s JOIN pg_class c ON c.oid = s.seqrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = $2",
+  "cols": [
+   "seqstart",
+   "seqincrement"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.conname, c.contype::text, (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n), COALESCE(rn.nspname, ''), COALESCE(rc.relname, ''), (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.confkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.n), c.confupdtype::text, c.confdeltype::text, c.condeferrable, c.condeferred, c.convalidated, pg_get_constraintdef(c.oid), c.confmatchtype::text FROM pg_constraint c LEFT JOIN pg_class rc ON rc.oid = c.confrelid LEFT JOIN pg_namespace rn ON rn.oid = rc.relnamespace WHERE c.conrelid = $1 ORDER BY c.conname",
+  "cols": [
+   "conname",
+   "contype",
+   "string_agg",
+   "coalesce",
+   "coalesce",
+   "string_agg",
+   "confupdtype",
+   "confdeltype",
+   "condeferrable",
+   "condeferred",
+   "convalidated",
+   "pg_get_constraintdef",
+   "confmatchtype"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "emptyauto_pkey"
+    },
+    {
+     "t": "s",
+     "v": "p"
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "n"
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "PRIMARY KEY (id)"
+    },
+    {
+     "t": "s",
+     "v": " "
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT ic.relname, i.indisunique, am.amname, i.indpred IS NOT NULL, COALESCE(pg_get_expr(i.indpred, i.indrelid), ''), i.indnkeyatts, i.indnatts, (SELECT string_agg(CASE WHEN k.n = 0 THEN '' ELSE a.attname END, E'\\037' ORDER BY k.ord) FROM unnest(i.indkey::int2[]) WITH ORDINALITY k(n, ord) LEFT JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.n), array_to_string(i.indoption::int2[], ','), i.indexprs IS NOT NULL, EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conindid = i.indexrelid AND c.contype IN ('p','u','x')) FROM pg_index i JOIN pg_class ic ON ic.oid = i.indexrelid JOIN pg_am am ON am.oid = ic.relam WHERE i.indrelid = $1 ORDER BY ic.relname",
+  "cols": [
+   "relname",
+   "indisunique",
+   "amname",
+   "?column?",
+   "coalesce",
+   "indnkeyatts",
+   "indnatts",
+   "string_agg",
+   "array_to_string",
+   "?column?",
+   "exists"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "emptyauto_pkey"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "btree"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "0"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT tgname FROM pg_trigger WHERE tgrelid = $1 AND NOT tgisinternal",
+  "cols": [
+   "tgname"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT count(*) FROM \"public\".\"emptyauto\"",
+  "cols": [
+   "count"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 0
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT a.attnum, a.attname, format_type(a.atttypid, a.atttypmod), tt.typname, tt.typtype::text, tt.typcategory::text, a.attnotnull, COALESCE(pg_get_expr(d.adbin, d.adrelid), ''), a.attidentity::text, a.attgenerated::text, COALESCE(col_description(a.attrelid, a.attnum), ''), (a.attcollation \u003c\u003e 0 AND a.attcollation \u003c\u003e tt.typcollation) FROM pg_attribute a JOIN pg_type tt ON tt.oid = a.atttypid LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum WHERE a.attrelid = $1 AND a.attnum \u003e 0 AND NOT a.attisdropped ORDER BY a.attnum",
+  "cols": [
+   "attnum",
+   "attname",
+   "format_type",
+   "typname",
+   "typtype",
+   "typcategory",
+   "attnotnull",
+   "coalesce",
+   "attidentity",
+   "attgenerated",
+   "coalesce",
+   "?column?"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "a"
+    },
+    {
+     "t": "s",
+     "v": "bigint"
+    },
+    {
+     "t": "s",
+     "v": "int8"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "bigint"
+    },
+    {
+     "t": "s",
+     "v": "int8"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 3
+    },
+    {
+     "t": "s",
+     "v": "n"
+    },
+    {
+     "t": "s",
+     "v": "bigint"
+    },
+    {
+     "t": "s",
+     "v": "int8"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "d"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\",\"identity\":\"rowid\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT sn.nspname, s.relname FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S' JOIN pg_namespace sn ON sn.oid = s.relnamespace WHERE d.refobjid = $1 AND d.refobjsubid = $2 AND d.deptype IN ('a','i') LIMIT 1",
+  "cols": [
+   "nspname",
+   "relname"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "public"
+    },
+    {
+     "t": "s",
+     "v": "grandchild_n_seq"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM \"public\".\"grandchild_n_seq\"",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 4
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT seqstart, seqincrement FROM pg_sequence s JOIN pg_class c ON c.oid = s.seqrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = $2",
+  "cols": [
+   "seqstart",
+   "seqincrement"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.conname, c.contype::text, (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n), COALESCE(rn.nspname, ''), COALESCE(rc.relname, ''), (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.confkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.n), c.confupdtype::text, c.confdeltype::text, c.condeferrable, c.condeferred, c.convalidated, pg_get_constraintdef(c.oid), c.confmatchtype::text FROM pg_constraint c LEFT JOIN pg_class rc ON rc.oid = c.confrelid LEFT JOIN pg_namespace rn ON rn.oid = rc.relnamespace WHERE c.conrelid = $1 ORDER BY c.conname",
+  "cols": [
+   "conname",
+   "contype",
+   "string_agg",
+   "coalesce",
+   "coalesce",
+   "string_agg",
+   "confupdtype",
+   "confdeltype",
+   "condeferrable",
+   "condeferred",
+   "convalidated",
+   "pg_get_constraintdef",
+   "confmatchtype"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "grandchild_a_b_fkey"
+    },
+    {
+     "t": "s",
+     "v": "f"
+    },
+    {
+     "t": "s",
+     "v": "a\u001fb"
+    },
+    {
+     "t": "s",
+     "v": "public"
+    },
+    {
+     "t": "s",
+     "v": "child"
+    },
+    {
+     "t": "s",
+     "v": "parent_id\u001fseq"
+    },
+    {
+     "t": "s",
+     "v": "c"
+    },
+    {
+     "t": "s",
+     "v": "n"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "FOREIGN KEY (a, b) REFERENCES child(parent_id, seq) ON UPDATE CASCADE ON DELETE SET NULL"
+    },
+    {
+     "t": "s",
+     "v": "s"
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "grandchild_pkey"
+    },
+    {
+     "t": "s",
+     "v": "p"
+    },
+    {
+     "t": "s",
+     "v": "n"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "n"
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "PRIMARY KEY (n)"
+    },
+    {
+     "t": "s",
+     "v": " "
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT ic.relname, i.indisunique, am.amname, i.indpred IS NOT NULL, COALESCE(pg_get_expr(i.indpred, i.indrelid), ''), i.indnkeyatts, i.indnatts, (SELECT string_agg(CASE WHEN k.n = 0 THEN '' ELSE a.attname END, E'\\037' ORDER BY k.ord) FROM unnest(i.indkey::int2[]) WITH ORDINALITY k(n, ord) LEFT JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.n), array_to_string(i.indoption::int2[], ','), i.indexprs IS NOT NULL, EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conindid = i.indexrelid AND c.contype IN ('p','u','x')) FROM pg_index i JOIN pg_class ic ON ic.oid = i.indexrelid JOIN pg_am am ON am.oid = ic.relam WHERE i.indrelid = $1 ORDER BY ic.relname",
+  "cols": [
+   "relname",
+   "indisunique",
+   "amname",
+   "?column?",
+   "coalesce",
+   "indnkeyatts",
+   "indnatts",
+   "string_agg",
+   "array_to_string",
+   "?column?",
+   "exists"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "grandchild_pkey"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "btree"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "n"
+    },
+    {
+     "t": "s",
+     "v": "0"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT tgname FROM pg_trigger WHERE tgrelid = $1 AND NOT tgisinternal",
+  "cols": [
+   "tgname"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT count(*) FROM \"public\".\"grandchild\"",
+  "cols": [
+   "count"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 3
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.conname, rc.relname, pg_get_constraintdef(c.oid), COALESCE(to_jsonb(c)-\u003e\u003e'conenforced', 'true') = 'true', COALESCE(obj_description(c.oid, 'pg_constraint'), ''), (SELECT string_agg(a.attname, ',' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace JOIN pg_class rc ON rc.oid = c.confrelid JOIN pg_namespace rn ON rn.oid = rc.relnamespace WHERE c.contype = 'f' AND n.nspname = $1 AND t.relname = $2 AND rn.nspname = $1 ORDER BY c.conname",
+  "cols": [
+   "conname",
+   "relname",
+   "pg_get_constraintdef",
+   "?column?",
+   "coalesce",
+   "string_agg"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.conname, rc.relname, pg_get_constraintdef(c.oid), COALESCE(to_jsonb(c)-\u003e\u003e'conenforced', 'true') = 'true', COALESCE(obj_description(c.oid, 'pg_constraint'), ''), (SELECT string_agg(a.attname, ',' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace JOIN pg_class rc ON rc.oid = c.confrelid JOIN pg_namespace rn ON rn.oid = rc.relnamespace WHERE c.contype = 'f' AND n.nspname = $1 AND t.relname = $2 AND rn.nspname = $1 ORDER BY c.conname",
+  "cols": [
+   "conname",
+   "relname",
+   "pg_get_constraintdef",
+   "?column?",
+   "coalesce",
+   "string_agg"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "fk_parent"
+    },
+    {
+     "t": "s",
+     "v": "Parent"
+    },
+    {
+     "t": "s",
+     "v": "FOREIGN KEY (parent_id) REFERENCES \"Parent\"(id) ON DELETE CASCADE"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "the key that matters"
+    },
+    {
+     "t": "s",
+     "v": "parent_id"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.conname, rc.relname, pg_get_constraintdef(c.oid), COALESCE(to_jsonb(c)-\u003e\u003e'conenforced', 'true') = 'true', COALESCE(obj_description(c.oid, 'pg_constraint'), ''), (SELECT string_agg(a.attname, ',' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace JOIN pg_class rc ON rc.oid = c.confrelid JOIN pg_namespace rn ON rn.oid = rc.relnamespace WHERE c.contype = 'f' AND n.nspname = $1 AND t.relname = $2 AND rn.nspname = $1 ORDER BY c.conname",
+  "cols": [
+   "conname",
+   "relname",
+   "pg_get_constraintdef",
+   "?column?",
+   "coalesce",
+   "string_agg"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "grandchild_a_b_fkey"
+    },
+    {
+     "t": "s",
+     "v": "child"
+    },
+    {
+     "t": "s",
+     "v": "FOREIGN KEY (a, b) REFERENCES child(parent_id, seq) ON UPDATE CASCADE ON DELETE SET NULL"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "a,b"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "exec",
+  "sql": "ALTER TABLE \"public\".\"child\" DROP CONSTRAINT \"fk_parent\""
+ },
+ {
+  "kind": "exec",
+  "sql": "ALTER TABLE \"public\".\"grandchild\" DROP CONSTRAINT \"grandchild_a_b_fkey\""
+ },
+ {
+  "kind": "exec",
+  "sql": "TRUNCATE \"public\".\"Parent\", \"public\".\"child\", \"public\".\"grandchild\" RESTART IDENTITY"
+ },
+ {
+  "kind": "exec",
+  "sql": "INSERT INTO \"public\".\"Parent\" (\"id\", \"name\", \"code\", \"born\", \"seen\", \"odd\", \"price\", \"exact\", \"ok\", \"photo\", \"small\", \"ratio\", \"note\", \"loose\", \"doc\", \"created\", \"expr\") VALUES ($1, $2, $3, $4::text::date, $5::text::timestamp without time zone, $6, $7::text::numeric(10,2), $8::text::numeric(10,2), $9, $10, $11, $12, $13, $14, $15::text::json, $16, $17), ($18, $19, $20, $21::text::date, $22::text::timestamp without time zone, $23, $24::text::numeric(10,2), $25::text::numeric(10,2), $26, $27, $28, $29, $30, $31, $32::text::json, $33, $34)",
+  "affected": 2
+ },
+ {
+  "kind": "exec",
+  "sql": "INSERT INTO \"public\".\"child\" (\"parent_id\", \"seq\", \"label\") VALUES ($1, $2, $3), ($4, $5, $6), ($7, $8, $9)",
+  "affected": 3
+ },
+ {
+  "kind": "exec",
+  "sql": "INSERT INTO \"public\".\"grandchild\" (\"a\", \"b\", \"n\") VALUES ($1, $2, $3), ($4, $5, $6), ($7, $8, $9)",
+  "affected": 3
+ },
+ {
+  "kind": "exec",
+  "sql": "SAVEPOINT dt_try"
+ },
+ {
+  "kind": "exec",
+  "sql": "ALTER TABLE \"public\".\"child\" ADD CONSTRAINT \"fk_parent\" FOREIGN KEY (parent_id) REFERENCES \"Parent\"(id) ON DELETE CASCADE"
+ },
+ {
+  "kind": "exec",
+  "sql": "RELEASE SAVEPOINT dt_try"
+ },
+ {
+  "kind": "exec",
+  "sql": "COMMENT ON CONSTRAINT \"fk_parent\" ON \"public\".\"child\" IS 'the key that matters'"
+ },
+ {
+  "kind": "exec",
+  "sql": "SAVEPOINT dt_try"
+ },
+ {
+  "kind": "exec",
+  "sql": "ALTER TABLE \"public\".\"grandchild\" ADD CONSTRAINT \"grandchild_a_b_fkey\" FOREIGN KEY (a, b) REFERENCES child(parent_id, seq) ON UPDATE CASCADE ON DELETE SET NULL"
+ },
+ {
+  "kind": "exec",
+  "sql": "RELEASE SAVEPOINT dt_try"
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT count(*) FROM \"public\".\"Parent\"",
+  "cols": [
+   "count"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 2
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT count(*) FROM \"public\".\"child\"",
+  "cols": [
+   "count"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 3
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT count(*) FROM \"public\".\"grandchild\"",
+  "cols": [
+   "count"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 3
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT max(\"id\") FROM \"public\".\"Parent\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 2
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT CASE (SELECT count(*) FROM s) WHEN 0 THEN pg_get_serial_sequence($1, $2) WHEN 1 THEN (SELECT min(name) FROM s) END",
+  "cols": [
+   "case"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "shared_seq"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT seqrelid::regclass::text, seqincrement, seqmax FROM pg_sequence WHERE seqrelid = $1::text::regclass",
+  "cols": [
+   "seqrelid",
+   "seqincrement",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "shared_seq"
+    },
+    {
+     "t": "i",
+     "v": -1
+    },
+    {
+     "t": "i",
+     "v": 100
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM shared_seq",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 100
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT max(\"n\") FROM \"public\".\"grandchild\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 3
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT CASE (SELECT count(*) FROM s) WHEN 0 THEN pg_get_serial_sequence($1, $2) WHEN 1 THEN (SELECT min(name) FROM s) END",
+  "cols": [
+   "case"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "public.grandchild_n_seq"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT seqrelid::regclass::text, seqincrement, seqmax FROM pg_sequence WHERE seqrelid = $1::text::regclass",
+  "cols": [
+   "seqrelid",
+   "seqincrement",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "grandchild_n_seq"
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 9223372036854775807
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM grandchild_n_seq",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
   "affected": 1
  },
  {

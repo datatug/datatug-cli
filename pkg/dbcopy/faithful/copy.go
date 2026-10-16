@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"sort"
 	"strconv"
 	"strings"
@@ -1050,13 +1051,8 @@ func (x *executor) counters(q execer) error {
 					x.plan.warn(WarnIdentityNotCarried, t.Name+"."+c.Name, "the target column does not take its values from exactly one sequence (serial, identity or a nextval default): its counter is not set to %d, so a new row may get an id that a copied row has", next)
 					continue
 				}
-				// setval, not ALTER ... RESTART WITH: that one is refused while a deferred key of the table has pending checks (55006).
-				// Forward only, for every sequence: a sequence that other tables share, or that is already past the rows
-				// copied, is never moved back (a reload of one table must not make another one repeat an id). The next
-				// value of a sequence is its last value plus the step, or its start when it has not been used.
-				if _, err := q.ExecContext(ctx, `SELECT setval($1::text::regclass, GREATEST($2::bigint,
-  (SELECT COALESCE(pg_sequence_last_value(seqrelid) + seqincrement, seqstart) FROM pg_sequence WHERE seqrelid = $1::text::regclass)), false)`, seq, next); err != nil {
-					return fmt.Errorf("set the counter of %s.%s: %w", t.Name, c.Name, err)
+				if err := x.moveCounter(q, t.Name+"."+c.Name, seq, next); err != nil {
+					return err
 				}
 			} else if c.Identity == IdentityAutoincrement && next > 1 {
 				if _, err := q.ExecContext(ctx, "DELETE FROM sqlite_sequence WHERE name = ?", t.Name); err != nil {
@@ -1087,6 +1083,46 @@ WITH s AS (
     AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2))
 SELECT CASE (SELECT count(*) FROM s) WHEN 0 THEN pg_get_serial_sequence($1, $2) WHEN 1 THEN (SELECT min(name) FROM s) END`, qualifiedTable, column).Scan(&seq)
 	return seq.String, err
+}
+
+// moveCounter sets the sequence seq so that its next value is next, setval and not ALTER ... RESTART WITH (that
+// one is refused while a deferred key of the table has pending checks, 55006). It only moves a sequence forward:
+// a sequence that other tables share, or that is already past the rows copied, is left where it is (a reload of
+// one table must not make another one repeat an id). The next value of a sequence is read from the sequence
+// itself: its last value, plus the step once it has been used (is_called). A sequence that cannot be set to
+// the value (it would be beyond its maximum, or it counts down) is left alone and the copy says so.
+func (x *executor) moveCounter(q execer, obj, seq string, next int64) error {
+	var name string
+	var step, maxValue int64
+	if err := q.QueryRowContext(x.ctx, `SELECT seqrelid::regclass::text, seqincrement, seqmax FROM pg_sequence WHERE seqrelid = $1::text::regclass`, seq).Scan(&name, &step, &maxValue); err != nil {
+		return fmt.Errorf("read the sequence of %s: %w", obj, err)
+	}
+	var last int64
+	var called bool
+	// name is the sequence as the server writes it, quoted.
+	if err := q.QueryRowContext(x.ctx, "SELECT last_value, is_called FROM "+name).Scan(&last, &called); err != nil {
+		return fmt.Errorf("read the sequence of %s: %w", obj, err)
+	}
+	if step < 0 {
+		x.plan.warn(WarnIdentityNotCarried, obj, "the sequence %s counts down: its counter is not moved, a new row may get an id that a copied row has", name)
+		return nil
+	}
+	target := big.NewInt(next)
+	current := big.NewInt(last)
+	if called {
+		current.Add(current, big.NewInt(step))
+	}
+	if current.Cmp(target) > 0 {
+		target = current
+	}
+	if target.Cmp(big.NewInt(maxValue)) > 0 {
+		x.plan.warn(WarnIdentityNotCarried, obj, "the next id %s is beyond the maximum %d of the sequence %s: its counter is not moved, a new row may get an id that a copied row has", target, maxValue, name)
+		return nil
+	}
+	if _, err := q.ExecContext(x.ctx, "SELECT setval($1::text::regclass, $2, false)", name, target.Int64()); err != nil {
+		return fmt.Errorf("set the counter of %s: %w", obj, err)
+	}
+	return nil
 }
 
 // tolerated is a failure of a statement the copy can do without (an index, a check, a foreign key): it

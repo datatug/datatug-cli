@@ -14,7 +14,7 @@ func TestDialectRegistry(t *testing.T) {
 	if err != nil || d.Name() != "mysql" || d.MaxIdentLen() != 64 {
 		t.Fatalf("%v %v", d, err)
 	}
-	if _, err := DialectByName("oracle"); err == nil || !strings.Contains(err.Error(), "implemented: mssql, mysql") {
+	if _, err := DialectByName("postgres"); err == nil || !strings.Contains(err.Error(), "implemented: mssql, mysql, oracle") {
 		t.Errorf("an unimplemented dialect is refused with the list of the implemented ones: %v", err)
 	}
 	if (ColumnUse{}).Keyed() || !(ColumnUse{FK: true}).Keyed() || !(ColumnUse{PK: true}).Keyed() {

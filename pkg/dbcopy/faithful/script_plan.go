@@ -250,7 +250,7 @@ func planNames(d Dialect, p *ScriptPlan, cat *Catalog) (*namePlan, error) {
 	for _, k := range folds {
 		v := byFold[k]
 		sort.Strings(v)
-		p.warn(WarnNameCaseCollision, strings.Join(v, " / "), "these table names differ only by case: the script loads on a server with case-sensitive table names (lower_case_table_names=0, the Linux default) and fails on one with case-insensitive names (macOS and Windows)")
+		p.warn(WarnNameCaseCollision, strings.Join(v, " / "), "%s", caseTwinNote(d))
 	}
 	return np, nil
 }

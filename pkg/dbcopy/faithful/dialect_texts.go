@@ -68,3 +68,16 @@ func extraObjectNames(d Dialect, p *ScriptPlan) []string {
 	}
 	return nil
 }
+
+// caseTwinNoter is implemented by a dialect that says something else than MySQL about two tables whose names differ only by case.
+type caseTwinNoter interface {
+	// CaseTwinNote says what happens to the names that differ only by case.
+	CaseTwinNote() string
+}
+
+func caseTwinNote(d Dialect) string {
+	if n, ok := d.(caseTwinNoter); ok {
+		return n.CaseTwinNote()
+	}
+	return "these table names differ only by case: the script loads on a server with case-sensitive table names (lower_case_table_names=0, the Linux default) and fails on one with case-insensitive names (macOS and Windows)"
+}

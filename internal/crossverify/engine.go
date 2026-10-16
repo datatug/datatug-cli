@@ -32,6 +32,12 @@ type targetEngine struct {
 	unstorable func(string) string
 	tableTwin  func(p *faithful.ScriptPlan, t *faithful.ScriptTable) bool
 	columnTwin func(t *faithful.ScriptTable, c *faithful.ScriptColumn) bool
+	// normalizeSource is what the engine makes of the canonical form of a SQLite value (nil: nothing); the plan says the
+	// same in its warnings.
+	normalizeSource func(c *faithful.ScriptColumn, form string) string
+	// lobLength, when set, adds the length of every BLOB column to the target query: a driver that reads an empty BLOB as
+	// NULL is told otherwise by it.
+	lobLength func(quoted string) string
 }
 
 var mysqlEngine = targetEngine{
@@ -64,10 +70,28 @@ var mssqlEngine = targetEngine{
 	columnTwin:    mssqlColumnTwin,
 }
 
+var oracleEngine = targetEngine{
+	name:            "oracle",
+	quote:           quoteOracle,
+	read:            ReadOracle,
+	canon:           canonOracle,
+	implicitIndex:   func(*faithful.ScriptTable, MyIndex) bool { return false }, // the backing indexes of PK and UNIQUE are read as the keys
+	count:           func(table string) string { return "SELECT COUNT(*) FROM " + quoteOracle(table) },
+	markerSQL:       `SELECT "source_sha256", "tables_count", "rows_count" FROM "` + faithful.MySQLMarkerTable + `"`,
+	extra:           checkIdentityOracle,
+	label:           "Oracle",
+	unstorable:      unstorableOracle,
+	tableTwin:       noTableTwin,
+	columnTwin:      noColumnTwin,
+	normalizeSource: normalizeSourceOracle,
+	lobLength:       lobLengthOracle,
+}
+
 // Engine names the engines the verifier knows.
 const (
-	EngineMySQL = "mysql"
-	EngineMSSQL = "mssql"
+	EngineMySQL  = "mysql"
+	EngineMSSQL  = "mssql"
+	EngineOracle = "oracle"
 )
 
 func engineByName(name string) (targetEngine, error) {
@@ -76,6 +100,8 @@ func engineByName(name string) (targetEngine, error) {
 		return mysqlEngine, nil
 	case EngineMSSQL:
 		return mssqlEngine, nil
+	case EngineOracle:
+		return oracleEngine, nil
 	}
-	return targetEngine{}, fmt.Errorf("unknown engine %q (known: %s, %s)", name, EngineMySQL, EngineMSSQL)
+	return targetEngine{}, fmt.Errorf("unknown engine %q (known: %s, %s, %s)", name, EngineMySQL, EngineMSSQL, EngineOracle)
 }

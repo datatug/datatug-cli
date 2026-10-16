@@ -1,0 +1,917 @@
+[
+  {
+    "kind": "name-renamed",
+    "object": "",
+    "message": "table name cannot be stored (the name is empty): created as \"_e3b0c442\""
+  },
+  {
+    "kind": "name-renamed",
+    "object": ".",
+    "message": "column name cannot be stored (the name is empty): created as \"_e3b0c442\""
+  },
+  {
+    "kind": "values-normalized",
+    "object": "Order Details.Unit Price",
+    "message": "2 REAL value(s) are written as the exact decimal of their shortest spelling, for example 9.99: SQLite stores a binary float, NUMBER(10,2) an exact decimal"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "Production.Product.Color",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 4"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "Production.Product.Name.Full",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 6"
+  },
+  {
+    "kind": "name-renamed",
+    "object": "ROWID",
+    "message": "table name cannot be stored (ROWID is a reserved word that Oracle refuses as a name even when it is quoted): created as \"ROWID_ef2a45f7\""
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "a-very-long-table-name-that-is-more-than-sixty-four-characters-long-for-sure.v",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 1"
+  },
+  {
+    "kind": "fk-action-not-carried",
+    "object": "act_c(a)",
+    "message": "ON UPDATE CASCADE does not exist in Oracle: the key is carried without it"
+  },
+  {
+    "kind": "fk-action-not-carried",
+    "object": "act_c(c)",
+    "message": "ON UPDATE RESTRICT does not exist in Oracle: the key is carried without it"
+  },
+  {
+    "kind": "fk-action-not-carried",
+    "object": "act_c(c)",
+    "message": "ON DELETE RESTRICT does not exist in Oracle: the key is carried with no action, which refuses the same change when the key is not deferred"
+  },
+  {
+    "kind": "fk-action-not-carried",
+    "object": "act_c(d)",
+    "message": "ON UPDATE SET DEFAULT does not exist in Oracle: the key is carried without it"
+  },
+  {
+    "kind": "fk-action-not-carried",
+    "object": "act_c(d)",
+    "message": "ON DELETE SET DEFAULT does not exist in Oracle: the key is carried with no action"
+  },
+  {
+    "kind": "name-renamed",
+    "object": "back`tick.a\"b",
+    "message": "column name cannot be stored (the name holds a double quotation mark, which Oracle refuses in a name even when it is quoted): created as \"a_b_39a01277\""
+  },
+  {
+    "kind": "fk-action-not-carried",
+    "object": "cas_a(p)",
+    "message": "ON UPDATE CASCADE does not exist in Oracle: the key is carried without it"
+  },
+  {
+    "kind": "fk-action-not-carried",
+    "object": "cas_b(p)",
+    "message": "ON UPDATE CASCADE does not exist in Oracle: the key is carried without it"
+  },
+  {
+    "kind": "fk-action-not-carried",
+    "object": "cas_g(a)",
+    "message": "ON UPDATE SET NULL does not exist in Oracle: the key is carried without it"
+  },
+  {
+    "kind": "fk-action-not-carried",
+    "object": "cas_g(b)",
+    "message": "ON UPDATE CASCADE does not exist in Oracle: the key is carried without it"
+  },
+  {
+    "kind": "fk-action-not-carried",
+    "object": "cas_self(up)",
+    "message": "ON UPDATE CASCADE does not exist in Oracle: the key is carried without it"
+  },
+  {
+    "kind": "fk-action-not-carried",
+    "object": "cas_two(p2)",
+    "message": "ON UPDATE CASCADE does not exist in Oracle: the key is carried without it"
+  },
+  {
+    "kind": "collation-not-carried",
+    "object": "checks_o.check #1",
+    "message": "a comparison or pattern of text in this check follows the NLS_COMP and NLS_SORT of the session that writes a row (BINARY, like SQLite, unless it changes them); the script loads with BINARY"
+  },
+  {
+    "kind": "check-not-carried",
+    "object": "checks_o.check #11",
+    "message": "check constraint \"n / 2 \u003c 40\" is not carried: the operator / is not translated (it differs between SQLite and Oracle, or Oracle has none)"
+  },
+  {
+    "kind": "check-not-carried",
+    "object": "checks_o.check #12",
+    "message": "check constraint \"code || s \u003c\u003e 'a'\" is not carried: the operator || is not translated (it differs between SQLite and Oracle, or Oracle has none)"
+  },
+  {
+    "kind": "collation-not-carried",
+    "object": "checks_o.check #2",
+    "message": "a comparison or pattern of text in this check follows the NLS_COMP and NLS_SORT of the session that writes a row (BINARY, like SQLite, unless it changes them); the script loads with BINARY"
+  },
+  {
+    "kind": "check-not-carried",
+    "object": "checks_o.check #5",
+    "message": "check constraint \"l LIKE 'a%'\" is not carried: LIKE ignores case in SQLite and does not in Oracle: it is not translated"
+  },
+  {
+    "kind": "check-not-carried",
+    "object": "checks_o.check #6",
+    "message": "check constraint \"e \u003c\u003e ''\" is not carried: a string in the expression is empty (NULL in Oracle) or holds a character that a script cannot carry safely"
+  },
+  {
+    "kind": "check-not-carried",
+    "object": "checks_o.check #7",
+    "message": "check constraint \"length(b) \u003e 0\" is not carried: the column b is a BLOB, which Oracle cannot compare in a check"
+  },
+  {
+    "kind": "collation-not-carried",
+    "object": "checks_o.check #8",
+    "message": "a comparison or pattern of text in this check follows the NLS_COMP and NLS_SORT of the session that writes a row (BINARY, like SQLite, unless it changes them); the script loads with BINARY"
+  },
+  {
+    "kind": "collation-not-carried",
+    "object": "checks_t.check #1",
+    "message": "a comparison or pattern of text in this check follows the NLS_COMP and NLS_SORT of the session that writes a row (BINARY, like SQLite, unless it changes them); the script loads with BINARY"
+  },
+  {
+    "kind": "collation-not-carried",
+    "object": "checks_t.check #2",
+    "message": "a comparison or pattern of text in this check follows the NLS_COMP and NLS_SORT of the session that writes a row (BINARY, like SQLite, unless it changes them); the script loads with BINARY"
+  },
+  {
+    "kind": "check-not-carried",
+    "object": "checks_t.check #4",
+    "message": "check constraint \"length(s) \u003c 10 AND s \u003c\u003e ''\" is not carried: a string in the expression is empty (NULL in Oracle) or holds a character that a script cannot carry safely"
+  },
+  {
+    "kind": "check-not-carried",
+    "object": "checks_t.check #5",
+    "message": "check constraint \"typeof(bad) = 'text'\" is not carried: the function typeof has no Oracle equivalent the translator knows"
+  },
+  {
+    "kind": "type-widened",
+    "object": "child_int.pid2",
+    "message": "declared \"INT2\" and carried as NUMBER(5,0), but it joins the columns of its foreign keys, which Oracle requires to be of one type family: carried as NUMBER(19,0)"
+  },
+  {
+    "kind": "fk-action-not-carried",
+    "object": "child_named.fk_child_named",
+    "message": "ON UPDATE RESTRICT does not exist in Oracle: the key is carried without it"
+  },
+  {
+    "kind": "fk-action-not-carried",
+    "object": "child_txt(code)",
+    "message": "ON UPDATE CASCADE does not exist in Oracle: the key is carried without it"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "child_txt.code",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 5"
+  },
+  {
+    "kind": "type-widened",
+    "object": "child_txt.code",
+    "message": "declared \"TEXT\" and carried as VARCHAR2(5 CHAR), but it joins the columns of its foreign keys, which Oracle requires to be of one type family: carried as VARCHAR2(255 CHAR)"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "comp_child.b",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 1"
+  },
+  {
+    "kind": "type-widened",
+    "object": "comp_child.b",
+    "message": "declared \"TEXT\" and carried as VARCHAR2(1 CHAR), but it joins the columns of its foreign keys, which Oracle requires to be of one type family: carried as VARCHAR2(255 CHAR)"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "comp_parent.b",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 1"
+  },
+  {
+    "kind": "type-widened",
+    "object": "comp_parent.b",
+    "message": "declared \"TEXT\" and carried as VARCHAR2(1 CHAR), but it joins the columns of its foreign keys, which Oracle requires to be of one type family: carried as VARCHAR2(255 CHAR)"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "defaults_o.dd",
+    "message": "1 REAL value(s) are written as the exact decimal of their shortest spelling, for example 1.25: SQLite stores a binary float, NUMBER(5,2) an exact decimal"
+  },
+  {
+    "kind": "default-not-carried",
+    "object": "defaults_o.e",
+    "message": "default expression '' cannot be translated to Oracle and is not carried"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "defaults_o.e",
+    "message": "1 empty value(s) become NULL, because Oracle has no empty text"
+  },
+  {
+    "kind": "default-translated",
+    "object": "defaults_o.ts",
+    "message": "default CURRENT_TIMESTAMP on a text column is written as a UTC expression in the same text format"
+  },
+  {
+    "kind": "default-translated",
+    "object": "defaults_o.ts2",
+    "message": "default CURRENT_DATE on a text column is written as a UTC expression in the same text format"
+  },
+  {
+    "kind": "default-translated",
+    "object": "defaults_o.ts3",
+    "message": "default CURRENT_TIME on a text column is written as a UTC expression in the same text format"
+  },
+  {
+    "kind": "default-not-carried",
+    "object": "defaults_o.ts4",
+    "message": "default expression CURRENT_TIMESTAMP cannot be translated to Oracle and is not carried"
+  },
+  {
+    "kind": "default-not-carried",
+    "object": "defaults_t.blobd",
+    "message": "default expression x'01' cannot be translated to Oracle and is not carried"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "defaults_t.dec",
+    "message": "1 REAL value(s) are written as the exact decimal of their shortest spelling, for example 0.1: SQLite stores a binary float, NUMBER(5,2) an exact decimal"
+  },
+  {
+    "kind": "default-not-carried",
+    "object": "defaults_t.expr",
+    "message": "default expression 1+2 cannot be translated to Oracle and is not carried"
+  },
+  {
+    "kind": "default-translated",
+    "object": "defaults_t.tdec",
+    "message": "text default '0.00' of a decimal text column became the numeric default (0.00)"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "defaults_t.tdec",
+    "message": "1 text value(s) are written in the spelling of NUMBER(5,2) (0.00 -\u003e 0)"
+  },
+  {
+    "kind": "default-translated",
+    "object": "defaults_t.ts",
+    "message": "default CURRENT_TIMESTAMP on a text column is written as a UTC expression in the same text format"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "dup_ix.a",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 1"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "dup_ix.b",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 1"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "dup_ix.c",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 1"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "dup_ix.d",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 1"
+  },
+  {
+    "kind": "index-not-carried",
+    "object": "dup_ix.dup_ix_c1",
+    "message": "the index has the columns of the index dup_ix_c2, which Oracle refuses (ORA-01408): it is not created"
+  },
+  {
+    "kind": "index-not-carried",
+    "object": "dup_ix.dup_ix_d2",
+    "message": "the index has the columns of the index dup_ix_d1, which Oracle refuses (ORA-01408): it is not created"
+  },
+  {
+    "kind": "index-not-carried",
+    "object": "dup_ix.dup_ix_pk",
+    "message": "the index has the columns of the primary key, which Oracle refuses (ORA-01408): it is not created"
+  },
+  {
+    "kind": "index-not-carried",
+    "object": "dup_ix.dup_ix_uq",
+    "message": "the index has the columns of the unique key (a,b), which Oracle refuses (ORA-01408): it is not created"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "empties.a",
+    "message": "2 empty value(s) become NULL, because Oracle has no empty text: the column is created without NOT NULL"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "empties.b",
+    "message": "1 empty value(s) become NULL, because Oracle has no empty text"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "empties.d",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 0"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "empties.d",
+    "message": "1 empty value(s) become NULL, because Oracle has no empty text"
+  },
+  {
+    "kind": "default-not-carried",
+    "object": "empties.e",
+    "message": "default expression '' cannot be translated to Oracle and is not carried"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "empties.e",
+    "message": "1 empty value(s) become NULL, because Oracle has no empty text: the column is created without NOT NULL"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "empties.g",
+    "message": "1 empty value(s) become NULL, because Oracle has no empty text"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "empty_key_ok.code",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 1"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "empty_key_ok.code",
+    "message": "1 empty value(s) become NULL, because Oracle has no empty text"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "empty_key_ok.n",
+    "message": "1 empty value(s) become NULL, because Oracle has no empty text: the column is created without NOT NULL"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "empty_raw_key.k",
+    "message": "a key column is carried as RAW(2) (declared \"BLOB\"): Oracle cannot index a CLOB or a BLOB; its longest value is 2"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "fam_child.ref",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 1"
+  },
+  {
+    "kind": "type-widened",
+    "object": "fam_child.ref",
+    "message": "declared \"TEXT\" and carried as VARCHAR2(1 CHAR), but it joins the columns of its foreign keys, which Oracle requires to be of one type family: carried as VARCHAR2(255 CHAR)"
+  },
+  {
+    "kind": "identity-not-carried",
+    "object": "fam_parent.id",
+    "message": "the column is carried as VARCHAR2(255 CHAR), which cannot be an identity column: its counter is not carried"
+  },
+  {
+    "kind": "type-widened",
+    "object": "fam_parent.id",
+    "message": "declared \"INTEGER\" and carried as NUMBER(19,0), but it joins the columns of its foreign keys, which Oracle requires to be of one type family: carried as VARCHAR2(255 CHAR)"
+  },
+  {
+    "kind": "fk-not-carried",
+    "object": "fk_missing_parent",
+    "message": "foreign key (x) references \"not_a_table\", which is not part of this copy"
+  },
+  {
+    "kind": "fk-not-carried",
+    "object": "fk_nonunique_child(v)",
+    "message": "the referenced columns (v) of fk_nonunique are no primary key or unique constraint, which Oracle requires"
+  },
+  {
+    "kind": "fk-violations-in-source",
+    "object": "fk_orphans(p)",
+    "message": "1 row(s) have no parent in parent_int: the key is not created, because Oracle would refuse it"
+  },
+  {
+    "kind": "fk-action-not-carried",
+    "object": "fk_setnull_notnull(p)",
+    "message": "ON UPDATE SET DEFAULT does not exist in Oracle: the key is carried without it"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "hostile.v",
+    "message": "1 empty value(s) become NULL, because Oracle has no empty text"
+  },
+  {
+    "kind": "default-not-carried",
+    "object": "hostile.w",
+    "message": "default expression '' cannot be translated to Oracle and is not carried"
+  },
+  {
+    "kind": "type-widened",
+    "object": "hostile_nul.v",
+    "message": "declared \"TEXT\" but its values are not all of that type: carried as BLOB; a text with a NUL byte is carried as bytes, and a copy back returns BLOBs"
+  },
+  {
+    "kind": "type-widened",
+    "object": "hostile_utf8.v",
+    "message": "declared \"TEXT\" but its values are not all of that type: carried as BLOB; a text that is not valid UTF-8 cannot be stored in a VARCHAR2 column and is carried as bytes"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "index_long_o.a",
+    "message": "a key column is carried as VARCHAR2(1700 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 1700"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "index_long_o.b",
+    "message": "a key column is carried as VARCHAR2(1700 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 1700"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "index_long_o.c",
+    "message": "a key column is carried as VARCHAR2(1700 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 1700"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "index_long_o.d",
+    "message": "a key column is carried as VARCHAR2(1700 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 1700"
+  },
+  {
+    "kind": "index-not-carried",
+    "object": "index_long_o.index_long_o_i",
+    "message": "the key row is longer than the 6000 bytes the script allows in an Oracle index (the longest values of its columns), or the key has a column that cannot be indexed"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "ix_names.a",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 1"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "ix_names.b",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 1"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "key_big_bytes.k",
+    "message": "a key column is carried as RAW(100) (declared \"BLOB\"): Oracle cannot index a CLOB or a BLOB; its longest value is 100"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "key_child.code",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"VARCHAR(4)\"): Oracle cannot index a CLOB or a BLOB; its longest value is 5"
+  },
+  {
+    "kind": "type-widened",
+    "object": "key_child.code",
+    "message": "declared \"VARCHAR(4)\" but some values are longer than that: carried as VARCHAR2(5 CHAR)"
+  },
+  {
+    "kind": "type-widened",
+    "object": "key_child.code",
+    "message": "declared \"VARCHAR(4)\" and carried as VARCHAR2(5 CHAR), but it joins the columns of its foreign keys, which Oracle requires to be of one type family: carried as VARCHAR2(255 CHAR)"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "key_long_o.a",
+    "message": "a key column is carried as VARCHAR2(900 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 900"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "key_long_o.b",
+    "message": "a key column is carried as VARCHAR2(900 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 900"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "key_long_o.c",
+    "message": "a key column is carried as VARCHAR2(900 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 900"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "key_long_o.d",
+    "message": "a key column is carried as VARCHAR2(900 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 900"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "key_long_o.e",
+    "message": "a key column is carried as VARCHAR2(900 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 900"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "key_long_o.f",
+    "message": "a key column is carried as VARCHAR2(900 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 900"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "key_text.code",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 11"
+  },
+  {
+    "kind": "type-widened",
+    "object": "key_text.code",
+    "message": "declared \"TEXT\" and carried as VARCHAR2(11 CHAR), but it joins the columns of its foreign keys, which Oracle requires to be of one type family: carried as VARCHAR2(255 CHAR)"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "key_twins.code",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 2"
+  },
+  {
+    "kind": "type-widened",
+    "object": "key_twins.code",
+    "message": "declared \"TEXT\" and carried as VARCHAR2(2 CHAR), but it joins the columns of its foreign keys, which Oracle requires to be of one type family: carried as VARCHAR2(255 CHAR)"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "key_twins_child.code",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 2"
+  },
+  {
+    "kind": "type-widened",
+    "object": "key_twins_child.code",
+    "message": "declared \"TEXT\" and carried as VARCHAR2(2 CHAR), but it joins the columns of its foreign keys, which Oracle requires to be of one type family: carried as VARCHAR2(255 CHAR)"
+  },
+  {
+    "kind": "name-renamed",
+    "object": "line\nbreak",
+    "message": "table name cannot be stored (the name holds the control, line-break or byte-order-mark character U+000A, which a script line must never carry): created as \"line_break_697affca\""
+  },
+  {
+    "kind": "name-renamed",
+    "object": "line\nbreak.co\nl",
+    "message": "column name cannot be stored (the name holds the control, line-break or byte-order-mark character U+000A, which a script line must never carry): created as \"co_l_dc072b2b\""
+  },
+  {
+    "kind": "name-renamed",
+    "object": "line\nbreak.tab\tcol",
+    "message": "column name cannot be stored (the name holds the control, line-break or byte-order-mark character U+0009, which a script line must never carry): created as \"tab_col_ab1cfc8c\""
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "long_index.a",
+    "message": "a key column is carried as VARCHAR2(300 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 300"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "long_index.b",
+    "message": "a key column is carried as VARCHAR2(300 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 300"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "long_index.c",
+    "message": "a key column is carried as VARCHAR2(300 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 300"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "long_key.a",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 100"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "long_key.b",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 100"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "long_key.c",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 100"
+  },
+  {
+    "kind": "name-renamed",
+    "object": "name-of-129-characters-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "message": "table name cannot be stored (the name is 129 bytes and Oracle takes at most 128): created as \"name-of-129-characters-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_ef202833\""
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "named_keys.a",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 1"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "named_keys.b",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 1"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "named_keys2.a",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 1"
+  },
+  {
+    "kind": "constraint-name-not-carried",
+    "object": "named_keys2.shared_name",
+    "message": "unique constraint name is not carried (the name is taken by another constraint or index of the schema): Oracle names the key itself"
+  },
+  {
+    "kind": "type-widened",
+    "object": "parent_int.id",
+    "message": "declared \"INT4\" and carried as NUMBER(10,0), but it joins the columns of its foreign keys, which Oracle requires to be of one type family: carried as NUMBER(19,0)"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "parent_txt.code",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"VARCHAR(5)\"): Oracle cannot index a CLOB or a BLOB; its longest value is 5"
+  },
+  {
+    "kind": "type-widened",
+    "object": "parent_txt.code",
+    "message": "declared \"VARCHAR(5)\" and carried as VARCHAR2(5 CHAR), but it joins the columns of its foreign keys, which Oracle requires to be of one type family: carried as VARCHAR2(255 CHAR)"
+  },
+  {
+    "kind": "index-not-carried",
+    "object": "partial_ix.partial_ix_a",
+    "message": "partial index (WHERE a IS NOT NULL) is not carried: Oracle has no partial indexes"
+  },
+  {
+    "kind": "name-renamed",
+    "object": "q\"uote",
+    "message": "table name cannot be stored (the name holds a double quotation mark, which Oracle refuses in a name even when it is quoted): created as \"q_uote_158ef06c\""
+  },
+  {
+    "kind": "name-renamed",
+    "object": "q\"uote.ROWID",
+    "message": "column name cannot be stored (ROWID is a reserved word that Oracle refuses as a name even when it is quoted): created as \"ROWID_ef2a45f7\""
+  },
+  {
+    "kind": "name-renamed",
+    "object": "q\"uote.c\"ol",
+    "message": "column name cannot be stored (the name holds a double quotation mark, which Oracle refuses in a name even when it is quoted): created as \"c_ol_986e17bd\""
+  },
+  {
+    "kind": "values-normalized",
+    "object": "range_t.big",
+    "message": "1 REAL and 1 INTEGER value(s) share one NUMBER(20,0) column: SQLite keeps them apart (5 and 5.0), NUMBER(20,0) does not; each REAL is written as the exact decimal of its shortest spelling, for example 12345678901234567000"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "range_t.n",
+    "message": "2 REAL value(s) are written as the exact decimal of their shortest spelling, for example 12345678901234568000000000: SQLite stores a binary float, NUMBER(38,10) an exact decimal"
+  },
+  {
+    "kind": "type-widened",
+    "object": "range_t.t",
+    "message": "declared \"TIME\" but Oracle has no time of day type: carried as VARCHAR2(15 CHAR)"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "ref_ui.code",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 1"
+  },
+  {
+    "kind": "type-widened",
+    "object": "ref_ui.code",
+    "message": "declared \"TEXT\" and carried as VARCHAR2(1 CHAR), but it joins the columns of its foreign keys, which Oracle requires to be of one type family: carried as VARCHAR2(255 CHAR)"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "ref_ui.other",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 1"
+  },
+  {
+    "kind": "fk-not-carried",
+    "object": "ref_ui_child(other)",
+    "message": "the referenced columns (other) of ref_ui are no primary key or unique constraint, which Oracle requires"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "ref_ui_child.code",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 1"
+  },
+  {
+    "kind": "type-widened",
+    "object": "ref_ui_child.code",
+    "message": "declared \"TEXT\" and carried as VARCHAR2(1 CHAR), but it joins the columns of its foreign keys, which Oracle requires to be of one type family: carried as VARCHAR2(255 CHAR)"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "ref_ui_child.other",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 0"
+  },
+  {
+    "kind": "fk-action-not-carried",
+    "object": "tree(parent)",
+    "message": "ON DELETE RESTRICT does not exist in Oracle: the key is carried with no action, which refuses the same change when the key is not deferred"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "tree.name",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 4"
+  },
+  {
+    "kind": "type-widened",
+    "object": "type_changes.decl_char",
+    "message": "declared \"CHAR(3)\" but some values are longer than that: carried as VARCHAR2(4000 BYTE)"
+  },
+  {
+    "kind": "type-widened",
+    "object": "type_changes.mixed_n",
+    "message": "declared \"NUMERIC(4,1)\" but some values do not fit that precision and scale exactly, or its default does not: carried as NUMBER(3,2)"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "type_changes.mixed_n",
+    "message": "1 REAL and 1 INTEGER value(s) share one NUMBER(3,2) column: SQLite keeps them apart (5 and 5.0), NUMBER(3,2) does not; each REAL is written as the exact decimal of its shortest spelling, for example 1.25"
+  },
+  {
+    "kind": "type-widened",
+    "object": "type_changes.nodecl",
+    "message": "has no declared type: carried as VARCHAR2(4000 BYTE) from its values"
+  },
+  {
+    "kind": "type-widened",
+    "object": "type_changes.small",
+    "message": "declared \"INT2\" but its values do not fit NUMBER(5,0): carried as NUMBER(19,0)"
+  },
+  {
+    "kind": "type-widened",
+    "object": "types_edge.big_b",
+    "message": "declared \"BLOB\" but its values are not all of that type: carried as BLOB"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "types_edge.d_bare",
+    "message": "2 REAL and 1 INTEGER value(s) share one NUMBER(3,2) column: SQLite keeps them apart (5 and 5.0), NUMBER(3,2) does not; each REAL is written as the exact decimal of its shortest spelling, for example 1.25"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "types_edge.d_fixed",
+    "message": "2 REAL and 1 INTEGER value(s) share one NUMBER(10,2) column: SQLite keeps them apart (5 and 5.0), NUMBER(10,2) does not; each REAL is written as the exact decimal of its shortest spelling, for example 12.5"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "types_edge.d_money",
+    "message": "1 REAL and 1 INTEGER value(s) share one NUMBER(2,1) column: SQLite keeps them apart (5 and 5.0), NUMBER(2,1) does not; each REAL is written as the exact decimal of its shortest spelling, for example 3.5"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "types_edge.d_text",
+    "message": "2 text value(s) are written in the spelling of NUMBER(12,4) (.0000 -\u003e 0)"
+  },
+  {
+    "kind": "type-widened",
+    "object": "types_edge.dt_dateonly",
+    "message": "declared \"DATETIME\" but its values are not all of that type: carried as VARCHAR2(4000 BYTE)"
+  },
+  {
+    "kind": "type-widened",
+    "object": "types_edge.js",
+    "message": "declared \"JSON_TEXT\" but the script has no such type: carried as VARCHAR2(4000 BYTE)"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "types_edge.long_tx",
+    "message": "1 empty value(s) become NULL, because Oracle has no empty text"
+  },
+  {
+    "kind": "type-widened",
+    "object": "types_edge.mixed",
+    "message": "has no declared type: carried as BLOB from its values"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "types_edge.nv",
+    "message": "1 empty value(s) become NULL, because Oracle has no empty text"
+  },
+  {
+    "kind": "type-widened",
+    "object": "types_edge.t",
+    "message": "declared \"TIME\" but Oracle has no time of day type: carried as VARCHAR2(8 CHAR)"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "types_edge.tx",
+    "message": "1 empty value(s) become NULL, because Oracle has no empty text"
+  },
+  {
+    "kind": "type-widened",
+    "object": "types_edge.tz",
+    "message": "declared \"TIMESTAMPTZ\" but the script has no such type: carried as VARCHAR2(4000 BYTE)"
+  },
+  {
+    "kind": "type-widened",
+    "object": "types_edge.untyped",
+    "message": "has no declared type: carried as BLOB from its values"
+  },
+  {
+    "kind": "type-widened",
+    "object": "types_o.js",
+    "message": "declared \"JSON_TEXT\" but the script has no such type: carried as VARCHAR2(4000 BYTE)"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "types_o.money",
+    "message": "1 REAL value(s) are written as the exact decimal of their shortest spelling, for example 12.5: SQLite stores a binary float, NUMBER(3,1) an exact decimal"
+  },
+  {
+    "kind": "type-widened",
+    "object": "types_o.n",
+    "message": "declared \"NUMERIC(5,2)\" but some values do not fit that precision and scale exactly, or its default does not: carried as NUMBER(6,3)"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "types_o.n",
+    "message": "1 REAL value(s) are written as the exact decimal of their shortest spelling, for example 123.456: SQLite stores a binary float, NUMBER(6,3) an exact decimal"
+  },
+  {
+    "kind": "type-widened",
+    "object": "types_o.t",
+    "message": "declared \"TIME\" but Oracle has no time of day type: carried as VARCHAR2(11 CHAR)"
+  },
+  {
+    "kind": "type-widened",
+    "object": "types_o.tz",
+    "message": "declared \"TIMESTAMPTZ\" but the script has no such type: carried as VARCHAR2(4000 BYTE)"
+  },
+  {
+    "kind": "unique-filtered",
+    "object": "uniq_many_null.UQ_uniq_many_null_a_b",
+    "message": "the unique key (a, b) allows several NULLs in SQLite, and Oracle treats NULLs in a multi-column unique key as equal: it is written as a unique function-based index that holds no row with a NULL, which a foreign key cannot reference"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "uniq_many_null.a",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 1"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "uniq_many_null.c",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 1"
+  },
+  {
+    "kind": "type-widened",
+    "object": "uniq_many_null.c",
+    "message": "declared \"TEXT\" and carried as VARCHAR2(1 CHAR), but it joins the columns of its foreign keys, which Oracle requires to be of one type family: carried as VARCHAR2(255 CHAR)"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "uniq_one_null.a",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 1"
+  },
+  {
+    "kind": "type-widened",
+    "object": "uniq_one_null.a",
+    "message": "declared \"TEXT\" and carried as VARCHAR2(1 CHAR), but it joins the columns of its foreign keys, which Oracle requires to be of one type family: carried as VARCHAR2(255 CHAR)"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "uniq_ref.a",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 1"
+  },
+  {
+    "kind": "type-widened",
+    "object": "uniq_ref.a",
+    "message": "declared \"TEXT\" and carried as VARCHAR2(1 CHAR), but it joins the columns of its foreign keys, which Oracle requires to be of one type family: carried as VARCHAR2(255 CHAR)"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "uniq_ref_many.c",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 1"
+  },
+  {
+    "kind": "type-widened",
+    "object": "uniq_ref_many.c",
+    "message": "declared \"TEXT\" and carried as VARCHAR2(1 CHAR), but it joins the columns of its foreign keys, which Oracle requires to be of one type family: carried as VARCHAR2(255 CHAR)"
+  },
+  {
+    "kind": "unique-filtered",
+    "object": "uniq_t.UQ_uniq_t_a_b",
+    "message": "the unique key (a, b) allows several NULLs in SQLite, and Oracle treats NULLs in a multi-column unique key as equal: it is written as a unique function-based index that holds no row with a NULL, which a foreign key cannot reference"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "uniq_t.a",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 1"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "uniq_t.b",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 1"
+  },
+  {
+    "kind": "index-not-carried",
+    "object": "uniq_t.uniq_t_b",
+    "message": "the unique index (b) is descending, and Oracle indexes a NULL of a descending key as a value that collides with another NULL, while SQLite allows many: it is carried ascending"
+  },
+  {
+    "kind": "storage-option-not-carried",
+    "object": "without_rowid_t",
+    "message": "WITHOUT ROWID is a SQLite storage option and is not carried"
+  },
+  {
+    "kind": "key-type-bounded",
+    "object": "without_rowid_t.k",
+    "message": "a key column is carried as VARCHAR2(255 CHAR) (declared \"TEXT\"): Oracle cannot index a CLOB or a BLOB; its longest value is 2"
+  },
+  {
+    "kind": "name-case-collision",
+    "object": "Ünï_t / ünï_t",
+    "message": "these table names differ only by case: Oracle keeps them apart because the script quotes every name; a client that writes them without quotes reads them as one name in upper case"
+  },
+  {
+    "kind": "name-renamed",
+    "object": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+    "message": "table name cannot be stored (the name is 130 bytes and Oracle takes at most 128): created as \"____________________________________________________________c8a2666a\""
+  }
+]

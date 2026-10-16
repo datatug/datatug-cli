@@ -60,6 +60,7 @@ func Verify(ctx context.Context, in Input) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	in.Schema = cat.Schema // the schema the reader resolved, for what an engine asks about a table
 	res := &Result{}
 	add := func(obj, aspect, want, got string) {
 		if want != got {
@@ -279,20 +280,27 @@ func implicitFKIndex(t *faithful.ScriptTable, ix MyIndex) bool {
 }
 
 func compareFKs(t *faithful.ScriptTable, mt *MyTable, add func(obj, aspect, want, got string)) {
-	sig := func(cols []string, ref string, refCols []string, upd, del string) string {
-		return fmt.Sprintf("(%s)->%s(%s) update %s delete %s", strings.Join(cols, ","), ref, strings.Join(refCols, ","), upd, del)
+	sig := func(cols []string, ref string, refCols []string, upd, del string, deferrable, deferred bool) string {
+		s := fmt.Sprintf("(%s)->%s(%s) update %s delete %s", strings.Join(cols, ","), ref, strings.Join(refCols, ","), upd, del)
+		if deferrable {
+			s += " deferrable"
+			if deferred {
+				s += " initially deferred"
+			}
+		}
+		return s
 	}
 	var want, got []string
 	names := map[string]string{}
 	for _, fk := range t.FKs {
-		s := sig(fk.Columns, fk.RefTable, fk.RefColumns, fk.OnUpdate, fk.OnDelete)
+		s := sig(fk.Columns, fk.RefTable, fk.RefColumns, fk.OnUpdate, fk.OnDelete, fk.Deferrable, fk.Deferred)
 		want = append(want, s)
 		if fk.Name != "" {
 			names[s] = fk.Name
 		}
 	}
 	for _, fk := range mt.FKs {
-		s := sig(fk.Columns, fk.RefTable, fk.RefColumns, fk.OnUpdate, fk.OnDelete)
+		s := sig(fk.Columns, fk.RefTable, fk.RefColumns, fk.OnUpdate, fk.OnDelete, fk.Deferrable, fk.Deferred)
 		got = append(got, s)
 		if n, ok := names[s]; ok && n != fk.Name {
 			add(t.Name+"."+n, "foreign key name", n, fk.Name)

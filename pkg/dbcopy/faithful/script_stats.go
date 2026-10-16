@@ -25,6 +25,7 @@ type ScriptStats struct {
 	MaxIntDigits  int   // most integer digits of a value that is a decimal number
 	MaxFracDigits int
 	Empty         int64 // empty texts
+	EmptyBlobs    int64 // empty blobs
 	// RealExample is the first REAL value the column holds, as its shortest decimal ("" when it holds none).
 	RealExample string
 	// Decimal texts: how many are not in canonical spelling (with the first), and how many canonical ones have each
@@ -33,6 +34,9 @@ type ScriptStats struct {
 	nonCanonExample  string
 	canonFrac        map[int]int64
 	canonFracExample map[int]string
+	// Decimal texts an engine that keeps no trailing zeros (Oracle's NUMBER) spells differently, with the first.
+	trimmed        int64
+	trimmedExample string
 }
 
 func newScriptStats(d declInfo) *ScriptStats { return &ScriptStats{colStats: newStats(d)} }
@@ -64,6 +68,9 @@ func (s *ScriptStats) add(v any) {
 		}
 	case []byte:
 		s.MaxBlob = max(s.MaxBlob, len(x))
+		if len(x) == 0 {
+			s.EmptyBlobs++
+		}
 	case string:
 		s.MaxBytes = max(s.MaxBytes, len(x))
 		s.MaxU16 = max(s.MaxU16, utf16Len(x))
@@ -113,7 +120,23 @@ func utf16Len(x string) int {
 	return n
 }
 
+// trimmedDecimalText is a decimal text as a type that keeps no trailing zeros spells it: the canonical spelling
+// without the zeros after the point (1.50 is 1.5, 0.0000 is 0).
+func trimmedDecimalText(x string) string {
+	c := canonicalDecimalText(x)
+	if strings.Contains(c, ".") {
+		c = strings.TrimRight(strings.TrimRight(c, "0"), ".")
+	}
+	return c
+}
+
 func (s *ScriptStats) spelling(x string) {
+	if t := trimmedDecimalText(x); t != x {
+		s.trimmed++
+		if s.trimmedExample == "" {
+			s.trimmedExample = x + " -> " + t
+		}
+	}
 	if canon := canonicalDecimalText(x); canon != x {
 		s.textNonCanon++
 		if s.nonCanonExample == "" {

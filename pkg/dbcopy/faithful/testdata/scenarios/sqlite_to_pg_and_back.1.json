@@ -321,8 +321,23 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT COALESCE(pg_get_serial_sequence($1, $2), (SELECT min(name) FROM s WHERE (SELECT count(*) FROM s) = 1))",
+  "cols": [
+   "coalesce"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "public.\"Parent_id_seq\""
+    }
+   ]
+  ]
+ },
+ {
   "kind": "exec",
-  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
   "affected": 1
  },
  {
@@ -341,8 +356,23 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT COALESCE(pg_get_serial_sequence($1, $2), (SELECT min(name) FROM s WHERE (SELECT count(*) FROM s) = 1))",
+  "cols": [
+   "coalesce"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "public.grandchild_n_seq"
+    }
+   ]
+  ]
+ },
+ {
   "kind": "exec",
-  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
   "affected": 1
  },
  {
@@ -732,8 +762,23 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT COALESCE(pg_get_serial_sequence($1, $2), (SELECT min(name) FROM s WHERE (SELECT count(*) FROM s) = 1))",
+  "cols": [
+   "coalesce"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "public.\"Parent_id_seq\""
+    }
+   ]
+  ]
+ },
+ {
   "kind": "exec",
-  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
   "affected": 1
  },
  {
@@ -752,8 +797,23 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT COALESCE(pg_get_serial_sequence($1, $2), (SELECT min(name) FROM s WHERE (SELECT count(*) FROM s) = 1))",
+  "cols": [
+   "coalesce"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "public.grandchild_n_seq"
+    }
+   ]
+  ]
+ },
+ {
   "kind": "exec",
-  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
   "affected": 1
  },
  {
@@ -1131,8 +1191,23 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT COALESCE(pg_get_serial_sequence($1, $2), (SELECT min(name) FROM s WHERE (SELECT count(*) FROM s) = 1))",
+  "cols": [
+   "coalesce"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "public.\"Parent_id_seq\""
+    }
+   ]
+  ]
+ },
+ {
   "kind": "exec",
-  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
   "affected": 1
  },
  {
@@ -1151,8 +1226,23 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT COALESCE(pg_get_serial_sequence($1, $2), (SELECT min(name) FROM s WHERE (SELECT count(*) FROM s) = 1))",
+  "cols": [
+   "coalesce"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "public.grandchild_n_seq"
+    }
+   ]
+  ]
+ },
+ {
   "kind": "exec",
-  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
   "affected": 1
  },
  {
@@ -1194,7 +1284,7 @@
    [
     {
      "t": "i",
-     "v": 65869
+     "v": 17843
     },
     {
      "t": "s",
@@ -1216,7 +1306,7 @@
    [
     {
      "t": "i",
-     "v": 65882
+     "v": 17856
     },
     {
      "t": "s",
@@ -1238,7 +1328,7 @@
    [
     {
      "t": "i",
-     "v": 65901
+     "v": 17875
     },
     {
      "t": "s",
@@ -1260,7 +1350,7 @@
    [
     {
      "t": "i",
-     "v": 65890
+     "v": 17864
     },
     {
      "t": "s",
@@ -1282,7 +1372,7 @@
    [
     {
      "t": "i",
-     "v": 65895
+     "v": 17869
     },
     {
      "t": "s",
@@ -4076,7 +4166,7 @@
     },
     {
      "t": "s",
-     "v": "2026-10-15 14:10:02"
+     "v": "2026-10-16 00:00:20"
     },
     {
      "t": "i",
@@ -4141,7 +4231,7 @@
     },
     {
      "t": "s",
-     "v": "2026-10-15 14:10:02"
+     "v": "2026-10-16 00:00:20"
     },
     {
      "t": "i",
@@ -4316,7 +4406,7 @@
    [
     {
      "t": "i",
-     "v": 65869
+     "v": 17843
     },
     {
      "t": "s",
@@ -4338,7 +4428,7 @@
    [
     {
      "t": "i",
-     "v": 65882
+     "v": 17856
     },
     {
      "t": "s",
@@ -4360,7 +4450,7 @@
    [
     {
      "t": "i",
-     "v": 65901
+     "v": 17875
     },
     {
      "t": "s",
@@ -4382,7 +4472,7 @@
    [
     {
      "t": "i",
-     "v": 65890
+     "v": 17864
     },
     {
      "t": "s",
@@ -4404,7 +4494,7 @@
    [
     {
      "t": "i",
-     "v": 65895
+     "v": 17869
     },
     {
      "t": "s",
@@ -7198,7 +7288,7 @@
     },
     {
      "t": "s",
-     "v": "2026-10-15 14:10:02"
+     "v": "2026-10-16 00:00:20"
     },
     {
      "t": "s",
@@ -7263,7 +7353,7 @@
     },
     {
      "t": "s",
-     "v": "2026-10-15 14:10:02"
+     "v": "2026-10-16 00:00:20"
     },
     {
      "t": "s",

@@ -71,7 +71,7 @@ func TestPostgresReloadKeepsANotEnforcedKey(t *testing.T) {
 		t.Skip("NOT ENFORCED keys are PostgreSQL 18")
 	}
 	mustCopy(t, src, pg, Options{})
-	execAll(t, pg.DB, `ALTER TABLE child DROP CONSTRAINT child_p_fkey`, `ALTER TABLE child ADD CONSTRAINT child_p_fkey FOREIGN KEY (p) REFERENCES parent (id) NOT ENFORCED`)
+	execAll(t, pg.DB, `ALTER TABLE child ADD CONSTRAINT child_p_fkey FOREIGN KEY (p) REFERENCES parent (id) NOT ENFORCED`)
 	mustCopy(t, src, pg, Options{Overwrite: "reload"})
 	if got := pgText(t, pg.DB, `SELECT conenforced::text FROM pg_constraint WHERE conname = 'child_p_fkey'`); got != "false" {
 		t.Errorf("enforced after the reload: %s", got)

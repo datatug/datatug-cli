@@ -91,7 +91,7 @@ var scenarioChecks = map[string]func(t *testing.T, e *scenarioEnv){
 	},
 	"filters_and_reload": func(t *testing.T, e *scenarioEnv) {
 		c := e.copies
-		if len(c) != 16 {
+		if len(c) != 18 {
 			t.Fatalf("copies %d", len(c))
 		}
 		if c[0].err != nil || !hasWarning(c[0].rep, WarnFKNotValidated, "child(parent_id)") {
@@ -131,6 +131,12 @@ var scenarioChecks = map[string]func(t *testing.T, e *scenarioEnv){
 		}
 		if c[15].rep == nil || hasWarningText(c[15].rep, "child", "not part of this copy") {
 			t.Errorf("the key to a table that is not part of the copy is on the target: %v", c[15].rep)
+		}
+		if c[16].err != nil || hasWarning(c[16].rep, WarnIdentityNotCarried, "Parent.id") {
+			t.Errorf("the counter of a sequence the column does not own is moved: %v %v", c[16].err, c[16].rep.Warnings)
+		}
+		if c[17].err != nil || !hasWarningText(c[17].rep, "Parent.id", "exactly one sequence") {
+			t.Errorf("a column with no sequence is said: %v %v", c[17].err, c[17].rep.Warnings)
 		}
 	},
 	"filters_from_pg": func(t *testing.T, e *scenarioEnv) {

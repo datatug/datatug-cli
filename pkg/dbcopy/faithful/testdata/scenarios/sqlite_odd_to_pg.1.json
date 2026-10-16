@@ -302,8 +302,23 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT COALESCE(pg_get_serial_sequence($1, $2), (SELECT min(name) FROM s WHERE (SELECT count(*) FROM s) = 1))",
+  "cols": [
+   "coalesce"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "copy_target.p_id_seq"
+    }
+   ]
+  ]
+ },
+ {
   "kind": "exec",
-  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
   "affected": 1
  },
  {
@@ -322,8 +337,23 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT COALESCE(pg_get_serial_sequence($1, $2), (SELECT min(name) FROM s WHERE (SELECT count(*) FROM s) = 1))",
+  "cols": [
+   "coalesce"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "copy_target.c_id_seq"
+    }
+   ]
+  ]
+ },
+ {
   "kind": "exec",
-  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
   "affected": 1
  },
  {
@@ -342,8 +372,23 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT COALESCE(pg_get_serial_sequence($1, $2), (SELECT min(name) FROM s WHERE (SELECT count(*) FROM s) = 1))",
+  "cols": [
+   "coalesce"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "copy_target.nonkey_id_seq"
+    }
+   ]
+  ]
+ },
+ {
   "kind": "exec",
-  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
   "affected": 1
  },
  {
@@ -362,8 +407,23 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT COALESCE(pg_get_serial_sequence($1, $2), (SELECT min(name) FROM s WHERE (SELECT count(*) FROM s) = 1))",
+  "cols": [
+   "coalesce"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "copy_target.badthings_id_seq"
+    }
+   ]
+  ]
+ },
+ {
   "kind": "exec",
-  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
   "affected": 1
  },
  {
@@ -382,8 +442,23 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT COALESCE(pg_get_serial_sequence($1, $2), (SELECT min(name) FROM s WHERE (SELECT count(*) FROM s) = 1))",
+  "cols": [
+   "coalesce"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "copy_target.types_id_seq"
+    }
+   ]
+  ]
+ },
+ {
   "kind": "exec",
-  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "sql": "SELECT setval($1::text::regclass, $2, false)",
   "affected": 1
  },
  {

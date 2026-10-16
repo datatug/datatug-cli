@@ -652,6 +652,9 @@ func (x *executor) warnLosses(t *TargetTable) {
 		if c.loss.rounded > 0 {
 			x.plan.warn(WarnValuesNormalized, obj, "%d value(s) have more digits than a SQLite number holds and were rounded: the declared type has numeric affinity", c.loss.rounded)
 		}
+		if c.loss.special > 0 {
+			x.plan.warn(WarnValuesNormalized, obj, "%d numeric NaN / Infinity value(s) are kept as their text: SQLite has no such number", c.loss.special)
+		}
 		if c.loss.negZero > 0 {
 			x.plan.warn(WarnValuesNormalized, obj, "%d negative zero value(s) became 0: SQLite does not keep the sign of a zero", c.loss.negZero)
 		}
@@ -1038,8 +1041,17 @@ func (x *executor) counters(q execer) error {
 				continue
 			}
 			if x.to.Engine == Postgres {
+				seq, err := x.counterSequence(q, qn, c.Name)
+				if err != nil {
+					return fmt.Errorf("find the counter of %s.%s: %w", t.Name, c.Name, err)
+				}
+				if seq == "" {
+					// setval(NULL, ...) does nothing and says nothing: the counter is not moved, and that is said.
+					x.plan.warn(WarnIdentityNotCarried, t.Name+"."+c.Name, "the target column does not take its values from exactly one sequence (serial, identity or a nextval default): its counter is not set to %d, so a new row may get an id that a copied row has", next)
+					continue
+				}
 				// setval, not ALTER ... RESTART WITH: that one is refused while a deferred key of the table has pending checks (55006).
-				if _, err := q.ExecContext(ctx, "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)", qn, c.Name, next); err != nil {
+				if _, err := q.ExecContext(ctx, "SELECT setval($1::text::regclass, $2, false)", seq, next); err != nil {
 					return fmt.Errorf("set the counter of %s.%s: %w", t.Name, c.Name, err)
 				}
 			} else if c.Identity == IdentityAutoincrement && next > 1 {
@@ -1053,6 +1065,23 @@ func (x *executor) counters(q execer) error {
 		}
 	}
 	return nil
+}
+
+// counterSequence names the sequence that numbers a column of the target: the one a serial or identity
+// column owns, or else the only one its DEFAULT takes values from (nextval('s') on a sequence the column
+// does not own). It is "" when there is none or more than one: the caller says so.
+func (x *executor) counterSequence(q execer, qualifiedTable, column string) (string, error) {
+	var seq sql.NullString
+	err := q.QueryRowContext(x.ctx, `
+WITH s AS (
+  SELECT d.refobjid::regclass::text AS name
+  FROM pg_attrdef ad
+  JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass
+  JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S'
+  WHERE ad.adrelid = $1::text::regclass
+    AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2))
+SELECT COALESCE(pg_get_serial_sequence($1, $2), (SELECT min(name) FROM s WHERE (SELECT count(*) FROM s) = 1))`, qualifiedTable, column).Scan(&seq)
+	return seq.String, err
 }
 
 // tolerated is a failure of a statement the copy can do without (an index, a check, a foreign key): it

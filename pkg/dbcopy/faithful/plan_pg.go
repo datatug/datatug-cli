@@ -3,7 +3,9 @@ package faithful
 import (
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -222,10 +224,23 @@ func sqliteReadExpr(c *Column) string { return "+" + quoteIdent(c.Name) }
 // decimalDefaultSpelling is how numeric(p,s) spells a default number: padded to the scale.
 func decimalDefaultSpelling(def, pgType string) string {
 	e := strings.Trim(strings.Trim(strings.TrimSpace(def), "() "), "'")
-	if !reDec.MatchString(e) {
+	if !reDefNumber.MatchString(e) {
 		return e
 	}
-	spelled := canonicalDecimalText(e)
+	r, ok := new(big.Rat).SetString(e)
+	if !ok {
+		return e // an exponent too large for Rat to read
+	}
+	// PostgreSQL keeps the decimals the literal is written with, less the exponent: 1.50 stays 1.50,
+	// 1e2 is 100, 1.5e1 is 15.0, and a leading + or zeros, or a trailing dot, are not part of the number.
+	mantissa, exp, _ := strings.Cut(strings.ToLower(e), "e")
+	_, frac, _ := strings.Cut(mantissa, ".")
+	scale := len(frac)
+	if exp != "" {
+		n, _ := strconv.Atoi(exp)
+		scale -= n
+	}
+	spelled := r.FloatString(max(scale, 0))
 	var p, s int
 	if n, _ := fmt.Sscanf(pgType, "numeric(%d,%d)", &p, &s); n == 2 {
 		_, frac, _ := strings.Cut(spelled, ".")

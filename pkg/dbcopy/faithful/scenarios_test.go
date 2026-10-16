@@ -458,6 +458,13 @@ var scenarios = []scenario{
 		e.copy(src, pg, Options{Overwrite: "reload"})
 		// A table is reloaded alone: its key to a table that is not part of the copy stays on the target and is not said to be missing.
 		e.copy(src, pg, Options{Overwrite: "reload", Include: []string{"child"}})
+		// The counter of a column that takes its numbers from a sequence it does not own is moved too; a column with none is said.
+		family := []string{"Parent", "child", "grandchild"}
+		quiet(pg.DB, `ALTER TABLE "public"."Parent" ALTER COLUMN id DROP IDENTITY`, `CREATE SEQUENCE "public".shared_seq`,
+			`ALTER TABLE "public"."Parent" ALTER COLUMN id SET DEFAULT nextval('shared_seq')`)
+		e.copy(src, pg, Options{Overwrite: "reload", Include: family})
+		quiet(pg.DB, `ALTER TABLE "public"."Parent" ALTER COLUMN id DROP DEFAULT`)
+		e.copy(src, pg, Options{Overwrite: "reload", Include: family})
 	}},
 	{name: "filters_from_pg", pgs: 1, run: func(e *scenarioEnv) {
 		// From a PostgreSQL source: where and limit read through the server.

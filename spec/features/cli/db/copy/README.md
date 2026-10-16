@@ -398,7 +398,7 @@ All ACs are testable via `go test ./...` plus shell-driven E2E runs invoking the
 Inherited from the source Idea, reinforced at Feature-spec time:
 
 - **`project export` / `project import` wrappers** — discarded. The source Idea originally floated these as stretch goals; the design conversation concluded they don't earn the surface area. `db copy --from <project-url> --to <other-url>` and the reverse suffice.
-- **Incremental / delta sync** — MVP is one-shot full copy. Delta sync is a separate future Idea.
+- **Incremental / delta sync** — MVP is one-shot full copy. Incremental, additive history of a database, and every remote or cloud destination, belong to [`datatug backup`](../../backup/README.md) (Draft), which runs this command's source side and adds the destination policy.
 - **In-flight row filters, column mappings, anonymization** — separate concern. `db copy` is structural; transformations live in a follow-up command.
 - **Conflict resolution on a non-empty target beyond `--overwrite=recreate|reload`** — no `--overwrite=merge`, no row-level upsert. MVP requires the user to choose drop-and-rebuild or truncate-and-reload.
 - **All DALgo backends** — only SQLite, inGitDB, and PostgreSQL are E2E-tested. Other DALgo backends (e.g. Datastore, Firestore) MAY work through the abstraction but are not guaranteed by this Feature.

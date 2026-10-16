@@ -73,6 +73,10 @@ type LinkRequest struct {
 	// Code is the one-time code of the agent (agentaccess.MintCode), put first in the fragment of
 	// every link; "" when the agent has none to give.
 	Code string
+	// Metadata reads the scanned relations named Table (nil when the project holds none): the link is
+	// checked against them, and carries a warning when there is nothing to check against. It runs
+	// last, after every check of the request itself; a nil function is no metadata.
+	Metadata func() *Metadata
 }
 
 // Link is the deep link of one card.
@@ -81,6 +85,8 @@ type Link struct {
 	Kind      string `json:"kind"`
 	Running   bool   `json:"running"`
 	UISupport string `json:"uiSupport"`
+	// Warnings is always present ([] when empty) so the shape is stable.
+	Warnings []string `json:"warnings"`
 }
 
 // BuildLink builds the deep link of contract deep-link-contract for the agent
@@ -114,7 +120,8 @@ func BuildLink(st Status, req LinkRequest) (Link, error) {
 		encodeComponent(req.Project), encodeComponent(req.Env), encodeComponent(req.DB), kind, encodeComponent(req.Table))
 	schema := "schema=" + encodeComponent(req.Schema)
 	var fragment []string
-	out := Link{Kind: KindTableMetadata, Running: st.Running}
+	out := Link{Kind: KindTableMetadata, Running: st.Running, Warnings: []string{}}
+	var keys []string
 	switch {
 	case req.Records:
 		limit := req.Limit
@@ -133,6 +140,7 @@ func BuildLink(st Status, req LinkRequest) (Link, error) {
 		}
 		u += "/record?" + schema
 		fragment = append(fragment, "pk="+encodeComponent(pk))
+		keys = keyNames(pk)
 		out.Kind = KindRecord
 	default:
 		u += "?" + schema
@@ -145,6 +153,19 @@ func BuildLink(st Status, req LinkRequest) (Link, error) {
 	}
 	if len(u) > MaxLinkLength {
 		return Link{}, UsageError{fmt.Sprintf("the link would be longer than %d characters", MaxLinkLength)}
+	}
+	var meta *Metadata
+	if req.Metadata != nil {
+		meta = req.Metadata()
+	}
+	if meta == nil {
+		out.Warnings = append(out.Warnings, WarningNotScanned)
+	} else {
+		w, err := meta.check(req, keys)
+		if err != nil {
+			return Link{}, err
+		}
+		out.Warnings = append(out.Warnings, w...)
 	}
 	out.URL, out.UISupport = u, uiSupport[out.Kind]
 	return out, nil

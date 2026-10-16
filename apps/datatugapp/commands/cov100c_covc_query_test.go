@@ -145,7 +145,7 @@ func TestCovCQueryFailureDefaultAndBuildQueryBadDocument(t *testing.T) {
 	if err := os.WriteFile(file, []byte("from: [unclosed"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err = buildQuery(queryOptions{file: file}, strings.NewReader(""))
+	_, _, err = buildQuery(queryOptions{file: file}, strings.NewReader(""))
 	if !errors.As(err, &coder) || coder.ExitCode() != exitCodeUsage {
 		t.Fatalf("buildQuery bad document: %v", err)
 	}

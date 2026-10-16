@@ -292,3 +292,55 @@ func TestOracleFKToAFilteredParentSaysWhy(t *testing.T) {
 		t.Errorf("plain: %q", plain)
 	}
 }
+
+// A negative number is written as "- 297": the wrapper never cuts after the minus, because SQL*Plus drops a trailing hyphen
+// and joins the next line, which would turn -297 into 297 in the constraint.
+func TestOracleNeverEndsALineInAHyphen(t *testing.T) {
+	var in []string
+	for i := 1; i <= 400; i++ {
+		in = append(in, fmt.Sprintf("-%d", i))
+	}
+	script, _ := exportOracle(t, sqliteWith(t, `CREATE TABLE neg (id INTEGER PRIMARY KEY, n INTEGER CHECK (n IN (`+strings.Join(in, ", ")+`)))`, `INSERT INTO neg VALUES (1, -1)`))
+	checkOracleLines(t, script)
+	i := strings.Index(script, "ADD CHECK (")
+	stmt := script[i : i+strings.Index(script[i:], ";\n")]
+	if !strings.Contains(stmt, "\n") {
+		t.Fatal("the list was not wrapped")
+	}
+	if got := strings.Count(strings.ReplaceAll(stmt, "\n", " "), "- "); got != 400 {
+		t.Errorf("%d minus signs, want 400", got)
+	}
+	// The rule on the cut itself: a space after a minus is not a place to cut, however long the line is.
+	l := "CHECK (n IN (" + strings.Repeat("- 123 , ", 400) + "- 7))"
+	for _, line := range strings.Split(oracleWrap(l), "\n") {
+		if strings.HasSuffix(strings.TrimRight(line, " \t"), "-") {
+			t.Fatalf("a line ends in a hyphen: %.40q", line[len(line)-40:])
+		}
+	}
+	if !oracleWrapStart("- 7") || oracleWrapStart("- x") || oracleWrapStart("-") {
+		t.Error("a minus apart from its number starts a line only before a digit")
+	}
+}
+
+func TestLineGuardRefusesAHyphenEnd(t *testing.T) {
+	var buf bytes.Buffer
+	g := &lineGuard{w: &buf, max: 100, noHyphen: true}
+	// comments may end in a hyphen; so may any line when the client does not join them
+	if _, err := g.Write([]byte("-- note -\nSELECT 1 FROM DUAL;\n")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Write([]byte("SELECT 10 ")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Write([]byte("-  \t\n3 FROM DUAL;\n")); err == nil || !strings.Contains(err.Error(), "ends in a hyphen") || !strings.Contains(err.Error(), `starts "SELECT 10 `) {
+		t.Fatalf("%v", err)
+	}
+	var loose bytes.Buffer
+	lg := &lineGuard{w: &loose, max: 100}
+	if _, err := lg.Write([]byte("SELECT 10 -\n3\n")); err != nil {
+		t.Fatalf("%v", err)
+	}
+	if !(oracleDialect{}).HyphenContinues() {
+		t.Error("Oracle's client joins hyphen lines")
+	}
+}

@@ -307,7 +307,7 @@ anything is written, and the message never repeats the text. The same URL gives 
 Every line of the file becomes one comment line (`-- ` and the line), in every dialect. The text is verbatim except for what
 could end the comment or start a script line: CR, LF, CR LF, VT, FF, U+001C to U+001F, U+0085, U+2028 and U+2029 all end a line;
 other control characters, a byte order mark, bidirectional controls and invalid bytes become spaces; a tab becomes four spaces;
-`*/` and `/*` get a space between the two characters; for `mssql` `$(` becomes `$ (`, for `oracle` `&` becomes `& ` (the header comes before `SET DEFINE OFF`; a line ending in a hyphen joins nothing in a SQL*Plus comment, measured on 23.26.3). Trailing spaces and the blank lines at both
+`*/` and `/*` get a space between the two characters; for `mssql` `$(` becomes `$ (`, for `oracle` `&` becomes `& ` (the header comes before `SET DEFINE OFF`; a comment line that ends in a hyphen joins nothing, measured on 23.26.3; a statement line that ends in one is joined with the next, see the wrapping rule). Trailing spaces and the blank lines at both
 ends are dropped. So a notice line such as `GO`, `\! cmd`, `source x`, `HOST cmd`, `@file` or `/` stays a comment. The notice follows the
 `license` and `attribution` lines, after a blank comment line.
 
@@ -668,6 +668,7 @@ the client:
   exact limit of each client is untested). Every statement is wrapped at a safe place: after a comma, or before a keyword, a quoted name, a literal or a number, outside
   any quote, so a continuation line starts with a token the generator wrote. A wide `CHECK (x IN (...))`, a key over many long names or a composite foreign key is several lines. A
   statement that cannot be wrapped makes the export **fail** (the writer refuses any line over the limit; a comment line is continued on another comment line).
+  **No line outside a `--` comment ends in a hyphen**: SQL*Plus drops a trailing hyphen (a trailing blank does not matter) and joins the next line (`SELECT 10 -` and `3` is `SELECT 10  3`, measured on 23.26.3; a trailing `+` or `\\` is no continuation), so a minus written apart from its number in a wrapped `CHECK` list would silently change its sign. The wrapper never cuts after a hyphen and the writer refuses such a line, so nothing is ever joined and the 4,999-character limit applies to each line as written.
   Long literals are wrapped too, and a literal over 4,000 bytes is a `TO_CLOB` group of at most 3,500 bytes. A `BLOB`
   over 2,000 bytes is written by a per-row PL/SQL block of `HEXTORAW` chunks.
 * `WHENEVER SQLERROR EXIT FAILURE ROLLBACK` stops at the first error. Oracle DDL commits, so the script is **not transactional**:

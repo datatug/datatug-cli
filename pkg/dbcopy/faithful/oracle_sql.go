@@ -27,6 +27,9 @@ const (
 // MaxLine is the longest line the script writes (see lineLimiter).
 func (oracleDialect) MaxLine() int { return oracleMaxLine }
 
+// HyphenContinues: SQL*Plus joins a line that ends in a hyphen with the next one (outside a "--" comment).
+func (oracleDialect) HyphenContinues() bool { return true }
+
 // CountsEveryIdentity: an Oracle identity column does not move its counter when a row is inserted with an id, so the
 // script sets the counter of every identity column (see everyCounter).
 func (oracleDialect) CountsEveryIdentity() bool { return true }
@@ -660,6 +663,8 @@ func oracleWrapStart(s string) bool {
 		return true // a number may start a line inside a statement (measured on SQL*Plus 23.26.3)
 	case (c == '-' || c == '.') && len(s) > 1 && (s[1] >= '0' && s[1] <= '9' || s[1] == '.' && len(s) > 2 && s[2] >= '0' && s[2] <= '9'):
 		return true
+	case c == '-' && len(s) > 2 && s[1] == ' ' && s[2] >= '0' && s[2] <= '9':
+		return true // a minus written apart from its number, as the CHECK translator writes it
 	}
 	end := 0
 	for end < len(s) && (s[end] == '_' || s[end] == '$' || s[end] >= 'A' && s[end] <= 'Z' || s[end] >= '0' && s[end] <= '9') {
@@ -689,7 +694,10 @@ func oracleBreak(l string, limit int) int {
 			for start < len(l) && l[start] == ' ' {
 				start++
 			}
-			if cut <= limit && cut > 0 && oracleWrapStart(l[start:]) {
+			// A line that ends in a hyphen is a continuation line for SQL*Plus, which drops the hyphen and joins the next line
+			// (SELECT 10 -, 3 reads as SELECT 10  3, measured on 23.26.3; a trailing space or tab does not matter): never cut
+			// after one.
+			if cut <= limit && cut > 0 && oracleWrapStart(l[start:]) && !strings.HasSuffix(strings.TrimRight(l[:cut], " \t"), "-") {
 				best = start
 			}
 		}

@@ -45,24 +45,38 @@ func countsEveryIdentity(d Dialect) bool {
 	return ok && e.CountsEveryIdentity()
 }
 
+// hyphenContinuer is implemented by a dialect whose client reads a line that ends in a hyphen as continued on the next line
+// (SQL*Plus, outside a "--" comment): the writer refuses such a line, so nothing is ever joined.
+type hyphenContinuer interface {
+	HyphenContinues() bool
+}
+
 // lineGuard refuses a script that has a line longer than a client can read: the dialect wraps what it writes, and a line
 // that is over the limit anyway is a generator fault that must not become a skipped statement (SQL*Plus ignores an
 // overlong line, SP2-0027, and goes on). The error names the line.
 type lineGuard struct {
-	w    io.Writer
-	max  int
-	cur  int    // bytes of the line being written
-	head string // its first bytes
+	w        io.Writer
+	max      int
+	noHyphen bool   // a non-comment line may not end in a hyphen
+	cur      int    // bytes of the line being written
+	head     string // its first bytes
+	last     byte   // its last byte that is not a blank
 }
 
 func (g *lineGuard) Write(b []byte) (int, error) {
 	for _, c := range b {
 		if c == '\n' {
-			g.cur, g.head = 0, ""
+			if g.noHyphen && g.last == '-' && !strings.HasPrefix(g.head, "--") {
+				return 0, fmt.Errorf("the script has a line that ends in a hyphen, which its client joins with the next line (it starts %q): the statement cannot be wrapped at a safe place", g.head)
+			}
+			g.cur, g.head, g.last = 0, "", 0
 			continue
 		}
 		if g.cur < 60 {
 			g.head += string(c)
+		}
+		if c != ' ' && c != '\t' {
+			g.last = c
 		}
 		g.cur++
 		if g.cur > g.max {
@@ -81,7 +95,8 @@ func (g *lineGuard) Write(b []byte) (int, error) {
 func WriteScript(ctx context.Context, w io.Writer, src Queryer, p *ScriptPlan, h Header) (int64, error) {
 	d := p.Dialect
 	if ll, ok := d.(lineLimiter); ok {
-		w = &lineGuard{w: w, max: ll.MaxLine()}
+		hc, _ := d.(hyphenContinuer)
+		w = &lineGuard{w: w, max: ll.MaxLine(), noHyphen: hc != nil && hc.HyphenContinues()}
 	}
 	bw := bufio.NewWriterSize(w, 1<<20)
 	line := func(s string) { _, _ = bw.WriteString(s); _ = bw.WriteByte('\n') }

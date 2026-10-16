@@ -118,6 +118,10 @@ func checkOracleLines(t testing.TB, script string) {
 		if len(l) > oracleMaxLine {
 			t.Fatalf("line %d is %d characters long (the limit is %d): %.60q", i+1, len(l), oracleMaxLine, l)
 		}
+		// SQL*Plus joins a line that ends in a hyphen with the next one, outside a "--" comment: no such line is written.
+		if strings.HasSuffix(strings.TrimRight(l, " \t"), "-") && !strings.HasPrefix(l, "--") {
+			t.Fatalf("line %d ends in a hyphen: %.60q", i+1, l)
+		}
 		if strings.ContainsAny(l, "\x01\x02\x03\x04\x05\x06\x07\x08\x0b\x0c\x0e\x0f\x1a\x1b\x7f\u0085\u2028\u2029") {
 			t.Fatalf("line %d holds a raw control or line-break character: %.80q", i+1, l)
 		}

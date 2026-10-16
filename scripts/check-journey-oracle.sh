@@ -271,6 +271,15 @@ for ds in $datasets; do
 			sql_root <<<"drop user j_lost cascade;" >/dev/null
 		done
 		echo "    objects: a load that lost a foreign key, an index or a check (an error, or a skipped overlong line) gets no marker row"
+		# A wrapped CHECK over negative numbers holds them as written: -297 is accepted and 297 refused (a line cut after a minus is a
+		# continuation line for SQL*Plus, which drops the hyphen and would have made the list positive; the verifier compares
+		# only the number of checks, so the constraint is probed).
+		neg_ok=$(printf 'insert into "neg_in" values (10, -297);\ncommit;\n' | sql_as j_fixture 2>&1 || true)
+		neg_bad=$(printf 'insert into "neg_in" values (11, 297);\n' | sql_as j_fixture 2>&1 || true)
+		case $neg_ok in *ORA-*) echo "negative check: -297 was refused: $neg_ok" >&2; failures=$((failures + 1)); continue ;; esac
+		case $neg_bad in *ORA-02290*) ;; *) echo "negative check: 297 was accepted by a list of negative numbers" >&2; failures=$((failures + 1)); continue ;; esac
+		awk '/^ALTER TABLE "neg_in" ADD CHECK/ { on = 1 } on { n++ } on && /;$/ { on = 0 } END { exit !(n > 1) }' "$script" || { echo "negative check: the list was not wrapped, so the probe proves nothing" >&2; failures=$((failures + 1)); continue; }
+		echo "    negative check: a wrapped IN list of negative numbers keeps its signs (-297 accepted, 297 refused)"
 		;;
 	fuzz)
 		# Positive controls: the hazards are real.
@@ -296,7 +305,13 @@ SQL
 		printf -- '-- a line that ends with a hyphen -\nWHENEVER SQLERROR EXIT FAILURE ROLLBACK\n-- and another -\nSELECT 1 FROM nosuch_table;\nSELECT 2 FROM DUAL;\n' >"$work/threat-hyphen.sql"
 		if load "$work/threat-hyphen.sql" j_threat >"$work/threat-hyphen.out" 2>&1; then echo "threat control: a comment ending in a hyphen swallowed the WHENEVER line" >&2; failures=$((failures + 1)); continue; fi
 		grep -q 'ORA-00942' "$work/threat-hyphen.out" || { echo "threat control: the statement after a hyphen comment did not run" >&2; failures=$((failures + 1)); continue; }
-		echo "    threat control: a comment line ending in a hyphen joins nothing (the WHENEVER line after it still stopped the load)"
+		echo "    threat control: a COMMENT line ending in a hyphen joins nothing (the WHENEVER line after it still stopped the load)"
+		# ... but any other line that ends in a hyphen is a continuation line: the hyphen is dropped and the next line is joined. The
+		# script writes none (the wrapper never cuts after a minus and the writer refuses such a line).
+		printf 'WHENEVER SQLERROR EXIT FAILURE ROLLBACK\nSELECT 10 -\n3 AS x FROM DUAL;\n' >"$work/threat-join.sql"
+		if load "$work/threat-join.sql" j_threat >"$work/threat-join.out" 2>&1; then echo "threat control: a statement line ending in a hyphen was not joined" >&2; failures=$((failures + 1)); continue; fi
+		grep -q 'ORA-00923' "$work/threat-join.out" || { echo "threat control: a statement line ending in a hyphen was not read as SELECT 10  3" >&2; failures=$((failures + 1)); continue; }
+		echo "    threat control: a statement line ending in a hyphen is joined with the next one (the script never ends a line in a hyphen)"
 		# The script has its SET DEFINE OFF line: without it the load is not complete.
 		grep -v '^SET DEFINE OFF$' "$script" >"$work/nodefine.sql"
 		cmp -s "$script" "$work/nodefine.sql" && { echo "define control: the script has no SET DEFINE OFF line" >&2; failures=$((failures + 1)); continue; }

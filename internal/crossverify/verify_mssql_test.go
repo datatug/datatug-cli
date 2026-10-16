@@ -423,3 +423,56 @@ func TestCanonMSSQL(t *testing.T) {
 		}
 	}
 }
+
+func TestUnstorableMSSQL(t *testing.T) {
+	for name, bad := range map[string]bool{"": true, "a\xffb": true, "   ": true, "a$(b)": true, "a\nb": true, "a\u2028b": true, "a\ufeffb": true,
+		strings.Repeat("é", 129): true, strings.Repeat("😀", 65): true, "é": false, "a ": false, "Order Details": false, strings.Repeat("😀", 64): false} {
+		if got := unstorableMSSQL(name) != ""; got != bad {
+			t.Errorf("unstorableMSSQL(%q) = %v", name, got)
+		}
+	}
+}
+
+// A name is renamed only when SQL Server cannot store it or its default collation merges it with another table or
+// column; a rename without such a reason is a difference.
+func TestMSSQLRenamesNeedAReason(t *testing.T) {
+	src := openSource(t, `CREATE TABLE "Tw" (id INTEGER PRIMARY KEY, "a", "a ", "b")`, `CREATE TABLE "tw " (id INTEGER PRIMARY KEY)`, `CREATE TABLE "ok" (id INTEGER PRIMARY KEY)`)
+	p := planMSSQLFor(t, src)
+	var diffs []string
+	add := func(obj, aspect, want, got string) {
+		if want != got {
+			diffs = append(diffs, aspect+" "+obj)
+		}
+	}
+	checkNames(p, mssqlEngine, add)
+	if len(diffs) != 0 {
+		t.Fatalf("%v", diffs)
+	}
+	renamed := 0
+	for _, tb := range p.Tables {
+		if tb.Name != tb.Src.Name {
+			renamed++
+		}
+		for _, c := range tb.Columns {
+			if c.Name != c.Src.Name {
+				renamed++
+			}
+		}
+	}
+	if renamed != 2 { // one table of the twins and one column of the twins
+		t.Fatalf("renamed %d names", renamed)
+	}
+	p.Table("ok").Name = "ok_x"
+	p.Warnings = append(p.Warnings, faithful.Warning{Kind: faithful.WarnNameRenamed, Object: "ok", Message: "mutation"})
+	for _, c := range p.Table("Tw").Columns {
+		if c.Src.Name == "b" {
+			c.Name = "b_x"
+		}
+	}
+	p.Warnings = append(p.Warnings, faithful.Warning{Kind: faithful.WarnNameRenamed, Object: "Tw.b", Message: "mutation"})
+	diffs = nil
+	checkNames(p, mssqlEngine, add)
+	if len(diffs) != 2 || diffs[0] != "rename justified ok" && diffs[1] != "rename justified ok" {
+		t.Errorf("%v", diffs)
+	}
+}

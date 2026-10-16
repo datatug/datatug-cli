@@ -10,6 +10,11 @@
     "message": "column name cannot be stored (the name is empty): created as \"_e3b0c442\""
   },
   {
+    "kind": "values-normalized",
+    "object": "Order Details.Unit Price",
+    "message": "2 REAL value(s) are written as the exact decimal of their shortest spelling, for example 9.99: SQLite stores a binary float, DECIMAL(10,2) an exact decimal"
+  },
+  {
     "kind": "key-type-bounded",
     "object": "Production.Product.Color",
     "message": "a key column is carried as NVARCHAR(255) (declared \"TEXT\"): SQL Server cannot index an unbounded type; its longest value is 4"
@@ -27,7 +32,7 @@
   {
     "kind": "name-renamed",
     "object": "Trailing.x ",
-    "message": "column name cannot be stored (it differs only by case or trailing spaces from another column of the table, and SQL Server compares column names without them): created as \"x _2ac3e029\""
+    "message": "column name cannot be stored (it differs only by case or trailing spaces from another column of the table, and SQL Server compares column names without case or trailing spaces): created as \"x _2ac3e029\""
   },
   {
     "kind": "key-type-bounded",
@@ -118,6 +123,11 @@
     "kind": "default-not-carried",
     "object": "defaults_t.blobd",
     "message": "default expression x'01' cannot be translated to SQL Server and is not carried"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "defaults_t.dec",
+    "message": "1 REAL value(s) are written as the exact decimal of their shortest spelling, for example 0.1: SQLite stores a binary float, DECIMAL(5,2) an exact decimal"
   },
   {
     "kind": "default-not-carried",
@@ -340,6 +350,16 @@
     "message": "partial index (WHERE a IS NOT NULL) is not carried: the script does not write filtered indexes for a SQLite partial index"
   },
   {
+    "kind": "values-normalized",
+    "object": "range_t.big",
+    "message": "1 REAL and 1 INTEGER value(s) share one DECIMAL(20,0) column: SQLite keeps them apart (5 and 5.0), DECIMAL(20,0) does not; each REAL is written as the exact decimal of its shortest spelling, for example 12345678901234567000"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "range_t.n",
+    "message": "2 REAL value(s) are written as the exact decimal of their shortest spelling, for example 12345678901234568000000000: SQLite stores a binary float, DECIMAL(38,10) an exact decimal"
+  },
+  {
     "kind": "fk-action-not-carried",
     "object": "tree(parent)",
     "message": "ON DELETE RESTRICT does not exist in T-SQL: the key is carried with NO ACTION, which refuses the same change when the key is not deferred"
@@ -365,6 +385,11 @@
     "message": "declared \"NUMERIC(4,1)\" but some values do not fit that precision and scale exactly, or its default does not: carried as DECIMAL(3,2)"
   },
   {
+    "kind": "values-normalized",
+    "object": "type_changes.mixed_n",
+    "message": "1 REAL and 1 INTEGER value(s) share one DECIMAL(3,2) column: SQLite keeps them apart (5 and 5.0), DECIMAL(3,2) does not; each REAL is written as the exact decimal of its shortest spelling, for example 1.25"
+  },
+  {
     "kind": "type-widened",
     "object": "type_changes.nodecl",
     "message": "has no declared type: carried as NVARCHAR(MAX) from its values"
@@ -378,6 +403,21 @@
     "kind": "type-widened",
     "object": "types_edge.big_b",
     "message": "declared \"BLOB\" but its values are not all of that type: carried as VARBINARY(MAX)"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "types_edge.d_bare",
+    "message": "2 REAL and 1 INTEGER value(s) share one DECIMAL(3,2) column: SQLite keeps them apart (5 and 5.0), DECIMAL(3,2) does not; each REAL is written as the exact decimal of its shortest spelling, for example 1.25"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "types_edge.d_fixed",
+    "message": "2 REAL and 1 INTEGER value(s) share one DECIMAL(10,2) column: SQLite keeps them apart (5 and 5.0), DECIMAL(10,2) does not; each REAL is written as the exact decimal of its shortest spelling, for example 12.5"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "types_edge.d_money",
+    "message": "1 REAL and 1 INTEGER value(s) share one DECIMAL(2,1) column: SQLite keeps them apart (5 and 5.0), DECIMAL(2,1) does not; each REAL is written as the exact decimal of its shortest spelling, for example 3.5"
   },
   {
     "kind": "values-normalized",
@@ -502,6 +542,6 @@
   {
     "kind": "name-renamed",
     "object": "ünïcode_日本語_😀.ünï",
-    "message": "column name cannot be stored (it differs only by case or trailing spaces from another column of the table, and SQL Server compares column names without them): created as \"ünï_e975a529\""
+    "message": "column name cannot be stored (it differs only by case or trailing spaces from another column of the table, and SQL Server compares column names without case or trailing spaces): created as \"ünï_e975a529\""
   }
 ]

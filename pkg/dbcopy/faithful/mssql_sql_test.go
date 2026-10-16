@@ -62,7 +62,7 @@ func TestMSSQLDialectTexts(t *testing.T) {
 	}
 	// MySQL says what the planner started with.
 	m := mysqlDialect{}
-	if dialectLabel(m) != "MySQL" || foldsTableNames(m) || foldDescription(m) != "case or accents" || !strings.Contains(partialIndexNote(m), "MySQL") || foldFor(m, "Ab") != "ab" || len(extraObjectNames(m, nil)) != 0 {
+	if dialectLabel(m) != "MySQL" || foldsTableNames(m) || foldDescription(m) != "case" || !strings.Contains(partialIndexNote(m), "MySQL") || foldFor(m, "Ab") != "ab" || len(extraObjectNames(m, nil)) != 0 {
 		t.Error("the MySQL texts")
 	}
 	if dialectLabel(d) != "SQL Server" || foldFor(d, "A ") != "a" || foldDescription(d) == "" {

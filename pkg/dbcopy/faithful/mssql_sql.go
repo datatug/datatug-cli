@@ -120,7 +120,9 @@ func (mssqlDialect) Literal(ch Choice, v any) (string, error) {
 			}
 		}
 	case "bytes":
-		return "0x" + hex.EncodeToString(valueBytes(v)), nil
+		if b, ok := valueBytes(v); ok {
+			return "0x" + hex.EncodeToString(b), nil
+		}
 	}
 	return "", fmt.Errorf("value %v (%T) cannot be written as a %s", v, v, ch.Type)
 }

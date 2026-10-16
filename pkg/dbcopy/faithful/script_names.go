@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"strings"
+	"unicode"
 )
 
 func nameHash(orig string) string {

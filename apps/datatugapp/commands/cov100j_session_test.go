@@ -2906,15 +2906,18 @@ func TestSessionRemainingCoverage100(t *testing.T) {
 	_, err = runSessionInvoiceDashboard(context.Background(), "", "1")
 	require.Error(t, err)
 	sessionCreateTemp = oldCreateTemp
-	http.DefaultTransport = oldTransport
 
-	// Line 174: sessionFileClose error on download
+	// Line 174: sessionFileClose error on download. The stand-in transport stays
+	// installed: restoring the real one here would fetch the live public sample,
+	// which CI must never depend on (a 429 or an outage left the close-error and
+	// copy-error branches of the download uncovered on the runner).
 	oldFileClose := sessionFileClose
 	t.Cleanup(func() { sessionFileClose = oldFileClose })
 	sessionFileClose = func(*os.File) error { return errors.New("close fail") }
 	_, err = runSessionInvoiceDashboard(context.Background(), "", "1")
 	require.Error(t, err)
 	sessionFileClose = oldFileClose
+	http.DefaultTransport = oldTransport
 
 	// Line 179: open non-existent path
 	_, err = runSessionInvoiceDashboard(context.Background(), "/non/existent/path/f.sqlite", "1")

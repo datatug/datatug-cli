@@ -2,12 +2,12 @@ package commands
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/dal-go/dalgo/dal"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/stretchr/testify/assert"
@@ -31,26 +31,27 @@ func TestChat_OpensASQLiteSourceWithTheOneBuilderOfTheFileURI(t *testing.T) {
 	t.Run("the join metadata", func(t *testing.T) {
 		original := openJoinMetadataDB
 		t.Cleanup(func() { openJoinMetadataDB = original })
-		var opened []string
+		var opened []dbcopy.BackendRef
 		stop := errors.New("stop")
-		openJoinMetadataDB = func(driverName, dataSourceName string) (*sql.DB, error) {
-			opened = append(opened, driverName+" "+dataSourceName)
+		openJoinMetadataDB = func(_ context.Context, backend dbcopy.BackendRef) (dal.DB, error) {
+			opened = append(opened, backend)
 			return nil, stop
 		}
 
 		_, _, err := loadChatJoinApplication(context.Background(), source, nil, false)
 
 		require.ErrorIs(t, err, stop)
-		assert.Equal(t, []string{"sqlite " + want}, opened)
+		require.Len(t, opened, 1)
+		assert.Equal(t, ref.Path, opened[0].Path, "the source is opened by its file, as query run opens it")
 	})
 
 	t.Run("the lookup of a saved query's parameter", func(t *testing.T) {
-		original := chatOpenSQLite
-		t.Cleanup(func() { chatOpenSQLite = original })
-		var opened []string
+		original := openJoinMetadataDB
+		t.Cleanup(func() { openJoinMetadataDB = original })
+		var opened []dbcopy.BackendRef
 		stop := errors.New("stop")
-		chatOpenSQLite = func(driverName, dataSourceName string) (*sql.DB, error) {
-			opened = append(opened, driverName+" "+dataSourceName)
+		openJoinMetadataDB = func(_ context.Context, backend dbcopy.BackendRef) (dal.DB, error) {
+			opened = append(opened, backend)
 			return nil, stop
 		}
 		query := covCQueryFiles("f", "inv", "DTQL", "dtql", covCCustomerDTQL, covCCustomerParams)
@@ -63,9 +64,9 @@ func TestChat_OpensASQLiteSourceWithTheOneBuilderOfTheFileURI(t *testing.T) {
 
 		require.ErrorIs(t, err, stop)
 		// The folder of the test may be reached through a link, so the name of the file is
-		// what is compared: the URI of a path that holds a "?", a "#" and a "%" escapes them.
+		// what is compared.
 		require.Len(t, opened, 1)
-		assert.Contains(t, opened[0], "sqlite file:")
-		assert.Contains(t, opened[0], "a%3Fb%23c%25d.db?mode=ro")
+		assert.Equal(t, "sqlite", opened[0].Scheme)
+		assert.Equal(t, "a?b#c%d.db", filepath.Base(opened[0].Path))
 	})
 }

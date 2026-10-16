@@ -127,7 +127,7 @@ func TestCollectorBuild(t *testing.T) {
 	if names := c.FieldNames(); len(names) != 3 || strings.Join(names[1], ",") != "extra,id,mixed,name" {
 		t.Fatalf("field names %v", names)
 	}
-	data := c.Build("t1", []string{"id", "name", "mixed", "blob", "big", "absent"})
+	data := c.Build("t1", []string{"id", "name", "mixed", "blob", "big", "absent"}, nil)
 	recordset, raw := decodeData(t, data)
 	if raw["id"] != "t1" {
 		t.Fatalf("id %v", raw["id"])
@@ -161,7 +161,7 @@ func TestCollectorBuild(t *testing.T) {
 		t.Fatal("an absent field must be null")
 	}
 
-	empty := NewCollector(5).Build("e", nil)
+	empty := NewCollector(5).Build("e", nil, nil)
 	recordset, _ = decodeData(t, empty)
 	if len(recordset.Rows) != 0 || empty.Rows != (Rows{TruncatedBy: TruncatedNone}) || recordset.Columns[0].Type != "string" {
 		t.Fatalf("empty %+v %+v", recordset, empty.Rows)
@@ -193,7 +193,7 @@ func TestCollectorByteBound(t *testing.T) {
 	for c.Add("k", map[string]any{"v": cell}) {
 		added++
 	}
-	data := c.Build("b", []string{"v"})
+	data := c.Build("b", []string{"v"}, nil)
 	if len(data.Bytes) > MaxDataBytes || data.Rows.Kept != added || !data.Rows.HasMore || data.Rows.TruncatedBy != TruncatedBytes {
 		t.Fatalf("%d bytes, rows %+v, added %d", len(data.Bytes), data.Rows, added)
 	}
@@ -215,7 +215,7 @@ func TestCollectorByteBound(t *testing.T) {
 			columns = append(columns, name)
 		}
 	}
-	data = c.Build("g", columns)
+	data = c.Build("g", columns, nil)
 	if len(data.Bytes) > MaxDataBytes || data.Rows.TruncatedBy != TruncatedBytes || !data.Rows.HasMore || data.Rows.Kept == 0 {
 		t.Fatalf("%d bytes, rows %+v", len(data.Bytes), data.Rows)
 	}
@@ -254,5 +254,52 @@ func TestRecordData(t *testing.T) {
 	}
 	if _, err := RecordData("SECRET-VALUE"); err == nil || strings.Contains(err.Error(), "SECRET") {
 		t.Fatalf("a non-object: %v", err)
+	}
+}
+
+func TestCastValue(t *testing.T) {
+	cases := []struct {
+		in   apicontract.TypedValue
+		want string
+		out  apicontract.TypedValue
+		ok   bool
+	}{
+		{apicontract.NewNullValue(), "integer", apicontract.NewNullValue(), true},
+		{apicontract.NewIntegerValue("5"), "integer", apicontract.NewIntegerValue("5"), true},
+		{apicontract.NewIntegerValue("5"), "decimal", apicontract.NewDecimalValue("5"), true},
+		{apicontract.NewNumberValue(9.99), "decimal", apicontract.NewDecimalValue("9.99"), true},
+		{apicontract.NewIntegerValue("7"), "number", apicontract.NewNumberValue(7), true},
+		{apicontract.NewIntegerValue("9007199254740993"), "number", apicontract.NewNumberValue(9007199254740992), false},
+		{apicontract.NewNumberValue(3), "integer", apicontract.NewIntegerValue("3"), true},
+		{apicontract.NewNumberValue(3.5), "integer", apicontract.NewIntegerValue("4"), false},
+		{apicontract.NewStringValue("2009-01-01 00:00:00"), "datetime", apicontract.NewDatetimeValue("2009-01-01T00:00:00Z"), true},
+		{apicontract.NewStringValue("soon"), "datetime", apicontract.NewStringValue("soon"), false},
+		{apicontract.NewStringValue("2009-01-02"), "date", apicontract.NewDateValue("2009-01-02"), true},
+		{apicontract.NewStringValue("x"), "date", apicontract.NewDateValue("x"), false},
+		{apicontract.NewBooleanValue(true), "string", apicontract.NewStringValue("true"), true},
+		{apicontract.NewStringValue("abc"), "integer", apicontract.NewStringValue("abc"), false},
+	}
+	for _, tc := range cases {
+		out, ok := castValue(tc.in, tc.want)
+		if ok != tc.ok || (ok && out != tc.out) {
+			t.Errorf("castValue(%+v, %s) = %+v %v", tc.in, tc.want, out, ok)
+		}
+	}
+}
+
+func TestBuildWithDeclaredTypes(t *testing.T) {
+	c := NewCollector(10)
+	c.Add("1", map[string]any{"total": 9.99, "id": int64(1), "mixed": int64(1)})
+	c.Add("2", map[string]any{"total": 1.5, "id": int64(2), "mixed": "abc"})
+	data := c.Build("d", []string{"total", "id", "mixed"}, map[string]string{"total": "decimal", "mixed": "integer"})
+	recordset, _ := decodeData(t, data)
+	if recordset.Columns[1].Type != "decimal" || recordset.Rows[0][1] != apicontract.NewDecimalValue("9.99") {
+		t.Fatalf("declared decimal: %+v %+v", recordset.Columns[1], recordset.Rows[0][1])
+	}
+	if recordset.Columns[2].Type != "integer" {
+		t.Fatal("undeclared column keeps its observed type")
+	}
+	if recordset.Columns[3].Type != "string" || strings.Join(data.Columns[3].ObservedTypes, ",") != "integer,string" {
+		t.Fatalf("a declared type that does not fit every value falls back: %+v", data.Columns[3])
 	}
 }

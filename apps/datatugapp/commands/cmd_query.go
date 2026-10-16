@@ -319,7 +319,7 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		query = fromQuery(o, pagingOrder(ctx, db, backend.Scheme, o.from))
 	}
 	if o.sink != nil {
-		o.sink.describeAdHoc(ctx, o, backend, queryText, variables)
+		o.sink.describeAdHoc(ctx, o, backend, db, queryText, variables)
 	}
 	stderr := cmd.ErrOrStderr()
 	if len(loaded) == 0 {

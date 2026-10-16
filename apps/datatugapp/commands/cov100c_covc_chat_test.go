@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -203,16 +202,22 @@ func TestCovCChatLookupParameterSeams(t *testing.T) {
 	))
 	service := covCChatService(t, dir, true)
 
-	origOpen, origLoad := chatOpenSQLite, chatLoadForeignKeySnapshot
-	t.Cleanup(func() { chatOpenSQLite, chatLoadForeignKeySnapshot = origOpen, origLoad })
+	origOpen, origLoad := openJoinMetadataDB, chatLoadForeignKeySnapshot
+	t.Cleanup(func() { openJoinMetadataDB, chatLoadForeignKeySnapshot = origOpen, origLoad })
 
-	chatOpenSQLite = func(string, string) (*sql.DB, error) { return nil, errors.New("covC open failed") }
+	openJoinMetadataDB = func(context.Context, dbcopy.BackendRef) (dal.DB, error) { return nil, errors.New("covC open failed") }
 	if _, err := service.LookupParameter(ctx, "f/inv", "CustomerId"); err == nil || !strings.Contains(err.Error(), "open failed") {
 		t.Fatalf("open failure: %v", err)
 	}
-	chatOpenSQLite = origOpen
+	openJoinMetadataDB = origOpen
 
-	chatLoadForeignKeySnapshot = func(ctx context.Context, source string, db *sql.DB) (chat.ForeignKeySnapshot, error) {
+	chatLoadForeignKeySnapshot = func(context.Context, dal.DB, string) (chat.ForeignKeySnapshot, error) {
+		return chat.ForeignKeySnapshot{}, errors.New("covC snapshot failed")
+	}
+	if _, err := service.LookupParameter(ctx, "f/inv", "CustomerId"); err == nil || !strings.Contains(err.Error(), "snapshot failed") {
+		t.Fatalf("snapshot failure: %v", err)
+	}
+	chatLoadForeignKeySnapshot = func(ctx context.Context, db dal.DB, source string) (chat.ForeignKeySnapshot, error) {
 		return chat.ForeignKeySnapshot{Source: source + "-changed"}, nil
 	}
 	if _, err := service.LookupParameter(ctx, "f/inv", "CustomerId"); err == nil || !strings.Contains(err.Error(), "source changed") {

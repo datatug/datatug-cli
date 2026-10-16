@@ -182,7 +182,7 @@ func TestDaemonURL(t *testing.T) {
 		t.Fatalf("%q %v", out, err)
 	}
 	out, err = runDaemon(t, append(args, "--record", `{"AlbumId":1}`, "--view", "--schema", "main")...)
-	if err != nil || !strings.Contains(out, `/view/Album/record?schema=main#pk=`) || !strings.Contains(out, `"uiSupport": "pending"`) {
+	if err != nil || !strings.Contains(out, `/view/Album/record?schema=main#pk=`) || !strings.Contains(out, `"uiSupport": "available"`) {
 		t.Fatalf("%s %v", out, err)
 	}
 	if _, err = runDaemon(t, "url", "--project", "demo"); exitCodeOf(t, err) != exitCodeUsage {

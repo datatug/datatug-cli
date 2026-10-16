@@ -118,7 +118,7 @@ The web UI address of an agent is `<uiBase>` = `https://datatug.app/store/http-<
 
 The key is in the URL fragment so it is never sent to the web host. It is one JSON object with sorted keys and typed values; an integer above 2^53 − 1 in absolute value is written as a string so the UI never rounds it. The fragment is encoded like JavaScript's `encodeURIComponent`.
 
-`DATATUG_UI_BASE` MAY replace `https://datatug.app` (self-hosted or local build). The metadata route exists in the UI today (`env/:environmentId` → `db/:dbCatalogId` → `table|view/:tableType`, datatug-apps `datatug-routing-proj-env*.ts`); the `records` and `record` child routes do not, and the page does not yet read `schema` as authoritative, so `url` reports `uiSupport` `pending` for all three kinds until the UI ships the routes.
+`DATATUG_UI_BASE` MAY replace `https://datatug.app` (self-hosted or local build). The deployed UI serves all three kinds on both `table` and `view` (datatug-apps `libs/datatug/main/src/lib/routes/datatug-routing-proj-env-db.ts`: `table|view/:tableType`, `…/records`, `…/record`; `schema` is authoritative in `agent-links/table-identity.ts`, `limit` is read in `link-route.ts`, `pk` is the last part of the fragment in `record-key.ts`, the code is taken out first by `main.ts`), so `url` reports `uiSupport` `available` for all three kinds. A kind is flipped only when both its `table` and `view` routes are served.
 
 ## Acceptance Criteria
 
@@ -150,7 +150,7 @@ The spawned command line has `--host 127.0.0.1`, `--idle-timeout 2h` and none of
 
 **Requirements:** daemon#req:url, daemon#req:deep-link-contract, daemon#req:no-secrets
 
-`daemon url` returns the three shapes above (key in the fragment, `schema` always present), refuses `://`, `@`, `.` and `..` in identifiers, and flags all three kinds `pending`.
+`daemon url` returns the three shapes above (key in the fragment, `schema` always present), refuses `://`, `@`, `.` and `..` in identifiers, and flags all three kinds `available`.
 
 ### AC: link-contract-version
 
@@ -164,11 +164,9 @@ Every `daemon url` JSON object carries `"contract": 1`.
 
 Against a scanned project, `daemon url` refuses an unknown table (exit 3), `--view` on a table or no `--view` on a view, and a `--record` whose keys are not exactly the primary key (exit 2), and an ambiguous schema (exit 2); for a never-scanned or empty source it still prints the link with the `warnings` entry.
 
-## Follow-up (UI repository, datatug/datatug-apps — not done here)
+## Follow-up
 
-1. Add child routes `records` and `record` under `table/:tableType` and `view/:tableType` in `datatug-routing-proj-env-db.ts`, reading `limit` and `schema` (query) and `pk` (fragment).
-2. Flip `uiSupport` to `available` in `pkg/daemon` once shipped.
-3. Confirm `https://datatug.app` can call a plain-HTTP `127.0.0.1` agent (CORS allow-list in the request guard) from a browser page.
+1. Confirm `https://datatug.app` can call a plain-HTTP `127.0.0.1` agent (CORS allow-list in the request guard) from a browser page.
 
 ## Decisions
 

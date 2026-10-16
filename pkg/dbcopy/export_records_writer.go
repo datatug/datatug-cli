@@ -9,13 +9,21 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dbschema"
+	"github.com/datatug/datatug-cli/pkg/dbcopy/filter"
 	"github.com/ingitdb/ingitdb-go/ingitdb"
 	"github.com/ingr-io/ingr-go/ingr"
 )
 
-// ExportOptions applies one records-file format to every exported table.
-// The zero value uses JSON, preserving the original CLI behavior.
-type ExportOptions struct{ RecordsFormat string }
+// ExportOptions are the options of the native inGitDB export. The zero value
+// exports every collection in JSON, preserving the original CLI behavior.
+type ExportOptions struct {
+	// RecordsFormat is the records file format of every collection: json (the default), jsonl, ingr, csv or yaml.
+	RecordsFormat string
+	// Filters selects collections (include/exclude) and rows (where/limit); nil exports everything.
+	Filters *filter.Directives
+	// DryRun checks and counts everything and publishes nothing.
+	DryRun bool
+}
 
 func normalizeExportFormat(raw string) (ingitdb.RecordFormat, error) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {

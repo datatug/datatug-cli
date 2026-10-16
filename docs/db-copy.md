@@ -408,4 +408,52 @@ literal holds a raw control character and every literal reads back as its text, 
   type, no declared type text).
 * **Duplication debt.** Identifier quoting and reserved-word knowledge now exist twice: here (`mysqlDialect.QuoteIdent`,
   `StorableName`) and in `dalgo2sql`'s `typed_dialect.go`. Sharing them is a follow-up once the script dialects settle.
-* **Follow-up.** `datatug db export` (inGitDB) could be folded into `db copy --to ingitdb://`; it is untouched here.
+* **Done.** `datatug db export` (inGitDB) is now a shortcut over `db copy --to ingitdb://` (see below).
+
+## Local backup to a folder: `db export` and `--to ingitdb://`
+
+`datatug db export` is a shortcut for `datatug db copy --from URL --to ingitdb://FOLDER`: an ergonomic local backup as a
+native inGitDB project (one records file per collection, the schema, keys and indexes as descriptive metadata). It is the
+same engine as `copy`, so the same filters, report and exit codes apply.
+
+```bash
+# the folder is ./shop.ingitdb, named after the SQLite file (a PostgreSQL URL gives the database name)
+datatug db export --from sqlite://$PWD/shop.db
+
+# a plain path, or an ingitdb:// URL; both are the same
+datatug db export --from sqlite://$PWD/shop.db --to ~/backups/shop-2026-10-16
+datatug db copy   --from sqlite://$PWD/shop.db --to ingitdb://$HOME/backups/shop-2026-10-16
+
+# format of every records file: json (default), jsonl, ingr, csv, yaml
+datatug db export --from sqlite://$PWD/shop.db --to shop-csv --records-format csv
+datatug db copy   --from sqlite://$PWD/shop.db --to 'ingitdb://shop-csv?records-format=csv'
+
+# a part of it, a plan, a machine-readable report
+datatug db export --from sqlite://$PWD/shop.db --include orders,customers --where orders:created:>=:2026-01-01 --dry-run --json
+```
+
+* **A new folder, published whole.** The destination must not exist. The project is built in a hidden staging folder beside
+  it and renamed into place after every collection succeeded; a failure leaves neither. `--dry-run` reads and checks every
+  row in a temporary folder, prints the counts of a real run and writes nothing. For `copy`, an `ingitdb://` folder that
+  exists is copied into as before; a folder that does not exist is this native export.
+* **Default folder.** Without `--to`, `export` writes `./<name>.ingitdb` in the working folder, where the name comes from
+  `--from` only: the SQLite file name without its extension, or the PostgreSQL database name (never a host, a user, a
+  password or a query). Characters other than letters, digits, `.`, `_` and `-` become `_`; the name is at most 100
+  characters. A source with no name (an in-memory SQLite, a PostgreSQL URL without a database) is exit 2: pass `--to`.
+* **Filters and report.** `--include`, `--exclude`, `--where`, `--limit` and `--filter-config` are those of `copy`;
+  `--json`, `--dry-run` and `--fail-on-warning` print and exit as for the other destinations (`--json` report: the same
+  fields; `command` is `db export` or `db copy`). A foreign key to a table `--include`/`--exclude` leaves out is not carried
+  and is a `foreign-key-dropped` warning; a key to a table narrowed by `--where`/`--limit` is a `filtered-parent`
+  warning; `--fail-on-warning` exits 3 after the project is published. A `--where` or `--limit` on a table that is not
+  exported is exit 1.
+* **Flags that do not apply** (`--overwrite`, `--to-schema`, `--decimals`, `--parallel-streams`, `--progress`,
+  `--recover-job-ref`) are exit 2 with the reason; `?records-format=` on a folder that exists is exit 2.
+* **Differences between the two commands.** `export` refuses a folder that exists (exit 1), takes a plain path and the
+  default folder, and exits 1 on a source with nothing to write; `copy` into a missing folder prints "source has no tables;
+  nothing to copy" and exits 0, like every other copy of an empty source.
+* **Compatibility.** `datatug db export --from URL --to ingitdb://DIR [--records-format F]` writes the same bytes, prints
+  the same `db export: exported N collections and M rows to ...` line and exits with the same code as before; the test
+  `TestExportOldInvocationIsByteIdentical` holds the digests of the earlier binary's output.
+* **Not here: cloud or remote backup.** `export` writes a local folder. A backup to a bucket, another server or on a
+  schedule belongs to the planned `backup` command family, or to `db copy --to <destination>` where `copy` reaches one
+  (PostgreSQL, BigQuery, a SQLite file).

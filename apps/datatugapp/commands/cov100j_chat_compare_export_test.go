@@ -101,7 +101,7 @@ func TestDBExportCommandBranches(t *testing.T) {
 
 	t.Run("invalid to URL", func(t *testing.T) {
 		cmd := dbExportCommand()
-		cmd.SetArgs([]string{"--from", "sqlite://file.db", "--to", ":::invalid"})
+		cmd.SetArgs([]string{"--from", "sqlite://file.db", "--to", "ingitdb://"})
 		err := cmd.ExecuteContext(context.Background())
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "--to:")
@@ -116,7 +116,7 @@ func TestDBExportCommandBranches(t *testing.T) {
 	})
 
 	t.Run("open source fails", func(t *testing.T) {
-		openExportSource = func(context.Context, dbcopy.BackendRef) (dal.DB, error) {
+		openExportSource = func(context.Context, dbcopy.BackendRef, string) (dal.DB, error) {
 			return nil, errors.New("open error")
 		}
 		cmd := dbExportCommand()
@@ -127,10 +127,10 @@ func TestDBExportCommandBranches(t *testing.T) {
 	})
 
 	t.Run("source has no tables", func(t *testing.T) {
-		openExportSource = func(context.Context, dbcopy.BackendRef) (dal.DB, error) {
+		openExportSource = func(context.Context, dbcopy.BackendRef, string) (dal.DB, error) {
 			return nil, nil
 		}
-		runNativeExport = func(context.Context, dal.DB, string, ...dbcopy.ExportOptions) (map[string]int64, error) {
+		runNativeExport = func(context.Context, dal.DB, string, ...dbcopy.ExportOptions) (*dbcopy.ExportResult, error) {
 			return nil, dbcopy.ErrSourceHasNoTables
 		}
 		cmd := dbExportCommand()
@@ -141,11 +141,11 @@ func TestDBExportCommandBranches(t *testing.T) {
 	})
 
 	t.Run("export succeeds", func(t *testing.T) {
-		openExportSource = func(context.Context, dbcopy.BackendRef) (dal.DB, error) {
+		openExportSource = func(context.Context, dbcopy.BackendRef, string) (dal.DB, error) {
 			return nil, nil
 		}
-		runNativeExport = func(context.Context, dal.DB, string, ...dbcopy.ExportOptions) (map[string]int64, error) {
-			return map[string]int64{"items": 5, "orders": 10}, nil
+		runNativeExport = func(context.Context, dal.DB, string, ...dbcopy.ExportOptions) (*dbcopy.ExportResult, error) {
+			return &dbcopy.ExportResult{Tables: []dbcopy.ExportTable{{Name: "items", Rows: 5}, {Name: "orders", Rows: 10}}}, nil
 		}
 		cmd := dbExportCommand()
 		var errBuf bytes.Buffer

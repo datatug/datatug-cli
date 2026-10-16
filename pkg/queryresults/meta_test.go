@@ -152,8 +152,33 @@ func TestSetEditor(t *testing.T) {
 	meta.Query.DTQL = "from:\n  name: T\n"
 	_ = json.Unmarshal(meta.Encode(), &decoded)
 	query = decoded["query"].(map[string]any)
-	if query["text"] != nil || query["dtql"] == nil || decoded["unavailable"].(map[string]any)["query"] != nil {
+	if query["text"] != nil || query["dtql"] == nil || decoded["unavailable"].(map[string]any)["query"] != nil || decoded["unavailable"].(map[string]any)["editor"] != UnavailableTooLarge {
 		t.Fatalf("editor members over their bound %v %v", query, decoded["unavailable"])
+	}
+
+	// params alone over the bound, and both, and neither
+	meta = Meta{Query: Query{Parameters: map[string]apicontract.TypedValueOrSet{"p": apicontract.ScalarValue(apicontract.NewIntegerValue("1"))}}}
+	meta.SetEditor("select 1", LanguageSQL)
+	meta.Query.Params[0].Name = strings.Repeat("n", MaxQueryBytes)
+	_ = json.Unmarshal(meta.Encode(), &decoded)
+	query = decoded["query"].(map[string]any)
+	unavailable := decoded["unavailable"].(map[string]any)
+	if query["text"] != nil || query["params"] != nil || query["parameters"] == nil || unavailable["editor"] != UnavailableTooLarge || unavailable["query"] != nil {
+		t.Fatalf("params over their bound %v %v", query, unavailable)
+	}
+	meta.Query.Params = nil
+	meta.Query.Text = strings.Repeat("x", MaxQueryBytes)
+	meta.Query.DTQL = strings.Repeat("y", MaxQueryBytes)
+	_ = json.Unmarshal(meta.Encode(), &decoded)
+	unavailable = decoded["unavailable"].(map[string]any)
+	if unavailable["editor"] != UnavailableTooLarge || unavailable["query"] != UnavailableTooLarge {
+		t.Fatalf("both over %v", unavailable)
+	}
+	meta = Meta{}
+	meta.SetEditor("select 1", LanguageSQL)
+	_ = json.Unmarshal(meta.Encode(), &decoded)
+	if _, has := decoded["unavailable"].(map[string]any)["editor"]; has {
+		t.Fatal("editor flag set with nothing dropped")
 	}
 
 	// the legacy bound is not shared with them: 200 KiB of each is kept

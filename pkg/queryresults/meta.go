@@ -234,7 +234,11 @@ type RelatedField struct {
 
 // Unavailable holds a reason code per part of the metadata that is missing.
 type Unavailable struct {
-	Query         string `json:"query,omitempty"`
+	Query string `json:"query,omitempty"`
+	// Editor says query.text and query.params were dropped for size, so a
+	// consumer can tell dropped from absent; the legacy dtql and parameters
+	// are untouched by it.
+	Editor        string `json:"editor,omitempty"`
 	Columns       string `json:"columns,omitempty"`
 	Participants  string `json:"participants,omitempty"`
 	Related       string `json:"related,omitempty"`
@@ -294,6 +298,7 @@ func (m Meta) Encode() []byte {
 	// not shrink what the legacy members may hold; past it only they go.
 	if len(editorText)+len(params) > MaxQueryBytes {
 		m.Query.Text, m.Query.Params = "", nil
+		m.Unavailable.Editor = UnavailableTooLarge
 	}
 	if m.Participants == nil {
 		m.Participants = []Participant{}

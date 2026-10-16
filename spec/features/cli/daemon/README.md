@@ -42,11 +42,11 @@ When the daemon is not running and could not be started, the wrapper MUST print 
 
 #### REQ: status
 
-`datatug daemon status [--format json|text]` MUST NOT start or stop anything. JSON (the default) is one object on stdout with: `running` (bool), `url` (agent API base, e.g. `http://127.0.0.1:8989`, empty when not running), `uiBase` (web UI address of this agent), `port`, `pid`, `startedBy` (caller id, `"external"` for a datatug API this CLI did not start, empty when not running), `startedAt` (RFC 3339), `version`, `logFile`, `idleTimeout` and `error` (fixed phrase, only when the last start failed). Exit code is `0` whether or not it runs.
+`datatug daemon status [--format json|text]` MUST NOT start or stop anything. JSON (the default) is one object on stdout with: `running` (bool), `url` (agent API base, e.g. `http://127.0.0.1:8989`, empty when not running), `uiBase` (web UI address of this agent), `port`, `pid`, `startedBy` (caller id, `"external"` for a datatug API this CLI did not start, empty when not running), `startedAt` (RFC 3339), `version`, `logFile`, `idleTimeout` and `error` (fixed phrase, only when the last start failed) and `startError` (stable machine-readable reason, omitted when empty; the one value today is `policy-principal-required`: a policy set exists, `serve` would refuse to start without `--as`/`--role`/`--group`, and the daemon names none; `start` decides this before spawning, with the same policies-folder rule as `serve`, reading nothing beyond whether a valid set exists). Exit code is `0` whether or not it runs.
 
 #### REQ: start
 
-`datatug daemon start [--client <caller>] [--format json|text]` MUST ensure the daemon is running: reuse a running one, otherwise start one, then print the `status` object. It MUST exit `0` when running and `4` when it could not be started (the status object, with `error`, is still printed).
+`datatug daemon start [--client <caller>] [--format json|text]` MUST ensure the daemon is running: reuse a running one, otherwise start one, then print the `status` object. It MUST exit `0` when running and `4` when it could not be started (the status object, with `error` and, when named, `startError`, is still printed). On `policy-principal-required`, `daemon start` and the `--client` auto-start print one stderr line saying a policy set exists but no principal was named for the daemon and to run `datatug serve --as <principal>` or remove the policy set; it never names the policy path or contents.
 
 #### REQ: stop
 
@@ -69,6 +69,10 @@ When the daemon is not running and could not be started, the wrapper MUST print 
 Names (table, schema, key columns) are compared exactly and case-sensitively, as `datatug db schema` prints them; `--table customer` does not match `Customer`.
 
 When the project holds no usable metadata for the source (never scanned, a scan with no table and no view at all, a model folder that is missing, an unregistered project, an unknown environment or source, or a table's columns file that is unreadable, not a regular file (links are never followed) or larger than 4 MiB) the link is built as before and `warnings` is `["table metadata not scanned: link not validated"]`; the exit code is `0` and nothing goes to stderr. With the text format the warnings are not printed.
+
+#### REQ: result-link
+
+`datatug daemon url --result <id> [--view=table|record|columns|sources|related] [--row <n>] [--format json|text]` MUST print the link of a result stored by `query run --result-id` (see [query](../query/README.md)) and MUST NOT start the daemon or send a request. `--view` takes its value after `=` (a bare `--view` keeps meaning a view of a table link); the default view is `table`. `--row` is a 1-based position, at most 10000, never a key; `--row 0` and `--row` without `--result` are exit `2`. The id follows the result id grammar (exit `2` otherwise); any table-link flag with `--result`, a view outside the list, and a view name on a table link are exit `2`. JSON fields: `contract` (as for every `daemon url` object), `url`, `kind` (`query-result`), `running`, `uiSupport`, `resultExists`, `warnings` (always present, `[]`). Whether the result exists is read from the store on disk (a complete, unexpired result whose directory is not a link and is the user's); when it does not, `url` is absent and no code is minted. The link carries no project, database, table, column, value or query text: the page reads them from the agent.
 
 ### Ownership and lifetime
 
@@ -115,10 +119,11 @@ The web UI address of an agent is `<uiBase>` = `https://datatug.app/store/http-<
 | Table metadata | `<uiBase>/project/<project>/env/<env>/db/<db>/table/<table>?schema=<s>` (`view/<name>` for a view; `schema` is always present, empty for a schemaless source) |
 | Table records (top N) | `<uiBase>/project/<project>/env/<env>/db/<db>/table/<table>/records?limit=<N>&schema=<s>` |
 | Single record | `<uiBase>/project/<project>/env/<env>/db/<db>/table/<table>/record?schema=<s>#pk=<encodeURIComponent of a JSON object column→value>` |
+| Query result | `<uiBase>/result/<id>?view=<view>[&row=<n>]` |
 
 The key is in the URL fragment so it is never sent to the web host. It is one JSON object with sorted keys and typed values; an integer above 2^53 − 1 in absolute value is written as a string so the UI never rounds it. The fragment is encoded like JavaScript's `encodeURIComponent`.
 
-`DATATUG_UI_BASE` MAY replace `https://datatug.app` (self-hosted or local build). The deployed UI serves all three kinds on both `table` and `view` (datatug-apps `libs/datatug/main/src/lib/routes/datatug-routing-proj-env-db.ts`: `table|view/:tableType`, `…/records`, `…/record`; `schema` is authoritative in `agent-links/table-identity.ts`, `limit` is read in `link-route.ts`, `pk` is the last part of the fragment in `record-key.ts`, the code is taken out first by `main.ts`), so `url` reports `uiSupport` `available` for all three kinds. A kind is flipped only when both its `table` and `view` routes are served.
+`DATATUG_UI_BASE` MAY replace `https://datatug.app` (self-hosted or local build). The deployed UI serves all three kinds on both `table` and `view` (datatug-apps `libs/datatug/main/src/lib/routes/datatug-routing-proj-env-db.ts`: `table|view/:tableType`, `…/records`, `…/record`; `schema` is authoritative in `agent-links/table-identity.ts`, `limit` is read in `link-route.ts`, `pk` is the last part of the fragment in `record-key.ts`, the code is taken out first by `main.ts`), so `url` reports `uiSupport` `available` for all three kinds. A kind is flipped only when both its `table` and `view` routes are served. The `result/<id>` route of a query result is not served yet, so `query-result` is `pending`; the page will read the result from the agent's `GET /datatug/results/<id>` (see [serve](../serve/README.md) `result-route`).
 
 ## Acceptance Criteria
 
@@ -164,9 +169,16 @@ Every `daemon url` JSON object carries `"contract": 1`.
 
 Against a scanned project, `daemon url` refuses an unknown table (exit 3), `--view` on a table or no `--view` on a view, and a `--record` whose keys are not exactly the primary key (exit 2), and an ambiguous schema (exit 2); for a never-scanned or empty source it still prints the link with the `warnings` entry.
 
+### AC: result-link-shape
+
+**Requirements:** daemon#req:result-link, daemon#req:deep-link-contract, daemon#req:no-secrets
+
+For a stored result, `daemon url --result <id> --view=sources --row 2` prints `<uiBase>/result/<id>?view=sources&row=2` with `resultExists` `true`, `kind` `query-result` and `uiSupport` `pending`, and a running agent's code first in the fragment; for an id with no result it prints `resultExists` `false` and no `url`; a bad id or view, or `--result` with `--table`, is exit `2`.
+
 ## Follow-up
 
 1. Confirm `https://datatug.app` can call a plain-HTTP `127.0.0.1` agent (CORS allow-list in the request guard) from a browser page.
+2. Serve `result/<id>` in datatug-apps (reading `GET /datatug/results/<id>`), then flip `query-result` to `available` in `pkg/daemon`.
 
 ## Decisions
 
@@ -174,4 +186,4 @@ Against a scanned project, `daemon url` refuses an unknown table (exit 3), `--vi
 
 ## Open Questions
 
-- A policy set under `~/.datatug/policies/` makes `serve` refuse to start without `--as`; the daemon then fails with its log pointing at that. Should `daemon start` accept `--as/--role/--group` passthrough?
+- How does the daemon obtain a principal when a policy set exists (`--as`/`--role`/`--group` on `daemon start`, remembered in `daemon.json`)? Today it names none, so `start` fails with `startError: policy-principal-required`. Recommendation: `daemon start --as/--role/--group`, persisted in `daemon.json` and passed through to `serve`, with the `--client` wrapper reusing the recorded one.

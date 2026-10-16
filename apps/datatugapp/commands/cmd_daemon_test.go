@@ -444,3 +444,69 @@ func TestDaemonURLScanThatHoldsNothingUsableIsNotScanned(t *testing.T) {
 	}
 	warned("no model folder")
 }
+
+// useDaemonPolicySet makes the fake manager see a policy set.
+func useDaemonPolicySet(t *testing.T, present bool) {
+	t.Helper()
+	orig := newDaemonManager
+	t.Cleanup(func() { newDaemonManager = orig })
+	newDaemonManager = func() *daemon.Manager {
+		m := daemonManagerWithoutPolicy(t)
+		m.PolicySetPresent = func() bool { return present }
+		return m
+	}
+}
+
+func daemonManagerWithoutPolicy(t *testing.T) *daemon.Manager {
+	t.Helper()
+	return &daemon.Manager{
+		Dir:       t.TempDir(),
+		Exe:       func() (string, error) { return "/bin/datatug", nil },
+		Probe:     func(int) (string, bool) { return "", false },
+		Dial:      func(int) bool { return false },
+		PortFree:  func(int) bool { return true },
+		Alive:     func(int) bool { return false },
+		Owns:      func(int, int) bool { return true },
+		Terminate: func(int) error { return nil },
+		Spawn: func(string, []string, string) (int, <-chan struct{}, error) {
+			return 0, nil, errors.New("must not spawn")
+		},
+		Now: time.Now, Sleep: func(time.Duration) {}, StartWait: time.Millisecond, Poll: time.Millisecond,
+	}
+}
+
+func TestDaemonStartPolicyPrincipalRequired(t *testing.T) {
+	useDaemonPolicySet(t, true)
+	root := daemonRoot()
+	var out, errOut bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&errOut)
+	root.SetArgs([]string{"daemon", "start"})
+	err := root.Execute()
+	if exitCodeOf(t, err) != exitCodeDatabase {
+		t.Fatalf("exit: %v", err)
+	}
+	var raw map[string]any
+	if jsonErr := json.Unmarshal(out.Bytes(), &raw); jsonErr != nil {
+		t.Fatal(jsonErr)
+	}
+	if raw["startError"] != "policy-principal-required" || raw["error"] != daemon.ErrPhrasePolicyPrincipal {
+		t.Fatalf("%s", out.String())
+	}
+	if got := errOut.String(); got != policyPrincipalWarning+"\n" || strings.Contains(got, "policies") && strings.Contains(got, "/") {
+		t.Fatalf("%q", got)
+	}
+}
+
+func TestDaemonStartWithoutPolicySetKeepsStatusShape(t *testing.T) {
+	useDaemonPolicySet(t, false)
+	root := daemonRoot()
+	var out, errOut bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&errOut)
+	root.SetArgs([]string{"daemon", "start"})
+	err := root.Execute()
+	if exitCodeOf(t, err) != exitCodeDatabase || strings.Contains(out.String(), "startError") || strings.Contains(errOut.String(), "policy set") {
+		t.Fatalf("%v %s %s", err, out.String(), errOut.String())
+	}
+}

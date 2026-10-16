@@ -43,6 +43,7 @@ func registerRoutesOn(path string, router router, wrapper wrapper, writeOnly boo
 	incidentRoutes(path, router, wrapper, writeOnly, caps)
 	detectiveRoutes(path, router, wrapper, writeOnly, caps)
 	sessionContextRoutes(path, router, wrapper, writeOnly, caps)
+	resultsRoutes(path, router, wrapper, writeOnly)
 
 }
 

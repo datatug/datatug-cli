@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/datatug/datatug-cli/pkg/api"
@@ -269,6 +270,18 @@ func root(writer http.ResponseWriter, _ *http.Request) {
 `, filestore.GetProjectPath(storage.SingleProjectID))
 }
 
+// resultsPathSegment is where a stored result's id is in a request path.
+const resultsPathSegment = "/datatug/results/"
+
+// loggedPath is path as the log shows it: a stored result's id is replaced by
+// :id, so the log never holds one.
+func loggedPath(path string) string {
+	if i := strings.Index(path, resultsPathSegment); i >= 0 {
+		return path[:i+len(resultsPathSegment)] + ":id"
+	}
+	return path
+}
+
 // logRequests logs the method, the length of the body and the path of every request
 // but the agent-info poll, then runs handler. The query string is not logged: a
 // client can put a source string in it (an environment, a database, a source), and
@@ -276,7 +289,7 @@ func root(writer http.ResponseWriter, _ *http.Request) {
 func logRequests(handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/agent-info" {
-			log.Println(r.Method, r.ContentLength, r.URL.Path)
+			log.Println(r.Method, r.ContentLength, loggedPath(r.URL.Path))
 		}
 		handler(w, r)
 	}

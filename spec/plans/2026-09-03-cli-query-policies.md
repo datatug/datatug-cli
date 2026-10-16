@@ -47,6 +47,15 @@ The reusable core lives in `pkg/accesspolicies` (discovery, decoding, variable p
 
 `cmd_query.go`: the `query` group and `run` verb, flags, DTQL/`--from`, `dbcopy` URL backend, exit codes 2/4/5/1, row normalisation and the five formats.
 
+### Task 4: Result files
+
+**Id:** task-4
+**Verifies:** cli/query#ac:result-files-written, cli/query#ac:result-rows-capped, cli/query#ac:result-meta-describes-the-run, cli/query#ac:results-pruned-and-removed
+**Depends-On:** 3
+**Status:** complete
+
+`pkg/queryresults` (store, collector, `meta.json` types), `--result-id`/`--result-rows` on both forms of `query run`, the path-free locator and failure lines, and `query results locate|check|prune|rm`; the Git checks moved from `pkg/executionstore` to `pkg/gitpath`.
+
 ## Open Questions
 
 None at this time.

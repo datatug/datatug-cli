@@ -307,54 +307,109 @@
  },
  {
   "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"public\".\"Parent\"",
+  "sql": "SELECT max(\"id\"), ( WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT CASE (SELECT count(*) FROM s) WHEN 0 THEN pg_get_serial_sequence($1, $2) WHEN 1 THEN (SELECT min(name) FROM s) END) FROM \"public\".\"Parent\"",
   "cols": [
-   "max"
+   "max",
+   "case"
   ],
   "rows": [
    [
     {
      "t": "i",
      "v": 2
+    },
+    {
+     "t": "s",
+     "v": "public.\"Parent_id_seq\""
     }
    ]
   ]
  },
  {
-  "kind": "exec",
-  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
-  "affected": 1
+  "kind": "query",
+  "sql": "SELECT CASE WHEN p.seqincrement \u003c 0 THEN 'down' WHEN GREATEST(c.cur, $2::numeric) \u003e p.seqmax THEN 'max' WHEN c.cur \u003e= $2::numeric THEN 'past' ELSE 'set' || setval($1::text::regclass, $2::bigint, false)::text END, GREATEST(c.cur, $2::numeric)::text, p.seqmax::text FROM pg_sequence p, public.\"Parent_id_seq\" s, LATERAL (SELECT CASE WHEN s.is_called THEN s.last_value::numeric + p.seqincrement ELSE s.last_value::numeric END AS cur) c WHERE p.seqrelid = $1::text::regclass",
+  "cols": [
+   "case",
+   "greatest",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "set11"
+    },
+    {
+     "t": "s",
+     "v": "11"
+    },
+    {
+     "t": "s",
+     "v": "9223372036854775807"
+    }
+   ]
+  ]
  },
  {
   "kind": "query",
-  "sql": "SELECT max(\"n\") FROM \"public\".\"grandchild\"",
+  "sql": "SELECT max(\"n\"), ( WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT CASE (SELECT count(*) FROM s) WHEN 0 THEN pg_get_serial_sequence($1, $2) WHEN 1 THEN (SELECT min(name) FROM s) END) FROM \"public\".\"grandchild\"",
   "cols": [
-   "max"
+   "max",
+   "case"
   ],
   "rows": [
    [
     {
      "t": "i",
      "v": 3
+    },
+    {
+     "t": "s",
+     "v": "public.grandchild_n_seq"
     }
    ]
   ]
  },
  {
-  "kind": "exec",
-  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
-  "affected": 1
+  "kind": "query",
+  "sql": "SELECT CASE WHEN p.seqincrement \u003c 0 THEN 'down' WHEN GREATEST(c.cur, $2::numeric) \u003e p.seqmax THEN 'max' WHEN c.cur \u003e= $2::numeric THEN 'past' ELSE 'set' || setval($1::text::regclass, $2::bigint, false)::text END, GREATEST(c.cur, $2::numeric)::text, p.seqmax::text FROM pg_sequence p, public.grandchild_n_seq s, LATERAL (SELECT CASE WHEN s.is_called THEN s.last_value::numeric + p.seqincrement ELSE s.last_value::numeric END AS cur) c WHERE p.seqrelid = $1::text::regclass",
+  "cols": [
+   "case",
+   "greatest",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "set4"
+    },
+    {
+     "t": "s",
+     "v": "4"
+    },
+    {
+     "t": "s",
+     "v": "9223372036854775807"
+    }
+   ]
+  ]
  },
  {
   "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"public\".\"emptyauto\"",
+  "sql": "SELECT max(\"id\"), ( WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT CASE (SELECT count(*) FROM s) WHEN 0 THEN pg_get_serial_sequence($1, $2) WHEN 1 THEN (SELECT min(name) FROM s) END) FROM \"public\".\"emptyauto\"",
   "cols": [
-   "max"
+   "max",
+   "case"
   ],
   "rows": [
    [
     {
      "t": "n"
+    },
+    {
+     "t": "s",
+     "v": "public.emptyauto_id_seq"
     }
    ]
   ]
@@ -718,54 +773,109 @@
  },
  {
   "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"public\".\"Parent\"",
+  "sql": "SELECT max(\"id\"), ( WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT CASE (SELECT count(*) FROM s) WHEN 0 THEN pg_get_serial_sequence($1, $2) WHEN 1 THEN (SELECT min(name) FROM s) END) FROM \"public\".\"Parent\"",
   "cols": [
-   "max"
+   "max",
+   "case"
   ],
   "rows": [
    [
     {
      "t": "i",
      "v": 2
+    },
+    {
+     "t": "s",
+     "v": "public.\"Parent_id_seq\""
     }
    ]
   ]
  },
  {
-  "kind": "exec",
-  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
-  "affected": 1
+  "kind": "query",
+  "sql": "SELECT CASE WHEN p.seqincrement \u003c 0 THEN 'down' WHEN GREATEST(c.cur, $2::numeric) \u003e p.seqmax THEN 'max' WHEN c.cur \u003e= $2::numeric THEN 'past' ELSE 'set' || setval($1::text::regclass, $2::bigint, false)::text END, GREATEST(c.cur, $2::numeric)::text, p.seqmax::text FROM pg_sequence p, public.\"Parent_id_seq\" s, LATERAL (SELECT CASE WHEN s.is_called THEN s.last_value::numeric + p.seqincrement ELSE s.last_value::numeric END AS cur) c WHERE p.seqrelid = $1::text::regclass",
+  "cols": [
+   "case",
+   "greatest",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "set11"
+    },
+    {
+     "t": "s",
+     "v": "11"
+    },
+    {
+     "t": "s",
+     "v": "9223372036854775807"
+    }
+   ]
+  ]
  },
  {
   "kind": "query",
-  "sql": "SELECT max(\"n\") FROM \"public\".\"grandchild\"",
+  "sql": "SELECT max(\"n\"), ( WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT CASE (SELECT count(*) FROM s) WHEN 0 THEN pg_get_serial_sequence($1, $2) WHEN 1 THEN (SELECT min(name) FROM s) END) FROM \"public\".\"grandchild\"",
   "cols": [
-   "max"
+   "max",
+   "case"
   ],
   "rows": [
    [
     {
      "t": "i",
      "v": 3
+    },
+    {
+     "t": "s",
+     "v": "public.grandchild_n_seq"
     }
    ]
   ]
  },
  {
-  "kind": "exec",
-  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
-  "affected": 1
+  "kind": "query",
+  "sql": "SELECT CASE WHEN p.seqincrement \u003c 0 THEN 'down' WHEN GREATEST(c.cur, $2::numeric) \u003e p.seqmax THEN 'max' WHEN c.cur \u003e= $2::numeric THEN 'past' ELSE 'set' || setval($1::text::regclass, $2::bigint, false)::text END, GREATEST(c.cur, $2::numeric)::text, p.seqmax::text FROM pg_sequence p, public.grandchild_n_seq s, LATERAL (SELECT CASE WHEN s.is_called THEN s.last_value::numeric + p.seqincrement ELSE s.last_value::numeric END AS cur) c WHERE p.seqrelid = $1::text::regclass",
+  "cols": [
+   "case",
+   "greatest",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "set4"
+    },
+    {
+     "t": "s",
+     "v": "4"
+    },
+    {
+     "t": "s",
+     "v": "9223372036854775807"
+    }
+   ]
+  ]
  },
  {
   "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"public\".\"emptyauto\"",
+  "sql": "SELECT max(\"id\"), ( WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT CASE (SELECT count(*) FROM s) WHEN 0 THEN pg_get_serial_sequence($1, $2) WHEN 1 THEN (SELECT min(name) FROM s) END) FROM \"public\".\"emptyauto\"",
   "cols": [
-   "max"
+   "max",
+   "case"
   ],
   "rows": [
    [
     {
      "t": "n"
+    },
+    {
+     "t": "s",
+     "v": "public.emptyauto_id_seq"
     }
    ]
   ]
@@ -1117,54 +1227,109 @@
  },
  {
   "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"public\".\"Parent\"",
+  "sql": "SELECT max(\"id\"), ( WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT CASE (SELECT count(*) FROM s) WHEN 0 THEN pg_get_serial_sequence($1, $2) WHEN 1 THEN (SELECT min(name) FROM s) END) FROM \"public\".\"Parent\"",
   "cols": [
-   "max"
+   "max",
+   "case"
   ],
   "rows": [
    [
     {
      "t": "i",
      "v": 2
+    },
+    {
+     "t": "s",
+     "v": "public.\"Parent_id_seq\""
     }
    ]
   ]
  },
  {
-  "kind": "exec",
-  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
-  "affected": 1
+  "kind": "query",
+  "sql": "SELECT CASE WHEN p.seqincrement \u003c 0 THEN 'down' WHEN GREATEST(c.cur, $2::numeric) \u003e p.seqmax THEN 'max' WHEN c.cur \u003e= $2::numeric THEN 'past' ELSE 'set' || setval($1::text::regclass, $2::bigint, false)::text END, GREATEST(c.cur, $2::numeric)::text, p.seqmax::text FROM pg_sequence p, public.\"Parent_id_seq\" s, LATERAL (SELECT CASE WHEN s.is_called THEN s.last_value::numeric + p.seqincrement ELSE s.last_value::numeric END AS cur) c WHERE p.seqrelid = $1::text::regclass",
+  "cols": [
+   "case",
+   "greatest",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "set11"
+    },
+    {
+     "t": "s",
+     "v": "11"
+    },
+    {
+     "t": "s",
+     "v": "9223372036854775807"
+    }
+   ]
+  ]
  },
  {
   "kind": "query",
-  "sql": "SELECT max(\"n\") FROM \"public\".\"grandchild\"",
+  "sql": "SELECT max(\"n\"), ( WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT CASE (SELECT count(*) FROM s) WHEN 0 THEN pg_get_serial_sequence($1, $2) WHEN 1 THEN (SELECT min(name) FROM s) END) FROM \"public\".\"grandchild\"",
   "cols": [
-   "max"
+   "max",
+   "case"
   ],
   "rows": [
    [
     {
      "t": "i",
      "v": 3
+    },
+    {
+     "t": "s",
+     "v": "public.grandchild_n_seq"
     }
    ]
   ]
  },
  {
-  "kind": "exec",
-  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
-  "affected": 1
+  "kind": "query",
+  "sql": "SELECT CASE WHEN p.seqincrement \u003c 0 THEN 'down' WHEN GREATEST(c.cur, $2::numeric) \u003e p.seqmax THEN 'max' WHEN c.cur \u003e= $2::numeric THEN 'past' ELSE 'set' || setval($1::text::regclass, $2::bigint, false)::text END, GREATEST(c.cur, $2::numeric)::text, p.seqmax::text FROM pg_sequence p, public.grandchild_n_seq s, LATERAL (SELECT CASE WHEN s.is_called THEN s.last_value::numeric + p.seqincrement ELSE s.last_value::numeric END AS cur) c WHERE p.seqrelid = $1::text::regclass",
+  "cols": [
+   "case",
+   "greatest",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "set4"
+    },
+    {
+     "t": "s",
+     "v": "4"
+    },
+    {
+     "t": "s",
+     "v": "9223372036854775807"
+    }
+   ]
+  ]
  },
  {
   "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"public\".\"emptyauto\"",
+  "sql": "SELECT max(\"id\"), ( WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT CASE (SELECT count(*) FROM s) WHEN 0 THEN pg_get_serial_sequence($1, $2) WHEN 1 THEN (SELECT min(name) FROM s) END) FROM \"public\".\"emptyauto\"",
   "cols": [
-   "max"
+   "max",
+   "case"
   ],
   "rows": [
    [
     {
      "t": "n"
+    },
+    {
+     "t": "s",
+     "v": "public.emptyauto_id_seq"
     }
    ]
   ]
@@ -1194,7 +1359,7 @@
    [
     {
      "t": "i",
-     "v": 65869
+     "v": 50887
     },
     {
      "t": "s",
@@ -1216,7 +1381,7 @@
    [
     {
      "t": "i",
-     "v": 65882
+     "v": 50900
     },
     {
      "t": "s",
@@ -1238,7 +1403,7 @@
    [
     {
      "t": "i",
-     "v": 65901
+     "v": 50919
     },
     {
      "t": "s",
@@ -1260,7 +1425,7 @@
    [
     {
      "t": "i",
-     "v": 65890
+     "v": 50908
     },
     {
      "t": "s",
@@ -1282,7 +1447,7 @@
    [
     {
      "t": "i",
-     "v": 65895
+     "v": 50913
     },
     {
      "t": "s",
@@ -4076,7 +4241,7 @@
     },
     {
      "t": "s",
-     "v": "2026-10-15 14:10:02"
+     "v": "2026-10-16 01:45:14"
     },
     {
      "t": "i",
@@ -4141,7 +4306,7 @@
     },
     {
      "t": "s",
-     "v": "2026-10-15 14:10:02"
+     "v": "2026-10-16 01:45:14"
     },
     {
      "t": "i",
@@ -4316,7 +4481,7 @@
    [
     {
      "t": "i",
-     "v": 65869
+     "v": 50887
     },
     {
      "t": "s",
@@ -4338,7 +4503,7 @@
    [
     {
      "t": "i",
-     "v": 65882
+     "v": 50900
     },
     {
      "t": "s",
@@ -4360,7 +4525,7 @@
    [
     {
      "t": "i",
-     "v": 65901
+     "v": 50919
     },
     {
      "t": "s",
@@ -4382,7 +4547,7 @@
    [
     {
      "t": "i",
-     "v": 65890
+     "v": 50908
     },
     {
      "t": "s",
@@ -4404,7 +4569,7 @@
    [
     {
      "t": "i",
-     "v": 65895
+     "v": 50913
     },
     {
      "t": "s",
@@ -7198,7 +7363,7 @@
     },
     {
      "t": "s",
-     "v": "2026-10-15 14:10:02"
+     "v": "2026-10-16 01:45:14"
     },
     {
      "t": "s",
@@ -7263,7 +7428,7 @@
     },
     {
      "t": "s",
-     "v": "2026-10-15 14:10:02"
+     "v": "2026-10-16 01:45:14"
     },
     {
      "t": "s",

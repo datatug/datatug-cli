@@ -54,11 +54,11 @@ Every item is a warning with a `kind`, the object it is about and a message.
 | `check-not-carried` | A check constraint the target does not accept (the regular expression `~ '^[A-Z]{3}$'` has no SQLite equivalent). |
 | `type-widened` | A column whose values do not fit its declared type (a `DATETIME` holding `2016-07-04`, a `NUMERIC(5,2)` holding `1.255`, a `FLOAT4` holding `16777217`, a `JSONB_TEXT` that jsonb would write differently, a `TIMESTAMPTZ` with offset `+02`, a `TEXT` holding a NUL byte, a column of mixed storage classes). It is carried in a type that holds every value (`text`, `double precision`, `json`, `bytea`, `numeric`), the declared type is recorded on the column, and the values are unchanged. A text with a NUL byte makes the whole column `bytea`, and a copy back to SQLite returns BLOBs. |
 | `values-normalized` | (PostgreSQL -> SQLite) a numeric of more than 15 significant digits written into a column of numeric affinity is rounded by SQLite: counted. An integer numeric is bound as an integer and never passes through a double. |
-| `values-normalized` | A `DECIMAL_TEXT` written in numeric's spelling (`.0000` -> `0.0000`, `-0.00` -> `0.00`, `1.5` -> `1.50` in `numeric(p,2)`): the count and the first example per column (`--decimals=text` keeps the text). A value the target cannot hold: PostgreSQL NaN becomes NULL in SQLite and a negative zero becomes 0 (counted per column); a `char(n)` is copied with PostgreSQL's blank padding. |
-| `default-translated` | A text default of a `DECIMAL_TEXT` column becomes the numeric default (`'0.00'` -> `0.00`; the same number, written back as text). A `CURRENT_TIMESTAMP` / `CURRENT_DATE` / `CURRENT_TIME` default of a text column is written with `to_char(... AT TIME ZONE 'UTC')` in the same text format. |
+| `values-normalized` | A `DECIMAL_TEXT` written in numeric's spelling (`.0000` -> `0.0000`, `-0.00` -> `0.00`, `1.5` -> `1.50` in `numeric(p,2)`): the count and the first example per column (`--decimals=text` keeps the text). A value the target cannot hold: PostgreSQL NaN becomes NULL in SQLite (a `numeric` NaN in a numeric-affinity column stays its text) and a negative zero becomes 0 (counted per column); a `char(n)` is copied with PostgreSQL's blank padding. |
+| `default-translated` | A text default of a `DECIMAL_TEXT` column becomes the numeric default (`'0.00'` -> `0.00`; the same number, written back as text); when numeric would store another number (`'1.5'` into scale 2, `'+1.5'`, `'1e2'`) the warning says which one new rows get. A `CURRENT_TIMESTAMP` / `CURRENT_DATE` / `CURRENT_TIME` default of a text column is written with `to_char(... AT TIME ZONE 'UTC')` in the same text format. |
 | `type-approximated` | A PostgreSQL type SQLite cannot hold (arrays, enums, ranges, ...): carried as its text form. |
 | `default-not-carried` | A default expression the target cannot take (`(1+2)`, `nextval(..)`). |
-| `identity-not-carried` | An identity column that is not a single integer primary key (SQLite cannot auto-number it); a sequence whose start or step is not 1 (the next value is carried, the step is not). |
+| `identity-not-carried` | An identity column that is not a single integer primary key (SQLite cannot auto-number it); a sequence whose start or step is not 1 (the next value is carried, the step is not); a reload into a column that has no single sequence to move, whose sequence would have to go beyond its maximum (`CYCLE` at `MAXVALUE`, a `bigint` at the top), or that counts down: the counter is not moved. |
 | `generated-column` | The expression of a generated column; its values are copied as an ordinary column. |
 | `collation-not-carried`, `storage-option-not-carried` | Collations; `WITHOUT ROWID`, `STRICT`, partitioning. |
 | `comment-not-carried` | PostgreSQL column comments (SQLite has none). |
@@ -155,7 +155,22 @@ than the loaded rows fails the reload, which is rolled back. A key to a table th
 (`--include child`) is not touched and stays enforced: a source row without its parent is then a
 failure of the reload (23503, nothing changes), not a `NOT VALID` key. The counters of auto-numbered
 columns are set with `setval` last in the transaction (a rollback does not undo a `setval`, so nothing
-that can fail comes after it). A source table the target lacks is created. Views and
+that can fail comes after it), on the sequence the column's `DEFAULT nextval('s')` takes values from (a serial
+column's own, or another one the default was changed to), or the one an identity column owns. A sequence is
+only ever moved *forward*, by one statement that reads it (its last value, plus its step once it has been
+used; its start, which is its last value, while it has not) and decides: a sequence already past the rows (also
+one that is set but not called yet) is not touched at all; one behind them is set to the id after the highest
+copied one, in the same statement that found it behind. A sequence that several tables share is therefore not
+moved back by the reload of one of them. The reload locks only the tables it reloads: another session that
+writes to a table sharing the sequence during the reload can still lose a value in the instant of that one
+statement (a repeated stress run of 20 seconds over 1,600 reloads saw none), so a shared sequence is best
+reloaded while it is quiet. A sequence that cannot be set to the value (it would be beyond its maximum, as a
+`CYCLE` sequence at its `MAXVALUE` or a `bigint` at the top) or that counts down (a negative step) is left
+alone and an `identity-not-carried` warning says so; the copy does not fail. A target column with no
+sequence, or with more than one, is an `identity-not-carried` warning too (its counter is not moved), never
+silent. Reading the sequence needs the `SELECT` privilege on it, as `setval` needs `UPDATE`: a role that has
+neither fails the reload (rolled back) with the server's message. A source table the target lacks is created.
+Views and
 triggers of a SQLite source are replaced by the source's.
 
 Reload takes `ACCESS EXCLUSIVE` locks (`TRUNCATE`, the dropped keys) and waits as long as another
@@ -174,8 +189,10 @@ they are).
   SQLite says that PostgreSQL stores `1.500` where SQLite inserts the text `1.5`.
 * A date, timestamp or timestamptz in year `0000` is carried as text: PostgreSQL has no year 0.
 * `+-Infinity` of a REAL in a DECIMAL column makes that column text (PostgreSQL 14+ `numeric` could
-  hold them; this copy does not rely on it); a PostgreSQL `numeric` `NaN` / `Infinity` comes back to
-  SQLite as text, and is warned.
+  hold them; this copy does not rely on it); a PostgreSQL `numeric` `NaN` that comes back into a SQLite
+  column of numeric affinity (a `DECIMAL` an earlier copy wrote) stays its text `NaN`, exactly, and is
+  counted per column in a `values-normalized` warning; a `numeric` column that comes back as text keeps
+  `NaN` / `Infinity` as they are, and there is nothing to say.
 * `--decimals=text` applies to SQLite to PostgreSQL copies only; any other copy refuses it (exit 2).
 * The values-normalized count of a `DECIMAL_TEXT` is the count for the type the column gets:
   `numeric(p,s)` pads to the scale; a column some value of which does not fit it is a plain `numeric`,
@@ -184,7 +201,8 @@ they are).
   an engine prints a default or a check expression) are not warned: `db copy` compares what a column
   holds and the structure, not the text of the DDL.
 * `Verify` compares checks by count, and does not compare comments or the position of a sequence:
-  each engine writes its own names and counters.
+  each engine writes its own names and counters. It compares the deferral, match type and validity of a
+  foreign key, not PostgreSQL 18's NOT ENFORCED.
 
 ## Filters
 

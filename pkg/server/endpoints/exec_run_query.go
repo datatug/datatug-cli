@@ -60,6 +60,8 @@ type runQueryOptions struct {
 	// An internal Detective run must execute the saved definition admitted
 	// with its sealed catalog, even if a concurrent edit changes the query.
 	expectedQueryRevision string
+	// acceptedQuery is supplied only by the trusted private-pin native adapter.
+	acceptedQuery *datatug.QueryDefWithFolderPath
 }
 
 var execRunProjectStoreFor = api.ProjectStoreFor
@@ -74,6 +76,9 @@ func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (api
 }
 
 func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRequest, options runQueryOptions) (apicontract.Result, error) {
+	if options.acceptedQuery != nil && options.expectedQueryRevision == "" {
+		return apicontract.Result{}, newInvalidRequest("queryId", "accepted query requires its revision")
+	}
 	if options.expectedQueryRevision != "" && (!req.Record || req.QueryID == "") {
 		return apicontract.Result{}, newInvalidRequest("queryId", "a pinned query revision requires a recorded saved query")
 	}
@@ -121,7 +126,18 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 
 	var queryDef *datatug.QueryDef
 	queryRevision := ""
-	if req.QueryID != "" {
+	if options.acceptedQuery != nil {
+		accepted := options.acceptedQuery
+		canonicalID := accepted.ID
+		if accepted.FolderPath != "" {
+			canonicalID = accepted.FolderPath + "/" + accepted.ID
+		}
+		if req.QueryID != canonicalID || accepted.QueryDef.Validate() != nil || len(accepted.Targets) != 0 {
+			return apicontract.Result{}, newInvalidRequest("queryId", "invalid accepted query")
+		}
+		loaded := accepted.QueryDef
+		queryDef, queryRevision = &loaded, options.expectedQueryRevision
+	} else if req.QueryID != "" {
 		// S97: req.QueryID may be bare or folder-qualified — resolve to the
 		// canonical, folder-qualified form (ResolveQueryID's own doc
 		// comment) before LoadQuery/LoadQueryDocument ever see it, and

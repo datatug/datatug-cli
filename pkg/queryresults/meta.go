@@ -3,6 +3,7 @@ package queryresults
 import (
 	"encoding/json"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/datatug/datatug-core/pkg/apicontract"
@@ -154,6 +155,42 @@ type Column struct {
 	Encoding      string        `json:"encoding,omitempty"`
 	CutCells      int           `json:"cutCells,omitempty"`
 	ObservedTypes []string      `json:"observedTypes,omitempty"`
+	// Internal marks a column that is bookkeeping, not a field of the result
+	// (today only the record key "$key"): a consumer that shows fields hides
+	// it. It is additive: absent (false) in results written before it
+	// existed, which is why IsInternal also knows the key column by name.
+	Internal bool `json:"internal,omitempty"`
+}
+
+// IsInternal is whether a consumer that shows fields should hide the column:
+// it is marked internal, or it is the record key of a result written before
+// the marker existed.
+func (c Column) IsInternal() bool { return c.Internal || c.Name == KeyColumn }
+
+// OrderColumns puts columns in the order of source, a table's or SELECT
+// list's columns: those named in source come first in its order, the others
+// follow in the order given. A name matches case-insensitively; a column
+// named twice in source takes its first place.
+func OrderColumns(columns, source []string) []string {
+	if len(source) == 0 {
+		return columns
+	}
+	rank := make(map[string]int, len(source))
+	for i, name := range source {
+		if _, found := rank[strings.ToLower(name)]; !found {
+			rank[strings.ToLower(name)] = i
+		}
+	}
+	ordered := append([]string(nil), columns...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		a, aKnown := rank[strings.ToLower(ordered[i])]
+		b, bKnown := rank[strings.ToLower(ordered[j])]
+		if aKnown && bKnown {
+			return a < b
+		}
+		return aKnown && !bKnown
+	})
+	return ordered
 }
 
 // ColumnFacts are the schema facts of a column that is a direct reference to

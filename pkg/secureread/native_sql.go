@@ -2,7 +2,9 @@ package secureread
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo2sql"
@@ -86,7 +88,7 @@ func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, 
 	if err := ref.CheckFile(); err != nil {
 		return Result{}, err
 	}
-	db, closeDB, err := openReadOnlySQLite(ctx, ref.Path)
+	db, sqlDB, closeDB, err := openReadOnlySQLiteDB(ctx, ref.Path)
 	if err != nil {
 		// The driver's own text can quote the DSN: say which source failed and
 		// keep the cause for errors.Is and errors.As (see BackendRef.OpenFailure).
@@ -102,7 +104,32 @@ func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, 
 	if !e.session.Unrestricted {
 		result.Limitations = append(result.Limitations, nativeSQLLimitation)
 	}
+	result.ColumnOrder = selectListOrder(ctx, sqlDB, sqlText, args)
 	return result, nil
+}
+
+// selectListOrder is the column names of a SELECT in the order its select list
+// gives them. The reader hands each row over as a map, which has no order, so
+// the statement is asked once for its columns with no rows (LIMIT 0 over it,
+// on the same read-only connection). It answers nil when the text is not a
+// single query that can be wrapped (a PRAGMA, several statements); Columns
+// stays the sorted union either way.
+func selectListOrder(ctx context.Context, db *sql.DB, sqlText string, args []dal.QueryArg) []string {
+	text := strings.TrimRight(strings.TrimSpace(sqlText), "; \t\r\n")
+	bound := make([]any, len(args))
+	for i, arg := range args {
+		bound[i] = arg.Value
+		if arg.Name != "" {
+			bound[i] = sql.Named(arg.Name, arg.Value)
+		}
+	}
+	rows, err := db.QueryContext(ctx, "SELECT * FROM ("+text+") LIMIT 0", bound...)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = rows.Close() }()
+	names, _ := rows.Columns() // nil when the rows are unusable
+	return names
 }
 
 // openReadOnlySQLite opens a dedicated, single-connection *sql.DB against
@@ -114,25 +141,32 @@ func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, 
 // adapter dalgo2sqlite itself composes) reuses its tested TextQuery
 // execution and row-to-record conversion rather than re-implementing it.
 func openReadOnlySQLite(ctx context.Context, path string) (dal.DB, func(), error) {
+	db, _, closeDB, err := openReadOnlySQLiteDB(ctx, path)
+	return db, closeDB, err
+}
+
+// openReadOnlySQLiteDB is openReadOnlySQLite that also answers the raw
+// connection the dal.DB wraps.
+func openReadOnlySQLiteDB(ctx context.Context, path string) (dal.DB, *sql.DB, func(), error) {
 	// The path is handed over as a "file:" URI: a bare path with a "?" in it is read by the
 	// driver as the file before it and its parameters (see dbcopy.SQLiteFileURI).
 	sqlDB, err := sqlOpenNative("sqlite", dbcopy.SQLiteFileURI(path))
 	if err != nil {
-		return nil, nil, fmt.Errorf("secureread: open sqlite: %w", err)
+		return nil, nil, nil, fmt.Errorf("secureread: open sqlite: %w", err)
 	}
 	sqlDB.SetMaxOpenConns(1) // one physical connection: PRAGMA query_only must stick to the connection every query reuses
 	if pingErr := sqlDB.PingContext(ctx); pingErr != nil {
 		_ = sqlDB.Close()
-		return nil, nil, fmt.Errorf("secureread: open sqlite: %w", pingErr)
+		return nil, nil, nil, fmt.Errorf("secureread: open sqlite: %w", pingErr)
 	}
 	if execErr := pragmaQueryOnly(ctx, sqlDB); execErr != nil {
 		_ = sqlDB.Close()
-		return nil, nil, fmt.Errorf("secureread: enable read-only session: %w", execErr)
+		return nil, nil, nil, fmt.Errorf("secureread: enable read-only session: %w", execErr)
 	}
 	// The sqlite structured-query dialect is set like on every other SQLite
 	// open in this CLI, so no structured read can reach dalgo2sql's legacy
 	// text emitter. RunNativeSQL — this connection's only caller — always
 	// executes a dal.TextQuery, which the dialect does not touch.
 	db := newNativeSQLDatabase(sqlDB, dal.NewSchema(nil, nil), dalgo2sql.DbOptions{StructuredQueryDialect: "sqlite"})
-	return db, func() { _ = sqlDB.Close() }, nil
+	return db, sqlDB, func() { _ = sqlDB.Close() }, nil
 }

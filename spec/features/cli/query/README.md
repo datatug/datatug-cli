@@ -29,7 +29,13 @@ Policy authors have no way to see what a DALgo access policy will do to a real q
 datatug query run --db <url|datatug://<project>/<db>[?env=<ENV>]> (-f <dtql-file>|--from <collection> [--limit <n>] [--offset <n>]) \
   [--format grid|json|jsonl|yaml|csv] \
   [--as <user-id>] [--role <role>]... [--group <group>]... [--var <name>=<value>]... \
-  [--policy <file>]... [--policies-dir <dir>] [--no-policies] [-q|--quiet]
+  [--policy <file>]... [--policies-dir <dir>] [--no-policies] [-q|--quiet] \
+  [--result-id <id> [--result-rows <n>]]
+
+datatug query results locate --id <id> [--format json]
+datatug query results check [--format json]
+datatug query results prune [--all]
+datatug query results rm --id <id>
 ```
 
 `-f/--file` is the input document, as on `entity add`; `--format` has no short alias on this command. `-q` is `--quiet`.
@@ -93,6 +99,36 @@ When a policy denies the query — including a missing variable and a hidden-fie
 #### REQ: exit-codes
 
 Exit codes: 0 success; 2 usage or invalid input (flags, undecodable query or policy file, bad `--var`, unresolved query parameter, missing explicit policies directory, no policies without `--no-policies`); 4 the database cannot be opened or refuses the query; 5 access denied by policy; 1 writing the output failed or any other failure.
+
+### Result files
+
+#### REQ: result-id
+
+`query run` MUST accept `--result-id <id>` on the ad-hoc and the saved form. With it the rows MUST NOT be printed: the result goes to `~/.datatug/query-results/<id>/data.json` (the rows) and `meta.json` (everything else a viewer needs). The root is fixed, with no environment override, so a shell, a terminal and the daemon of one user always find the same files. `<id>` MUST match `^[A-Za-z0-9_-]{1,128}$`; an id that is already used MUST exit 2 (`result-id-in-use`), so a result is never overwritten. `--format` MUST be absent or `json`. `--result-rows <n>` (1 to 10000, default 2000) MUST be refused without `--result-id`. `query run` MUST refuse positional arguments.
+
+#### REQ: result-store
+
+The root and each result directory MUST be 0700 and owned by the user, the files 0600. A root inside a Git working tree or a bare repository (`inside-git`), a symlinked root or result directory (`symlink`), one owned by another user (`owner`) or one that cannot be written (`results-store-unwritable`) MUST exit 2 with nothing written. The store is checked before the database is opened. Every store error is a reason code that names no path and no id.
+
+#### REQ: result-files-atomic
+
+Each file MUST be written as an `O_EXCL` 0600 temporary file in the result directory, synced and renamed into place, `data.json` first and `meta.json` last. `meta.json` records the byte length of `data.json`; a result with no `meta.json`, or whose `data.json` has another length, is incomplete. A run that fails removes its result directory.
+
+#### REQ: result-locator
+
+With `--result-id`, stdout MUST be one JSON line with no id, no path and no row: `{"resultFiles":{"version":1},"rowsKept":<n>,"hasMore":<bool>,"columns":<n>}`. Any failure after the flags were parsed MUST print `{"resultFiles":null,"reason":"<code>"}` instead, with the usual exit code; the reason is a store code or `query-failed`, whose details stay on stderr. `query results locate --id <id>` MUST print `{"resultFiles":{"version":1,"id":…,"root":…,"data":…,"meta":…}}` for a complete, unexpired result and `{"resultFiles":null,"reason":"not-found"|"incomplete"|"expired"}` (exit 0) otherwise; `query results check` MUST print `{"usable":true}` or `{"usable":false,"reason":"<code>"}`. Neither opens a database.
+
+#### REQ: result-data
+
+`data.json` is `{"format":"datatug.query-result.data","version":1,"id":…,"recordset":<apicontract.Recordset>}`, with `$key` first and then the columns `stdout-rows` would print. Every cell is a typed value: integers are kept exact as text, binary becomes `<binary N bytes>` and a nested value its JSON text (recorded as the column's `encoding`), and a column whose values have several kinds is a string column listing them in `observedTypes`. The ad-hoc form MUST stop reading after `--result-rows` + 1 records; a saved query keeps the first `--result-rows` rows of its collected result. A cell over 64 KiB is cut on a UTF-8 boundary (counted in `cutCells`), and rows stop before the file would pass 4,000,000 bytes (`truncatedBy: bytes`).
+
+#### REQ: result-meta
+
+`meta.json` is `{"format":"datatug.query-result.meta","version":1,…}` with `id`, `createdAt`, `expiresAt`, `cliVersion`, `dataBytes`; `db` (`ref`, `project`, `env`, `source`: the full `datatug://<project>/<db>?env=<env>` reference of a source of a registered project, else `null`; and `driver`); `query` (`kind` `from`|`dtql`|`saved`, `dtql` as given or the equivalent document of `--from`, `from`, `savedQueryId` and `savedQueryType` for a saved query, typed `parameters`, and `policy` `none`|`discovered`|`dir`|`explicit`|`project`); `rows` (`kept`, `hasMore`, `truncatedBy`); `provenance` (`mode` and `observedAt` of an HTTP source, else `null`); and `columns` (`name`, `type`, `encoding`, `cutCells`, `observedTypes`). It MUST hold no row value, connection string, path, host, user, password, environment variable or policy path. `dtql` and `parameters` past 256 KiB together are dropped (`unavailable.query: too-large`); at most 400 columns are described (`unavailable.columns: too-many`); the file stays within 1 MiB.
+
+#### REQ: result-lifetime
+
+A result lives 7 days. Every `--result-id` write MUST prune expired results, result directories without `meta.json` older than one hour, and then the oldest results while more than 200 results or 512 MiB are kept. `query results prune [--all]` prunes on demand (all results with `--all`) and `query results rm --id <id>` removes one (exit 3 when it is not there). Only directories whose name follows the id grammar are touched, after the symlink and owner checks; a link is never followed.
 
 ## Acceptance Criteria
 
@@ -294,6 +330,30 @@ Exit codes: 0 success; 2 usage or invalid input (flags, undecodable query or pol
 **When** the user runs `--from products --no-policies`
 **Then** stdout is empty and the exit code is 4.
 
+### AC: result-files-written (verifies REQ:result-id, REQ:result-store, REQ:result-files-atomic, REQ:result-locator, REQ:result-data)
+
+**Given** the Chinook SQLite fixture and an empty home directory
+**When** the user runs `datatug query run --db sqlite://<chinook> --from Invoice --no-policies --result-id t1`
+**Then** stdout is exactly the path-free locator line with `rowsKept` 412, `~/.datatug/query-results/t1/` is 0700 and holds 0600 `data.json` (412 typed rows) and `meta.json`, `query results locate --id t1` prints the paths and `query results check` answers `usable: true`. The same command again exits 2 with `result-id-in-use`; `--result-id ../x`, `--format csv`, a symlinked root and a home that is a Git working tree each exit 2 and write nothing, and the Git case is refused before the database is opened.
+
+### AC: result-rows-capped (verifies REQ:result-data)
+
+**Given** a source of 1,000,000 records and a table with a 70 KiB text cell
+**When** the result is collected with the default `--result-rows`, and `--result-rows 5` is run on the table
+**Then** the reader is asked for exactly 2001 records and 2000 are kept with `hasMore`; the table result keeps 5 rows, `truncatedBy: rows`, and the long cell is cut to 64 KiB with `cutCells: 1`.
+
+### AC: result-meta-describes-the-run (verifies REQ:result-meta)
+
+**Given** a DTQL file with a parameter, a `datatug://` reference of a registered project, an HTTP source and saved DTQL, SQL and HTTP queries
+**When** each runs with `--result-id`
+**Then** `meta.json` holds the query text, the typed parameters and the policy mode (never the policy path), the full reference with project, environment and source for the reference (and `null` for a path or an unregistered project), the provenance mode of the HTTP source (never its URL), and `kind: saved` with `savedQueryId`, `savedQueryType` and `policy: project` for the saved queries.
+
+### AC: results-pruned-and-removed (verifies REQ:result-lifetime)
+
+**Given** results that are fresh, expired, incomplete for over an hour, incomplete for a minute, more than 200, a link and a directory named outside the grammar
+**When** `query results prune`, `prune --all` and `rm --id` run
+**Then** expired and stale incomplete results and the oldest past the bounds are removed, the recent incomplete one, the link (and what it points to) and the other directory stay, and `rm` removes only the result named.
+
 ## Architecture
 
 - `pkg/accesspolicies` is the reusable core, so the TUI and `serve` can adopt it without the cobra layer:
@@ -302,6 +362,7 @@ Exit codes: 0 success; 2 usage or invalid input (flags, undecodable query or pol
   - `Run(ctx, session, query, Options) (Result, error)`: principal and variables on the context, query-parameter placement and substitution (`condeval.Substitute` + `dal.WithWhere`), the alias refusal and the hidden-field reference check over columns and clauses against every field list DALgo's decisions expose (`Decision.Writes`, mirroring DALgo's pattern matcher), `access.SecureReadSession`, and `Result{Reader, Lines}`; running with no policies requires `Options.Unrestricted`.
   - `Line{Policy, Source, Resource, Rule, Allowed, Condition, Bindings, FieldLists, Via, Explanation}` with `String()` rendering the pinned report format; `Explain` produces the lines from one `Decide` per policy.
 - `apps/datatugapp/commands/cmd_query.go`: the `query` group (help only) and `run`: flags, DTQL/`--from` query construction, `pkg/dbcopy` URL backend, exit-code mapping, and row formatting (`query_output.go`: rows normalised to JSON-shaped maps; `grid`, `json`, `jsonl`, `yaml`, `csv`).
+- `pkg/queryresults`: the result store (root checks, atomic writes, locate, prune, remove), the collector that builds `data.json` within its bounds, and the `meta.json` types; `apps/datatugapp/commands/query_result_files.go` connects it to both forms of `query run`, and `cmd_query_results.go` is `query results`. The Git checks are `pkg/gitpath`, shared with `pkg/executionstore`.
 - `~/.datatug/` sits beside the umbrella's proposed `~/.datatug.yaml`; `DATATUG_POLICIES_DIR` follows its `DATATUG_*` naming.
 - No change to DALgo.
 

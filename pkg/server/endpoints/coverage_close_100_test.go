@@ -2503,6 +2503,21 @@ func TestClose100_Incidents_Deep(t *testing.T) {
 	}
 	performIncidentRequest(t, router, http.MethodGet, eventsURL, nil, http.StatusInternalServerError)
 
+	// store.Events error in nextVisibleIncidentStreamItem: deterministic, so the 100% gate does not
+	// depend on the timing of a stream test that reached it only sometimes.
+	incidentStoreByID = func(_, _ string) (incidents.APIStore, error) {
+		return &customIncidentStore{
+			APIStore: baseStore,
+			eventsFn: func(context.Context, incidents.IncidentRef, uint64) ([]incidents.Event, error) {
+				return nil, errors.New("stream events err")
+			},
+			watchFn: func(ctx context.Context, query incidents.WatchQuery) (incidents.EventStream, error) {
+				return &scriptedEventStream{items: []incidents.StreamItem{streamItem1}, nextErr: io.EOF}, nil
+			},
+		}, nil
+	}
+	performIncidentRequest(t, router, http.MethodGet, eventsURL, nil, http.StatusInternalServerError)
+
 	// !incidentHasProject continue (line 596)
 	unrelatedRef := incidents.IncidentRef{StoreID: scope.StoreID, IncidentID: "INC-OTHER"}
 	itemNotProject := incidents.StreamItem{Cursor: "c0", Event: incidents.Event{Incident: unrelatedRef, ID: "e0"}}
@@ -2521,6 +2536,21 @@ func TestClose100_Incidents_Deep(t *testing.T) {
 		}, nil
 	}
 	performIncidentRequest(t, router, http.MethodGet, eventsURL, nil, http.StatusOK)
+
+	// store.Events error in nextVisibleIncidentStreamItem (the return after store.Events).
+	// Covered here deterministically; the live-stream test only hits it when its client cancels mid-read.
+	incidentStoreByID = func(_, _ string) (incidents.APIStore, error) {
+		return &customIncidentStore{
+			APIStore: baseStore,
+			eventsFn: func(ctx context.Context, ref incidents.IncidentRef, after uint64) ([]incidents.Event, error) {
+				return nil, errors.New("events err in stream")
+			},
+			watchFn: func(ctx context.Context, query incidents.WatchQuery) (incidents.EventStream, error) {
+				return &scriptedEventStream{items: []incidents.StreamItem{streamItem1}, nextErr: io.EOF}, nil
+			},
+		}, nil
+	}
+	performIncidentRequest(t, router, http.MethodGet, eventsURL, nil, http.StatusInternalServerError)
 
 	// incidentViewHook error in stream (lines 604-605)
 	incidentStoreByID = func(_, _ string) (incidents.APIStore, error) {

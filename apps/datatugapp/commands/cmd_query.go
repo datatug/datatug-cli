@@ -17,6 +17,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/httpsource"
+	"github.com/datatug/datatug-cli/pkg/queryresults"
 	"github.com/spf13/cobra"
 )
 
@@ -38,6 +39,8 @@ const (
 	queryProjectFlag     = "project"
 	queryQueryFlag       = "query"
 	queryEnvFlag         = "env"
+	queryResultIDFlag    = "result-id"
+	queryResultRowsFlag  = "result-rows"
 
 	// Standard exit codes from the CLI umbrella feature.
 	exitCodeUsage        = 2
@@ -64,7 +67,7 @@ func queryCommand() *cobra.Command {
 		Use:   "query",
 		Short: "Run queries through your access policies",
 	}
-	cmd.AddCommand(queryRunCommand(), queryBigQueryCommand())
+	cmd.AddCommand(queryRunCommand(), queryBigQueryCommand(), queryResultsCommand())
 	return cmd
 }
 
@@ -94,6 +97,7 @@ Examples:
   datatug query run --project ./demo-project-1 --query customers/customer-invoices --as alice --var CustomerId=5
   datatug query run --project demo-project-1 --query reference/country-facts --env local --var name=Brazil`,
 		SilenceUsage: true,
+		Args:         cobra.NoArgs,
 		RunE:         queryRunCommandAction,
 	}
 	flags := cmd.Flags()
@@ -114,6 +118,8 @@ Examples:
 	flags.String(queryPoliciesDirFlag, "", "Policies directory (default $"+accesspolicies.DirEnv+" or ~/"+accesspolicies.DefaultDir+")")
 	flags.Bool(queryNoPoliciesFlag, false, "Run without any access policy")
 	flags.BoolP(queryQuietFlag, "q", false, "Do not report applied policy limitations on stderr")
+	flags.String(queryResultIDFlag, "", "Write the result to private files under ~/"+queryresults.DefaultDir+"/<id>/ instead of printing rows; stdout gets one path-free JSON line")
+	flags.Int(queryResultRowsFlag, queryresults.DefaultRows, fmt.Sprintf("Rows kept with --result-id (%d to %d)", queryresults.MinRows, queryresults.MaxRows))
 	return cmd
 }
 
@@ -135,6 +141,11 @@ type queryOptions struct {
 	project     string
 	query       string
 	env         string
+	// resultID and resultRows are --result-id and --result-rows; sink is the
+	// result being written when resultID is set.
+	resultID   string
+	resultRows int
+	sink       *resultSink
 }
 
 func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
@@ -157,6 +168,11 @@ func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
 	o.project, _ = flags.GetString(queryProjectFlag)
 	o.query, _ = flags.GetString(queryQueryFlag)
 	o.env, _ = flags.GetString(queryEnvFlag)
+	o.resultID, _ = flags.GetString(queryResultIDFlag)
+	o.resultRows, _ = flags.GetInt(queryResultRowsFlag)
+	if err := checkResultFlags(o, flags.Changed(queryFormatFlag), flags.Changed(queryResultRowsFlag)); err != nil {
+		return o, err
+	}
 
 	savedQueryMode := o.project != "" || o.query != ""
 	adHocMode := o.db != "" || o.file != "" || o.from != ""
@@ -209,15 +225,32 @@ var openBackend = func(ctx context.Context, backend dbcopy.BackendRef) (dal.DB, 
 	return backend.Open(ctx)
 }
 
+// queryRunCommandAction runs `query run`. With --result-id every failure
+// after the flags were parsed also prints the path-free failure line.
 func queryRunCommandAction(cmd *cobra.Command, _ []string) error {
 	o, err := readQueryOptions(cmd)
-	if err != nil {
-		return err
+	if err == nil {
+		err = runQueryCommand(cmd, o)
+	}
+	if err != nil && o.resultID != "" {
+		_, _ = cmd.OutOrStdout().Write(queryresults.FailureLine(resultFailureReason(err)))
+	}
+	return err
+}
+
+func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
+	if o.resultID != "" {
+		sink, err := openResultSink(o)
+		if err != nil {
+			return err
+		}
+		defer sink.discardUnlessWritten()
+		o.sink = sink
 	}
 	if o.project != "" && o.query != "" {
 		return runSavedQueryCommand(cmd, o)
 	}
-	query, err := buildQuery(o, cmd.InOrStdin())
+	query, queryText, err := buildQuery(o, cmd.InOrStdin())
 	if err != nil {
 		return err
 	}
@@ -285,6 +318,9 @@ func queryRunCommandAction(cmd *cobra.Command, _ []string) error {
 	if o.from != "" && (o.limit > 0 || o.offset > 0) {
 		query = fromQuery(o, pagingOrder(ctx, db, backend.Scheme, o.from))
 	}
+	if o.sink != nil {
+		o.sink.describeAdHoc(ctx, o, backend, queryText, variables)
+	}
 	stderr := cmd.ErrOrStderr()
 	if len(loaded) == 0 {
 		_, _ = fmt.Fprintln(stderr, "access: running without access policies")
@@ -306,6 +342,12 @@ func queryRunCommandAction(cmd *cobra.Command, _ []string) error {
 	}
 	if err != nil {
 		return queryFailure(err)
+	}
+	if o.sink != nil {
+		if provOK {
+			o.sink.meta.Provenance = resultProvenance(prov)
+		}
+		return o.sink.collectAndWrite(cmd.OutOrStdout(), result.Reader, result.Query)
 	}
 	rows, err := collectRows(result.Reader)
 	if err != nil {
@@ -350,9 +392,13 @@ func queryFailure(err error) error {
 	}
 }
 
-func buildQuery(o queryOptions, stdin io.Reader) (dal.Query, error) {
+// buildQuery is the query to run and its DTQL text: the document as given,
+// or for --from the equivalent one-collection document.
+func buildQuery(o queryOptions, stdin io.Reader) (dal.Query, string, error) {
 	if o.from != "" {
-		return fromQuery(o, nil), nil
+		query := fromQuery(o, nil)
+		text, _ := dtql.Serialize(query.(dal.StructuredQuery))
+		return query, string(text), nil
 	}
 	var (
 		content []byte
@@ -364,16 +410,16 @@ func buildQuery(o queryOptions, stdin io.Reader) (dal.Query, error) {
 		content, err = os.ReadFile(o.file)
 	}
 	if err != nil {
-		return nil, Exit(fmt.Sprintf("read query %s: %v", o.file, err), exitCodeUsage)
+		return nil, "", Exit(fmt.Sprintf("read query %s: %v", o.file, err), exitCodeUsage)
 	}
 	if strings.TrimSpace(string(content)) == "" {
-		return nil, Exit(fmt.Sprintf("query %s is empty", o.file), exitCodeUsage)
+		return nil, "", Exit(fmt.Sprintf("query %s is empty", o.file), exitCodeUsage)
 	}
 	query, err := dtql.Deserialize(content)
 	if err != nil {
-		return nil, Exit(fmt.Sprintf("query %s: %v", o.file, err), exitCodeUsage)
+		return nil, "", Exit(fmt.Sprintf("query %s: %v", o.file, err), exitCodeUsage)
 	}
-	return query, nil
+	return query, string(content), nil
 }
 
 // fromQuery selects every row of the --from collection, paged by --limit and

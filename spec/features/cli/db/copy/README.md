@@ -25,6 +25,8 @@ status: Implemented
 
 The command currently dispatches the registered URL schemes above; it does not accept every DALgo adapter automatically. BigQuery table creation omits source primary and foreign key declarations because BigQuery does not enforce them and this copy path does not independently validate uniqueness or referential integrity across staged rows. The command reports each omitted source constraint. A `--parallel-streams` flag governs per-table parallelism with a safety cap derived from the DALgo `ConcurrencyAware` capability. SQL targets require explicit `--overwrite=recreate` (drop tables and recreate from source schema) or `--overwrite=reload` (truncate tables and reload data, preserving schema) when destination tables already exist. BigQuery always refuses existing tables; choose a new dataset or table names.
 
+**Between SQLite and PostgreSQL (and SQLite to SQLite) the copy is faithful** (amended 2026-10-15, see [SQLite and PostgreSQL copies](#sqlite-and-postgresql-copies)): tables, columns with their declared types, primary keys, foreign keys with their actions, unique constraints, indexes, check constraints, defaults, auto-number counters and every value are carried, in one transaction on a snapshot of the source; whatever an engine cannot carry is a warning, never a silent loss. The other pairs keep the DALgo path described below.
+
 ## Contents
 
 | Child | Description |
@@ -38,6 +40,9 @@ datatug db copy --from <source-url> --to <target-url>
                 [--parallel-streams=N]
                 [--overwrite=recreate|reload]
                 [--progress]
+                [--from-schema=NAME] [--to-schema=NAME]   # PostgreSQL sides
+                [--json] [--dry-run] [--fail-on-warning]  # SQLite / PostgreSQL copies
+                [--decimals=numeric|text]                 # SQLite -> PostgreSQL
 
 datatug db copy --to bigquery://PROJECT/DATASET?location=LOCATION
                 --recover-job-ref '<credential-free JSON reference>'
@@ -62,6 +67,7 @@ The command MUST accept the following optional flags:
 - `--parallel-streams <N>` — positive integer; default `runtime.NumCPU() - 1` (minimum `1`). Governs per-table parallelism, subject to the cap-to-1 rule in REQ:concurrency-cap.
 - `--overwrite <recreate|reload>` — value MUST be exactly one of `recreate` or `reload`. A bare `--overwrite` (with no value) MUST be rejected with exit `2`. Omitting the flag means "require empty target" per REQ:empty-target-check.
 - `--progress` — boolean; when present, enables per-table progress lines on stderr (see REQ:progress-reporting). Default off (silent).
+- `--from-schema <name>`, `--to-schema <name>`, `--json`, `--dry-run`, `--fail-on-warning` and `--decimals <numeric|text>` apply to SQLite and PostgreSQL copies only (see REQ:faithful-reporting); any other pair MUST reject them with exit `2`.
 
 ### URL scheme dispatch
 
@@ -96,6 +102,8 @@ A URL whose scheme is not in the supported list MUST be rejected before any conn
 
 The command MUST introspect the source schema via the DALgo `dbschema` package (shipped in `dal-go/dalgo/dbschema`). Specifically, it calls `Adapter.ListTables(ctx)` to enumerate tables and `Adapter.DescribeTable(ctx, name)` for each table's column definitions, primary key, and indexes. The command MUST NOT hand-roll engine-specific introspection queries (e.g. `SELECT … FROM sqlite_master`); the DALgo dbschema adapter is the single seam.
 
+**Exception (2026-10-15).** A copy between SQLite and PostgreSQL, and one between two SQLite files, reads each engine's own catalog (`PRAGMA` tables and `sqlite_master`; `pg_catalog`) instead, as REQ:faithful-pairs says: `dbschema.Type` has no place for a declared type text, a check constraint, a default expression or a constraint name, and a copy that must keep them cannot be built on it.
+
 #### REQ: source-introspection-failure
 
 If the source URL parses cleanly but the source backend cannot be opened (file missing, connection refused, auth failure), the command MUST exit `4` (connection failure) with stderr naming the source as it is displayed (scheme, host, port and path, never a user name, a password or a query string) and a fixed reason: the file or directory does not exist, permission denied, the attempt timed out or was cancelled, or the connection was refused; for any other cause, a sentence saying the driver could not open the source. The driver's own text MUST NOT be shown, because a driver can quote the connection string, which holds the password. A PostgreSQL side is not named by its display form (that holds the host): the line after `open --from:` or `open --to:` is the sentence the adapter chose for the failure and where the connection string is read from (`the PostgreSQL connection string is read from the --to flag`, or the variable of an `env:NAME` side), the same text a call that fails later gives. (`TestDBCopy_OnlyTheTargetIsOpenedForWriting`.)
@@ -108,11 +116,15 @@ If introspection succeeds in opening the source but `ListTables` returns an empt
 
 The command MUST create target tables (and primary-key declarations) via the DALgo DDL surface (`dal-go/dalgo/ddl`). Per source table, it builds a `ddl.CreateTable` operation from the introspected `TableDef` and applies it through the target's `dal.Adapter`. The command MUST NOT hand-roll engine-specific `CREATE TABLE` SQL.
 
+**Exception (2026-10-15).** For the pairs of REQ:faithful-pairs the command writes the `CREATE TABLE`, index, check and foreign-key statements of the target engine itself, from the catalog it read: the DDL surface does not express declared types, checks, defaults, deferrable keys or key actions exactly.
+
 For indexes, the command MUST apply each non-primary index via `ddl.CreateIndex` after the table is created and BEFORE row data is loaded for that table. The order is: `CreateTable` → `CreateIndex` (×N) → row stream. This order is engine-agnostic; per-engine performance hints (e.g. "drop indexes, bulk-load, recreate indexes") are out of scope for MVP.
 
 #### REQ: names-checked-before-writes
 
 For a PostgreSQL target, the command MUST check every source table name and every name in a definition it will write (table, column, primary-key column, index and index column) before the first target change. It MUST use the adapter's rule: a plain identifier of at most 63 UTF-8 bytes after lower-casing. A refused name MUST leave the target unchanged, name its source object, say how to rename or exclude it, and exit `1`.
+
+**Exception (2026-10-15).** A SQLite or PostgreSQL copy of REQ:faithful-pairs keeps names exactly as they are (it writes quoted identifiers and never lower-cases). It refuses a table or column name longer than 63 bytes (or holding a NUL byte) for a PostgreSQL target before the first change, and shortens an index name or leaves a constraint without its name when that name is too long, with a warning (`index-renamed`, `constraint-name-not-carried`).
 
 #### REQ: index-not-recreated
 
@@ -147,6 +159,8 @@ Target row writes MUST go through the DALgo `dal.ReadwriteTransaction.InsertMult
 Before launching workers, the command MUST query both the source and target adapters for the DALgo `ConcurrencyAware` capability (`dal-go/dalgo`'s `ConcurrencyAware` interface, shipped via the concurrency-capability Feature). If EITHER adapter advertises `Concurrency() == 1` (or equivalent "single-writer / single-reader" signal), the effective `--parallel-streams` value MUST be silently capped at `1`. When the cap reduces the user's requested value, a single stderr warning line MUST be emitted naming the constraining driver (e.g. `"warning: sqlite (target) requires serial writes; ignoring --parallel-streams=8, using 1"`).
 
 When the user did not pass `--parallel-streams` and the default `runtime.NumCPU() - 1` is capped to 1 by this rule, NO warning is emitted — the default is implicit and the cap is the expected behavior.
+
+**SQLite and PostgreSQL copies (2026-10-15).** They write the target in one transaction, one table after the other, so the effective value is always `1`: an explicit `--parallel-streams` above `1` prints `warning: a <source> to <target> copy writes the target in one transaction, one table after the other; ignoring --parallel-streams=N, using 1` on stderr; a value below `1` exits `2`.
 
 ### Overwrite policy
 
@@ -185,13 +199,15 @@ If the check identifies a non-empty target, the command MUST exit `1` BEFORE any
 
 Without `--progress`, the command MUST be silent on stdout/stderr during a successful run. Errors, warnings (per REQ:concurrency-cap), and exit messages are NOT suppressed by the silent default.
 
-With `--progress`, the command MUST emit, per table, one stderr line when copy starts (`"copying <table> (est. <N> rows)…"` where the row count comes from the source's count query if available, else the literal `?`) and one when copy finishes (`"copied <table>: <M> rows in <duration>"`). stdout remains silent so the tool composes in pipelines.
+With `--progress`, the command MUST emit, per table, one stderr line when copy starts (`"copying <table> (est. <N> rows)…"` where the row count comes from the source's count query if available, else the literal `?`) and one when copy finishes (`"copied <table>: <M> rows in <duration>"`). stdout remains silent so the tool composes in pipelines. The SQLite and PostgreSQL copies print exactly these lines (`--json` prints its report on stdout and is the one exception to the silent stdout).
 
 ### Failure semantics
 
 #### REQ: partial-failure-leaves-state
 
 If a copy fails midway (mid-stream insert error, target connection drop, source read error), the command MUST exit `1` with stderr naming the failing table. Tables already copied at the time of failure stay copied. The failing table is left in whatever state the failure produced (some rows inserted, some not). Tables not yet started never start. The user reruns with `--overwrite=recreate` or `--overwrite=reload` to retry.
+
+**Exception (2026-10-15).** A copy between SQLite and PostgreSQL (REQ:faithful-pairs) is atomic: it runs in one transaction on the target, so a failure leaves the target exactly as it was (a SQLite file that the command created, and the folders it made for it, are removed again), and the source is read in one snapshot (REQ:faithful-snapshot). The rest of this REQ (exit `1`, naming the failing table) holds.
 
 #### REQ: exit-codes
 
@@ -200,7 +216,42 @@ If a copy fails midway (mid-stream insert error, target connection drop, source 
 | `0` | All source tables copied successfully (or source had no tables) |
 | `1` | Generic runtime error (mid-copy failure, a name refused by a PostgreSQL target, schema mismatch on reload, non-empty target without overwrite, type-mapping gap) |
 | `2` | Invalid flags (missing required, unsupported `--overwrite` value, unknown scheme, remote `ingitdb://`) |
+| `3` | A SQLite or PostgreSQL copy finished but carried something inexactly, and `--fail-on-warning` was given (the copy is made; see REQ:faithful-reporting) |
 | `4` | Could not connect to source or target |
+
+### SQLite and PostgreSQL copies
+
+Added 2026-10-15 (founder direction: a copy between SQLite and PostgreSQL must keep what the engines can both express, and say what they cannot). The package is `pkg/dbcopy/faithful`; the user guide is `docs/db-copy.md`. PostgreSQL stays a preview behind `DATATUG_PREVIEW_POSTGRES=1`.
+
+#### REQ: faithful-pairs
+
+A copy whose source and target are each SQLite or PostgreSQL (SQLite to PostgreSQL, PostgreSQL to SQLite, SQLite to SQLite; not PostgreSQL to PostgreSQL) MUST be done by the faithful engine, which reads each engine's own catalog. It carries tables, columns with nullability, defaults and declared types, primary keys (composite too), foreign keys (composite too, with their ON DELETE / ON UPDATE actions and deferrability), unique constraints, indexes (descending, partial), check constraints, auto-number columns and their counters, and every row. Every other pair keeps the DALgo path of this Feature. All the REQs about flags, `--include` / `--exclude`, `--overwrite`, empty-target detection and progress apply to these pairs unchanged unless a REQ of this section says otherwise.
+
+*Rationale (2026-10-15).* The DALgo `dbschema` model cannot hold a declared type text, a check constraint, a default expression or a constraint name, and the first versions of the pair lost them silently. Moving the model into DALgo is a larger change that is tracked as a follow-up; until it lands the catalog engine lives here.
+
+#### REQ: faithful-reporting
+
+Whatever an engine cannot carry MUST be reported, per object, as a warning with a stable `kind` (views and triggers across engines, expression indexes, a check the target does not accept, a column whose type had to be widened, a value that was rewritten or lost, a default that was translated, a sequence's step, a foreign key created NOT VALID, …). `--json` MUST print the whole report (`status`, `totals`, per-table counts, `warnings`, `plan` for a dry run, `exitCode`, `error`) on stdout, also for a failure that comes before any copy. `--dry-run` MUST print the plan and change nothing on either side (it opens no target). `--fail-on-warning` MUST exit `3`, after the copy is made, when there is any warning. A PostgreSQL target MUST be refused while the preview switch is off, a dry run included (exit `4`).
+
+#### REQ: faithful-exact-values
+
+A copy MUST NOT change a value without saying so. A column whose values do not fit the type its declaration maps to (a `FLOAT4` holding a double a 4-byte real cannot hold, a `JSONB_TEXT` that jsonb would write differently, a `TIMESTAMPTZ` text with an offset other than `+00`, a text holding a NUL byte) MUST be carried in a type that holds every value, with a `type-widened` warning that names the column and the reason. A value that the target engine cannot hold (NaN, a negative zero in SQLite) MUST be counted in a `values-normalized` warning; a `numeric` NaN that SQLite keeps as its text in a column of numeric affinity is counted too (the value stays exact). A `DECIMAL_TEXT` column is carried as `numeric`; the texts that numeric spells differently (a leading dot or zeros, a negative zero, fewer decimals than the scale) MUST be counted per column in a `values-normalized` warning with the first one as an example, and a text default MUST be reported as the numeric default it became; `--decimals=text` keeps such a column as `text` with a `type-widened` warning (founder decision 2026-10-15: numeric by default, exactness opt-in). An empty blob is an empty blob, never NULL. The text a PostgreSQL source prints (dates, intervals, floats) MUST NOT depend on the settings of the server: the session pins `DateStyle`, `IntervalStyle`, `extra_float_digits`, the time zone and `standard_conforming_strings`, and removes the statement timeout. A `TIME` or `TIMESTAMPTZ` text that PostgreSQL would refuse or write as another instant (a leap second `23:59:60`, an hour `24`, a day that is not there) makes the column `text`; a value in a SQLite column of numeric affinity is never passed through a double when it is an integer.
+
+#### REQ: faithful-snapshot
+
+The source MUST be read in one transaction (REPEATABLE READ on PostgreSQL; one read transaction on SQLite, which in WAL mode lets writers commit and in rollback-journal mode holds a shared lock), so that every table of the copy is of one moment. The rows read of an unfiltered table MUST equal the count taken in that snapshot, else the copy fails.
+
+#### REQ: faithful-atomic
+
+The target MUST be written in one transaction. Indexes, checks and foreign keys that follow the data are tried under a savepoint: a statement that fails because of the data or its spelling (SQLSTATE class 22, 23 or 42 on PostgreSQL) becomes a warning that carries the server's own reason, and a foreign key that existing rows violate (23503) is created NOT VALID and reported (`fk-not-validated`); any other failure (a timeout, a lock, a lost connection) fails the copy. Row counts of the target MUST be verified against what was written before the commit.
+
+#### REQ: faithful-reload
+
+`--overwrite=reload` MUST empty the target tables of the copy (PostgreSQL: one `TRUNCATE … RESTART IDENTITY`; SQLite: `DELETE`) and load the source rows into them in the same transaction as the load, keeping the schema of the target. Before anything is written each target table MUST be checked as REQ:reload-schema-match says (extra target columns are allowed when they can be left to their defaults; the key must be the same; a column must be of a kind the source values fit); a mismatch exits `1` and changes nothing. On PostgreSQL the foreign keys among the reloaded tables are dropped before the rows are emptied and added again after the load (so the order of the tables, a cycle of keys, and a key created NOT VALID cannot stop the reload); a key that the loaded rows violate (23503) is created NOT VALID and reported as REQ:faithful-filters says, a key the rows satisfy is validated again; a key comes back with the definition the server had given it (match type, SET NULL column list, deferral, enforcement, comment). A key to a table that is not reloaded stays enforced, so a source row without its parent fails the reload (nothing changes). A table that is not on the target is created. Views and triggers of a SQLite source are replaced by the source's.
+
+#### REQ: faithful-filters
+
+`--where`, `--limit` (and `--filter-config`) MUST be applied in the source `SELECT` (REQ:push-down-only in the [filtering sub-feature](filtering/README.md)): values are checked and coerced as that Feature says, a value of `in` is a comma list whose elements are checked one by one, and `--limit` is applied after `--where` in primary-key order. The report counts the rows written. A foreign key that a filter leaves without its parent rows is reported as such (`fk-not-validated` on PostgreSQL, `fk-violations-in-source` on SQLite) and the message names the filter.
 
 ## Architecture
 
@@ -492,6 +543,38 @@ A SQLite or inGitDB target accepts source names under its existing rules, includ
 **Given** a source with three tables `a`, `b`, `c` where the row insert into `b` is configured to fail mid-stream (e.g. a NOT NULL violation injected by a fault-injection harness)
 **When** the user runs `datatug db copy --from ... --to ...`
 **Then** the command exits `1`; on the target after exit, `a` is fully copied (every source row present); `b` exists (table created) and has between 0 and len(`b`)-1 rows (the partial state at the moment of failure); `c` does NOT exist on the target (its worker never started).
+
+### AC: faithful-roundtrip-keeps-every-value
+
+**Requirements:** copy#req:faithful-pairs, copy#req:faithful-exact-values
+
+**Given** a SQLite database holding an empty blob, a number a 4-byte real cannot hold, json that jsonb would rewrite, a `TIMESTAMPTZ` text with offset `+02`, a decimal text `-0.00` with the default `'0.00'`, and an AUTOINCREMENT counter at 100
+**When** the user copies it to PostgreSQL and back to a new SQLite file
+**Then** both copies exit `0`; every column reads back with the same storage class and value but the decimal text, the default is still the text `'0.00'`, the counter is still 100, and the widened columns are named in `type-widened` warnings.
+
+### AC: faithful-reload-is-one-transaction
+
+**Requirements:** copy#req:faithful-reload, copy#req:faithful-atomic
+
+**Given** a target that holds the tables of the source, one with an extra column that has a default and a CHECK of its own, and a source row that the CHECK refuses
+**When** the user runs `datatug db copy --overwrite=reload`
+**Then** the command exits `1` naming the check, and every target table holds the rows it held before and keeps its foreign keys. A source row that only lacks a parent is no failure when the parent table is reloaded too: the key is created NOT VALID and reported; when the parent is not part of the reload the key of the target stays enforced and the reload fails with nothing changed.
+
+### AC: faithful-filters-are-pushed-down
+
+**Requirements:** copy#req:faithful-filters
+
+**Given** two SQLite files and a source with `Artist(ArtistId)` and `Album`
+**When** the user runs `datatug db copy --where Artist:ArtistId:<:10 --limit Album:5`
+**Then** the target holds the artists below 10 and 5 albums, the report counts those rows, and a filter that names an unknown table, field or operator exits `2` before anything is written.
+
+### AC: faithful-warnings-are-not-silent
+
+**Requirements:** copy#req:faithful-reporting
+
+**Given** a source with a view and an expression index
+**When** the user runs the copy to PostgreSQL with `--json --fail-on-warning`
+**Then** stdout holds the report with `view-not-carried` and `index-not-carried` warnings and the command exits `3` after the target is written.
 
 ## Open Questions
 

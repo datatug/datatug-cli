@@ -86,7 +86,7 @@ func projectConnectionCatalogHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for key, values := range q {
-		if len(values) != 1 || (key != "project" && key != "storage") {
+		if len(values) != 1 || (key != "project" && key != "storage" && key != "branch") {
 			writeProjectMutationError(w, r, validation.NewBadRequestError(errors.New("invalid catalog selector")))
 			return
 		}
@@ -96,7 +96,12 @@ func projectConnectionCatalogHandler(w http.ResponseWriter, r *http.Request) {
 		writeProjectMutationError(w, r, err)
 		return
 	}
-	result, err := api.LocalProjectConnectionCatalog(r.Context(), ref)
+	var result any
+	if q.Has("branch") {
+		result, err = api.LocalProjectConnectionCatalogForBranch(r.Context(), ref, q.Get("branch"))
+	} else {
+		result, err = api.LocalProjectConnectionCatalog(r.Context(), ref)
+	}
 	if err != nil {
 		writeProjectMutationError(w, r, err)
 		return

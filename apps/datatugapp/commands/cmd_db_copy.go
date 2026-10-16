@@ -29,6 +29,7 @@ func dbCopyCommand() *cobra.Command {
 		Short: "Copy a database from one DALgo URL to another.",
 		Long: "Between SQLite and PostgreSQL (and SQLite to SQLite) the copy is faithful: tables, columns, declared types, primary keys, foreign keys with their actions, unique constraints, indexes, check constraints, defaults and auto-increment counters are carried, and every value is copied exactly (a date stays the text it was). Anything an engine cannot carry - views across engines, triggers, expression indexes, collations, a check the target does not accept - is never dropped silently: it is listed as a warning, with --json as a machine-readable summary, and with --fail-on-warning as exit code 3. --dry-run prints the plan and changes nothing. A missing SQLite target file is created. The source is read as one snapshot and the target is written in one transaction: the copy either completes or leaves the target as it was. --where, --limit, --include and --exclude copy some rows or tables, and --overwrite=reload empties the target tables and loads them again (keeping their schema) in the same transaction. A value is never changed silently (a DECIMAL_TEXT is numeric, and the values numeric spells differently are counted in a warning; --decimals=text keeps the text): a column whose values do not fit the type its declaration suggests is carried in a type that holds them, and says so. See docs/db-copy.md.\n\n" +
 			"Other pairs copy source collections and rows through DALgo adapters. A BigQuery destination uses the authenticated Google identity configured on this machine and requires an explicit dataset location. Existing BigQuery tables are never replaced. For a complete, atomic native inGitDB export, use `datatug db export`.\n\n" +
+			"A sqlscript:///PATH.sql?dialect=mysql destination (a SQLite --from only) writes a deterministic MySQL 8 script instead of copying into a database: the same tables, keys, indexes, checks, defaults and values, every value written as a safe literal, and the same warnings, --json report, --dry-run, --fail-on-warning, --include and --exclude; it refuses to replace an existing file unless --overwrite=recreate. See docs/db-copy.md.\n\n" +
 			"PostgreSQL (postgres://) is a preview: it opens only while " + dbcopy.PostgresPreviewEnv + "=1. A PostgreSQL --from is read through a read-only session, " +
 			"and a --from URL that turns the session's default_transaction_read_only off is refused. --to is the only place a PostgreSQL database is opened for writing.",
 		RunE: dbCopyAction,
@@ -36,7 +37,7 @@ func dbCopyCommand() *cobra.Command {
 	flags := cmd.Flags()
 	flags.String("from", "", "Source URL (sqlite://, ingitdb://, postgres:// read-only, http(s):// DataTug project, openvaultdb://). Required.")
 	flags.String("from-schema", "", "PostgreSQL source schema to read; defaults to public.")
-	flags.String("to", "", "Target DALgo URL (sqlite://, ingitdb://, postgres://: the only way DataTug opens PostgreSQL for writing; bigquery://PROJECT/DATASET?location=LOCATION). Required.")
+	flags.String("to", "", "Target DALgo URL (sqlite://, ingitdb://, postgres://: the only way DataTug opens PostgreSQL for writing; bigquery://PROJECT/DATASET?location=LOCATION; sqlscript:///path/out.sql?dialect=mysql writes a SQL script file). Required.")
 	flags.String("to-schema", "", "PostgreSQL target schema (SQLite <-> PostgreSQL copies); defaults to public. Created when missing.")
 	flags.Bool("json", false, "SQLite <-> PostgreSQL copies: print a machine-readable summary (tables, rows, created keys and indexes, warnings, exit code) on stdout.")
 	flags.Bool("dry-run", false, "SQLite <-> PostgreSQL copies: print the plan (DDL, row counts, every warning) and change nothing; the target is not opened.")
@@ -100,6 +101,11 @@ func dbCopyAction(cmd *cobra.Command, _ []string) error {
 			fmt.Sprintf("invalid --overwrite value %q: valid values are recreate, reload", overwrite),
 			2,
 		)
+	}
+
+	// A sqlscript:// destination writes a SQL script file (see cmd_db_copy_sqlscript.go).
+	if isSQLScriptTarget(toURL) {
+		return dbCopySQLScript(cmd, fromURL, toURL, overwrite)
 	}
 
 	// Parse both URLs first (REQ:unknown-scheme-rejected, REQ:ingitdb-url-local-only,

@@ -259,3 +259,153 @@ SQLite -> PostgreSQL -> SQLite and PostgreSQL -> SQLite -> PostgreSQL on the dem
 `pkg/dbcopy/faithful/testdata/chk.py` is an independent checker (it shares no code with the package:
 it reads every column's storage class and value through python's `sqlite3` or `psycopg`, and compares
 catalogs) that the journey test `TestPostgresExactValuesRoundTrip` runs when `python3` is available.
+
+## SQL script destination: `sqlscript://` (MySQL)
+
+`datatug db copy --from sqlite://<file> --to 'sqlscript:///path/out.sql?dialect=mysql'` does not copy into a
+database: it writes a **SQL script** that creates the same database in an engine. The script is made from the
+SQLite file alone (no server is opened), it is the same bytes on every run of one datatug version, and everything
+that could not be carried is a warning, as for any other `db copy` (`--json`, `--dry-run`, `--fail-on-warning`).
+
+```sh
+datatug db copy --from sqlite://./chinook.sqlite --to 'sqlscript:///tmp/chinook.mysql.sql?dialect=mysql&license=MIT'
+mysql --default-character-set=utf8mb4 --skip-commands --database chinook < /tmp/chinook.mysql.sql
+```
+
+The destination is a path in the URL (`sqlscript:///abs/path.sql`, or `sqlscript:rel/path.sql`) and its query:
+
+| Parameter | Meaning |
+|---|---|
+| `dialect` | Required. `mysql` is implemented; `mssql`, `oracle`, `postgres` and `sqlite` are planned and refused with the list of the implemented ones. |
+| `name` | Dataset name in the header and in the completion marker (default: the SQLite file name without its extension). |
+| `edition` | A label for the header, such as `DemoDB contract edition, identical to the SQLite/CSV/JSON`. |
+| `license`, `attribution` | Licence and attribution lines of the header (a demo database's `manifest.json` `source.license`). |
+
+Flags: `--include`, `--exclude`, `--dry-run`, `--json`, `--fail-on-warning` work as for any copy (a key into a table that
+is not written is not created, with a warning). The source must be `sqlite://`. A script file is never replaced silently:
+an existing file is refused (exit 1) unless `--overwrite=recreate` is given (`reload` does not apply). The script is
+written to a temporary file beside the destination and put in place only when it is complete, so a failure leaves
+nothing. `--where`, `--limit`, `--filter-config`, `--from-schema`, `--to-schema`, `--decimals`, `--parallel-streams`
+and `--progress` are refused with exit 2: a script holds every row of the tables it writes.
+
+### What the script is
+
+* UTF-8, no byte order mark, LF line ends. **No literal holds a raw CR or LF** and no value can start a line of the
+  script: every line starts with a token the generator wrote (`--`, `SET`, `CREATE`, `INSERT`, `(`, `START`, `COMMIT`, `ALTER`,
+  two spaces inside `CREATE TABLE`). A text with a line break, any other control character, a Unicode line or
+  paragraph separator or a backslash is written as `_utf8mb4 X'..'` (a backslash because the mysql client reads
+  `\` as an escape inside every quoted string, whatever the server's SQL mode), a blob as `X'..'`, floats as exponent
+  literals (`1.5e+00`). So a value such as `"\nGO"`, `"\n\! cmd"` or `"\nsource x"` cannot become a client command.
+  The header recommends `--skip-commands` (mysql 8.4.6 and later) on top of that.
+* A header of comments: the label, dataset, datatug version and the SHA-256 of the SQLite file, licence and attribution,
+  the minimum MySQL version (8.0.16, where CHECK constraints are enforced; verified on MySQL 8.4 LTS), how to load it
+  safely, the tables, and every warning.
+* `SET NAMES utf8mb4` and a session `sql_mode` of `STRICT_ALL_TABLES,NO_AUTO_VALUE_ON_ZERO,NO_ENGINE_SUBSTITUTION,NO_ZERO_DATE,NO_ZERO_IN_DATE`
+  (`NO_AUTO_VALUE_ON_ZERO` because SQLite allows an id of 0 and MySQL would number it otherwise).
+* **The first statement creates the marker table `_demodb_import`** and fails when it exists, so a second load into the
+  same database stops at once; **the last statement inserts its row** (dataset, label, source SHA-256, version, tables,
+  rows): a row means the load completed. MySQL commits DDL, so a failed load is not rolled back: drop the database (or the
+  tables) and load again. `DROP TABLE _demodb_import` removes the marker.
+* `CREATE TABLE` (columns, primary key, unique keys, `ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`, no collation named), the rows
+  of each table in one transaction per batch of at most 1000 rows or about 1 MiB, in a **total order** (primary key and
+  then the rowid, so a table without a key has an order too), the counters of the auto-numbered columns, **then**
+  indexes, check constraints and foreign keys (keys follow the data; a foreign key validates every row). A table that is
+  not part of the script has no foreign key into it.
+
+### Types (the declared type wins when every value fits it)
+
+| SQLite | MySQL | Notes |
+|---|---|---|
+| `INTEGER`, `INT`... / `INT2` / `INT4` | `BIGINT` / `SMALLINT` / `INT` | wider when a value does not fit (`type-widened`); an `INTEGER PRIMARY KEY` is `AUTO_INCREMENT`, its counter is moved past the highest id and `sqlite_sequence` |
+| `REAL`, `FLOAT`, `DOUBLE` | `DOUBLE` | an infinite value makes the column `TEXT` (MySQL has none) |
+| `NUMERIC(p,s)`, `DECIMAL(p,s)`, `DECIMAL_TEXT(p,s)` | `DECIMAL(p,s)` | when every value fits; otherwise (and for a bare `NUMERIC`/`DECIMAL`/`MONEY`) `DECIMAL(P,S)` computed from the values; beyond 65 digits or 30 decimals `TEXT`. A text that DECIMAL spells differently (`.0000` becomes `0.0000`) is counted in `values-normalized` |
+| `BOOLEAN` | `TINYINT(1)` | |
+| `DATE` / `DATETIME`, `TIMESTAMP` / `TIME` | `DATE` / `DATETIME(f)` / `TIME(f)` | `f` is the longest fraction; a value that is not in MySQL's form, before year 1000 or a date in a `DATETIME` column becomes `TEXT` |
+| `TIMESTAMPTZ`, `JSON_TEXT`, `UUID_TEXT` | `TEXT` | MySQL has no such type; `type-widened` |
+| `CHAR(n)`, `VARCHAR(n)`, `NVARCHAR(n)` | `VARCHAR(n)` | n up to 16383 |
+| `TEXT` | `TEXT`, `MEDIUMTEXT`, `LONGTEXT` | by the longest value in bytes |
+| `BLOB` | `BLOB`, `MEDIUMBLOB`, `LONGBLOB` | |
+| any text in a **key**, any blob in a key | `VARCHAR(n)`, `VARBINARY(n)` | `key-type-bounded`: MySQL cannot index an unbounded type. 255 characters when the key fits InnoDB's 3,072 bytes, the length of the longest value otherwise |
+| text with a NUL byte, text that is not valid UTF-8, a column of text and blobs | `BLOB` (bytes) | `type-widened`; **policy**: a utf8mb4 column cannot hold such a text, so the whole column is bytes and the values are exact |
+| no declared type, unknown types | from the values | |
+
+All the columns of a foreign key equivalence class (the child columns and the parent columns they reference,
+transitively) get **one type before anything is written**: the widest integer, the longest text, the largest
+precision and fraction, bytes if any member is bytes, text if the families differ (`type-widened` for each member that changed).
+A row that would exceed 65,535 bytes makes the widest unkeyed `VARCHAR` columns `TEXT` (`row-size-bounded`). A key that
+cannot fit 3,072 bytes even at the length of its longest values is refused for a primary key, a unique key and a
+foreign key, and dropped for a plain index (`index-not-carried`).
+
+### Names
+
+Every table, column and index name is kept **byte for byte** as one backtick-quoted identifier (`Order Details`,
+`Production.Product`, a backtick doubled, reserved words, Unicode, up to 64 characters). A name MySQL cannot store is the
+only reason to change one, and every change is a counted `name-renamed` (`index-renamed` for an index) warning: an empty
+name, a name that ends in a space, a name longer than 64 characters, a name with a control or line-break character (a
+script line must never carry one), a name with a character outside the Basic Multilingual Plane (MySQL **silently stores it
+as `?`**, so two such names would meet), and a column that differs from another of its table only by case or accents
+(MySQL compares column names without them). The new name is the old one with each unusable character replaced by `_`,
+cut to fit, and ended by `_` and 8 hex digits of the SHA-256 of the original, so it is the same on every run. Two table names that differ only by case load on a
+server with case-sensitive table names (`lower_case_table_names=0`, the Linux default) and fail on macOS and Windows
+defaults: a `name-case-collision` warning says so. An index name that is `PRIMARY` or taken by another key of the table is
+renamed. A primary key's own name is not carried (MySQL calls it `PRIMARY`); the name of a foreign key, unique key or check
+is carried when MySQL can use it (unique in the schema for a foreign key or check, at most 64 characters) and is
+`constraint-name-not-carried` otherwise.
+
+### Keys, defaults, checks
+
+* A foreign key needs a primary or unique key of its parent (MySQL 8.4 `restrict_fk_on_non_standard_key`); otherwise it is
+  `fk-not-carried`. A key whose rows the source itself violates is not created (`fk-violations-in-source`), because
+  MySQL would refuse it. `SET DEFAULT`, `SET NULL` on a `NOT NULL` column, and `DEFERRABLE` are carried as the nearest
+  thing MySQL has and say so (`fk-action-not-carried`). A partial index is `index-not-carried`.
+* Defaults: numbers, quoted texts (in the `DEFAULT (..)` form for `TEXT`/`BLOB` columns, which MySQL needs), booleans.
+  `CURRENT_TIMESTAMP`/`CURRENT_DATE`/`CURRENT_TIME` become `UTC_TIMESTAMP()`-based defaults in the column's own form: a
+  `DATETIME` gets `UTC_TIMESTAMP()`, a **text** column gets `DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%d %H:%i:%s')` (SQLite's
+  text format, in UTC; `default-translated`). Anything else is `default-not-carried`.
+* Checks: `GLOB` becomes `REGEXP_LIKE(col, '^..$', 'cn')` (case-sensitive, as GLOB is), a comparison or `IN` list of a text
+  column gets `COLLATE utf8mb4_bin` (SQLite compares exactly; MySQL's default collation ignores case and accents),
+  `length()` is `CHAR_LENGTH()`, `[x]` names are backtick-quoted. An expression the translator does not understand, or MySQL
+  does not allow (a column of an `AUTO_INCREMENT`, or of a foreign key with a referential action), is `check-not-carried`; a comparison
+  that stays case-insensitive is `collation-not-carried`.
+* Not carried at all: views and triggers across engines (`view-not-carried`, `trigger-not-carried`), expression indexes,
+  collations, `WITHOUT ROWID`/`STRICT`.
+
+### What a person must know about MySQL's defaults
+
+Text comparison in MySQL is case- and accent-insensitive by default. A key that differs only by case or accents in
+SQLite is a duplicate there and **stops the load** (the script does not hide it). The demo databases have no such key.
+`lower_case_table_names` (see above) and MariaDB are not tested here.
+
+### How it is proved
+
+`scripts/check-journey-mysql.sh` (the non-required workflow `.github/workflows/journey-mysql.yml`, path-filtered) starts
+the digest-pinned `mysql:8.4` image on a private port; for the edge-case fixture
+(`pkg/dbcopy/faithful/testdata/mysql_edge.sql`: hostile names and values, every type, composite, self-referencing and
+text keys), for a fuzz fixture of 4,000 rows of hostile text, bytes and names, and for the six demo databases pinned in
+`scripts/journey-datasets.txt` it exports twice (the two scripts must be the same bytes), loads the script with the
+`mysql` client in the container (`--skip-commands`, stop at the first error), checks that a second load stops at the marker
+table, and runs the cross-engine verifier. The verifier (`internal/crossverify`, an internal package, deliberately not a
+command: its long-term home is an extension of `datatug compare` once compare's known defects are fixed) reads the
+MySQL catalog and compares it with the plan the exporter makes for the same SQLite file: tables, columns (type,
+nullability, auto-increment, default), primary key, foreign keys (columns, parent, actions), unique keys and indexes
+(**the indexes MySQL creates for a foreign key by itself are modelled and left out**), check constraints, the completion
+marker, that no name was renamed without a warning, row counts, and **every value** read through the Go MySQL driver in
+its binary protocol (int64, the 64 bits of a float, a DECIMAL as an exact rational, bytes as bytes). The canonical form of
+each value in each family is written at the top of `internal/crossverify/canon.go`: a REAL of a `NUMERIC(10,2)` column
+is read as its shortest decimal (`FormatFloat(x, 'f', -1, 64)`), an INTEGER or REAL in a `NUMERIC` column compares as the
+same number, a date or time only as text in the column's own format with the fraction's trailing zeros removed.
+Unit tests (100% statement coverage of all new code) include golden scripts, a determinism test, a property test that no
+literal holds a raw control character and every literal reads back as its text, and an emulated MySQL for the verifier.
+
+### Design notes
+
+* **Offline literals and DALGO.** The 2026-10-04 resolution of `dalgo-dialect-aware-sql-emission` ("no caller value may ever be
+  sent as SQL text") is about `StructuredQuery` values sent to a server. An offline script written from a pinned file, never
+  run against a server by DataTug, is outside it; the literal writer is `mysqlDialect.Literal`, the one place a value
+  becomes SQL text, and it is fuzzed and round-tripped through a real MySQL.
+* **Why not DALGO.** The reason is not `dalgo2mysql`'s identifier check (trivially relaxed): the DALgo `dbschema` model is too
+  coarse for a faithful script (`ConstraintDef` has a name and a type only, `ForeignKeyDef` no actions, a single `Time`
+  type, no declared type text).
+* **Duplication debt.** Identifier quoting and reserved-word knowledge now exist twice: here (`mysqlDialect.QuoteIdent`,
+  `StorableName`) and in `dalgo2sql`'s `typed_dialect.go`. Sharing them is a follow-up once the script dialects settle.
+* **Follow-up.** `datatug db export` (inGitDB) could be folded into `db copy --to ingitdb://`; it is untouched here.

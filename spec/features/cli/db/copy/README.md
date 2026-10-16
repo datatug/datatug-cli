@@ -27,6 +27,8 @@ The command currently dispatches the registered URL schemes above; it does not a
 
 **Between SQLite and PostgreSQL (and SQLite to SQLite) the copy is faithful** (amended 2026-10-15, see [SQLite and PostgreSQL copies](#sqlite-and-postgresql-copies)): tables, columns with their declared types, primary keys, foreign keys with their actions, unique constraints, indexes, check constraints, defaults, auto-number counters and every value are carried, in one transaction on a snapshot of the source; whatever an engine cannot carry is a warning, never a silent loss. The other pairs keep the DALgo path described below.
 
+**SQL script destination** (added 2026-10-16, founder direction: not a second command): `--to 'sqlscript:///path/out.sql?dialect=mysql'` writes a deterministic MySQL script from a SQLite `--from` instead of copying into a database, with the same warnings, `--json`, `--dry-run`, `--fail-on-warning`, `--include` and `--exclude` (see [SQL script destinations](#sql-script-destinations)). `datatug db export` is unchanged.
+
 ## Contents
 
 | Child | Description |
@@ -67,7 +69,7 @@ The command MUST accept the following optional flags:
 - `--parallel-streams <N>` — positive integer; default `runtime.NumCPU() - 1` (minimum `1`). Governs per-table parallelism, subject to the cap-to-1 rule in REQ:concurrency-cap.
 - `--overwrite <recreate|reload>` — value MUST be exactly one of `recreate` or `reload`. A bare `--overwrite` (with no value) MUST be rejected with exit `2`. Omitting the flag means "require empty target" per REQ:empty-target-check.
 - `--progress` — boolean; when present, enables per-table progress lines on stderr (see REQ:progress-reporting). Default off (silent).
-- `--from-schema <name>`, `--to-schema <name>`, `--json`, `--dry-run`, `--fail-on-warning` and `--decimals <numeric|text>` apply to SQLite and PostgreSQL copies only (see REQ:faithful-reporting); any other pair MUST reject them with exit `2`.
+- `--from-schema <name>`, `--to-schema <name>`, `--json`, `--dry-run`, `--fail-on-warning` and `--decimals <numeric|text>` apply to SQLite and PostgreSQL copies only (see REQ:faithful-reporting) and, except `--from-schema`, `--to-schema` and `--decimals`, to a `sqlscript://` destination (see REQ:sqlscript-flags); any other pair MUST reject them with exit `2`.
 
 ### URL scheme dispatch
 
@@ -80,6 +82,7 @@ The MVP URL parser MUST accept these schemes:
 | `sqlite` | `sqlite:///absolute/path.db` or `sqlite://./relative/path.db` | `dalgo2sqlite` (lives in `dal-go/dalgo2sqlite`) | E2E-tested |
 | `ingitdb` | `ingitdb://./path-to-project` (local-filesystem path) | `dalgo2ingitdb` (lives in `ingitdb/ingitdb-cli`) | E2E-tested |
 | `postgres` | `postgres://user:pw@host:port/dbname?sslmode=...` | `dalgo2postgres` (lives in `dal-go/dalgo2postgres`) | **Preview** — while `DATATUG_PREVIEW_POSTGRES` is not `1`, opening MUST exit `4` with one fixed sentence that says PostgreSQL sources are a preview and names the variable, before the URL is read any further and without a connection. A URL on either side whose query sets `host`, `port`, `dbname` or `database` is refused by the URL parser with exit `2` whether the variable is set or not, because `db copy` parses both URLs before it opens anything. With it set, `--from` opens through a read-only session (a `--from` URL that turns `default_transaction_read_only` off is refused, and so is one whose query sets `service` or `servicefile`) and `--to` opens for writing. Not in the MVP E2E bar. |
+| `sqlscript` | `sqlscript:///abs/path.sql?dialect=mysql` or `sqlscript:rel/path.sql?dialect=mysql` | none: a file writer in `pkg/dbcopy/faithful` | **Destination only**, from a `sqlite://` source; `dialect=mysql` is implemented (see [SQL script destinations](#sql-script-destinations)) |
 | `bigquery` | `bigquery://PROJECT/DATASET?location=LOCATION` | `dalgo2bigquery` load writer | Supported destination; uses local Google Application Default Credentials with BigQuery write scope. The project is the billing project. Location is mandatory. Existing tables are never replaced, and `--overwrite` is rejected. |
 
 #### REQ: bigquery-destination-transfer
@@ -253,6 +256,38 @@ The target MUST be written in one transaction. Indexes, checks and foreign keys 
 
 `--where`, `--limit` (and `--filter-config`) MUST be applied in the source `SELECT` (REQ:push-down-only in the [filtering sub-feature](filtering/README.md)): values are checked and coerced as that Feature says, a value of `in` is a comma list whose elements are checked one by one, and `--limit` is applied after `--where` in primary-key order. The report counts the rows written. A foreign key that a filter leaves without its parent rows is reported as such (`fk-not-validated` on PostgreSQL, `fk-violations-in-source` on SQLite) and the message names the filter.
 
+### SQL script destinations
+
+Added 2026-10-16 (founder direction: the script is a destination of `db copy`, not a flag of `db export`). The package is `pkg/dbcopy/faithful` (`PlanSQLiteTo`, `WriteScript`, the `Dialect` interface and the `mysql` dialect); the user guide is `docs/db-copy.md`; the cross-engine verifier is the internal package `internal/crossverify`.
+
+#### REQ: sqlscript-destination
+
+A `--to` whose scheme is `sqlscript` MUST write a SQL script file from a `sqlite://` `--from` (any other source is rejected with exit `2`). The URL carries the file path and the query parameters `dialect` (required; `mysql` is implemented, any other name MUST be refused with exit `2` and the list of implemented dialects), `name`, `edition`, `license` and `attribution` (header text); any other parameter, a host, user information or a fragment MUST be rejected with exit `2`. The script MUST be written from the SQLite file alone (no server is opened), MUST be the same bytes on every run of one datatug version, and MUST be put in place only when complete (a failure leaves no file and no temporary file).
+
+#### REQ: sqlscript-flags
+
+`--json`, `--dry-run`, `--fail-on-warning`, `--include` and `--exclude` MUST work as for a SQLite and PostgreSQL copy (the report has the same shape; `--dry-run` writes no file and creates no folder; `--fail-on-warning` exits `3` after the script is written). `--where`, `--limit`, `--filter-config`, `--from-schema`, `--to-schema`, `--decimals`, `--parallel-streams` and `--progress` MUST be rejected with exit `2` naming the flag. An existing destination file MUST be refused with exit `1` unless `--overwrite=recreate` is given; `--overwrite=reload` MUST be rejected with exit `2`.
+
+#### REQ: sqlscript-no-data-starts-a-line
+
+No literal of a script MAY contain a raw CR or LF in any dialect, and no value MAY start a line of a script: every line starts with a token the generator wrote. A text with a line break, another control character, a Unicode line or paragraph separator, a NUL byte or a backslash (the mysql client reads a backslash as an escape in every quoted string) MUST be written as a hex literal. The header MUST recommend the safe client flags. A name that holds a control or line-break character MUST be renamed with a warning (REQ:sqlscript-names).
+
+#### REQ: sqlscript-marker
+
+The first statement that creates anything MUST create the marker table `_demodb_import`, failing when it exists, and the last statement MUST insert its row (dataset, label, source SHA-256, version, table and row counts). A source table with that name MUST be refused.
+
+#### REQ: sqlscript-names
+
+Table, column and index names MUST be written byte for byte as one quoted identifier, including spaces, dots, backticks (doubled), reserved words, Unicode and names of up to 64 characters. A name the engine cannot store (empty, ending in a space, longer than the limit, with a control or line-break character, outside the Basic Multilingual Plane for MySQL, or a column that differs from another only by case or accents) MUST be the only reason to change one, MUST be changed to a name derived from the original and a hash of it, and MUST be a `name-renamed` (`index-renamed` for an index) warning. Table names that differ only by case MUST be a `name-case-collision` warning.
+
+#### REQ: sqlscript-types
+
+Types MUST be chosen from the declared type and every value, as for PostgreSQL: a column whose values do not fit its declared type MUST be carried in a type that holds them, with a `type-widened` warning; text that a utf8mb4 column cannot hold (a NUL byte, invalid UTF-8) MUST make the column bytes. A text or blob in a key MUST get a bounded type (`key-type-bounded`). The columns of a foreign key equivalence class MUST have one type before any statement is written. A row over the engine's row size MUST fall back to TEXT columns (`row-size-bounded`), and a key over the engine's key size MUST be refused (primary, unique, foreign) or dropped with a warning (plain index).
+
+#### REQ: sqlscript-verified
+
+Each dialect MUST be proved by loading its script with the engine's own client in a container of a digest-pinned image and comparing the result with the SQLite source (tables, columns, keys, indexes without the ones the engine creates for itself, row counts, every value through the engine's Go driver). The journey workflow MUST NOT be a required check and MUST NOT be added to the required `Go CI` workflow.
+
 ## Architecture
 
 ### Components
@@ -334,6 +369,8 @@ Inherited from the source Idea, reinforced at Feature-spec time:
 - **Conflict resolution on a non-empty target beyond `--overwrite=recreate|reload`** — no `--overwrite=merge`, no row-level upsert. MVP requires the user to choose drop-and-rebuild or truncate-and-reload.
 - **All DALgo backends** — only SQLite, inGitDB, and PostgreSQL are E2E-tested. Other DALgo backends (e.g. Datastore, Firestore) MAY work through the abstraction but are not guaranteed by this Feature.
 - **Schema diffing / migration** — target schema is auto-created from source. There is no contract for reconciling an existing target schema with the source schema beyond the strict REQ:reload-schema-match rule.
+- **`datatug db export` folded into `copy --to ingitdb://`** — follow-up (2026-10-16): the SQL script became a destination of `db copy`, which leaves `db export` as the one place with its own command for a destination `copy` also reaches. Folding it is a separate change; `export` is unchanged.
+- **A public comparison command for the script journey** — no: `internal/crossverify` stays internal; its long-term home is a `datatug compare` extension once compare's known defects are fixed.
 - **A bespoke dump-file format** — inGitDB serves as the canonical inspectable, versionable intermediate. `db copy --to ingitdb://./snap` followed by `db copy --from ingitdb://./snap --to <other>` is the "dump and load" workflow.
 - **Resumability after partial failure** — per REQ:partial-failure-leaves-state, the user reruns with `--overwrite`. There is no checkpoint/resume protocol.
 - **Per-engine bulk-load optimizations** — `COPY FROM STDIN` (PostgreSQL), prepared-statement batching with explicit transactions for throughput, drop-indexes-bulk-load-recreate dance. Correctness via DALgo abstractions is the MVP bar; performance work is a follow-up.
@@ -575,6 +612,30 @@ A SQLite or inGitDB target accepts source names under its existing rules, includ
 **Given** a source with a view and an expression index
 **When** the user runs the copy to PostgreSQL with `--json --fail-on-warning`
 **Then** stdout holds the report with `view-not-carried` and `index-not-carried` warnings and the command exits `3` after the target is written.
+
+### AC: sqlscript-writes-a-deterministic-script
+
+**Requirements:** copy#req:sqlscript-destination, copy#req:sqlscript-no-data-starts-a-line, copy#req:sqlscript-marker
+
+**Given** a SQLite file with a text value `"\nGO"`, a backslash and a name with a space
+**When** the user runs `datatug db copy --from sqlite://x.sqlite --to 'sqlscript:///out.sql?dialect=mysql'` twice
+**Then** the two files are the same bytes, no line of either starts with a value, the names are quoted as they are, and the first statement creates `_demodb_import` and the last one fills it.
+
+### AC: sqlscript-refuses-a-file-and-flags-that-do-not-apply
+
+**Requirements:** copy#req:sqlscript-flags
+
+**Given** an existing `out.sql`
+**When** the user runs the copy with the same destination
+**Then** the command exits `1` and the file is untouched; with `--overwrite=recreate` it is replaced; with `--where` it exits `2`.
+
+### AC: sqlscript-loads-into-mysql-and-verifies
+
+**Requirements:** copy#req:sqlscript-verified, copy#req:sqlscript-names, copy#req:sqlscript-types
+
+**Given** the edge-case fixture, the fuzz fixture and the six pinned demo databases
+**When** `scripts/check-journey-mysql.sh` loads each script into MySQL 8.4 and runs the verifier
+**Then** every dataset passes with no difference, and a second load of a script stops at the marker table.
 
 ## Open Questions
 

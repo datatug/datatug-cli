@@ -29,10 +29,8 @@ permissions:
 
 jobs:
   release:
-    # Pinned to an exact tag, not the moving @v1: that tag defines the
-    # require_notarized_macos input but does NOT contain the
-    # macos_signing_preflight job, so the gate silently no-ops there.
-    uses: strongo/cicd/.github/workflows/release.yml@v1.21.3
+    # Pin the released private-dependency and macOS signing contract.
+    uses: strongo/cicd/.github/workflows/release.yml@v1.22.0 # 686765a7cb84ca84c3cef799f960c730663c182b
     permissions:
       contents: write
       # Lets the require_workflow_success guard below read Go CI's result for
@@ -41,6 +39,10 @@ jobs:
       # workflow. Without it the guard fails closed and says so.
       actions: read
     with:
+      GOPRIVATE: github.com/datatug/datatug-core
+      goprivate_github_app_client_id: Iv23li26w131Kv6u3IdM
+      goprivate_github_app_owner: datatug
+      goprivate_github_app_repositories: datatug-core
       # Keep GitHub release artifacts automatic, but never update downstream
       # package managers as a side effect of merging code.
       goreleaser_extra_args: '--skip=homebrew,winget'
@@ -67,6 +69,7 @@ jobs:
       # See https://github.com/strongo/cicd/issues/66
       require_notarized_macos: true
     secrets:
+      GOPRIVATE_GITHUB_APP_PRIVATE_KEY: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
       # This workflow has no cross-repository publishing token. Only the
       # manually triggered package workflow can update the Homebrew tap.
       # macOS signing + notarization. These activate the `notarize:` block in

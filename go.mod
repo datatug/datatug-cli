@@ -25,7 +25,7 @@ require (
 	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/ultraviolet v0.0.0-20260812204455-68fa937c71be
 	github.com/charmbracelet/x/ansi v0.11.8
-	github.com/dal-go/dalgo v0.93.0
+	github.com/dal-go/dalgo v0.95.1
 	github.com/dal-go/dalgo2bigquery v0.3.1
 	github.com/dal-go/dalgo2http v0.2.1
 	github.com/dal-go/dalgo2postgres v0.9.1
@@ -33,7 +33,7 @@ require (
 	github.com/dal-go/dalgo2sqlite v0.4.0
 	github.com/dal-go/record v0.1.5
 	github.com/datatug/cliformat v0.0.3
-	github.com/datatug/datatug-core v0.58.0
+	github.com/datatug/datatug-core v0.59.0
 	github.com/datatug/sql2csv v0.0.1
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/go-sql-driver/mysql v1.10.0
@@ -43,7 +43,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/gosuri/uitable v0.0.4
 	github.com/ingitdb/dalgo2ingitdb v0.7.1
-	github.com/ingitdb/ingitdb-go/ingitdb v0.9.0
+	github.com/ingitdb/ingitdb-go/ingitdb v0.9.1
 	github.com/ingr-io/ingr-go v0.0.2
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/julienschmidt/httprouter v1.3.0
@@ -64,14 +64,14 @@ require (
 	github.com/strongo/deviceauth v0.1.0
 	github.com/strongo/logus v0.4.3
 	github.com/strongo/random v0.0.3
-	github.com/strongo/slice v0.3.12
-	github.com/strongo/validation v0.0.15
+	github.com/strongo/slice v0.3.13
+	github.com/strongo/validation v0.0.16
 	github.com/tuigoff/tuigoff v0.8.0
 	github.com/xo/dburl v0.24.2
 	github.com/xuri/excelize/v2 v2.11.0
 	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/oauth2 v0.36.0
-	golang.org/x/sys v0.48.0
+	golang.org/x/sys v0.49.0
 	golang.org/x/term v0.45.0
 	golang.org/x/text v0.42.0
 	google.golang.org/api v0.296.0

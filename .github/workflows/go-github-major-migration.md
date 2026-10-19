@@ -16,7 +16,7 @@ checkout:
   fetch-depth: 0
 safe-outputs:
   create-pull-request:
-    title-prefix: "[go-github major] "
+    title-prefix: "fix(deps): [go-github major] "
     draft: false
     auto-merge: squash
     auto-close-issue: false
@@ -69,7 +69,7 @@ workflow files, agent instructions, release configuration, or unrelated
 dependencies.
 
 Only after all verification passes, create exactly one non-draft PR against the
-default branch. Its title must start with `[go-github major] ` and its body must
+default branch. Its title must start with `fix(deps): [go-github major] ` and its body must
 identify the triggering Renovate PR, the old and new go-github majors, adapted
 APIs, and exact commands/results. Do not request reviewers. The configured
 safe output enables squash auto-merge; GitHub may merge it only after all

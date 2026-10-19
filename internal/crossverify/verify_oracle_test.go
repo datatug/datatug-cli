@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -499,5 +500,64 @@ func TestOracleEngineReadsLobLengths(t *testing.T) {
 	}
 	if got := unstorableOracle("bin$abc"); got == "" {
 		t.Error("a BIN$ name is storable")
+	}
+}
+
+func TestOracleBinaryColumnsDistinguishNullFromEmpty(t *testing.T) {
+	for _, tc := range []struct {
+		name, query string
+		columns     []*faithful.ScriptColumn
+		rows        *sqlmock.Rows
+		want        []string
+	}{
+		{
+			name:  "BLOB first",
+			query: `SELECT "blob", "raw", DBMS_LOB.GETLENGTH\("blob"\), CASE WHEN "raw" IS NULL THEN 1 ELSE 0 END`,
+			columns: []*faithful.ScriptColumn{
+				{Name: "blob", Choice: faithful.Choice{Family: "bytes", Len: 0}},
+				{Name: "raw", Choice: faithful.Choice{Family: "bytes", Len: 4}},
+			},
+			rows: sqlmock.NewRows([]string{"blob", "raw", "length", "raw_null"}).
+				AddRow([]byte{}, []byte{}, nil, int64(1)).
+				AddRow(nil, []byte{2}, int64(0), int64(0)).
+				AddRow([]byte{1}, []byte{}, int64(1), int64(1)),
+			want: []string{"N,N", "b0:,b1:\x02", "b1:\x01,N"},
+		},
+		{
+			name:  "RAW first",
+			query: `SELECT "raw", "blob", DBMS_LOB.GETLENGTH\("blob"\), CASE WHEN "raw" IS NULL THEN 1 ELSE 0 END`,
+			columns: []*faithful.ScriptColumn{
+				{Name: "raw", Choice: faithful.Choice{Family: "bytes", Len: 4}},
+				{Name: "blob", Choice: faithful.Choice{Family: "bytes", Len: 0}},
+			},
+			rows: sqlmock.NewRows([]string{"raw", "blob", "length", "raw_null"}).
+				AddRow([]byte{}, []byte{1}, int64(1), int64(1)).
+				AddRow([]byte{2}, nil, int64(0), int64(0)),
+			want: []string{"N,b1:\x01", "b1:\x02,b0:"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = db.Close() }()
+			mock.ExpectPrepare(tc.query).ExpectQuery().WillReturnRows(tc.rows)
+			table := &faithful.ScriptTable{Name: "items", Columns: tc.columns}
+			var got []string
+			err = targetRows(Input{Target: db, Engine: EngineOracle, eng: oracleEngine}, table)(context.Background(), func(forms []string) error {
+				got = append(got, strings.Join(forms, ","))
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("binary forms = %q, want %q", got, tc.want)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }

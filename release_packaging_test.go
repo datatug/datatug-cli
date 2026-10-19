@@ -339,12 +339,15 @@ case "$1" in
   release)
     echo x >> "$FAKE_DIR/dl.calls"
     n=$(wc -l < "$FAKE_DIR/dl.calls" | tr -d ' ')
-    [[ -e "$FAKE_DIR/dl_fail.$n" ]] && { echo "gh: HTTP 502" >&2; exit 1; }
-    dir=""
+    dir="" repo=""
     while [[ $# -gt 0 ]]; do
       [[ "$1" == "--dir" ]] && dir="$2"
+      [[ "$1" == "--repo" ]] && repo="$2"
       shift
     done
+    echo "$repo" >> "$FAKE_DIR/dl.repos"
+    [[ "$repo" == "$FAKE_EXPECT_REPO" ]] || { echo "unexpected release repository: $repo" >&2; exit 64; }
+    [[ -e "$FAKE_DIR/dl_fail.$n" ]] && { echo "gh: HTTP 502" >&2; exit 1; }
     cp "$FAKE_DIR/checksums.txt" "$dir/datatug_0.56.0_checksums.txt"
     ;;
   api)
@@ -376,6 +379,7 @@ func TestVerifyHomebrewCaskScript(t *testing.T) {
 		tag          string
 		warn         bool     // run with --warn-only, as the release run does
 		noRepo       bool     // GITHUB_REPOSITORY unset
+		releaseRepo  string   // explicit public asset repository overrides the source repo
 		noArgs       bool     // no tag argument at all
 		casks        []string // cask.N contents; "" means the Nth read fails
 		dlFail       []int    // download call numbers that fail
@@ -388,6 +392,10 @@ func TestVerifyHomebrewCaskScript(t *testing.T) {
 		wantDLCalls  int
 	}{
 		{name: "current at once", tag: "v0.56.0", casks: []string{fresh}, wantAPICalls: 1, wantDLCalls: 1},
+		{name: "explicit public repository wins over private workflow repository", tag: "v0.56.0", releaseRepo: "datatug/datatug", casks: []string{fresh}, wantAPICalls: 1, wantDLCalls: 1},
+		{name: "explicit repository works without a workflow repository", tag: "v0.56.0", noRepo: true, releaseRepo: "datatug/datatug", casks: []string{fresh}, wantAPICalls: 1, wantDLCalls: 1},
+		{name: "explicit repository download failure stays strict", tag: "v0.56.0", releaseRepo: "datatug/datatug", casks: []string{fresh}, dlFail: []int{1, 2, 3, 4}, wantExit: 1, wantAnn: "error", wantStderr: "datatug/datatug v0.56.0 checksums", wantDLCalls: 4},
+		{name: "warn: explicit repository download failure remains a warning", tag: "v0.56.0", releaseRepo: "datatug/datatug", warn: true, casks: []string{fresh}, dlFail: []int{1, 2, 3, 4}, wantAnn: "warning", wantStderr: "datatug/datatug v0.56.0 checksums", notStderr: "::error::", wantDLCalls: 4},
 		{name: "current after two stale reads", tag: "v0.56.0", casks: []string{stale, stale, fresh}, wantAPICalls: 3, wantDLCalls: 3},
 		{name: "current after a failed read", tag: "v0.56.0", casks: []string{"", fresh}, wantAPICalls: 2, wantDLCalls: 2},
 		{name: "current after a failed download", tag: "v0.56.0", casks: []string{fresh, fresh}, dlFail: []int{1}, wantAPICalls: 1, wantDLCalls: 2},
@@ -402,6 +410,7 @@ func TestVerifyHomebrewCaskScript(t *testing.T) {
 
 		// --warn-only: the release run. Every outcome exits 0; anything but
 		// "current" is exactly one ::warning:: line.
+		{name: "warn: public asset repository still points to the publisher workflow", tag: "v0.56.0", releaseRepo: "datatug/datatug", warn: true, casks: []string{stale, stale, stale, stale}, wantAnn: "warning", wantStderr: "Actions tab of datatug/datatug-cli, on main", wantAPICalls: 4, wantDLCalls: 4},
 		{name: "warn: current says nothing", tag: "v0.56.0", warn: true, casks: []string{fresh}, notStderr: "::warning::", wantAPICalls: 1, wantDLCalls: 1},
 		{name: "warn: stale names both versions and the workflow", tag: "v0.56.0", warn: true, casks: []string{stale, stale, stale, stale}, wantAnn: "warning", wantStderr: "0.43.1, but the release is 0.56.0", notStderr: "::error::", wantAPICalls: 4, wantDLCalls: 4},
 		{name: "warn: stale names the workflow to start", tag: "v0.56.0", warn: true, casks: []string{stale, stale, stale, stale}, wantAnn: "warning", wantStderr: `"Publish latest packages"`, wantAPICalls: 4, wantDLCalls: 4},
@@ -448,7 +457,11 @@ func TestVerifyHomebrewCaskScript(t *testing.T) {
 				args = append(args, tt.tag)
 			}
 			cmd := exec.Command(bash, append([]string{script}, args...)...)
-			cmd.Env = append(os.Environ(), "GH="+ghPath, "FAKE_DIR="+dir, "GITHUB_REPOSITORY=datatug/datatug-cli", "ATTEMPTS=4", "INTERVAL=0")
+			expectedRepo := tt.releaseRepo
+			if expectedRepo == "" {
+				expectedRepo = "datatug/datatug-cli"
+			}
+			cmd.Env = append(os.Environ(), "GH="+ghPath, "FAKE_DIR="+dir, "GITHUB_REPOSITORY=datatug/datatug-cli", "RELEASE_REPO="+tt.releaseRepo, "FAKE_EXPECT_REPO="+expectedRepo, "ATTEMPTS=4", "INTERVAL=0")
 			if tt.noRepo {
 				cmd.Env = append(cmd.Env, "GITHUB_REPOSITORY=")
 			}
@@ -472,6 +485,15 @@ func TestVerifyHomebrewCaskScript(t *testing.T) {
 			}
 			if tt.notStderr != "" && strings.Contains(stderr.String(), tt.notStderr) {
 				t.Errorf("stderr = %q, must not contain %q", stderr.String(), tt.notStderr)
+			}
+			if tt.wantDLCalls > 0 {
+				repos, err := os.ReadFile(filepath.Join(dir, "dl.repos"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if want := strings.Repeat(expectedRepo+"\n", tt.wantDLCalls); string(repos) != want {
+					t.Errorf("download repositories = %q, want %q", repos, want)
+				}
 			}
 			// Every non-zero outcome says why in exactly one annotation line.
 			var annotations []string

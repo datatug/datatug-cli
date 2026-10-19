@@ -106,14 +106,21 @@ func targetRows(in Input, t *faithful.ScriptTable) rowSource {
 		for i, c := range t.Columns {
 			names[i] = eng.quote(c.Name)
 		}
-		// lobs are the columns whose length is read too (see targetEngine.lobLength): their lengths follow the values.
-		var lobs []int
+		// Oracle's driver can return an empty byte slice for NULL RAW and BLOB values.
+		// Read BLOB lengths and RAW null flags beside the values to preserve both distinctions.
+		var lobs, raws []int
 		sel := append([]string(nil), names...)
 		if eng.lobLength != nil {
 			for i, c := range t.Columns {
-				if c.Choice.Family == "bytes" && c.Choice.Len == 0 {
+				if c.Choice.Family != "bytes" {
+					continue
+				}
+				if c.Choice.Len == 0 {
 					lobs = append(lobs, i)
 					sel = append(sel, eng.lobLength(names[i]))
+				} else {
+					raws = append(raws, i)
+					sel = append(sel, "CASE WHEN "+names[i]+" IS NULL THEN 1 ELSE 0 END")
 				}
 			}
 		}
@@ -135,6 +142,11 @@ func targetRows(in Input, t *faithful.ScriptTable) rowSource {
 					vals[i] = nil
 				} else if number(n) == 0 {
 					vals[i] = []byte{}
+				}
+			}
+			for k, i := range raws {
+				if number(vals[len(names)+len(lobs)+k]) != 0 {
+					vals[i] = nil
 				}
 			}
 			for i, c := range t.Columns {

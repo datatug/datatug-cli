@@ -503,27 +503,30 @@ func TestOracleEngineReadsLobLengths(t *testing.T) {
 	}
 }
 
-func TestOracleLobLengthDistinguishesNullFromEmpty(t *testing.T) {
+func TestOracleBinaryColumnsDistinguishNullFromEmpty(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = db.Close() }()
-	rows := sqlmock.NewRows([]string{"blob", "length"}).
-		AddRow([]byte{}, nil).
-		AddRow(nil, int64(0)).
-		AddRow([]byte{1}, int64(1))
-	mock.ExpectPrepare("SELECT").ExpectQuery().WillReturnRows(rows)
-	table := &faithful.ScriptTable{Name: "items", Columns: []*faithful.ScriptColumn{{Name: "blob", Choice: faithful.Choice{Family: "bytes", Len: 0}}}}
+	rows := sqlmock.NewRows([]string{"blob", "raw", "length", "raw_null"}).
+		AddRow([]byte{}, []byte{}, nil, int64(1)).
+		AddRow(nil, []byte{2}, int64(0), int64(0)).
+		AddRow([]byte{1}, []byte{}, int64(1), int64(1))
+	mock.ExpectPrepare(`SELECT "blob", "raw", DBMS_LOB.GETLENGTH\("blob"\), CASE WHEN "raw" IS NULL THEN 1 ELSE 0 END`).ExpectQuery().WillReturnRows(rows)
+	table := &faithful.ScriptTable{Name: "items", Columns: []*faithful.ScriptColumn{
+		{Name: "blob", Choice: faithful.Choice{Family: "bytes", Len: 0}},
+		{Name: "raw", Choice: faithful.Choice{Family: "bytes", Len: 4}},
+	}}
 	var got []string
 	err = targetRows(Input{Target: db, Engine: EngineOracle, eng: oracleEngine}, table)(context.Background(), func(forms []string) error {
-		got = append(got, forms[0])
+		got = append(got, strings.Join(forms, ","))
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"N", "b0:", "b1:\x01"}
+	want := []string{"N,N", "b0:,b1:\x02", "b1:\x01,N"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("LOB forms = %q, want %q", got, want)
 	}

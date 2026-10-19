@@ -14,7 +14,7 @@ import (
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/datatug/datatug-core/pkg/storage/dtprojcreator"
-	"github.com/google/go-github/v92/github"
+	"github.com/google/go-github/v93/github"
 	"github.com/strongo/cli-helpers/fsutil"
 )
 
@@ -159,12 +159,11 @@ func (c *projectCreator) createRepo(ctx context.Context, visibility datatug.Proj
 	c.repo, _, err = c.client.Repositories.Get(context.Background(), c.repoOwner, c.repoName)
 	if err != nil {
 		// Create repository
-		c.repo = &github.Repository{
-			Name:    new(c.repoName),
+		request := github.CreateRepositoryRequest{
+			Name:    c.repoName,
 			Private: new(visibility == datatug.PrivateProject),
 		}
-
-		c.repo, _, err = c.client.Repositories.Create(ctx, "", c.repo)
+		c.repo, _, err = c.client.Repositories.Create(ctx, "", request)
 	}
 	return err
 }

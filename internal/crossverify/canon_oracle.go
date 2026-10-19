@@ -16,7 +16,7 @@ import (
 )
 
 // canonOracle is the canonical form (see canon.go) of a value read from Oracle through its Go driver
-// (github.com/sijms/go-ora/v2), which returns every NUMBER as the string of its exact decimal value, a BINARY_DOUBLE as
+// (github.com/sijms/go-ora/v3), which returns every NUMBER as the string of its exact decimal value, a BINARY_DOUBLE as
 // float64, VARCHAR2 and CLOB as string, RAW and BLOB as bytes, and DATE and TIMESTAMP as time.Time. A date or time is
 // written with an explicit format, as many decimals as the column holds: the verifier never asks the engine for text.
 func canonOracle(ch faithful.Choice, v any) (string, error) {

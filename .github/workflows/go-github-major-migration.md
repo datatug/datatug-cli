@@ -6,7 +6,7 @@ on:
   pull_request:
     types: [opened, reopened, synchronize]
 if: >-
-  github.event.pull_request.user.login == 'app/renovate' &&
+  github.event.pull_request.user.login == 'renovate[bot]' &&
   contains(github.event.pull_request.body, 'github.com/google/go-github')
 permissions:
   contents: read
@@ -39,7 +39,7 @@ Before changing files, independently inspect the triggering PR through GitHub
 and compare its head with the default branch. Continue only if all of these
 conditions hold:
 
-1. The PR author is exactly `app/renovate`.
+1. The PR author is exactly `renovate[bot]`.
 2. Its dependency change is a real semantic-major upgrade of the Go module
    `github.com/google/go-github/vN` from one positive major `N` to a different
    positive major.

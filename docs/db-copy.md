@@ -738,7 +738,7 @@ digest-pinned `gvenzl/oracle-free:23-slim` image and, for the edge-case fixture 
 a fuzz fixture of 4,000 hostile rows, a fixture of 80 random foreign key graphs and the six demo databases pinned in
 `scripts/journey-datasets.txt`: exports twice (the same bytes), loads with SQL*Plus inside the container, checks that a second
 load stops at the marker table, and runs the cross-engine verifier (`Engine: crossverify.EngineOracle`) through the pure-Go driver
-`github.com/sijms/go-ora/v2`. The verifier reads the `ALL_*` catalog (tables, columns, nullability, identity, keys, foreign keys with actions and
+`github.com/sijms/go-ora/v3`. The verifier reads the `ALL_*` catalog (tables, columns, nullability, identity, keys, foreign keys with actions and
 deferrability, unique and function-based indexes, the marker) and every value with typed reads (a `NUMBER` as exact text, a `BLOB` by its length and bytes). It compares **only whether a default exists and the number of `CHECK` constraints, not their text**, so a translated `CHECK` or `DEFAULT` is covered by the unit tests and the golden script, not by the real-engine journey.
 Once per run it proves the controls: a client in another character set stops with no table, a failing statement stops the load,
 a client that goes on after an error gets no marker row (and with the counts removed it does), `&`, a long line and a raw

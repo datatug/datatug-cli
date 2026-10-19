@@ -527,7 +527,11 @@ func TestBridgeMessagesHandlerAskActiveStoreErrorSurfaces(t *testing.T) {
 	req.Header.Set("Origin", "https://datatug.app")
 	req.Header.Set("X-DataTug-Chat-Capability", token)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	// Other parallel bridge tests can release and reuse the preferred port.
+	// Keep this POST off their shared pool of connections to closing bridges.
+	client := &http.Client{Transport: &http.Transport{}}
+	t.Cleanup(client.CloseIdleConnections)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}

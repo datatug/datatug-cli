@@ -21,7 +21,8 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-root=$PWD
+# shellcheck source=scripts/lib/mysql-readiness.sh
+source scripts/lib/mysql-readiness.sh
 image=${MYSQL_IMAGE:-mysql:8.4@sha256:24989179f58856db763f418010c1169fecc944e3ec1ea7e921572d83eb070f70}
 datasets=${JOURNEY_DATASETS:-fixture fuzz chinook northwind pubs sakila employees adventureworks}
 password=journey-only-$$-$RANDOM
@@ -36,19 +37,19 @@ echo "starting $image"
 docker run -d --name "$name" -e MYSQL_ROOT_PASSWORD="$password" -p 127.0.0.1::3306 --tmpfs /var/lib/mysql:rw,size=4g "$image" >/dev/null
 for _ in $(seq 1 120); do
 	# the entrypoint runs a temporary server on a socket first; the real one logs "port: 3306"
-	if docker logs "$name" 2>&1 | grep -q "ready for connections.*port: 3306"; then break; fi
+	if mysql_tcp_ready "$name"; then break; fi
 	sleep 1
 done
-docker logs "$name" 2>&1 | grep -q "ready for connections.*port: 3306" || { echo "the MySQL server did not come up" >&2; docker logs "$name" >&2; exit 1; }
+mysql_tcp_ready "$name" || { echo "the MySQL server did not come up" >&2; docker logs "$name" >&2; exit 1; }
 port=$(docker port "$name" 3306/tcp | head -1 | sed 's/.*://')
 docker exec "$name" mysql -uroot -p"$password" -N -e 'select version()' 2>/dev/null | sed 's/^/server version /'
 
 mysql_root() { docker exec -i "$name" mysql -uroot -p"$password" "$@" 2>/dev/null; }
 
 fetch() { # id -> $work/<id>.sqlite
-	local id=$1 commit file sha license want got
+	local id=$1 commit file sha license got
 	if [ -n "${JOURNEY_SQLITE_DIR:-}" ]; then cp "$JOURNEY_SQLITE_DIR/$id.sqlite" "$work/$id.sqlite"; return; fi
-	read -r _ commit file sha license < <(grep -E "^$id[[:space:]]" scripts/journey-datasets.txt)
+	read -r _ commit file sha license < <(grep -E "^${id}[[:space:]]" scripts/journey-datasets.txt)
 	curl -fsSL --retry 3 -o "$work/$id.download" "https://raw.githubusercontent.com/demo-db/$id/$commit/data-source/$file"
 	case $file in *.gz) gzip -dc "$work/$id.download" >"$work/$id.sqlite" ;; *) mv "$work/$id.download" "$work/$id.sqlite" ;; esac
 	got=$(shasum -a 256 "$work/$id.sqlite" | cut -d' ' -f1)
@@ -59,7 +60,7 @@ license_of() { awk -v id="$1" '$1 == id { print $5 }' scripts/journey-datasets.t
 
 # urlencode percent-encodes a path for a query value (ASCII paths; anything outside [A-Za-z0-9._~/-] is escaped).
 urlencode() {
-	local s=$1 out= c i
+	local s=$1 out='' c i
 	for ((i = 0; i < ${#s}; i++)); do
 		c=${s:i:1}
 		case $c in [a-zA-Z0-9._~/-]) out+=$c ;; *) out+=$(printf '%%%02X' "'$c") ;; esac

@@ -52,7 +52,7 @@ The current implementation surfaces this via `dtconfig.GetSettings()` returning 
 
 ## Parameters
 
-None. The command accepts no flags or positional arguments today.
+No positional arguments. The native persistent `--config /absolute/path/settings.yaml` option selects a settings file; omission preserves `~/.datatug.yaml`.
 
 ## Exit codes
 
@@ -96,6 +96,10 @@ Running `datatug config` MUST NOT create `~/.datatug.yaml` if it does not exist,
 - Should this command expand into `datatug config <get|set|list|unset>` subcommands, mirroring `git config` / `gh config`? Today there is no way to set values from the CLI.
 - Should output format be selectable via `--format yaml|json` per the parent [REQ: yaml-default-for-structured](../README.md#req-yaml-default-for-structured)?
 - The currently-commented-out `cmd_config_client.go` and `cmd_config_server.go` files suggest a former `config client` / `config server` surface. Should those be restored under a `config set` umbrella?
+
+## Explicit settings file
+
+The native persistent `--config /absolute/path/settings.yaml` flag selects the settings file before command execution. It applies to `projects add`, `db add`, and `serve` through the same shared settings loader and writer. The parent directory must exist; relative paths are rejected. Omitting the flag preserves `~/.datatug.yaml`. An explicit configuration file supports isolated project registration and local acceptance without changing HOME or the user's settings.
 
 ---
 *This document follows the https://specscore.md/feature-specification*

@@ -17,6 +17,8 @@ on:
       - 'go.mod'
       - 'go.sum'
       - 'scripts/check-journey-mysql.sh'
+      - 'scripts/check-mysql-readiness.sh'
+      - 'scripts/lib/mysql-readiness.sh'
       - 'scripts/journey-datasets.txt'
       - '.github/workflows/journey-mysql.yml'
   push:
@@ -30,6 +32,8 @@ on:
       - 'go.mod'
       - 'go.sum'
       - 'scripts/check-journey-mysql.sh'
+      - 'scripts/check-mysql-readiness.sh'
+      - 'scripts/lib/mysql-readiness.sh'
       - 'scripts/journey-datasets.txt'
       - '.github/workflows/journey-mysql.yml'
   workflow_dispatch:
@@ -61,6 +65,8 @@ jobs:
           # Must be >= go.mod's `go` directive, same constraint as release.yml.
           go-version: '1.27.2'
           cache: true
+      - name: MySQL readiness regression (no Docker)
+        run: bash scripts/check-mysql-readiness.sh
       - name: MySQL journey
         env:
           CGO_ENABLED: '1'

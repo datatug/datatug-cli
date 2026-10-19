@@ -129,8 +129,11 @@ func targetRows(in Input, t *faithful.ScriptTable) rowSource {
 		defer func() { _ = rows.Close() }()
 		return eachRow(rows, len(sel), func(vals []any) error {
 			forms := make([]string, len(names))
+			// The LOB length distinguishes NULL from empty even when the driver returns the same byte slice for both.
 			for k, i := range lobs {
-				if n := vals[len(names)+k]; n != nil && number(n) == 0 {
+				if n := vals[len(names)+k]; n == nil {
+					vals[i] = nil
+				} else if number(n) == 0 {
 					vals[i] = []byte{}
 				}
 			}

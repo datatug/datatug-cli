@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -499,5 +500,34 @@ func TestOracleEngineReadsLobLengths(t *testing.T) {
 	}
 	if got := unstorableOracle("bin$abc"); got == "" {
 		t.Error("a BIN$ name is storable")
+	}
+}
+
+func TestOracleLobLengthDistinguishesNullFromEmpty(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	rows := sqlmock.NewRows([]string{"blob", "length"}).
+		AddRow([]byte{}, nil).
+		AddRow(nil, int64(0)).
+		AddRow([]byte{1}, int64(1))
+	mock.ExpectPrepare("SELECT").ExpectQuery().WillReturnRows(rows)
+	table := &faithful.ScriptTable{Name: "items", Columns: []*faithful.ScriptColumn{{Name: "blob", Choice: faithful.Choice{Family: "bytes", Len: 0}}}}
+	var got []string
+	err = targetRows(Input{Target: db, Engine: EngineOracle, eng: oracleEngine}, table)(context.Background(), func(forms []string) error {
+		got = append(got, forms[0])
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"N", "b0:", "b1:\x01"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("LOB forms = %q, want %q", got, want)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }

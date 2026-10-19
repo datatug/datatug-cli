@@ -16,7 +16,7 @@ import (
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/datatug/datatug-core/pkg/storage/dtprojcreator"
-	"github.com/google/go-github/v92/github"
+	"github.com/google/go-github/v93/github"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -377,6 +377,10 @@ func TestCreateRepo_CreateNew(t *testing.T) {
 		_, _ = fmt.Fprintln(w, `{"message":"Not Found"}`)
 	})
 	mux.HandleFunc("/user/repos", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		assert.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "newrepo", body["name"])
+		assert.Equal(t, false, body["private"])
 		jsonResponse(w, http.StatusCreated, repoJSON("newrepo"))
 	})
 
@@ -395,7 +399,9 @@ func TestCreateRepo_Private(t *testing.T) {
 	mux.HandleFunc("/user/repos", func(w http.ResponseWriter, r *http.Request) {
 		// Decode the body to verify private flag
 		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		assert.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "privaterepo", body["name"])
+		assert.Equal(t, true, body["private"])
 		jsonResponse(w, http.StatusCreated, repoJSON("privaterepo"))
 	})
 

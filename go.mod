@@ -38,7 +38,7 @@ require (
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/gofrs/flock v0.13.1
-	github.com/google/go-github/v92 v92.0.0
+	github.com/google/go-github/v93 v93.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/gosuri/uitable v0.0.4
@@ -53,7 +53,7 @@ require (
 	github.com/openvaultdb/openvaultdb-go v0.6.2
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
 	github.com/posthog/posthog-go v1.24.3
-	github.com/sijms/go-ora/v2 v2.9.0
+	github.com/sijms/go-ora/v3 v3.0.1
 	github.com/sneat-co/sneat-go-core v0.67.3
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10

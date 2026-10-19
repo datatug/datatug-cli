@@ -9,7 +9,7 @@
 #   3. loads it a second time into the same schema, which must stop at the marker table and change nothing;
 #   4. runs the cross-engine verifier (internal/crossverify) over the SQLite file and that schema: tables, columns, keys,
 #      indexes, row counts, the identity counters and every value, read through the pure Go Oracle driver
-#      (github.com/sijms/go-ora/v2: no client library).
+#      (github.com/sijms/go-ora/v3: no client library).
 # It fails on any difference, any skipped test and any missing pass, and prints one line per dataset.
 #
 # Extra checks, once per run (fixture and fuzz datasets):

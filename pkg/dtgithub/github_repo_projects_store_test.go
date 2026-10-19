@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/datatug/datatug-core/pkg/datatug"
-	"github.com/google/go-github/v92/github"
+	"github.com/google/go-github/v93/github"
 	"github.com/stretchr/testify/assert"
 )
 

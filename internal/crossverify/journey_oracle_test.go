@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy/faithful"
-	_ "github.com/sijms/go-ora/v2" // the Oracle driver the verifier reads through (pure Go: no client library)
+	_ "github.com/sijms/go-ora/v3" // the Oracle driver the verifier reads through (pure Go: no client library)
 )
 
 // journeyOracleDSNEnv is the DSN of the schema the Oracle journey (scripts/check-journey-oracle.sh) loaded the script

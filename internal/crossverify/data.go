@@ -112,13 +112,13 @@ func targetRows(in Input, t *faithful.ScriptTable) rowSource {
 		sel := append([]string(nil), names...)
 		if eng.lobLength != nil {
 			for i, c := range t.Columns {
-				if c.Choice.Family != "bytes" {
-					continue
-				}
-				if c.Choice.Len == 0 {
+				if c.Choice.Family == "bytes" && c.Choice.Len == 0 {
 					lobs = append(lobs, i)
 					sel = append(sel, eng.lobLength(names[i]))
-				} else {
+				}
+			}
+			for i, c := range t.Columns {
+				if c.Choice.Family == "bytes" && c.Choice.Len > 0 {
 					raws = append(raws, i)
 					sel = append(sel, "CASE WHEN "+names[i]+" IS NULL THEN 1 ELSE 0 END")
 				}

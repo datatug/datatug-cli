@@ -8,31 +8,47 @@
 //   - GET and HEAD move on after any network error before a response and after
 //     HTTP 502, 503, 504 and the Cloudflare origin statuses 520-523, 525, 526.
 //   - Every other method moves on only when the request certainly never
-//     reached a server: a DNS, connect or TLS-verification error, or
+//     reached a server: a DNS, connect or TLS-handshake error that happened
+//     before the attempt obtained a connection (an httptrace GotConn or
+//     WroteHeaders signal ends that eligibility, whatever the error says), or
 //     Cloudflare 521, 522 or 523 (Cloudflare could not open a connection to
 //     the origin). Never after 524 (the origin got the request and was too
 //     slow), an application 5xx or a 4xx. A body that cannot be replayed
 //     (no GetBody) is never resent.
+//   - An attempt that is not the last one must obtain a connection within
+//     ConnectTimeout, so a primary that silently drops packets fails over
+//     within a short caller deadline. Not obtaining a connection means
+//     nothing was sent, so this applies to every method.
 //   - After a failover the fallback is preferred for HoldFor (5 minutes by
 //     default), then the primary is tried first again. The preference lives
 //     in the process only.
 package cloudapi
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 // DefaultHoldFor is how long the fallback stays preferred after a failover.
 const DefaultHoldFor = 5 * time.Minute
+
+// DefaultConnectTimeout bounds how long a non-final attempt may spend
+// getting a connection (DNS, TCP and TLS). A healthy path connects in well
+// under a second even on a poor mobile link; 2 s leaves the fallback about
+// half of the 4 s budget of the shortest caller deadline (the aichat decision
+// call) while still tolerating a slow handshake.
+const DefaultConnectTimeout = 2 * time.Second
 
 // SplitBaseURLs splits a comma-separated list of API base URLs, trimming
 // blanks. A single URL gives a one-element list; an empty string gives nil.
@@ -57,6 +73,9 @@ type Config struct {
 	Now func() time.Time
 	// HoldFor is how long a fallback stays preferred; zero means DefaultHoldFor.
 	HoldFor time.Duration
+	// ConnectTimeout bounds connection setup of every attempt but the last;
+	// zero means DefaultConnectTimeout and a negative value disables it.
+	ConnectTimeout time.Duration
 	// Notice receives one line, once, when the first failover happens. It
 	// names hosts only, never paths, queries or credentials. Nil is silent.
 	Notice io.Writer
@@ -68,6 +87,7 @@ type Transport struct {
 	next    http.RoundTripper
 	now     func() time.Time
 	holdFor time.Duration
+	connect time.Duration
 	notice  io.Writer
 
 	mu        sync.Mutex
@@ -79,7 +99,7 @@ type Transport struct {
 // NewTransport builds a Transport. With fewer than two base URLs it only
 // forwards requests, so a single-URL configuration behaves as before.
 func NewTransport(cfg Config) *Transport {
-	t := &Transport{next: cfg.Next, now: cfg.Now, holdFor: cfg.HoldFor, notice: cfg.Notice}
+	t := &Transport{next: cfg.Next, now: cfg.Now, holdFor: cfg.HoldFor, connect: cfg.ConnectTimeout, notice: cfg.Notice}
 	if t.next == nil {
 		t.next = http.DefaultTransport
 	}
@@ -88,6 +108,9 @@ func NewTransport(cfg Config) *Transport {
 	}
 	if t.holdFor <= 0 {
 		t.holdFor = DefaultHoldFor
+	}
+	if t.connect == 0 {
+		t.connect = DefaultConnectTimeout
 	}
 	for _, base := range cfg.BaseURLs {
 		if !strings.HasSuffix(base, "/") {
@@ -114,13 +137,16 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	for attempt := 0; ; attempt++ {
 		idx := order[attempt]
 		more := replayable && attempt < len(order)-1
-		attemptReq, err := t.attemptRequest(req, t.bases[idx]+rest, attempt)
+		st, cancel := t.newAttempt(req, more)
+		attemptReq, err := t.attemptRequest(req, st.ctx, t.bases[idx]+rest, attempt)
 		if err != nil {
+			cancel()
 			return nil, err
 		}
 		resp, err := t.next.RoundTrip(attemptReq)
 		if err != nil {
-			if !more || req.Context().Err() != nil || !retryError(idempotent, err) {
+			cancel()
+			if !more || req.Context().Err() != nil || !st.retryError(idempotent, err) {
 				return nil, err
 			}
 		} else {
@@ -129,13 +155,78 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 				t.succeeded(idx, attempt)
 			}
 			if !failed || !more {
+				resp.Body = &cancelOnClose{ReadCloser: resp.Body, cancel: cancel}
 				return resp, nil
 			}
 			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
 			_ = resp.Body.Close()
+			cancel()
 		}
 		t.announce(t.bases[idx], t.bases[order[attempt+1]])
 	}
+}
+
+// attemptState records what an attempt got to do. The httptrace hooks set it
+// from the transport's goroutines.
+type attemptState struct {
+	ctx       context.Context
+	connected atomic.Bool // a connection was obtained or headers were written
+	timedOut  atomic.Bool // connection setup exceeded the connect timeout
+}
+
+// newAttempt prepares one attempt's context. When limited, the attempt is
+// cancelled if it has no connection after the connect timeout; the timer
+// stops as soon as a connection arrives so a long response is never cut. The
+// returned cancel must be called when the attempt is over.
+func (t *Transport) newAttempt(req *http.Request, limited bool) (*attemptState, context.CancelFunc) {
+	st := &attemptState{}
+	ctx, cancel := context.WithCancel(req.Context())
+	var timer *time.Timer
+	if limited && t.connect > 0 {
+		// GotConn stops the timer; if it fires in that instant anyway, the
+		// connected flag still keeps a non-idempotent request from replaying.
+		timer = time.AfterFunc(t.connect, func() {
+			st.timedOut.Store(true)
+			cancel()
+		})
+	}
+	st.ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		GotConn: func(httptrace.GotConnInfo) {
+			st.connected.Store(true)
+			if timer != nil {
+				timer.Stop()
+			}
+		},
+		WroteHeaders: func() { st.connected.Store(true) },
+	})
+	return st, func() {
+		if timer != nil {
+			timer.Stop()
+		}
+		cancel()
+	}
+}
+
+// retryError decides whether a transport error warrants the next host.
+func (st *attemptState) retryError(idempotent bool, err error) bool {
+	if idempotent {
+		return true
+	}
+	if st.connected.Load() {
+		return false
+	}
+	return st.timedOut.Load() || neverReachedServer(err)
+}
+
+// cancelOnClose releases an attempt's context once its response body is done.
+type cancelOnClose struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (c *cancelOnClose) Close() error {
+	defer c.cancel()
+	return c.ReadCloser.Close()
 }
 
 // order lists base indexes in the order to try them: the preferred one first
@@ -188,12 +279,12 @@ func hostOf(base string) string {
 
 // attemptRequest clones req for one attempt against target. The original is
 // never modified. Later attempts take a fresh body from GetBody.
-func (t *Transport) attemptRequest(req *http.Request, target string, attempt int) (*http.Request, error) {
+func (t *Transport) attemptRequest(req *http.Request, ctx context.Context, target string, attempt int) (*http.Request, error) {
 	u, err := url.Parse(target)
 	if err != nil {
 		return nil, err
 	}
-	clone := req.Clone(req.Context())
+	clone := req.Clone(ctx)
 	clone.URL = u
 	clone.Host = ""
 	if attempt > 0 && req.Body != nil && req.Body != http.NoBody {
@@ -217,13 +308,9 @@ func retryStatus(idempotent bool, status int) bool {
 	return false
 }
 
-// retryError decides whether a transport error warrants the next host.
-func retryError(idempotent bool, err error) bool {
-	return idempotent || neverReachedServer(err)
-}
-
-// neverReachedServer reports errors that certainly happened before any byte
-// of the request reached a server.
+// neverReachedServer reports errors whose type says they belong to DNS,
+// connect or TLS-handshake setup. A TLS record error can also arrive while
+// the response is read, so callers must pair this with attemptState.connected.
 func neverReachedServer(err error) bool {
 	var dns *net.DNSError
 	var op *net.OpError

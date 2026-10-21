@@ -76,6 +76,9 @@ func filesUnder(t *testing.T, dir string) []string {
 	t.Helper()
 	var files []string
 	require.NoError(t, filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+		if filepath.Base(path) == ".datatug-environments.lock" || filepath.Base(path) == ".datatug-environments-owner.json" {
+			return nil
+		}
 		if err != nil || entry.IsDir() {
 			return err
 		}

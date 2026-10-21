@@ -86,6 +86,9 @@ func hashesUnder(t *testing.T, dir string) map[string]string {
 	t.Helper()
 	hashes := map[string]string{}
 	require.NoError(t, filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+		if filepath.Base(path) == ".datatug-environments.lock" || filepath.Base(path) == ".datatug-environments-owner.json" {
+			return nil
+		}
 		if err != nil {
 			return err
 		}

@@ -36,6 +36,9 @@ func treeBytes(t *testing.T, dir string) map[string]string {
 	t.Helper()
 	files := map[string]string{}
 	require.NoError(t, filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+		if filepath.Base(path) == ".datatug-environments.lock" || filepath.Base(path) == ".datatug-environments-owner.json" {
+			return nil
+		}
 		require.NoError(t, err)
 		if !entry.IsDir() {
 			data, readErr := os.ReadFile(path)
@@ -409,11 +412,11 @@ func TestResolveProjectSourceURLWithoutAnEnvironment(t *testing.T) {
 	_, err = ResolveProjectSourceURL(ctx, store, dir, "", "shop-local")
 	var ambiguous *AmbiguousSourceError
 	require.ErrorAs(t, err, &ambiguous)
-	assert.Equal(t, []string{"dev", "local"}, ambiguous.Environments)
-	assert.EqualError(t, err, "the source is listed in several environments (dev, local): add ?env=<ENV> to the reference")
+	assert.Equal(t, []string{"local", "dev"}, ambiguous.Environments)
+	assert.EqualError(t, err, "the source is listed in several environments (local, dev): add ?env=<ENV> to the reference")
 	listing, err := EnvironmentsListingSource(ctx, store, "shop-local")
 	require.NoError(t, err)
-	assert.Equal(t, []string{"dev", "local"}, listing)
+	assert.Equal(t, []string{"local", "dev"}, listing)
 
 	_, err = ResolveProjectSourceURL(ctx, store, dir, "", "nope")
 	assert.EqualError(t, err, `source "nope" not found in any environment of the project`)

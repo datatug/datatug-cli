@@ -12,6 +12,7 @@ import (
 
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
+	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/gofrs/flock"
 )
 
@@ -66,7 +67,8 @@ func withCurrentBranchRead(ctx context.Context, ref dto.ProjectRef, branch strin
 		return nil, err
 	}
 	defer reader.close()
-	value, err := read(reader)
+	var value any
+	err = filestore.WithEnvironmentFiles(ctx, projectDir, "", func(*filestore.EnvironmentFiles) error { var e error; value, e = read(reader); return e })
 	if err != nil {
 		return nil, err
 	}

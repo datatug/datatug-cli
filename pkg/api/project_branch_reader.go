@@ -327,6 +327,23 @@ func readQualifiedEnvironments(reader *qualifiedProjectReader) ([]qualifiedEnvir
 		}
 		environments = append(environments, qualifiedEnvironmentData{env: env, presentation: presentation})
 	}
+	var project datatug.ProjectFile
+	if _, err := reader.readJSON("datatug-project.json", &project); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+	live := make([]string, len(environments))
+	byID := map[string]qualifiedEnvironmentData{}
+	for i, v := range environments {
+		live[i] = v.env.ID
+		byID[v.env.ID] = v
+	}
+	order, _, err := datatug.ResolveEnvironmentOrder(live, project.EnvironmentOrder)
+	if err != nil {
+		return nil, err
+	}
+	for i, id := range order {
+		environments[i] = byID[id]
+	}
 	return environments, nil
 }
 

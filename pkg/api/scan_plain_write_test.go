@@ -53,6 +53,9 @@ func entriesOfTheScan(t *testing.T, scan rescanScan) (files, folders []string) {
 	_, err := scan.save(t, projectDir)
 	require.NoError(t, err)
 	require.NoError(t, filepath.WalkDir(projectDir, func(path string, entry fs.DirEntry, err error) error {
+		if filepath.Base(path) == ".datatug-environments.lock" || filepath.Base(path) == ".datatug-environments-owner.json" {
+			return nil
+		}
 		rel, _ := filepath.Rel(projectDir, path)
 		switch {
 		case err != nil || rel == ".":
@@ -139,6 +142,9 @@ func treeWithLinks(t *testing.T, dir string) map[string]string {
 	t.Helper()
 	tree := map[string]string{}
 	require.NoError(t, filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+		if filepath.Base(path) == ".datatug-environments.lock" || filepath.Base(path) == ".datatug-environments-owner.json" {
+			return nil
+		}
 		require.NoError(t, err)
 		rel, _ := filepath.Rel(dir, path)
 		switch {

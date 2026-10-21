@@ -33,7 +33,7 @@ func registerRoutesOn(path string, router router, wrapper wrapper, writeOnly boo
 	foldersRoutes(path, router, wrapper, caps)
 	queriesRoutes(path, router, wrapper, writeOnly, caps)
 	boardsRoutes(path, router, wrapper, writeOnly, caps)
-	environmentsRoutes(path, router, wrapper, writeOnly)
+	environmentsRoutes(path, router, wrapper, writeOnly, caps)
 	dbServerRoutes(path, router, wrapper, writeOnly, caps)
 	entitiesRoutes(path, router, wrapper, writeOnly, caps)
 	recordsetsRoutes(path, router, wrapper, writeOnly, caps)
@@ -143,9 +143,14 @@ func projectsRoutes(path string, router router, wrap wrapper, writeOnly bool, ca
 	route(router, wrap, http.MethodDelete, path+"/projects/delete_project", requireWriteCapability(caps, projectEndpoints.deleteProject))
 }
 
-func environmentsRoutes(path string, router router, wrap wrapper, writeOnly bool) {
+func environmentsRoutes(path string, router router, wrap wrapper, writeOnly bool, caps Capabilities) {
+	route(router, wrap, http.MethodPost, path+"/environment/create_environment", requireWriteCapability(caps, createEnvironmentHandler))
+	route(router, wrap, http.MethodPost, path+"/environments/save_order", requireWriteCapability(caps, saveEnvironmentOrderHandler))
+	route(router, wrap, http.MethodPost, path+"/environments/operation_status", environmentOperationStatusHandler)
+
 	if !writeOnly {
 		route(router, wrap, http.MethodGet, path+"/environments/all_environments", getEnvironments)
+		route(router, wrap, http.MethodGet, path+"/environments/state", environmentStateHandler)
 		route(router, wrap, http.MethodGet, path+"/environment-summary", getEnvironmentSummary)
 		// catalog-tables: Task 17 item A.2 (S121) — see
 		// getCatalogTablesHandler/api.CatalogTables's own doc comments.

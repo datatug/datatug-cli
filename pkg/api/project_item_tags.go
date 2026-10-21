@@ -51,7 +51,7 @@ type ItemTags struct {
 }
 
 func (s ItemTagsSelector) validate() error {
-	if err := s.ProjectRef.Validate(); err != nil {
+	if err := s.Validate(); err != nil {
 		return err
 	}
 	if s.Branch == "" || len(s.Branch) > 1024 {

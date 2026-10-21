@@ -12,9 +12,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/datatug/datatug-cli/internal/plainfs"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/dbconnection"
+	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/spf13/cobra"
 )
@@ -47,6 +49,27 @@ func scanCommandAction(cmd *cobra.Command, _ []string) error {
 	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true, writesProject: true}); err != nil {
 		return err
 	}
+	// Validate the supplied root before normalization: an address is not a
+	// local directory, and a regular file keeps its existing useful diagnostic.
+	projectDirIsNew, err := checkProjectDir(v.ProjectDir)
+	if err != nil {
+		return err
+	}
+	// The root-link policy runs above. Abs preserves that policy while giving
+	// Core one stable root identity for relative scans and absolute reopens.
+	if !filepath.IsAbs(v.ProjectDir) {
+		absoluteDir, err := scanDirectoryAbs(v.ProjectDir)
+		if err != nil {
+			return fmt.Errorf("cannot locate the project folder: %w", err)
+		}
+		v.ProjectDir = absoluteDir
+		v.store, v.projectID = filestore.NewSingleProjectStore(v.ProjectDir, v.projectID)
+	}
+	// Refuse unsafe summary entries before Core's generic recovery error can
+	// hide their project-relative path. The shared walker never follows links.
+	if _, err := plainfs.New(v.ProjectDir, 0o755).ReadFile(filepath.Join(v.ProjectDir, storage.ProjectSummaryFileName)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
 	log.Println("Initiating project...")
 
 	// A database, a model and an environment are names of folders of the project: a
@@ -64,7 +87,6 @@ func scanCommandAction(cmd *cobra.Command, _ []string) error {
 	// A database the project already holds stays on its model: a scan without --dbmodel
 	// keeps it, and one that names another is refused, naming both. The same database in
 	// another environment is on the model the other environments record for it.
-	var err error
 	var modelNote string
 	if v.DbModel, modelNote, err = api.ResolveScanDbModelNoted(v.ProjectDir, v.Environment, v.Database, v.DbModel); err != nil {
 		return err
@@ -82,13 +104,6 @@ func scanCommandAction(cmd *cobra.Command, _ []string) error {
 	if err = api.CheckScanDriverAgainstProject(v.ProjectDir, v.Environment, v.Database, v.Driver); err != nil {
 		return err
 	}
-	// A project folder that is not there is made, once the scan has read something: a
-	// scan that fails makes nothing.
-	projectDirIsNew, err := checkProjectDir(v.ProjectDir)
-	if err != nil {
-		return err
-	}
-
 	connParams, err := v.connectionParams()
 	if err != nil {
 		return err
@@ -196,6 +211,10 @@ var scanMkdirAll = os.MkdirAll
 // scanFilepathAbs is a seam over filepath.Abs, which fails only when the working
 // directory is gone. Always filepath.Abs in production.
 var scanFilepathAbs = filepath.Abs
+
+// scanDirectoryAbs permits testing a missing working directory without changing
+// the separate optional project-name inference seam.
+var scanDirectoryAbs = filepath.Abs
 
 // descriptorWriter is implemented by connection parameters that need a file
 // beside the project: PostgreSQL's connection descriptor. It returns the function

@@ -372,6 +372,8 @@ func TestScanJourneyPostgres(t *testing.T) {
 
 	// The scan writes the layout every reader reads, the descriptor, and nothing else.
 	assert.Equal(t, []string{
+		".datatug-environments-owner.json",
+		".datatug-environments.lock",
 		"README.md",
 		"connections/local/shop.json",
 		"datatug-project.json",
@@ -490,7 +492,8 @@ func TestScanJourneyPostgres(t *testing.T) {
 	// 5. I scan again. Nothing changed in the database, so nothing changes in the folder:
 	// every file is as it was, by content.
 	first := treeHashes(t, projectDir, "")
-	require.Len(t, first, 11)
+	assertScanEnvironmentOwnership(t, projectDir)
+	require.Len(t, first, 13)
 	stderr, err = scan()
 	require.NoError(t, err)
 	assert.Empty(t, stderr, "a rescan with nothing to leave out says nothing on stderr")

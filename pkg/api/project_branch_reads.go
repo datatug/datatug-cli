@@ -68,7 +68,7 @@ func withCurrentBranchRead(ctx context.Context, ref dto.ProjectRef, branch strin
 	}
 	defer reader.close()
 	var value any
-	err = filestore.WithEnvironmentFiles(ctx, projectDir, "", func(*filestore.EnvironmentFiles) error { var e error; value, e = read(reader); return e })
+	err = filestore.ReadEnvironmentFiles(ctx, projectDir, func(*filestore.EnvironmentFiles) error { var e error; value, e = read(reader); return e })
 	if err != nil {
 		return nil, err
 	}

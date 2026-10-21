@@ -108,7 +108,7 @@ func environmentGitState(ctx context.Context, root string) (gitState, error) {
 	}
 	return gitState{root: top, gitDir: gitDir, branch: branch, head: "unborn"}, nil
 }
-func withLocalEnvironment(ctx context.Context, requested dto.EnvironmentScope, fn func(*filestore.EnvironmentFiles, dto.EnvironmentScope, string, dto.EnvironmentCapabilities, string) error) error {
+func withLocalEnvironment(ctx context.Context, requested dto.EnvironmentScope, initialize bool, fn func(*filestore.EnvironmentFiles, dto.EnvironmentScope, string, dto.EnvironmentCapabilities, string) error) error {
 	generation := SecurityContextID()
 	actor, c, private, authority, err := envPolicy(requested.ProjectID)
 	if err != nil {
@@ -140,15 +140,17 @@ func withLocalEnvironment(ctx context.Context, requested dto.EnvironmentScope, f
 		if requested.Branch != nil && *requested.Branch != state.branch {
 			return environmentError("ENVIRONMENT_REVISION_CONFLICT", 409)
 		}
-		gitLock = flock.New(filepath.Join(state.gitDir, "datatug-project-api.lock"))
-		ok, e := gitLock.TryLockContext(ctx, 25*time.Millisecond)
-		if e != nil {
-			return e
+		if initialize {
+			gitLock = flock.New(filepath.Join(state.gitDir, "datatug-project-api.lock"))
+			ok, e := gitLock.TryLockContext(ctx, 25*time.Millisecond)
+			if e != nil {
+				return e
+			}
+			if !ok {
+				return ctx.Err()
+			}
+			defer gitLock.Unlock()
 		}
-		if !ok {
-			return ctx.Err()
-		}
-		defer gitLock.Unlock()
 		resolved.ResolvedBranch = &state.branch
 		fence = state.branch + ":" + state.head
 	} else {
@@ -169,7 +171,13 @@ func withLocalEnvironment(ctx context.Context, requested dto.EnvironmentScope, f
 		return environmentError("ENVIRONMENT_REVISION_CONFLICT", 409)
 	}
 	binding := envScopeBinding(resolved, actor)
-	return filestore.WithEnvironmentFiles(ctx, root, private, func(f *filestore.EnvironmentFiles) error {
+	run := func(callback func(*filestore.EnvironmentFiles) error) error {
+		if initialize {
+			return filestore.WithEnvironmentFiles(ctx, root, private, callback)
+		}
+		return filestore.ReadEnvironmentFiles(ctx, root, callback)
+	}
+	return run(func(f *filestore.EnvironmentFiles) error {
 		actor2, c2, _, authority2, e := envPolicy(requested.ProjectID)
 		if e != nil {
 			return e
@@ -236,7 +244,7 @@ func localEnvironmentState(ctx context.Context, f *filestore.EnvironmentFiles, s
 	return &dto.EnvironmentState{Contract: "environment-state/1", Scope: s, ScopeBinding: binding, Environments: briefs, SavedOrder: project.EnvironmentOrder, Order: order, NeedsRepair: repair, Revision: revision, Capabilities: c}, nil
 }
 func LocalEnvironmentState(ctx context.Context, s dto.EnvironmentScope) (result *dto.EnvironmentState, err error) {
-	err = withLocalEnvironment(ctx, s, func(f *filestore.EnvironmentFiles, s dto.EnvironmentScope, b string, c dto.EnvironmentCapabilities, fence string) error {
+	err = withLocalEnvironment(ctx, s, false, func(f *filestore.EnvironmentFiles, s dto.EnvironmentScope, b string, c dto.EnvironmentCapabilities, fence string) error {
 		result, err = localEnvironmentState(ctx, f, s, b, c, fence)
 		return err
 	})
@@ -299,7 +307,7 @@ func LocalSaveEnvironmentOrder(ctx context.Context, r dto.SaveEnvironmentOrderRe
 }
 func localEnvironmentMutation(ctx context.Context, r dto.EnvironmentMutation, kind, name string, order []string) (result *dto.EnvironmentOperationResult, err error) {
 	generation := SecurityContextID()
-	err = withLocalEnvironment(ctx, r.Scope, func(f *filestore.EnvironmentFiles, s dto.EnvironmentScope, b string, c dto.EnvironmentCapabilities, fence string) error {
+	err = withLocalEnvironment(ctx, r.Scope, true, func(f *filestore.EnvironmentFiles, s dto.EnvironmentScope, b string, c dto.EnvironmentCapabilities, fence string) error {
 		if (kind == "create-environment" && !c.CanCreateEnvironment) || (kind == "save-environment-order" && !c.CanWriteOrder) {
 			return environmentError("ACCESS_DENIED", 403)
 		}
@@ -440,7 +448,7 @@ func localEnvironmentMutation(ctx context.Context, r dto.EnvironmentMutation, ki
 	return
 }
 func LocalEnvironmentOperationStatus(ctx context.Context, r dto.EnvironmentOperationStatusRequest) (result *dto.EnvironmentOperationResult, err error) {
-	err = withLocalEnvironment(ctx, r.Scope, func(f *filestore.EnvironmentFiles, s dto.EnvironmentScope, b string, c dto.EnvironmentCapabilities, fence string) error {
+	err = withLocalEnvironment(ctx, r.Scope, false, func(f *filestore.EnvironmentFiles, s dto.EnvironmentScope, b string, c dto.EnvironmentCapabilities, fence string) error {
 		if !environmentOperationPattern.MatchString(r.OperationID) || !strings.HasPrefix(r.OperationID, b+".") {
 			return environmentError("OPERATION_CONFLICT", 409)
 		}

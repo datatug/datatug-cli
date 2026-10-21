@@ -134,3 +134,29 @@ func TestLocalEnvironmentDefaultReorderAndMembershipFence(t *testing.T) {
 		t.Fatal("full scope alias collided")
 	}
 }
+
+func TestLocalEnvironmentStateReadOnlyProject(t *testing.T) {
+	scope, _ := environmentFixture(t)
+	root, err := servedProjectDir("p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Chmod(root, 0500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(root, 0700) })
+	state, err := LocalEnvironmentState(context.Background(), scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Revision == "" {
+		t.Fatal("missing revision")
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("read created project state: %v", entries)
+	}
+}

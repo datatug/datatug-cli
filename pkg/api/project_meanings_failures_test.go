@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-var meaningTestFailure = errors.New("injected meanings I/O failure")
+var errMeaningTestFailure = errors.New("injected meanings I/O failure")
 
 func preserveMeaningSeams(t *testing.T) {
 	t.Helper()
@@ -51,11 +51,11 @@ func TestLocalMeaningLockFailureBoundaries(t *testing.T) {
 				ref.StoreID = "other"
 				defer func() { ref.StoreID = LocalStoreID }()
 			case "canonical path":
-				filepathEvalSymlinks = func(string) (string, error) { return "", meaningTestFailure }
+				filepathEvalSymlinks = func(string) (string, error) { return "", errMeaningTestFailure }
 			case "git":
-				localGitStateSeam = func(context.Context, string) (gitState, error) { return state, meaningTestFailure }
+				localGitStateSeam = func(context.Context, string) (gitState, error) { return state, errMeaningTestFailure }
 			case "lock error":
-				flockTryLockContextSeam = func(*flock.Flock, context.Context, time.Duration) (bool, error) { return false, meaningTestFailure }
+				flockTryLockContextSeam = func(*flock.Flock, context.Context, time.Duration) (bool, error) { return false, errMeaningTestFailure }
 			case "lock timeout":
 				flockTryLockContextSeam = func(*flock.Flock, context.Context, time.Duration) (bool, error) { return false, nil }
 			case "git after lock":
@@ -63,12 +63,12 @@ func TestLocalMeaningLockFailureBoundaries(t *testing.T) {
 				localGitStateSeam = func(context.Context, string) (gitState, error) {
 					n++
 					if n == 2 {
-						return state, meaningTestFailure
+						return state, errMeaningTestFailure
 					}
 					return state, nil
 				}
 			case "open root":
-				meaningOpenRoot = func(string) (*os.Root, error) { return nil, meaningTestFailure }
+				meaningOpenRoot = func(string) (*os.Root, error) { return nil, errMeaningTestFailure }
 			case "postread drift":
 				n := 0
 				localGitStateSeam = func(context.Context, string) (gitState, error) {
@@ -108,30 +108,30 @@ func TestLocalMeaningFileFaults(t *testing.T) {
 			switch name {
 			case "stat":
 				read = true
-				meaningLstat = func(*os.Root, string) (os.FileInfo, error) { return nil, meaningTestFailure }
+				meaningLstat = func(*os.Root, string) (os.FileInfo, error) { return nil, errMeaningTestFailure }
 			case "open":
 				read = true
-				meaningOpen = func(*os.Root, string) (*os.File, error) { return nil, meaningTestFailure }
+				meaningOpen = func(*os.Root, string) (*os.File, error) { return nil, errMeaningTestFailure }
 			case "decode":
 				read = true
 				if err = os.WriteFile(filepath.Join(dir, localMeaningsFile), []byte("{"), 0600); err != nil {
 					t.Fatal(err)
 				}
 			case "marshal":
-				meaningMarshalIndent = func(any, string, string) ([]byte, error) { return nil, meaningTestFailure }
+				meaningMarshalIndent = func(any, string, string) ([]byte, error) { return nil, errMeaningTestFailure }
 			case "oversize":
 				meaningMarshalIndent = func(any, string, string) ([]byte, error) { return make([]byte, (4<<20)+1), nil }
 			case "create":
-				meaningOpenFile = func(*os.Root, string, int, os.FileMode) (*os.File, error) { return nil, meaningTestFailure }
+				meaningOpenFile = func(*os.Root, string, int, os.FileMode) (*os.File, error) { return nil, errMeaningTestFailure }
 			case "write":
 				meaningOpenFile = func(r *os.Root, _ string, _ int, _ os.FileMode) (*os.File, error) { return r.Open(localMeaningsFile) }
 			case "rename":
-				meaningRename = func(*os.Root, string, string) error { return meaningTestFailure }
+				meaningRename = func(*os.Root, string, string) error { return errMeaningTestFailure }
 			case "sync directory":
 				original := meaningOpen
 				meaningOpen = func(r *os.Root, path string) (*os.File, error) {
 					if path == "." {
-						return nil, meaningTestFailure
+						return nil, errMeaningTestFailure
 					}
 					return original(r, path)
 				}
@@ -150,7 +150,7 @@ func TestLocalMeaningFileFaults(t *testing.T) {
 
 type failingMeaningEntry struct{ fs.DirEntry }
 
-func (failingMeaningEntry) Info() (fs.FileInfo, error) { return nil, meaningTestFailure }
+func (failingMeaningEntry) Info() (fs.FileInfo, error) { return nil, errMeaningTestFailure }
 func TestLocalMeaningSourceScanBounds(t *testing.T) {
 	for _, name := range []string{"valid", "environment", "root stat", "walk", "link", "entry info", "oversize", "open", "read", "query json", "board json", "unsupported board", "file count"} {
 		t.Run(name, func(t *testing.T) {
@@ -187,12 +187,12 @@ func TestLocalMeaningSourceScanBounds(t *testing.T) {
 				original := meaningLstat
 				meaningLstat = func(r *os.Root, p string) (os.FileInfo, error) {
 					if p == "queries" {
-						return nil, meaningTestFailure
+						return nil, errMeaningTestFailure
 					}
 					return original(r, p)
 				}
 			case "walk":
-				meaningWalkDir = func(_ fs.FS, _ string, fn fs.WalkDirFunc) error { return fn("x", nil, meaningTestFailure) }
+				meaningWalkDir = func(_ fs.FS, _ string, fn fs.WalkDirFunc) error { return fn("x", nil, errMeaningTestFailure) }
 			case "link":
 				if err = os.Symlink("q.query.json", filepath.Join(dir, "queries", "link")); err != nil {
 					t.Fatal(err)
@@ -212,9 +212,9 @@ func TestLocalMeaningSourceScanBounds(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "open":
-				meaningOpen = func(*os.Root, string) (*os.File, error) { return nil, meaningTestFailure }
+				meaningOpen = func(*os.Root, string) (*os.File, error) { return nil, errMeaningTestFailure }
 			case "read":
-				meaningReadAll = func(io.Reader) ([]byte, error) { return nil, meaningTestFailure }
+				meaningReadAll = func(io.Reader) ([]byte, error) { return nil, errMeaningTestFailure }
 			case "query json":
 				if err = os.WriteFile(qpath, []byte("{"), 0600); err != nil {
 					t.Fatal(err)
@@ -303,11 +303,11 @@ func TestLocalMeaningEnvironmentScanFailures(t *testing.T) {
 			originalStat, originalOpen := meaningLstat, meaningOpen
 			switch name {
 			case "root stat":
-				meaningLstat = func(*os.Root, string) (os.FileInfo, error) { return nil, meaningTestFailure }
+				meaningLstat = func(*os.Root, string) (os.FileInfo, error) { return nil, errMeaningTestFailure }
 			case "open directory":
-				meaningOpen = func(*os.Root, string) (*os.File, error) { return nil, meaningTestFailure }
+				meaningOpen = func(*os.Root, string) (*os.File, error) { return nil, errMeaningTestFailure }
 			case "read directory":
-				meaningReadDir = func(*os.File, int) ([]os.DirEntry, error) { return nil, meaningTestFailure }
+				meaningReadDir = func(*os.File, int) ([]os.DirEntry, error) { return nil, errMeaningTestFailure }
 			case "count":
 				entry, err := os.ReadDir(filepath.Join(dir, "environments"))
 				if err != nil {
@@ -335,7 +335,7 @@ func TestLocalMeaningEnvironmentScanFailures(t *testing.T) {
 			case "file stat":
 				meaningLstat = func(r *os.Root, p string) (os.FileInfo, error) {
 					if strings.HasSuffix(p, ".json") {
-						return nil, meaningTestFailure
+						return nil, errMeaningTestFailure
 					}
 					return originalStat(r, p)
 				}
@@ -349,7 +349,7 @@ func TestLocalMeaningEnvironmentScanFailures(t *testing.T) {
 			case "file open":
 				meaningOpen = func(r *os.Root, p string) (*os.File, error) {
 					if strings.HasSuffix(p, ".json") {
-						return nil, meaningTestFailure
+						return nil, errMeaningTestFailure
 					}
 					return originalOpen(r, p)
 				}
@@ -418,9 +418,9 @@ func TestLocalMeaningMutationFailureOutcomes(t *testing.T) {
 					return s, nil
 				}
 			case "write":
-				meaningRename = func(*os.Root, string, string) error { return meaningTestFailure }
+				meaningRename = func(*os.Root, string, string) error { return errMeaningTestFailure }
 			case "stage":
-				localGitInputSeam = func(context.Context, string, []byte, ...string) (string, error) { return "", meaningTestFailure }
+				localGitInputSeam = func(context.Context, string, []byte, ...string) (string, error) { return "", errMeaningTestFailure }
 			}
 			if name == "catalog scan" {
 				_, err = LocalProjectMeaningsCatalog(ctx, ref, "main")
@@ -458,13 +458,13 @@ func TestLocalMeaningStageFaults(t *testing.T) {
 			case "drift":
 				localGitStateSeam = func(context.Context, string) (gitState, error) { return gitState{}, nil }
 			case "marshal":
-				meaningMarshalIndent = func(any, string, string) ([]byte, error) { return nil, meaningTestFailure }
+				meaningMarshalIndent = func(any, string, string) ([]byte, error) { return nil, errMeaningTestFailure }
 			case "containment":
 				filepathRel = func(string, string) (string, error) { return "..", nil }
 			case "blob":
-				localGitInputSeam = func(context.Context, string, []byte, ...string) (string, error) { return "", meaningTestFailure }
+				localGitInputSeam = func(context.Context, string, []byte, ...string) (string, error) { return "", errMeaningTestFailure }
 			case "index":
-				localGitOutputSeam = func(context.Context, string, ...string) (string, error) { return "", meaningTestFailure }
+				localGitOutputSeam = func(context.Context, string, ...string) (string, error) { return "", errMeaningTestFailure }
 			case "disk bytes":
 				if err = os.WriteFile(filepath.Join(dir, localMeaningsFile), []byte("changed"), 0600); err != nil {
 					t.Fatal(err)

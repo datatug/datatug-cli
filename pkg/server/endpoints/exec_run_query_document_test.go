@@ -27,7 +27,7 @@ func TestExecRunQuery_ASavedQueryWhoseDocumentCannotBeReadAnswersOneBuiltSentenc
 			t.Run(c.name+" "+breakage, func(t *testing.T) {
 				projectDir, projectID := writeRunQueryTestProject(t)
 				queriesDir := filepath.Join(projectDir, "queries", "customers")
-				mustWriteFile(t, filepath.Join(queriesDir, "customer-count.query.json"), `{"id": "customer-count", "title": "Customer count", "type": "SQL"}`)
+				mustWriteFile(t, filepath.Join(queriesDir, "customer-count.query.json"), `{"createdAt":"2026-01-01T00:00:00Z","id": "customer-count", "title": "Customer count", "type": "SQL"}`)
 				document := filepath.Join(queriesDir, c.document)
 				if err := os.RemoveAll(document); err != nil {
 					t.Fatal(err)

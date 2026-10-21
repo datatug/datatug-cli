@@ -33,7 +33,7 @@ import (
 // the real captureStoreFor.
 func realCaptureSetup(t *testing.T, as string, roles []string) (apicontract.Scope, string) {
 	t.Helper()
-	projectDir, projectID := writeSemanticTestProject(t)
+	projectDir, projectID := writeSemanticTestProjectWithSetup(t, func(dir string) { runGit(t, dir, "init", "-q") })
 	gitInit(t, projectDir)
 	session, err := secureread.NewSession(secureread.SessionOptions{As: as, Roles: roles, PoliciesDir: projectDir + "/policies"})
 	if err != nil {

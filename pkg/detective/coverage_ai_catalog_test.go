@@ -109,7 +109,7 @@ func TestCoverage100_AICatalog_Confirm_Replay_And_Errors(t *testing.T) {
 
 	queriesDir := filepath.Join(store.projectDir, "queries")
 	_ = os.MkdirAll(queriesDir, 0700)
-	_ = os.WriteFile(filepath.Join(queriesDir, "valid-q.query.json"), []byte(`{"id":"valid-q"}`), 0600)
+	_ = os.WriteFile(filepath.Join(queriesDir, "valid-q.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","id":"valid-q"}`), 0600)
 
 	check := Check{
 		ID:    "chk-replay",
@@ -263,7 +263,7 @@ func TestCoverage100_AICatalog_Prepare_Check(t *testing.T) {
 	// Save query for valid resolution
 	queriesDir := filepath.Join(store.projectDir, "queries")
 	_ = os.MkdirAll(queriesDir, 0700)
-	_ = os.WriteFile(filepath.Join(queriesDir, "valid-q.query.json"), []byte(`{"id":"valid-q"}`), 0600)
+	_ = os.WriteFile(filepath.Join(queriesDir, "valid-q.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","id":"valid-q"}`), 0600)
 
 	validCheckWithQuery := Check{
 		ID:    "chk-q-ok",
@@ -659,7 +659,7 @@ func TestCoverage100_AICatalog_Prepare_Scenario(t *testing.T) {
 	// Prepare valid query and valid check
 	queriesDir := filepath.Join(store.projectDir, "queries")
 	_ = os.MkdirAll(queriesDir, 0700)
-	_ = os.WriteFile(filepath.Join(queriesDir, "valid-q.query.json"), []byte(`{"id":"valid-q"}`), 0600)
+	_ = os.WriteFile(filepath.Join(queriesDir, "valid-q.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","id":"valid-q"}`), 0600)
 	checksDir := store.definitionDir("checks")
 	_ = os.MkdirAll(checksDir, 0700)
 	_ = writeItem(checksDir, "valid-chk", Check{ID: "valid-chk", Title: "Valid Check", Version: 1})

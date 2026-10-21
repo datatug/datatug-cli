@@ -79,7 +79,7 @@ func writeRunQueryTestProject(t *testing.T) (projectDir, projectID string) {
 	queriesDir := filepath.Join(dir, "queries", "customers")
 	mustMkdirAll(t, queriesDir)
 	mustWriteFile(t, filepath.Join(queriesDir, "customer-invoices.query.json"), `{
-		"id": "customer-invoices",
+		"createdAt":"2026-01-01T00:00:00Z","id": "customer-invoices",
 		"title": "Customer invoices",
 		"type": "DTQL",
 		"parameters": [
@@ -223,7 +223,7 @@ func TestExecRunQueryRejectsUnresolvedSourceStoreID(t *testing.T) {
 func TestExecRunQueryRejectsClientClaimedDefaultThatDoesNotMatchQuery(t *testing.T) {
 	projectDir, projectID := writeRunQueryTestProject(t)
 	mustWriteFile(t, filepath.Join(projectDir, "queries", "customers", "customer-invoices.query.json"), `{
-		"id": "customer-invoices",
+		"createdAt":"2026-01-01T00:00:00Z","id": "customer-invoices",
 		"title": "Customer invoices",
 		"type": "DTQL",
 		"parameters": [
@@ -603,7 +603,7 @@ func writeQueryIDConventionTestProject(t *testing.T) (projectDir, projectID stri
 	writeMinimalQuery := func(folder string) {
 		queriesDir := filepath.Join(dir, "queries", folder)
 		mustMkdirAll(t, queriesDir)
-		mustWriteFile(t, filepath.Join(queriesDir, "q.query.json"), `{"id":"q","type":"DTQL"}`)
+		mustWriteFile(t, filepath.Join(queriesDir, "q.query.json"), `{"createdAt":"2026-01-01T00:00:00Z","id":"q","type":"DTQL"}`)
 	}
 	writeMinimalQuery("x")
 	writeMinimalQuery("y")

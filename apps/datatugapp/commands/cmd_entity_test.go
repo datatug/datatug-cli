@@ -275,11 +275,8 @@ func TestEntityFieldAdd_Additive(t *testing.T) {
 	assert.Equal(t, "integer", fields["id"], "id must be unchanged")
 }
 
-// A load-modify-save round trip (field add) must not silently drop the
-// entity's Tables ("generated mapping copy"): datatug.ProjectStore.LoadEntity
-// does a generic JSON unmarshal that cannot populate Tables (see
-// loadEntityWithTables's doc comment), so re-saving an entity loaded that way
-// without repairing Tables first would wipe it.
+// A load-modify-save round trip must preserve the generated mapping copy.
+// Core's canonical TableKeys codec owns its physical and logical identities.
 func TestEntityFieldAdd_PreservesTables(t *testing.T) {
 	dir := t.TempDir()
 	def := "id: User\n" +

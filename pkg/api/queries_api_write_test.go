@@ -171,7 +171,7 @@ func TestCreateQuery_RejectsUnsafeLocationsAndContent(t *testing.T) {
 }
 
 func TestUpdateQuery_Authorization(t *testing.T) {
-	const existing = `{"id":"q1","title":"q1","type":"SQL"}`
+	const existing = `{"createdAt":"2026-10-01T00:00:00Z","id":"q1","title":"q1","type":"SQL"}`
 	t.Run("a read-only principal is refused", func(t *testing.T) {
 		projectID, queriesDir := servedWritableProject(t, supportSession(t), true)
 		path := filepath.Join(queriesDir, "q1.query.json")
@@ -215,7 +215,7 @@ func TestUpdateQuery_Authorization(t *testing.T) {
 }
 
 func TestDeleteQuery_Authorization(t *testing.T) {
-	const existing = `{"id":"q1","title":"q1","type":"SQL"}`
+	const existing = `{"createdAt":"2026-10-01T00:00:00Z","id":"q1","title":"q1","type":"SQL"}`
 	t.Run("a read-only principal is refused", func(t *testing.T) {
 		projectID, queriesDir := servedWritableProject(t, supportSession(t), true)
 		path := filepath.Join(queriesDir, "q1.query.json")

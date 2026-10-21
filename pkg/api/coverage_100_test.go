@@ -1674,6 +1674,7 @@ func TestResolverAPI(t *testing.T) {
 	hDir := filepath.Join(tmpDir, storage.QueriesFolder)
 	require.NoError(t, os.MkdirAll(hDir, 0755))
 	hDef := datatug.QueryDef{
+		CreatedAt:   "2026-01-01T00:00:00Z",
 		ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "http1", Title: "HTTP 1"}},
 		Type:        datatug.QueryTypeHTTP,
 	}
@@ -2195,7 +2196,7 @@ func TestCoverageRemaining100(t *testing.T) {
 	}
 	p1Dir := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(p1Dir, storage.QueriesFolder), 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(p1Dir, storage.QueriesFolder, "q1.query.json"), []byte(`{"id":"q1"}`), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(p1Dir, storage.QueriesFolder, "q1.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","id":"q1"}`), 0644))
 	ConfigureSecureSession(secureread.Session{Unrestricted: true}, map[string]string{"p1": p1Dir}, Capabilities{})
 	_, err = GetQuery(ctx, dto.ProjectItemRef{
 		ProjectRef: dto.ProjectRef{StoreID: "store1", ProjectID: "p1"},
@@ -2556,7 +2557,7 @@ func TestCoverageFinal100_PkgApi(t *testing.T) {
 
 		qDir := filepath.Join(credProjDir, storage.QueriesFolder)
 		require.NoError(t, os.MkdirAll(qDir, 0755))
-		require.NoError(t, os.WriteFile(filepath.Join(qDir, "q_good.query.json"), []byte(`{"id":"q_good"}`), 0644))
+		require.NoError(t, os.WriteFile(filepath.Join(qDir, "q_good.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","id":"q_good"}`), 0644))
 		_, err = GetQuery(ctx, dto.ProjectItemRef{
 			StoreID:   "unknown_store_xyz",
 			ProjectID: "p_cred",

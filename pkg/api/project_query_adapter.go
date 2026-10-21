@@ -356,14 +356,24 @@ func (LocalProjectQueryAdapter) SaveQuery(ctx context.Context, scope dto.Operati
 		if current != nil && !reflect.DeepEqual(current.Query.Capture, request.Query.Capture) {
 			return nil, clientCaptureRefusal("save_query cannot alter capture provenance")
 		}
+		// Freeze server metadata before previewing: the scratch store and the
+		// durable write must serialize the same creation instant.
+		creationTime := time.Now().UTC()
+		if current != nil {
+			creationTime, _ = time.Parse(time.RFC3339Nano, current.Query.CreatedAt)
+		}
+		query.CreatedAt = creationTime.Format(time.RFC3339Nano)
+		ctx = datatug.WithQueryCreationTime(ctx, creationTime)
 		preview, err := previewLocalQueryRevisionSeam(ctx, query)
 		if err != nil {
 			return nil, err
 		}
+		resultQuery := request.Query
+		resultQuery.CreatedAt = query.CreatedAt
 		journal = localQueryJournal{
 			OperationReceipt: dto.OperationReceipt{
 				Scope: scope, OperationID: request.OperationID, PayloadDigest: digest,
-				Result: dto.SaveQueryResponse{Query: request.Query, Revision: string(preview.revision), BranchHead: state.head},
+				Result: dto.SaveQueryResponse{Query: resultQuery, Revision: string(preview.revision), BranchHead: state.head},
 			},
 			QueryID: queryID, MetadataBytes: preview.metadata, BodyBytes: preview.body,
 		}
@@ -376,6 +386,12 @@ func (LocalProjectQueryAdapter) SaveQuery(ctx context.Context, scope dto.Operati
 		}
 	}
 	if shouldPut {
+		// A pending intent also owns the clock after a process restart.
+		if err := journal.Result.Query.ValidateCreationMetadata(); err != nil {
+			return nil, ErrProjectMutationOutcomeUncertain
+		}
+		creationTime, _ := time.Parse(time.RFC3339Nano, journal.Result.Query.CreatedAt)
+		ctx = datatug.WithQueryCreationTime(ctx, creationTime)
 		condition := datatug.QueryWriteCondition{IfNoneMatch: request.IfNoneMatch, IfMatch: datatug.QueryRevision(request.IfMatch)}
 		stored, err := revisioned.PutQuery(ctx, &query, condition)
 		if err != nil {

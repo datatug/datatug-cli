@@ -529,7 +529,7 @@ func TestFinal_ExecRunQuery_Branches(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(catDir, "c1.db.json"), []byte(catJSON), 0644)
 	qDir := filepath.Join(dir, "queries")
 	_ = os.MkdirAll(qDir, 0755)
-	qJSON := `{"id":"graphql_query","type":"graphql"}`
+	qJSON := `{"createdAt":"2026-01-01T00:00:00Z","id":"graphql_query","type":"graphql"}`
 	_ = os.WriteFile(filepath.Join(qDir, "graphql_query.query.json"), []byte(qJSON), 0644)
 
 	req := apicontract.ExecutionRequest{

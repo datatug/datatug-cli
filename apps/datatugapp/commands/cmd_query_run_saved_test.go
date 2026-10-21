@@ -417,7 +417,7 @@ func TestQueryRunSaved_AmbiguousQueryID_ClearUsageError(t *testing.T) {
 		if err := os.MkdirAll(queriesDir, 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", queriesDir, err)
 		}
-		if err := os.WriteFile(filepath.Join(queriesDir, "q.query.json"), []byte(`{"id":"q","type":"DTQL"}`), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(queriesDir, "q.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","id":"q","type":"DTQL"}`), 0o644); err != nil {
 			t.Fatalf("write query file: %v", err)
 		}
 	}

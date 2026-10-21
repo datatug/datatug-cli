@@ -291,9 +291,9 @@ columns:
   - {aggregate: {function: sum, args: [{field: amount, source: o}]}, as: totalSales}
   - {binary: {op: '/', left: {aggregate: {function: sum, args: [{field: amount, source: o}]}}, right: {field: population, source: c}}, as: salesPerCapita}
 `
-	write("queries/sales/money.query.json", `{"id":"money","type":"DTQL"}`)
+	write("queries/sales/money.query.json", `{"createdAt":"2026-01-01T00:00:00Z","id":"money","type":"DTQL"}`)
 	write("queries/sales/money.query.dtql", moneyDoc)
-	write("queries/sales/rows.query.json", `{"id":"rows","type":"DTQL"}`)
+	write("queries/sales/rows.query.json", `{"createdAt":"2026-01-01T00:00:00Z","id":"rows","type":"DTQL"}`)
 	write("queries/sales/rows.query.dtql", streamingJoinDTQL)
 	stdout, stderr, code := runQuery(t, "", "--project", dir, "--query", "sales/money", "--env", "local", "--format", "json")
 	if code != 0 {

@@ -87,7 +87,7 @@ func TestClose100_QueryCapture_And_Semantic(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(dir, "datatug-project.json"), []byte(projJSON), 0644)
 	qDir := filepath.Join(dir, "queries")
 	_ = os.MkdirAll(qDir, 0755)
-	qJSON := `{"id":"http_q","type":"HTTP"}`
+	qJSON := `{"createdAt":"2026-01-01T00:00:00Z","id":"http_q","type":"HTTP"}`
 	_ = os.WriteFile(filepath.Join(qDir, "http_q.query.json"), []byte(qJSON), 0644)
 
 	scope := apicontract.Scope{Project: pID, Environment: "e", SecurityContextID: api.SecurityContextID()}
@@ -1057,11 +1057,11 @@ func TestClose100_CompareFacts_Deep(t *testing.T) {
 
 	qDir := filepath.Join(dir, "queries")
 	_ = os.MkdirAll(qDir, 0755)
-	dtqlDef := `{"id":"dtql_q","type":"DTQL","parameters":[{"id":"p1","type":"integer","isMultiValue":true,"meta":{"entity":"Customer","field":"ID"}}]}`
+	dtqlDef := `{"createdAt":"2026-01-01T00:00:00Z","id":"dtql_q","type":"DTQL","parameters":[{"id":"p1","type":"integer","isMultiValue":true,"meta":{"entity":"Customer","field":"ID"}}]}`
 	_ = os.WriteFile(filepath.Join(qDir, "dtql_q.query.json"), []byte(dtqlDef), 0644)
 	_ = os.WriteFile(filepath.Join(qDir, "dtql_q.query.yaml"), []byte("from: {name: customers}\nwhere: {field: ID, operator: In, right: {parameter: p1}}\n"), 0644)
 
-	dtqlSingleDef := `{"id":"dtql_single","type":"DTQL","parameters":[{"id":"p2","type":"integer","meta":{"entity":"Customer","field":"ID"}}]}`
+	dtqlSingleDef := `{"createdAt":"2026-01-01T00:00:00Z","id":"dtql_single","type":"DTQL","parameters":[{"id":"p2","type":"integer","meta":{"entity":"Customer","field":"ID"}}]}`
 	_ = os.WriteFile(filepath.Join(qDir, "dtql_single.query.json"), []byte(dtqlSingleDef), 0644)
 	_ = os.WriteFile(filepath.Join(qDir, "dtql_single.query.yaml"), []byte("from: {name: customers}\n"), 0644)
 
@@ -1134,7 +1134,7 @@ func TestClose100_ExecRunQuery_Deep(t *testing.T) {
 
 	qDir := filepath.Join(dir, "queries")
 	_ = os.MkdirAll(qDir, 0755)
-	sqlQ := `{"id":"sql_q","type":"SQL"}`
+	sqlQ := `{"createdAt":"2026-01-01T00:00:00Z","id":"sql_q","type":"SQL"}`
 	_ = os.WriteFile(filepath.Join(qDir, "sql_q.query.json"), []byte(sqlQ), 0644)
 	_ = os.WriteFile(filepath.Join(qDir, "sql_q.query.sql"), []byte("SELECT 1;"), 0644)
 
@@ -1850,7 +1850,7 @@ func TestClose100_ExecRunQuery_More(t *testing.T) {
 	// 9. execRunProjectStoreFor wrappers for lines 135, 139, 147
 	queriesDir := filepath.Join(dir, "queries", "customers")
 	_ = os.MkdirAll(queriesDir, 0755)
-	_ = os.WriteFile(filepath.Join(queriesDir, "customer-invoices.query.json"), []byte(`{"id":"customer-invoices","type":"DTQL"}`), 0644)
+	_ = os.WriteFile(filepath.Join(queriesDir, "customer-invoices.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","id":"customer-invoices","type":"DTQL"}`), 0644)
 	_ = os.WriteFile(filepath.Join(queriesDir, "customer-invoices.query.dtql"), []byte("SELECT 1"), 0644)
 
 	realStore, _ := api.ProjectStoreFor(pID)

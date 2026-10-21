@@ -37,7 +37,7 @@ func TestCompareFactsUsesOneNativeSQLiteSetExecutionPerSide(t *testing.T) {
 	projectDir, projectID := writeRunQueryTestProject(t)
 	queriesDir := filepath.Join(projectDir, "queries", "customers")
 	mustWriteFile(t, filepath.Join(queriesDir, "customer-invoices.query.json"), `{
-        "id": "customer-invoices",
+        "createdAt":"2026-01-01T00:00:00Z","id": "customer-invoices",
         "title": "Customers by cohort",
         "type": "DTQL",
         "parameters": [
@@ -257,7 +257,7 @@ func TestCompareHandlerInfersMappedKeyForLiveEnvironmentSides(t *testing.T) {
 	projectDir, projectID := writeRunQueryTestProject(t)
 	queryDir := filepath.Join(projectDir, "queries", "customers")
 	mustWriteFile(t, filepath.Join(queryDir, "customer-invoices.query.json"), `{
-        "id":"customer-invoices","title":"Customers","type":"DTQL",
+        "createdAt":"2026-01-01T00:00:00Z","id":"customer-invoices","title":"Customers","type":"DTQL",
         "recordsets":[{
           "id":"customers","title":"Customers","type":"recordset",
           "primaryKey":{"name":"PK_Customer","columns":["CustomerId"]},
@@ -323,7 +323,7 @@ func TestCompareFactsUsesOneNativeInGitDBSetExecutionPerSide(t *testing.T) {
 	queryDir := filepath.Join(projectDir, "queries")
 	mustMkdirAll(t, queryDir)
 	mustWriteFile(t, filepath.Join(queryDir, "notes.query.json"), `{
-      "id":"notes","title":"Notes by customer","type":"DTQL",
+      "createdAt":"2026-01-01T00:00:00Z","id":"notes","title":"Notes by customer","type":"DTQL",
       "parameters":[{"id":"CustomerId","type":"integer","isRequired":true,"isMultiValue":true,"meta":{"entity":"Customer","field":"CustomerId"}}]
     }`)
 	mustWriteFile(t, filepath.Join(queryDir, "notes.query.dtql"), `from:
@@ -383,7 +383,7 @@ func TestProveNativeFactsBindingFailsClosedForNonDTQLBeforeExecution(t *testing.
 	projectDir, projectID := writeRunQueryTestProject(t)
 	queryPath := filepath.Join(projectDir, "queries", "customers", "customer-invoices.query.json")
 	mustWriteFile(t, queryPath, `{
-        "id":"customer-invoices","type":"SQL",
+        "createdAt":"2026-01-01T00:00:00Z","id":"customer-invoices","type":"SQL",
 		"parameters":[{"id":"CustomerId","type":"integer","isRequired":true,"isMultiValue":true,"meta":{"entity":"Customer","field":"CustomerId"}}]
     }`)
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
@@ -402,7 +402,7 @@ func TestProveNativeFactsBindingRejectsINBelowOR(t *testing.T) {
 	projectDir, projectID := writeRunQueryTestProject(t)
 	queryDir := filepath.Join(projectDir, "queries", "customers")
 	mustWriteFile(t, filepath.Join(queryDir, "customer-invoices.query.json"), `{
-        "id":"customer-invoices","type":"DTQL",
+        "createdAt":"2026-01-01T00:00:00Z","id":"customer-invoices","type":"DTQL",
         "parameters":[{"id":"CustomerId","type":"integer","isRequired":true,"isMultiValue":true,"meta":{"entity":"Customer","field":"CustomerId"}}]
     }`)
 	mustWriteFile(t, filepath.Join(queryDir, "customer-invoices.query.dtql"), `from:
@@ -432,7 +432,7 @@ func TestProveNativeFactsBindingRejectsAmbiguousInverseBinding(t *testing.T) {
 	projectDir, projectID := writeRunQueryTestProject(t)
 	queryDir := filepath.Join(projectDir, "queries", "customers")
 	mustWriteFile(t, filepath.Join(queryDir, "customer-invoices.query.json"), `{
-        "id":"customer-invoices","type":"DTQL",
+        "createdAt":"2026-01-01T00:00:00Z","id":"customer-invoices","type":"DTQL",
         "parameters":[{"id":"CustomerId","type":"integer","isRequired":true,"isMultiValue":true,"meta":{"entity":"Customer","field":"CustomerId"}}]
     }`)
 	mustWriteFile(t, filepath.Join(queryDir, "customer-invoices.query.dtql"), `from:

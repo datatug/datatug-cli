@@ -121,7 +121,7 @@ func TestLocalMeaningOverCapacityMutationLeavesFileUnchanged(t *testing.T) {
 	if err = json.Unmarshal([]byte(localMeaningSemanticFixture), &model); err != nil {
 		t.Fatal(err)
 	}
-	data, err := json.Marshal(datatug.QueryDef{SemanticModel: &model})
+	data, err := json.Marshal(datatug.QueryDef{CreatedAt: "2026-01-01T00:00:00Z", SemanticModel: &model})
 	if err != nil {
 		t.Fatal(err)
 	}

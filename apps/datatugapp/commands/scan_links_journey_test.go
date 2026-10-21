@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -189,11 +190,34 @@ func TestScanJourneyIntoACleanFolderWritesWhatMainWrote(t *testing.T) {
 			_, ok := hashes["datatug-project.json"]
 			require.True(t, ok, "the project file is written")
 			delete(hashes, "datatug-project.json")
-			assert.Equal(t, mainScanHashes[driver.name], hashes, "every file of the scan has the content hash of the scan of main, and there is no other")
+			assertScanEnvironmentOwnership(t, projectDir)
+			delete(hashes, ".datatug-environments-owner.json")
+			delete(hashes, ".datatug-environments.lock")
+			assert.Equal(t, mainScanHashes[driver.name], hashes, "every scan data file retains its main content hash, with no unexpected files besides validated ownership metadata")
 
 			content, err := os.ReadFile(filepath.Join(projectDir, "datatug-project.json"))
 			require.NoError(t, err)
 			assert.Equal(t, mainProjectFile, regexp.MustCompile(`"at": "[^"]+"`).ReplaceAllString(string(content), `"at": "<time>"`))
 		})
 	}
+}
+
+func assertScanEnvironmentOwnership(t *testing.T, projectDir string) {
+	t.Helper()
+	// Core's environment owner and lock bind this scan to a runtime
+	// namespace. Check their relationship instead of hashing machine paths.
+	ownerBytes, err := os.ReadFile(filepath.Join(projectDir, ".datatug-environments-owner.json"))
+	require.NoError(t, err)
+	var owner struct {
+		Format      string `json:"format"`
+		RootDigest  string `json:"rootDigest"`
+		NamespaceID string `json:"namespaceId"`
+	}
+	require.NoError(t, json.Unmarshal(ownerBytes, &owner))
+	assert.Equal(t, "datatug-environment-owner/1", owner.Format)
+	require.Regexp(t, `^[a-f0-9]{64}$`, owner.RootDigest)
+	require.Regexp(t, `^[a-f0-9]{32}$`, owner.NamespaceID)
+	lockBytes, err := os.ReadFile(filepath.Join(projectDir, ".datatug-environments.lock"))
+	require.NoError(t, err)
+	assert.Equal(t, "environment-owner/1:"+owner.RootDigest+":"+owner.NamespaceID, strings.TrimSpace(string(lockBytes)))
 }

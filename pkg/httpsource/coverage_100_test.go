@@ -51,7 +51,7 @@ func TestOpen_LoadURLTemplateError(t *testing.T) {
 	qdir := filepath.Join(tmpDir, "queries")
 	_ = os.MkdirAll(qdir, 0o755)
 
-	queryJSON := `{"id": "q1", "type": "HTTP"}`
+	queryJSON := `{"createdAt":"2026-01-01T00:00:00Z","id": "q1", "type": "HTTP"}`
 	_ = os.WriteFile(filepath.Join(qdir, "q1.query.json"), []byte(queryJSON), 0o644)
 
 	_, err := Open(context.Background(), tmpDir)
@@ -65,7 +65,7 @@ func TestOpen_BuildCollectionError(t *testing.T) {
 	qdir := filepath.Join(tmpDir, "queries")
 	_ = os.MkdirAll(qdir, 0o755)
 
-	queryJSON := `{"id": "q1", "type": "HTTP", "parameters": [{"id": "not_in_url"}]}`
+	queryJSON := `{"createdAt":"2026-01-01T00:00:00Z","id": "q1", "type": "HTTP", "parameters": [{"id": "not_in_url"}]}`
 	_ = os.WriteFile(filepath.Join(qdir, "q1.query.json"), []byte(queryJSON), 0o644)
 	_ = os.WriteFile(filepath.Join(qdir, "q1.query.http"), []byte("https://api.example.com/items"), 0o644)
 
@@ -80,7 +80,7 @@ func TestOpen_WithDispatchTimeoutAndOffline(t *testing.T) {
 	qdir := filepath.Join(tmpDir, "queries")
 	_ = os.MkdirAll(qdir, 0o755)
 
-	queryJSON := `{"id": "q1", "type": "HTTP", "parameters": [{"id": "id", "type": "string"}]}`
+	queryJSON := `{"createdAt":"2026-01-01T00:00:00Z","id": "q1", "type": "HTTP", "parameters": [{"id": "id", "type": "string"}]}`
 	_ = os.WriteFile(filepath.Join(qdir, "q1.query.json"), []byte(queryJSON), 0o644)
 	_ = os.WriteFile(filepath.Join(qdir, "q1.query.http"), []byte("https://api.example.com/items?id={id}"), 0o644)
 
@@ -102,7 +102,7 @@ func TestOpen_NewDBError(t *testing.T) {
 	// Two queries in different folders that resolve to the same collection ID "dup"
 	_ = os.MkdirAll(filepath.Join(qdir, "sub1"), 0o755)
 	_ = os.MkdirAll(filepath.Join(qdir, "sub2"), 0o755)
-	queryJSON := `{"id": "dup", "type": "HTTP"}`
+	queryJSON := `{"createdAt":"2026-01-01T00:00:00Z","id": "dup", "type": "HTTP"}`
 	_ = os.WriteFile(filepath.Join(qdir, "sub1", "dup.query.json"), []byte(queryJSON), 0o644)
 	_ = os.WriteFile(filepath.Join(qdir, "sub1", "dup.query.http"), []byte("https://api.example.com/items"), 0o644)
 	_ = os.WriteFile(filepath.Join(qdir, "sub2", "dup.query.json"), []byte(queryJSON), 0o644)
@@ -166,8 +166,8 @@ func TestLoadHTTPQueries_ErrorsAndBranches(t *testing.T) {
 	_ = os.Remove(badJSONFile)
 
 	// Query with empty ID (takes ID from filename) and sorted ordering
-	_ = os.WriteFile(filepath.Join(qdir, "z.query.json"), []byte(`{"type":"HTTP"}`), 0o644)
-	_ = os.WriteFile(filepath.Join(qdir, "a.query.json"), []byte(`{"type":"HTTP"}`), 0o644)
+	_ = os.WriteFile(filepath.Join(qdir, "z.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","type":"HTTP"}`), 0o644)
+	_ = os.WriteFile(filepath.Join(qdir, "a.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","type":"HTTP"}`), 0o644)
 
 	queries, err := LoadHTTPQueries(tmpDir)
 	if err != nil {

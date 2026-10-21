@@ -235,7 +235,7 @@ func TestCoverage100_Action_ExecuteAction_Mutations(t *testing.T) {
 	}
 	queriesDir := filepath.Join(store.projectDir, "queries")
 	_ = os.MkdirAll(queriesDir, 0700)
-	_ = os.WriteFile(filepath.Join(queriesDir, "valid-q.query.json"), []byte(`{"id":"valid-q"}`), 0600)
+	_ = os.WriteFile(filepath.Join(queriesDir, "valid-q.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","id":"valid-q"}`), 0600)
 
 	req := ActionRequest{
 		Project: store.projectID,
@@ -361,7 +361,7 @@ func TestCoverage100_Action_ExecuteRunAction_Errors(t *testing.T) {
 	// Valid check and query setup
 	queriesDir := filepath.Join(store.projectDir, "queries")
 	_ = os.MkdirAll(queriesDir, 0700)
-	_ = os.WriteFile(filepath.Join(queriesDir, "valid-q.query.json"), []byte(`{"id":"valid-q"}`), 0600)
+	_ = os.WriteFile(filepath.Join(queriesDir, "valid-q.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","id":"valid-q"}`), 0600)
 	checksDir := store.definitionDir("checks")
 	_ = os.MkdirAll(checksDir, 0700)
 	check := Check{
@@ -630,7 +630,7 @@ func TestCoverage100_Action_PrepareAction_AllKinds(t *testing.T) {
 
 	queriesDir := filepath.Join(store.projectDir, "queries")
 	_ = os.MkdirAll(queriesDir, 0700)
-	_ = os.WriteFile(filepath.Join(queriesDir, "valid-q.query.json"), []byte(`{"id":"valid-q"}`), 0600)
+	_ = os.WriteFile(filepath.Join(queriesDir, "valid-q.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","id":"valid-q"}`), 0600)
 
 	// 1. save-scenario in prepareAction:
 	// a) req.Scenario == nil -> ErrInvalid
@@ -676,7 +676,7 @@ func TestCoverage100_Action_PrepareAction_AllKinds(t *testing.T) {
 	// Save query for valid resolution
 	queriesDir = filepath.Join(store.projectDir, "queries")
 	_ = os.MkdirAll(queriesDir, 0700)
-	_ = os.WriteFile(filepath.Join(queriesDir, "valid-q.query.json"), []byte(`{"id":"valid-q"}`), 0600)
+	_ = os.WriteFile(filepath.Join(queriesDir, "valid-q.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","id":"valid-q"}`), 0600)
 	qvValid.QueryID = "valid-q"
 
 	// d) Existing query-validators: version mismatch -> ErrConflict
@@ -830,7 +830,7 @@ func TestCoverage100_Action_DeepBranches_Part1(t *testing.T) {
 	// 2. ExecuteAction:
 	queriesDir := filepath.Join(store.projectDir, "queries")
 	_ = os.MkdirAll(queriesDir, 0700)
-	_ = os.WriteFile(filepath.Join(queriesDir, "valid-q.query.json"), []byte(`{"id":"valid-q"}`), 0600)
+	_ = os.WriteFile(filepath.Join(queriesDir, "valid-q.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","id":"valid-q"}`), 0600)
 
 	chk := Check{
 		ID:      "chk-rep",
@@ -1245,8 +1245,8 @@ func TestCoverage100_Action_DeepBranches_Part3(t *testing.T) {
 
 	queriesDir := filepath.Join(store.projectDir, "queries")
 	_ = os.MkdirAll(queriesDir, 0700)
-	_ = os.WriteFile(filepath.Join(queriesDir, "q1.query.json"), []byte(`{"id":"q1"}`), 0600)
-	_ = os.WriteFile(filepath.Join(queriesDir, "q2.query.json"), []byte(`{"id":"q2"}`), 0600)
+	_ = os.WriteFile(filepath.Join(queriesDir, "q1.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","id":"q1"}`), 0600)
+	_ = os.WriteFile(filepath.Join(queriesDir, "q2.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","id":"q2"}`), 0600)
 
 	qvDir := store.definitionDir("query-validators")
 	_ = os.MkdirAll(qvDir, 0700)
@@ -1294,7 +1294,7 @@ func TestCoverage100_Action_DeepBranches_Part3(t *testing.T) {
 
 	// b) safeReadFile error other than ErrNotExist (dir instead of file)
 	_ = os.MkdirAll(filepath.Join(qvDir, queryValidatorFileID("q-dir-err")+".json"), 0700)
-	_ = os.WriteFile(filepath.Join(queriesDir, "q-dir-err.query.json"), []byte(`{"id":"q-dir-err"}`), 0600)
+	_ = os.WriteFile(filepath.Join(queriesDir, "q-dir-err.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","id":"q-dir-err"}`), 0600)
 	qvDirErr := QueryValidators{
 		QueryID: "q-dir-err",
 		Validators: []Validator{{

@@ -152,7 +152,7 @@ func TestReferenceToADatabaseOfSeveralEnvironmentsNeedsEnv(t *testing.T) {
 	_, err = runProjectMetadata(t, dbSchemaCommand(), "--db", "datatug://shop/shop")
 	require.Error(t, err)
 	assert.Equal(t, 2, exitCodeOf(t, err))
-	assert.EqualError(t, err, `database "shop": the source is listed in several environments (dev, local): add ?env=<ENV> to the reference`)
+	assert.EqualError(t, err, `database "shop": the source is listed in several environments (local, dev): add ?env=<ENV> to the reference`)
 	_, err = runProjectMetadata(t, dbSchemaCommand(), "--db", "datatug://shop/shop?env=dev")
 	require.NoError(t, err)
 }

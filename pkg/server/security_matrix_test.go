@@ -209,6 +209,7 @@ func newSecurityMatrixProject(t *testing.T) (map[string]string, string) {
 		t.Helper()
 		def := datatug.QueryDef{
 			ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: id, Title: title}},
+			CreatedAt:   "2026-01-01T00:00:00Z",
 			Type:        queryType,
 			Parameters:  parameters,
 		}

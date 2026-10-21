@@ -35,7 +35,7 @@ func newRedactionFixture(t *testing.T) *redactionFixture {
 	if err := os.Mkdir(filepath.Join(project, "queries"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(project, "queries", "q.query.json"), []byte(`{"id":"q","type":"SQL"}`), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(project, "queries", "q.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","id":"q","type":"SQL"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	native, err := detective.NewLocalStore("p", project, private)
@@ -100,7 +100,7 @@ func newRedactionFixture(t *testing.T) *redactionFixture {
 		value := apicontract.NewIntegerValue("9007199254740993")
 		ref := apicontract.SessionInputReference{SchemaVersion: 1, StorageID: n.StorageID, DatabaseID: n.DatabaseID, ProjectID: n.ProjectID, NamespaceID: n.NamespaceID, SessionID: "session", InputSnapshotID: "input-" + suffix, ContextSetID: snapshot.ContextSet.ID, EnvironmentID: scope.EnvironmentID, IdentityDomain: scope.IdentityDomain}
 		capture, err := native.CaptureNativeInput(ctx, detective.NativeCaptureRequest{CheckID: "check", CaseID: "case", NativeOperationID: "native-" + suffix, Actor: "alice", Inputs: map[string]core.InputValue{"id": {Scalar: &value}}, Reference: ref}, func(context.Context, string) (sessioncontext.DetectiveAcceptedQueryPin, error) {
-			return sessioncontext.DetectiveAcceptedQueryPin{QueryID: "q", Revision: "revision", DefinitionJSON: json.RawMessage(`{"id":"q","title":"Private query","type":"SQL","text":"select private_pin_text"}`)}, nil
+			return sessioncontext.DetectiveAcceptedQueryPin{QueryID: "q", Revision: "revision", DefinitionJSON: json.RawMessage(`{"createdAt":"2026-01-01T00:00:00Z","id":"q","title":"Private query","type":"SQL","text":"select private_pin_text"}`)}, nil
 		})
 		if err != nil {
 			t.Fatal(err)

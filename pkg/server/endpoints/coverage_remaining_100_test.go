@@ -431,6 +431,7 @@ func TestRemaining100_SemanticSchema(t *testing.T) {
 
 	// resolveHTTPSource with 0 recordsets
 	httpDef := datatug.QueryDef{
+		CreatedAt:  "2026-01-01T00:00:00Z",
 		Type:       datatug.QueryTypeHTTP,
 		Recordsets: []datatug.RecordsetDefinition{},
 	}
@@ -460,7 +461,7 @@ func TestRemaining100_SemanticProject(t *testing.T) {
 	// query file with empty ID sets ID from filename
 	queriesDir := filepath.Join(tempDir, "queries")
 	require.NoError(t, os.MkdirAll(queriesDir, 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(queriesDir, "auto_q.query.json"), []byte(`{"type":"DTQL"}`), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(queriesDir, "auto_q.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","type":"DTQL"}`), 0644))
 	queries, canonicalIDs, err := loadModuleQueries(tempDir)
 	assert.NoError(t, err)
 	assert.Len(t, queries, 1)
@@ -728,7 +729,7 @@ func TestRemaining100_CompareKey(t *testing.T) {
 	}
 	qDir := filepath.Join(tempDir, "queries")
 	require.NoError(t, os.MkdirAll(qDir, 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(qDir, "myq.query.json"), []byte(`{"id":"myq"}`), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(qDir, "myq.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","id":"myq"}`), 0644))
 	_, err = mappedCompareKey(ctx, "myq", sideValidProj)
 	assert.Error(t, err)
 	compareKeyProjectStoreFor = origStore
@@ -736,7 +737,8 @@ func TestRemaining100_CompareKey(t *testing.T) {
 	// query recordsets missing primary key
 	filestore.SetProjectPath("comp_proj", tempDir)
 	qNoPK := datatug.QueryDef{
-		ID: "myq",
+		CreatedAt: "2026-01-01T00:00:00Z",
+		ID:        "myq",
 		Recordsets: []datatug.RecordsetDefinition{{
 			Columns: datatug.RecordsetColumnDefs{{Name: "id", Type: "string"}},
 		}},
@@ -748,7 +750,8 @@ func TestRemaining100_CompareKey(t *testing.T) {
 
 	// query recordset column has no mapped entity field
 	qNoMeta := datatug.QueryDef{
-		ID: "myq",
+		CreatedAt: "2026-01-01T00:00:00Z",
+		ID:        "myq",
 		Recordsets: []datatug.RecordsetDefinition{{
 			Columns: datatug.RecordsetColumnDefs{{Name: "id", Type: "string"}},
 			RecordsetBaseDef: datatug.RecordsetBaseDef{
@@ -763,7 +766,8 @@ func TestRemaining100_CompareKey(t *testing.T) {
 
 	// column not in columns list (findRecordsetColumn returns nil)
 	qMissingCol := datatug.QueryDef{
-		ID: "myq",
+		CreatedAt: "2026-01-01T00:00:00Z",
+		ID:        "myq",
 		Recordsets: []datatug.RecordsetDefinition{{
 			Columns: datatug.RecordsetColumnDefs{{Name: "other", Type: "string"}},
 			RecordsetBaseDef: datatug.RecordsetBaseDef{
@@ -1215,13 +1219,13 @@ func TestRemaining100_CompareFacts(t *testing.T) {
 	}
 	qDir := filepath.Join(tempDir, "queries")
 	require.NoError(t, os.MkdirAll(qDir, 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(qDir, "facts_q.query.json"), []byte(`{"id":"facts_q"}`), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(qDir, "facts_q.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","id":"facts_q"}`), 0644))
 	_, err = proveNativeFactsBinding(ctx, "facts_q", apicontract.CompareSideSpec{Project: "facts_proj", Environment: "local", StoreID: api.LocalStoreID}, "E", "F")
 	assert.Error(t, err)
 	compareFactsProjectStoreFor = origStore
 
 	// queryDef.Type != QueryTypeDTQL
-	qSQL := datatug.QueryDef{ID: "facts_q", Type: datatug.QueryTypeSQL}
+	qSQL := datatug.QueryDef{CreatedAt: "2026-01-01T00:00:00Z", ID: "facts_q", Type: datatug.QueryTypeSQL}
 	data, _ := json.Marshal(qSQL)
 	require.NoError(t, os.WriteFile(filepath.Join(qDir, "facts_q.query.json"), data, 0644))
 	_, err = proveNativeFactsBinding(ctx, "facts_q", apicontract.CompareSideSpec{Project: "facts_proj", Environment: "local", StoreID: api.LocalStoreID}, "E", "F")

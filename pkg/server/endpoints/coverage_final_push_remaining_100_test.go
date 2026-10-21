@@ -58,7 +58,7 @@ func TestCoverage100_SessionContextQueryDuplicateResolvedParameter(t *testing.T)
 	projectDir := t.TempDir()
 	queriesDir := filepath.Join(projectDir, "queries")
 	require.NoError(t, os.MkdirAll(queriesDir, 0700))
-	require.NoError(t, os.WriteFile(filepath.Join(queriesDir, "q1.query.json"), []byte(`{"id":"q1","type":"SQL","parameters":[{"id":"p1","type":"string","isRequired":true}]}`), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(queriesDir, "q1.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","id":"q1","type":"SQL","parameters":[{"id":"p1","type":"string","isRequired":true}]}`), 0600))
 	paths := map[string]string{"p1": projectDir}
 	fStore, err := filestore.NewStore("files", paths)
 	require.NoError(t, err)
@@ -659,7 +659,7 @@ func TestCoverage100_DetectiveRemainingBranches(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(envDir, "qa.env.json"), []byte(`{"id":"qa"}`), 0600))
 	queriesDir := filepath.Join(projectDir, "queries")
 	require.NoError(t, os.MkdirAll(queriesDir, 0700))
-	require.NoError(t, os.WriteFile(filepath.Join(queriesDir, "q1.query.json"), []byte(`{"id":"q1","type":"SQL"}`), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(queriesDir, "q1.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","id":"q1","type":"SQL"}`), 0600))
 	paths := map[string]string{"p": projectDir}
 
 	origStore := storage.NewDatatugStore

@@ -400,7 +400,7 @@ func TestLocalMeaningMutationFailureOutcomes(t *testing.T) {
 					t.Fatal(err)
 				}
 				model := datatug.QuerySemanticModel{Version: 2, Basis: datatug.QuerySemanticBasis{Columns: []datatug.QuerySemanticColumn{}}, Meaning: datatug.QueryMeaning{Concepts: []datatug.QueryMeaningConcept{}}, Model: datatug.QueryModelSpec{Records: datatug.QueryModelRecords{QueryResult: datatug.QueryModelRecord{Fields: map[string]datatug.QueryModelField{}}}}, Bindings: []datatug.QuerySemanticBinding{}}
-				data, err := json.Marshal(datatug.QueryDef{SemanticModel: &model})
+				data, err := json.Marshal(datatug.QueryDef{CreatedAt: "2026-01-01T00:00:00Z", SemanticModel: &model})
 				if err != nil {
 					t.Fatal(err)
 				}

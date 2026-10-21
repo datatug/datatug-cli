@@ -172,7 +172,7 @@ func TestCompareCommandInfersLiveMappedKeyThroughRealServer(t *testing.T) {
 	queryDir := filepath.Join(projectDir, "queries")
 	require.NoError(t, os.MkdirAll(queryDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(queryDir, "shipping-rate-config.query.json"), []byte(`{
-      "id":"shipping-rate-config","title":"Shipping rates","type":"DTQL",
+      "createdAt":"2026-01-01T00:00:00Z","id":"shipping-rate-config","title":"Shipping rates","type":"DTQL",
       "recordsets":[{
         "id":"rates","title":"Rates","type":"recordset",
         "primaryKey":{"name":"PK_Rate","columns":["id"]},

@@ -474,6 +474,8 @@ func TestPostgresScanJourney(t *testing.T) {
 		wantFiles = append(wantFiles, "dbmodels/shop/"+folder+"/"+schema+"."+folder[strings.LastIndex(folder, "/")+1:]+".columns.json")
 	}
 	wantFiles = append(wantFiles,
+		".datatug-environments-owner.json",
+		".datatug-environments.lock",
 		"README.md",
 		"connections/local/shop.json",
 		"datatug-project.json",
@@ -483,6 +485,8 @@ func TestPostgresScanJourney(t *testing.T) {
 	slices.Sort(wantFiles)
 	assert.Equal(t, wantFiles, projectFiles(t, projectDir, ""),
 		"the files of the scan: one columns file per table and view of each schema, a view and a materialized view among the views, and the two tables called customer each in its own schema")
+
+	assertScanEnvironmentOwnership(t, projectDir)
 
 	store, id := filestore.NewSingleProjectStore(projectDir, "")
 	projStore := store.GetProjectStore(id)

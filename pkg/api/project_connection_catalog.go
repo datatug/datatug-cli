@@ -7,12 +7,15 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"regexp"
 
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
 )
 
 var errConnectionCatalogUnavailable = errors.New("project connection catalog unavailable")
+
+var browserFixtureAssetURL = regexp.MustCompile(`^/assets/showcase/[a-z0-9][a-z0-9-]*\.sqlite$`)
 
 // LocalConnectionCatalog exposes declaration metadata, never connection profiles
 // or arbitrary files. Public-source executors must independently admit its pins.
@@ -99,15 +102,19 @@ func readLocalConnectionCatalogBody(body []byte) (*LocalConnectionCatalog, error
 		return nil, errConnectionCatalogUnavailable
 	}
 	for _, connection := range catalog.Connections {
-		for _, source := range []string{connection.Source, connection.BrowserFixture.URL} {
-			if source == "" {
-				continue
-			}
-			parsed, parseErr := url.Parse(source)
-			if parseErr != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
-				return nil, errConnectionCatalogUnavailable
-			}
+		if connection.Source != "" && !isCatalogRemoteURL(connection.Source) {
+			return nil, errConnectionCatalogUnavailable
+		}
+		if fixtureURL := connection.BrowserFixture.URL; fixtureURL != "" &&
+			!browserFixtureAssetURL.MatchString(fixtureURL) && !isCatalogRemoteURL(fixtureURL) {
+			return nil, errConnectionCatalogUnavailable
 		}
 	}
 	return &catalog, nil
+}
+
+func isCatalogRemoteURL(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	return err == nil && (parsed.Scheme == "https" || parsed.Scheme == "http") && parsed.Host != "" &&
+		parsed.User == nil && parsed.RawQuery == "" && !parsed.ForceQuery && parsed.Fragment == ""
 }

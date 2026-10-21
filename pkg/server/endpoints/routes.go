@@ -32,6 +32,10 @@ func registerRoutesOn(path string, router router, wrapper wrapper, writeOnly boo
 	projectsRoutes(path, router, wrapper, writeOnly, caps)
 	foldersRoutes(path, router, wrapper, caps)
 	queriesRoutes(path, router, wrapper, writeOnly, caps)
+	if !writeOnly {
+		route(router, wrapper, http.MethodGet, path+"/meanings/catalog", projectMeaningsCatalogHandler)
+	}
+	route(router, wrapper, http.MethodPost, path+"/meanings/change", requireWriteCapability(caps, projectMeaningChangeHandler))
 	boardsRoutes(path, router, wrapper, writeOnly, caps)
 	environmentsRoutes(path, router, wrapper, writeOnly)
 	dbServerRoutes(path, router, wrapper, writeOnly, caps)

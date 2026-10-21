@@ -311,6 +311,9 @@ func (LocalProjectQueryAdapter) SaveQuery(ctx context.Context, scope dto.Operati
 		}
 		return nil, dto.ErrBranchHeadConflict
 	}
+	if err := validateLocalQueryMeaningReferences(projectDir, datatug.MeaningScope{Storage: LocalStoreID, Project: request.ProjectID, Branch: request.Branch}, request.Query.SemanticModel); err != nil {
+		return nil, err
+	}
 	store, err := projectStoreForID(request.StoreID, request.ProjectID)
 	if err != nil {
 		return nil, err

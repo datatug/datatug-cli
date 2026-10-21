@@ -399,7 +399,7 @@ func TestCoverageRemaining100_SessionContextQuerySuite(t *testing.T) {
 	projectDir := t.TempDir()
 	queriesDir := filepath.Join(projectDir, "queries")
 	require.NoError(t, os.MkdirAll(queriesDir, 0700))
-	require.NoError(t, os.WriteFile(filepath.Join(queriesDir, "q1.query.json"), []byte(`{"id":"q1","type":"SQL","parameters":[{"id":"p1","type":"string","isRequired":true}]}`), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(queriesDir, "q1.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","id":"q1","type":"SQL","parameters":[{"id":"p1","type":"string","isRequired":true}]}`), 0600))
 	paths := map[string]string{"p1": projectDir}
 	fStore, err := filestore.NewStore("files", paths)
 	require.NoError(t, err)
@@ -609,7 +609,7 @@ func TestCoverageRemaining100_DetectiveAISnapshotSuite(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(envDir, "qa.env.json"), []byte(`{"id":"qa"}`), 0600))
 
 	// Query with empty title (line 62) and multi-value parameter (line 67)
-	require.NoError(t, os.WriteFile(filepath.Join(queriesDir, "multi.query.json"), []byte(`{"id":"multi","type":"SQL","parameters":[{"id":"p_multi","type":"string","isMultiValue":true}]}`), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(queriesDir, "multi.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","id":"multi","type":"SQL","parameters":[{"id":"p_multi","type":"string","isMultiValue":true}]}`), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(queriesDir, "multi.query.sql"), []byte("SELECT 1"), 0600))
 
 	paths := map[string]string{"p": project}

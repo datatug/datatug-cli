@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/api"
@@ -75,6 +76,20 @@ func copyDemoProjectToTempDir(t *testing.T, srcDir string) string {
 		data, readErr := os.ReadFile(path)
 		if readErr != nil {
 			return readErr
+		}
+		if strings.HasSuffix(rel, ".query.json") {
+			var definition map[string]json.RawMessage
+			if err := json.Unmarshal(data, &definition); err != nil {
+				return err
+			}
+			if _, exists := definition["createdAt"]; !exists {
+				// This historic demo fixture predates mandatory creation metadata.
+				definition["createdAt"] = json.RawMessage(`"2026-01-01T00:00:00Z"`)
+				data, err = json.Marshal(definition)
+				if err != nil {
+					return err
+				}
+			}
 		}
 		return os.WriteFile(filepath.Join(dstDir, rel), data, 0o644)
 	})

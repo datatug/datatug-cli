@@ -1058,3 +1058,47 @@ func TestShowReportsNullabilityForTheDriversThatKnowIt(t *testing.T) {
 	assert.Nil(t, geo.Schemas[0].Tables[0].Columns[0].Nullable)
 	assert.Equal(t, 4, strings.Count(stdout, `"nullable"`), "only the two sqlite3 catalogs (two columns each) carry it")
 }
+
+func TestShowRelativeProjectRootMustBeLocatedBeforeReading(t *testing.T) {
+	projectDir := scannedJourneyProject(t)
+	t.Chdir(filepath.Dir(projectDir))
+	original := showDirectoryAbs
+	t.Cleanup(func() { showDirectoryAbs = original })
+	cause := errors.New("working directory unavailable")
+	showDirectoryAbs = func(string) (string, error) { return "", cause }
+	stdout, _, err := runShowCommand(t, "-d", filepath.Base(projectDir))
+	require.ErrorIs(t, err, cause)
+	assert.Empty(t, stdout)
+
+	// Invalid folders keep their existing diagnostic before normalization.
+	_, _, err = runShowCommand(t, "-d", "missing-project")
+	assert.Equal(t, 3, showExitCodeOf(t, err))
+	assert.NotErrorIs(t, err, cause)
+}
+
+func TestShowRelativeAndAbsoluteRootsReadTheSameScannedProject(t *testing.T) {
+	projectDir := scannedJourneyProject(t)
+	absolute, _, err := runShowCommand(t, "-d", projectDir)
+	require.NoError(t, err)
+	t.Chdir(filepath.Dir(projectDir))
+	relative, _, err := runShowCommand(t, "-d", filepath.Base(projectDir))
+	require.NoError(t, err)
+	assert.Equal(t, absolute, relative)
+}
+
+// Read-only show has always accepted a project-root link; normalization must
+// preserve that contract rather than resolve the link into a trusted write root.
+func TestShowKeepsReadOnlyProjectRootLinkBehavior(t *testing.T) {
+	projectDir := scannedJourneyProject(t)
+	want, _, err := runShowCommand(t, "-d", projectDir)
+	require.NoError(t, err)
+	parent := t.TempDir()
+	link := filepath.Join(parent, "project-link")
+	require.NoError(t, os.Symlink(projectDir, link))
+	t.Chdir(parent)
+	for _, root := range []string{link, "project-link"} {
+		got, _, err := runShowCommand(t, "-d", root)
+		require.NoError(t, err)
+		assert.Equal(t, want, got)
+	}
+}

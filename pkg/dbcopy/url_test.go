@@ -134,7 +134,7 @@ func writeHTTPSourceProject(t *testing.T, urlTemplate, fixtureBody string) strin
 	root := t.TempDir()
 	queriesDir := filepath.Join(root, "queries", "reference")
 	assert.NoError(t, os.MkdirAll(queriesDir, 0o755))
-	assert.NoError(t, os.WriteFile(filepath.Join(queriesDir, "greeting.query.json"), []byte(`{
+	assert.NoError(t, os.WriteFile(filepath.Join(queriesDir, "greeting.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z",
 		"id": "greeting",
 		"title": "Greeting",
 		"type": "HTTP",

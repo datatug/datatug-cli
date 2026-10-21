@@ -165,7 +165,7 @@ func TestRecordedRunQueryListShowAndSnapshotJourney(t *testing.T) {
 func TestRecordedRunQueryPersistsArbitraryLimitAsIncomplete(t *testing.T) {
 	projectDir, projectID := writeRunQueryTestProject(t)
 	queryDir := filepath.Join(projectDir, "queries", "customers")
-	mustWriteFile(t, filepath.Join(queryDir, "customer-invoices.query.json"), `{"id":"customer-invoices","type":"DTQL"}`)
+	mustWriteFile(t, filepath.Join(queryDir, "customer-invoices.query.json"), `{"createdAt":"2026-01-01T00:00:00Z","id":"customer-invoices","type":"DTQL"}`)
 	mustWriteFile(t, filepath.Join(queryDir, "customer-invoices.query.dtql"), "from:\n  name: Invoice\n")
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
 	configureExecutionEvidence(t, projectID, projectDir)

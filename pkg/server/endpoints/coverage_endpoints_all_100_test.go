@@ -161,7 +161,8 @@ func TestCoverageFinish100_CompareKey(t *testing.T) {
 	require.NoError(t, os.MkdirAll(qDir, 0755))
 
 	qDef := datatug.QueryDef{
-		ID: "q1",
+		CreatedAt: "2026-01-01T00:00:00Z",
+		ID:        "q1",
 		Recordsets: []datatug.RecordsetDefinition{
 			{
 				PrimaryKey: &datatug.UniqueKey{Columns: []string{"id"}},
@@ -175,7 +176,7 @@ func TestCoverageFinish100_CompareKey(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(qDir, "q1.query.json"), data, 0644))
 
 	// mappedCompareKey with no recordsets
-	qDefNoRec := datatug.QueryDef{ID: "q_no_rec"}
+	qDefNoRec := datatug.QueryDef{CreatedAt: "2026-01-01T00:00:00Z", ID: "q_no_rec"}
 	dataNoRec, _ := json.Marshal(qDefNoRec)
 	require.NoError(t, os.WriteFile(filepath.Join(qDir, "q_no_rec.query.json"), dataNoRec, 0644))
 
@@ -184,7 +185,8 @@ func TestCoverageFinish100_CompareKey(t *testing.T) {
 
 	// mappedCompareKey with column missing Meta
 	qDefNoMeta := datatug.QueryDef{
-		ID: "q_no_meta",
+		CreatedAt: "2026-01-01T00:00:00Z",
+		ID:        "q_no_meta",
 		Recordsets: []datatug.RecordsetDefinition{
 			{
 				PrimaryKey: &datatug.UniqueKey{Columns: []string{"id"}},
@@ -220,7 +222,8 @@ func TestCoverageFinish100_CompareKey(t *testing.T) {
 	qDir2 := filepath.Join(dir2, "queries")
 	require.NoError(t, os.MkdirAll(qDir2, 0755))
 	qDefDiff := datatug.QueryDef{
-		ID: "q1",
+		CreatedAt: "2026-01-01T00:00:00Z",
+		ID:        "q1",
 		Recordsets: []datatug.RecordsetDefinition{
 			{
 				PrimaryKey: &datatug.UniqueKey{Columns: []string{"id2"}},

@@ -113,6 +113,8 @@ func TestSaveScannedProject_WritesTheCatalogFileAndOneColumnsFilePerTableAndView
 
 	assert.Empty(t, warnings.String())
 	assert.ElementsMatch(t, []string{
+		".datatug-environments-owner.json",
+		".datatug-environments.lock",
 		"README.md",
 		"datatug-project.json",
 		"dbmodels/shop/main/tables/Customer/main.Customer.columns.json",

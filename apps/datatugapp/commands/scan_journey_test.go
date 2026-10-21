@@ -207,6 +207,8 @@ func TestScanJourneySQLite(t *testing.T) {
 
 			// The scan writes the layout every reader reads, and nothing else.
 			assert.Equal(t, []string{
+				".datatug-environments-owner.json",
+				".datatug-environments.lock",
 				"README.md",
 				"datatug-project.json",
 				"dbmodels/shop/main/tables/Customer/main.Customer.columns.json",
@@ -314,7 +316,8 @@ func TestScanJourneySQLite(t *testing.T) {
 			// 5. I scan again. Nothing changed in the database, so nothing changes in the
 			// folder: every file is as it was, by content.
 			first := treeHashes(t, projectDir, "data/")
-			require.Len(t, first, 8)
+			assertScanEnvironmentOwnership(t, projectDir)
+			require.Len(t, first, 10)
 			stderr, err = runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", dbPath, "--db", "shop", "--env", "local")
 			require.NoError(t, err)
 			assert.Empty(t, stderr, "a rescan with nothing to leave out says nothing on stderr")
@@ -609,6 +612,12 @@ func TestScanJourneyRelativePath(t *testing.T) {
 	sourceURL, err := resolveQuerySourceURL(context.Background(), store.GetProjectStore(id), projectDir, "local", "shop")
 	require.NoError(t, err)
 	assert.Equal(t, "sqlite://"+filepath.Join(workDir, "shop.db"), sourceURL)
+	before := treeHashes(t, projectDir, "")
+	for _, directory := range []string{projectDir, "shop-project"} {
+		_, err = runScanCommand(t, "-d", directory, "-D", "sqlite3", "--path", "shop.db", "--db", "shop", "--env", "local")
+		require.NoError(t, err, "absolute and relative reopens share one environment owner")
+		assert.Equal(t, before, treeHashes(t, projectDir, ""), "reopening the saved scan keeps its ownership and data bytes")
+	}
 }
 
 // The names of the tables, views and indexes of the scanned file are names, and

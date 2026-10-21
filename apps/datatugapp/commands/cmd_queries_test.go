@@ -36,7 +36,7 @@ func queriesProject(t *testing.T, queryFiles ...string) string {
 	for _, name := range queryFiles {
 		file := filepath.Join(dir, "queries", filepath.FromSlash(name)+".query.json")
 		require.NoError(t, os.MkdirAll(filepath.Dir(file), 0o755))
-		require.NoError(t, os.WriteFile(file, []byte(`{}`), 0o600))
+		require.NoError(t, os.WriteFile(file, []byte(`{"createdAt":"2026-01-01T00:00:00Z"}`), 0o600))
 	}
 	return dir
 }
@@ -205,10 +205,10 @@ func runQueriesBoth(t *testing.T, argv ...string) (stdout, stderr string, err er
 
 func TestQueries_JSONListsQueriesInIDOrderWithTitleAndType(t *testing.T) {
 	t.Chdir(queriesProjectWith(t, map[string]string{
-		"top":             `{"title":"Top","type":"SQL"}`,
+		"top":             `{"createdAt":"2026-01-01T00:00:00Z","title":"Top","type":"SQL"}`,
 		"sales/by-region": `{}`,
 		"sales/by-month":  `{"title":"By month"}`,
-		"sales/typed":     `{"type":"HTTP"}`,
+		"sales/typed":     `{"createdAt":"2026-01-01T00:00:00Z","type":"HTTP"}`,
 	}))
 	out, errOut, err := runQueriesBoth(t, "--format", "json")
 	require.NoError(t, err)
@@ -351,7 +351,7 @@ func TestQueries_FailsWhenStdoutCannotBeWritten(t *testing.T) {
 
 func TestQueries_JSONListsParameters(t *testing.T) {
 	t.Chdir(queriesProjectWith(t, map[string]string{
-		"with-params": `{"title":"T","type":"SQL","parameters":[
+		"with-params": `{"createdAt":"2026-01-01T00:00:00Z","title":"T","type":"SQL","parameters":[
 			{"id":"year","type":"integer","isRequired":true},
 			{"id":"region"},
 			{"id":"flag","type":"bool","isRequired":false},
@@ -399,7 +399,7 @@ func TestQueries_JSONListsParameters(t *testing.T) {
 func TestQueries_JSONLeavesOutMalformedParametersAndKeepsTheQuery(t *testing.T) {
 	t.Chdir(queriesProjectWith(t, map[string]string{
 		"bad-entries": `{"title":"A","parameters":["x",5,null,{"type":"integer"},{"id":3},{"id":""},{"id":"ok"}]}`,
-		"not-array":   `{"title":"B","type":"SQL","parameters":{"id":"x"}}`,
+		"not-array":   `{"createdAt":"2026-01-01T00:00:00Z","title":"B","type":"SQL","parameters":{"id":"x"}}`,
 		"null-params": `{"title":"C","parameters":null}`,
 	}))
 	out, errOut, err := runQueriesBoth(t, "--format", "json")

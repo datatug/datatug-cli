@@ -163,6 +163,8 @@ func TestScanJourneyHonoursTheDbModel(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, []string{
+		".datatug-environments-owner.json",
+		".datatug-environments.lock",
 		"README.md",
 		"datatug-project.json",
 		"dbmodels/retail-model/main/tables/Customer/main.Customer.columns.json",
@@ -588,4 +590,14 @@ func TestScanJourneyRefusesANameThatDiffersOnlyByCaseFromOneTheProjectHas(t *tes
 			assert.Equal(t, before, treeHashes(t, projectDir, ""), "the project is as it was, with its tables")
 		})
 	}
+}
+
+func TestScanRelativeProjectRootMustBeLocatedBeforeWriting(t *testing.T) {
+	workDir := t.TempDir()
+	t.Chdir(workDir)
+	covDSetVar(t, &scanDirectoryAbs, func(string) (string, error) { return "", errors.New("working directory unavailable") })
+	_, err := runScanCommand(t, "-d", "project", "-D", "sqlite3", "--path", "shop.db", "--db", "shop", "--env", "local")
+	require.ErrorContains(t, err, "cannot locate the project folder")
+	assert.ErrorContains(t, err, "working directory unavailable")
+	assert.NoDirExists(t, filepath.Join(workDir, "project"))
 }

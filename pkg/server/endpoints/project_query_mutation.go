@@ -71,7 +71,7 @@ func projectCapabilitiesHandler(w http.ResponseWriter, r *http.Request) {
 		writeProjectMutationError(w, r, err)
 		return
 	}
-	writeProjectMutationJSON(w, r, http.StatusOK, result)
+	writeProjectMutationJSON(w, r, http.StatusOK, projectCapabilitiesWithTags{ProjectCapabilities: result, BoardTags: true, DbServerTags: true})
 }
 
 func projectConnectionCatalogHandler(w http.ResponseWriter, r *http.Request) {
@@ -140,6 +140,8 @@ func writeProjectMutationError(w http.ResponseWriter, r *http.Request, err error
 	switch {
 	case errors.Is(err, secureread.ErrAccessDenied):
 		status, code, message = http.StatusForbidden, "ACCESS_DENIED", "project query access denied"
+	case errors.Is(err, api.ErrItemTagsRevisionConflict):
+		status, code, message = http.StatusConflict, "ITEM_REVISION_CONFLICT", "item changed; reload before saving tags"
 	case errors.Is(err, dto.ErrQueryRevisionConflict):
 		status, code, message = http.StatusConflict, "QUERY_REVISION_CONFLICT", "query changed; reload before saving"
 	case errors.Is(err, dto.ErrBranchHeadConflict):

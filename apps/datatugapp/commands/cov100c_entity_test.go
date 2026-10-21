@@ -106,11 +106,11 @@ func TestCov100cEntityShow(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, out.String(), "Entity A")
 	})
-	t.Run("unparsable tables are tolerated", func(t *testing.T) {
+	t.Run("unparsable tables are refused", func(t *testing.T) {
 		dir := t.TempDir()
 		cov100cSeedEntity(t, dir, "A", `{"id":"A","tables":[{"name":5}]}`)
 		_, _, err := runEntity(t, "entity", "show", "A", "-d", dir)
-		require.NoError(t, err)
+		require.ErrorContains(t, err, "invalid entity table identity")
 	})
 	t.Run("render failure", func(t *testing.T) {
 		dir := t.TempDir()

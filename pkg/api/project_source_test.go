@@ -61,7 +61,9 @@ func TestAddProjectSourceSQLiteIsWrittenAsAScanWritesIt(t *testing.T) {
 	assert.Contains(t, files["environments/local/catalogs/shop/shop.db.json"], `"dbModel": ""`)
 	assert.Contains(t, files["environments/local/catalogs/shop/shop.db.json"], filepath.ToSlash(file))
 	assert.Contains(t, files["environments/local/local.env.json"], `"shop"`)
-	assert.Len(t, files, 3, "the project file, the environment file and the catalog file")
+	assert.Len(t, files, 5, "the project, environment and catalog files plus the environment owner sidecar and lock")
+	assert.Equal(t, "datatug-environment-owner/1", decodeJSONFile(t, filepath.Join(dir, ".datatug-environments-owner.json"))["format"])
+	assert.True(t, strings.HasPrefix(files[".datatug-environments.lock"], "environment-owner/1:"))
 
 	before := treeBytes(t, dir)
 	again, err := AddProjectSource(context.Background(), store, dir, ProjectSourceRequest{Environment: "local", ID: "shop", SQLitePath: file})
@@ -409,11 +411,11 @@ func TestResolveProjectSourceURLWithoutAnEnvironment(t *testing.T) {
 	_, err = ResolveProjectSourceURL(ctx, store, dir, "", "shop-local")
 	var ambiguous *AmbiguousSourceError
 	require.ErrorAs(t, err, &ambiguous)
-	assert.Equal(t, []string{"dev", "local"}, ambiguous.Environments)
-	assert.EqualError(t, err, "the source is listed in several environments (dev, local): add ?env=<ENV> to the reference")
+	assert.Equal(t, []string{"local", "dev"}, ambiguous.Environments)
+	assert.EqualError(t, err, "the source is listed in several environments (local, dev): add ?env=<ENV> to the reference")
 	listing, err := EnvironmentsListingSource(ctx, store, "shop-local")
 	require.NoError(t, err)
-	assert.Equal(t, []string{"dev", "local"}, listing)
+	assert.Equal(t, []string{"local", "dev"}, listing)
 
 	_, err = ResolveProjectSourceURL(ctx, store, dir, "", "nope")
 	assert.EqualError(t, err, `source "nope" not found in any environment of the project`)

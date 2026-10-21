@@ -67,21 +67,6 @@ func TestUnmarshalEntity_Errors(t *testing.T) {
 		t.Fatal("expected unmarshal error for malformed json")
 	}
 
-	origUnmarshal := jsonUnmarshal
-	defer func() { jsonUnmarshal = origUnmarshal }()
-
-	callCount := 0
-	jsonUnmarshal = func(data []byte, v any) error {
-		callCount++
-		if callCount == 2 {
-			return errors.New("tablesDoc unmarshal error")
-		}
-		return origUnmarshal(data, v)
-	}
-
-	if _, err := UnmarshalEntity([]byte(`{}`)); err == nil {
-		t.Fatal("expected error on second unmarshal")
-	}
 }
 
 func TestMarshalEntity_Errors(t *testing.T) {
@@ -114,15 +99,4 @@ func TestMarshalEntity_Errors(t *testing.T) {
 		t.Fatal("expected unmarshal error")
 	}
 
-	// 3. tables marshal error
-	jsonUnmarshal = origUnmarshal
-	jsonMarshal = func(v any) ([]byte, error) {
-		if _, ok := v.([]TableKeyDoc); ok {
-			return nil, errors.New("tables marshal error")
-		}
-		return origMarshal(v)
-	}
-	if _, err := MarshalEntity(entityWithTables); err == nil {
-		t.Fatal("expected tables marshal error")
-	}
 }

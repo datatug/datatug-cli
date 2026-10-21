@@ -98,7 +98,7 @@ func TestCov100cEntityShow(t *testing.T) {
 		_, _, err := runEntity(t, "entity", "show", "A", "-d", dir)
 		require.Error(t, err)
 	})
-	t.Run("flat layout has no nested file to repair tables from", func(t *testing.T) {
+	t.Run("flat layout loads canonical tables through Core", func(t *testing.T) {
 		dir := t.TempDir()
 		require.NoError(t, os.MkdirAll(filepath.Join(dir, "entities"), 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "entities", "A.entity.json"), []byte(cov100cEntityA), 0o600))

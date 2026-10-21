@@ -238,3 +238,42 @@ func TestProjectItemTagsCapabilitiesAndServerCatalog(t *testing.T) {
 	require.Contains(t, w.Body.String(), `"boardTags":true`)
 	require.Contains(t, w.Body.String(), `"dbServerTags":true`)
 }
+
+func TestProjectItemTagsMalformedTransportsChangeNothing(t *testing.T) {
+	selector, dir, _ := tagFixture(t, "board", "flat")
+	q := url.Values{"storage": {"local"}, "project": {selector.ProjectID}, "branch": {selector.Branch}, "kind": {"board"}, "id": {selector.ID}}
+	before := treeDigest(t, dir)
+	for _, tc := range []struct {
+		name, method, path, body string
+		handler                  http.HandlerFunc
+		status                   int
+	}{
+		{"extra selector", "GET", "/datatug/projects/item_tags?" + q.Encode() + "&extra=x", "", getProjectItemTags, 400},
+		{"missing project", "GET", "/datatug/projects/item_tags?storage=unknown&project=" + selector.ProjectID, "", getProjectItemTags, 400},
+		{"missing board", "GET", "/datatug/projects/item_tags?" + q.Encode() + "&unused=bad", "", getProjectItemTags, 400},
+		{"large body", "PUT", "/datatug/projects/item_tags", strings.Repeat("x", 16<<10+1), saveProjectItemTags, 400},
+		{"malformed body", "PUT", "/datatug/projects/item_tags", "{", saveProjectItemTags, 400},
+		{"servers missing project", "GET", "/datatug/dbservers/all_dbservers?storage=unknown&project=" + selector.ProjectID, "", getProjectDbServers, 400},
+		{"servers wrong branch", "GET", "/datatug/dbservers/all_dbservers?storage=local&project=" + selector.ProjectID + "&branch=not-current", "", getProjectDbServers, 409},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			tc.handler(w, httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body)))
+			require.Equal(t, tc.status, w.Code, w.Body.String())
+		})
+	}
+	// A valid selector reaches the API and propagates an absent item error.
+	q.Set("id", "absent")
+	w := httptest.NewRecorder()
+	getProjectItemTags(w, httptest.NewRequest("GET", "/datatug/projects/item_tags?"+q.Encode(), nil))
+	require.Equal(t, 404, w.Code)
+	assertTreeUnchanged(t, dir, before)
+}
+
+func TestProjectDbServerTagsCatalogRequiresPrincipal(t *testing.T) {
+	selector, dir, _ := tagFixture(t, "board", "flat")
+	api.ConfigureSecureSession(secureread.Session{}, map[string]string{selector.ProjectID: dir}, api.Capabilities{})
+	w := httptest.NewRecorder()
+	getProjectDbServers(w, httptest.NewRequest("GET", "/datatug/dbservers/all_dbservers?project="+selector.ProjectID, nil))
+	require.Equal(t, http.StatusForbidden, w.Code)
+}

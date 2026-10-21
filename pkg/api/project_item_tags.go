@@ -23,6 +23,18 @@ import (
 	"github.com/strongo/validation"
 )
 
+// These serialization and filesystem boundaries use their production implementations;
+// tests inject failures to verify that conditional writes preserve existing files.
+var (
+	itemTagsProjectDir    = servedProjectDir
+	itemTagsJSONUnmarshal = json.Unmarshal
+	itemTagsMarshalIndent = json.MarshalIndent
+	itemTagsLstat         = (*os.Root).Lstat
+	itemTagsStat          = (*os.Root).Stat
+	itemTagsOpenFile      = (*os.Root).OpenFile
+	itemTagsRename        = (*os.Root).Rename
+)
+
 var ErrItemTagsRevisionConflict = errors.New("item tags document changed; reload before saving")
 
 // ItemTagsSelector names one existing project document. Server IDs are the
@@ -125,7 +137,7 @@ func loadItemTagsDocument(reader *qualifiedProjectReader, s ItemTagsSelector) (s
 	}
 	parts := strings.Split(selected, "/")
 	for i := range parts {
-		info, err := reader.root.Lstat(strings.Join(parts[:i+1], "/"))
+		info, err := itemTagsLstat(reader.root, strings.Join(parts[:i+1], "/"))
 		if err != nil {
 			return "", nil, nil, err
 		}
@@ -137,12 +149,12 @@ func loadItemTagsDocument(reader *qualifiedProjectReader, s ItemTagsSelector) (s
 		return "", nil, nil, err
 	}
 	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(body, &fields); err != nil || fields == nil {
+	if err := itemTagsJSONUnmarshal(body, &fields); err != nil || fields == nil {
 		return "", nil, nil, dto.ErrUnsupportedCapability
 	}
 	if s.Kind == "dbserver" {
 		var server datatug.ServerRef
-		if json.Unmarshal(fields["server"], &server) != nil || server.Driver != s.Driver || server.GetID() != s.ID {
+		if itemTagsJSONUnmarshal(fields["server"], &server) != nil || server.Driver != s.Driver || server.GetID() != s.ID {
 			return "", nil, nil, dto.ErrUnsupportedCapability
 		}
 		if err := validateDbServer(server); err != nil {
@@ -155,7 +167,7 @@ func loadItemTagsDocument(reader *qualifiedProjectReader, s ItemTagsSelector) (s
 func itemTagsResult(s ItemTagsSelector, fields map[string]json.RawMessage, body []byte, head string) (*ItemTags, error) {
 	tags := make([]string, 0)
 	if raw, ok := fields["tags"]; ok {
-		if err := json.Unmarshal(raw, &tags); err != nil {
+		if err := itemTagsJSONUnmarshal(raw, &tags); err != nil {
 			return nil, err
 		}
 	}
@@ -174,7 +186,7 @@ func LocalProjectItemTags(ctx context.Context, s ItemTagsSelector) (*ItemTags, e
 		if err != nil {
 			return nil, err
 		}
-		dir, err := servedProjectDir(s.ProjectID)
+		dir, err := itemTagsProjectDir(s.ProjectID)
 		if err != nil {
 			return nil, err
 		}
@@ -228,7 +240,7 @@ func SaveLocalProjectItemTags(ctx context.Context, request SaveItemTagsRequest) 
 		return nil, err
 	}
 	value, err := withCurrentBranchRead(ctx, s.ProjectRef, s.Branch, func(reader *qualifiedProjectReader) (any, error) {
-		dir, err := servedProjectDir(s.ProjectID)
+		dir, err := itemTagsProjectDir(s.ProjectID)
 		if err != nil {
 			return nil, err
 		}
@@ -246,11 +258,11 @@ func SaveLocalProjectItemTags(ctx context.Context, request SaveItemTagsRequest) 
 		if itemTagsRevision(body) != request.IfMatch {
 			return nil, ErrItemTagsRevisionConflict
 		}
-		fields["tags"], err = json.Marshal(request.Tags)
+		fields["tags"], err = jsonMarshal(request.Tags)
 		if err != nil {
 			return nil, err
 		}
-		updated, err := json.MarshalIndent(fields, "", "  ")
+		updated, err := itemTagsMarshalIndent(fields, "", "  ")
 		if err != nil {
 			return nil, err
 		}
@@ -258,23 +270,23 @@ func SaveLocalProjectItemTags(ctx context.Context, request SaveItemTagsRequest) 
 		// Create the replacement inside the confined root with an unpredictable
 		// exclusive name. Rename preserves the existing item and its other fields.
 		temp := path.Join(path.Dir(name), ".datatug-tags-"+newSecurityContextID()+".tmp")
-		file, err := reader.root.OpenFile(temp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		file, err := itemTagsOpenFile(reader.root, temp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err != nil {
 			return nil, err
 		}
 		defer func() { _ = reader.root.Remove(temp) }()
-		info, err := reader.root.Stat(name)
+		info, err := itemTagsStat(reader.root, name)
 		if err != nil {
-			_ = file.Close()
+			_ = fileClose(file)
 			return nil, err
 		}
-		if err = file.Chmod(info.Mode().Perm()); err == nil {
-			_, err = file.Write(updated)
+		if err = fileChmod(file, info.Mode().Perm()); err == nil {
+			_, err = fileWrite(file, updated)
 		}
 		if err == nil {
-			err = file.Sync()
+			err = fileSync(file)
 		}
-		closeErr := file.Close()
+		closeErr := fileClose(file)
 		if err == nil {
 			err = closeErr
 		}
@@ -296,7 +308,7 @@ func SaveLocalProjectItemTags(ctx context.Context, request SaveItemTagsRequest) 
 		if checkName != name || !bytes.Equal(check, body) {
 			return nil, ErrItemTagsRevisionConflict
 		}
-		if err := reader.root.Rename(temp, name); err != nil {
+		if err := itemTagsRename(reader.root, temp, name); err != nil {
 			return nil, err
 		}
 		// Once renamed a branch move or foreign edit is an uncertain outcome,
@@ -355,7 +367,7 @@ func LocalProjectDbServers(ctx context.Context, ref dto.ProjectRef, branch strin
 					return nil, err
 				}
 				var server datatug.ProjDbServer
-				if err := json.Unmarshal(body, &server); err != nil {
+				if err := itemTagsJSONUnmarshal(body, &server); err != nil {
 					return nil, err
 				}
 				server.SetID(id)

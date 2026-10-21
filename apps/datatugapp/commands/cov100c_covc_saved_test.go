@@ -104,7 +104,7 @@ func covCMerge(maps ...map[string]string) map[string]string {
 
 func covCQueryFiles(folder, id, typ, sidecarExt, text string, extra string) map[string]string {
 	files := map[string]string{
-		"queries/" + folder + "/" + id + ".query.json": `{"id":"` + id + `","type":"` + typ + `"` + extra + `}`,
+		"queries/" + folder + "/" + id + ".query.json": `{"createdAt":"2026-10-01T00:00:00Z","id":"` + id + `","type":"` + typ + `"` + extra + `}`,
 	}
 	if sidecarExt != "" {
 		files["queries/"+folder+"/"+id+".query."+sidecarExt] = text

@@ -35,8 +35,9 @@ func validateCardItem(projectID, id string) error {
 	return nil
 }
 
-// createCardMu serialises creates in this process so two creates of one ID
-// cannot both pass the existence check.
+// createCardMu serialises creates and saves of cards in this process, so two
+// creates of one ID cannot both pass the existence check and a save cannot slip
+// in between a create's check and its write.
 var createCardMu sync.Mutex
 
 // itemExists is the answer for a create of an item that is already there.
@@ -132,6 +133,8 @@ func SaveCard(ctx context.Context, ref dto.ProjectRef, card datatug.Card) (*data
 	if err != nil {
 		return nil, err
 	}
+	createCardMu.Lock()
+	defer createCardMu.Unlock()
 	if err = store.SaveCard(ctx, &card); err != nil {
 		return nil, itemWriteFailed("save", "card", dbcopy.SourceIDDisplay(card.ID), err)
 	}

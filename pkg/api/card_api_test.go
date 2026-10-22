@@ -266,6 +266,9 @@ func TestLocalProjectCardsFailClosed(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "cards", "big.card.json"), []byte(big), 0o644))
 	_, err = LocalProjectCard(ctx, dto.ProjectItemRef{ProjectRef: ref, ID: "big"}, branch)
 	assert.Error(t, err)
+	// An unreadable card fails the listing: only bad content is skipped.
+	_, err = LocalProjectCards(ctx, ref, branch)
+	assert.Error(t, err)
 }
 
 func TestReadQualifiedCardsTooMany(t *testing.T) {

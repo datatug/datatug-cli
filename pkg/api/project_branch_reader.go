@@ -367,11 +367,15 @@ func readQualifiedEnvironment(reader *qualifiedProjectReader, id string) (*datat
 	return env, selected, nil
 }
 
+// errInvalidQualifiedCard marks a card file that was read but is not a valid
+// card: the listing skips it, while read failures propagate.
+var errInvalidQualifiedCard = errors.New("invalid card content")
+
 // readQualifiedCard reads cards/<id>/card.json, or the flat cards/<id>.card.json;
 // the folder form wins when both exist.
 func (r *qualifiedProjectReader) readQualifiedCard(id string) (*datatug.Card, error) {
 	if !datatug.CardIDPattern.MatchString(id) {
-		return nil, fmt.Errorf("invalid card id %q", id)
+		return nil, fmt.Errorf("%w: invalid card id %q", errInvalidQualifiedCard, id)
 	}
 	for _, name := range []string{
 		path.Join(storage.CardsFolder, id, storage.CardFileSuffix+".json"),
@@ -384,14 +388,17 @@ func (r *qualifiedProjectReader) readQualifiedCard(id string) (*datatug.Card, er
 		if body == nil {
 			continue
 		}
-		if err = validateQualifiedStoredID(body, id, "card"); err != nil {
-			return nil, err
-		}
 		card := new(datatug.Card)
-		if err = json.Unmarshal(body, card); err != nil {
-			return nil, err
+		if err = validateQualifiedStoredID(body, id, "card"); err == nil {
+			err = json.Unmarshal(body, card)
 		}
-		card.SetID(id)
+		if err == nil {
+			card.SetID(id)
+			err = card.Validate()
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", errInvalidQualifiedCard, err)
+		}
 		return card, nil
 	}
 	return nil, fs.ErrNotExist
@@ -410,17 +417,17 @@ func readQualifiedCards(reader *qualifiedProjectReader) (datatug.Cards, error) {
 	cards := make(datatug.Cards, 0, len(ids))
 	for _, id := range ids {
 		card, err := reader.readQualifiedCard(id)
-		if err == nil {
-			err = card.Validate()
-		}
-		if err != nil {
+		switch {
+		case err == nil:
+			cards = append(cards, card)
+		case errors.Is(err, errInvalidQualifiedCard):
 			// One stray or invalid card must not hide the others.
-			if !(errors.Is(err, fs.ErrNotExist) && isDirectoryEntry(entries, id)) {
-				log.Printf("api: skipping invalid card %q: %v", id, err)
-			}
-			continue
+			log.Printf("api: skipping invalid card %q: %v", id, err)
+		case errors.Is(err, fs.ErrNotExist) && isDirectoryEntry(entries, id):
+			// a folder without a card file
+		default:
+			return nil, err // a read failure is not a bad card
 		}
-		cards = append(cards, card)
 	}
 	return cards, nil
 }

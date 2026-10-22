@@ -37,6 +37,7 @@ func registerRoutesOn(path string, router router, wrapper wrapper, writeOnly boo
 	}
 	route(router, wrapper, http.MethodPost, path+"/meanings/change", requireWriteCapability(caps, projectMeaningChangeHandler))
 	boardsRoutes(path, router, wrapper, writeOnly, caps)
+	cardsRoutes(path, router, wrapper, writeOnly, caps)
 	environmentsRoutes(path, router, wrapper, writeOnly)
 	dbServerRoutes(path, router, wrapper, writeOnly, caps)
 	entitiesRoutes(path, router, wrapper, writeOnly, caps)
@@ -131,6 +132,16 @@ func boardsRoutes(path string, router router, wrap wrapper, writeOnly bool, caps
 	route(router, wrap, http.MethodPost, path+"/boards/create_board", requireWriteCapability(caps, createBoard))
 	route(router, wrap, http.MethodPut, path+"/boards/save_board", requireWriteCapability(caps, saveBoard))
 	route(router, wrap, http.MethodDelete, path+"/boards/delete_board", requireWriteCapability(caps, deleteBoard))
+}
+
+func cardsRoutes(path string, router router, wrap wrapper, writeOnly bool, caps Capabilities) {
+	if !writeOnly {
+		route(router, wrap, http.MethodGet, path+"/cards/all_cards", getCards)
+		route(router, wrap, http.MethodGet, path+"/cards/card", getCard)
+	}
+	route(router, wrap, http.MethodPost, path+"/cards/create_card", requireWriteCapability(caps, createCard))
+	route(router, wrap, http.MethodPut, path+"/cards/save_card", requireWriteCapability(caps, saveCard))
+	route(router, wrap, http.MethodDelete, path+"/cards/delete_card", requireWriteCapability(caps, deleteCard))
 }
 
 func projectsRoutes(path string, router router, wrap wrapper, writeOnly bool, caps Capabilities) {

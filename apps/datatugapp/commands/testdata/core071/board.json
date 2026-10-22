@@ -1,0 +1,151 @@
+{
+  "id": "shipping",
+  "title": "Shipping \u00b7 milestones, measured timing and readiness",
+  "parameters": [
+    {
+      "id": "order_id",
+      "title": "Order ID",
+      "type": "integer",
+      "isRequired": true
+    },
+    {
+      "id": "comparison_order_id",
+      "title": "Compare order",
+      "type": "integer",
+      "isRequired": true
+    }
+  ],
+  "requiredParams": [
+    [
+      "order_id",
+      "comparison_order_id"
+    ]
+  ],
+  "rows": [
+    {
+      "cards": [
+        {
+          "id": "milestones",
+          "title": "Request processing",
+          "cols": 12,
+          "widget": {
+            "name": "chart",
+            "data": {
+              "sources": [
+                {
+                  "id": "milestones-held",
+                  "queryId": "shipping/events-comparison",
+                  "parameters": [
+                    {
+                      "id": "order_id",
+                      "boardParameterId": "order_id"
+                    },
+                    {
+                      "id": "comparison_order_id",
+                      "boardParameterId": "comparison_order_id"
+                    }
+                  ]
+                }
+              ],
+              "chart": {
+                "type": "timeline",
+                "selectionId": "milestones-selection",
+                "timeline": {
+                  "laneColumn": "attempt_id",
+                  "eventColumn": "kind",
+                  "sequenceColumn": "sequence",
+                  "timeColumn": "occurred_at",
+                  "clockDomainColumn": "clock_domain",
+                  "precisionColumn": "precision_ms",
+                  "statusColumn": "status",
+                  "evidenceRefColumn": "evidence_ref",
+                  "timeMode": "elapsed",
+                  "anchorColumn": "elapsed_anchor"
+                }
+              },
+              "defaultView": "chart"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cards": [
+        {
+          "id": "measured-timing",
+          "title": "Stage timing \u00b7 observed adjacent endpoints",
+          "cols": 7,
+          "widget": {
+            "name": "chart",
+            "data": {
+              "sources": [
+                {
+                  "id": "measured-timing-held",
+                  "queryId": "shipping/timings",
+                  "parameters": [
+                    {
+                      "id": "order_id",
+                      "boardParameterId": "order_id"
+                    }
+                  ]
+                }
+              ],
+              "chart": {
+                "type": "timing-bars",
+                "selectionId": "measured-timing-selection",
+                "timing": {
+                  "rowKeyColumn": "row_key",
+                  "labelColumn": "end_kind",
+                  "startTimeColumn": "start_at",
+                  "endTimeColumn": "end_at",
+                  "startClockDomainColumn": "clock_domain",
+                  "endClockDomainColumn": "clock_domain",
+                  "startPrecisionColumn": "precision_ms",
+                  "endPrecisionColumn": "precision_ms",
+                  "startEvidenceRefColumn": "start_evidence_ref",
+                  "endEvidenceRefColumn": "end_evidence_ref",
+                  "startIdentityColumn": "start_event_id",
+                  "endIdentityColumn": "end_event_id"
+                }
+              },
+              "defaultView": "chart"
+            }
+          }
+        },
+        {
+          "id": "route-readiness",
+          "title": "Route and assignment \u00b7 current readiness",
+          "cols": 5,
+          "widget": {
+            "name": "chart",
+            "data": {
+              "sources": [
+                {
+                  "id": "route-readiness-held",
+                  "queryId": "shipping/readiness",
+                  "parameters": [
+                    {
+                      "id": "order_id",
+                      "boardParameterId": "order_id"
+                    }
+                  ]
+                }
+              ],
+              "chart": {
+                "type": "heatmap",
+                "selectionId": "route-readiness-selection",
+                "heatmap": {
+                  "rowColumn": "request_id",
+                  "columnColumn": "expectation",
+                  "statusColumn": "status",
+                  "evidenceRefColumn": "evidence_ref"
+                }
+              },
+              "defaultView": "chart"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -2,9 +2,13 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log"
+	"sync"
 
+	"github.com/dal-go/record"
 	"github.com/strongo/validation"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
@@ -19,6 +23,22 @@ import (
 // cardIDField is the field the refusal of a card ID names.
 const cardIDField = "cardID"
 
+// validateCardItem is validateProjectItem for a card: the ID is a card ID, which
+// is narrower than the identifiers other items take.
+func validateCardItem(projectID, id string) error {
+	if err := ValidateProjectIdentifier("project", projectID); err != nil {
+		return err
+	}
+	if !datatug.CardIDPattern.MatchString(id) {
+		return validation.NewBadRequestError(fmt.Errorf("invalid %s: must match %s", cardIDField, datatug.CardIDPattern))
+	}
+	return nil
+}
+
+// createCardMu serialises creates in this process so two creates of one ID
+// cannot both pass the existence check.
+var createCardMu sync.Mutex
+
 // itemExists is the answer for a create of an item that is already there.
 func itemExists(kind, shown string) error {
 	return validation.NewBadRequestError(fmt.Errorf("%s %q already exists", kind, shown))
@@ -27,7 +47,7 @@ func itemExists(kind, shown string) error {
 // CreateCard creates a project card under the ID it carries. A card that is already
 // there is not replaced: the answer says so.
 func CreateCard(ctx context.Context, ref dto.ProjectRef, card datatug.Card) (*datatug.Card, error) {
-	if err := validateProjectItem(ref.ProjectID, cardIDField, card.ID); err != nil {
+	if err := validateCardItem(ref.ProjectID, card.ID); err != nil {
 		return nil, err
 	}
 	if err := card.Validate(); err != nil {
@@ -38,8 +58,15 @@ func CreateCard(ctx context.Context, ref dto.ProjectRef, card datatug.Card) (*da
 	if err != nil {
 		return nil, err
 	}
-	if existing, _ := store.LoadCard(ctx, card.ID); existing != nil {
+	createCardMu.Lock()
+	defer createCardMu.Unlock()
+	// Only a card that is not there may be created: a card that cannot be read
+	// (corrupt, unreadable) is neither replaced nor reported as absent.
+	switch _, err = store.LoadCard(ctx, card.ID); {
+	case err == nil:
 		return nil, itemExists("card", dbcopy.SourceIDDisplay(card.ID))
+	case !errors.Is(err, fs.ErrNotExist) && !record.IsNotFound(err):
+		return nil, itemWriteFailed("create", "card", dbcopy.SourceIDDisplay(card.ID), err)
 	}
 	if err = store.SaveCard(ctx, &card); err != nil {
 		return nil, itemWriteFailed("create", "card", dbcopy.SourceIDDisplay(card.ID), err)
@@ -49,7 +76,7 @@ func CreateCard(ctx context.Context, ref dto.ProjectRef, card datatug.Card) (*da
 
 // GetCard returns a project card by ID.
 func GetCard(ctx context.Context, ref dto.ProjectItemRef) (*datatug.Card, error) {
-	if err := validateProjectItem(ref.ProjectID, cardIDField, ref.ID); err != nil {
+	if err := validateCardItem(ref.ProjectID, ref.ID); err != nil {
 		return nil, err
 	}
 	store, err := projectStoreForID(ref.StoreID, ref.ProjectID)
@@ -81,7 +108,7 @@ func ListCards(ctx context.Context, ref dto.ProjectRef) ([]datatug.CardBrief, er
 
 // DeleteCard deletes a project card.
 func DeleteCard(ctx context.Context, ref dto.ProjectItemRef) error {
-	if err := validateProjectItem(ref.ProjectID, cardIDField, ref.ID); err != nil {
+	if err := validateCardItem(ref.ProjectID, ref.ID); err != nil {
 		return err
 	}
 	store, err := projectStoreForID(ref.StoreID, ref.ProjectID)
@@ -95,7 +122,7 @@ func DeleteCard(ctx context.Context, ref dto.ProjectItemRef) error {
 
 // SaveCard saves a project card, replacing the one under the same ID.
 func SaveCard(ctx context.Context, ref dto.ProjectRef, card datatug.Card) (*datatug.Card, error) {
-	if err := validateProjectItem(ref.ProjectID, cardIDField, card.ID); err != nil {
+	if err := validateCardItem(ref.ProjectID, card.ID); err != nil {
 		return nil, err
 	}
 	if err := card.Validate(); err != nil {

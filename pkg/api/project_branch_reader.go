@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"os"
 	"path"
 	"reflect"
@@ -369,8 +370,8 @@ func readQualifiedEnvironment(reader *qualifiedProjectReader, id string) (*datat
 // readQualifiedCard reads cards/<id>/card.json, or the flat cards/<id>.card.json;
 // the folder form wins when both exist.
 func (r *qualifiedProjectReader) readQualifiedCard(id string) (*datatug.Card, error) {
-	if err := ValidateIdentifier("card", id); err != nil {
-		return nil, err
+	if !datatug.CardIDPattern.MatchString(id) {
+		return nil, fmt.Errorf("invalid card id %q", id)
 	}
 	for _, name := range []string{
 		path.Join(storage.CardsFolder, id, storage.CardFileSuffix+".json"),
@@ -409,11 +410,15 @@ func readQualifiedCards(reader *qualifiedProjectReader) (datatug.Cards, error) {
 	cards := make(datatug.Cards, 0, len(ids))
 	for _, id := range ids {
 		card, err := reader.readQualifiedCard(id)
+		if err == nil {
+			err = card.Validate()
+		}
 		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) && isDirectoryEntry(entries, id) {
-				continue
+			// One stray or invalid card must not hide the others.
+			if !(errors.Is(err, fs.ErrNotExist) && isDirectoryEntry(entries, id)) {
+				log.Printf("api: skipping invalid card %q: %v", id, err)
 			}
-			return nil, err
+			continue
 		}
 		cards = append(cards, card)
 	}

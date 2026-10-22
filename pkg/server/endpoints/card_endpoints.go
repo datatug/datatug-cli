@@ -2,12 +2,14 @@ package endpoints
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
 	"github.com/sneat-co/sneat-go-core/apicore"
+	"github.com/strongo/validation"
 )
 
 // getCard handles the get card endpoint. With a branch it reads that checked-out
@@ -75,6 +77,9 @@ func saveCard(w http.ResponseWriter, r *http.Request) {
 	var ref dto.ProjectItemRef
 	var card datatug.Card
 	saveProjectItem(w, r, &ref, &card, func(ctx context.Context) (apicore.ResponseDTO, error) {
+		if ref.ID != "" && ref.ID != card.ID {
+			return nil, validation.NewBadRequestError(errors.New("the id of the request does not match the id of the card"))
+		}
 		return api.SaveCard(ctx, ref.ProjectRef, card)
 	})
 }

@@ -89,6 +89,10 @@ func TestCardEndpointsRoundTrip(t *testing.T) {
 	// save_card replaces it.
 	w = send(saveCard, http.MethodPut, "/datatug/cards/save_card", item("customer"), strings.Replace(customerCardJSON, `"Customer","display"`, `"Customer 2","display"`, 1))
 	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+	// An id in the query that disagrees with the body is refused and writes nothing.
+	w = send(saveCard, http.MethodPut, "/datatug/cards/save_card", item("customer"), strings.Replace(customerCardJSON, `"id":"customer"`, `"id":"other"`, 1))
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	require.NoFileExists(t, filepath.Join(projectDir, "cards", "other", "card.json"))
 	raw, err := os.ReadFile(cardFile)
 	require.NoError(t, err)
 	require.Contains(t, string(raw), "Customer 2")

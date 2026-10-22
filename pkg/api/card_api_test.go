@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dal-go/record"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
 	"github.com/datatug/datatug-core/pkg/storage"
@@ -21,9 +22,13 @@ type cardStoreStub struct {
 	saveErr error
 	listErr error
 	delErr  error
+	loadErr error
 }
 
 func (s *cardStoreStub) LoadCard(_ context.Context, id string, _ ...datatug.StoreOption) (*datatug.Card, error) {
+	if s.loadErr != nil {
+		return nil, s.loadErr
+	}
 	if c, ok := s.cards[id]; ok {
 		return c, nil
 	}
@@ -128,6 +133,22 @@ func TestCardAPI(t *testing.T) {
 	}
 	_, err = ListCards(ctx, dto.ProjectRef{ProjectID: "../p"})
 	assert.Error(t, err)
+	_, err = CreateCard(ctx, dto.ProjectRef{ProjectID: "../p"}, apiTestCard("c9"))
+	assert.Error(t, err)
+
+	// A card that cannot be read is neither replaced nor taken for absent.
+	stub.cards["corrupt"] = &datatug.Card{ID: "corrupt"}
+	stub.loadErr = errors.New("unexpected end of JSON input")
+	_, err = CreateCard(ctx, ref, apiTestCard("corrupt"))
+	assert.ErrorContains(t, err, `could not create card "corrupt"`)
+	assert.Equal(t, "", stub.cards["corrupt"].Title, "the unreadable card was not overwritten")
+	// The dalgo not-found error counts as absent.
+	stub.loadErr = record.ErrRecordNotFound
+	_, err = CreateCard(ctx, ref, apiTestCard("fresh"))
+	assert.NoError(t, err)
+	stub.loadErr = nil
+	delete(stub.cards, "fresh")
+	delete(stub.cards, "corrupt")
 
 	// Store failures are answered without the store's own text.
 	stub.saveErr = errors.New("disk /secret/path full")
@@ -196,15 +217,26 @@ func TestLocalProjectCardsReadSelectedBranch(t *testing.T) {
 	_, err = LocalProjectCard(ctx, dto.ProjectItemRef{ProjectRef: ref, ID: "flat"}, "")
 	assert.Error(t, err)
 
-	// A stored id that disagrees with the path, unknown keys and broken JSON fail closed.
+	// A stored id that disagrees with the path and unknown keys fail the single read,
+	// but the list skips them and keeps the valid cards.
 	write("cards/liar/card.json", `{"id":"other","title":"T"}`)
 	_, err = LocalProjectCard(ctx, dto.ProjectItemRef{ProjectRef: ref, ID: "liar"}, branch)
 	assert.Error(t, err)
 	write("cards/extra/card.json", `{"title":"T","unknown":1}`)
 	_, err = LocalProjectCard(ctx, dto.ProjectItemRef{ProjectRef: ref, ID: "extra"}, branch)
 	assert.Error(t, err)
-	_, err = LocalProjectCards(ctx, ref, branch)
-	assert.ErrorContains(t, err, "cards of project")
+	write("cards/untitled/card.json", `{"title":"","widget":{"name":"text"}}`)
+	write("cards/a.b/card.json", strings.Replace(body, "%s", "Dotted", 1))
+	write("cards/stray.dot.card.json", strings.Replace(body, "%s", "Dotted flat", 1))
+	_, err = LocalProjectCard(ctx, dto.ProjectItemRef{ProjectRef: ref, ID: "a.b"}, branch)
+	assert.Error(t, err, "a dotted id violates the card id pattern")
+	briefs, err = LocalProjectCards(ctx, ref, branch)
+	require.NoError(t, err)
+	ids = nil
+	for _, b := range briefs {
+		ids = append(ids, b.ID)
+	}
+	assert.Equal(t, []string{"both", "flat", "folder"}, ids)
 }
 
 func TestLocalProjectCardsFailClosed(t *testing.T) {
@@ -221,11 +253,12 @@ func TestLocalProjectCardsFailClosed(t *testing.T) {
 	assert.Error(t, err)
 	require.NoError(t, os.Remove(filepath.Join(dir, "cards")))
 
-	// A file name that is no valid ID is refused, not skipped.
+	// A file name that is no valid ID is skipped, not fatal.
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "cards"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "cards", "bad id.card.json"), []byte(`{}`), 0o644))
-	_, err = LocalProjectCards(ctx, ref, branch)
-	assert.Error(t, err)
+	briefs, err := LocalProjectCards(ctx, ref, branch)
+	require.NoError(t, err)
+	assert.Empty(t, briefs)
 	require.NoError(t, os.Remove(filepath.Join(dir, "cards", "bad id.card.json")))
 
 	// A file over the read bound is refused.

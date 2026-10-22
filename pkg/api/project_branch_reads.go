@@ -141,7 +141,7 @@ func LocalProjectCards(ctx context.Context, ref dto.ProjectRef, branch string) (
 // LocalProjectCard returns a full card from the selected current branch.
 func LocalProjectCard(ctx context.Context, ref dto.ProjectItemRef, branch string) (*datatug.Card, error) {
 	value, err := withCurrentBranchRead(ctx, ref.ProjectRef, branch, func(reader *qualifiedProjectReader) (any, error) {
-		if err := validateProjectItem(ref.ProjectID, cardIDField, ref.ID); err != nil {
+		if err := validateCardItem(ref.ProjectID, ref.ID); err != nil {
 			return nil, err
 		}
 		card, err := reader.readQualifiedCard(ref.ID)

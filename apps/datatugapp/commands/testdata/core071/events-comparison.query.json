@@ -1,0 +1,127 @@
+{
+  "createdAt": "2026-10-22T05:14:16Z",
+  "id": "events-comparison",
+  "title": "Request processing comparison",
+  "type": "SQL",
+  "connectionId": "shipping-working-copy",
+  "purpose": "Read deterministic synthetic shipping application records; requires an independently admitted isolated source binding.",
+  "parameters": [
+    {
+      "id": "order_id",
+      "type": "integer",
+      "isRequired": true,
+      "meta": {
+        "entity": "Order",
+        "field": "id"
+      }
+    },
+    {
+      "id": "comparison_order_id",
+      "type": "integer",
+      "isRequired": true
+    }
+  ],
+  "recordsets": [
+    {
+      "columns": [
+        {
+          "name": "order_id",
+          "type": "integer"
+        },
+        {
+          "name": "attempt_id",
+          "type": "string"
+        },
+        {
+          "name": "attempt_no",
+          "type": "integer"
+        },
+        {
+          "name": "config_revision",
+          "type": "integer"
+        },
+        {
+          "name": "event_id",
+          "type": "string"
+        },
+        {
+          "name": "sequence",
+          "type": "integer"
+        },
+        {
+          "name": "kind",
+          "type": "string"
+        },
+        {
+          "name": "occurred_at",
+          "type": "string"
+        },
+        {
+          "name": "clock_domain",
+          "type": "string"
+        },
+        {
+          "name": "precision_ms",
+          "type": "integer"
+        },
+        {
+          "name": "elapsed_anchor",
+          "type": "integer"
+        },
+        {
+          "name": "artifact",
+          "type": "string"
+        },
+        {
+          "name": "artifact_sha256",
+          "type": "string"
+        },
+        {
+          "name": "byte_start",
+          "type": "integer"
+        },
+        {
+          "name": "byte_end",
+          "type": "integer"
+        },
+        {
+          "name": "status",
+          "type": "string"
+        },
+        {
+          "name": "evidence_ref",
+          "type": "string"
+        },
+        {
+          "name": "source_generation",
+          "type": "string"
+        },
+        {
+          "name": "source_collection",
+          "type": "string"
+        },
+        {
+          "name": "source_record_key",
+          "type": "string"
+        }
+      ]
+    }
+  ],
+  "comparison": {
+    "kind": "pair",
+    "primaryInput": "order_id",
+    "controlInput": "comparison_order_id",
+    "projection": {
+      "memberColumn": "order_id",
+      "observationColumn": "event_id",
+      "laneColumn": "attempt_id",
+      "eventColumn": "kind",
+      "sequenceColumn": "sequence",
+      "timeColumn": "occurred_at",
+      "clockDomainColumn": "clock_domain",
+      "precisionColumn": "precision_ms",
+      "statusColumn": "status",
+      "anchorColumn": "elapsed_anchor"
+    }
+  }
+}

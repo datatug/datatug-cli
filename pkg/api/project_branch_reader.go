@@ -365,3 +365,57 @@ func readQualifiedEnvironment(reader *qualifiedProjectReader, id string) (*datat
 	env.SetID(id)
 	return env, selected, nil
 }
+
+// readQualifiedCard reads cards/<id>/card.json, or the flat cards/<id>.card.json;
+// the folder form wins when both exist.
+func (r *qualifiedProjectReader) readQualifiedCard(id string) (*datatug.Card, error) {
+	if err := ValidateIdentifier("card", id); err != nil {
+		return nil, err
+	}
+	for _, name := range []string{
+		path.Join(storage.CardsFolder, id, storage.CardFileSuffix+".json"),
+		path.Join(storage.CardsFolder, storage.JsonFileName(id, storage.CardFileSuffix)),
+	} {
+		body, err := readQualifiedOptionalFile(r, name)
+		if err != nil {
+			return nil, err
+		}
+		if body == nil {
+			continue
+		}
+		if err = validateQualifiedStoredID(body, id, "card"); err != nil {
+			return nil, err
+		}
+		card := new(datatug.Card)
+		if err = json.Unmarshal(body, card); err != nil {
+			return nil, err
+		}
+		card.SetID(id)
+		return card, nil
+	}
+	return nil, fs.ErrNotExist
+}
+
+func readQualifiedCards(reader *qualifiedProjectReader) (datatug.Cards, error) {
+	entries, err := reader.dirEntries(storage.CardsFolder)
+	if err != nil {
+		return nil, err
+	}
+	ids := itemIDs(entries, storage.CardFileSuffix)
+	if len(ids) > maxQualifiedProjectItems {
+		return nil, fmt.Errorf("card list exceeds %d items", maxQualifiedProjectItems)
+	}
+	sort.Strings(ids)
+	cards := make(datatug.Cards, 0, len(ids))
+	for _, id := range ids {
+		card, err := reader.readQualifiedCard(id)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) && isDirectoryEntry(entries, id) {
+				continue
+			}
+			return nil, err
+		}
+		cards = append(cards, card)
+	}
+	return cards, nil
+}

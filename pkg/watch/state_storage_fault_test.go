@@ -69,7 +69,7 @@ func TestWatchStorageDeploymentValidationAndDefaults(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	if s.config.LeaseDuration != 30*time.Second || s.config.RunnerTTL != 90*time.Second || s.config.ExecutionTimeout != 2*time.Minute || s.config.MaxAttempts != 3 || s.config.HistoryLimit != 1000 || s.now().IsZero() {
 		t.Fatal("deployment defaults unavailable", s.config)
 	}

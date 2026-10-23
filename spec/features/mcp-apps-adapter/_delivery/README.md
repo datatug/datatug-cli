@@ -83,7 +83,7 @@ The parent's [actual deployment and live acceptance receipt](website-live-accept
 
 **Website full post-merge CI run40039403748 was still in_progress**, with no conclusion in that receipt. Its deployment jobs and candidate CI successes do not imply that this separate full run passed. The parent is awaiting the final check before final cleanup. Retained worktrees are for required evidence/lifecycle publication and final checks.
 
-CLI main subsequently advanced to `4e30fd76afdc9c51bb14242e0ab17b804dd212b9`; the [incoming CLI review](review-cli-incoming-4e30fd76.md) verifies all54 reviewed file hashes unchanged. [Go CI for that exact head](integration-4e30fd76-ci.json) passed; its later automatic release remains pending and is not claimed passed. Public v0.112.0 and its pinned harness source acceptance above remain the tested distribution identities. The [initial evidence review](review-delivery-evidence-r1.md) preserves its earlier43-file scope and then-pending website status unchanged.
+CLI main subsequently advanced to `4e30fd76afdc9c51bb14242e0ab17b804dd212b9`; the [incoming CLI review](review-cli-incoming-4e30fd76.md) verifies all54 reviewed file hashes unchanged. [Go CI for that exact head](integration-4e30fd76-ci.json) passed; its automatic release and supplemental v0.113.0 acceptance subsequently passed as recorded below. Public v0.112.0 remains the literal contributor recipe acceptance identity. The [initial evidence review](review-delivery-evidence-r1.md) preserves its earlier43-file scope and then-pending website status unchanged.
 
 Additional portable website records:
 
@@ -100,11 +100,24 @@ Additional portable website records:
 
 ## Newer CLI integration CI
 
-The retained task checkout advanced to already-landed main `4e30fd76afdc9c51bb14242e0ab17b804dd212b9` after independent integration review confirmed all54 historical reviewed file hashes unchanged. [Exact-main Go CI](integration-4e30fd76-ci.json) passed at that commit. Its later automatic release is separate from the accepted and documented v0.112.0 binary; no newer artifact acceptance is inferred here.
+The retained task checkout advanced to already-landed main `4e30fd76afdc9c51bb14242e0ab17b804dd212b9` after independent integration review confirmed all54 historical reviewed file hashes unchanged. [Exact-main Go CI](integration-4e30fd76-ci.json) passed at that commit. Its later automatic release is separate from the documented v0.112.0 literal recipe acceptance; actual supplemental v0.113.0 acceptance follows below.
+
+## Supplemental current CLI release acceptance
+
+Public [v0.113.0](https://github.com/datatug/datatug/releases/tag/v0.113.0) binds through downloaded binary build info and private CLI tag to source `4e30fd76afdc9c51bb14242e0ab17b804dd212b9`. Exact Go CI and automatic release passed. Native archive checksum, strict signature and Notarized Developer ID assessment passed. The downloaded binary passed all17 maintained official-host browser scenarios and real plain MCP acceptance, with fixture `08cc4d367e33cca82269bff54dc8a35b242e9937` and harness `2bd815ece0a2bc37c99de10862b06c877bc37b80`. Embedded HTML remains unchanged.
+
+This supplemental run used the maintained browser command; the literal documented recipe was executed against v0.112.0. Neither the installed CLI nor package-manager publication was changed or claimed. Independent review found zero open findings. The batch4 second review records the evidence checkpoint review separately.
+
+| Evidence | SHA256 |
+|---|---|
+| [release-v0.113.0-complete-acceptance.json](release-v0.113.0-complete-acceptance.json) | `56488205fcbd87cb0210e5bc3e469bbc8a03536a6633d48b63b44edde1ee0286` |
+| [release-v0.113.0-browser-receipt.json](release-v0.113.0-browser-receipt.json) | `4411489f8b95cededa11738a4812e4b0def127d7668ce3214aa7342d0a16dcb1` |
+| [review-public-integration-v0.113.0.md](review-public-integration-v0.113.0.md) | `81f65f5f0dcaacc972455a3c0e802256c0a7f61dbeac0ce8bf80c0fc205c353c` |
+| [review-batch4-r2.md](review-batch4-r2.md) | `bd2a92f5e0991947c5fd1f40e42c6a61ecf4bd5cb0c5d684dbac7a55afa6940f` |
 
 ## Open Questions
 
-Final website full post-merge CI and the later CLI4e release conclusion remain with the parent owner; exact CLI4e Go CI has passed. No task/feature/plan transition or cleanup completion is asserted by this evidence update. The [independent website live-evidence review](review-website-live-r1.md) personally verified the three deploys and11 live page receipts, preserved the pending post-merge CI distinction, and reported zero findings.
+Final website full post-merge CI remains with the parent owner. Exact CLI4e Go CI, automatic release and supplemental v0.113.0 acceptance passed. No task/feature/plan transition or cleanup completion is asserted by this evidence update. The [independent website live-evidence review](review-website-live-r1.md) personally verified the three deploys and11 live page receipts, preserved the pending post-merge CI distinction, and reported zero findings.
 
 ---
 *This document follows the https://specscore.md/features-index-specification*

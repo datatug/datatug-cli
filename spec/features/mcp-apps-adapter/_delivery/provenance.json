@@ -300,6 +300,30 @@
       "originalPath": "/private/tmp/mcp-apps-cli-main-4e30fd76-ci.json",
       "bytes": 209,
       "sha256": "41739ade87718ea7c113c058c538807c2735edfc7779dc45e800b9fe06c9286b"
+    },
+    {
+      "file": "release-v0.113.0-complete-acceptance.json",
+      "originalPath": "/private/tmp/datatug-mcp-apps-release-v0.113.0/complete-acceptance.json",
+      "bytes": 3543,
+      "sha256": "56488205fcbd87cb0210e5bc3e469bbc8a03536a6633d48b63b44edde1ee0286"
+    },
+    {
+      "file": "release-v0.113.0-browser-receipt.json",
+      "originalPath": "/Users/alex/.codex/visualizations/2026/10/23/01a16885-2371-7fb1-bc8d-fdbeb55e9dbc/mcp-apps-release-v0-113-0-browser-receipt.json",
+      "bytes": 3761,
+      "sha256": "4411489f8b95cededa11738a4812e4b0def127d7668ce3214aa7342d0a16dcb1"
+    },
+    {
+      "file": "review-public-integration-v0.113.0.md",
+      "originalPath": "/private/tmp/mcp-apps-review-public-integration-v0.113.0.md",
+      "bytes": 2026,
+      "sha256": "81f65f5f0dcaacc972455a3c0e802256c0a7f61dbeac0ce8bf80c0fc205c353c"
+    },
+    {
+      "file": "review-batch4-r2.md",
+      "originalPath": "/private/tmp/mcp-apps-review-batch4-r2-20261023.md",
+      "bytes": 886,
+      "sha256": "bd2a92f5e0991947c5fd1f40e42c6a61ecf4bd5cb0c5d684dbac7a55afa6940f"
     }
   ]
 }

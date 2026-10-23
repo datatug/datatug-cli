@@ -327,4 +327,9 @@ SQL
 	esac
 done
 if [ "$failures" -ne 0 ]; then echo "$failures dataset(s) failed" >&2; exit 1; fi
+
+# The scan and query journey of an Oracle source on the same server: each test makes a user (a schema) of its own.
+# shellcheck source=scripts/lib/source-journey.sh
+. scripts/lib/source-journey.sh
+run_source_journey DATATUG_TEST_ORACLE_URL "oracle://system:$password@127.0.0.1:$port/$service" "$work" TestOracleScanAndQueryJourney
 echo "Oracle journey passed"

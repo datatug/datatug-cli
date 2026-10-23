@@ -2,6 +2,7 @@ package dbcopy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"net"
@@ -27,9 +28,9 @@ import (
 // PostgreSQL one: mysql://user:password@host:port/database, oracle://user:password@host:port/service
 // and sqlserver://user:password@host:port/database. The URL is read from an environment variable
 // ("env:NAME"), and a project names the variable and never the URL (see PostgresDescriptor, which they
-// share). DataTug only reads one: a MySQL session is opened with transaction_read_only on, and a records
-// read of an Oracle source runs in a READ ONLY transaction (see oracleReads). SQL Server has no read-only
-// session, so a SQL Server source relies on DataTug sending SELECT text only and on a read-only login.
+// share). DataTug only reads one: a MySQL session is opened with transaction_read_only on, a records read
+// of an Oracle source runs in a READ ONLY transaction, and one of a SQL Server source, which has no
+// read-only session, in a transaction that is always rolled back (see transactionReads).
 // Opening one for a read is behind a preview switch of its own (MySQLPreviewEnv, OraclePreviewEnv,
 // SQLServerPreviewEnv), as PostgreSQL's is; a schema scan is not.
 
@@ -322,23 +323,45 @@ func asSchemaScanDB[T SchemaScanDB](db T, err error) (SchemaScanDB, error) {
 	return db, nil
 }
 
-// oracleReads is an Oracle database whose records reads each run in a READ ONLY transaction
-// (dalgo2oracle turns RunReadonlyTransaction into SET TRANSACTION READ ONLY): the server refuses a
-// write that a query's text might hold. The rows are read in full inside the transaction and handed
-// over from memory, because the transaction ends when the read returns.
-type oracleReads struct{ SchemaScanDB }
+// transactionReads is a database whose records reads each run in a transaction that cannot keep a
+// write a query's text might hold. For Oracle it is a READ ONLY transaction (dalgo2oracle turns
+// RunReadonlyTransaction into SET TRANSACTION READ ONLY), which the server refuses to write in. SQL
+// Server has none, so for it (rollBack) the read runs in a transaction that is always rolled back:
+// a write, and DDL, which SQL Server runs inside a transaction, is undone. The rows are read in full
+// inside the transaction and handed over from memory, because the transaction ends when the read returns.
+type transactionReads struct {
+	SchemaScanDB
+	rollBack bool
+}
 
-// ExecuteQueryToRecordsReader runs query in a READ ONLY transaction (see oracleReads).
-func (o oracleReads) ExecuteQueryToRecordsReader(ctx context.Context, query dal.Query) (dal.RecordsReader, error) {
+// errRolledBack is what the worker of a rolled-back read returns to end its transaction with a rollback.
+var errRolledBack = errors.New("the read is rolled back")
+
+// ExecuteQueryToRecordsReader runs query in a transaction that keeps no write (see transactionReads).
+func (r transactionReads) ExecuteQueryToRecordsReader(ctx context.Context, query dal.Query) (dal.RecordsReader, error) {
 	var records []dalrecord.Record
-	err := o.RunReadonlyTransaction(ctx, func(ctx context.Context, tx dal.ReadTransaction) error {
+	read := func(ctx context.Context, tx dal.QueryExecutor) error {
 		reader, err := tx.ExecuteQueryToRecordsReader(ctx, query)
 		if err != nil {
 			return err
 		}
 		records, err = dal.ReadAllToRecords(ctx, reader)
 		return err
-	})
+	}
+	var err error
+	if r.rollBack {
+		err = r.RunReadwriteTransaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
+			if err := read(ctx, tx); err != nil {
+				return err
+			}
+			return errRolledBack
+		})
+		if errors.Is(err, errRolledBack) {
+			err = nil
+		}
+	} else {
+		err = r.RunReadonlyTransaction(ctx, func(ctx context.Context, tx dal.ReadTransaction) error { return read(ctx, tx) })
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -387,9 +410,13 @@ func (r BackendRef) openServerDatabase(ctx context.Context, engine serverEngine)
 		if err != nil {
 			return nil, err
 		}
-		return oracleReads{db}, nil
+		return transactionReads{SchemaScanDB: db}, nil
 	}
-	return newSQLServerDatabase(ctx, sqlServerURL(parsed))
+	db, err := newSQLServerDatabase(ctx, sqlServerURL(parsed))
+	if err != nil {
+		return nil, err
+	}
+	return transactionReads{SchemaScanDB: db, rollBack: true}, nil
 }
 
 // openServer is openSource's case for a MySQL or an Oracle source: the preview switch first, then a

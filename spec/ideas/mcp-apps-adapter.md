@@ -1,11 +1,11 @@
 ---
 format: https://specscore.md/idea-specification
-status: Specified
+status: Implementing
 ---
 
 # Idea: Private MCP Apps saved query explorer
 
-**Status:** Specified
+**Status:** Implementing
 **Date:** 2026-10-23
 **Owner:** alex
 **Promotes To:** mcp-apps-adapter

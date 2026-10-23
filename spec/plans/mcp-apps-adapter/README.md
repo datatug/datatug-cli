@@ -1,11 +1,11 @@
 ---
 format: https://specscore.md/plan-specification
-status: Approved
+status: Executing
 ---
 
 # Plan: Mcp Apps Adapter
 
-**Status:** Approved
+**Status:** Executing
 **Source Feature:** mcp-apps-adapter
 **Date:** 2026-10-23
 **Owner:** alex
@@ -26,27 +26,34 @@ Begin with the small upstream precision dependency, then immutable session proto
 ### Task 1: Review upstream precision dependency
 
 **Verifies:** mcp-apps-adapter#ac:precision-reuse
-**Status:** planning
+**Id:** task-1
+**Status:** complete
+**Implemented-by:** datatug/ai-plugin@d4ff0c5beac346eb8ead527144630978c5052ff5
 
 In ai-plugin lib/rows.js replace lossy noninteger Number comparison with exact decimal comparison; preserve stable/null semantics. Run precision/parity fixtures, independently review, and publish the approved upstream source through parent WB ownership before pinning its exact license/path/commit/hash in CLI vendor refresh.
 
 ### Task 2: Project protocol per session
 
 **Verifies:** mcp-apps-adapter#ac:negotiation, mcp-apps-adapter#ac:privacy
-**Status:** planning
+**Id:** task-2
+**Status:** complete
+**Evidence:** /private/tmp/mcp-apps-review-task2-r1-20261023.md
 
 In pkg/mcpserver add receiving middleware using actual GoSDK ServerSession InitializeParams and ID for immutable per-session tools/list projection and tools/call guards. Snapshot first real stdio initialization once, reject later per-request/sessionless capability mode flips in either direction and test bound scope remains unchanged. Use explicit private envelopes and static resource metadata, test two simultaneous capabilities and distinct UI-only secret sentinel absence (initial model-authored arguments are already visible); existing plain MCP tests remain unchanged.
 
 ### Task 3: Retain authorized bounded capabilities
 
 **Verifies:** mcp-apps-adapter#ac:binding, mcp-apps-adapter#ac:bounds, mcp-apps-adapter#ac:execution
-**Status:** planning
+**Id:** task-3
+**Status:** complete
+**Evidence:** /private/tmp/mcp-apps-review-task3-r2-20261023.md
 
 Layer memory-only registry over existing saved-query execution and contract validation, with fresh authority/definition checks and specified expiry/size/concurrency limits. Add controlled-clock revocation/replay/overflow tests plus daemon auth/grant/write/parameter negatives without new SQL endpoints.
 
 ### Task 4: Build embedded official App
 
 **Verifies:** mcp-apps-adapter#ac:precision-reuse, mcp-apps-adapter#ac:views, mcp-apps-adapter#ac:ux, mcp-apps-adapter#ac:sdk-offline
+**Id:** task-4
 **Status:** planning
 
 Build browser renderer with locked published official SDK, exact upstream helpers, deterministic bundle and go:embed assets. Implement automatic five-view display, precise DTO, sorting/paging/record/history/copy/parameters, single toolbar and all accessible loading/error states; record vendor/build provenance.
@@ -54,6 +61,7 @@ Build browser renderer with locked published official SDK, exact upstream helper
 ### Task 5: Prove real official-host journey
 
 **Verifies:** mcp-apps-adapter#ac:privacy, mcp-apps-adapter#ac:execution, mcp-apps-adapter#ac:precision-reuse, mcp-apps-adapter#ac:views, mcp-apps-adapter#ac:ux, mcp-apps-adapter#ac:sdk-offline
+**Id:** task-5
 **Status:** planning
 
 Use official App+AppBridge/reference sandbox with explicit capability and privacy-safe logging, actual child CLI stdio/authenticated serve/committed Chinook; perform automatic render and parameter rerun. Exercise origin/source/network negatives, transcript sentinels, precision copy/sort and narrow/wide light/dark keyboard states; fixtures own and clean all processes/temp files.
@@ -61,6 +69,7 @@ Use official App+AppBridge/reference sandbox with explicit capability and privac
 ### Task 6: Review and deliver public binary
 
 **Verifies:** mcp-apps-adapter#ac:delivery, mcp-apps-adapter#ac:sdk-offline
+**Id:** task-6
 **Status:** planning
 
 Parent drives independent implementation review, exact-head CI and WB landing using the repository datatug-release delegate/automatic release convention, never manual tags. Verify the exact downloaded public binary offline/no Node with the same child and official-host browser acceptance, update accurate tested-host/setup/privacy/SQLite website docs and clean task worktrees after receipts.

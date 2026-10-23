@@ -151,4 +151,9 @@ for ds in $datasets; do
 	{ grep -o '"kind": "[a-z-]*"' "$work/$ds.report.json" || true; } | sort | uniq -c | sed 's/"kind": //; s/^/    warning /'
 done
 if [ "$failures" -ne 0 ]; then echo "$failures dataset(s) failed" >&2; exit 1; fi
+
+# The scan and query journey of a MySQL source on the same server: each test makes a database and a user of its own.
+# shellcheck source=scripts/lib/source-journey.sh
+. scripts/lib/source-journey.sh
+run_source_journey DATATUG_TEST_MYSQL_URL "mysql://root:$password@127.0.0.1:$port/mysql" "$work" TestMySQLScanAndQueryJourney
 echo "MySQL journey passed"

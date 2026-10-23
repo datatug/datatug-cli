@@ -192,11 +192,12 @@ func TestItemTagsDocumentRefusals(t *testing.T) {
 				require.NoError(t, os.WriteFile(name, []byte(`{"id":"sales","tags":null}`), 0o600))
 			case "invalid-server":
 				s.Kind = "dbserver"
-				s.Driver = "mysql"
-				s.ID = "mysql:"
-				name = filepath.Join(dir, "dbs", "mysql", s.ID+".dbserver.json")
+				// A SQLite server has no host: one that names a host is not a valid server.
+				s.Driver = "sqlite3"
+				s.ID = "sqlite3:h"
+				name = filepath.Join(dir, "dbs", "sqlite3", s.ID+".dbserver.json")
 				require.NoError(t, os.MkdirAll(filepath.Dir(name), 0o700))
-				require.NoError(t, os.WriteFile(name, []byte(`{"id":"mysql:","server":{"driver":"mysql"}}`), 0o600))
+				require.NoError(t, os.WriteFile(name, []byte(`{"id":"sqlite3:h","server":{"driver":"sqlite3","host":"h"}}`), 0o600))
 			}
 			got, err := LocalProjectItemTags(t.Context(), s)
 			if mode == "missing-tags" || mode == "null-tags" {

@@ -225,4 +225,9 @@ for ds in $datasets; do
 	esac
 done
 if [ "$failures" -ne 0 ]; then echo "$failures dataset(s) failed" >&2; exit 1; fi
+
+# The scan and query journey of a SQL Server source on the same server: each test makes a database and a login of its own.
+# shellcheck source=scripts/lib/source-journey.sh
+. scripts/lib/source-journey.sh
+run_source_journey DATATUG_TEST_MSSQL_URL "sqlserver://sa:$password@127.0.0.1:$port/master?TrustServerCertificate=true" "$work" TestSQLServerScanAndQueryJourney
 echo "SQL Server journey passed"

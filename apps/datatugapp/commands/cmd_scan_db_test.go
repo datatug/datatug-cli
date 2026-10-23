@@ -36,16 +36,16 @@ func TestScanConnectionParams_Sqlite3WithPathSucceeds(t *testing.T) {
 	assert.Equal(t, "chinook", params.Catalog())
 }
 
-func TestScanConnectionParams_NoHostReturnsErrorNotPanic(t *testing.T) {
-	v := &scanDbCommand{Driver: "sqlserver", Database: "demo"} // Host empty
+func TestScanConnectionParams_SQLServerNeedsDSNEnv(t *testing.T) {
+	v := &scanDbCommand{Driver: "sqlserver", Database: "demo"}
 	params, err := v.connectionParams()
-	require.Error(t, err)
+	assert.EqualError(t, err, "scanning a sqlserver database requires --dsn-env NAME, the environment variable that holds the connection URL (sqlserver://user:password@host:1433/database)")
 	assert.Nil(t, params)
 }
 
-func TestScanConnectionParams_SqlServerWithHostSucceeds(t *testing.T) {
-	v := &scanDbCommand{Driver: "sqlserver", Host: "localhost", Database: "demo", Port: 1433}
+func TestScanConnectionParams_SQLiteNeedsAPath(t *testing.T) {
+	v := &scanDbCommand{Driver: "sqlite3", Database: "demo"}
 	params, err := v.connectionParams()
-	require.NoError(t, err)
-	assert.NotNil(t, params)
+	assert.EqualError(t, err, "scanning a sqlite3 database requires --path to the database file")
+	assert.Nil(t, params)
 }

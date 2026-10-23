@@ -189,13 +189,22 @@ func (*provider) IsBulkProvider() bool {
 }
 
 // ref names a table the way the scanner does: in the given schema, or in the
-// reader's own when none is given.
-func (*provider) ref(schema, table string) *dal.CollectionRef {
+// reader's own when none is given. A reader of one schema (not a SchemaLister) is
+// asked about its own schema by an unqualified reference: the provider's schema is
+// then the name the scan reports it under ("default" for MySQL, Oracle and SQL
+// Server), which is not the server's name for it.
+func (p *provider) ref(schema, table string) *dal.CollectionRef {
 	ref := dal.NewRootCollectionRef(table, "")
-	if schema != "" {
+	if schema != "" && (schema != p.schema || p.listsSchemas()) {
 		ref = dal.NewQualifiedRootCollectionRef(schema, table, "")
 	}
 	return &ref
+}
+
+// listsSchemas tells whether the reader holds more than one schema (SchemaLister).
+func (p *provider) listsSchemas() bool {
+	_, ok := p.reader.(SchemaLister)
+	return ok
 }
 
 // schemaOf is the schema a reference is read from.

@@ -34,7 +34,7 @@ func TestQuery_EnvSourceResolvesTheVariable(t *testing.T) {
 }
 
 func TestQuery_EnvSourceErrorsNameTheVariableOnly(t *testing.T) {
-	t.Setenv("DT01_QUERY_BAD", "mysql://alice:"+sourceSecret+"@db.example.com/shop")
+	t.Setenv("DT01_QUERY_BAD", "db2://alice:"+sourceSecret+"@db.example.com/shop")
 	for _, tc := range []struct {
 		db      string
 		wantMsg string

@@ -14,11 +14,14 @@ import (
 
 type serveRuntimeSettings struct {
 	Server struct {
-		IncidentStores    []incidentstore.ConfiguredStore      `yaml:"incidentStores"`
-		EvidenceDir       string                               `yaml:"evidenceDir"`
-		SnapshotByteCap   int                                  `yaml:"snapshotByteCap"`
-		SnapshotRetention time.Duration                        `yaml:"snapshotRetention"`
-		SnapshotPolicies  map[string]api.SnapshotProjectPolicy `yaml:"snapshotPolicies"`
+		IncidentStores              []incidentstore.ConfiguredStore          `yaml:"incidentStores"`
+		EvidenceDir                 string                                   `yaml:"evidenceDir"`
+		SnapshotByteCap             int                                      `yaml:"snapshotByteCap"`
+		SnapshotRetention           time.Duration                            `yaml:"snapshotRetention"`
+		SnapshotPolicies            map[string]api.SnapshotProjectPolicy     `yaml:"snapshotPolicies"`
+		EnvironmentMetadataPolicies map[string]api.EnvironmentMetadataPolicy `yaml:"environmentMetadataPolicies"`
+		EnvironmentPrivateDir       string                                   `yaml:"environmentPrivateDir"`
+		EnvironmentAuthorityID      string                                   `yaml:"environmentAuthorityId"`
 	} `yaml:"server"`
 }
 

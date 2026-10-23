@@ -38,8 +38,8 @@ func corsRequest(t *testing.T, method, url, origin, token, acrm string) *http.Re
 // Every answer to a page of a listed origin carries the same CORS headers as a success: the
 // router's own 404 and 405, the 401 of a request with no token, and the preflight of a path no
 // route serves (which is answered as any other preflight, so the browser sends the real request
-// and the page reads its 404). The app tells a released agent by such a 404
-// (GET /datatug/environments/state); with no CORS header it saw status 0 and could not.
+// and the page reads its 404). The app tells a released agent by such a 404 (an agent before
+// GET /datatug/environments/state); with no CORS header it saw status 0 and could not.
 func TestServeHTTP_CORS_ErrorAnswersToAListedOrigin(t *testing.T) {
 	base, secret := accessServer(t)
 	token := agentaccess.SessionToken(secret)
@@ -48,11 +48,11 @@ func TestServeHTTP_CORS_ErrorAnswersToAListedOrigin(t *testing.T) {
 		status                          int
 	}{
 		{"success", http.MethodGet, "/datatug/ping", token, "", http.StatusOK},
-		{"unknown route", http.MethodGet, "/datatug/environments/state", token, "", http.StatusNotFound},
+		{"unknown route", http.MethodGet, "/datatug/no-such-route", token, "", http.StatusNotFound},
 		{"no token", http.MethodGet, "/datatug/environments/state", "", "", http.StatusUnauthorized},
 		{"wrong method", http.MethodDelete, "/datatug/ping", token, "", http.StatusMethodNotAllowed},
 		{"wrong method, no token", http.MethodDelete, "/datatug/ping", "", "", http.StatusUnauthorized},
-		{"preflight of an unknown route", http.MethodOptions, "/datatug/environments/state", "", http.MethodGet, http.StatusNoContent},
+		{"preflight of an unknown route", http.MethodOptions, "/datatug/no-such-route", "", http.MethodGet, http.StatusNoContent},
 		{"preflight of a known route", http.MethodOptions, "/datatug/ping", "", http.MethodGet, http.StatusNoContent},
 		{"incomplete preflight of an unknown route", http.MethodOptions, "/datatug/nope", "", "", http.StatusBadRequest},
 	}
@@ -101,7 +101,7 @@ func TestServeHTTP_CORS_NoHeaderForAnOriginNotOnTheList(t *testing.T) {
 			}
 		}
 	}
-	resp := corsRequest(t, http.MethodGet, base+"/datatug/environments/state", "", token, "")
+	resp := corsRequest(t, http.MethodGet, base+"/datatug/no-such-route", "", token, "")
 	if resp.StatusCode != http.StatusNotFound || resp.Header.Get("Access-Control-Allow-Origin") != "" {
 		t.Errorf("no Origin: status=%d ACAO=%q, want 404 and none", resp.StatusCode, resp.Header.Get("Access-Control-Allow-Origin"))
 	}

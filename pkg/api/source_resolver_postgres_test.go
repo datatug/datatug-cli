@@ -97,9 +97,9 @@ func TestSourceURLFromCatalog_PostgresRefusesWhatItCannotTrust(t *testing.T) {
 }
 
 func TestSourceURLFromCatalog_UnsupportedDriverListsPostgres(t *testing.T) {
-	_, err := sourceURLFromCatalog(datatug.DbCatalog{DbCatalogBase: datatug.DbCatalogBase{Driver: "oracle", Path: "/a"}}, "")
+	_, err := sourceURLFromCatalog(datatug.DbCatalog{DbCatalogBase: datatug.DbCatalogBase{Driver: "sqlserver", Path: "/a"}}, "")
 	require.Error(t, err)
-	for _, want := range []string{`"oracle"`, "sqlite3", "ingitdb", "openvaultdb", "postgres"} {
+	for _, want := range []string{`"sqlserver"`, "sqlite3", "ingitdb", "openvaultdb", "postgres"} {
 		assert.Contains(t, err.Error(), want)
 	}
 }

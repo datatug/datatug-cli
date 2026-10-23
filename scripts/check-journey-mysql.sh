@@ -151,4 +151,22 @@ for ds in $datasets; do
 	{ grep -o '"kind": "[a-z-]*"' "$work/$ds.report.json" || true; } | sort | uniq -c | sed 's/"kind": //; s/^/    warning /'
 done
 if [ "$failures" -ne 0 ]; then echo "$failures dataset(s) failed" >&2; exit 1; fi
+
+# The scan and query journey of a MySQL source (apps/datatugapp/commands/server_journey_mysql_real_test.go) on the
+# same server: each test makes a database and a user of its own. `go test` reports a skip as success, so the output
+# is read: any SKIP, or a missing PASS line for a required test, fails the job.
+source_tests=(TestMySQLScanAndQueryJourney)
+out="$work/source.journey.txt"
+status=0
+DATATUG_TEST_MYSQL_URL="mysql://root:$password@127.0.0.1:$port/mysql" \
+	go test -count=1 -v -run "^($(IFS='|'; echo "${source_tests[*]}"))\$" ./apps/datatugapp/commands/ >"$out" 2>&1 || status=$?
+if [ "$status" -ne 0 ] || grep -q -- '--- SKIP' "$out"; then
+	cat "$out" >&2
+	echo "the MySQL source journey failed or skipped" >&2
+	exit 1
+fi
+for test_name in "${source_tests[@]}"; do
+	grep -q -- "^--- PASS: $test_name " "$out" || { cat "$out" >&2; echo "no PASS line for $test_name" >&2; exit 1; }
+done
+echo "MySQL source journey (scan, query run, saved queries) passed"
 echo "MySQL journey passed"

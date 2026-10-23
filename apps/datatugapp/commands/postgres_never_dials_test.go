@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"os"
 	"testing"
 
@@ -17,6 +18,16 @@ import (
 func init() {
 	dbcopy.SetPostgresOpenerForTest(neverDialPostgres)
 	_ = os.Unsetenv(dbcopy.PostgresPreviewEnv)
+	dbcopy.SetServerOpenersForTest(dbcopy.ServerOpeners{
+		MySQL: func(string) (dbcopy.SchemaScanDB, error) {
+			panic("a test of a command opened a MySQL database for real")
+		},
+		Oracle: func(context.Context, string) (dbcopy.SchemaScanDB, error) {
+			panic("a test of a command opened an Oracle database for real")
+		},
+	})
+	_ = os.Unsetenv(dbcopy.MySQLPreviewEnv)
+	_ = os.Unsetenv(dbcopy.OraclePreviewEnv)
 }
 
 // neverDialPostgres panics: a test that reaches it did not stand in, and the next thing the real constructor

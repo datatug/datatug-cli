@@ -21,5 +21,8 @@ func TestMain(m *testing.M) {
 	newPostgresDatabase = neverDialPostgres
 	newPostgresDatabaseWithOptions = neverDialPostgresWithOptions
 	_ = os.Unsetenv(PostgresPreviewEnv)
+	newMySQLDatabase, newOracleDatabase = neverDialMySQL, neverDialOracle
+	_ = os.Unsetenv(MySQLPreviewEnv)
+	_ = os.Unsetenv(OraclePreviewEnv)
 	os.Exit(hermetictest.Main(m))
 }

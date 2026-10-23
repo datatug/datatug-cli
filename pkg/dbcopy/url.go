@@ -42,7 +42,7 @@ import (
 
 // supportedSchemes is the MVP-supported scheme list, used both for dispatch
 // and to construct the error message for REQ:unknown-scheme-rejected.
-var supportedSchemes = []string{"sqlite", "ingitdb", "postgres", "http", "https", "openvaultdb", "bigquery"}
+var supportedSchemes = []string{"sqlite", "ingitdb", "postgres", "mysql", "oracle", "http", "https", "openvaultdb", "bigquery"}
 
 // SupportedSchemes returns the exact schemes Parse/Open dispatch, in
 // dispatch order. It is the single source of truth other packages should
@@ -216,6 +216,11 @@ func parseEnvSource(rawURL string, lookupEnv func(string) (string, bool)) (Backe
 	}
 	ref, err := parseURL(value)
 	if err != nil {
+		var serverRefusal *serverURLRefusal
+		if errors.As(err, &serverRefusal) {
+			// The same for a MySQL or Oracle URL: a fixed sentence that quotes none of it.
+			return BackendRef{}, fmt.Errorf("environment variable %s does not hold a usable connection URL: %w", name, serverRefusal)
+		}
 		if refusal := postgresURLRefusal(err); refusal != nil {
 			// A fixed sentence about the shape of the URL that quotes none of it, so the
 			// variable's value stays out of the message and the person is still told what to fix.
@@ -290,6 +295,9 @@ func parseURL(rawURL string) (BackendRef, error) {
 			return BackendRef{}, fmt.Errorf("invalid postgres URL: %w", err)
 		}
 		return BackendRef{Scheme: "postgres", Path: path, Raw: display}, nil
+	case "mysql", "oracle":
+		engine, _ := serverEngineOf(scheme)
+		return parseServerSource(engine, rest, display)
 	case "sqlite":
 		return parseSQLite(rawURL, scheme+separator+rest, rest, true)
 	}
@@ -731,6 +739,10 @@ func (r BackendRef) openSource(ctx context.Context, mode openMode) (dal.DB, erro
 	case "postgres":
 		// The preview switch is asked first, inside openPostgres.
 		return r.openPostgres(ctx, mode)
+
+	case "mysql", "oracle":
+		engine, _ := serverEngineOf(r.Scheme)
+		return r.openServer(ctx, engine, mode)
 
 	case "http", "https":
 		var opts []httpsource.Option

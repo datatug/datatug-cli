@@ -380,7 +380,7 @@ func TestResolveProjectSourceURLThatCannotBeResolved(t *testing.T) {
 		require.NoError(t, store.SaveEnvDbCatalog(ctx, "local", "", id, &datatug.DbCatalog{DbCatalogBase: catalog, Schemas: datatug.DbSchemas{}}))
 	}
 	for id, message := range map[string]string{
-		"mssql": "its driver is not one that can be opened (sqlite3 or postgres)",
+		"mssql": "its driver is not one that can be opened (sqlite3, postgres, mysql or oracle)",
 		"url":   "its catalog path or connection descriptor cannot be resolved",
 		"pg":    "its catalog path or connection descriptor cannot be resolved",
 	} {

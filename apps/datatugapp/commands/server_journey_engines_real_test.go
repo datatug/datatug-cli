@@ -313,8 +313,9 @@ func TestSQLServerScanAndQueryJourney(t *testing.T) {
 
 	// A write in a WITH query, or a batch that commits, is refused before it reaches the server.
 	for id, text := range map[string]string{
-		"sneaky-update": "WITH c AS (SELECT 1 AS id) UPDATE customer SET name = 'changed' OUTPUT inserted.id WHERE id IN (SELECT id FROM c)",
-		"sneaky-commit": "SELECT 1 AS id COMMIT UPDATE customer SET name = 'changed' WHERE id = 1",
+		"sneaky-update":  "WITH c AS (SELECT 1 AS id) UPDATE customer SET name = 'changed' OUTPUT inserted.id WHERE id IN (SELECT id FROM c)",
+		"sneaky-commit":  "SELECT 1 AS id COMMIT UPDATE customer SET name = 'changed' WHERE id = 1",
+		"nested-comment": "SELECT 1 AS id /* /* */ ' */ COMMIT UPDATE customer SET name = 'changed' WHERE id = 1 --'",
 	} {
 		writeSavedQuery(t, queries, id, "SQL", text)
 		_, stderr, code := runQuery(t, "", "--project", projectDir, "--query", id, "--env", "local", "--format", "json")

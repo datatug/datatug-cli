@@ -71,8 +71,11 @@ var writeWords = map[string]bool{
 }
 
 // sqlWords returns the words of text, upper case, outside its string literals, quoted names and comments, or the
-// reason it refuses the text: a statement separator (";"), a MySQL comment the server runs ("/*!"), an Oracle
-// quoted literal (q'...'), whose end a simple scan cannot find, or a literal, a name or a comment left open.
+// reason it refuses the text: a statement separator (";"), a MySQL comment the server runs ("/*!"), a comment
+// inside a comment (SQL Server nests them, so where one ends depends on the engine), an Oracle quoted literal
+// (q'...') or a backslash in a MySQL literal (whose ends depend on the server's settings), or a literal, a name
+// or a comment left open. Where the engines differ it follows the one it reads for: MySQL takes "--" for a
+// comment only before blank space, and "#" for one.
 func sqlWords(scheme, text string) (words []string, refusal string) {
 	for i := 0; i < len(text); {
 		c := text[i]
@@ -86,8 +89,11 @@ func sqlWords(scheme, text string) (words []string, refusal string) {
 			if end < 0 {
 				return nil, "a comment that is not closed"
 			}
+			if strings.Contains(text[i+2:i+2+end], "/*") {
+				return nil, "a comment inside a comment"
+			}
 			i += 2 + end + 2
-		case strings.HasPrefix(text[i:], "--") || c == '#' && scheme == "mysql":
+		case strings.HasPrefix(text[i:], "--") && (scheme != "mysql" || i+2 == len(text) || text[i+2] <= ' ') || c == '#' && scheme == "mysql":
 			end := strings.IndexByte(text[i:], '\n')
 			if end < 0 {
 				return words, ""
@@ -98,9 +104,12 @@ func sqlWords(scheme, text string) (words []string, refusal string) {
 			if c == '[' {
 				closing = ']'
 			}
-			end, ok := closingQuote(text, i+1, closing, scheme == "mysql" && c != '`')
+			end, ok := closingQuote(text, i+1, closing)
 			if !ok {
 				return nil, "a string or a name that is not closed"
+			}
+			if scheme == "mysql" && c != '`' && strings.IndexByte(text[i+1:end], '\\') >= 0 {
+				return nil, "a backslash in a MySQL literal"
 			}
 			i = end + 1
 		case isWordRune(rune(c)):
@@ -112,6 +121,9 @@ func sqlWords(scheme, text string) (words []string, refusal string) {
 			if scheme == "oracle" && (word == "Q" || word == "NQ") && i < len(text) && text[i] == '\'' {
 				return nil, "an Oracle quoted literal (q'...')"
 			}
+			if word == "SET" && scheme == "mysql" && len(words) > 0 && words[len(words)-1] == "CHARACTER" {
+				continue // how MySQL names a character set: CAST(x AS CHAR CHARACTER SET utf8mb4)
+			}
 			words = append(words, word)
 		default:
 			i++
@@ -121,12 +133,10 @@ func sqlWords(scheme, text string) (words []string, refusal string) {
 }
 
 // closingQuote is the index of the quote that closes a literal or a name whose text starts at from: a doubled
-// quote is one character of it, and so is a character after a backslash when backslash escapes.
-func closingQuote(text string, from int, quote byte, backslash bool) (int, bool) {
+// quote is one character of it.
+func closingQuote(text string, from int, quote byte) (int, bool) {
 	for i := from; i < len(text); i++ {
 		switch {
-		case backslash && text[i] == '\\':
-			i++
 		case text[i] == quote && i+1 < len(text) && text[i+1] == quote:
 			i++
 		case text[i] == quote:

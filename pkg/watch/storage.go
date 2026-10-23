@@ -36,6 +36,8 @@ const (
 
 var tables = []string{definitions, observations, runs, runners, subscriptions, inbox, outbox, audit, operations, telegramLinks, telegramRequests, quotas, telegramProviders, telegramBots, telegramPolls}
 
+var watchCloseStorageFile = (*os.File).Close
+
 // Store separates durable project definitions from bounded runtime tables. Every
 // transition uses the same DALGO read/write transaction, with SQLite IMMEDIATE
 // locking established before the callback. No DALGO precondition is assumed.
@@ -81,7 +83,7 @@ func NewSQLiteStore(connection string, c Config) (*Store, error) {
 	if e != nil {
 		return nil, e
 	}
-	if e = f.Close(); e != nil {
+	if e = watchCloseStorageFile(f); e != nil {
 		return nil, e
 	}
 	if c.MaxWatchesPerUser <= 0 {

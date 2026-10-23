@@ -23,8 +23,17 @@ var openSQLiteScan = func(dsn string) (sqliteScanDB, error) {
 	if err != nil {
 		return nil, err
 	}
-	return db.LenientSchema(), nil
+	return lenientSQLite{Database: db.LenientSchema(), owner: db}, nil
 }
+
+// lenientSQLite is dalgo2sqlite's lenient schema reader of a database, closed by
+// closing the database that owns the connection pool the two share.
+type lenientSQLite struct {
+	*dalgo2sqlite.Database
+	owner *dalgo2sqlite.Database
+}
+
+func (db lenientSQLite) Close() error { return db.owner.Close() }
 
 // sqliteScanDB is the dalgo2sqlite database a scan reads: its schema reader, which
 // also lists views (dalgoschema.ViewLister) and the tables and views it leaves out
@@ -71,9 +80,10 @@ func scanSQLiteCatalog(ctx context.Context, connectionParams dbconnection.Params
 	}
 	catalogID := connectionParams.Catalog()
 	provider := dalgoschema.NewSchemaProviderWithOptions(db, nil, catalogID, sqliteMainSchema, dalgoschema.Options{
-		Warnings:          warnings,
-		SourceDefinitions: true,
-		ZeroBasedOrdinals: true,
+		Warnings:                warnings,
+		LeaveOutUnreadableViews: true,
+		SourceDefinitions:       true,
+		ZeroBasedOrdinals:       true,
 	})
 	dbCatalog, err := schemer.NewScanner(provider).ScanCatalog(ctx, catalogID)
 	if err != nil {

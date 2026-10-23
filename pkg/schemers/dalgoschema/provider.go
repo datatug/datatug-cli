@@ -69,9 +69,10 @@ type RecordsCounter interface {
 }
 
 // ViewLister is the optional capability of a reader that can tell a view from a
-// table: it lists the collections that are views, each by the reference that
-// ListCollections gave it (a view is among the collections ListCollections lists).
-// A scan reports a collection it lists as a view, and does not count its records.
+// table: it lists the collections that are views. A reader may list them among its
+// collections too (ListCollections), each by the same reference, or apart from them
+// (dalgo2sqlite lists tables only), in which case they are added after them. A scan
+// reports a collection it lists as a view, and does not count its records.
 type ViewLister interface {
 	ListViews(ctx context.Context) ([]dal.CollectionRef, error)
 }
@@ -113,12 +114,16 @@ type Options struct {
 	Observe func(error)
 
 	// Warnings is where the provider names, one line each, what it leaves out of a
-	// scan and why, so that the scan of a database with a mistake in it reads the
-	// rest: a collection with no name, a view whose definition cannot be read (it
-	// names a table that was dropped), and a foreign key to a table the reader did
-	// not list. nil fails the scan on a view that cannot be read, and logs a foreign
-	// key that is left out.
+	// scan and why: a collection with no name, a view it cannot read (see
+	// LeaveOutUnreadableViews), and a foreign key to a table the reader did not list.
+	// nil says nothing of the first two and logs a foreign key that is left out.
 	Warnings io.Writer
+
+	// LeaveOutUnreadableViews describes every view when the collections are listed
+	// and leaves out one the reader cannot describe (it names a table that was
+	// dropped), so that the scan of a database with a mistake in it reads the rest.
+	// Without it such a view is listed, and reading its columns fails.
+	LeaveOutUnreadableViews bool
 
 	// SourceDefinitions reports what the reader keeps of the database's own catalog
 	// (dbschema.SourceDefinition) where it keeps it: a column's declared type and the
@@ -142,7 +147,7 @@ func NewSchemaProviderWithOptions(reader dbschema.SchemaReader, counter RecordsC
 	if opts.ZeroBasedOrdinals {
 		firstOrdinal = 0
 	}
-	return &provider{reader: reader, counter: counter, catalog: catalog, schema: schema, slots: make(chan struct{}, maxConcurrentReads), observe: opts.Observe, warnings: opts.Warnings, source: opts.SourceDefinitions, firstOrdinal: firstOrdinal}
+	return &provider{reader: reader, counter: counter, catalog: catalog, schema: schema, slots: make(chan struct{}, maxConcurrentReads), observe: opts.Observe, warnings: opts.Warnings, source: opts.SourceDefinitions, firstOrdinal: firstOrdinal, leaveOutUnreadableViews: opts.LeaveOutUnreadableViews}
 }
 
 type provider struct {
@@ -154,6 +159,8 @@ type provider struct {
 	warnings     io.Writer // nil says nothing (see Options.Warnings)
 	source       bool      // see Options.SourceDefinitions
 	firstOrdinal int       // the ordinal position of a table's first column (see Options.ZeroBasedOrdinals)
+
+	leaveOutUnreadableViews bool // see Options.LeaveOutUnreadableViews
 
 	// slots holds one entry for every call to the reader or the counter in flight.
 	slots   chan struct{}
@@ -399,9 +406,9 @@ func (p *provider) listViews(ctx context.Context) (map[string]bool, []dal.Collec
 // listed after them.
 //
 // A collection with no name is left out. So is a view the reader cannot describe,
-// when the provider has somewhere to say so (Options.Warnings): its columns are
-// read now, before the scan reads any other, so that one broken view does not fail
-// the scan of the whole database.
+// with Options.LeaveOutUnreadableViews: its columns are read now, before the scan
+// reads any other, so that one broken view does not fail the scan of the whole
+// database.
 func (p *provider) GetCollections(ctx context.Context, _ *record.Key) (schemer.CollectionsReader, error) {
 	refs, listed, err := p.listCollections(ctx)
 	if err != nil {
@@ -427,7 +434,7 @@ func (p *provider) GetCollections(ctx context.Context, _ *record.Key) (schemer.C
 			p.warnf("warning: %s %q of schema %q is left out of the project: its name is empty\n", strings.ToLower(string(kind)), "", p.schemaOf(&refs[i]))
 			continue
 		}
-		if kind == datatug.CollectionTypeView && p.warnings != nil {
+		if kind == datatug.CollectionTypeView && p.leaveOutUnreadableViews {
 			if _, describeErr := p.describe(ctx, &refs[i]); describeErr != nil {
 				p.warnf("warning: view %q of schema %q is left out of the project: its definition cannot be read: %q\n", refs[i].Name(), p.schemaOf(&refs[i]), rootCause(describeErr).Error())
 				continue

@@ -97,7 +97,7 @@ func sqliteFile() *sqliteLikeReader {
 }
 
 func sqliteProvider(reader dbschema.SchemaReader, warnings io.Writer) schemer.SchemaProvider {
-	return NewSchemaProviderWithOptions(reader, nil, "file", "main", Options{Warnings: warnings, SourceDefinitions: true})
+	return NewSchemaProviderWithOptions(reader, nil, "file", "main", Options{Warnings: warnings, SourceDefinitions: true, LeaveOutUnreadableViews: true})
 }
 
 func readCollections(t *testing.T, provider schemer.SchemaProvider) []*datatug.CollectionInfo {
@@ -136,11 +136,16 @@ warning: view "broken" of schema "main" is left out of the project: its definiti
 	assert.Contains(t, warnings.String(), `warning: view "" of schema "main" is left out of the project: its name is empty`)
 }
 
-func TestOptions_WithoutWarningsAViewIsNotReadAhead(t *testing.T) {
-	reader := sqliteFile()
-	collections := readCollections(t, sqliteProvider(reader, nil))
-	assert.Len(t, collections, 5, "the broken view stays: the scan fails on it as it did")
-	assert.Zero(t, reader.callCount("DescribeCollection"))
+func TestOptions_WithoutLeaveOutUnreadableViewsAViewIsNotReadAhead(t *testing.T) {
+	for name, warnings := range map[string]io.Writer{"silent": nil, "discarded": io.Discard} {
+		t.Run(name, func(t *testing.T) {
+			reader := sqliteFile()
+			provider := NewSchemaProviderWithOptions(reader, nil, "file", "main", Options{Warnings: warnings, SourceDefinitions: true})
+			collections := readCollections(t, provider)
+			assert.Len(t, collections, 5, "the broken view stays listed; only the unnamed table is left out")
+			assert.Zero(t, reader.callCount("DescribeCollection"))
+		})
+	}
 }
 
 func TestOptions_ColumnsHaveTheirDeclaredTypesAndDefaults(t *testing.T) {

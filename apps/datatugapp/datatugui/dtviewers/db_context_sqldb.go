@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"io"
 	"path/filepath"
+	"sync"
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
@@ -98,46 +99,121 @@ var openSQLiteSchema = func(uri string) (sqliteSchemaReader, error) {
 }
 
 // sqliteSchema is the schema of the SQLite file at path, read through DALgo's
-// schema reader the way a scan reads it: the file opened read-only, a column with
-// the type its table declares, and a view that cannot be read left out. A file that
-// cannot be opened fails every read of the schema with the reason.
+// schema reader the way a scan reads it: the file opened read-only, and a column
+// with the type its table declares. The file is opened on the first read, and one
+// that cannot be opened is tried again on the next. Every read asks a provider of
+// its own, so the viewer shows the file as it is now: what an earlier read found,
+// or failed to find, is not kept. A view whose definition does not work is listed,
+// and fails when its columns are read.
 func sqliteSchema(path string) schemer.SchemaProvider {
-	var reader sqliteSchemaReader
-	reader, err := openSQLiteSchema(dbcopy.SQLiteFileURIMode(path, dbcopy.SQLiteReadOnly))
-	if err != nil {
-		reader = failedSchemaReader{err: err}
+	return &liveSQLiteSchema{uri: dbcopy.SQLiteFileURIMode(path, dbcopy.SQLiteReadOnly)}
+}
+
+// liveSQLiteSchema is a schemer.SchemaProvider that reads each answer afresh.
+type liveSQLiteSchema struct {
+	uri    string
+	mu     sync.Mutex
+	reader sqliteSchemaReader // nil until the file is opened
+}
+
+var _ schemer.SchemaProvider = (*liveSQLiteSchema)(nil)
+
+// provider is a new provider over the file, which it opens if it is not open yet.
+func (s *liveSQLiteSchema) provider() (schemer.SchemaProvider, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.reader == nil {
+		reader, err := openSQLiteSchema(s.uri)
+		if err != nil {
+			return nil, err
+		}
+		s.reader = reader
 	}
-	return dalgoschema.NewSchemaProviderWithOptions(reader, nil, "", "main", dalgoschema.Options{
+	return dalgoschema.NewSchemaProviderWithOptions(s.reader, nil, "", "main", dalgoschema.Options{
 		Warnings:          io.Discard,
 		SourceDefinitions: true,
 		ZeroBasedOrdinals: true,
-	})
+	}), nil
 }
 
-// failedSchemaReader answers every read with the error that kept the database from
-// being opened.
-type failedSchemaReader struct{ err error }
+func (*liveSQLiteSchema) IsBulkProvider() bool { return false }
 
-func (r failedSchemaReader) ListCollections(context.Context, *record.Key) ([]dal.CollectionRef, error) {
-	return nil, r.err
+func (s *liveSQLiteSchema) GetCollections(ctx context.Context, parent *record.Key) (schemer.CollectionsReader, error) {
+	p, err := s.provider()
+	if err != nil {
+		return nil, err
+	}
+	return p.GetCollections(ctx, parent)
 }
 
-func (r failedSchemaReader) ListViews(context.Context) ([]dal.CollectionRef, error) {
-	return nil, r.err
+func (s *liveSQLiteSchema) GetColumnsReader(ctx context.Context, catalog string, filter schemer.ColumnsFilter) (schemer.ColumnsReader, error) {
+	p, err := s.provider()
+	if err != nil {
+		return nil, err
+	}
+	return p.GetColumnsReader(ctx, catalog, filter)
 }
 
-func (r failedSchemaReader) DescribeCollection(context.Context, *dal.CollectionRef) (*dbschema.CollectionDef, error) {
-	return nil, r.err
+func (s *liveSQLiteSchema) GetColumns(ctx context.Context, catalog string, filter schemer.ColumnsFilter) ([]schemer.Column, error) {
+	p, err := s.provider()
+	if err != nil {
+		return nil, err
+	}
+	return p.GetColumns(ctx, catalog, filter)
 }
 
-func (r failedSchemaReader) ListIndexes(context.Context, *dal.CollectionRef) ([]dbschema.IndexDef, error) {
-	return nil, r.err
+func (s *liveSQLiteSchema) GetIndexes(ctx context.Context, catalog, schema, table string) (schemer.IndexesReader, error) {
+	p, err := s.provider()
+	if err != nil {
+		return nil, err
+	}
+	return p.GetIndexes(ctx, catalog, schema, table)
 }
 
-func (r failedSchemaReader) ListConstraints(context.Context, *dal.CollectionRef) ([]dbschema.ConstraintDef, error) {
-	return nil, r.err
+func (s *liveSQLiteSchema) GetIndexColumns(ctx context.Context, catalog, schema, table, index string) (schemer.IndexColumnsReader, error) {
+	p, err := s.provider()
+	if err != nil {
+		return nil, err
+	}
+	return p.GetIndexColumns(ctx, catalog, schema, table, index)
 }
 
-func (r failedSchemaReader) ListReferrers(context.Context, *dal.CollectionRef) ([]dbschema.Referrer, error) {
-	return nil, r.err
+func (s *liveSQLiteSchema) GetForeignKeysReader(ctx context.Context, schema, table string) (schemer.ForeignKeysReader, error) {
+	p, err := s.provider()
+	if err != nil {
+		return nil, err
+	}
+	return p.GetForeignKeysReader(ctx, schema, table)
+}
+
+func (s *liveSQLiteSchema) GetForeignKeys(ctx context.Context, schema, table string) ([]schemer.ForeignKey, error) {
+	p, err := s.provider()
+	if err != nil {
+		return nil, err
+	}
+	return p.GetForeignKeys(ctx, schema, table)
+}
+
+func (s *liveSQLiteSchema) GetReferrers(ctx context.Context, schema, table string) ([]schemer.ForeignKey, error) {
+	p, err := s.provider()
+	if err != nil {
+		return nil, err
+	}
+	return p.GetReferrers(ctx, schema, table)
+}
+
+func (s *liveSQLiteSchema) GetConstraints(ctx context.Context, catalog, schema, table string) (schemer.ConstraintsReader, error) {
+	p, err := s.provider()
+	if err != nil {
+		return nil, err
+	}
+	return p.GetConstraints(ctx, catalog, schema, table)
+}
+
+func (s *liveSQLiteSchema) RecordsCount(ctx context.Context, catalog, schema, table string) (*int, error) {
+	p, err := s.provider()
+	if err != nil {
+		return nil, err
+	}
+	return p.RecordsCount(ctx, catalog, schema, table)
 }

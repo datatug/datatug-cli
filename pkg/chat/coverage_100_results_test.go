@@ -15,7 +15,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/queryops"
 	"github.com/datatug/datatug-cli/pkg/resultops"
 	"github.com/datatug/datatug-cli/pkg/secureread"
@@ -39,7 +39,7 @@ type switchingSessionExecutor struct {
 	sessions *SessionChat
 }
 
-func (s *switchingSessionExecutor) RunDTQL(ctx context.Context, source string, doc []byte, params map[string]any) (secureread.Result, error) {
+func (s *switchingSessionExecutor) RunTugQL(ctx context.Context, source string, doc []byte, params map[string]any) (secureread.Result, error) {
 	s.sessions.mu.Lock()
 	s.sessions.activeID = "changed-session-id"
 	s.sessions.mu.Unlock()
@@ -47,7 +47,7 @@ func (s *switchingSessionExecutor) RunDTQL(ctx context.Context, source string, d
 }
 
 // 1. relatedRecord.identity & previewRelationshipsActive & PreviewRelationships
-// Not parallel: mutates dtqlSerialize
+// Not parallel: mutates tugqlSerialize
 func TestCoverage100_RelatedRecords(t *testing.T) {
 
 	// r.identity
@@ -65,7 +65,7 @@ func TestCoverage100_RelatedRecords(t *testing.T) {
 	ctx := context.Background()
 	u := focusedGridStoreBackedTestUI(t, QueryResult{
 		Title:  "users",
-		DTQL:   "from: {name: users}\ncolumns: [{field: id}]\n",
+		TugQL:  "from: {name: users}\ncolumns: [{field: id}]\n",
 		Source: "sqlite:///fixture.db",
 		Result: secureread.Result{Columns: []string{"id"}, Rows: []secureread.Row{{Data: map[string]any{"id": int64(1)}}}},
 	})
@@ -89,12 +89,12 @@ func TestCoverage100_RelatedRecords(t *testing.T) {
 	}
 	app.Executor = exec
 
-	// PreviewRelationships: invalid DTQL
+	// PreviewRelationships: invalid TugQL
 	app.Executor = sessions.queryExecutor
 	badRec := rec
-	badRec.DTQL = "INVALID QUERY"
+	badRec.TugQL = "INVALID QUERY"
 	if _, err := app.PreviewRelationships(ctx, badRec, nil); err == nil {
-		t.Fatal("expected invalid DTQL error")
+		t.Fatal("expected invalid TugQL error")
 	}
 
 	// PreviewRelationships: snapshot error
@@ -207,15 +207,15 @@ func TestCoverage100_RelatedRecords(t *testing.T) {
 	sessions.joinApplication = &app
 	_, _ = sessions.previewRelationshipsActive(ctx, sessions.activeID, rec.ID, map[string]any{"main.users.id": int64(1)})
 
-	// dtqlSerialize error (line 91)
-	origSerialize := dtqlSerialize
-	dtqlSerialize = func(q dal.StructuredQuery) ([]byte, error) {
+	// tugqlSerialize error (line 91)
+	origSerialize := tugqlSerialize
+	tugqlSerialize = func(q dal.StructuredQuery) ([]byte, error) {
 		return nil, errors.New("serialize fail")
 	}
 	_, _ = app.PreviewRelationships(ctx, rec, map[string]any{"main.users.id": int64(1)})
-	dtqlSerialize = origSerialize
+	tugqlSerialize = origSerialize
 
-	// Executor.RunDTQL error (line 100)
+	// Executor.RunTugQL error (line 100)
 	appErr := app
 	appErr.Executor = &fakeExecutor{err: errors.New("query failed")}
 	_, _ = appErr.PreviewRelationships(ctx, rec, map[string]any{"main.users.id": int64(1)})
@@ -239,7 +239,7 @@ func TestCoverage100_RelatedOpen(t *testing.T) {
 	ctx := context.Background()
 	u := focusedGridStoreBackedTestUI(t, QueryResult{
 		Title:  "users",
-		DTQL:   "from: {name: users}\ncolumns: [{field: id}]\n",
+		TugQL:  "from: {name: users}\ncolumns: [{field: id}]\n",
 		Source: "sqlite:///chinook.db",
 		Result: secureread.Result{Columns: []string{"id"}, Rows: []secureread.Row{{Data: map[string]any{"id": int64(1)}}}},
 	})
@@ -679,7 +679,7 @@ func TestCoverage100_ResultColumnsAgent(t *testing.T) {
 	// success with candidateIDs
 	fakeCtx = context.WithValue(ctx, resultColumnsContextKey{}, resultColumnsCallbacks{
 		plan: func(ctx context.Context, id string, ids []string) ([]ResultColumnRow, ResultColumnsPreview, error) {
-			return []ResultColumnRow{{Name: "col1"}}, ResultColumnsPreview{DTQL: "SELECT col1"}, nil
+			return []ResultColumnRow{{Name: "col1"}}, ResultColumnsPreview{TugQL: "SELECT col1"}, nil
 		},
 	})
 	res, _ = colHandler(fakeCtx, ai.ToolCall{ID: "call4", Arguments: []byte(`{"candidateIds":["c1"]}`)})
@@ -779,7 +779,7 @@ func TestCoverage100_ResultColumnsAgent(t *testing.T) {
 		Title:    "bad db",
 		Source:   "sqlite:///chinook.db",
 		SourceID: "unknown_db_id",
-		DTQL:     "from: {name: Invoice}\nlimit: 10\n",
+		TugQL:    "from: {name: Invoice}\nlimit: 10\n",
 	})
 	_, _, _ = cbTurn.plan(ctx, qBadDb.RecordSetID, nil)
 
@@ -789,7 +789,7 @@ func TestCoverage100_ResultColumnsAgent(t *testing.T) {
 		Title:    "invoices",
 		Source:   validSrc,
 		SourceID: sessions.store.info.Database,
-		DTQL:     "from: {name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 10\n",
+		TugQL:    "from: {name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 10\n",
 		Result:   secureread.Result{Columns: []string{"InvoiceId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": int64(1)}}}},
 	})
 	_, _ = sessions.store.db.ExecContext(ctx, "UPDATE recordsets SET source = ? WHERE id = ?", validSrc, qGoodTurn.RecordSetID)
@@ -810,7 +810,7 @@ func TestCoverage100_ResultColumnsAgent(t *testing.T) {
 }
 
 // 5. result_columns.go: comprehensive error branches & query validation
-// Not parallel: mutates dtqlSerialize and dtqlDeserialize
+// Not parallel: mutates tugqlSerialize and tugqlDeserialize
 func TestCoverage100_ResultColumns(t *testing.T) {
 
 	// resultColumnRows(nil)
@@ -819,63 +819,63 @@ func TestCoverage100_ResultColumns(t *testing.T) {
 	}
 
 	// resultColumnQuery:
-	// 1. invalid DTQL
-	if _, _, err := resultColumnQuery(RecordSet{DTQL: "INVALID"}); err == nil {
+	// 1. invalid TugQL
+	if _, _, err := resultColumnQuery(RecordSet{TugQL: "INVALID"}); err == nil {
 		t.Fatal("expected parse error")
 	}
 	// 2. Joins != 0
-	joinDTQL := "from:\n  name: users\n  alias: u\n  joins:\n    - from: {name: orders, alias: o}\n      on: [{left: {field: id, source: u}, op: '==', right: {field: user_id, source: o}}]\nlimit: 100\n"
-	if _, _, err := resultColumnQuery(RecordSet{DTQL: joinDTQL}); err == nil {
+	joinTugQL := "from:\n  name: users\n  alias: u\n  joins:\n    - from: {name: orders, alias: o}\n      on: [{left: {field: id, source: u}, op: '==', right: {field: user_id, source: o}}]\nlimit: 100\n"
+	if _, _, err := resultColumnQuery(RecordSet{TugQL: joinTugQL}); err == nil {
 		t.Fatal("expected join error")
 	}
 	// 3. schema != "main"
-	schemaDTQL := "from: {schema: analytics, name: events}\nlimit: 100\n"
-	if _, _, err := resultColumnQuery(RecordSet{DTQL: schemaDTQL}); err == nil {
+	schemaTugQL := "from: {schema: analytics, name: events}\nlimit: 100\n"
+	if _, _, err := resultColumnQuery(RecordSet{TugQL: schemaTugQL}); err == nil {
 		t.Fatal("expected schema error")
 	}
 	// 4. Wildcard in columns
-	wildDTQL := "from: {name: users}\ncolumns: [{wildcard: {exclude: [id]}}]\nlimit: 100\n"
-	if q, root, err := resultColumnQuery(RecordSet{DTQL: wildDTQL}); err != nil {
+	wildTugQL := "from: {name: users}\ncolumns: [{wildcard: {exclude: [id]}}]\nlimit: 100\n"
+	if q, root, err := resultColumnQuery(RecordSet{TugQL: wildTugQL}); err != nil {
 		t.Fatalf("unexpected error on wildcard: %v (root=%v, q=%v)", err, root, q)
 	}
 	// 5. Projection provenance ambiguous (field from different source)
-	ambigDTQL := "from: {name: users}\ncolumns: [{field: name, source: other}]\nlimit: 100\n"
-	if _, _, err := resultColumnQuery(RecordSet{DTQL: ambigDTQL}); err == nil {
+	ambigTugQL := "from: {name: users}\ncolumns: [{field: name, source: other}]\nlimit: 100\n"
+	if _, _, err := resultColumnQuery(RecordSet{TugQL: ambigTugQL}); err == nil {
 		t.Fatal("expected ambiguous provenance error")
 	}
 	// 6. Aggregate not COUNT (e.g. SUM)
-	sumDTQL := "from: {name: users}\ncolumns: [{aggregate: {function: sum, args: [{field: id}]}}]\ngroupBy: [{field: id}]\nlimit: 100\n"
-	if _, _, err := resultColumnQuery(RecordSet{DTQL: sumDTQL}); err == nil {
+	sumTugQL := "from: {name: users}\ncolumns: [{aggregate: {function: sum, args: [{field: id}]}}]\ngroupBy: [{field: id}]\nlimit: 100\n"
+	if _, _, err := resultColumnQuery(RecordSet{TugQL: sumTugQL}); err == nil {
 		t.Fatal("expected non-COUNT aggregate error")
 	}
 	// 6b. COUNT with len(args) != 1
-	noArgsDTQL := "from: {name: users}\ncolumns: [{aggregate: {function: count, args: []}}]\ngroupBy: [{field: id}]\nlimit: 100\n"
-	if _, _, err := resultColumnQuery(RecordSet{DTQL: noArgsDTQL}); err == nil {
+	noArgsTugQL := "from: {name: users}\ncolumns: [{aggregate: {function: count, args: []}}]\ngroupBy: [{field: id}]\nlimit: 100\n"
+	if _, _, err := resultColumnQuery(RecordSet{TugQL: noArgsTugQL}); err == nil {
 		t.Fatal("expected unsupported COUNT expression error")
 	}
 	// 6c. COUNT with unsupported operand
-	badArgDTQL := "from: {name: users}\ncolumns: [{aggregate: {function: count, args: [{constant: 42}]}}]\ngroupBy: [{field: id}]\nlimit: 100\n"
-	if _, _, err := resultColumnQuery(RecordSet{DTQL: badArgDTQL}); err == nil {
+	badArgTugQL := "from: {name: users}\ncolumns: [{aggregate: {function: count, args: [{constant: 42}]}}]\ngroupBy: [{field: id}]\nlimit: 100\n"
+	if _, _, err := resultColumnQuery(RecordSet{TugQL: badArgTugQL}); err == nil {
 		t.Fatal("expected unsupported COUNT operand error")
 	}
 	// 7. COUNT DISTINCT
-	distinctDTQL := "from: {name: users}\ncolumns: [{aggregate: {function: count, distinct: true, args: [{field: id}]}}]\ngroupBy: [{field: id}]\nlimit: 100\n"
-	if _, _, err := resultColumnQuery(RecordSet{DTQL: distinctDTQL}); err == nil {
+	distinctTugQL := "from: {name: users}\ncolumns: [{aggregate: {function: count, distinct: true, args: [{field: id}]}}]\ngroupBy: [{field: id}]\nlimit: 100\n"
+	if _, _, err := resultColumnQuery(RecordSet{TugQL: distinctTugQL}); err == nil {
 		t.Fatal("expected COUNT DISTINCT error")
 	}
 	// 8. Computed projection
-	compDTQL := "from: {name: users}\ncolumns: [{constant: 42}]\nlimit: 100\n"
-	if _, _, err := resultColumnQuery(RecordSet{DTQL: compDTQL}); err == nil {
+	compTugQL := "from: {name: users}\ncolumns: [{constant: 42}]\nlimit: 100\n"
+	if _, _, err := resultColumnQuery(RecordSet{TugQL: compTugQL}); err == nil {
 		t.Fatal("expected computed projection error")
 	}
 	// 9. Computed or ambiguous GROUP BY
-	groupDTQL := "from: {name: users}\ncolumns: [{field: id}]\ngroupBy: [{source: other, field: id}]\nlimit: 100\n"
-	if _, _, err := resultColumnQuery(RecordSet{DTQL: groupDTQL}); err == nil {
+	groupTugQL := "from: {name: users}\ncolumns: [{field: id}]\ngroupBy: [{source: other, field: id}]\nlimit: 100\n"
+	if _, _, err := resultColumnQuery(RecordSet{TugQL: groupTugQL}); err == nil {
 		t.Fatal("expected computed group by error")
 	}
 	// 10. Global aggregate without GROUP BY
-	globalDTQL := "from: {name: users}\ncolumns: [{aggregate: {function: count, args: [{field: id}]}}]\nlimit: 100\n"
-	if _, _, err := resultColumnQuery(RecordSet{DTQL: globalDTQL}); err == nil {
+	globalTugQL := "from: {name: users}\ncolumns: [{aggregate: {function: count, args: [{field: id}]}}]\nlimit: 100\n"
+	if _, _, err := resultColumnQuery(RecordSet{TugQL: globalTugQL}); err == nil {
 		t.Fatal("expected global aggregate error")
 	}
 
@@ -919,13 +919,13 @@ func TestCoverage100_ResultColumns(t *testing.T) {
 	}
 
 	// columnGroupHas returning false (line 173)
-	qDummy, _ := dtql.Deserialize([]byte("from: {name: users}\ncolumns: [{field: id}]\ngroupBy: [{field: id}]\nlimit: 10\n"))
+	qDummy, _ := tugql.Deserialize([]byte("from: {name: users}\ncolumns: [{field: id}]\ngroupBy: [{field: id}]\nlimit: 10\n"))
 	if columnGroupHas(qDummy, "missing_column") {
 		t.Fatal("expected columnGroupHas to return false")
 	}
 
 	// returnedColumnKeyOutOfRange
-	qParsed, _ := dtql.Deserialize([]byte("from: {name: users}\ncolumns: [{field: id, as: id_alias}]\n"))
+	qParsed, _ := tugql.Deserialize([]byte("from: {name: users}\ncolumns: [{field: id, as: id_alias}]\n"))
 	recOutOfRange := RecordSet{
 		Result: secureread.Result{
 			Rows: []secureread.Row{
@@ -1004,7 +1004,7 @@ func TestCoverage100_ResultColumns(t *testing.T) {
 	recValid := RecordSet{
 		ID:     "r_valid",
 		Source: "sqlite:///fixture.db",
-		DTQL:   "from: {name: users}\ncolumns: [{field: id}, {field: name}]\n",
+		TugQL:  "from: {name: users}\ncolumns: [{field: id}, {field: name}]\n",
 		Result: secureread.Result{
 			Columns: []string{"id", "name"},
 			Rows:    []secureread.Row{{Data: map[string]any{"id": int64(1), "name": "Alice"}}},
@@ -1057,7 +1057,7 @@ func TestCoverage100_ResultColumns(t *testing.T) {
 	recGrpMissing := RecordSet{
 		ID:     "r_grp_missing",
 		Source: "sqlite:///fixture.db",
-		DTQL:   "from: {name: users}\ncolumns: [{field: name}, {aggregate: {function: count, args: [{field: name}]}}]\ngroupBy: [{field: name}]\nlimit: 100\n",
+		TugQL:  "from: {name: users}\ncolumns: [{field: name}, {aggregate: {function: count, args: [{field: name}]}}]\ngroupBy: [{field: name}]\nlimit: 100\n",
 	}
 	discGrpMissing, _ := discoverResultColumns(recGrpMissing, meta, admitted)
 	_ = discGrpMissing
@@ -1079,15 +1079,15 @@ func TestCoverage100_ResultColumns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected planResultColumns error: %v", err)
 	}
-	if prev.DTQL == "" || prev.Fingerprint == "" {
-		t.Fatal("expected non-empty DTQL and Fingerprint")
+	if prev.TugQL == "" || prev.Fingerprint == "" {
+		t.Fatal("expected non-empty TugQL and Fingerprint")
 	}
 
-	// planResultColumns: record.DTQL invalid (line 338)
+	// planResultColumns: record.TugQL invalid (line 338)
 	badRec := recValid
-	badRec.DTQL = "INVALID"
+	badRec.TugQL = "INVALID"
 	if _, err := planResultColumns(badRec, meta, admitted, []string{candID}); err == nil {
-		t.Fatal("expected DTQL error in planResultColumns")
+		t.Fatal("expected TugQL error in planResultColumns")
 	}
 
 	// planResultColumns: selected column not in rows (line 447)
@@ -1097,7 +1097,7 @@ func TestCoverage100_ResultColumns(t *testing.T) {
 
 	// planResultColumns: DESC order by (line 389)
 	recDesc := recValid
-	recDesc.DTQL = "from: {name: users}\ncolumns: [{field: id}, {field: name}]\norderBy: [{field: id, desc: true}]\nlimit: 100\n"
+	recDesc.TugQL = "from: {name: users}\ncolumns: [{field: id}, {field: name}]\norderBy: [{field: id, desc: true}]\nlimit: 100\n"
 	rowsDesc, _ := discoverResultColumns(recDesc, meta, admitted)
 	var candDescID string
 	for _, r := range rowsDesc {
@@ -1116,7 +1116,7 @@ func TestCoverage100_ResultColumns(t *testing.T) {
 
 	// planResultColumns: alias collision in join and outputs (lines 423, 436)
 	recAlias := recValid
-	recAlias.DTQL = "from: {name: users, alias: orders}\ncolumns: [{field: id, as: orders_notes}, {field: name}]\nlimit: 100\n"
+	recAlias.TugQL = "from: {name: users, alias: orders}\ncolumns: [{field: id, as: orders_notes}, {field: name}]\nlimit: 100\n"
 	rowsAlias, _ := discoverResultColumns(recAlias, meta, admitted)
 	var candAliasID string
 	for _, r := range rowsAlias {
@@ -1130,30 +1130,30 @@ func TestCoverage100_ResultColumns(t *testing.T) {
 		_ = prevAlias
 	}
 
-	// planResultColumns: dtqlSerialize and dtqlDeserialize errors (lines 451, 454)
-	origSer := dtqlSerialize
-	origDes := dtqlDeserialize
-	dtqlSerialize = func(q dal.StructuredQuery) ([]byte, error) {
+	// planResultColumns: tugqlSerialize and tugqlDeserialize errors (lines 451, 454)
+	origSer := tugqlSerialize
+	origDes := tugqlDeserialize
+	tugqlSerialize = func(q dal.StructuredQuery) ([]byte, error) {
 		return nil, errors.New("serialize fail")
 	}
 	if _, err := planResultColumns(recValid, meta, admitted, []string{candID}); err == nil {
-		t.Fatal("expected dtqlSerialize error in planResultColumns")
+		t.Fatal("expected tugqlSerialize error in planResultColumns")
 	}
-	dtqlSerialize = origSer
+	tugqlSerialize = origSer
 
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
 		return nil, errors.New("deserialize fail")
 	}
 	if _, err := planResultColumns(recValid, meta, admitted, []string{candID}); err == nil {
-		t.Fatal("expected dtqlDeserialize error in planResultColumns")
+		t.Fatal("expected tugqlDeserialize error in planResultColumns")
 	}
-	dtqlDeserialize = origDes
+	tugqlDeserialize = origDes
 
 	// Plan with grouped query: proofs and grouped branches
 	recGrouped := RecordSet{
 		ID:     "r_grouped",
 		Source: "sqlite:///fixture.db",
-		DTQL:   "from: {name: users}\ncolumns: [{field: id}, {aggregate: {function: count, args: [{field: id}]}}]\ngroupBy: [{field: id}]\nlimit: 100\n",
+		TugQL:  "from: {name: users}\ncolumns: [{field: id}, {aggregate: {function: count, args: [{field: id}]}}]\ngroupBy: [{field: id}]\nlimit: 100\n",
 		Result: secureread.Result{
 			Columns: []string{"id", "COUNT(*)"},
 			Rows:    []secureread.Row{{Data: map[string]any{"id": int64(1)}}},
@@ -1209,10 +1209,10 @@ func TestCoverage100_ResultColumns(t *testing.T) {
 		t.Fatal("expected store.Load error in resultColumnsPreview")
 	}
 
-	// resultColumnEvidence: DTQL invalid (line 488)
-	_, _, _ = sessions.resultColumnEvidence(ctx, RecordSet{DTQL: "INVALID"})
+	// resultColumnEvidence: TugQL invalid (line 488)
+	_, _, _ = sessions.resultColumnEvidence(ctx, RecordSet{TugQL: "INVALID"})
 	// resultColumnEvidence: source metadata error (line 496)
-	_, _, _ = sessions.resultColumnEvidence(ctx, RecordSet{DTQL: "from: {name: users}\ncolumns: [{field: id}]\nlimit: 10\n", Source: "invalid-source"})
+	_, _, _ = sessions.resultColumnEvidence(ctx, RecordSet{TugQL: "from: {name: users}\ncolumns: [{field: id}]\nlimit: 10\n", Source: "invalid-source"})
 
 	// planResultColumns: duplicate candidate (line 332)
 	if _, err := planResultColumns(recValid, meta, admitted, []string{candID, candID}); err == nil {
@@ -1234,7 +1234,7 @@ func TestCoverage100_ResultColumns(t *testing.T) {
 		Title:    "invoices",
 		Source:   validSource,
 		SourceID: sessions.store.info.Database,
-		DTQL:     "from: {name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 10\n",
+		TugQL:    "from: {name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 10\n",
 		Result:   secureread.Result{Columns: []string{"InvoiceId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": int64(1)}}}},
 	})
 	_, _ = sessions.store.db.ExecContext(ctx, "UPDATE recordsets SET source = ? WHERE id = ?", validSource, qRes.RecordSetID)
@@ -1303,7 +1303,7 @@ func TestCoverage100_ResultColumnsUI(t *testing.T) {
 
 	u := focusedGridStoreBackedTestUI(t, QueryResult{
 		Title:  "users",
-		DTQL:   "from: {name: users}\ncolumns: [{field: id}]\n",
+		TugQL:  "from: {name: users}\ncolumns: [{field: id}]\n",
 		Source: "sqlite:///fixture.db",
 		Result: secureread.Result{Columns: []string{"id"}, Rows: []secureread.Row{{Data: map[string]any{"id": int64(1)}}}},
 	})
@@ -1322,7 +1322,7 @@ func TestCoverage100_ResultColumnsUI(t *testing.T) {
 	if len(hintsNormal) == 0 || !strings.Contains(hintsNormal[0], "Add") {
 		t.Fatalf("unexpected hints normal: %v", hintsNormal)
 	}
-	o.preview = &ResultColumnsPreview{Fields: []string{"col1"}, DTQL: "SELECT col1"}
+	o.preview = &ResultColumnsPreview{Fields: []string{"col1"}, TugQL: "SELECT col1"}
 	hintsPreview := o.HelpHints()
 	if len(hintsPreview) == 0 || !strings.Contains(hintsPreview[0], "Review") {
 		t.Fatalf("unexpected hints preview: %v", hintsPreview)
@@ -1383,7 +1383,7 @@ func TestCoverage100_ResultColumnsUI(t *testing.T) {
 	o.preview = &ResultColumnsPreview{
 		Fields: []string{"orders.total"},
 		Proof:  "Left join proof",
-		DTQL:   "SELECT users.id, orders.total FROM users LEFT JOIN orders ON users.id = orders.user_id",
+		TugQL:  "SELECT users.id, orders.total FROM users LEFT JOIN orders ON users.id = orders.user_id",
 	}
 	vPrev := o.View(80, 24)
 	if !strings.Contains(vPrev, "Review column query") {
@@ -1422,19 +1422,19 @@ func TestCoverage100_ResultColumnsUI(t *testing.T) {
 	// Mouse clicks:
 	// 1. click on controlY in preview mode:
 	// - click Esc
-	o.preview = &ResultColumnsPreview{Fields: []string{"f"}, DTQL: "q"}
+	o.preview = &ResultColumnsPreview{Fields: []string{"f"}, TugQL: "q"}
 	_ = o.View(80, 24)
 	_, _, _ = o.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 50, Y: o.controlY})
 	if o.preview != nil {
 		t.Fatal("expected Esc click to clear preview")
 	}
 	// - click Run on server
-	o.preview = &ResultColumnsPreview{Fields: []string{"f"}, DTQL: "q"}
+	o.preview = &ResultColumnsPreview{Fields: []string{"f"}, TugQL: "q"}
 	_ = o.View(80, 24)
 	_, cmdRun, _ := o.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 5, Y: o.controlY})
 	_ = cmdRun
 	// - click Run on server separator (line 179)
-	o.preview = &ResultColumnsPreview{Fields: []string{"f"}, DTQL: "q"}
+	o.preview = &ResultColumnsPreview{Fields: []string{"f"}, TugQL: "q"}
 	_ = o.View(80, 24)
 	_, _, _ = o.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: ansi.StringWidth("Run on server ⇧↵"), Y: o.controlY})
 
@@ -1504,12 +1504,12 @@ func TestCoverage100_ResultColumnsUI(t *testing.T) {
 }
 
 // 7. result_operations.go & derived_execution.go
-// Not parallel: mutates resultopsCapture and dtqlDeserialize
+// Not parallel: mutates resultopsCapture and tugqlDeserialize
 func TestCoverage100_ResultOperationsAndDerived(t *testing.T) {
 	ctx := context.Background()
 	u := focusedGridStoreBackedTestUI(t, QueryResult{
 		Title:  "users",
-		DTQL:   "from: {name: users}\ncolumns: [{field: id}, {field: name}]\nlimit: 10\n",
+		TugQL:  "from: {name: users}\ncolumns: [{field: id}, {field: name}]\nlimit: 10\n",
 		Source: "sqlite:///chinook.db",
 		Result: secureread.Result{Columns: []string{"id", "name"}, Rows: []secureread.Row{{Data: map[string]any{"id": int64(1), "name": "Alice"}}}},
 	})
@@ -1585,8 +1585,8 @@ func TestCoverage100_ResultOperationsAndDerived(t *testing.T) {
 	// groupedRecord with group == true
 	groupedRec := *rec
 	groupedRec.Title = "Grouped Result"
-	groupedRec.DTQL = "from: {name: users}\ncolumns: [{field: id}]\ngroupBy: [{field: id}]\nlimit: 10\n"
-	uGrouped := focusedGridStoreBackedTestUI(t, QueryResult{Title: groupedRec.Title, DTQL: groupedRec.DTQL, Source: "sqlite:///chinook.db", Result: groupedRec.Result})
+	groupedRec.TugQL = "from: {name: users}\ncolumns: [{field: id}]\ngroupBy: [{field: id}]\nlimit: 10\n"
+	uGrouped := focusedGridStoreBackedTestUI(t, QueryResult{Title: groupedRec.Title, TugQL: groupedRec.TugQL, Source: "sqlite:///chinook.db", Result: groupedRec.Result})
 	_ = uGrouped.openResultOperation(true)
 
 	// 5. resultOperationOverlay methods
@@ -1707,7 +1707,7 @@ func TestCoverage100_ResultOperationsAndDerived(t *testing.T) {
 	recCountCol := *rec
 	recCountCol.Result.Columns = []string{"Count", "name"}
 	recCountCol.Result.Rows = []secureread.Row{{Data: map[string]any{"Count": int64(1), "name": "Alice"}}}
-	uCountCol := focusedGridStoreBackedTestUI(t, QueryResult{Title: recCountCol.Title, DTQL: recCountCol.DTQL, Source: "sqlite:///chinook.db", Result: recCountCol.Result})
+	uCountCol := focusedGridStoreBackedTestUI(t, QueryResult{Title: recCountCol.Title, TugQL: recCountCol.TugQL, Source: "sqlite:///chinook.db", Result: recCountCol.Result})
 	opCountCol, _ := uCountCol.newResultOperation(true)
 	opCountCol.selected = []int{0}
 	opCountCol.count = true
@@ -1734,22 +1734,22 @@ func TestCoverage100_ResultOperationsAndDerived(t *testing.T) {
 	// 6. derived_execution.go:
 	// exactAggregateColumns: joins in query (lines 40-44)
 	recJoins := *rec
-	recJoins.DTQL = "from:\n  name: orders\n  alias: orders\n  joins:\n    - from: {name: other, alias: other}\n      on: [{left: {field: user_id, source: orders}, op: '==', right: {field: id, source: other}}]\nlimit: 10\n"
+	recJoins.TugQL = "from:\n  name: orders\n  alias: orders\n  joins:\n    - from: {name: other, alias: other}\n      on: [{left: {field: user_id, source: orders}, op: '==', right: {field: id, source: other}}]\nlimit: 10\n"
 	_, _ = exactAggregateColumns(u.sessions.catalog, recJoins)
 
 	// deterministicOriginal:
 	// GroupBy: one key not in OrderBy -> false (lines 71-72)
-	qGrpNotOrdered, _ := dtql.Deserialize([]byte("from: {name: users}\ncolumns: [{field: id}, {field: name}]\ngroupBy: [{field: id}, {field: name}]\norderBy: [{field: id}]\nlimit: 10\n"))
+	qGrpNotOrdered, _ := tugql.Deserialize([]byte("from: {name: users}\ncolumns: [{field: id}, {field: name}]\ngroupBy: [{field: id}, {field: name}]\norderBy: [{field: id}]\nlimit: 10\n"))
 	if deterministicOriginal(u.sessions.catalog, *rec, qGrpNotOrdered) {
 		t.Fatal("expected false when group by keys not all ordered")
 	}
 	// GroupBy: all keys ordered -> true (line 75)
-	qGrpOrdered, _ := dtql.Deserialize([]byte("from: {name: users}\ncolumns: [{field: id}, {field: name}]\ngroupBy: [{field: id}, {field: name}]\norderBy: [{field: id}, {field: name}]\nlimit: 10\n"))
+	qGrpOrdered, _ := tugql.Deserialize([]byte("from: {name: users}\ncolumns: [{field: id}, {field: name}]\ngroupBy: [{field: id}, {field: name}]\norderBy: [{field: id}, {field: name}]\nlimit: 10\n"))
 	if !deterministicOriginal(u.sessions.catalog, *rec, qGrpOrdered) {
 		t.Fatal("expected true when all group by keys ordered")
 	}
 	// len(instances) != 1 -> false (line 79)
-	qMultiInst, err := dtql.Deserialize([]byte("from:\n  name: orders\n  alias: orders\n  joins:\n    - from: {name: other, alias: other}\n      on: [{left: {field: user_id, source: orders}, op: '==', right: {field: id, source: other}}]\nlimit: 10\n"))
+	qMultiInst, err := tugql.Deserialize([]byte("from:\n  name: orders\n  alias: orders\n  joins:\n    - from: {name: other, alias: other}\n      on: [{left: {field: user_id, source: orders}, op: '==', right: {field: id, source: other}}]\nlimit: 10\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1764,11 +1764,11 @@ func TestCoverage100_ResultOperationsAndDerived(t *testing.T) {
 			PrimaryKey: []string{"id"},
 		},
 	}
-	qNoOrder, _ := dtql.Deserialize([]byte("from: {name: users}\ncolumns: [{field: id}]\nlimit: 10\n"))
+	qNoOrder, _ := tugql.Deserialize([]byte("from: {name: users}\ncolumns: [{field: id}]\nlimit: 10\n"))
 	if deterministicOriginal(catOnePart, *rec, qNoOrder) {
 		t.Fatal("expected false when PK not ordered")
 	}
-	qOrderPK, _ := dtql.Deserialize([]byte("from: {name: users}\ncolumns: [{field: id}]\norderBy: [{field: id}]\nlimit: 10\n"))
+	qOrderPK, _ := tugql.Deserialize([]byte("from: {name: users}\ncolumns: [{field: id}]\norderBy: [{field: id}]\nlimit: 10\n"))
 	if !deterministicOriginal(catOnePart, *rec, qOrderPK) {
 		t.Fatal("expected true when PK ordered")
 	}
@@ -1777,19 +1777,19 @@ func TestCoverage100_ResultOperationsAndDerived(t *testing.T) {
 	dOp := derivedOperation{Group: true, Columns: []string{"id"}, Count: true}
 	// limit > maxRows (line 112)
 	recExceedLimit := *rec
-	recExceedLimit.DTQL = fmt.Sprintf("from: {name: users}\ncolumns: [{field: id}]\nlimit: %d\n", maxRows+10)
+	recExceedLimit.TugQL = fmt.Sprintf("from: {name: users}\ncolumns: [{field: id}]\nlimit: %d\n", maxRows+10)
 	if _, err := deriveResultPreview(u.sessions.catalog, recExceedLimit, dOp); err == nil {
 		t.Fatal("expected limit exceed error")
 	}
-	// dtqlDeserialize returns error (line 132)
-	origDes := dtqlDeserialize
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
+	// tugqlDeserialize returns error (line 132)
+	origDes := tugqlDeserialize
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
 		return nil, errors.New("deser fail")
 	}
 	if _, err := deriveResultPreview(u.sessions.catalog, *rec, dOp); err == nil {
-		t.Fatal("expected dtqlDeserialize error in deriveResultPreview")
+		t.Fatal("expected tugqlDeserialize error in deriveResultPreview")
 	}
-	dtqlDeserialize = origDes
+	tugqlDeserialize = origDes
 
 	// executeDerivedResult:
 	// activeID mismatch (line 141)
@@ -1817,12 +1817,12 @@ func TestCoverage100_ResultOperationsAndDerived(t *testing.T) {
 	}
 	// origin source unavailable (line 160)
 	_, _ = u.sessions.store.db.ExecContext(ctx, "UPDATE recordsets SET source = ? WHERE id = ?", "corrupted", rec.ID)
-	if _, _, err := u.sessions.executeDerivedResult(ctx, u.sessions.activeID, rec.ID, dOp, prevDerived.DTQL); err == nil {
+	if _, _, err := u.sessions.executeDerivedResult(ctx, u.sessions.activeID, rec.ID, dOp, prevDerived.TugQL); err == nil {
 		t.Fatal("expected origin source unavailable error")
 	}
 	_, _ = u.sessions.store.db.ExecContext(ctx, "UPDATE recordsets SET source = ? WHERE id = ?", validSource, rec.ID)
 
-	// exact server aggregates without exactAggregateDTQLExecutor (line 169)
+	// exact server aggregates without exactAggregateTugQLExecutor (line 169)
 	dOpWithAgg := derivedOperation{
 		Group:      true,
 		Columns:    []string{"id"},
@@ -1831,13 +1831,13 @@ func TestCoverage100_ResultOperationsAndDerived(t *testing.T) {
 		Scope:      queryops.MatchingSource,
 	}
 	prevAgg, _ := deriveResultPreview(u.sessions.catalog, *rec, dOpWithAgg)
-	if prevAgg.DTQL != "" {
-		if _, _, err := u.sessions.executeDerivedResult(ctx, u.sessions.activeID, rec.ID, dOpWithAgg, prevAgg.DTQL); err == nil {
+	if prevAgg.TugQL != "" {
+		if _, _, err := u.sessions.executeDerivedResult(ctx, u.sessions.activeID, rec.ID, dOpWithAgg, prevAgg.TugQL); err == nil {
 			t.Fatal("expected executor cannot run exact server aggregates error")
 		}
 	}
 
-	// OriginalOutput without recursiveDTQLExecutor (line 181)
+	// OriginalOutput without recursiveTugQLExecutor (line 181)
 	dOpOrig := derivedOperation{
 		Group:   false,
 		Columns: []string{"id"},
@@ -1845,15 +1845,15 @@ func TestCoverage100_ResultOperationsAndDerived(t *testing.T) {
 		Sort:    []queryops.SortTerm{{Column: "id", Descending: false}},
 	}
 	recNoLimit := *rec
-	recNoLimit.DTQL = "from: {name: users}\ncolumns: [{field: id}]\n"
-	_, _ = u.sessions.store.db.ExecContext(ctx, "UPDATE recordsets SET dtql = ? WHERE id = ?", recNoLimit.DTQL, rec.ID)
+	recNoLimit.TugQL = "from: {name: users}\ncolumns: [{field: id}]\n"
+	_, _ = u.sessions.store.db.ExecContext(ctx, "UPDATE recordsets SET tugql = ? WHERE id = ?", recNoLimit.TugQL, rec.ID)
 	prevOrig, _ := deriveResultPreview(u.sessions.catalog, recNoLimit, dOpOrig)
-	if prevOrig.DTQL != "" {
-		if _, _, err := u.sessions.executeDerivedResult(ctx, u.sessions.activeID, rec.ID, dOpOrig, prevOrig.DTQL); err == nil {
+	if prevOrig.TugQL != "" {
+		if _, _, err := u.sessions.executeDerivedResult(ctx, u.sessions.activeID, rec.ID, dOpOrig, prevOrig.TugQL); err == nil {
 			t.Fatal("expected executor cannot safely run Original query output error")
 		}
 	}
-	_, _ = u.sessions.store.db.ExecContext(ctx, "UPDATE recordsets SET dtql = ? WHERE id = ?", rec.DTQL, rec.ID)
+	_, _ = u.sessions.store.db.ExecContext(ctx, "UPDATE recordsets SET tugql = ? WHERE id = ?", rec.TugQL, rec.ID)
 
 	// AppendUser error (line 199) & AppendQuery error (line 203)
 	prevNormal, _ := deriveResultPreview(u.sessions.catalog, *rec, dOp)
@@ -1861,7 +1861,7 @@ func TestCoverage100_ResultOperationsAndDerived(t *testing.T) {
 	insertMessageFn = func(ctx context.Context, tx *sql.Tx, sessionID string, message ChatMessage) error {
 		return errors.New("insert fail")
 	}
-	if _, _, err := u.sessions.executeDerivedResult(ctx, u.sessions.activeID, rec.ID, dOp, prevNormal.DTQL); err == nil {
+	if _, _, err := u.sessions.executeDerivedResult(ctx, u.sessions.activeID, rec.ID, dOp, prevNormal.TugQL); err == nil {
 		t.Fatal("expected AppendUser error in executeDerivedResult")
 	}
 	insertMessageFn = origInsMsg
@@ -1870,7 +1870,7 @@ func TestCoverage100_ResultOperationsAndDerived(t *testing.T) {
 	appendQueryTxFn = func(s *SessionStore, ctx context.Context, tx *sql.Tx, sessionID, originID, source string, query *QueryResult, now time.Time) error {
 		return errors.New("append fail")
 	}
-	if _, _, err := u.sessions.executeDerivedResult(ctx, u.sessions.activeID, rec.ID, dOp, prevNormal.DTQL); err == nil {
+	if _, _, err := u.sessions.executeDerivedResult(ctx, u.sessions.activeID, rec.ID, dOp, prevNormal.TugQL); err == nil {
 		t.Fatal("expected AppendQuery error in executeDerivedResult")
 	}
 	appendQueryTxFn = origAppQuery
@@ -1892,10 +1892,10 @@ func TestCoverage100_ResultOperationsAndDerived(t *testing.T) {
 		t.Fatal("expected no policy executor error in serverPreview")
 	}
 
-	// serverPreview: dtqlDeserialize parseErr (line 251)
-	origDes = dtqlDeserialize
+	// serverPreview: tugqlDeserialize parseErr (line 251)
+	origDes = tugqlDeserialize
 	callDes := 0
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
 		callDes++
 		if callDes == 2 {
 			return nil, errors.New("parseErr")
@@ -1906,7 +1906,7 @@ func TestCoverage100_ResultOperationsAndDerived(t *testing.T) {
 	opOrigPrev.selected = []int{0}
 	opOrigPrev.originalOutput = true
 	_, _ = opOrigPrev.serverPreview()
-	dtqlDeserialize = origDes
+	tugqlDeserialize = origDes
 
 	// reviewServer with error (line 260)
 	opErrRev, _ := u.newResultOperation(false)
@@ -1927,8 +1927,8 @@ func TestCoverage100_ResultOperationsAndDerived(t *testing.T) {
 	_, _, _ = sp.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 2, Y: sp.controlY})
 	// Click Esc return (lines 309-310)
 	_, _, _ = sp.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 25, Y: sp.controlY})
-	// Shift+Enter with preview.DTQL mismatch (line 321)
-	spMismatch := &resultServerPreviewOverlay{operation: opGroup, preview: queryops.Preview{DTQL: "mismatched"}, text: "preview"}
+	// Shift+Enter with preview.TugQL mismatch (line 321)
+	spMismatch := &resultServerPreviewOverlay{operation: opGroup, preview: queryops.Preview{TugQL: "mismatched"}, text: "preview"}
 	_, _, _ = spMismatch.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift})
 	if spMismatch.err == "" {
 		t.Fatal("expected mismatch error in shift+enter")

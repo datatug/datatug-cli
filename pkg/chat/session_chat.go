@@ -38,7 +38,7 @@ type StreamingConversation interface {
 	LastStreamTurn() Turn
 }
 
-// SessionChat composes durable state with the existing AI -> DTQL pipeline.
+// SessionChat composes durable state with the existing AI -> TugQL pipeline.
 // Its lock prevents a session switch while a turn is being saved/executed.
 type SessionChat struct {
 	mu                 sync.Mutex
@@ -52,7 +52,7 @@ type SessionChat struct {
 	lastBookmarkID     string
 	implicitBookmarkID string
 	joinApplication    JoinApplication
-	queryExecutor      DTQLExecutor
+	queryExecutor      TugQLExecutor
 	savedQueryService  SavedQueryService
 	reporter           InteractionReporter
 	clientContext      ai.ClientContext
@@ -81,10 +81,10 @@ type SessionChat struct {
 
 var ErrActiveSessionChanged = errors.New("session changed; refresh chat")
 
-// ConfigureQueryExecutor enables deterministic refresh of stored DTQL without
+// ConfigureQueryExecutor enables deterministic refresh of stored TugQL without
 // another model call. The caller supplies the same policy-bound executor used
 // for ordinary agent queries.
-func (c *SessionChat) ConfigureQueryExecutor(executor DTQLExecutor) {
+func (c *SessionChat) ConfigureQueryExecutor(executor TugQLExecutor) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.queryExecutor = executor
@@ -106,8 +106,8 @@ func (c *SessionChat) ListSavedQueries(ctx context.Context) ([]SavedQuery, error
 	return service.List(ctx)
 }
 
-func (c *SessionChat) RunSavedDTQLActive(ctx context.Context, sessionID, queryID string, variables map[string]string) error {
-	return c.runSavedQueryActive(ctx, sessionID, queryID, variables, "DTQL")
+func (c *SessionChat) RunSavedTugQLActive(ctx context.Context, sessionID, queryID string, variables map[string]string) error {
+	return c.runSavedQueryActive(ctx, sessionID, queryID, variables, "TugQL")
 }
 
 func (c *SessionChat) RunSavedHTTPActive(ctx context.Context, sessionID, queryID string, variables map[string]string) error {
@@ -159,11 +159,11 @@ func (c *SessionChat) runSavedQueryActive(ctx context.Context, sessionID, queryI
 		}
 		result, err = runner.RunHTTPWithVariables(ctx, queryID, variables)
 	} else {
-		runner, ok := service.(SavedDTQLRunner)
+		runner, ok := service.(SavedTugQLRunner)
 		if !ok {
-			return fmt.Errorf("DTQL query execution is unavailable")
+			return fmt.Errorf("TugQL query execution is unavailable")
 		}
-		result, err = runner.RunDTQLWithVariables(ctx, queryID, variables)
+		result, err = runner.RunTugQLWithVariables(ctx, queryID, variables)
 	}
 	if err != nil {
 		return fmt.Errorf("query failed; check its parameters and data source")
@@ -205,7 +205,7 @@ func (c *SessionChat) SaveQueryActive(ctx context.Context, sessionID string, req
 	if request.Title == "" {
 		return fmt.Errorf("give this query a name")
 	}
-	if request.Type != "DTQL" && request.Type != "HTTP" {
+	if request.Type != "TugQL" && request.Type != "HTTP" {
 		return fmt.Errorf("unsupported query type")
 	}
 	if strings.TrimSpace(request.Text) == "" {
@@ -793,7 +793,7 @@ type preparedTurn struct {
 	clientContext *ai.ClientContext
 	// joinChoice, once non-nil after the agent turn, holds an
 	// attachedJoinChoiceError raised by the withAttachedJoin observer below:
-	// the model's run_dtql referenced attached-context metadata that matched
+	// the model's run_tugql referenced attached-context metadata that matched
 	// more than one join edge. It is a clarification, not a failed query or
 	// a model-authored choice, so ask()/streamAsk() replace the turn's text
 	// with its question rather than persisting a query error.
@@ -1264,7 +1264,7 @@ func buildSessionContext(session ChatSession, catalogs ...ProjectCatalog) string
 				view := session.Workspace.Views[selection.ViewID]
 				line += fmt.Sprintf("; RecordSet=%s; selected rows=%d; columns=%s", view.RecordSetID, len(selection.Rows), strings.Join(selection.Columns, ", "))
 				for columnIndex, column := range selection.Columns {
-					line += fmt.Sprintf("; DTQL In parameter for %s: selection_%d_c%d", column, index+1, columnIndex+1)
+					line += fmt.Sprintf("; TugQL In parameter for %s: selection_%d_c%d", column, index+1, columnIndex+1)
 				}
 			}
 		case "bookmark":
@@ -1272,7 +1272,7 @@ func buildSessionContext(session ChatSession, catalogs ...ProjectCatalog) string
 				result, _ := bookmarkResult(bookmark)
 				line += fmt.Sprintf("; target=%s; rows=%d; columns=%s", bookmark.TargetKind, len(result.Rows), boundedContextText(sanitizeTerminalText(strings.Join(result.Columns, ", ")), 600))
 				for columnIndex, column := range result.Columns {
-					line += fmt.Sprintf("; DTQL In parameter for %s: selection_%d_c%d", column, index+1, columnIndex+1)
+					line += fmt.Sprintf("; TugQL In parameter for %s: selection_%d_c%d", column, index+1, columnIndex+1)
 				}
 			}
 		}
@@ -1292,7 +1292,7 @@ func buildSessionContext(session ChatSession, catalogs ...ProjectCatalog) string
 			if !ok {
 				continue
 			}
-			line := fmt.Sprintf("RecordSet %s (%s): %d rows; columns: %s; source: %s/%s; DTQL: %s", record.ID, boundedContextText(sanitizeTerminalText(record.Title), 100), len(record.Result.Rows), boundedContextText(sanitizeTerminalText(strings.Join(record.Result.Columns, ", ")), 800), record.Environment, record.Database, boundedContextText(record.DTQL, 4000))
+			line := fmt.Sprintf("RecordSet %s (%s): %d rows; columns: %s; source: %s/%s; TugQL: %s", record.ID, boundedContextText(sanitizeTerminalText(record.Title), 100), len(record.Result.Rows), boundedContextText(sanitizeTerminalText(strings.Join(record.Result.Columns, ", ")), 800), record.Environment, record.Database, boundedContextText(record.TugQL, 4000))
 			lines = append(lines, line)
 		}
 	}

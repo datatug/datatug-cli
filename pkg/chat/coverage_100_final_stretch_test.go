@@ -17,7 +17,7 @@ import (
 
 	godbf "github.com/LindsayBradford/go-dbf"
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -106,7 +106,7 @@ func TestFinalStretch_HTTPStoreErrors(t *testing.T) {
 	appendQueryTxFn = func(s *SessionStore, ctx context.Context, tx *sql.Tx, sessionID, originID, source string, query *QueryResult, now time.Time) error {
 		return errors.New("fail appendQueryTx")
 	}
-	q := &QueryResult{Title: "Q", DTQL: "from: {name: t}", Result: secureread.Result{Columns: []string{"id"}}}
+	q := &QueryResult{Title: "Q", TugQL: "from: {name: t}", Result: secureread.Result{Columns: []string{"id"}}}
 	if _, err := store.AppendHTTPResponse(ctx, sess.ID, origMsg.ID, HTTPResponse{Method: "GET", URL: "https://example.com", Body: []byte{}}, q); err == nil {
 		t.Fatal("expected error when appendQueryTxFn fails")
 	}
@@ -225,7 +225,7 @@ func TestFinalStretch_BridgeEndpoints(t *testing.T) {
 		chat.ConfigureQueryExecutor(&fakeExecutor{result: secureread.Result{Columns: []string{"id"}, Rows: []secureread.Row{{Data: map[string]any{"id": 1}}}}})
 		rs := QueryResult{
 			Title:    "RS",
-			DTQL:     "from: {name: Invoice}\nlimit: 20",
+			TugQL:    "from: {name: Invoice}\nlimit: 20",
 			SourceID: "chinook",
 			Result:   secureread.Result{Columns: []string{"id"}},
 		}
@@ -248,7 +248,7 @@ func TestFinalStretch_BridgeEndpoints(t *testing.T) {
 		userTurn, _ := chat.store.AppendUser(ctx, chat.activeID, "hi")
 		appended, _ := chat.store.AppendQuery(ctx, chat.activeID, userTurn.ID, "sqlite:///chinook.db", QueryResult{
 			Title:  "RS",
-			DTQL:   "from: {name: t}",
+			TugQL:  "from: {name: t}",
 			Result: secureread.Result{Columns: []string{"id"}, Rows: []secureread.Row{{Key: "1", Data: map[string]any{"id": "a_long_string_to_exceed_limit"}}}},
 		})
 
@@ -291,7 +291,7 @@ func (f *failingSavedQueryService) List(ctx context.Context) ([]SavedQuery, erro
 func (f *failingSavedQueryService) Run(ctx context.Context, id string) (QueryResult, error) {
 	return QueryResult{}, errors.New("run error")
 }
-func (f *failingSavedQueryService) RunDTQLWithVariables(ctx context.Context, id string, vars map[string]string) (QueryResult, error) {
+func (f *failingSavedQueryService) RunTugQLWithVariables(ctx context.Context, id string, vars map[string]string) (QueryResult, error) {
 	return QueryResult{}, errors.New("run error")
 }
 
@@ -540,13 +540,13 @@ func TestFinalStretch_BookmarkAndJoin(t *testing.T) {
 	}
 
 	// prepareJoinProjection baseColumns empty
-	qSingle, _ := dtql.Deserialize([]byte("from: {name: users}\n"))
+	qSingle, _ := tugql.Deserialize([]byte("from: {name: users}\n"))
 	if _, err := prepareJoinProjection(qSingle, ForeignKeySnapshot{Columns: map[string][]string{}}, JoinCandidate{Target: RelationInstance{Relation: "orders"}}, "orders"); err == nil {
 		t.Fatal("expected error when baseColumns empty")
 	}
 
 	// queryHasAggregate binary right and order expression
-	qBase, _ := dtql.Deserialize([]byte("from: {name: t}\ncolumns: [{field: a}]\n"))
+	qBase, _ := tugql.Deserialize([]byte("from: {name: t}\ncolumns: [{field: a}]\n"))
 	qAggOrder := joinPreparedQuery{
 		StructuredQuery: qBase,
 		order: []dal.OrderExpression{

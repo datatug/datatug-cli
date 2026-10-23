@@ -169,9 +169,9 @@ func TestBuildChatProjectCatalogIncludesQueries(t *testing.T) {
 	write("environments/local/local.env.json", `{"id":"local","dbServers":[{"driver":"sqlite3","catalogs":["chinook-local","second-db"]}]}`)
 	write("environments/local/catalogs/chinook-local/chinook-local.db.json", fmt.Sprintf(`{"driver":"sqlite3","path":%q}`, filepath.Join(dir, "chinook.sqlite")))
 	write("environments/local/catalogs/second-db/second-db.db.json", fmt.Sprintf(`{"driver":"sqlite3","path":%q}`, filepath.Join(dir, "second.sqlite")))
-	write("queries/scoped.query.json", `{"createdAt":"2026-10-01T00:00:00Z","id":"scoped","title":"Scoped query","type":"DTQL","targets":[{"catalog":"chinook-local"}]}`)
-	write("queries/ambiguous.query.json", `{"createdAt":"2026-10-01T00:00:00Z","id":"ambiguous","type":"DTQL","targets":[{"catalog":"chinook-local"},{"catalog":"second-db"}]}`)
-	write("queries/untargeted.query.json", `{"createdAt":"2026-10-01T00:00:00Z","id":"untargeted","type":"DTQL"}`)
+	write("queries/scoped.query.json", `{"createdAt":"2026-10-01T00:00:00Z","id":"scoped","title":"Scoped query","type":"TugQL","targets":[{"catalog":"chinook-local"}]}`)
+	write("queries/ambiguous.query.json", `{"createdAt":"2026-10-01T00:00:00Z","id":"ambiguous","type":"TugQL","targets":[{"catalog":"chinook-local"},{"catalog":"second-db"}]}`)
+	write("queries/untargeted.query.json", `{"createdAt":"2026-10-01T00:00:00Z","id":"untargeted","type":"TugQL"}`)
 
 	store := filestore.NewProjectStore("chat-test", dir)
 	catalog, urls, err := buildChatProjectCatalog(context.Background(), dir, store, "local")

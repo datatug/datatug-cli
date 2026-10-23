@@ -141,7 +141,7 @@ func TestCovCQueryFailureDefaultAndBuildQueryBadDocument(t *testing.T) {
 	if !errors.As(err, &coder) || coder.ExitCode() != exitCodeDatabase {
 		t.Fatalf("queryFailure default: %v", err)
 	}
-	file := filepath.Join(t.TempDir(), "bad.dtql")
+	file := filepath.Join(t.TempDir(), "bad.tugql")
 	if err := os.WriteFile(file, []byte("from: [unclosed"), 0o644); err != nil {
 		t.Fatal(err)
 	}

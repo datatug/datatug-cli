@@ -125,7 +125,8 @@ func getTokenFromWeb(ctx context.Context, config *oauth2.Config) (*oauth2.Token,
 		_ = srv.Close()
 		_ = listener.Close()
 		select {
-		case <-done:
+		case serveErr := <-done:
+			_ = serveErr // Server errors are deliberately normalized to the auth-flow result.
 		case <-time.After(authDrainTimeout):
 		}
 	}
@@ -137,7 +138,8 @@ func getTokenFromWeb(ctx context.Context, config *oauth2.Config) (*oauth2.Token,
 	var response authResponse
 	select {
 	case response = <-result:
-	case <-done:
+	case serveErr := <-done:
+		_ = serveErr // Server errors are deliberately normalized to the auth-flow result.
 		closeFlow()
 		return nil, errAuthServerStopped
 	case <-ctx.Done():

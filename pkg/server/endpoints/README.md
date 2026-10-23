@@ -118,7 +118,7 @@ and exact integers only (a float is never compared for equality, and the structu
 | POST | /queries/create_query | Legacy create-or-replace; needs `--allow-writes` and a project-write grant for the serving principal |
 | PUT | /queries/update_query | Legacy create-or-replace; same authorization as create_query |
 | DELETE | /queries/delete_query | Needs `--allow-writes` and a project-write grant |
-| POST | /queries/capture | Save as project query: an atomic, revision-checked create (`ifNoneMatch`) or update (`ifMatch`) of a DTQL query pair; same authorization |
+| POST | /queries/capture | Save as project query: an atomic, revision-checked create (`ifNoneMatch`) or update (`ifMatch`) of a TugQL query pair; same authorization |
 |  **Recordsets** |
 | GET | /data/recordsets | |
 | GET | /data/recordset_definition | |

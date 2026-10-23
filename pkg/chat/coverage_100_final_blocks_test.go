@@ -15,7 +15,7 @@ import (
 
 	godbf "github.com/LindsayBradford/go-dbf"
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/xuri/excelize/v2"
@@ -270,7 +270,7 @@ func TestFinalBlocks_Bookmark(t *testing.T) {
 	}
 	qResult := QueryResult{
 		Title:    "Test Query",
-		DTQL:     "from: {name: Invoice}\n",
+		TugQL:    "from: {name: Invoice}\n",
 		SourceID: "chinook",
 		Result:   secureread.Result{Columns: []string{"id"}, Rows: []secureread.Row{{Data: map[string]any{"id": 1}}}},
 	}
@@ -550,21 +550,21 @@ func TestFinalBlocks_Bookmark(t *testing.T) {
 
 	// 20. recordSetsForSession errors
 	// Corrupt parameters JSON in recordsets table
-	_, _ = store.db.ExecContext(ctx, "INSERT INTO recordsets (session_id, id, query_id, origin_message_id, title, dtql, source, environment, database_id, parameters_json, created_at, result_json) VALUES (?, 'r_corrupt1', ?, '', 't', '', '', '', '', 'bad json', '2025-01-01T00:00:00Z', '[]')", sess.ID, appended.QueryID)
+	_, _ = store.db.ExecContext(ctx, "INSERT INTO recordsets (session_id, id, query_id, origin_message_id, title, tugql, source, environment, database_id, parameters_json, created_at, result_json) VALUES (?, 'r_corrupt1', ?, '', 't', '', '', '', '', 'bad json', '2025-01-01T00:00:00Z', '[]')", sess.ID, appended.QueryID)
 	if _, err := recordSetsForSession(ctx, store.db, sess.ID); err == nil {
 		t.Fatal("expected error on corrupt parameters JSON")
 	}
 	_, _ = store.db.ExecContext(ctx, "DELETE FROM recordsets WHERE id = 'r_corrupt1'")
 
 	// Corrupt created_at timestamp
-	_, _ = store.db.ExecContext(ctx, "INSERT INTO recordsets (session_id, id, query_id, origin_message_id, title, dtql, source, environment, database_id, parameters_json, created_at, result_json) VALUES (?, 'r_corrupt2', ?, '', 't', '', '', '', '', '{}', 'bad-date', '[]')", sess.ID, appended.QueryID)
+	_, _ = store.db.ExecContext(ctx, "INSERT INTO recordsets (session_id, id, query_id, origin_message_id, title, tugql, source, environment, database_id, parameters_json, created_at, result_json) VALUES (?, 'r_corrupt2', ?, '', 't', '', '', '', '', '{}', 'bad-date', '[]')", sess.ID, appended.QueryID)
 	if _, err := recordSetsForSession(ctx, store.db, sess.ID); err == nil {
 		t.Fatal("expected error on corrupt created_at timestamp")
 	}
 	_, _ = store.db.ExecContext(ctx, "DELETE FROM recordsets WHERE id = 'r_corrupt2'")
 
 	// Corrupt result payload
-	_, _ = store.db.ExecContext(ctx, "INSERT INTO recordsets (session_id, id, query_id, origin_message_id, title, dtql, source, environment, database_id, parameters_json, created_at, result_json) VALUES (?, 'r_corrupt3', ?, '', 't', '', '', '', '', '{}', '2025-01-01T00:00:00Z', 'bad-result')", sess.ID, appended.QueryID)
+	_, _ = store.db.ExecContext(ctx, "INSERT INTO recordsets (session_id, id, query_id, origin_message_id, title, tugql, source, environment, database_id, parameters_json, created_at, result_json) VALUES (?, 'r_corrupt3', ?, '', 't', '', '', '', '', '{}', '2025-01-01T00:00:00Z', 'bad-result')", sess.ID, appended.QueryID)
 	if _, err := recordSetsForSession(ctx, store.db, sess.ID); err == nil {
 		t.Fatal("expected error on corrupt result payload")
 	}
@@ -680,7 +680,7 @@ func TestFinalBlocks_Bookmark(t *testing.T) {
 }
 
 func TestFinalBlocks_Join(t *testing.T) {
-	// Not parallel: mutates package-level join and DTQL seams.
+	// Not parallel: mutates package-level join and TugQL seams.
 	ctx := context.Background()
 
 	// 1. Candidates: Refresh error
@@ -694,25 +694,25 @@ func TestFinalBlocks_Join(t *testing.T) {
 		t.Fatal("expected error from Refresh in Candidates")
 	}
 
-	// 2. Candidates: invalid DTQL
+	// 2. Candidates: invalid TugQL
 	appValid := ForeignKeyJoinApplication{
 		Source:   "s1",
 		Snapshot: ForeignKeySnapshot{Source: "s1"},
 	}
-	if _, err := appValid.Candidates(ctx, RecordSet{Source: "s1", DTQL: "invalid-yaml: ["}); err == nil {
-		t.Fatal("expected error from invalid DTQL in Candidates")
+	if _, err := appValid.Candidates(ctx, RecordSet{Source: "s1", TugQL: "invalid-yaml: ["}); err == nil {
+		t.Fatal("expected error from invalid TugQL in Candidates")
 	}
 
 	// 3. Candidates: DiscoverJoinCandidates error (unsupported condition or bad query)
-	origDeserialize := dtqlDeserialize
-	defer func() { dtqlDeserialize = origDeserialize }()
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
+	origDeserialize := tugqlDeserialize
+	defer func() { tugqlDeserialize = origDeserialize }()
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
 		return nil, errors.New("deserialize fail")
 	}
-	if _, err := appValid.Candidates(ctx, RecordSet{Source: "s1", DTQL: "from: {name: t}"}); err == nil {
+	if _, err := appValid.Candidates(ctx, RecordSet{Source: "s1", TugQL: "from: {name: t}"}); err == nil {
 		t.Fatal("expected error when DiscoverJoinCandidates fails")
 	}
-	dtqlDeserialize = origDeserialize
+	tugqlDeserialize = origDeserialize
 
 	// 4. Candidates: Secure && CanReadTarget == nil
 	appSecureNoTarget := ForeignKeyJoinApplication{
@@ -721,7 +721,7 @@ func TestFinalBlocks_Join(t *testing.T) {
 		Secure:        true,
 		CanReadTarget: nil,
 	}
-	cands, err := appSecureNoTarget.Candidates(ctx, RecordSet{Source: "s1", DTQL: "from: {name: t}"})
+	cands, err := appSecureNoTarget.Candidates(ctx, RecordSet{Source: "s1", TugQL: "from: {name: t}"})
 	if err != nil || len(cands) != 0 {
 		t.Fatalf("expected empty candidates for secure without CanReadTarget, got %v, %v", cands, err)
 	}
@@ -746,7 +746,7 @@ func TestFinalBlocks_Join(t *testing.T) {
 			return nil
 		},
 	}
-	candsFilter, err := appFilter.Candidates(ctx, RecordSet{Source: "s1", DTQL: "from: {name: orders}\n"})
+	candsFilter, err := appFilter.Candidates(ctx, RecordSet{Source: "s1", TugQL: "from: {name: orders}\n"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -760,7 +760,7 @@ func TestFinalBlocks_Join(t *testing.T) {
 			return nil
 		},
 	}
-	qFrom, _ := dtql.Deserialize([]byte("from: {name: orders}\n"))
+	qFrom, _ := tugql.Deserialize([]byte("from: {name: orders}\n"))
 	if !appExpandTrue.canExpandQuery(ctx, qFrom.From()) {
 		t.Fatal("expected canExpandQuery to return true when CanReadTarget allows all")
 	}
@@ -769,7 +769,7 @@ func TestFinalBlocks_Join(t *testing.T) {
 	rsOrders := RecordSet{
 		ID:     "rs1",
 		Source: "s1",
-		DTQL:   "from: {name: orders}\n",
+		TugQL:  "from: {name: orders}\n",
 	}
 	fkSnap := ForeignKeySnapshot{
 		Source: "s1",
@@ -792,7 +792,7 @@ func TestFinalBlocks_Join(t *testing.T) {
 			return nil
 		},
 	}
-	candsAllowed, err := appAllowed.Candidates(ctx, RecordSet{Source: "s1", DTQL: "from: {name: orders}\n"})
+	candsAllowed, err := appAllowed.Candidates(ctx, RecordSet{Source: "s1", TugQL: "from: {name: orders}\n"})
 	if err != nil || len(candsAllowed) == 0 {
 		t.Fatalf("expected allowed candidate, got %v", err)
 	}
@@ -809,17 +809,17 @@ func TestFinalBlocks_Join(t *testing.T) {
 		t.Fatal("expected error on snapshot failure in Apply")
 	}
 
-	// Apply DTQL deserialize error
+	// Apply TugQL deserialize error
 	appApplyValid := ForeignKeyJoinApplication{
 		Source:   "s1",
 		Snapshot: fkSnap,
 		Executor: &fakeExecutor{},
 	}
-	if _, err := appApplyValid.Apply(ctx, RecordSet{Source: "s1", DTQL: "bad-yaml: ["}, "cand1"); err == nil {
+	if _, err := appApplyValid.Apply(ctx, RecordSet{Source: "s1", TugQL: "bad-yaml: ["}, "cand1"); err == nil {
 		t.Fatal("expected error on deserialize failure in Apply")
 	}
 
-	// Apply deriveJoinDTQL error (candidate not found)
+	// Apply deriveJoinTugQL error (candidate not found)
 	if _, err := appApplyValid.Apply(ctx, rsOrders, "nonexistent-candidate"); err == nil {
 		t.Fatal("expected error when candidate not found in Apply")
 	}
@@ -833,7 +833,7 @@ func TestFinalBlocks_Join(t *testing.T) {
 		CanReadTarget: nil,
 	}
 	// Get valid candidate ID
-	candsValid, _ := DiscoverJoinCandidates([]byte(rsOrders.DTQL), fkSnap)
+	candsValid, _ := DiscoverJoinCandidates([]byte(rsOrders.TugQL), fkSnap)
 	if len(candsValid) == 0 {
 		t.Fatal("expected valid candidate")
 	}
@@ -857,8 +857,8 @@ func TestFinalBlocks_Join(t *testing.T) {
 
 	// Candidates DiscoverJoinCandidates error (line 116)
 	deserCallCount := 0
-	origDeser := dtqlDeserialize
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
+	origDeser := tugqlDeserialize
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
 		deserCallCount++
 		if deserCallCount == 2 {
 			return nil, errors.New("discover candidate fail")
@@ -869,7 +869,7 @@ func TestFinalBlocks_Join(t *testing.T) {
 	if _, err := appDiscoverErr.Candidates(ctx, rsOrders); err == nil {
 		t.Fatal("expected error from Candidates when DiscoverJoinCandidates fails")
 	}
-	dtqlDeserialize = origDeser
+	tugqlDeserialize = origDeser
 
 	// Apply CanReadTarget denied
 	appApplyDenied := ForeignKeyJoinApplication{
@@ -884,14 +884,14 @@ func TestFinalBlocks_Join(t *testing.T) {
 		t.Fatal("expected error for denied target in Apply")
 	}
 
-	// Apply Executor RunDTQL error (line 163)
+	// Apply Executor RunTugQL error (line 163)
 	appApplyExecErr := ForeignKeyJoinApplication{
 		Source:   "s1",
 		Snapshot: fkSnap,
-		Executor: &fakeExecutor{err: errors.New("run dtql error")},
+		Executor: &fakeExecutor{err: errors.New("run tugql error")},
 	}
 	if _, err := appApplyExecErr.Apply(ctx, rsOrders, validCandID); err == nil {
-		t.Fatal("expected error from Executor.RunDTQL in Apply")
+		t.Fatal("expected error from Executor.RunTugQL in Apply")
 	}
 
 	// Apply success (line 124)
@@ -1048,19 +1048,19 @@ func TestFinalBlocks_Join(t *testing.T) {
 		t.Fatalf("expected 0 candidates for invalid FKs, got %v, %v", candsEmpty, err)
 	}
 
-	// 10. deriveJoinDTQL:
+	// 10. deriveJoinTugQL:
 	// DiscoverJoinCandidates error
-	if _, _, err := deriveJoinDTQL([]byte("bad-yaml: ["), fkSnap, "cand1", dal.JoinInner); err == nil {
-		t.Fatal("expected error on invalid DTQL in deriveJoinDTQL")
+	if _, _, err := deriveJoinTugQL([]byte("bad-yaml: ["), fkSnap, "cand1", dal.JoinInner); err == nil {
+		t.Fatal("expected error on invalid TugQL in deriveJoinTugQL")
 	}
-	// dtqlDeserialize(parent) error
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
+	// tugqlDeserialize(parent) error
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
 		return nil, errors.New("deserialize fail")
 	}
-	if _, _, err := deriveJoinDTQL([]byte(rsOrders.DTQL), fkSnap, validCandID, dal.JoinInner); err == nil {
-		t.Fatal("expected error from dtqlDeserialize in deriveJoinDTQL")
+	if _, _, err := deriveJoinTugQL([]byte(rsOrders.TugQL), fkSnap, validCandID, dal.JoinInner); err == nil {
+		t.Fatal("expected error from tugqlDeserialize in deriveJoinTugQL")
 	}
-	dtqlDeserialize = origDeserialize
+	tugqlDeserialize = origDeserialize
 
 	// Candidate with non-main target schema
 	fkSnapNonMain := fkSnap
@@ -1068,37 +1068,37 @@ func TestFinalBlocks_Join(t *testing.T) {
 		{ConstraintID: "fk_nonmain", Schema: "main", FromRelation: "orders", FromFields: []string{"user_id"}, ToSchema: "other_schema", ToRelation: "users", ToFields: []string{"id"}},
 	}
 	fkSnapNonMain.Columns[relationKey("other_schema", "users")] = []string{"id", "name"}
-	candsNonMain, _ := DiscoverJoinCandidates([]byte(rsOrders.DTQL), fkSnapNonMain)
+	candsNonMain, _ := DiscoverJoinCandidates([]byte(rsOrders.TugQL), fkSnapNonMain)
 	if len(candsNonMain) > 0 {
-		if derived, _, err := deriveJoinDTQL([]byte(rsOrders.DTQL), fkSnapNonMain, candsNonMain[0].ID, dal.JoinInner); err != nil {
+		if derived, _, err := deriveJoinTugQL([]byte(rsOrders.TugQL), fkSnapNonMain, candsNonMain[0].ID, dal.JoinInner); err != nil {
 			t.Fatalf("expected success for non-main schema join, got %v: %s", err, string(derived))
 		}
 	}
 
-	// dtqlSerialize error
-	origSerialize := dtqlSerialize
-	defer func() { dtqlSerialize = origSerialize }()
-	dtqlSerialize = func(q dal.StructuredQuery) ([]byte, error) {
+	// tugqlSerialize error
+	origSerialize := tugqlSerialize
+	defer func() { tugqlSerialize = origSerialize }()
+	tugqlSerialize = func(q dal.StructuredQuery) ([]byte, error) {
 		return nil, errors.New("serialize fail")
 	}
-	if _, _, err := deriveJoinDTQL([]byte(rsOrders.DTQL), fkSnap, validCandID, dal.JoinInner); err == nil {
-		t.Fatal("expected error from dtqlSerialize in deriveJoinDTQL")
+	if _, _, err := deriveJoinTugQL([]byte(rsOrders.TugQL), fkSnap, validCandID, dal.JoinInner); err == nil {
+		t.Fatal("expected error from tugqlSerialize in deriveJoinTugQL")
 	}
-	dtqlSerialize = origSerialize
+	tugqlSerialize = origSerialize
 
-	// dtqlDeserialize(derived) error
+	// tugqlDeserialize(derived) error
 	deserializeCount := 0
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
 		deserializeCount++
 		if deserializeCount > 2 {
 			return nil, errors.New("deserialize derived fail")
 		}
 		return origDeserialize(data)
 	}
-	if _, _, err := deriveJoinDTQL([]byte(rsOrders.DTQL), fkSnap, validCandID, dal.JoinInner); err == nil {
-		t.Fatal("expected error from dtqlDeserialize(derived) in deriveJoinDTQL")
+	if _, _, err := deriveJoinTugQL([]byte(rsOrders.TugQL), fkSnap, validCandID, dal.JoinInner); err == nil {
+		t.Fatal("expected error from tugqlDeserialize(derived) in deriveJoinTugQL")
 	}
-	dtqlDeserialize = origDeserialize
+	tugqlDeserialize = origDeserialize
 
 	// 11. prepareJoinProjection:
 	// Wildcard source not in query
@@ -1123,7 +1123,7 @@ func TestFinalBlocks_Join(t *testing.T) {
 
 	// Multi-relation wildcard (!single) and alias collision loop
 	candMulti := candsValid[0]
-	qMultiJoin, err := dtql.Deserialize([]byte("from:\n  name: orders\n  alias: orders\n  joins:\n    - from: {name: other, alias: other}\n      on: [{left: {field: user_id, source: orders}, op: '==', right: {field: id, source: other}}]\n"))
+	qMultiJoin, err := tugql.Deserialize([]byte("from:\n  name: orders\n  alias: orders\n  joins:\n    - from: {name: other, alias: other}\n      on: [{left: {field: user_id, source: orders}, op: '==', right: {field: id, source: other}}]\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1222,7 +1222,7 @@ func TestFinalBlocks_Join(t *testing.T) {
 	appliedEdge := AppliedJoinEdge{
 		JoinPath: RelationInstanceID("root/0"),
 	}
-	qWithJoin, err := dtql.Deserialize([]byte("from:\n  name: orders\n  alias: orders\n  joins:\n    - from: {name: users, alias: users}\n      on: [{left: {field: user_id, source: orders}, op: '==', right: {field: id, source: users}}]\n"))
+	qWithJoin, err := tugql.Deserialize([]byte("from:\n  name: orders\n  alias: orders\n  joins:\n    - from: {name: users, alias: users}\n      on: [{left: {field: user_id, source: orders}, op: '==', right: {field: id, source: users}}]\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1231,13 +1231,13 @@ func TestFinalBlocks_Join(t *testing.T) {
 		t.Fatal("expected 0 active join pairs when provenance matches")
 	}
 
-	// 16. deriveJoinDTQL error on group_by (line 405)
-	if _, _, err := deriveJoinDTQL([]byte("from: {name: orders}\ngroup_by: [{field: user_id}]\n"), fkSnap, validCandID, dal.JoinInner); err == nil {
-		t.Fatal("expected error on group_by in deriveJoinDTQL")
+	// 16. deriveJoinTugQL error on group_by (line 405)
+	if _, _, err := deriveJoinTugQL([]byte("from: {name: orders}\ngroup_by: [{field: user_id}]\n"), fkSnap, validCandID, dal.JoinInner); err == nil {
+		t.Fatal("expected error on group_by in deriveJoinTugQL")
 	}
 
-	// 17. deriveJoinDTQL error when fromAtPath returns nil (line 440)
-	qWithJoinBytes, err := dtqlSerialize(qWithJoin)
+	// 17. deriveJoinTugQL error when fromAtPath returns nil (line 440)
+	qWithJoinBytes, err := tugqlSerialize(qWithJoin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1273,17 +1273,17 @@ func TestFinalBlocks_Join(t *testing.T) {
 		t.Fatal("expected candidate with Source.ID == root/0")
 	}
 	deserCount := 0
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
 		deserCount++
 		if deserCount == 2 {
 			return qOrdersBase(), nil
 		}
 		return origDeserialize(data)
 	}
-	if _, _, err := deriveJoinDTQL(qWithJoinBytes, fkSnapChild, childCandID, dal.JoinInner); err == nil {
-		t.Fatal("expected error when fromAtPath returns nil in deriveJoinDTQL")
+	if _, _, err := deriveJoinTugQL(qWithJoinBytes, fkSnapChild, childCandID, dal.JoinInner); err == nil {
+		t.Fatal("expected error when fromAtPath returns nil in deriveJoinTugQL")
 	}
-	dtqlDeserialize = origDeserialize
+	tugqlDeserialize = origDeserialize
 
 	// 18. fromAtPath when child == nil (line 692)
 	fromWithNilChild := dal.From(dal.NewRootCollectionRef("p", "p")).Join(dal.JoinedSource{})
@@ -1297,19 +1297,19 @@ func TestFinalBlocks_Join(t *testing.T) {
 	})
 	_ = activeJoinPairs(fromWithRecordsetSource, nil)
 
-	// 20. deriveJoinDTQL dtqlDeserialize call 2 error (line 408)
+	// 20. deriveJoinTugQL tugqlDeserialize call 2 error (line 408)
 	deserCall := 0
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
 		deserCall++
 		if deserCall == 2 {
 			return nil, errors.New("second deserialize fail")
 		}
 		return origDeserialize(data)
 	}
-	if _, _, err := deriveJoinDTQL([]byte(rsOrders.DTQL), fkSnap, validCandID, dal.JoinInner); err == nil {
-		t.Fatal("expected error on call 2 of dtqlDeserialize in deriveJoinDTQL")
+	if _, _, err := deriveJoinTugQL([]byte(rsOrders.TugQL), fkSnap, validCandID, dal.JoinInner); err == nil {
+		t.Fatal("expected error on call 2 of tugqlDeserialize in deriveJoinTugQL")
 	}
-	dtqlDeserialize = origDeserialize
+	tugqlDeserialize = origDeserialize
 
 	// 21. fromAtPath with nil from (line 684)
 	if node := fromAtPath(nil, "root"); node != nil {
@@ -1336,6 +1336,6 @@ func (m *mockChangingFromSource) Base() dal.RecordsetSource {
 }
 
 func qOrdersBase() dal.StructuredQuery {
-	q, _ := dtql.Deserialize([]byte("from: {name: orders}\ncolumns: [{field: id}]\n"))
+	q, _ := tugql.Deserialize([]byte("from: {name: orders}\ncolumns: [{field: id}]\n"))
 	return q
 }

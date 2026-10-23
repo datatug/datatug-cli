@@ -234,7 +234,7 @@ func checkNoCommandPathEchoesASourceSecret(t *testing.T) {
 		if projectErr != nil {
 			t.Fatal(projectErr)
 		}
-		_, envErr := resolveSQLOrDTQLSourceURL(context.Background(), projectStore, projectDir, c.Source, &datatug.QueryDef{ID: "saved"})
+		_, envErr := resolveSQLOrTugQLSourceURL(context.Background(), projectStore, projectDir, c.Source, &datatug.QueryDef{ID: "saved"})
 		note("", "", envErr)
 		if envErr == nil || !strings.Contains(envErr.Error(), "database catalogs") {
 			t.Errorf("%s: a saved query with --env did not stop at the environment's database catalogs: %v", c.Name, envErr)

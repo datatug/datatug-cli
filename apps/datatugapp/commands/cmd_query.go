@@ -12,7 +12,7 @@ import (
 	"github.com/dal-go/dalgo/access"
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/dal-go/dalgo2http"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
@@ -74,14 +74,14 @@ func queryCommand() *cobra.Command {
 func queryRunCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "run",
-		Short: "Run an ad-hoc DTQL query as a policy-secured application would",
-		Long: `Runs one DTQL query against a database URL through the DALgo access policies
+		Short: "Run an ad-hoc TugQL query as a policy-secured application would",
+		Long: `Runs one TugQL query against a database URL through the DALgo access policies
 found in ~/` + accesspolicies.DefaultDir + `/ (override with --policies-dir or $` + accesspolicies.DirEnv + `),
 exactly as a secured application would for the principal named by --as/--role/--group.
 Result rows go to stdout in the chosen format; the limitations the policies
 applied (row conditions, field allow-lists, the deciding rule) go to stderr.
 
-For saved federated DTQL, --format jsonl and csv stream one flat equality
+For saved federated TugQL, --format jsonl and csv stream one flat equality
 join without top-level ordering or aggregation. The joined dimension must
 declare a stable scan order and limit of at most 10000 rows; it is indexed
 in memory while fact rows and HTTP lookups stream in bounded batches.
@@ -90,9 +90,9 @@ shapes can use json, yaml or grid, which collect the result before output.
 
 Examples:
   datatug query run --db ingitdb://./crm --from customers --as alice
-  datatug query run --db sqlite:///tmp/crm.db -f report.dtql.yaml --as alice --role support --format csv
+  datatug query run --db sqlite:///tmp/crm.db -f report.tugql.yaml --as alice --role support --format csv
   datatug query run --db ingitdb://./crm --from products --var minPrice=10 --format json
-  datatug query run --db env:SHOP_PG_URL -f report.dtql.yaml --as alice   # SHOP_PG_URL holds the whole connection URL
+  datatug query run --db env:SHOP_PG_URL -f report.tugql.yaml --as alice   # SHOP_PG_URL holds the whole connection URL
   datatug query run --db datatug://shop/crm --from customers --no-policies   # crm is a source of the registered project shop
   datatug query run --project ./demo-project-1 --query customers/customer-invoices --as alice --var CustomerId=5
   datatug query run --project demo-project-1 --query reference/country-facts --env local --var name=Brazil`,
@@ -102,7 +102,7 @@ Examples:
 	}
 	flags := cmd.Flags()
 	flags.String(queryDBFlag, "", "Database URL ("+dbSchemesHelp()+"), or datatug://<project>/<db>[?env=<ENV>] for a database that is a source of a registered project (datatug:///<db> for the current project)")
-	flags.StringP(queryFileFlag, "f", "", "DTQL query document (YAML or JSON); '-' reads stdin")
+	flags.StringP(queryFileFlag, "f", "", "TugQL query document (YAML or JSON); '-' reads stdin")
 	flags.String(queryFromFlag, "", "Select every row and field of this root collection (alternative to -f)")
 	flags.String(queryProjectFlag, "", "Project directory or registered project ID (alternative to --db; runs a saved --query by ID)")
 	flags.String(queryQueryFlag, "", "Saved query ID to run, e.g. customers/customer-invoices (requires --project)")
@@ -213,7 +213,7 @@ func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
 // loopback httptest.Server, without any project descriptor file ever being
 // able to request that itself — see cmd_query_http_provenance_test.go.
 // Production code always runs with this default. SQLite uses the validated
-// structured-query dialect so grouped DTQL is rendered as native SQL (and
+// structured-query dialect so grouped TugQL is rendered as native SQL (and
 // literals remain bound parameters), and PostgreSQL opens as a protected read:
 // a read-only session, behind the preview switch; other sources keep their
 // existing open behavior. Both paths retain the HTTPS-only HTTP-source
@@ -392,12 +392,12 @@ func queryFailure(err error) error {
 	}
 }
 
-// buildQuery is the query to run and its DTQL text: the document as given,
+// buildQuery is the query to run and its TugQL text: the document as given,
 // or for --from the equivalent one-collection document.
 func buildQuery(o queryOptions, stdin io.Reader) (dal.Query, string, error) {
 	if o.from != "" {
 		query := fromQuery(o, nil)
-		text, _ := dtql.Serialize(query.(dal.StructuredQuery))
+		text, _ := tugql.Serialize(query.(dal.StructuredQuery))
 		return query, string(text), nil
 	}
 	var (
@@ -415,7 +415,7 @@ func buildQuery(o queryOptions, stdin io.Reader) (dal.Query, string, error) {
 	if strings.TrimSpace(string(content)) == "" {
 		return nil, "", Exit(fmt.Sprintf("query %s is empty", o.file), exitCodeUsage)
 	}
-	query, err := dtql.Deserialize(content)
+	query, err := tugql.Deserialize(content)
 	if err != nil {
 		return nil, "", Exit(fmt.Sprintf("query %s: %v", o.file, err), exitCodeUsage)
 	}

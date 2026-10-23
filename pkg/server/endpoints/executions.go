@@ -406,7 +406,7 @@ func authorizeExecutionRecordContext(ctx context.Context, record apicontract.Exe
 
 func executionBrief(r *http.Request, store *executionstore.Store, record apicontract.ExecutionRecord) (apicontract.ExecutionRecordBrief, error) {
 	brief := apicontract.ExecutionRecordBrief{
-		Ref: record.Ref, Scope: record.Scope, QueryID: record.QueryID, QueryRevision: record.QueryRevision, DTQLHash: record.DTQLHash,
+		Ref: record.Ref, Scope: record.Scope, QueryID: record.QueryID, QueryRevision: record.QueryRevision, TugQLHash: record.TugQLHash,
 		ExecutedAt: record.ExecutedAt, DurationMS: record.DurationMS, RowCount: record.RowCount,
 		ResultFingerprint: record.ResultFingerprint, SnapshotRef: record.SnapshotRef, Incident: record.Incident,
 	}
@@ -423,6 +423,6 @@ func executionBrief(r *http.Request, store *executionstore.Store, record apicont
 func recordMatchesPartition(record apicontract.ExecutionRecord, partition apicontract.ExecutionSeriesPartition) bool {
 	return record.Ref.StoreID == partition.EvidenceStoreID && record.Scope == partition.SourceScope &&
 		record.Provenance.Source == partition.Source && record.PolicyFingerprint == partition.PolicyFingerprint &&
-		record.QueryID == partition.QueryID && record.QueryRevision == partition.QueryRevision && record.DTQLHash == partition.DTQLHash &&
+		record.QueryID == partition.QueryID && record.QueryRevision == partition.QueryRevision && record.TugQLHash == partition.TugQLHash &&
 		reflect.DeepEqual(record.BindingsApplied, partition.BindingsApplied)
 }

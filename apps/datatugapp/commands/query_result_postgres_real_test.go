@@ -41,7 +41,7 @@ func TestPostgresResultMetaMatchesSQLite(t *testing.T) {
 		argv      []string
 	}{
 		{"from", "", []string{"--from", "Invoice"}},
-		{"join", invoiceCustomerDTQL, []string{"-f", "-"}},
+		{"join", invoiceCustomerTugQL, []string{"-f", "-"}},
 	} {
 		_, stderr, code := runQuery(t, tc.stdin, append([]string{"--db", "env:" + realPgScanVar, "--no-policies", "--result-id", "pg-" + tc.id}, tc.argv...)...)
 		require.Zero(t, code, stderr)

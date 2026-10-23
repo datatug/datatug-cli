@@ -13,7 +13,7 @@ import (
 const maxChatInterpretBody = 20 << 10
 
 // chatInterpretHandler is a stateless model proxy. No key or generated query
-// is saved on the agent. The browser validates and executes DTQL separately.
+// is saved on the agent. The browser validates and executes TugQL separately.
 func chatInterpretHandler(w http.ResponseWriter, r *http.Request) {
 	origin := r.Header.Get("Origin")
 	if origin != "" {

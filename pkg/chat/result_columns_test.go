@@ -20,9 +20,9 @@ type columnCountingExecutor struct {
 	cancel context.CancelFunc
 }
 
-func (e *columnCountingExecutor) RunDTQL(ctx context.Context, source string, doc []byte, params map[string]any) (secureread.Result, error) {
+func (e *columnCountingExecutor) RunTugQL(ctx context.Context, source string, doc []byte, params map[string]any) (secureread.Result, error) {
 	e.calls++
-	r, err := e.Executor.RunDTQL(ctx, source, doc, params)
+	r, err := e.Executor.RunTugQL(ctx, source, doc, params)
 	if e.cancel != nil {
 		e.cancel()
 	}
@@ -51,7 +51,7 @@ func resultColumnsFixture(t *testing.T, schema, document string) (*SessionChat, 
 	}
 	executor := &columnCountingExecutor{Executor: secureread.NewExecutor(secureread.Session{Unrestricted: true})}
 	c.ConfigureQueryExecutor(executor)
-	result, err := executor.RunDTQL(ctx, source, []byte(document), nil)
+	result, err := executor.RunTugQL(ctx, source, []byte(document), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func resultColumnsFixture(t *testing.T, schema, document string) (*SessionChat, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	query, err := store.AppendQuery(ctx, c.activeID, user.ID, source, QueryResult{Title: "Invoice counts", SourceID: scope.Database, DTQL: document, Result: result})
+	query, err := store.AppendQuery(ctx, c.activeID, user.ID, source, QueryResult{Title: "Invoice counts", SourceID: scope.Database, TugQL: document, Result: result})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,14 +109,14 @@ func TestResultColumnsGroupedSecureSQLitePreservesCountsAndOrigin(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(preview.DTQL, "type: left") || !strings.Contains(preview.DTQL, "Customer_FirstName") {
-		t.Fatal(preview.DTQL)
+	if !strings.Contains(preview.TugQL, "type: left") || !strings.Contains(preview.TugQL, "Customer_FirstName") {
+		t.Fatal(preview.TugQL)
 	}
 	s, query, err := c.executeResultColumns(ctx, c.activeID, parent.ID, ids, preview.Fingerprint, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if e.calls != 1 || query.DTQL != preview.DTQL {
+	if e.calls != 1 || query.TugQL != preview.TugQL {
 		t.Fatalf("calls %d query %+v", e.calls, query)
 	}
 	after, _ := json.Marshal(s.RecordSets[parent.ID])
@@ -219,7 +219,7 @@ func TestResultColumnsStaleCancelAndUnsafeShapes(t *testing.T) {
 		t.Fatal("cancelled child persisted")
 	}
 	unsafe := parent
-	unsafe.DTQL = strings.ReplaceAll(parent.DTQL, "COUNT", "SUM")
+	unsafe.TugQL = strings.ReplaceAll(parent.TugQL, "COUNT", "SUM")
 	if _, _, err = resultColumnQuery(unsafe); err == nil {
 		t.Fatal("SUM accepted")
 	}
@@ -238,8 +238,8 @@ func TestResultColumnsPreservesHavingFiltersParametersOrderOffset(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(q.DTQL, "having:") || !strings.Contains(q.DTQL, "offset: 1") || len(q.Result.Rows) != len(parent.Result.Rows) {
-		t.Fatal(q.DTQL)
+	if !strings.Contains(q.TugQL, "having:") || !strings.Contains(q.TugQL, "offset: 1") || len(q.Result.Rows) != len(parent.Result.Rows) {
+		t.Fatal(q.TugQL)
 	}
 	if len(s.RecordSets) != 2 {
 		t.Fatal("wrong result count")

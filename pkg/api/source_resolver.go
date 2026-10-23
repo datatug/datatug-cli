@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/datatug/datatug-cli/pkg/querybody"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/storage"
 )
@@ -223,7 +224,7 @@ func escapeSQLitePath(path string) string {
 // "<id>.query.json", the same convention filestore's saveQuery already
 // writes with (store_queries_saver.go). It exists because
 // fsQueriesStore.LoadQuery does not hydrate QueryDef.Text back from that
-// file (the read-back half of REQ:dtql-query-type's sidecar rule lands with
+// file (the read-back half of REQ:tugql-query-type's sidecar rule lands with
 // datatug-core PR #302 / the S1b module swap — see this stream's PR body).
 // LoadQueryDocument exports loadQueryDocument for pkg/server/endpoints'
 // exec/run_query rewrite (Task 12), which needs the same sidecar-text read
@@ -236,6 +237,21 @@ func loadQueryDocument(projectID, queryID string, queryType datatug.QueryType) (
 	dir, ok := projectDir(projectID)
 	if !ok || dir == "" {
 		return "", fmt.Errorf("no project directory configured for project %q", dbcopy.SourceIDDisplay(projectID))
+	}
+	if queryType == datatug.QueryTypeTugQL {
+		store, err := projectStoreForID(LocalStoreID, projectID)
+		if err != nil {
+			return "", err
+		}
+		query, err := store.LoadQuery(context.Background(), queryID)
+		if err != nil {
+			return "", fmt.Errorf("read query document %s: %w", queryID, err)
+		}
+		if query.Text == "" {
+			base := filepath.Join(dir, storage.QueriesFolder, filepath.FromSlash(queryID)+".query.")
+			return "", fmt.Errorf("read query document %s or %s: body is missing or empty", base+"tugql", base+"tugql.yaml")
+		}
+		return querybody.Structured(query)
 	}
 	folder, id := queryFolderAndID(queryID)
 	fileName := fmt.Sprintf("%s.%s.%s", id, storage.QueryFileSuffix, strings.ToLower(string(queryType)))

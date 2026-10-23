@@ -77,7 +77,7 @@ func workspaceTestRecord(t *testing.T, store *SessionStore, sessionID string) st
 		t.Fatal(err)
 	}
 	turn, err := store.AppendTurn(ctx, sessionID, user.ID, "sqlite:///chinook.db", Turn{Queries: []QueryResult{{
-		Title: "Customers", DTQL: "from: {name: Customer}\nlimit: 3",
+		Title: "Customers", TugQL: "from: {name: Customer}\nlimit: 3",
 		Result: secureread.Result{Columns: []string{"CustomerId", "City"}, Rows: []secureread.Row{
 			{Data: map[string]any{"CustomerId": int64(5), "City": "Prague"}},
 			{Data: map[string]any{"CustomerId": int64(6), "City": "Prague"}},
@@ -376,7 +376,7 @@ func TestAgentSelectDockAndFollowUpBindsSelectionLocally(t *testing.T) {
 		{text: "Selected."},
 		{toolCalls: []ai.ToolCall{toolCall("2", toolWorkspaceAction, map[string]any{"kind": "dock"})}},
 		{text: "Docked."},
-		{toolCalls: []ai.ToolCall{toolCall("3", toolRunDTQL, map[string]any{"dtql": doc, "title": "Largest selected orders"})}},
+		{toolCalls: []ai.ToolCall{toolCall("3", toolRunTugQL, map[string]any{"tugql": doc, "title": "Largest selected orders"})}},
 		{text: "Here are their invoices."},
 	}}
 	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"InvoiceId", "CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 404, "CustomerId": 6}}}}}
@@ -477,7 +477,7 @@ func TestPrivateSelectionErrorStaysOutOfSavedModelContext(t *testing.T) {
 	}
 	const secret = "Paris-private-selected-value"
 	_, err = store.AppendQuery(ctx, session.ID, user.ID, "sqlite:///chinook.db", QueryResult{
-		DTQL: "from: {name: Customer}\nlimit: 5", Err: errors.New("driver echoed " + secret),
+		TugQL: "from: {name: Customer}\nlimit: 5", Err: errors.New("driver echoed " + secret),
 		Parameters: map[string]any{"selection_1_c1": []any{secret}},
 	})
 	if err != nil {
@@ -499,7 +499,7 @@ func TestFailedBoundQueryNeverSendsSelectedValueToModelAcrossTurns(t *testing.T)
 	const secret = "Paris"
 	doc := "from: {name: Customer}\nwhere:\n  op: In\n  left: {field: City}\n  right: {param: selection_1_c1}\nlimit: 5"
 	llm := &scriptedProvider{steps: []scriptedStep{
-		{toolCalls: []ai.ToolCall{toolCall("1", toolRunDTQL, map[string]any{"dtql": doc})}},
+		{toolCalls: []ai.ToolCall{toolCall("1", toolRunTugQL, map[string]any{"tugql": doc})}},
 		{text: "The query could not be completed."},
 		{text: "Ready to try again."},
 	}}

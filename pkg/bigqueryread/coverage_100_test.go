@@ -201,7 +201,7 @@ func TestDALQuery_Validation_And_Traversal(t *testing.T) {
 	assert.NotNil(t, q)
 }
 
-// Not parallel: mutates jsonMarshal, dtqlDeserialize
+// Not parallel: mutates jsonMarshal, tugqlDeserialize
 func TestDALQuery_SeamFailures(t *testing.T) {
 	in := Input{Query: QueryShape{
 		From:    From{Name: "table"},
@@ -215,10 +215,10 @@ func TestDALQuery_SeamFailures(t *testing.T) {
 	jsonMarshal = origMarshal
 	assert.ErrorIs(t, err, ErrInput)
 
-	origDTQL := dtqlDeserialize
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) { return nil, errors.New("simulated dtql err") }
+	origTugQL := tugqlDeserialize
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) { return nil, errors.New("simulated tugql err") }
 	_, err = in.DALQuery()
-	dtqlDeserialize = origDTQL
+	tugqlDeserialize = origTugQL
 	assert.ErrorIs(t, err, ErrInput)
 }
 

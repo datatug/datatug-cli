@@ -85,7 +85,7 @@ func getSemanticColumns(t *testing.T, sourceURL string) (status int, env apicont
 	return rec.Code, env, rec.Body.String()
 }
 
-// postAdhocRunQuery asks exec/run_query to run a DTQL over the one source and decodes the error envelope it answers.
+// postAdhocRunQuery asks exec/run_query to run a TugQL over the one source and decodes the error envelope it answers.
 func postAdhocRunQuery(t *testing.T, sourceURL string) (status int, env apicontract.ErrorEnvelope, body string) {
 	t.Helper()
 	projectDir, projectID := writeRunQueryTestProject(t)
@@ -93,7 +93,7 @@ func postAdhocRunQuery(t *testing.T, sourceURL string) (status int, env apicontr
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
 	payload, err := json.Marshal(apicontract.ExecutionRequest{
 		Project: scope.Project, Environment: scope.Environment, SecurityContextID: scope.SecurityContextID,
-		Source: "shop", DTQL: "from: {name: customers}\n", Mode: apicontract.ProvenanceModeLive,
+		Source: "shop", TugQL: "from: {name: customers}\n", Mode: apicontract.ProvenanceModeLive,
 	})
 	require.NoError(t, err)
 	rec := httptest.NewRecorder()

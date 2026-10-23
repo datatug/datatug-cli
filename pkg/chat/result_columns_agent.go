@@ -18,7 +18,7 @@ type resultColumnsCallbacks struct {
 	apply func(context.Context, string, string) (QueryResult, error)
 }
 type resultColumnsArgs struct {
-	RecordSetID  string   `json:"recordSetId" jsonschema:"Exact persisted RecordSet ID returned by this turn's run_dtql"`
+	RecordSetID  string   `json:"recordSetId" jsonschema:"Exact persisted RecordSet ID returned by this turn's run_tugql"`
 	CandidateIDs []string `json:"candidateIds,omitempty" jsonschema:"Omit to discover admitted omitted columns; supply exact opaque IDs to prepare one enrichment plan"`
 }
 type applyResultColumnsArgs struct {

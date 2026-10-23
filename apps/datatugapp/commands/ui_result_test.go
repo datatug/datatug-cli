@@ -47,7 +47,7 @@ func registeredItemProject(t *testing.T) (dir, db string) {
 	db = covCSQLiteFile(t, "main.sqlite", `CREATE TABLE Item(id INTEGER PRIMARY KEY, name TEXT)`, `INSERT INTO Item VALUES (1,'a'),(2,'b')`)
 	dir = covCWriteProject(t, covCMerge(
 		covCEnvFiles(map[string]string{"main": db}),
-		covCQueryFiles("f", "items", "DTQL", "dtql", "from: {name: Item}\n", `,"targets":[{"catalog":"main"}]`),
+		covCQueryFiles("f", "items", "TugQL", "tugql", "from: {name: Item}\n", `,"targets":[{"catalog":"main"}]`),
 		covCQueryFiles("f", "sqlq", "SQL", "sql", "SELECT id FROM Item", `,"targets":[{"catalog":"main"}]`),
 	))
 	require.NoError(t, os.WriteFile(filepath.Join(os.Getenv("HOME"), ".datatug.yaml"), []byte("projects:\n  - id: covc\n    path: "+dir+"\n"), 0o600))
@@ -83,7 +83,7 @@ func TestUIResultOpensTheLoadedRecordsWithoutRunningTheQuery(t *testing.T) {
 	assert.NoFileExists(t, lastPath)
 	require.Len(t, opened.RecordSets, 1)
 	for _, record := range opened.RecordSets {
-		assert.Equal(t, "from:\n  name: Item\n", record.DTQL)
+		assert.Equal(t, "from:\n  name: Item\n", record.TugQL)
 		require.Len(t, record.Result.Rows, 2)
 		assert.Equal(t, "a", record.Result.Rows[0].Data["name"])
 		assert.Equal(t, int64(2), record.Result.Rows[1].Data["id"])
@@ -180,15 +180,15 @@ func TestLoadResultForUIOfSavedQueries(t *testing.T) {
 		_, stderr, code := runQuery(t, "", "--project", dir, "--query", id, "--env", "local", "--result-id", map[string]string{"f/items": "s1", "f/sqlq": "s2"}[id])
 		require.Zero(t, code, stderr)
 	}
-	dtqlResult, err := loadResultForUI(context.Background(), "s1")
+	tugqlResult, err := loadResultForUI(context.Background(), "s1")
 	require.NoError(t, err)
-	assert.Equal(t, "f/items", dtqlResult.query.QueryID)
-	assert.Equal(t, "from: {name: Item}\n", dtqlResult.query.DTQL, "the saved query's own text")
-	assert.Equal(t, dir, dtqlResult.projectDir)
+	assert.Equal(t, "f/items", tugqlResult.query.QueryID)
+	assert.Equal(t, "from: {name: Item}\n", tugqlResult.query.TugQL, "the saved query's own text")
+	assert.Equal(t, dir, tugqlResult.projectDir)
 	sqlResult, err := loadResultForUI(context.Background(), "s2")
 	require.NoError(t, err)
 	assert.Equal(t, "f/sqlq", sqlResult.query.QueryID)
-	assert.Empty(t, sqlResult.query.DTQL)
+	assert.Empty(t, sqlResult.query.TugQL)
 }
 
 func TestResultValuesAndParameters(t *testing.T) {

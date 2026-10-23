@@ -24,7 +24,7 @@ var authorizeProjectQueryWrite = api.AuthorizeProjectQueryWrite
 // POST queries/capture - "Save as project query" (hub datatug/datatug
 // executable-knowledge-library REQ:capture-from-exploration, Phase 2 plan
 // task 2). The browser saves a lookup it already ran as an ordinary project
-// query: a "<id>.query.json" / "<id>.query.dtql" pair, left as an
+// query: a "<id>.query.json" / "<id>.query.tugql.yaml" pair, left as an
 // uncommitted Git change, with its purpose, typed parameters and
 // source/binding provenance. No Git commit is made and no hosted team grant
 // is implied.
@@ -51,7 +51,7 @@ type capturedQuery struct {
 	Title          string                 `json:"title"`
 	Purpose        string                 `json:"purpose"`
 	Source         string                 `json:"source"`
-	DTQL           string                 `json:"dtql"`
+	TugQL          string                 `json:"tugql"`
 	Parameters     []capturedParameter    `json:"parameters"`
 	BindingOrigins []captureBindingOrigin `json:"bindingOrigins"`
 }
@@ -160,7 +160,7 @@ func rejectTrailingJSON(body []byte) error {
 //     409 STALE_CONTEXT).
 //  2. Exactly one condition, ifNoneMatch or ifMatch (400).
 //  3. The query itself (validateCapturedQuery; 400): safe folder/id,
-//     title, purpose, a registered-source-shaped id, DTQL that parses,
+//     title, purpose, a registered-source-shaped id, TugQL that parses,
 //     reads one collection and uses exactly its declared typed
 //     parameters, binding origins, no credential anywhere.
 //  4. The project is served here (404).

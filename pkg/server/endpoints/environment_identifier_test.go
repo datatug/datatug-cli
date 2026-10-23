@@ -163,7 +163,7 @@ func TestRoutes_RefuseAnUnsafeEnvironmentOrDatabaseBeforeAnyStoreLookup(t *testi
 			send: func(environment, _ string) *httptest.ResponseRecorder {
 				return postJSON(t, runQueryHandler, "/datatug/exec/run_query", apicontract.ExecutionRequest{
 					Project: scope.Project, Environment: environment, SecurityContextID: scope.SecurityContextID,
-					Source: semanticTestSource, DTQL: runQueryTestCustomerByIDDTQL,
+					Source: semanticTestSource, TugQL: runQueryTestCustomerByIDTugQL,
 					Parameters: map[string]apicontract.TypedValueOrSet{}, BindingOrigins: []apicontract.BindingOriginEntry{},
 					Mode: apicontract.ProvenanceModeLive,
 				})

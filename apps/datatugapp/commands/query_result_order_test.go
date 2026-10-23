@@ -46,12 +46,12 @@ func TestQueryRunResultColumnsFollowTheTableOrder(t *testing.T) {
 	root := resultsHome(t)
 	path := writeOrderDB(t)
 	for _, c := range []struct {
-		name, from string
-		want       []string
+		name, from, key string
+		want            []string
 	}{
-		{"table", "Pet", []string{"$key", "id", "zone", "name", "age", "breed"}},
-		{"composite primary key", "LineItem", []string{"$key", "orderId", "lineNo", "sku", "qty"}},
-		{"view", "PetCard", []string{"$key", "zone", "id", "breed", "name"}},
+		{"table", "Pet", "1", []string{"$key", "id", "zone", "name", "age", "breed"}},
+		{"composite primary key", "LineItem", "0", []string{"$key", "orderId", "lineNo", "sku", "qty"}},
+		{"view", "PetCard", "0", []string{"$key", "zone", "id", "breed", "name"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			id := "o-" + strings.ToLower(c.from)
@@ -67,7 +67,7 @@ func TestQueryRunResultColumnsFollowTheTableOrder(t *testing.T) {
 			for i, column := range meta.Columns {
 				assert.Equal(t, i == 0, column.Internal, column.Name)
 			}
-			assert.Equal(t, "__dalgo_record_id", recordset.Rows[0][0].Str, "$key stays in the data for readers that predate the marker")
+			assert.Equal(t, c.key, recordset.Rows[0][0].Str, "$key stays in the data for readers that predate the marker")
 		})
 	}
 }
@@ -90,7 +90,7 @@ func TestQueryRunStdoutOrderIsUnchanged(t *testing.T) {
 	assert.Equal(t, "$key,age,breed,id,name,zone", strings.SplitN(stdout, "\n", 2)[0])
 }
 
-func TestQueryRunResultColumnsOfDTQL(t *testing.T) {
+func TestQueryRunResultColumnsOfTugQL(t *testing.T) {
 	root := resultsHome(t)
 	path := writeOrderDB(t)
 	for _, c := range []struct {
@@ -117,9 +117,9 @@ func orderProject(t *testing.T, db, scanned string) string {
 	t.Helper()
 	files := covCMerge(
 		covCEnvFiles(map[string]string{"main": db}),
-		covCQueryFiles("f", "dtqlq", "DTQL", "dtql", "from: {name: Item}\n", `,"targets":[{"catalog":"main"}]`),
+		covCQueryFiles("f", "tugqlq", "TugQL", "tugql", "from: {name: Item}\n", `,"targets":[{"catalog":"main"}]`),
 		covCQueryFiles("f", "sqlq", "SQL", "sql", "SELECT name, id FROM Item", `,"targets":[{"catalog":"main"}]`),
-		covCQueryFiles("f", "viewq", "DTQL", "dtql", "from: {name: ItemNames}\n", `,"targets":[{"catalog":"main"}]`),
+		covCQueryFiles("f", "viewq", "TugQL", "tugql", "from: {name: ItemNames}\n", `,"targets":[{"catalog":"main"}]`),
 	)
 	if scanned != "" {
 		files["environments/local/catalogs/main/main.db.json"] = fmt.Sprintf(`{"driver":"sqlite3","path":%q,"dbModel":"shop"}`, db)
@@ -140,16 +140,16 @@ func orderItemDB(t *testing.T) string {
 func TestQueryRunSavedResultColumnOrder(t *testing.T) {
 	root := resultsHome(t)
 	dir := orderProject(t, orderItemDB(t), "")
-	for id, query := range map[string]string{"s1": "f/dtqlq", "s2": "f/sqlq", "s3": "f/viewq"} {
+	for id, query := range map[string]string{"s1": "f/tugqlq", "s2": "f/sqlq", "s3": "f/viewq"} {
 		_, stderr, code := runQuery(t, "", "--project", dir, "--query", query, "--env", "local", "--result-id", id)
 		require.Equal(t, 0, code, stderr)
 	}
 	_, recordset, _ := readResult(t, root, "s1")
-	assert.Equal(t, []string{"$key", "id", "name", "owner_id"}, storedNames(recordset), "saved DTQL: the table order")
+	assert.Equal(t, []string{"$key", "id", "name", "owner_id"}, storedNames(recordset), "saved TugQL: the table order")
 	_, recordset, _ = readResult(t, root, "s2")
 	assert.Equal(t, []string{"$key", "name", "id"}, storedNames(recordset), "saved native SQL: the SELECT list")
 	_, recordset, _ = readResult(t, root, "s3")
-	assert.Equal(t, []string{"$key", "name", "id"}, storedNames(recordset), "saved DTQL over a view")
+	assert.Equal(t, []string{"$key", "name", "id"}, storedNames(recordset), "saved TugQL over a view")
 	// the stdout rows keep the sorted union
 	stdout, stderr, code := runQuery(t, "", "--project", dir, "--query", "f/sqlq", "--env", "local", "--format", "csv")
 	require.Equal(t, 0, code, stderr)
@@ -164,7 +164,7 @@ func TestQueryRunResultColumnOrderOfAScannedProject(t *testing.T) {
 	scanned := `{"columns":[{"name":"owner_id","ordinalPosition":1},{"name":"name","ordinalPosition":2},{"name":"id","ordinalPosition":3}]}`
 	dir := orderProject(t, orderItemDB(t), scanned)
 
-	_, stderr, code := runQuery(t, "", "--project", dir, "--query", "f/dtqlq", "--env", "local", "--result-id", "sc1")
+	_, stderr, code := runQuery(t, "", "--project", dir, "--query", "f/tugqlq", "--env", "local", "--result-id", "sc1")
 	require.Equal(t, 0, code, stderr)
 	_, recordset, _ := readResult(t, root, "sc1")
 	assert.Equal(t, []string{"$key", "owner_id", "name", "id"}, storedNames(recordset))
@@ -198,32 +198,32 @@ func TestScannedColumnsAndProjectDirOfRef(t *testing.T) {
 func TestSourceOrderOfDescribedQueries(t *testing.T) {
 	ctx := context.Background()
 	db := chinookDB(t)
-	sources := dtqlSources{open: func(context.Context, string) (dal.DB, string, func(), error) { return db, "sqlite", func() {}, nil }}
+	sources := tugqlSources{open: func(context.Context, string) (dal.DB, string, func(), error) { return db, "sqlite", func() {}, nil }}
 	// no select list: the root's columns, then each joined table's
-	description := describeDTQL(ctx, invoiceCustomerDTQL[:strings.Index(invoiceCustomerDTQL, "columns:")], nil, sources)
+	description := describeTugQL(ctx, invoiceCustomerTugQL[:strings.Index(invoiceCustomerTugQL, "columns:")], nil, sources)
 	require.NotEmpty(t, description.order)
 	assert.Equal(t, "InvoiceId", description.order[0])
 	assert.Contains(t, description.order, "FirstName")
 	assert.Less(t, indexOf(description.order, "Total"), indexOf(description.order, "FirstName"), "the root's columns come first")
 
 	// a wildcard of one source expands that source only
-	description = describeDTQL(ctx, "from: {name: Genre, alias: g}\ncolumns:\n  - {value: 1, as: one}\n  - {wildcard: {source: g, exclude: [Nope]}}\n", nil, sources)
+	description = describeTugQL(ctx, "from: {name: Genre, alias: g}\ncolumns:\n  - {value: 1, as: one}\n  - {wildcard: {source: g, exclude: [Nope]}}\n", nil, sources)
 	assert.Equal(t, []string{"one", "GenreId", "Name"}, description.order)
 
 	// the project's scan wins over the database, and a relation it lacks falls back to the database
 	sources.scanned = func(_, _, relation string) ([]string, bool) {
 		return []string{"Name", "GenreId"}, relation == "Genre"
 	}
-	description = describeDTQL(ctx, "from: {name: Genre}\n", nil, sources)
+	description = describeTugQL(ctx, "from: {name: Genre}\n", nil, sources)
 	assert.Equal(t, []string{"Name", "GenreId"}, description.order)
-	description = describeDTQL(ctx, "from: {name: Artist}\n", nil, sources)
+	description = describeTugQL(ctx, "from: {name: Artist}\n", nil, sources)
 	assert.Equal(t, []string{"ArtistId", "Name"}, description.order)
 
 	// a source that cannot be read has no order
-	unreadable := dtqlSources{open: func(context.Context, string) (dal.DB, string, func(), error) {
+	unreadable := tugqlSources{open: func(context.Context, string) (dal.DB, string, func(), error) {
 		return nil, "sqlite", nil, assert.AnError
 	}}
-	assert.Empty(t, describeDTQL(ctx, "from: {name: Genre}\n", nil, unreadable).order)
+	assert.Empty(t, describeTugQL(ctx, "from: {name: Genre}\n", nil, unreadable).order)
 }
 
 func indexOf(names []string, name string) int {
@@ -246,18 +246,18 @@ func TestAddViewColumnsIgnoresWhatTheSourceDoesNotReport(t *testing.T) {
 	addViewColumns(ctx, struct{ dal.DB }{}, &snapshot, "", instances)      // a source with no view reader
 }
 
-func TestSavedDTQLSourcesScannedOrderNeedsTheQuerysDatabase(t *testing.T) {
+func TestSavedTugQLSourcesScannedOrderNeedsTheQuerysDatabase(t *testing.T) {
 	dir := orderProject(t, orderItemDB(t), `{"columns":[{"name":"b","ordinalPosition":2},{"name":"a","ordinalPosition":1}]}`)
 	store := covCFileStore(dir)
 	ctx := context.Background()
-	good := savedDTQLSources(ctx, store, dir, "local", &datatug.QueryDef{ID: "q", Targets: []datatug.QueryDefTarget{{Catalog: "main"}}})
+	good := savedTugQLSources(ctx, store, dir, "local", &datatug.QueryDef{ID: "q", Targets: []datatug.QueryDefTarget{{Catalog: "main"}}})
 	names, ok := good.scanned("", "", "Item")
 	assert.True(t, ok)
 	assert.Equal(t, []string{"a", "b"}, names)
 	names, ok = good.scanned("main", "", "Item")
 	assert.True(t, ok, "a federated query names its database")
 	assert.Equal(t, []string{"a", "b"}, names)
-	unresolved := savedDTQLSources(ctx, store, dir, "nowhere", &datatug.QueryDef{ID: "q"})
+	unresolved := savedTugQLSources(ctx, store, dir, "nowhere", &datatug.QueryDef{ID: "q"})
 	_, ok = unresolved.scanned("", "", "Item")
 	assert.False(t, ok, "the query's database cannot be resolved")
 }

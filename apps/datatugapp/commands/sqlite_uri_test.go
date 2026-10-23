@@ -54,7 +54,7 @@ func TestChat_OpensASQLiteSourceWithTheOneBuilderOfTheFileURI(t *testing.T) {
 			opened = append(opened, backend)
 			return nil, stop
 		}
-		query := covCQueryFiles("f", "inv", "DTQL", "dtql", covCCustomerDTQL, covCCustomerParams)
+		query := covCQueryFiles("f", "inv", "TugQL", "tugql", covCCustomerTugQL, covCCustomerParams)
 		project := covCWriteProject(t, covCMerge(map[string]string{
 			"environments/local/local.env.json":             `{"id":"local","dbServers":[{"driver":"sqlite3","catalogs":["main"]}]}`,
 			"environments/local/catalogs/main/main.db.json": `{"driver":"sqlite3","path":"` + filepath.Join(dir, "data", "a?b#c%d.db") + `"}`,

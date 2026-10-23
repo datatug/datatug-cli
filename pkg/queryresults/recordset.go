@@ -29,7 +29,7 @@ const (
 	MaxCellBytes = 64 << 10
 	// MaxMetaBytes bounds meta.json.
 	MaxMetaBytes = 1 << 20
-	// MaxQueryBytes bounds query.dtql and query.parameters together.
+	// MaxQueryBytes bounds query.tugql and query.parameters together.
 	MaxQueryBytes = 256 << 10
 	// MaxPromptBytes bounds the prompt text; MaxPromptJSONBytes is the room
 	// meta.json keeps free for it once escaped.

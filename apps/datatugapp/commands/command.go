@@ -67,6 +67,7 @@ func DatatugCommand() *cobra.Command {
 		demoCommandArgs(),
 		updateUrlConfigCommandArgs(),
 		projectsCommandArgs(),
+		dataModelsCommand(),
 		boardCommand(),
 		queriesCommand(),
 		queryCommand(),

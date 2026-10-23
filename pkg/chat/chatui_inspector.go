@@ -388,7 +388,7 @@ func (u *ChatUI) openSaveQueryDialog() tea.Cmd {
 	recordSetID := u.activeRecordSetID()
 	record, ok := u.snapshot.RecordSets[recordSetID]
 	if !ok {
-		u.shell.AppendAssistant("Focus a DTQL or HTTP result to save it as a project query.")
+		u.shell.AppendAssistant("Focus a TugQL or HTTP result to save it as a project query.")
 		return nil
 	}
 	request.Title = record.Title
@@ -405,15 +405,15 @@ func (u *ChatUI) openSaveQueryDialog() tea.Cmd {
 			return nil
 		}
 		request.Type, request.Text = "HTTP", response.URL
-	case record.DTQL != "":
+	case record.TugQL != "":
 		if len(record.Parameters) > 0 {
-			u.shell.AppendAssistant("This DTQL result used parameters. Create a project query with parameter declarations to save it safely.")
+			u.shell.AppendAssistant("This TugQL result used parameters. Create a project query with parameter declarations to save it safely.")
 			return nil
 		}
-		request.Type, request.Text = "DTQL", record.DTQL
+		request.Type, request.Text = "TugQL", record.TugQL
 	}
 	if request.Type == "" {
-		u.shell.AppendAssistant("Focus a DTQL or HTTP result to save it as a project query.")
+		u.shell.AppendAssistant("Focus a TugQL or HTTP result to save it as a project query.")
 		return nil
 	}
 	return u.shell.PushOverlay(newSaveQueryOverlay(u, request))

@@ -10,13 +10,13 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/joinmeta"
 )
 
 var (
-	dtqlSerialize      = dtql.Serialize
-	dtqlDeserialize    = dtql.Deserialize
+	tugqlSerialize     = tugql.Serialize
+	tugqlDeserialize   = tugql.Deserialize
 	sqliteQueryContext = func(db *sql.DB, ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 		return db.QueryContext(ctx, query, args...)
 	}
@@ -61,7 +61,7 @@ type JoinApplication interface {
 
 // ForeignKeyJoinApplication is the production-neutral implementation. Its
 // snapshot is source-bound and it delegates every read to the existing secure
-// DTQL executor; it never constructs SQL or joins displayed rows locally.
+// TugQL executor; it never constructs SQL or joins displayed rows locally.
 // When Secure is true, every existing source is preflighted for unrestricted
 // readability before a JOIN is exposed or executed.
 type ForeignKeyJoinApplication struct {
@@ -72,7 +72,7 @@ type ForeignKeyJoinApplication struct {
 	// source; a stale edge never falls back to the startup snapshot.
 	Refresh       func(context.Context) (ForeignKeySnapshot, error)
 	CanReadTarget func(context.Context, RelationInstance) error
-	Executor      DTQLExecutor
+	Executor      TugQLExecutor
 	Secure        bool
 }
 
@@ -84,14 +84,14 @@ func (a ForeignKeyJoinApplication) Candidates(ctx context.Context, record Record
 	if err != nil {
 		return nil, err
 	}
-	parent, err := dtqlDeserialize([]byte(record.DTQL))
+	parent, err := tugqlDeserialize([]byte(record.TugQL))
 	if err != nil {
 		return nil, err
 	}
 	if a.Secure && !canExpandQueryFn(a, ctx, parent.From()) {
 		return []JoinCandidate{}, nil
 	}
-	candidates, err := DiscoverJoinCandidates([]byte(record.DTQL), snapshot, appliedEdges(record)...)
+	candidates, err := DiscoverJoinCandidates([]byte(record.TugQL), snapshot, appliedEdges(record)...)
 	if err != nil {
 		return nil, err
 	}
@@ -131,14 +131,14 @@ func (a ForeignKeyJoinApplication) apply(ctx context.Context, record RecordSet, 
 	if err != nil {
 		return QueryResult{}, err
 	}
-	q, err := dtqlDeserialize([]byte(record.DTQL))
+	q, err := tugqlDeserialize([]byte(record.TugQL))
 	if err != nil {
-		return QueryResult{}, fmt.Errorf("parse RecordSet DTQL: %w", err)
+		return QueryResult{}, fmt.Errorf("parse RecordSet TugQL: %w", err)
 	}
 	if a.Secure && !canExpandQueryFn(a, ctx, q.From()) {
 		return QueryResult{}, fmt.Errorf("JOIN exploration cannot prove every existing source is fully readable under this policy")
 	}
-	doc, candidate, err := deriveJoinDTQL([]byte(record.DTQL), snapshot, id, joinType, appliedEdges(record)...)
+	doc, candidate, err := deriveJoinTugQL([]byte(record.TugQL), snapshot, id, joinType, appliedEdges(record)...)
 	if err != nil {
 		return QueryResult{}, err
 	}
@@ -148,13 +148,13 @@ func (a ForeignKeyJoinApplication) apply(ctx context.Context, record RecordSet, 
 	if a.CanReadTarget != nil && a.CanReadTarget(ctx, candidate.Target) != nil {
 		return QueryResult{}, fmt.Errorf("selected JOIN target is not readable by this policy")
 	}
-	result, err := a.Executor.RunDTQL(ctx, a.Source, doc, record.Parameters)
+	result, err := a.Executor.RunTugQL(ctx, a.Source, doc, record.Parameters)
 	if err != nil {
 		return QueryResult{}, err
 	}
 	edges := append([]AppliedJoinEdge(nil), appliedEdges(record)...)
 	edges = append(edges, AppliedJoinEdge{JoinPath: candidate.Target.ID, SourcePath: candidate.Source.ID, ConstraintID: candidate.ConstraintID, Direction: candidate.Direction, CandidateID: id, Fields: append([]JoinFieldPair(nil), candidate.Fields...)})
-	return QueryResult{Title: record.Title + " + " + candidate.Target.Relation, DTQL: string(doc), Result: result, Parameters: record.Parameters, Source: a.Source, Lineage: &JoinLineage{ParentRecordSetID: record.ID, CandidateID: id, AppliedEdges: edges}}, nil
+	return QueryResult{Title: record.Title + " + " + candidate.Target.Relation, TugQL: string(doc), Result: result, Parameters: record.Parameters, Source: a.Source, Lineage: &JoinLineage{ParentRecordSetID: record.ID, CandidateID: id, AppliedEdges: edges}}, nil
 }
 
 func appliedEdges(record RecordSet) []AppliedJoinEdge {
@@ -318,9 +318,9 @@ var relationKey = joinmeta.RelationKey
 // DiscoverJoinCandidates walks only the query's actual relation tree. It does
 // not recursively walk metadata targets, so cyclic schemas cannot recurse.
 func DiscoverJoinCandidates(doc []byte, snapshot ForeignKeySnapshot, applied ...AppliedJoinEdge) ([]JoinCandidate, error) {
-	q, err := dtqlDeserialize(doc)
+	q, err := tugqlDeserialize(doc)
 	if err != nil {
-		return nil, fmt.Errorf("parse RecordSet DTQL: %w", err)
+		return nil, fmt.Errorf("parse RecordSet TugQL: %w", err)
 	}
 	instances := relationInstances(q.From())
 	active := activeJoinPairs(q.From(), applied)
@@ -358,13 +358,13 @@ func DiscoverJoinCandidates(doc []byte, snapshot ForeignKeySnapshot, applied ...
 	return out, nil
 }
 
-// DeriveJoinDTQL derives a real AST join. It refuses a stale candidate rather
+// DeriveJoinTugQL derives a real AST join. It refuses a stale candidate rather
 // than accepting caller-provided field names or a replacement relation.
-func DeriveJoinDTQL(parent []byte, snapshot ForeignKeySnapshot, id JoinCandidateID, applied ...AppliedJoinEdge) ([]byte, JoinCandidate, error) {
-	return deriveJoinDTQL(parent, snapshot, id, dal.JoinInner, applied...)
+func DeriveJoinTugQL(parent []byte, snapshot ForeignKeySnapshot, id JoinCandidateID, applied ...AppliedJoinEdge) ([]byte, JoinCandidate, error) {
+	return deriveJoinTugQL(parent, snapshot, id, dal.JoinInner, applied...)
 }
 
-func deriveJoinDTQL(parent []byte, snapshot ForeignKeySnapshot, id JoinCandidateID, joinType dal.JoinType, applied ...AppliedJoinEdge) ([]byte, JoinCandidate, error) {
+func deriveJoinTugQL(parent []byte, snapshot ForeignKeySnapshot, id JoinCandidateID, joinType dal.JoinType, applied ...AppliedJoinEdge) ([]byte, JoinCandidate, error) {
 	candidates, err := DiscoverJoinCandidates(parent, snapshot, applied...)
 	if err != nil {
 		return nil, JoinCandidate{}, err
@@ -379,9 +379,9 @@ func deriveJoinDTQL(parent []byte, snapshot ForeignKeySnapshot, id JoinCandidate
 	if candidate.ID == "" {
 		return nil, JoinCandidate{}, fmt.Errorf("selected foreign-key edge is stale or unavailable")
 	}
-	q, err := dtqlDeserialize(parent)
+	q, err := tugqlDeserialize(parent)
 	if err != nil {
-		return nil, JoinCandidate{}, fmt.Errorf("parse RecordSet DTQL: %w", err)
+		return nil, JoinCandidate{}, fmt.Errorf("parse RecordSet TugQL: %w", err)
 	}
 	if len(q.GroupBy()) > 0 || q.Having() != nil || queryHasAggregate(q) {
 		return nil, JoinCandidate{}, fmt.Errorf("cannot add a JOIN to an aggregate query without changing its grouping")
@@ -420,11 +420,11 @@ func deriveJoinDTQL(parent []byte, snapshot ForeignKeySnapshot, id JoinCandidate
 	}
 	candidate.Target.ID = RelationInstanceID(fmt.Sprintf("%s/%d", candidate.Source.ID, len(node.Joins())))
 	node.Join(dal.NewJoinedSource(target, joinType, on...))
-	derived, err := dtqlSerialize(q)
+	derived, err := tugqlSerialize(q)
 	if err != nil {
-		return nil, JoinCandidate{}, fmt.Errorf("derive JOIN DTQL: %w", err)
+		return nil, JoinCandidate{}, fmt.Errorf("derive JOIN TugQL: %w", err)
 	}
-	if _, err := dtqlDeserialize(derived); err != nil {
+	if _, err := tugqlDeserialize(derived); err != nil {
 		return nil, JoinCandidate{}, fmt.Errorf("derived JOIN is invalid: %w", err)
 	}
 	return derived, candidate, nil
@@ -632,7 +632,7 @@ func qualifyJoinExpression(expression dal.Expression, source string, single bool
 		}
 		return dal.NewAggregate(value.FuncName(), distinct, args...), nil
 	default:
-		return expression, nil // DTQL already validated constants, arrays, params and stars.
+		return expression, nil // TugQL already validated constants, arrays, params and stars.
 	}
 }
 

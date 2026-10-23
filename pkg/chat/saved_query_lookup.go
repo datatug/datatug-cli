@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"gopkg.in/yaml.v3"
 )
 
@@ -41,7 +41,7 @@ func DiscoverSavedQueryLookup(snapshot ForeignKeySnapshot, entity, field string)
 	return savedQueryLookupPlan(snapshot, match)
 }
 
-// DiscoverSavedQueryParameterLookup uses the saved DTQL equality predicate to
+// DiscoverSavedQueryParameterLookup uses the saved TugQL equality predicate to
 // locate the parameter's source column, then checks Meta against the target
 // of that exact FK. ID is accepted as a semantic shorthand only for a real
 // target key named <Entity>Id in the FK snapshot.
@@ -83,7 +83,7 @@ func DiscoverSavedQueryParameterLookupWithMode(doc []byte, snapshot ForeignKeySn
 	} else if query.Where.Op != "==" && query.Where.Op != "=" {
 		return nil
 	}
-	if _, err := dtql.Deserialize(doc); err != nil {
+	if _, err := tugql.Deserialize(doc); err != nil {
 		return nil
 	}
 	bound := query.Where.Left

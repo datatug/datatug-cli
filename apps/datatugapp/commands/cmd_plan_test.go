@@ -433,7 +433,8 @@ func TestPersonalCloudContextAppliesToEveryAIRoute(t *testing.T) {
 				t.Fatal(err)
 			}
 			const questionID = "550e8400-e29b-41d4-a716-446655440000"
-			for range client.Stream(context.Background(), ai.ChatRequest{InteractionID: questionID}) {
+			for _, streamErr := range client.Stream(context.Background(), ai.ChatRequest{InteractionID: questionID}) {
+				_ = streamErr // This route-context test checks request headers, not the streamed result.
 			}
 			_, _, _ = client.Decider().Decide(context.Background(), decision.Request{Text: "question"})
 			if scorer, ok := client.Decider().(decision.ScoredProvider); ok {

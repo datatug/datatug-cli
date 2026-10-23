@@ -231,7 +231,7 @@ func TestRoutes_AStoreFailureAnswersOneBuiltSentenceWhateverIsAtThePath(t *testi
 			name: "exec/run_query", handler: runQueryHandler, path: "/datatug/exec/run_query", method: http.MethodPost, status: http.StatusServiceUnavailable,
 			query: func(string) url.Values { return url.Values{} },
 			body: func(p string) any {
-				return apicontract.ExecutionRequest{Project: p, Environment: "local", SecurityContextID: api.SecurityContextID(), Source: "s", DTQL: "from: {name: t}\n", Mode: apicontract.ProvenanceModeLive}
+				return apicontract.ExecutionRequest{Project: p, Environment: "local", SecurityContextID: api.SecurityContextID(), Source: "s", TugQL: "from: {name: t}\n", Mode: apicontract.ProvenanceModeLive}
 			},
 			sentence:  func(string) string { return httpQueriesNotListed },
 			breakages: brokenQueries(file),

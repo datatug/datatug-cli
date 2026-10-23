@@ -2,15 +2,16 @@ package dbcopy
 
 import "context"
 
-// ServerOpeners are the constructors a MySQL and an Oracle source are opened through: the adapter's own
+// ServerOpeners are the constructors a MySQL, an Oracle and a SQL Server source are opened through: the adapter's own
 // in production, a fake or one that stops the run in a test.
 type ServerOpeners struct {
-	MySQL  func(dsn string) (SchemaScanDB, error)
-	Oracle func(ctx context.Context, dsn string) (SchemaScanDB, error)
+	MySQL     func(dsn string) (SchemaScanDB, error)
+	Oracle    func(ctx context.Context, dsn string) (SchemaScanDB, error)
+	SQLServer func(ctx context.Context, dsn string) (SchemaScanDB, error)
 }
 
 // realServerOpeners are the openers of production, kept so a journey test can put them back.
-var realServerOpeners = ServerOpeners{MySQL: newMySQLDatabase, Oracle: newOracleDatabase}
+var realServerOpeners = ServerOpeners{MySQL: newMySQLDatabase, Oracle: newOracleDatabase, SQLServer: newSQLServerDatabase}
 
 // RealServerOpeners are the openers of production: a journey test of CI puts them back for the length of
 // one test, in place of the ones a test binary stops the run with.
@@ -23,12 +24,17 @@ func RealServerOpeners() ServerOpeners { return realServerOpeners }
 //
 // NEVER call this from production code.
 func SetServerOpenersForTest(openers ServerOpeners) (restore func()) {
-	previous := ServerOpeners{MySQL: newMySQLDatabase, Oracle: newOracleDatabase}
+	previous := ServerOpeners{MySQL: newMySQLDatabase, Oracle: newOracleDatabase, SQLServer: newSQLServerDatabase}
 	if openers.MySQL != nil {
 		newMySQLDatabase = openers.MySQL
 	}
 	if openers.Oracle != nil {
 		newOracleDatabase = openers.Oracle
 	}
-	return func() { newMySQLDatabase, newOracleDatabase = previous.MySQL, previous.Oracle }
+	if openers.SQLServer != nil {
+		newSQLServerDatabase = openers.SQLServer
+	}
+	return func() {
+		newMySQLDatabase, newOracleDatabase, newSQLServerDatabase = previous.MySQL, previous.Oracle, previous.SQLServer
+	}
 }

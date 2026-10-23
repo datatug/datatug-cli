@@ -42,7 +42,7 @@ import (
 
 // supportedSchemes is the MVP-supported scheme list, used both for dispatch
 // and to construct the error message for REQ:unknown-scheme-rejected.
-var supportedSchemes = []string{"sqlite", "ingitdb", "postgres", "mysql", "oracle", "http", "https", "openvaultdb", "bigquery"}
+var supportedSchemes = []string{"sqlite", "ingitdb", "postgres", "mysql", "oracle", "sqlserver", "http", "https", "openvaultdb", "bigquery"}
 
 // SupportedSchemes returns the exact schemes Parse/Open dispatch, in
 // dispatch order. It is the single source of truth other packages should
@@ -295,7 +295,7 @@ func parseURL(rawURL string) (BackendRef, error) {
 			return BackendRef{}, fmt.Errorf("invalid postgres URL: %w", err)
 		}
 		return BackendRef{Scheme: "postgres", Path: path, Raw: display}, nil
-	case "mysql", "oracle":
+	case "mysql", "oracle", "sqlserver":
 		engine, _ := serverEngineOf(scheme)
 		return parseServerSource(engine, rest, display)
 	case "sqlite":
@@ -740,7 +740,7 @@ func (r BackendRef) openSource(ctx context.Context, mode openMode) (dal.DB, erro
 		// The preview switch is asked first, inside openPostgres.
 		return r.openPostgres(ctx, mode)
 
-	case "mysql", "oracle":
+	case "mysql", "oracle", "sqlserver":
 		engine, _ := serverEngineOf(r.Scheme)
 		return r.openServer(ctx, engine, mode)
 

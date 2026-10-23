@@ -291,7 +291,7 @@ func (e *SourceUnresolvedError) Error() string {
 	if isSQLiteDriver(e.Driver) || IsServerDriver(e.Driver) {
 		return "its catalog path or connection descriptor cannot be resolved"
 	}
-	return "its driver is not one that can be opened (sqlite3, postgres, mysql or oracle)"
+	return "its driver is not one that can be opened (sqlite3, postgres, mysql, oracle or sqlserver)"
 }
 
 func (e *SourceUnresolvedError) Unwrap() error { return e.cause }

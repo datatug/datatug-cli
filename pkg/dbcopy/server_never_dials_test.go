@@ -11,3 +11,7 @@ func neverDialMySQL(string) (SchemaScanDB, error) {
 func neverDialOracle(context.Context, string) (SchemaScanDB, error) {
 	panic("a test of pkg/dbcopy opened an Oracle database for real: it must stand in and never dial")
 }
+
+func neverDialSQLServer(context.Context, string) (SchemaScanDB, error) {
+	panic("a test of pkg/dbcopy opened a SQL Server database for real: it must stand in and never dial")
+}

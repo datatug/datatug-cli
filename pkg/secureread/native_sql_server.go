@@ -9,9 +9,10 @@ import (
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 )
 
-// runServerNativeSQL is RunNativeSQL for a MySQL or an Oracle source. The source is opened as every read
-// of one is (OpenProtected, behind its preview switch): a MySQL session has transaction_read_only on, so
-// the server refuses any write or DDL; an Oracle read is a SELECT. On top of that the text must be one
+// runServerNativeSQL is RunNativeSQL for a MySQL, Oracle or SQL Server source. The source is opened as
+// every read of one is (OpenProtected, behind its preview switch): a MySQL session has
+// transaction_read_only on and an Oracle read runs in a READ ONLY transaction, so the server refuses any
+// write; SQL Server has no read-only session and relies on a read-only login. On top of that the text must be one
 // query led by SELECT or WITH (see serverQueryText): a statement such as SET, which could turn the
 // read-only session off, never reaches the server.
 func (e *Executor) runServerNativeSQL(ctx context.Context, sourceURL string, ref dbcopy.BackendRef, sqlText string, args []dal.QueryArg) (Result, error) {

@@ -12,7 +12,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/datatug/datatug-cli/pkg/schemers/mssqlschema"
 	"github.com/datatug/datatug-cli/pkg/schemers/sqliteschema"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dbconnection"
@@ -421,7 +420,7 @@ func driverTitle(driver string) string {
 	switch driver {
 	case dbconnection.DriverSQLite3:
 		return "SQLite"
-	case "sqlserver":
+	case DriverSQLServer:
 		return "SQL Server"
 	case DriverPostgres:
 		return "PostgreSQL"
@@ -470,8 +469,6 @@ func scanCatalog(ctx context.Context, server datatug.ServerRef, connectionParams
 
 	var scanner schemer.Scanner
 	switch server.Driver {
-	case "sqlserver":
-		scanner = schemer.NewScanner(mssqlschema.NewSchemaProvider(db))
 	case dbconnection.DriverSQLite3:
 		scanner = schemer.NewScanner(sqliteschema.NewSchemaProviderWithWarnings(func() (*sql.DB, error) { return db, nil }, scanWarningsFrom(ctx)))
 	default:

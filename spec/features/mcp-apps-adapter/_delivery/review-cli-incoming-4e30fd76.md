@@ -1,0 +1,13 @@
+# CLI incoming-main integration scope review
+
+Read-only comparison89d260fdfe00f3b0345adae451258443d2cd00a7→alreadylandedtarget4e30fd76afdc9c51bb14242e0ab17b804dd212b9. Incoming14paths concern environment metadata/state API, serve settings/wiring and tests. Personally verified all54 files in /private/tmp/mcp-apps-final-reviewed-source-manifest.json match targettree hashes exactly. go.mod/Core/App assets/MCP tools/defaultconverter/nativeSQL endpoint unchanged. No overlap between14incomingpaths and currentlydirty owned events/outbox/deliverypaths. No repo/Git mutations/tests/services performed.
+
+Relevant integration impact: Capabilities receives additive EnvironmentMetadataPolicies/PrivateDir/AuthorityID; cmdserve passes these while Access/AllowWrites/AllowOpaqueSQL/connection/timeout settings remain same. Environment mutations stay behind existing requireWriteCapability wrapper and explicitmetadata policy/fixedprincipal checks; state/status routes use existing wrapper and scoped metadata handlers. New code rechecks securitycontext generations; no MCP handle/tool/parameter surfaces added. Environment list reads gain environmentfile lock/order resolution; IDs remain sourceidentifiers, not changed authorization. Existing execution/currentprincipal/securityContext/querydigest binding paths untouched. This review does not reendorse all unrelated environment-state feature semantics.
+
+Structural integration is safe: a purefastforward of this task's own WBbranch to alreadylandedtarget can preserve disjoint ownedmetadata without canonicalmain merge or another productlanding. Root must recheck actualHEAD/dirtypathdisjointness immediately before governedFF, confirm54taskhashes and metadata preserved afterward, and use existing event/lifecycle tools for finalmetadata. This is not authorization to reset/stash dirtywork or bypassWBlanding rules.
+
+Proportional checks afterFF: compile/focused tests for cmdserve/api/server environmentroute wiring and MCP/defaultcodec/security regression tests as needed; actual currenttarget CI verdict remains authoritative. Newrelease classification must use actual candidatecontent and normal automaticworkflow. If newer4e publicbinary supersedes0.112, require sourcebuildidentity/checksum/signature and actualdownloadedbinary plain+17officialreferencehost acceptance before claiming it covers Apps. UnchangedApp bytes make that proof plausible, not alreadydone. Existing docs pinnedacceptedv0.112 remain historicallytrue and should not be rewritten or triggerwebsiteCI merely because latestmain/release advances.
+
+No Apps-specific source/security compatibility findings. Root sole landing owner; postFF identity/currentCI/newrelease acceptance pending as applicable.
+
+VERDICT: blockers=0 majors=0 minors=0 land=yes

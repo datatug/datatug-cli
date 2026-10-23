@@ -1,0 +1,77 @@
+{
+  "status": "PASS",
+  "tag": "v0.112.0",
+  "sourceCommit": "89d260fdfe00f3b0345adae451258443d2cd00a7",
+  "publicRelease": "https://github.com/datatug/datatug/releases/tag/v0.112.0",
+  "runs": {
+    "ci": {
+      "id": 40034686825,
+      "head_sha": "89d260fdfe00f3b0345adae451258443d2cd00a7",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/datatug/datatug-cli/actions/runs/40034686825"
+    },
+    "release": {
+      "id": 40034686763,
+      "head_sha": "89d260fdfe00f3b0345adae451258443d2cd00a7",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/datatug/datatug-cli/actions/runs/40034686763"
+    }
+  },
+  "archive": {
+    "name": "datatug_0.112.0_darwin_arm64.tar.gz",
+    "url": "https://github.com/datatug/datatug/releases/download/v0.112.0/datatug_0.112.0_darwin_arm64.tar.gz",
+    "sha256": "bf688e927e1c9171d3ca9f59b7372a319384ce1af0fc9cc925ab10100d0b6b02"
+  },
+  "checksums": {
+    "name": "datatug_0.112.0_checksums.txt",
+    "url": "https://github.com/datatug/datatug/releases/download/v0.112.0/datatug_0.112.0_checksums.txt"
+  },
+  "binary": "/private/tmp/datatug-mcp-apps-release-v0.112.0/datatug",
+  "binarySHA256": "875af63bef87a6c3ce38f2651c0a41a5b2e26a82da3f966ba71892d1f42eb400",
+  "version": {
+    "name": "datatug",
+    "version": "0.112.0",
+    "commit": "89d260fdfe00f3b0345adae451258443d2cd00a7",
+    "date": "2026-10-23T22:44:27Z",
+    "date_source": "build"
+  },
+  "platform": "darwin/arm64",
+  "CGO_ENABLED": 0,
+  "codesign": "/private/tmp/datatug-mcp-apps-release-v0.112.0/datatug: valid on disk\n/private/tmp/datatug-mcp-apps-release-v0.112.0/datatug: satisfies its Designated Requirement",
+  "spctl": "/private/tmp/datatug-mcp-apps-release-v0.112.0/datatug: accepted\nsource=Notarized Developer ID\norigin=Developer ID Application: Alexander Trakhimenok (NFKJ9BRHE7)",
+  "installedVersion": {
+    "name": "datatug",
+    "version": "0.102.2",
+    "commit": "18896ce400676e27d5010c3314e3cbab411738a3",
+    "date": "2026-10-16T19:57:26Z",
+    "date_source": "build"
+  },
+  "updateDiscovery": "update available: 0.102.2 \u2192 0.112.0\nTo upgrade, run: datatug self-update",
+  "installedUpdate": false,
+  "packageManagerPublicationClaimed": false,
+  "browserAcceptance": "PASS: all 17 official-host scenarios",
+  "plainMCPAcceptance": "PASS: real child saved SQLite SQL and authority negatives",
+  "browserReceipt": "/Users/alex/.codex/visualizations/2026/10/23/01a16885-2371-7fb1-bc8d-fdbeb55e9dbc/mcp-apps-release-v0-112-0-browser-receipt.json",
+  "contributorHarnessSource": "1d28aed057ee4a5000c1d5d9ad3ec835304baf45",
+  "fixtureCommit": "08cc4d367e33cca82269bff54dc8a35b242e9937",
+  "plainMCPFixtureCommit": "5d22712c2ea6a288d294576c4b76a6bd82b2e536",
+  "literalRecipe": "/private/tmp/mcp-apps-public-literal-recipe.sh",
+  "literalRecipeSHA256": "a4f91f9ba88a7098acdd7ff765ea42fcab145af1d048200f54c4e88117537315",
+  "runtimeReceipts": [
+    {
+      "path": "/Users/alex/.codex/visualizations/2026/10/23/01a16885-2371-7fb1-bc8d-fdbeb55e9dbc/mcp-apps-release-v0-112-0-browser-receipt.json",
+      "sha256": "4261d67ee5e9fd92410090ea665815a04a739ae2f9869adac5dea6d28d8660ad"
+    },
+    {
+      "path": "/private/tmp/mcp-apps-public-v0.112.0-literal-recipe-pinned.log",
+      "sha256": "9960d61cc13ef82b4ab8e969bad3fe84abf11f9575e678fdc914619c6586c19b"
+    },
+    {
+      "path": "/private/tmp/mcp-apps-public-v0.112.0-plain-mcp.log",
+      "sha256": "c6ea80bc7d77e959df35fd27391d5163e7044b84ea0571d09d00c9ef28a8d2e3"
+    }
+  ],
+  "safeRecipeRefusal": "First run refused advanced existing canonical demo checkout; preserved it and used a clean WB-isolated pinned fixture on retry."
+}

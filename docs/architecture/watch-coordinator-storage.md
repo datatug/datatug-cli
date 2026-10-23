@@ -140,6 +140,21 @@ Telegram delivery claims require the same live scoped bot grant and poll fence,
 in addition to the delivery fence. Coordinator email/SMS workers skip Telegram.
 No inbound bot webhook or shared DataTug-owned bot is used by this flow.
 
+A verified reconnect increments the account link's durable generation, including
+when it reconnects the same chat. Delivery claims retain that generation. An
+explicit Telegram recipient-unavailable response terminally fails the affected
+delivery and invalidates only that user's matching bot/chat/generation connection;
+it cancels that connection's other pending Telegram deliveries. A delayed failure
+cannot revoke a newer reconnect. Other subscribers, channels and the Watch's
+evaluation remain independent. The affected user sees a reconnect requirement;
+reconnecting does not replay terminal deliveries or change subscription consent.
+
+Telegram flood-wait responses retain the provider's bounded retry delay in the
+delivery and bot poll record. The same transaction fences the current poll lease.
+No runner can reclaim that bot before the durable cooldown expires. Poll-only
+rate limits use the same cooldown, so runner failover cannot bypass Telegram's
+bot-wide limit.
+
 Each accepted event has deterministic per-user/channel delivery IDs. In-app
 notifications persist immediately in the same acceptance transaction and maintain
 per-user read state. External delivery state is independent of evaluation success.
@@ -184,7 +199,11 @@ job, lease expiry and hard deadlines, fencing, error retry, transaction rollback
 restart durability, exact/changed result replay, owner/shared/privacy boundaries,
 wrong-environment claims, one-shot completion, failure/recovery/unknown semantics,
 source changes, verified recipient consent, paid-only SMS, quotas shared across
-projects, retry reservation reuse, Telegram nonce replay/unlink, and unsafe DSN
+projects, retry reservation reuse, Telegram nonce replay/unlink, multi-subscriber
+recipient isolation, reconnect generation fencing, durable flood waits, and unsafe DSN
 rejection. `beforeCommit` is an unexported test seam used to prove that notification
-and completion cannot partially commit. These storage tests do not claim that a
+and completion cannot partially commit. A narrow unexported database interface
+allows test wrappers to inject adapter failures while delegating successful calls
+to the actual SQLite DALGO database; the production constructor remains fixed.
+These storage tests do not claim that a
 browser, remote runner, SMTP/SMS/Telegram provider or public deployment passed.

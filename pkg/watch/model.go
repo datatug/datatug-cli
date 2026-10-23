@@ -166,11 +166,12 @@ type Notification struct {
 	ReadAt    time.Time `json:"readAt,omitempty"`
 }
 type Delivery struct {
-	TelegramBotID  string `json:"telegramBotId,omitempty"`
-	TelegramChatID string `json:"telegramChatId,omitempty"`
-	AccountID      string `json:"accountId,omitempty"`
-	Phone          string `json:"phone,omitempty"`
-	QuotaReserved  bool   `json:"quotaReserved"`
+	TelegramLinkGeneration int64  `json:"telegramLinkGeneration,omitempty"`
+	TelegramBotID          string `json:"telegramBotId,omitempty"`
+	TelegramChatID         string `json:"telegramChatId,omitempty"`
+	AccountID              string `json:"accountId,omitempty"`
+	Phone                  string `json:"phone,omitempty"`
+	QuotaReserved          bool   `json:"quotaReserved"`
 	Notification
 	Channel     string    `json:"channel"`
 	Email       string    `json:"email,omitempty"`
@@ -216,16 +217,19 @@ type Config struct {
 // TelegramProviderStatus exposes only the registered public bot identity and the
 // requesting user's verified link. Bot secrets remain on provider runners.
 type TelegramProviderStatus struct {
-	Connected   bool   `json:"connected"`
-	BotID       string `json:"botId,omitempty"`
-	BotUsername string `json:"botUsername,omitempty"`
+	ReconnectRequired bool   `json:"reconnectRequired,omitempty"`
+	ConnectionError   string `json:"connectionError,omitempty"`
+	Connected         bool   `json:"connected"`
+	BotID             string `json:"botId,omitempty"`
+	BotUsername       string `json:"botUsername,omitempty"`
 }
 
 // TelegramPollLease fences a single provider poller and its persisted update
 // offset. Offset is advanced only after an update has been handled.
 type TelegramPollLease struct {
-	BotID      string    `json:"botId"`
-	Fence      int64     `json:"fence"`
-	Offset     int64     `json:"offset"`
-	LeaseUntil time.Time `json:"leaseUntil"`
+	NextAttemptAt time.Time `json:"nextAttemptAt,omitempty"`
+	BotID         string    `json:"botId"`
+	Fence         int64     `json:"fence"`
+	Offset        int64     `json:"offset"`
+	LeaseUntil    time.Time `json:"leaseUntil"`
 }

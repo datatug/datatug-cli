@@ -391,7 +391,7 @@ func (s *Store) Subscribe(ctx context.Context, a Actor, sub Subscription) error 
 				return ErrForbidden
 			}
 			link, err := read[telegramLink](ctx, tx, telegramLinks, a.Scope, a.ID)
-			if err != nil || link.BotID != provider.BotID {
+			if err != nil || link.BotID != provider.BotID || link.FailureCode != "" {
 				return ErrForbidden
 			}
 			sub.TelegramBotID = provider.BotID

@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"errors"
 	"github.com/dal-go/dalgo/dal"
 	"regexp"
 	"strconv"
@@ -15,6 +16,8 @@ const (
 )
 
 type telegramLink struct {
+	Generation  int64  `json:"generation"`
+	FailureCode string `json:"failureCode,omitempty"`
 	Scope
 	BotID     string    `json:"botId"`
 	UserID    string    `json:"userId"`
@@ -103,7 +106,11 @@ func (s *Store) CompleteTelegramLinkByRunner(ctx context.Context, id RunnerIdent
 				return ErrForbidden
 			}
 		}
-		link := telegramLink{Scope: request.Scope, BotID: id.TelegramBotID, UserID: request.UserID, ChatID: chatID, At: s.now()}
+		previous, err := read[telegramLink](ctx, tx, telegramLinks, request.Scope, request.UserID)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return err
+		}
+		link := telegramLink{Scope: request.Scope, BotID: id.TelegramBotID, UserID: request.UserID, ChatID: chatID, At: s.now(), Generation: previous.Generation + 1}
 		if err = s.save(ctx, tx, telegramLinks, link.Scope, link.UserID, "", link.UserID, "", link); err != nil {
 			return err
 		}

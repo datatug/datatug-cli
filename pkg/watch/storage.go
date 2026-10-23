@@ -39,8 +39,15 @@ var tables = []string{definitions, observations, runs, runners, subscriptions, i
 // Store separates durable project definitions from bounded runtime tables. Every
 // transition uses the same DALGO read/write transaction, with SQLite IMMEDIATE
 // locking established before the callback. No DALGO precondition is assumed.
+type stateDatabase interface {
+	dal.Getter
+	dal.QueryExecutor
+	dal.ReadwriteTransactionCoordinator
+	Close() error
+}
+
 type Store struct {
-	db           *dalgo2sqlite.Database
+	db           stateDatabase
 	config       Config
 	beforeCommit func() error
 }

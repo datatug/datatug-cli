@@ -107,6 +107,7 @@ func (s *Store) TelegramProviderStatus(ctx context.Context, a Actor) (TelegramPr
 	}
 	result := TelegramProviderStatus{}
 	err := s.transaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
+		result = TelegramProviderStatus{}
 		provider, err := s.telegramProvider(ctx, tx, a.Scope)
 		if errors.Is(err, ErrNotFound) {
 			return nil
@@ -123,7 +124,11 @@ func (s *Store) TelegramProviderStatus(ctx context.Context, a Actor) (TelegramPr
 		if err != nil {
 			return err
 		}
-		result.Connected = link.BotID == provider.BotID && (link.ExpiresAt.IsZero() || link.ExpiresAt.After(s.now()))
+		if link.BotID == provider.BotID {
+			result.ReconnectRequired = link.FailureCode != ""
+			result.ConnectionError = link.FailureCode
+		}
+		result.Connected = link.BotID == provider.BotID && link.FailureCode == "" && (link.ExpiresAt.IsZero() || link.ExpiresAt.After(s.now()))
 		return nil
 	})
 	return result, err
@@ -183,7 +188,7 @@ func (s *Store) ClaimTelegramPoll(ctx context.Context, id RunnerIdentity) (*Tele
 		if err != nil && !errors.Is(err, ErrNotFound) {
 			return err
 		}
-		if err == nil && state.LeaseUntil.After(s.now()) {
+		if err == nil && (state.LeaseUntil.After(s.now()) || state.NextAttemptAt.After(s.now())) {
 			return nil
 		}
 		state.Scope = id.Scope
@@ -203,6 +208,7 @@ func (s *Store) ClaimTelegramPoll(ctx context.Context, id RunnerIdentity) (*Tele
 func (s *Store) RenewTelegramPoll(ctx context.Context, id RunnerIdentity, fence int64) (*TelegramPollLease, error) {
 	var result *TelegramPollLease
 	err := s.transaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
+		result = nil
 		state, err := s.poll(ctx, tx, id, fence)
 		if err != nil {
 			return err
@@ -235,5 +241,27 @@ func (s *Store) AdvanceTelegramPoll(ctx context.Context, id RunnerIdentity, fenc
 		}
 		s.renewPoll(&state)
 		return s.savePoll(ctx, tx, state)
+	})
+}
+
+func (s *Store) deferTelegramPoll(ctx context.Context, tx dal.ReadwriteTransaction, id RunnerIdentity, fence int64, seconds int) error {
+	state, err := s.poll(ctx, tx, id, fence)
+	if err != nil {
+		return err
+	}
+	state.NextAttemptAt = s.now().Add(time.Duration(seconds) * time.Second)
+	state.LeaseUntil = s.now()
+	state.Fence++
+	return s.savePoll(ctx, tx, state)
+}
+
+// DeferTelegramPoll persists Telegram's bot-wide flood wait and fences all old
+// requests, so failover to a second runner cannot bypass the provider cooldown.
+func (s *Store) DeferTelegramPoll(ctx context.Context, id RunnerIdentity, fence int64, retryAfterSeconds int) error {
+	if retryAfterSeconds < 1 || retryAfterSeconds > 86400 {
+		return ErrInvalid
+	}
+	return s.transaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
+		return s.deferTelegramPoll(ctx, tx, id, fence, retryAfterSeconds)
 	})
 }

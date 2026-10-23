@@ -51,6 +51,9 @@ func (s *Store) notify(ctx context.Context, tx dal.ReadwriteTransaction, d Defin
 				if err != nil {
 					return false, err
 				}
+				if link.FailureCode != "" {
+					continue
+				}
 				if !link.ExpiresAt.IsZero() && !link.ExpiresAt.After(s.now()) {
 					continue
 				}
@@ -59,6 +62,7 @@ func (s *Store) notify(ctx context.Context, tx dal.ReadwriteTransaction, d Defin
 					continue
 				}
 				delivery.TelegramBotID = link.BotID
+				delivery.TelegramLinkGeneration = link.Generation
 			}
 			if err = s.save(ctx, tx, outbox, d.Scope, id, d.ID, sub.UserID, "", delivery); err != nil {
 				return false, err
@@ -210,7 +214,7 @@ func (s *Store) claimNotifications(ctx context.Context, identity *RunnerIdentity
 				if e != nil && !errors.Is(e, ErrNotFound) {
 					return e
 				}
-				valid = valid && e == nil && link.ChatID == item.TelegramChatID && link.BotID == item.TelegramBotID && sub.TelegramBotID == item.TelegramBotID && (link.ExpiresAt.IsZero() || link.ExpiresAt.After(now))
+				valid = valid && e == nil && link.FailureCode == "" && link.Generation == item.TelegramLinkGeneration && link.ChatID == item.TelegramChatID && link.BotID == item.TelegramBotID && sub.TelegramBotID == item.TelegramBotID && (link.ExpiresAt.IsZero() || link.ExpiresAt.After(now))
 			}
 			if !valid {
 				item.State = "cancelled"
@@ -254,12 +258,26 @@ func (s *Store) claimNotifications(ctx context.Context, identity *RunnerIdentity
 	return result, err
 }
 func (s *Store) FinishNotification(ctx context.Context, id string, fence int64, failureCode string) error {
-	return s.finishNotification(ctx, nil, 0, id, fence, failureCode)
+	return s.finishNotification(ctx, nil, 0, id, fence, failureCode, 0)
 }
-func (s *Store) FinishTelegramNotification(ctx context.Context, identity RunnerIdentity, pollFence int64, id string, fence int64, failureCode string) error {
-	return s.finishNotification(ctx, &identity, pollFence, id, fence, failureCode)
+func (s *Store) FinishTelegramNotification(ctx context.Context, identity RunnerIdentity, pollFence int64, id string, fence int64, failureCode string, retryAfterSeconds ...int) error {
+	seconds := 0
+	if len(retryAfterSeconds) > 1 {
+		return ErrInvalid
+	}
+	if len(retryAfterSeconds) == 1 {
+		seconds = retryAfterSeconds[0]
+	}
+	if failureCode == "TELEGRAM_RATE_LIMITED" {
+		if seconds < 1 || seconds > 86400 {
+			return ErrInvalid
+		}
+	} else if seconds != 0 {
+		return ErrInvalid
+	}
+	return s.finishNotification(ctx, &identity, pollFence, id, fence, failureCode, seconds)
 }
-func (s *Store) finishNotification(ctx context.Context, identity *RunnerIdentity, pollFence int64, id string, fence int64, failureCode string) error {
+func (s *Store) finishNotification(ctx context.Context, identity *RunnerIdentity, pollFence int64, id string, fence int64, failureCode string, retryAfterSeconds int) error {
 	if len(failureCode) > 64 {
 		return ErrInvalid
 	}
@@ -283,13 +301,21 @@ func (s *Store) finishNotification(ctx context.Context, identity *RunnerIdentity
 			if item.ID != id {
 				continue
 			}
-			if item.Fence == fence && item.State == "delivered" && failureCode == "" {
+			if item.Fence == fence && (item.State == "delivered" && failureCode == "" || item.State == "failed" && item.FailureCode == "TELEGRAM_RECIPIENT_UNAVAILABLE" && failureCode == item.FailureCode) {
 				return nil
 			}
 			if item.Fence != fence || item.State != "sending" || !item.LeaseUntil.After(s.now()) {
 				return ErrStaleLease
 			}
 			item.FailureCode = failureCode
+			if identity != nil && failureCode == "TELEGRAM_RECIPIENT_UNAVAILABLE" {
+				if err = s.invalidateTelegramRecipient(ctx, tx, item); err != nil {
+					return err
+				}
+				item.State = "failed"
+				item.RetryAt = time.Time{}
+				return s.save(ctx, tx, outbox, item.Scope, item.ID, item.WatchID, item.UserID, "", item)
+			}
 			if failureCode == "" {
 				item.State = "delivered"
 			} else {
@@ -299,6 +325,12 @@ func (s *Store) finishNotification(ctx context.Context, identity *RunnerIdentity
 				}
 				delay := time.Second * time.Duration(1<<uint(min(item.Attempts, 10)))
 				item.RetryAt = s.now().Add(delay)
+			}
+			if identity != nil && failureCode == "TELEGRAM_RATE_LIMITED" {
+				item.RetryAt = maxTime(item.RetryAt, s.now().Add(time.Duration(retryAfterSeconds)*time.Second))
+				if err = s.deferTelegramPoll(ctx, tx, *identity, pollFence, retryAfterSeconds); err != nil {
+					return err
+				}
 			}
 			return s.save(ctx, tx, outbox, item.Scope, item.ID, item.WatchID, item.UserID, "", item)
 		}
@@ -330,6 +362,9 @@ func (s *Store) RetryNotification(ctx context.Context, a Actor, id string) error
 		if item.State != "failed" {
 			return ErrConflict
 		}
+		if item.FailureCode == "TELEGRAM_RECIPIENT_UNAVAILABLE" {
+			return ErrForbidden
+		}
 		item.State = "pending"
 		item.Attempts = 0
 		item.RetryAt = time.Time{}
@@ -339,4 +374,41 @@ func (s *Store) RetryNotification(ctx context.Context, a Actor, id string) error
 		}
 		return s.log(ctx, tx, a.Scope, a.ID, "notification.retry", id)
 	})
+}
+
+func maxTime(a, b time.Time) time.Time {
+	if a.After(b) {
+		return a
+	}
+	return b
+}
+
+// A permanent private-recipient failure never changes shared Watch execution or
+// another subscriber. Reconnection replaces this failed link only on fresh proof.
+func (s *Store) invalidateTelegramRecipient(ctx context.Context, tx dal.ReadwriteTransaction, failed Delivery) error {
+	link, err := read[telegramLink](ctx, tx, telegramLinks, failed.Scope, failed.UserID)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	if err == nil && link.BotID == failed.TelegramBotID && link.ChatID == failed.TelegramChatID && link.Generation == failed.TelegramLinkGeneration {
+		link.FailureCode = "TELEGRAM_RECIPIENT_UNAVAILABLE"
+		if err = s.save(ctx, tx, telegramLinks, failed.Scope, failed.UserID, "", failed.UserID, "", link); err != nil {
+			return err
+		}
+	}
+	deliveries, err := list[Delivery](ctx, tx, outbox, failed.Scope, "")
+	if err != nil {
+		return err
+	}
+	for _, delivery := range deliveries {
+		if delivery.ID != failed.ID && delivery.UserID == failed.UserID && delivery.Channel == "telegram" && delivery.TelegramBotID == failed.TelegramBotID && delivery.TelegramChatID == failed.TelegramChatID && delivery.TelegramLinkGeneration == failed.TelegramLinkGeneration && delivery.State != "delivered" {
+			delivery.State = "cancelled"
+			delivery.FailureCode = "TELEGRAM_RECIPIENT_UNAVAILABLE"
+			delivery.Fence++
+			if err = s.save(ctx, tx, outbox, delivery.Scope, delivery.ID, delivery.WatchID, delivery.UserID, "", delivery); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

@@ -164,6 +164,9 @@ func saveKeepingReadme(ctx context.Context, store datatug.ProjectStore, projectD
 		return fmt.Errorf("failed to read the README.md of the project, which a scan keeps: %w", readErr)
 	}
 	saveErr := store.SaveProject(ctx, project)
+	if errors.Is(saveErr, filestore.ErrEnvironmentRecoveryRequired) {
+		saveErr = fmt.Errorf("project metadata %s: %w", storage.ProjectSummaryFileName, saveErr)
+	}
 	if readErr != nil {
 		return saveErr // there was no README: the generated one stays
 	}

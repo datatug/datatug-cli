@@ -1258,7 +1258,10 @@ func TestStreamAskWithContextStopsWhenConsumerBreaksEarly(t *testing.T) {
 		t.Fatal(err)
 	}
 	events := 0
-	for range conversation.StreamAskWithContext(context.Background(), "Hi", "") {
+	for _, err := range conversation.StreamAskWithContext(context.Background(), "Hi", "") {
+		if err != nil {
+			t.Fatal(err)
+		}
 		events++
 		break
 	}

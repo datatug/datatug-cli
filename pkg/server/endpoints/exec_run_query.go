@@ -17,6 +17,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/httpsource"
 	"github.com/datatug/datatug-cli/pkg/openvaultdb"
+	"github.com/datatug/datatug-cli/pkg/querybody"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
@@ -454,7 +455,7 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 // said, which quotes the path of the file, goes to the log of the server.
 func executionQueryDocument(projectID, queryID string, queryDef *datatug.QueryDef, queryRevision string) (string, error) {
 	if queryRevision != "" {
-		return queryDef.Text, nil
+		return querybody.Structured(queryDef)
 	}
 	document, err := api.LoadQueryDocument(projectID, queryID, queryDef.Type)
 	if err != nil {

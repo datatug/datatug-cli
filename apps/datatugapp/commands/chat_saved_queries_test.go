@@ -45,7 +45,7 @@ func TestChatSavedQuerySaveIsCreateOnlyAndListed(t *testing.T) {
 	writer := service.store.(datatug.RevisionedQueriesStore)
 	_, err = writer.PutQuery(ctx, &datatug.QueryDefWithFolderPath{QueryDef: datatug.QueryDef{
 		ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "customer-invoices", Title: "Customer invoices"}},
-		Type:        datatug.QueryTypeTugQL, Text: "from: {name: Invoice}\n",
+		Type:        datatug.QueryTypeTugQL, StructuredBody: true, Text: "from: {name: Invoice}\n",
 		Parameters: datatug.Parameters{{ID: "CustomerId", Type: "string", IsRequired: true, DefaultValue: "001"}, {ID: "Enabled", Type: "boolean", DefaultValue: true}},
 	}}, datatug.QueryWriteCondition{IfNoneMatch: true})
 	if err != nil {

@@ -65,14 +65,21 @@ map[string]any` argument (by `.ID`/`.Value`); `request.Limit` becomes
 
 ### 2. Saved-query run (by `QueryDef.ID`)
 
-Not yet a separate handler; the nearest existing sibling is
-`pkg/server/endpoints/query_endpoints.go`'s `getQueryHandler`, which loads a
-project's `QueryDef` by ID from storage but does not execute it. Wiring this
-means: load the `QueryDef`, branch on `QueryDef.Type`
-(REQ:tugql-query-type — `TugQL` reads the `<id>.tugql.yaml` sidecar and calls
-`Executor.RunTugQL`; the existing `SQL` type reads its query text and calls
-`Executor.RunNativeSQL`), with the caller's bound parameter values as
-`variables`.
+Saved `TugQL` queries have one body: `<id>.query.tugql` for text or
+`<id>.query.tugql.yaml` for the structured document. Core selects the representation
+from the filename and rejects multiple bodies. A write request sets
+`QueryDef.StructuredBody` for the structured form; the flag is not stored in the
+JSON sidecar. `Executor.RunTugQL` accepts the structured document, with the
+caller's bound parameter values as `variables`. Saved text is parsed through
+DALgo before entering that same policy-bound executor. `SQL` queries use
+`Executor.RunNativeSQL`.
+
+Text authoring definitions, imports, CTEs, and inline parameter declarations
+require an authorized resolver context and currently fail closed. Separately
+declared project-query parameters remain available. Core's temporary reader can
+read and execute pre-cutover bodies, but this CLI's Git-backed writer refuses
+to edit them until they use a canonical modern filename; it never guesses which
+old tracked file to remove.
 
 ### 3. `POST /datatug/exec/run_query` (new — named by AC
 `restricted-rows-and-columns-server` and `tugql-query-runs`)

@@ -220,7 +220,11 @@ func newSecurityMatrixProject(t *testing.T) (map[string]string, string) {
 		if err := os.WriteFile(filepath.Join(queriesDir, id+".query.json"), encoded, 0o600); err != nil {
 			t.Fatalf("write query json %s: %v", id, err)
 		}
-		sidecar := fmt.Sprintf("%s.query.%s", id, strings.ToLower(string(queryType)))
+		extension := strings.ToLower(string(queryType))
+		if queryType == datatug.QueryTypeTugQL {
+			extension += ".yaml"
+		}
+		sidecar := fmt.Sprintf("%s.query.%s", id, extension)
 		if err := os.WriteFile(filepath.Join(queriesDir, sidecar), []byte(text), 0o600); err != nil {
 			t.Fatalf("write query sidecar %s: %v", id, err)
 		}
@@ -397,10 +401,10 @@ func TestRunQuery_RestrictedRowsAndColumns(t *testing.T) {
 	})
 }
 
-// TestRunQuery_TUGQL_RunsForAdmin is (the admin half of) AC tugql-query-runs:
+// TestRunQuery_TugQL_RunsForAdmin is (the admin half of) AC tugql-query-runs:
 // a saved TugQL query runs through the policy path and returns rows, with
 // execution-confirmed bindingsApplied.
-func TestRunQuery_TUGQL_RunsForAdmin(t *testing.T) {
+func TestRunQuery_TugQL_RunsForAdmin(t *testing.T) {
 	pathsByID, projectID := newSecurityMatrixProject(t)
 	session := securityMatrixSession(t, "boss", "admin")
 	baseURL := startServeHTTPWithSession(t, pathsByID, session)

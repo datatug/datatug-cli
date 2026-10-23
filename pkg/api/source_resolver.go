@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/datatug/datatug-cli/pkg/querybody"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/storage"
 )
@@ -237,41 +238,29 @@ func loadQueryDocument(projectID, queryID string, queryType datatug.QueryType) (
 	if !ok || dir == "" {
 		return "", fmt.Errorf("no project directory configured for project %q", dbcopy.SourceIDDisplay(projectID))
 	}
-	folder, id := queryFolderAndID(queryID)
-	var (
-		firstErr error
-		found    []string
-		content  []byte
-	)
-	for _, ext := range queryDocumentExtensions(queryType) {
-		filePath := filepath.Join(dir, storage.QueriesFolder, folder, fmt.Sprintf("%s.%s.%s", id, storage.QueryFileSuffix, ext))
-		data, err := os.ReadFile(filePath)
-		if err != nil {
-			if firstErr == nil {
-				firstErr = fmt.Errorf("read query document %s: %w", filePath, err)
-			}
-			continue
-		}
-		found = append(found, filepath.Base(filePath))
-		content = data
-	}
-	switch len(found) {
-	case 0:
-		return "", firstErr
-	case 1:
-		return string(content), nil
-	}
-	return "", fmt.Errorf("query %q has more than one body file (%s); the file name decides, so exactly one is allowed", queryID, strings.Join(found, ", "))
-}
-
-// queryDocumentExtensions lists the body file extensions a saved query of
-// queryType may have. A TugQL query's structured YAML body
-// ("tugql.yaml", what DataTug writes) and its text body ("tugql") are alternatives: both present is an error; every other type has the one lowercase-type extension.
-func queryDocumentExtensions(queryType datatug.QueryType) []string {
 	if queryType == datatug.QueryTypeTugQL {
-		return []string{"tugql.yaml", "tugql"}
+		store, err := projectStoreForID(LocalStoreID, projectID)
+		if err != nil {
+			return "", err
+		}
+		query, err := store.LoadQuery(context.Background(), queryID)
+		if err != nil {
+			return "", fmt.Errorf("read query document %s: %w", queryID, err)
+		}
+		if query.Text == "" {
+			base := filepath.Join(dir, storage.QueriesFolder, filepath.FromSlash(queryID)+".query.")
+			return "", fmt.Errorf("read query document %s or %s: body is missing or empty", base+"tugql", base+"tugql.yaml")
+		}
+		return querybody.Structured(query)
 	}
-	return []string{strings.ToLower(string(queryType))}
+	folder, id := queryFolderAndID(queryID)
+	fileName := fmt.Sprintf("%s.%s.%s", id, storage.QueryFileSuffix, strings.ToLower(string(queryType)))
+	filePath := filepath.Join(dir, storage.QueriesFolder, folder, fileName)
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", fmt.Errorf("read query document %s: %w", filePath, err)
+	}
+	return string(content), nil
 }
 
 // queryFolderAndID splits a "folder/subfolder/id"-shaped query ID into its

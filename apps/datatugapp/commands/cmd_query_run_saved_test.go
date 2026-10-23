@@ -431,3 +431,61 @@ func TestQueryRunSaved_AmbiguousQueryID_ClearUsageError(t *testing.T) {
 		t.Errorf("stderr must name both candidates x/q and y/q: %q", stderr)
 	}
 }
+
+func TestQueryRunSavedTugQLBodyRepresentations(t *testing.T) {
+	for _, sample := range []struct{ name, extension, body string }{
+		{"structured", "tugql.yaml", "from: {name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 1\n"},
+		{"text", "tugql", "from Invoice\nlimit 1\nselect InvoiceId\n"},
+	} {
+		t.Run(sample.name, func(t *testing.T) {
+			dir := setupSavedQueryProject(t)
+			folder := filepath.Join(dir, "queries")
+			metadata := `{"id":"body-representation","type":"TugQL","targets":[{"catalog":"chinook-local"}]}`
+			if err := os.WriteFile(filepath.Join(folder, "body-representation.query.json"), []byte(metadata), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(folder, "body-representation.query."+sample.extension), []byte(sample.body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			stdout, stderr, code := runQuery(t, "", "--project", dir, "--query", "body-representation", "--env", "local", "--as", "boss", "--role", "admin", "--format", "json")
+			if code != 0 || len(decodeObjects(t, stdout)) != 1 {
+				t.Fatalf("body execution: %d %s %s", code, stdout, stderr)
+			}
+			if err := os.WriteFile(filepath.Join(folder, "body-representation.query.tugql.other"), []byte("ignored"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			other := "tugql"
+			if sample.extension == other {
+				other = "tugql.yaml"
+			}
+			if err := os.WriteFile(filepath.Join(folder, "body-representation.query."+other), []byte(sample.body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			_, stderr, code = runQuery(t, "", "--project", dir, "--query", "body-representation", "--env", "local", "--as", "boss", "--role", "admin")
+			if code == 0 || !strings.Contains(stderr, "more than one body file") {
+				t.Fatalf("ambiguous body accepted: %d %s", code, stderr)
+			}
+		})
+	}
+}
+
+func TestQueryRunSavedTugQLRefusesStructuredContentInTextBody(t *testing.T) {
+	for _, format := range []string{"json", "jsonl"} {
+		t.Run(format, func(t *testing.T) {
+			dir := setupSavedQueryProject(t)
+			folder := filepath.Join(dir, "queries")
+			must := func(name, body string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(folder, name), []byte(body), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			must("mismatched.query.json", `{"id":"mismatched","type":"TugQL","targets":[{"catalog":"chinook-local"}]}`)
+			must("mismatched.query.tugql", "from: {name: Invoice}\nlimit: 1\n")
+			_, stderr, code := runQuery(t, "", "--project", dir, "--query", "mismatched", "--env", "local", "--as", "boss", "--role", "admin", "--format", format)
+			if code == 0 || !strings.Contains(stderr, "invalid TugQL text") {
+				t.Fatalf("mislabeled body accepted: %d %s", code, stderr)
+			}
+		})
+	}
+}

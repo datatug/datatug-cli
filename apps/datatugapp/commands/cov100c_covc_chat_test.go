@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -294,5 +295,30 @@ func TestCovCChatRunPaths(t *testing.T) {
 	))
 	if _, err := covCChatService(t, absent, true).Run(ctx, "f/inv"); err == nil {
 		t.Fatal("unknown target catalog accepted")
+	}
+}
+
+func TestChatLookupTugQLTextRepresentation(t *testing.T) {
+	for _, mismatched := range []bool{false, true} {
+		t.Run(fmt.Sprint(mismatched), func(t *testing.T) {
+			db := covCLookupDB(t)
+			files := covCMerge(covCEnvFiles(map[string]string{"main": db}), covCQueryFiles("f", "text", "TugQL", "", "", covCCustomerParams))
+			body := "from Invoice\nwhere CustomerId = @CustomerId\nselect InvoiceId"
+			if mismatched {
+				body = covCCustomerTugQL
+			}
+			files["queries/f/text.query.tugql"] = body
+			dir := covCWriteProject(t, files)
+			lookup, err := covCChatService(t, dir, true).LookupParameter(context.Background(), "f/text", "CustomerId")
+			if mismatched {
+				if err == nil || !strings.Contains(err.Error(), "invalid TugQL text") {
+					t.Fatalf("mismatched body: %v", err)
+				}
+				return
+			}
+			if err != nil || lookup == nil || len(lookup.Result.Rows) != 2 {
+				t.Fatalf("text lookup unavailable: %+v / %v", lookup, err)
+			}
+		})
 	}
 }

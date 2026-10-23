@@ -713,7 +713,8 @@ func TestSessionChatAskAndStreamAskAppendError(t *testing.T) {
 		return origTxCommit(tx)
 	}
 	seq, drain := streamChat.StreamAsk(ctx, "hello")
-	for range seq {
+	for _, streamErr := range seq {
+		_ = streamErr // The terminal drain below owns and asserts this injected failure.
 	}
 	if _, err := drain(); err == nil {
 		t.Fatal("expected StreamAsk error when AppendTurn fails")

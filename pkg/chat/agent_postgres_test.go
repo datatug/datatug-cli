@@ -48,7 +48,7 @@ scopes:
 // The chat reads a source through the executor, so what the executor answers for a PostgreSQL source is what the chat
 // says: with the preview off the sentence about the preview, with it on and a policy in the session the sentence about
 // policy-enforced reads, and in both cases the opener is never called.
-func TestRunTUGQL_APostgresSourceIsAnsweredBeforeItIsOpened(t *testing.T) {
+func TestRunTugQL_APostgresSourceIsAnsweredBeforeItIsOpened(t *testing.T) {
 	// Not parallel: mutates environment variables and dbcopy Postgres opener.
 	var opens atomic.Int32
 	restore := dbcopy.SetPostgresOpenerForTest(func(string, dal.Schema, dalgo2sql.DbOptions, ...dalgo2postgres.Option) (*dalgo2postgres.Database, error) {
@@ -117,7 +117,7 @@ func TestThePreviewSwitchIsOffUnlessATestTurnsItOn(t *testing.T) {
 // With the preview on and a session with no policy, a source that opened and whose pool cannot make a connection again
 // (the server was restarted, the password was changed) fails the read with the text pgx writes, which names the user and
 // holds the password. What the chat answers, which goes to the message, the model and the store, is one fixed sentence.
-func TestRunTUGQL_AReadThatLosesItsConnectionAnswersOneFixedSentence(t *testing.T) {
+func TestRunTugQL_AReadThatLosesItsConnectionAnswersOneFixedSentence(t *testing.T) {
 	// Not parallel: mutates environment variables, dbcopy Postgres opener, and standard logger.
 	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	const user = "USERMARKER-dt02-chat"
@@ -161,7 +161,7 @@ func TestRunTUGQL_AReadThatLosesItsConnectionAnswersOneFixedSentence(t *testing.
 // A source of the chat is "env:NAME" in the usual case, and the failure it answers names the variable the connection
 // string is read from (and not the fallback hint of a source given as a literal URL), with the adapter's sentence and
 // nothing of the URL the variable holds.
-func TestRunTUGQL_AnEnvSourceThatCannotBeReachedNamesTheVariable(t *testing.T) {
+func TestRunTugQL_AnEnvSourceThatCannotBeReachedNamesTheVariable(t *testing.T) {
 	// Not parallel: mutates environment variables and dbcopy Postgres opener.
 	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	const variable = "DATATUG_CHAT_SHOP_PG_URL"

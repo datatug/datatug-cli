@@ -225,7 +225,7 @@ func TestCov100gChatSavedQueryRunAndLookup(t *testing.T) {
 	tugqlText := "from: {name: Customer}\nlimit: 10\n"
 	_, err := writer.PutQuery(ctx, &datatug.QueryDefWithFolderPath{QueryDef: datatug.QueryDef{
 		ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "customers", Title: "Customers"}},
-		Type:        datatug.QueryTypeTugQL, Text: tugqlText,
+		Type:        datatug.QueryTypeTugQL, StructuredBody: true, Text: tugqlText,
 		Targets: []datatug.QueryDefTarget{{Catalog: "mini"}},
 		Parameters: datatug.Parameters{{
 			ID: "CustomerId", Type: "string", IsRequired: true,

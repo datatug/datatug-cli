@@ -106,7 +106,10 @@ func TestCloudUserProviderHonorsEarlyConsumerStop(t *testing.T) {
 	defer server.Close()
 	provider := cloudUserProvider{cloud.New(cloud.Config{BaseURL: server.URL + "/v0/", Product: "datatug", Token: func(context.Context) (string, error) { return "token", nil }})}
 	var events int
-	for range provider.Stream(context.Background(), ai.ChatRequest{}) {
+	for _, err := range provider.Stream(context.Background(), ai.ChatRequest{}) {
+		if err != nil {
+			t.Fatal(err)
+		}
 		events++
 		break
 	}

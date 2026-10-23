@@ -106,6 +106,9 @@ func covCQueryFiles(folder, id, typ, sidecarExt, text string, extra string) map[
 	files := map[string]string{
 		"queries/" + folder + "/" + id + ".query.json": `{"createdAt":"2026-10-01T00:00:00Z","id":"` + id + `","type":"` + typ + `"` + extra + `}`,
 	}
+	if sidecarExt == "tugql" {
+		sidecarExt = "tugql.yaml"
+	}
 	if sidecarExt != "" {
 		files["queries/"+folder+"/"+id+".query."+sidecarExt] = text
 	}
@@ -463,5 +466,16 @@ func TestCovCWriteStreamedRowsErrors(t *testing.T) {
 	}
 	if err := writeStreamedRows(ctx, &covCFailAfterWriter{after: 1}, "csv", []string{"a"}, &covCReader{recs: []record.Record{rec(map[string]any{"a": 1})}}); err == nil {
 		t.Fatal("csv row failure ignored")
+	}
+}
+
+func TestSavedTugQLRunnersRejectMislabeledTextBeforeSourceAccess(t *testing.T) {
+	query := &datatug.QueryDef{Type: datatug.QueryTypeTugQL, Text: "from: {name: Invoice}\n"}
+	// No store/executor is supplied: malformed text must fail before either is used.
+	if _, err := runTugQLSavedQuery(context.Background(), nil, nil, "", "", query, nil); err == nil || !strings.Contains(err.Error(), "invalid TugQL text") {
+		t.Fatalf("runner did not reject mislabeled text: %v", err)
+	}
+	if _, _, err := parseFederatedTugQL(context.Background(), nil, "", "", query); err == nil || !strings.Contains(err.Error(), "invalid TugQL text") {
+		t.Fatalf("federated planner did not reject mislabeled text: %v", err)
 	}
 }

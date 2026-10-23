@@ -36,7 +36,7 @@ func TestLocalAIConfirmedQueryUsesRevisionedAdapterAndExactReplay(t *testing.T) 
 	}
 	aiScope := aiCore.Scope{Key: "local:" + scope.Project, Project: scope.Project, Actor: "admin"}
 	local := detective.LocalAIStore{Store: store, Scope: aiScope}
-	query := aiCore.QueryDraft{ID: "ai-customer", Title: "Customer audit", Type: "TugQL", Text: "SELECT CustomerId FROM Customer"}
+	query := aiCore.QueryDraft{ID: "ai-customer", Title: "Customer audit", Type: "TugQL", Text: "from Customer\nselect CustomerId"}
 	proposal := aiCore.Proposal{ID: "reviewed-query", Scope: aiScope, Draft: aiCore.Draft{Kind: aiCore.KindQuery, Query: &query}}
 	command := aiCore.Command{Scope: aiScope, OperationID: "ai-query-confirm", Proposal: proposal, Binding: coreDetective.OperationBinding{Project: aiScope.Key, Actor: aiScope.Actor, Action: "ai-confirm-draft-query", ResourceID: proposal.ID, PayloadDigest: strings.Repeat("a", 64)}}
 	receipt, err := local.ConfirmQuery(context.Background(), command)

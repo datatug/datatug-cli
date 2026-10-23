@@ -313,7 +313,8 @@ func TestStreamAskActiveDelegatesToStreamAsk(t *testing.T) {
 	t.Parallel()
 	chat, _ := newTestSessionChat(t)
 	seq, result := chat.StreamAskActive(context.Background(), "", "hello")
-	for range seq {
+	for _, streamErr := range seq {
+		_ = streamErr // The result callback or consumer-stop assertion below owns the terminal outcome.
 	}
 	if turn, err := result(); err != nil || turn.Text == "" {
 		t.Fatalf("StreamAskActive result = %+v, %v", turn, err)
@@ -349,7 +350,8 @@ func TestStreamAskConsumerBreaksEarly(t *testing.T) {
 	t.Parallel()
 	chat, _ := newTestSessionChat(t)
 	seq, _ := chat.StreamAsk(context.Background(), "hello")
-	for range seq {
+	for _, streamErr := range seq {
+		_ = streamErr // The result callback or consumer-stop assertion below owns the terminal outcome.
 		break
 	}
 
@@ -362,7 +364,8 @@ func TestStreamAskConsumerBreaksEarly(t *testing.T) {
 	}
 	streamingChat.agent = streamingAgent
 	streamSeq, _ := streamingChat.StreamAsk(context.Background(), "hello")
-	for range streamSeq {
+	for _, streamErr := range streamSeq {
+		_ = streamErr // This test intentionally stops the consumer before completion.
 		break
 	}
 }
@@ -406,7 +409,8 @@ func TestStreamAskStreamingAgentFatalErrorWithNoUsableResult(t *testing.T) {
 	}
 	chat.agent = streamingAgent
 	seq, result := chat.StreamAsk(context.Background(), "hello")
-	for range seq {
+	for _, streamErr := range seq {
+		_ = streamErr // The result callback or consumer-stop assertion below owns the terminal outcome.
 	}
 	turn, err := result()
 	if err != nil {

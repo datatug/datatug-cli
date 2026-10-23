@@ -16,6 +16,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/chat"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/joinmeta"
+	"github.com/datatug/datatug-cli/pkg/querybody"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/google/uuid"
@@ -66,8 +67,8 @@ func (s chatSavedQueries) Save(ctx context.Context, request chat.SavedQuerySaveR
 	definition := datatug.QueryDefWithFolderPath{QueryDef: datatug.QueryDef{
 		ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: id, Title: strings.TrimSpace(request.Title), ListOfTags: datatug.ListOfTags{Tags: append([]string(nil), request.Tags...)}}},
 		Type:        datatug.QueryType(request.Type), Text: request.Text,
+		StructuredBody: request.Type == string(datatug.QueryTypeTugQL),
 	}}
-	definition.StructuredBody = request.Type == string(datatug.QueryTypeTugQL)
 	if request.Type == string(datatug.QueryTypeTugQL) && request.Database != "" {
 		definition.Targets = []datatug.QueryDefTarget{{Catalog: request.Database}}
 	}
@@ -217,7 +218,11 @@ func (s chatSavedQueries) LookupParameter(ctx context.Context, queryID, paramete
 	if snapshot.Source != source {
 		return nil, fmt.Errorf("foreign-key metadata source changed")
 	}
-	lookup := chat.DiscoverSavedQueryParameterLookupWithMode([]byte(definition.Text), snapshot, parameter.ID, parameter.Meta.Entity, parameter.Meta.Field, parameter.IsMultiValue)
+	document, err := querybody.Structured(definition)
+	if err != nil {
+		return nil, err
+	}
+	lookup := chat.DiscoverSavedQueryParameterLookupWithMode([]byte(document), snapshot, parameter.ID, parameter.Meta.Entity, parameter.Meta.Field, parameter.IsMultiValue)
 	if lookup == nil {
 		return nil, nil
 	}
@@ -294,7 +299,11 @@ func (s chatSavedQueries) run(ctx context.Context, id string, variables map[stri
 			return chat.QueryResult{}, err
 		}
 		if definition.Type == datatug.QueryTypeTugQL {
-			result, err = s.executor.RunTugQL(ctx, source, []byte(definition.Text), variables)
+			var document string
+			document, err = querybody.Structured(definition)
+			if err == nil {
+				result, err = s.executor.RunTugQL(ctx, source, []byte(document), variables)
+			}
 		} else {
 			result, err = runSQLSavedQuery(ctx, s.executor, s.store, s.projectDir, s.env, definition, variables)
 		}
@@ -309,7 +318,7 @@ func (s chatSavedQueries) run(ctx context.Context, id string, variables map[stri
 	}
 	query := chat.QueryResult{Title: definition.Title, Source: source, SourceID: database, Result: result, Parameters: variables}
 	if definition.Type == datatug.QueryTypeTugQL {
-		query.TugQL = definition.Text
+		query.TugQL, _ = querybody.Structured(definition)
 	}
 	return query, nil
 }

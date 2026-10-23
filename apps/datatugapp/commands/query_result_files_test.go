@@ -504,11 +504,11 @@ func TestSavedQueryDB(t *testing.T) {
 	assert.Equal(t, queryresults.DB{}, savedQueryDB(ctx, unsupported, t.TempDir(), "", "local", sqlDef))
 
 	// a federated TugQL query is described by its root's database
-	federated := &datatug.QueryDef{Type: datatug.QueryTypeTugQL, Text: "from: {name: Item, database: main}\n"}
+	federated := &datatug.QueryDef{Type: datatug.QueryTypeTugQL, StructuredBody: true, Text: "from: {name: Item, database: main}\n"}
 	database, err := savedQueryDatabase(ctx, &covCStore{catalogsErr: boom}, "local", federated)
 	require.NoError(t, err)
 	assert.Equal(t, "main", database)
-	_, err = savedQueryDatabase(ctx, &covCStore{catalogsErr: boom}, "local", &datatug.QueryDef{Type: datatug.QueryTypeTugQL, Text: ":"})
+	_, err = savedQueryDatabase(ctx, &covCStore{catalogsErr: boom}, "local", &datatug.QueryDef{Type: datatug.QueryTypeTugQL, StructuredBody: true, Text: ":"})
 	assert.ErrorIs(t, err, boom)
 }
 

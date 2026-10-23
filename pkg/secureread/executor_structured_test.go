@@ -228,10 +228,10 @@ func TestRunStructured_RestrictedButNoFieldOrRowRule_NoLimitations(t *testing.T)
 	}
 }
 
-// TestRunTUGQL_RunsThroughPolicyPath covers REQ:tugql-query-type / AC
+// TestRunTugQL_RunsThroughPolicyPath covers REQ:tugql-query-type / AC
 // tugql-query-runs: a TugQL-YAML document runs through the exact same policy
 // path as a structured query.
-func TestRunTUGQL_RunsThroughPolicyPath(t *testing.T) {
+func TestRunTugQL_RunsThroughPolicyPath(t *testing.T) {
 	runOnBothBackends(t, func(t *testing.T, sourceURL string) {
 		session := aliceSession(t, ownerScopedPolicy)
 		executor := NewExecutor(session)
@@ -244,9 +244,9 @@ func TestRunTUGQL_RunsThroughPolicyPath(t *testing.T) {
 	})
 }
 
-// TestRunTUGQL_InvalidDocument_Errors confirms a malformed TugQL document
+// TestRunTugQL_InvalidDocument_Errors confirms a malformed TugQL document
 // fails before ever touching the source or the policies.
-func TestRunTUGQL_InvalidDocument_Errors(t *testing.T) {
+func TestRunTugQL_InvalidDocument_Errors(t *testing.T) {
 	session := aliceSession(t, ownerScopedPolicy)
 	executor := NewExecutor(session)
 	_, err := executor.RunTugQL(context.Background(), newSQLiteFixture(t), []byte("not: [valid, tugql"), nil)

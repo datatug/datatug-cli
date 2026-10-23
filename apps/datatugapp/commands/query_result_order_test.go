@@ -67,7 +67,7 @@ func TestQueryRunResultColumnsFollowTheTableOrder(t *testing.T) {
 			for i, column := range meta.Columns {
 				assert.Equal(t, i == 0, column.Internal, column.Name)
 			}
-			assert.Equal(t, c.key, recordset.Rows[0][0].Str, "$key stays in the data: the primary-key value for a single-column key, else the row position")
+			assert.Equal(t, c.key, recordset.Rows[0][0].Str, "$key stays in the data for readers that predate the marker")
 		})
 	}
 }

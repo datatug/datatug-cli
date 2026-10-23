@@ -1234,8 +1234,8 @@ func TestRemaining100_CompareFacts(t *testing.T) {
 	// matchingCohortParameter cases
 	// no matching parameter
 	qTugQL := &datatug.QueryDef{
-		ID:         "facts_q",
-		Type:       datatug.QueryTypeTugQL,
+		ID:   "facts_q",
+		Type: datatug.QueryTypeTugQL, StructuredBody: true,
 		Parameters: []datatug.ParameterDef{{ID: "p1", Meta: &datatug.EntityFieldRef{Entity: "Other", Field: "F"}}},
 	}
 	_, err = matchingCohortParameter(qTugQL, "E", "F")

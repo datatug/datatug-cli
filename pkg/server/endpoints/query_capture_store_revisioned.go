@@ -71,8 +71,8 @@ func capturedQueryDef(record capturedRecord) datatug.QueryDefWithFolderPath {
 		QueryDef: datatug.QueryDef{
 			ProjectItem:    datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: q.ID, Title: q.Title}},
 			Type:           datatug.QueryTypeTugQL,
-			Text:           q.TugQL,
 			StructuredBody: true,
+			Text:           q.TugQL,
 			Purpose:        q.Purpose,
 			Parameters:     params,
 			Targets:        []datatug.QueryDefTarget{{Catalog: q.Source}},

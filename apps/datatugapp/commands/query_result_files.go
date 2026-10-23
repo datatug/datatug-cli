@@ -15,6 +15,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/datatug/datatug-cli/pkg/querybody"
 	"github.com/datatug/datatug-cli/pkg/queryresults"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
@@ -146,7 +147,8 @@ func (s *resultSink) describeSaved(ctx context.Context, store datatug.ProjectSto
 		s.meta.SetEditor(queryDef.Text, queryresults.LanguageTugQL)
 		sources := savedTugQLSources(ctx, store, projectDir, o.env, queryDef)
 		s.describe = func(columns []string) resultDescription {
-			return describeTugQL(ctx, queryDef.Text, columns, sources)
+			document, _ := querybody.Structured(queryDef)
+			return describeTugQL(ctx, document, columns, sources)
 		}
 	}
 }
@@ -468,7 +470,8 @@ func savedQueryDB(ctx context.Context, store datatug.ProjectStore, projectDir, p
 // database of a federated TugQL query, else the one it is resolved to.
 func savedQueryDatabase(ctx context.Context, store datatug.ProjectStore, envID string, queryDef *datatug.QueryDef) (string, error) {
 	if queryDef.Type == datatug.QueryTypeTugQL {
-		if parsed, err := tugql.Deserialize([]byte(queryDef.Text)); err == nil {
+		document, _ := querybody.Structured(queryDef)
+		if parsed, err := tugql.Deserialize([]byte(document)); err == nil {
 			if root, ok := parsed.From().Base().(dal.CollectionRef); ok && root.Database() != "" {
 				return root.Database(), nil
 			}

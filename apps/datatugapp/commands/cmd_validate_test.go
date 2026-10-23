@@ -27,7 +27,7 @@ func TestQueryDefTarget_Validate_RejectsEmbeddedCredentials(t *testing.T) {
 					ProjectItem: datatug.ProjectItem{
 						ProjItemBrief: datatug.ProjItemBrief{ID: "q1", Title: "Query 1"},
 					},
-					Type: datatug.QueryTypeTugQL,
+					Type: datatug.QueryTypeTugQL, StructuredBody: true,
 					Targets: []datatug.QueryDefTarget{
 						{Driver: "postgres", Credentials: datatug.Credentials{Password: "hunter2"}},
 					},
@@ -61,7 +61,7 @@ func TestQueryDefTarget_Validate_AcceptsCredentialFreeTugQLQuery(t *testing.T) {
 					ProjectItem: datatug.ProjectItem{
 						ProjItemBrief: datatug.ProjItemBrief{ID: "q1", Title: "Query 1"},
 					},
-					Type:    datatug.QueryTypeTugQL,
+					Type: datatug.QueryTypeTugQL, StructuredBody: true,
 					Targets: []datatug.QueryDefTarget{{Driver: "postgres", Catalog: "mydb"}},
 				},
 			},

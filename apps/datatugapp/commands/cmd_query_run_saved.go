@@ -17,6 +17,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/httpsource"
+	"github.com/datatug/datatug-cli/pkg/querybody"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/spf13/cobra"
@@ -297,18 +298,22 @@ func runSQLSavedQuery(ctx context.Context, executor *secureread.Executor, projSt
 // it through Executor.RunTugQL, which resolves its "param:" nodes (and
 // $currentUser) from variables the same way accesspolicies.Run always has.
 func runTugQLSavedQuery(ctx context.Context, executor *secureread.Executor, projStore datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef, variables map[string]any) (secureread.Result, error) {
+	document, err := querybody.Structured(queryDef)
+	if err != nil {
+		return secureread.Result{}, err
+	}
 	urls, err := federatedTugQLURLs(ctx, projStore, projectDir, envFlag, queryDef)
 	if err != nil {
 		return secureread.Result{}, err
 	}
 	if len(urls) > 0 {
-		return executor.RunFederatedTugQL(ctx, []byte(queryDef.Text), urls, variables)
+		return executor.RunFederatedTugQL(ctx, []byte(document), urls, variables)
 	}
 	sourceURL, err := resolveSQLOrTugQLSourceURL(ctx, projStore, projectDir, envFlag, queryDef)
 	if err != nil {
 		return secureread.Result{}, err
 	}
-	return executor.RunTugQL(ctx, sourceURL, []byte(queryDef.Text), variables)
+	return executor.RunTugQL(ctx, sourceURL, []byte(document), variables)
 }
 
 func federatedTugQLURLs(ctx context.Context, projStore datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef) (map[string]string, error) {
@@ -319,7 +324,11 @@ func federatedTugQLURLs(ctx context.Context, projStore datatug.ProjectStore, pro
 // parseFederatedTugQL parses the query once and resolves the source URL of each
 // named database it references, returning both so callers need not re-parse.
 func parseFederatedTugQL(ctx context.Context, projStore datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef) (dal.StructuredQuery, map[string]string, error) {
-	parsed, err := tugql.Deserialize([]byte(queryDef.Text))
+	document, err := querybody.Structured(queryDef)
+	if err != nil {
+		return nil, nil, err
+	}
+	parsed, err := tugql.Deserialize([]byte(document))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -369,7 +378,9 @@ func runStreamedSavedTugQL(ctx context.Context, out, progress io.Writer, o query
 	if !isBoundedFederatedRowShape(parsed) {
 		return true, fmt.Errorf("streaming %s requires a direct single-source scan or one flat equality join without global ordering, aggregation, or subqueries; joins also require an explicit dimension scan with stable id orderBy and limit of 1..10000; use --format json for other shapes", o.format)
 	}
-	stream, err := executor.StreamFederatedTugQL(ctx, []byte(queryDef.Text), urls, variables)
+	// The successful parse above already validated this explicit representation.
+	document, _ := querybody.Structured(queryDef)
+	stream, err := executor.StreamFederatedTugQL(ctx, []byte(document), urls, variables)
 	if err != nil {
 		return true, err
 	}

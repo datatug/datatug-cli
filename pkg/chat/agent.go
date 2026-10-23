@@ -637,7 +637,8 @@ func (c *AIConversation) runTugQL(ctx context.Context, executor TugQLExecutor, s
 		c.capture(ctx, QueryResult{Title: title, TugQL: strings.TrimSpace(args.TugQL), Err: err})
 		return runTugQLResponse{Title: title, Error: err.Error()}, nil
 	}
-	doc := strings.TrimSpace(args.TugQL)
+	rawDoc := args.TugQL
+	doc := strings.TrimSpace(rawDoc)
 	if doc == "" {
 		err := errors.New("the agent supplied empty TugQL")
 		c.capture(ctx, QueryResult{Title: title, Err: err})

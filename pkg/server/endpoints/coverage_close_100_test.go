@@ -1914,7 +1914,7 @@ func TestClose100_ExecRunQuery_More(t *testing.T) {
 		return dummyQueryDefStore{
 			ProjectStore: realStore,
 			qDef: &datatug.QueryDef{
-				ID: "customer-invoices", Type: datatug.QueryTypeTugQL, Text: "SELECT 1",
+				ID: "customer-invoices", Type: datatug.QueryTypeTugQL, StructuredBody: true, Text: "SELECT 1",
 				Capture: &datatug.QueryCapture{Collection: "capture_coll"},
 			},
 		}, nil
@@ -1934,7 +1934,7 @@ func TestClose100_ExecRunQuery_More(t *testing.T) {
 		return dummyQueryDefStore{
 			ProjectStore: realStore,
 			qDef: &datatug.QueryDef{
-				ID: "customer-invoices", Type: datatug.QueryTypeTugQL, Text: "SELECT 1",
+				ID: "customer-invoices", Type: datatug.QueryTypeTugQL, StructuredBody: true, Text: "SELECT 1",
 			},
 		}, nil
 	}

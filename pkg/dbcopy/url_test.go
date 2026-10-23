@@ -517,19 +517,18 @@ func TestStructuredDialect_StringParamEmitsPlaceholderNotLiteral(t *testing.T) {
 		WhereField("BillingCountry", dal.Equal, aliasDialectMaliciousBillingCountry).
 		SelectColumns(dal.Column{Expression: dal.Field("InvoiceId")})
 
-	// dalgo2sql v0.29.7 inspects the SQLite table before compiling the query.
-	mock.ExpectQuery("pragma_table_xinfo").WithArgs("Invoice").
-		WillReturnRows(sqlmock.NewRows([]string{"name", "type", "notnull", "pk"}).
-			AddRow("InvoiceId", "INTEGER", 1, 1).AddRow("BillingCountry", "TEXT", 0, 0))
-	mock.ExpectQuery("pragma_index_list").WithArgs("Invoice").
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-	mock.ExpectQuery("typeof").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery(`SELECT name, type, "notnull", pk FROM pragma_table_xinfo\(\?\)`).
+		WithArgs("Invoice").WillReturnRows(sqlmock.NewRows([]string{"name", "type", "notnull", "pk"}).
+		AddRow("InvoiceId", "INTEGER", 1, 1).AddRow("BillingCountry", "TEXT", 0, 0))
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM pragma_index_list\(\?\) WHERE origin = 'pk'`).WithArgs("Invoice").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectQuery("SELECT `InvoiceId` FROM `Invoice` AS `i` WHERE \\(\\+`BillingCountry` COLLATE BINARY\\) = \\?").
 		WithArgs(aliasDialectMaliciousBillingCountry).
 		WillReturnRows(sqlmock.NewRows([]string{"InvoiceId"}))
 
 	reader, err := sqlDB.ExecuteQueryToRecordsReader(context.Background(), q)
-	assert.NoError(t, err)
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer func() { _ = reader.Close() }()
 	_, err = reader.Next()
 	assert.ErrorIs(t, err, dal.ErrNoMoreRecords)

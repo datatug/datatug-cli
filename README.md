@@ -309,6 +309,9 @@ app to scan databases & execute SQL requests.
 It runs on your machine under your user account. The connection URL of a PostgreSQL source stays in an environment
 variable of yours, and a project never holds it.
 
+AI clients can use [`datatug mcp`](docs/mcp.md) over stdio to discover local
+projects and schemas and run saved SQL through that agent's read-only session.
+
 ## Would you steal my data?
 
 No, we won't.

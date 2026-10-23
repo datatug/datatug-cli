@@ -1,9 +1,11 @@
 package commands
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -11,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dal-go/dalgo/dal"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	_ "github.com/microsoft/go-mssqldb" // registers the "sqlserver" database/sql driver for the fixture
@@ -256,10 +259,16 @@ END;`, user))
 	}
 	projectDir, queries := server.journey(t)
 
-	// The read runs in a READ ONLY transaction: a query that locks rows for an update is refused by the server.
+	// A query that locks rows for an update is refused before it reaches the server.
 	writeSavedQuery(t, queries, "lock-rows", "SQL", `SELECT "id" FROM "customer" FOR UPDATE`)
 	_, stderr, code := runQuery(t, "", "--project", projectDir, "--query", "lock-rows", "--env", "local", "--format", "json")
-	assert.NotZero(t, code, "SELECT ... FOR UPDATE fails in a READ ONLY transaction: %s", stderr)
+	assert.NotZero(t, code)
+	assert.Contains(t, stderr, "the text holds UPDATE")
+
+	// Past that check, the read runs in a READ ONLY transaction, so the server refuses a write.
+	err := writeThroughTheRead(t, server.scanVar, `UPDATE "customer" SET "name" = 'changed' WHERE "id" = 1`)
+	assert.Error(t, err, "the server refuses an update in a READ ONLY transaction")
+	assert.Equal(t, []int{1}, server.ids(t, "from: {name: customer}\nwhere: {op: '==', left: {field: name}, right: {value: Ada Lovelace}}\n"), "the row is as it was")
 }
 
 func TestSQLServerScanAndQueryJourney(t *testing.T) {
@@ -302,9 +311,40 @@ func TestSQLServerScanAndQueryJourney(t *testing.T) {
 	}
 	projectDir, queries := server.journey(t)
 
-	// SQL Server has no read-only session: a read runs in a transaction that is rolled back, so a write that
-	// passes the SELECT/WITH check is undone, and the row is as it was.
-	writeSavedQuery(t, queries, "sneaky-update", "SQL", "WITH c AS (SELECT 1 AS id) UPDATE customer SET name = 'changed' OUTPUT inserted.id WHERE id IN (SELECT id FROM c)")
-	_, _, _ = runQuery(t, "", "--project", projectDir, "--query", "sneaky-update", "--env", "local", "--format", "json")
+	// A write in a WITH query, or a batch that commits, is refused before it reaches the server.
+	for id, text := range map[string]string{
+		"sneaky-update": "WITH c AS (SELECT 1 AS id) UPDATE customer SET name = 'changed' OUTPUT inserted.id WHERE id IN (SELECT id FROM c)",
+		"sneaky-commit": "SELECT 1 AS id COMMIT UPDATE customer SET name = 'changed' WHERE id = 1",
+	} {
+		writeSavedQuery(t, queries, id, "SQL", text)
+		_, stderr, code := runQuery(t, "", "--project", projectDir, "--query", id, "--env", "local", "--format", "json")
+		assert.NotZero(t, code, id)
+		assert.Contains(t, stderr, "the text holds", id)
+	}
+
+	// Past that check SQL Server has no read-only session: a read runs in a transaction that is rolled back, so a
+	// write that reaches the server is undone, and the row is as it was.
+	_ = writeThroughTheRead(t, server.scanVar, "UPDATE customer SET name = 'changed' OUTPUT inserted.id WHERE id = 1")
 	assert.Equal(t, []int{1}, server.ids(t, "from: {name: customer}\nwhere: {op: '==', left: {field: name}, right: {value: Ada Lovelace}}\n"), "the update was rolled back")
+}
+
+// writeThroughTheRead sends text to the server through the read every query of DataTug makes (the protected open
+// of query run), past the check of the text, and returns the error of the read, if any.
+func writeThroughTheRead(t *testing.T, scanVar, text string) error {
+	t.Helper()
+	ref, err := dbcopy.Parse("env:" + scanVar)
+	require.NoError(t, err)
+	db, err := ref.OpenProtected(context.Background())
+	require.NoError(t, err)
+	defer func() {
+		if closer, ok := db.(io.Closer); ok {
+			_ = closer.Close()
+		}
+	}()
+	reader, err := db.ExecuteQueryToRecordsReader(context.Background(), dal.NewTextQuery(text, nil))
+	if err != nil {
+		return err
+	}
+	_, err = dal.ReadAllToRecords(context.Background(), reader)
+	return err
 }

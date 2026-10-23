@@ -214,7 +214,7 @@ func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
 // able to request that itself — see cmd_query_http_provenance_test.go.
 // Production code always runs with this default. SQLite uses the validated
 // structured-query dialect so grouped TugQL is rendered as native SQL (and
-// literals remain bound parameters), and PostgreSQL, MySQL and Oracle open as a
+// literals remain bound parameters), and PostgreSQL, MySQL, Oracle and SQL Server open as a
 // protected read: a read-only session, behind each one's preview switch; other sources keep their
 // existing open behavior. Both paths retain the HTTPS-only HTTP-source
 // enforcement.

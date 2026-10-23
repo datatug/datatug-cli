@@ -71,7 +71,7 @@ func NewPostgresScanParams(lookupEnv func(string) (string, bool), dsnEnv, enviro
 	return NewServerScanParams(DriverPostgres, lookupEnv, dsnEnv, environment, catalog)
 }
 
-// NewServerScanParams is NewPostgresScanParams for the scan of driver: postgres, mysql or oracle. The
+// NewServerScanParams is NewPostgresScanParams for the scan of driver: postgres, mysql, oracle or sqlserver. The
 // variable must hold a URL of that driver's scheme.
 func NewServerScanParams(driver string, lookupEnv func(string) (string, bool), dsnEnv, environment, catalog string) (*PostgresScanParams, error) {
 	ref, err := dbcopy.ParseWithEnv("env:"+dsnEnv, lookupEnv)
@@ -280,7 +280,7 @@ func OpenSchemaScanForTest() func(dbcopy.BackendRef, context.Context) (dbcopy.Sc
 }
 
 // isConnectionReadError identifies a failed connection, timeout or cancellation in a reader error: the PostgreSQL
-// adapter's connection error, a connection the database/sql pool or a driver of MySQL or Oracle reports as lost (a
+// adapter's connection error, a connection the database/sql pool or a driver of MySQL, Oracle or SQL Server reports as lost (a
 // network error, a bad or invalid connection), or the end of a context.
 func isConnectionReadError(err error) bool {
 	var connectionErr *dalgo2postgres.ConnectionError
@@ -312,7 +312,7 @@ func (*catalogReadError) Error() string {
 
 func (e *catalogReadError) Unwrap() error { return e.cause }
 
-// scanPostgresCatalog scans a PostgreSQL, MySQL or Oracle database (driver) through DALgo's schema reader.
+// scanPostgresCatalog scans a PostgreSQL, MySQL, Oracle or SQL Server database (driver) through DALgo's schema reader.
 // It opens the source through dbcopy, so a driver error comes back classified
 // (see BackendRef.OpenFailure), never as the driver wrote it; what the scan
 // itself reads is reported the same way. It counts no records: no project file

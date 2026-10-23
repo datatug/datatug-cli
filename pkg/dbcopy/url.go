@@ -218,7 +218,7 @@ func parseEnvSource(rawURL string, lookupEnv func(string) (string, bool)) (Backe
 	if err != nil {
 		var serverRefusal *serverURLRefusal
 		if errors.As(err, &serverRefusal) {
-			// The same for a MySQL or Oracle URL: a fixed sentence that quotes none of it.
+			// The same for a MySQL, Oracle or SQL Server URL: a fixed sentence that quotes none of it.
 			return BackendRef{}, fmt.Errorf("environment variable %s does not hold a usable connection URL: %w", name, serverRefusal)
 		}
 		if refusal := postgresURLRefusal(err); refusal != nil {

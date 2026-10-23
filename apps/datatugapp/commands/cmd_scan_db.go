@@ -285,7 +285,7 @@ var scanURLExamples = map[string]string{
 	api.DriverSQLServer: "sqlserver://user:password@host:1433/database",
 }
 
-// postgresConnectionParams builds the parameters of a PostgreSQL, MySQL or Oracle scan. The only
+// postgresConnectionParams builds the parameters of a PostgreSQL, MySQL, Oracle or SQL Server scan. The only
 // way to connect is a connection URL held in an environment variable named by
 // --dsn-env: the URL carries the host, port, user and password together, so a
 // password is never on a command line (the process list and the shell history

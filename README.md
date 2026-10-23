@@ -462,11 +462,15 @@ real schema is called. The URL may carry only a few query parameters (MySQL: `tl
 `SSL VERIFY`, `TIMEOUT`, `CONNECTION TIMEOUT`, `WALLET`; SQL Server: `encrypt`, `TrustServerCertificate`,
 `connection timeout`); any other is refused.
 
-Reads are read-only. A MySQL session has `transaction_read_only` on, so the server refuses any write; on Oracle every
-read runs in a `READ ONLY` transaction; SQL Server has no read-only session, so every read runs in a transaction that
-DataTug always rolls back, and a write slipped into a query is undone. A read-only login (`db_datareader` and
-`VIEW DEFINITION`) is still the safer choice for SQL Server. On every engine, structured queries compile to a `SELECT`, and a saved SQL query
-must be one `SELECT` or `WITH` query or it is refused before it reaches the server. Queries through access policies
+Reads are read-only, in two layers. First, structured queries compile to a `SELECT`, and a saved SQL query must be
+one `SELECT` or `WITH` query: DataTug refuses, before it reaches the server, a text with a second statement or with a
+word that writes, runs code or ends a transaction (`UPDATE`, `INTO`, `COMMIT`, `EXEC`, `SET`, `FUNCTION`, ... outside
+string literals, quoted names and comments). Second, the connection: a MySQL session has `transaction_read_only` on,
+on Oracle every read runs in a `READ ONLY` transaction, and SQL Server, which has no read-only session, runs every read
+in a transaction that DataTug always rolls back. Neither layer stops a function or a procedure already on the server
+that writes when a query calls it (an Oracle function with an autonomous transaction commits its own writes), so give
+DataTug a login that can only read: on SQL Server `db_datareader` and `VIEW DEFINITION`, on Oracle `CREATE SESSION`
+and `SELECT` on the tables. Queries through access policies
 (`--policies`) are not available in the preview: use `--no-policies`. The scan saves no foreign keys or indexes yet.
 
 ## For developers

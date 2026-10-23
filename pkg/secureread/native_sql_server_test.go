@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// sqliteStandIn is a MySQL or Oracle database a test stands in with: a SQLite database in memory behind
+// sqliteStandIn is a MySQL, Oracle or SQL Server database a test stands in with: a SQLite database in memory behind
 // dalgo2sql, which runs the same text query a server would.
 type sqliteStandIn struct {
 	dal.DB
@@ -46,21 +46,47 @@ func standInForServers(t *testing.T) (opens *int) {
 }
 
 func TestServerQueryText(t *testing.T) {
-	for text, want := range map[string]string{
-		"SELECT 1;":              "SELECT 1",
-		"select id from t ;; \n": "select id from t",
-		"  -- a note\n/* x */ (WITH a AS (SELECT 1) SELECT * FROM a)": "-- a note\n/* x */ (WITH a AS (SELECT 1) SELECT * FROM a)",
+	for _, accepted := range []struct{ scheme, text, want string }{
+		{"mysql", "SELECT 1;", "SELECT 1"},
+		{"mysql", "select id from t ;; \n", "select id from t"},
+		{"mysql", "  -- a note\n/* x */ (WITH a AS (SELECT 1) SELECT * FROM a)", "-- a note\n/* x */ (WITH a AS (SELECT 1) SELECT * FROM a)"},
+		{"mysql", "SELECT 'it''s; COMMIT', \"x\", `update` FROM t # a note; DELETE", "SELECT 'it''s; COMMIT', \"x\", `update` FROM t # a note; DELETE"},
+		{"mysql", `SELECT 'a\'; DELETE' FROM t`, `SELECT 'a\'; DELETE' FROM t`},
+		{"sqlserver", "SELECT [update], N'insert' FROM [order] -- ends here", "SELECT [update], N'insert' FROM [order] -- ends here"},
+		{"oracle", `SELECT CASE WHEN "SET" > 0 THEN 1 END FROM dual`, `SELECT CASE WHEN "SET" > 0 THEN 1 END FROM dual`},
 	} {
-		got, err := serverQueryText("mysql", text)
-		require.NoError(t, err, text)
-		assert.Equal(t, want, got)
+		got, err := serverQueryText(accepted.scheme, accepted.text)
+		require.NoError(t, err, accepted.text)
+		assert.Equal(t, accepted.want, got)
 	}
-	for _, text := range []string{"SET SESSION transaction_read_only = 0", "-- only a comment", "/* never closed", "selectx 1", "", "DELETE FROM t"} {
+	for _, text := range []string{"SET SESSION transaction_read_only = 0", "-- only a comment", "selectx 1", "", "DELETE FROM t"} {
 		_, err := serverQueryText("oracle", text)
 		assert.ErrorIs(t, err, ErrNativeSQLUnsupported, text)
 		if err != nil {
 			assert.Contains(t, err.Error(), "on Oracle, DataTug runs a query (SELECT or WITH) and nothing else")
 		}
+	}
+	for _, refused := range []struct{ scheme, text, holds string }{
+		{"sqlserver", "SELECT 1; COMMIT; DELETE FROM t", "a second statement"},
+		{"sqlserver", "SELECT 1 COMMIT DELETE FROM t", "COMMIT"},
+		{"sqlserver", "SELECT 1 EXEC xp_cmdshell 'dir'", "EXEC"},
+		{"sqlserver", "SELECT 1 xp_cmdshell", "XP_CMDSHELL"},
+		{"sqlserver", "SELECT * FROM sys.objects WHERE 1 = sp_who", "SP_WHO"},
+		{"sqlserver", "SELECT * INTO copy FROM t", "INTO"},
+		{"sqlserver", "WITH c AS (SELECT 1 AS id) UPDATE customer SET name = 'x'", "UPDATE"},
+		{"oracle", "WITH FUNCTION f RETURN NUMBER IS PRAGMA AUTONOMOUS_TRANSACTION; BEGIN DELETE FROM t; COMMIT; RETURN 1; END; SELECT f FROM dual", "a second statement"},
+		{"oracle", "WITH FUNCTION f RETURN NUMBER IS BEGIN RETURN 1 END SELECT f FROM dual", "FUNCTION"},
+		{"oracle", "SELECT q'[it's]' FROM dual", "an Oracle quoted literal (q'...')"},
+		{"oracle", `SELECT "id" FROM "customer" FOR UPDATE`, "UPDATE"},
+		{"mysql", "SELECT * FROM t INTO OUTFILE '/tmp/x'", "INTO"},
+		{"mysql", "SELECT 1 /*!50000 , SLEEP(1) */", "a MySQL comment that the server runs"},
+		{"mysql", "SELECT 1 /* never closed", "a comment that is not closed"},
+		{"mysql", "SELECT 'never closed", "a string or a name that is not closed"},
+		{"sqlserver", "SELECT [never closed", "a string or a name that is not closed"},
+	} {
+		_, err := serverQueryText(refused.scheme, refused.text)
+		require.ErrorIs(t, err, ErrNativeSQLUnsupported, refused.text)
+		assert.Contains(t, err.Error(), "DataTug runs one query (SELECT or WITH) and nothing else, and the text holds "+refused.holds, refused.text)
 	}
 }
 

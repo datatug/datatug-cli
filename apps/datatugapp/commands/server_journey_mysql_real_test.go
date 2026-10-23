@@ -249,15 +249,19 @@ func TestMySQLScanAndQueryJourney(t *testing.T) {
 	require.Len(t, rows, 1)
 	assert.Equal(t, "Grace Hopper", rows[0]["name"])
 
-	// 4. The session is read only: a statement that passes the SELECT/WITH check but writes is refused by the
-	// server, and the row is as it was. Anything else is refused before it reaches the server.
-	writeSavedQuery(t, queries, "sneaky-update", "SQL", "WITH c AS (SELECT 1 AS id) UPDATE customer SET name = 'changed' WHERE id IN (SELECT id FROM c)")
-	_, stderr, code = runQuery(t, "", "--project", projectDir, "--query", "sneaky-update", "--env", "local", "--format", "json")
-	assert.NotZero(t, code, "a write through a saved query fails: %s", stderr)
-	writeSavedQuery(t, queries, "set-session", "SQL", "SET SESSION transaction_read_only = 0")
-	_, stderr, code = runQuery(t, "", "--project", projectDir, "--query", "set-session", "--env", "local", "--format", "json")
-	assert.NotZero(t, code)
-	assert.Contains(t, stderr, "SELECT or WITH")
+	// 4. A write in a WITH query, or a statement that could turn the read-only session off, is refused before it
+	// reaches the server. Past that check the session is read only, and the server refuses a write.
+	for id, text := range map[string]string{
+		"sneaky-update": "WITH c AS (SELECT 1 AS id) UPDATE customer SET name = 'changed' WHERE id IN (SELECT id FROM c)",
+		"set-session":   "SET SESSION transaction_read_only = 0",
+		"outfile":       "SELECT * FROM customer INTO OUTFILE '/tmp/customers.txt'",
+	} {
+		writeSavedQuery(t, queries, id, "SQL", text)
+		_, stderr, code = runQuery(t, "", "--project", projectDir, "--query", id, "--env", "local", "--format", "json")
+		assert.NotZero(t, code, id)
+		assert.Contains(t, stderr, "SELECT or WITH", id)
+	}
+	assert.Error(t, writeThroughTheRead(t, realMySQLScanVar, "UPDATE customer SET name = 'changed' WHERE id = 1"), "the read-only session refuses an update")
 	assert.Equal(t, []int{1}, realMySQLIDs(t, "from: {name: customer}\nwhere: {op: '==', left: {field: name}, right: {value: Ada Lovelace}}\n"), "the row the update named is as it was")
 }
 

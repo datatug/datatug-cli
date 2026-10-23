@@ -143,7 +143,7 @@ func (e *Executor) runThroughPolicies(ctx context.Context, db dal.DB, query dal.
 //
 // policies is how many access policies the session reads through. A PostgreSQL
 // source read through one or more of them is refused here, before the source is
-// opened (dbcopy.CheckServerRead): the previews of PostgreSQL, MySQL and Oracle
+// opened (dbcopy.CheckServerRead): the previews of PostgreSQL, MySQL, Oracle and SQL Server
 // sources do not serve policy-enforced reads yet. A session with no policy
 // (Unrestricted) reads such a source as any other, once its preview is on.
 //

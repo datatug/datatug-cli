@@ -6,7 +6,7 @@ import "strings"
 // unqualified table/collection name to (SQLite's single implicit database
 // is always named "main"; PostgreSQL's default search_path entry is
 // "public"), or "" for a driver with no such convention (e.g. ingitdb, which
-// has no schema concept at all). A MySQL or Oracle catalog records its tables
+// has no schema concept at all). A MySQL, Oracle or SQL Server catalog records its tables
 // under ServerDefaultSchema, the schema of the connection, whatever its real
 // name (see ServerDefaultSchema). Read from the resolved catalog's own
 // Driver field (see resolveSourceURL) rather than assumed unconditionally,

@@ -65,7 +65,7 @@ func (r BackendRef) OpenSchemaScan(ctx context.Context) (SchemaScanDB, error) {
 		return db, nil
 	}
 	if r.Scheme != "postgres" {
-		return nil, fmt.Errorf("a schema scan through DALgo is available for postgres, mysql and oracle sources only, not %s", r.Scheme)
+		return nil, fmt.Errorf("a schema scan through DALgo is available for postgres, mysql, oracle and sqlserver sources only, not %s", r.Scheme)
 	}
 	if _, err := ParsePostgresTarget(r.Path); err != nil {
 		return nil, fmt.Errorf("source %s: %w", r, err)

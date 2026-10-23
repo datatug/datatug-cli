@@ -98,7 +98,7 @@ func serverEngineOf(scheme string) (serverEngine, bool) {
 }
 
 // IsServerScheme reports whether scheme is that of a database server whose connection URL is kept in
-// an environment variable: postgres, mysql or oracle.
+// an environment variable: postgres, mysql, oracle or sqlserver.
 func IsServerScheme(scheme string) bool {
 	_, ok := serverEngineOf(scheme)
 	return ok || scheme == "postgres"
@@ -153,7 +153,7 @@ func CheckServerRead(ref BackendRef, policies int) error {
 	return nil
 }
 
-// ServerTarget is the part of a MySQL or Oracle connection URL that says where it points. It never
+// ServerTarget is the part of a MySQL, Oracle or SQL Server connection URL that says where it points. It never
 // holds the password.
 type ServerTarget struct {
 	Host string
@@ -165,7 +165,7 @@ type ServerTarget struct {
 	Database string
 }
 
-// serverURL is a parsed MySQL or Oracle URL: the target, the password and the query that the
+// serverURL is a parsed MySQL, Oracle or SQL Server URL: the target, the password and the query that the
 // driver is given.
 type serverURL struct {
 	ServerTarget
@@ -173,7 +173,7 @@ type serverURL struct {
 	query    url.Values
 }
 
-// serverURLRefusal is the refusal of a MySQL or Oracle URL: a fixed sentence that says what is wrong
+// serverURLRefusal is the refusal of a MySQL, Oracle or SQL Server URL: a fixed sentence that says what is wrong
 // and quotes none of the URL, which holds the password.
 type serverURLRefusal struct{ message string }
 
@@ -431,7 +431,7 @@ func (r BackendRef) openServer(ctx context.Context, engine serverEngine, mode op
 	return r.openServerDatabase(ctx, engine)
 }
 
-// serverFailureText is the text of a MySQL or Oracle source that could not be opened: what failed,
+// serverFailureText is the text of a MySQL, Oracle or SQL Server source that could not be opened: what failed,
 // why when that can be told without reading the driver's message, and where the connection string is
 // read from. It names no part of the URL.
 func (r BackendRef) serverFailureText(engine serverEngine, err error) string {

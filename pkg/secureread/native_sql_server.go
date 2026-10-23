@@ -11,10 +11,10 @@ import (
 
 // runServerNativeSQL is RunNativeSQL for a MySQL, Oracle or SQL Server source. The source is opened as
 // every read of one is (OpenProtected, behind its preview switch): a MySQL session has
-// transaction_read_only on and an Oracle read runs in a READ ONLY transaction, so the server refuses any
-// write; SQL Server has no read-only session and relies on a read-only login. On top of that the text must be one
-// query led by SELECT or WITH (see serverQueryText): a statement such as SET, which could turn the
-// read-only session off, never reaches the server.
+// transaction_read_only on, an Oracle read runs in a READ ONLY transaction, and a SQL Server read runs in a
+// transaction that is always rolled back. None of these stops everything (a COMMIT inside a SQL Server batch
+// ends the transaction, an Oracle function with an autonomous transaction commits its own writes), so before
+// the text reaches the server it must be one query that writes nothing DataTug can see (see serverQueryText).
 func (e *Executor) runServerNativeSQL(ctx context.Context, sourceURL string, ref dbcopy.BackendRef, sqlText string, args []dal.QueryArg) (Result, error) {
 	text, err := serverQueryText(ref.Scheme, sqlText)
 	if err != nil {
@@ -32,41 +32,108 @@ func (e *Executor) runServerNativeSQL(ctx context.Context, sourceURL string, ref
 }
 
 // serverQueryText is sqlText without its trailing semicolons (the Oracle driver refuses one, and a
-// MySQL connection runs one statement), when it is a query: led, past blank space, comments and
-// opening parentheses, by SELECT or WITH. Any other text is refused with ErrNativeSQLUnsupported.
+// MySQL connection runs one statement), when it is one query: led, past blank space, comments and opening
+// parentheses, by SELECT or WITH, with no second statement and no word that writes, runs code or ends a
+// transaction (writeWords) outside its string literals, quoted names and comments. A server runs what it is
+// given as one batch: SQL Server runs "SELECT 1 COMMIT DELETE FROM t" as three statements, the COMMIT ending
+// the transaction DataTug rolls back. Any other text is refused with ErrNativeSQLUnsupported. The check is
+// lexical and errs on the side of refusing: a query that names a column UPDATE without quoting it is refused.
 func serverQueryText(scheme, sqlText string) (string, error) {
 	text := strings.TrimRight(strings.TrimSpace(sqlText), "; \t\r\n")
-	rest := text
-	for {
-		trimmed := strings.TrimLeft(rest, " \t\r\n(")
-		switch {
-		case strings.HasPrefix(trimmed, "--"):
-			_, after, found := strings.Cut(trimmed, "\n")
-			if !found {
-				after = ""
-			}
-			rest = after
-			continue
-		case strings.HasPrefix(trimmed, "/*"):
-			_, after, found := strings.Cut(trimmed[2:], "*/")
-			if !found {
-				after = ""
-			}
-			rest = after
-			continue
+	words, refusal := sqlWords(scheme, text)
+	if refusal == "" && (len(words) == 0 || words[0] != "SELECT" && words[0] != "WITH") {
+		return "", fmt.Errorf("%w: on %s, DataTug runs a query (SELECT or WITH) and nothing else", ErrNativeSQLUnsupported, dbcopy.ServerTitle(scheme))
+	}
+	for _, word := range words {
+		if refusal != "" {
+			break
 		}
-		rest = trimmed
-		break
+		if writeWords[word] || scheme == "sqlserver" && (strings.HasPrefix(word, "XP_") || strings.HasPrefix(word, "SP_")) {
+			refusal = word
+		}
 	}
-	word := rest
-	if end := strings.IndexFunc(rest, func(r rune) bool { return !isWordRune(r) }); end >= 0 {
-		word = rest[:end]
+	if refusal != "" {
+		return "", fmt.Errorf("%w: on %s, DataTug runs one query (SELECT or WITH) and nothing else, and the text holds %s", ErrNativeSQLUnsupported, dbcopy.ServerTitle(scheme), refusal)
 	}
-	switch strings.ToUpper(word) {
-	case "SELECT", "WITH":
-		return text, nil
+	return text, nil
+}
+
+// writeWords are the words, upper case, that write, run code, lock or end a transaction in MySQL, Oracle or SQL
+// Server. A query has no use for them outside a string literal or a quoted name.
+var writeWords = map[string]bool{
+	"INSERT": true, "UPDATE": true, "DELETE": true, "MERGE": true, "UPSERT": true, "INTO": true, "OUTFILE": true, "DUMPFILE": true,
+	"CREATE": true, "ALTER": true, "DROP": true, "TRUNCATE": true, "RENAME": true, "GRANT": true, "REVOKE": true, "DENY": true,
+	"COMMIT": true, "ROLLBACK": true, "SAVEPOINT": true, "SAVE": true, "BEGIN": true, "TRANSACTION": true, "TRAN": true,
+	"SET": true, "DECLARE": true, "EXEC": true, "EXECUTE": true, "CALL": true, "FUNCTION": true, "PROCEDURE": true, "PRAGMA": true,
+	"TRIGGER": true, "LOCK": true, "UNLOCK": true, "HANDLER": true, "LOAD": true, "USE": true, "KILL": true, "SHUTDOWN": true,
+	"RECONFIGURE": true, "DBCC": true, "BACKUP": true, "RESTORE": true, "BULK": true, "OPENROWSET": true, "OPENQUERY": true,
+	"OPENDATASOURCE": true,
+}
+
+// sqlWords returns the words of text, upper case, outside its string literals, quoted names and comments, or the
+// reason it refuses the text: a statement separator (";"), a MySQL comment the server runs ("/*!"), an Oracle
+// quoted literal (q'...'), whose end a simple scan cannot find, or a literal, a name or a comment left open.
+func sqlWords(scheme, text string) (words []string, refusal string) {
+	for i := 0; i < len(text); {
+		c := text[i]
+		switch {
+		case c == ';':
+			return nil, "a second statement"
+		case strings.HasPrefix(text[i:], "/*!"):
+			return nil, "a MySQL comment that the server runs"
+		case strings.HasPrefix(text[i:], "/*"):
+			end := strings.Index(text[i+2:], "*/")
+			if end < 0 {
+				return nil, "a comment that is not closed"
+			}
+			i += 2 + end + 2
+		case strings.HasPrefix(text[i:], "--") || c == '#' && scheme == "mysql":
+			end := strings.IndexByte(text[i:], '\n')
+			if end < 0 {
+				return words, ""
+			}
+			i += end + 1
+		case c == '\'' || c == '"' || c == '`' || c == '[' && scheme == "sqlserver":
+			closing := c
+			if c == '[' {
+				closing = ']'
+			}
+			end, ok := closingQuote(text, i+1, closing, scheme == "mysql" && c != '`')
+			if !ok {
+				return nil, "a string or a name that is not closed"
+			}
+			i = end + 1
+		case isWordRune(rune(c)):
+			start := i
+			for i < len(text) && isWordRune(rune(text[i])) {
+				i++
+			}
+			word := strings.ToUpper(text[start:i])
+			if scheme == "oracle" && (word == "Q" || word == "NQ") && i < len(text) && text[i] == '\'' {
+				return nil, "an Oracle quoted literal (q'...')"
+			}
+			words = append(words, word)
+		default:
+			i++
+		}
 	}
-	return "", fmt.Errorf("%w: on %s, DataTug runs a query (SELECT or WITH) and nothing else", ErrNativeSQLUnsupported, dbcopy.ServerTitle(scheme))
+	return words, ""
+}
+
+// closingQuote is the index of the quote that closes a literal or a name whose text starts at from: a doubled
+// quote is one character of it, and so is a character after a backslash when backslash escapes.
+func closingQuote(text string, from int, quote byte, backslash bool) (int, bool) {
+	for i := from; i < len(text); i++ {
+		switch {
+		case backslash && text[i] == '\\':
+			i++
+		case text[i] == quote && i+1 < len(text) && text[i+1] == quote:
+			i++
+		case text[i] == quote:
+			return i, true
+		}
+	}
+	return 0, false
 }
 
 func isWordRune(r rune) bool {

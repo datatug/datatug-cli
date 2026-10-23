@@ -68,7 +68,7 @@ func (r BackendRef) connectionHint() string {
 	return "the PostgreSQL connection string is the one the source was given"
 }
 
-// ConnectionHint is the hint of a failure of this PostgreSQL, MySQL or Oracle source (see connectionHint): where its connection string
+// ConnectionHint is the hint of a failure of this PostgreSQL, MySQL, Oracle or SQL Server source (see connectionHint): where its connection string
 // is read from, by the name of the variable or of the flag, and never by a value. A command that logs what it connects
 // to says this and no part of the string.
 func (r BackendRef) ConnectionHint() string {
@@ -81,7 +81,7 @@ func (r BackendRef) ConnectionHint() string {
 // postgresFailureText is the one text of a PostgreSQL source that cannot be reached: the sentence and the hint.
 func postgresFailureText(sentence, hint string) string { return sentence + "; " + hint }
 
-// IsServerConnectionFailure reports whether err, or an error it wraps, is the failure of a PostgreSQL, MySQL or Oracle
+// IsServerConnectionFailure reports whether err, or an error it wraps, is the failure of a PostgreSQL, MySQL, Oracle or SQL Server
 // source that could not be opened or reached; see IsPostgresConnectionFailure, whose rules it shares.
 func IsServerConnectionFailure(err error) bool { return IsPostgresConnectionFailure(err) }
 

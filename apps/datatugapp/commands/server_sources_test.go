@@ -17,7 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// serverStandIn is a MySQL or Oracle database a test stands in with: SQLite in memory behind dalgo2sql,
+// serverStandIn is a MySQL, Oracle or SQL Server database a test stands in with: SQLite in memory behind dalgo2sql,
 // with a customer table, and the schema of the scan's fake reader.
 type serverStandIn struct {
 	dal.DB

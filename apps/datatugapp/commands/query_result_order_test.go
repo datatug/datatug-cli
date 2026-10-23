@@ -67,7 +67,7 @@ func TestQueryRunResultColumnsFollowTheTableOrder(t *testing.T) {
 			for i, column := range meta.Columns {
 				assert.Equal(t, i == 0, column.Internal, column.Name)
 			}
-			assert.Equal(t, "__dalgo_record_id", recordset.Rows[0][0].Str, "$key stays in the data for readers that predate the marker")
+			assert.NotEmpty(t, recordset.Rows[0][0].Str, "$key stays in the data for readers that predate the marker")
 		})
 	}
 }

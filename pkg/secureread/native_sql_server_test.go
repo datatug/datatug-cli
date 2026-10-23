@@ -55,6 +55,7 @@ func TestServerQueryText(t *testing.T) {
 		{"mysql", "SELECT CAST(name AS CHAR CHARACTER SET utf8mb4) FROM t --\n", "SELECT CAST(name AS CHAR CHARACTER SET utf8mb4) FROM t --"},
 		{"mysql", "SELECT `a\\b` FROM t", "SELECT `a\\b` FROM t"},
 		{"oracle", "SELECT 1 FROM dual --no space needed\n", "SELECT 1 FROM dual --no space needed"},
+		{"sqlserver", "SELECT t1.c2, 1.5e3, 0x1F FROM t1", "SELECT t1.c2, 1.5e3, 0x1F FROM t1"},
 		{"sqlserver", "SELECT [update], N'insert' FROM [order] -- ends here", "SELECT [update], N'insert' FROM [order] -- ends here"},
 		{"oracle", `SELECT CASE WHEN "SET" > 0 THEN 1 END FROM dual`, `SELECT CASE WHEN "SET" > 0 THEN 1 END FROM dual`},
 	} {
@@ -90,6 +91,9 @@ func TestServerQueryText(t *testing.T) {
 		{"mysql", `SELECT 'a\'; DELETE' FROM t`, "a backslash in a MySQL literal"},
 		{"mysql", `SELECT "a\" INTO OUTFILE '/tmp/x' -- " FROM t`, "a backslash in a MySQL literal"},
 		{"sqlserver", "SELECT 1 AS CHARACTER SET IMPLICIT_TRANSACTIONS OFF", "SET"},
+		{"sqlserver", "SELECT 1COMMIT SELECT 1DELETE FROM t", "COMMIT"},
+		{"oracle", "SELECT 1UPDATE FROM dual", "UPDATE"},
+		{"sqlserver", "SELECT 1 --x\rCOMMIT DELETE FROM t", "COMMIT"},
 		{"mysql", "SELECT 'never closed", "a string or a name that is not closed"},
 		{"sqlserver", "SELECT [never closed", "a string or a name that is not closed"},
 	} {

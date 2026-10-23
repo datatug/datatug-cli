@@ -94,7 +94,7 @@ func sqlWords(scheme, text string) (words []string, refusal string) {
 			}
 			i += 2 + end + 2
 		case strings.HasPrefix(text[i:], "--") && (scheme != "mysql" || i+2 == len(text) || text[i+2] <= ' ') || c == '#' && scheme == "mysql":
-			end := strings.IndexByte(text[i:], '\n')
+			end := strings.IndexAny(text[i:], "\n\r")
 			if end < 0 {
 				return words, ""
 			}
@@ -112,6 +112,12 @@ func sqlWords(scheme, text string) (words []string, refusal string) {
 				return nil, "a backslash in a MySQL literal"
 			}
 			i = end + 1
+		case c >= '0' && c <= '9':
+			// A number ends where a letter starts, as the servers read it: SQL Server runs "SELECT 1COMMIT" as
+			// SELECT 1 and COMMIT, so the letters after the digits are a word of their own.
+			for i < len(text) && text[i] >= '0' && text[i] <= '9' {
+				i++
+			}
 		case isWordRune(rune(c)):
 			start := i
 			for i < len(text) && isWordRune(rune(text[i])) {

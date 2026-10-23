@@ -315,6 +315,7 @@ func TestSQLServerScanAndQueryJourney(t *testing.T) {
 	for id, text := range map[string]string{
 		"sneaky-update":  "WITH c AS (SELECT 1 AS id) UPDATE customer SET name = 'changed' OUTPUT inserted.id WHERE id IN (SELECT id FROM c)",
 		"sneaky-commit":  "SELECT 1 AS id COMMIT UPDATE customer SET name = 'changed' WHERE id = 1",
+		"glued-commit":   "SELECT 1COMMIT UPDATE customer SET name = 'changed' WHERE id = 1",
 		"nested-comment": "SELECT 1 AS id /* /* */ ' */ COMMIT UPDATE customer SET name = 'changed' WHERE id = 1 --'",
 	} {
 		writeSavedQuery(t, queries, id, "SQL", text)

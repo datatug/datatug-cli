@@ -277,7 +277,7 @@ func TestMCPAppsBrowserHost(t *testing.T) {
 			return
 		case "/probe":
 			probe.Add(1)
-			w.WriteHeader(204)
+			w.WriteHeader(http.StatusNoContent)
 			return
 		case "/rpc":
 		default:
@@ -285,7 +285,7 @@ func TestMCPAppsBrowserHost(t *testing.T) {
 			return
 		}
 		if r.Method != "POST" || r.Header.Get("X-Test-Token") != token || r.Header.Get("Origin") != hostOrigin || !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
-			http.Error(w, "test broker denied", 403)
+			http.Error(w, "test broker denied", http.StatusForbidden)
 			return
 		}
 		var input struct {
@@ -298,7 +298,7 @@ func TestMCPAppsBrowserHost(t *testing.T) {
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
 		decoder.DisallowUnknownFields()
 		if decoder.Decode(&input) != nil {
-			http.Error(w, "invalid test request", 400)
+			http.Error(w, "invalid test request", http.StatusBadRequest)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -308,7 +308,7 @@ func TestMCPAppsBrowserHost(t *testing.T) {
 		case "resource":
 			resource, e := cs.ReadResource(callCtx, &mcp.ReadResourceParams{URI: "ui://datatug/query-explorer"})
 			if e != nil {
-				http.Error(w, "resource unavailable", 500)
+				http.Error(w, "resource unavailable", http.StatusInternalServerError)
 				return
 			}
 			_ = json.NewEncoder(w).Encode(resource)
@@ -320,13 +320,13 @@ func TestMCPAppsBrowserHost(t *testing.T) {
 				}
 				data, e := os.ReadFile(filepath.Join(fixtureRoot, name))
 				if e != nil {
-					http.Error(w, "fixture unavailable", 500)
+					http.Error(w, "fixture unavailable", http.StatusInternalServerError)
 					return
 				}
 				if input.Mode == "paged" {
 					var fixture map[string]any
 					if json.Unmarshal(data, &fixture) != nil {
-						http.Error(w, "fixture invalid", 500)
+						http.Error(w, "fixture invalid", http.StatusInternalServerError)
 						return
 					}
 					payload := fixture["_meta"].(map[string]any)["datatug"].(map[string]any)
@@ -355,13 +355,13 @@ func TestMCPAppsBrowserHost(t *testing.T) {
 					query = "acceptance/private-values"
 					parameters["UiNote"] = "public-seed"
 				} else if input.Mode != "real" {
-					http.Error(w, "unknown scenario", 400)
+					http.Error(w, "unknown scenario", http.StatusBadRequest)
 					return
 				}
 				name = "datatug_run_query"
 				args = map[string]any{"project": demoProjectID, "environment": demoProjectEnv, "source": demoProjectSource, "queryId": query, "parameters": parameters, "limit": 100}
 			} else if name != "datatug_apps_result" && name != "datatug_apps_rerun" {
-				http.Error(w, "tool not allowed", 403)
+				http.Error(w, "tool not allowed", http.StatusForbidden)
 				return
 			}
 			totalCalls.Add(1)
@@ -382,7 +382,7 @@ func TestMCPAppsBrowserHost(t *testing.T) {
 			}
 			result, e := cs.CallTool(callCtx, &mcp.CallToolParams{Name: name, Arguments: args})
 			if e != nil {
-				http.Error(w, "private call unavailable", 503)
+				http.Error(w, "private call unavailable", http.StatusServiceUnavailable)
 				return
 			}
 			safeRecord(result)
@@ -408,7 +408,7 @@ func TestMCPAppsBrowserHost(t *testing.T) {
 				mu.Unlock()
 			case "close-child":
 				if e := cs.Close(); e != nil {
-					http.Error(w, "child close failed", 500)
+					http.Error(w, "child close failed", http.StatusInternalServerError)
 					return
 				}
 				childClosed.Store(cmd.ProcessState != nil && cmd.ProcessState.Success())
@@ -418,12 +418,12 @@ func TestMCPAppsBrowserHost(t *testing.T) {
 				if ping != nil {
 					_ = ping.Body.Close()
 				}
-				if e != nil || ping.StatusCode != 200 {
-					http.Error(w, "separately owned agent stopped", 500)
+				if e != nil || ping.StatusCode != http.StatusOK {
+					http.Error(w, "separately owned agent stopped", http.StatusInternalServerError)
 					return
 				}
 			default:
-				http.Error(w, "unknown test control", 400)
+				http.Error(w, "unknown test control", http.StatusBadRequest)
 				return
 			}
 			_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
@@ -442,7 +442,7 @@ func TestMCPAppsBrowserHost(t *testing.T) {
 			mu.Unlock()
 			_ = json.NewEncoder(w).Encode(map[string]any{"modelProjectionPrivateLeak": privateLeak, "capturedContinuations": count, "probeRequests": probe.Load(), "totalCalls": totalCalls.Load(), "cancelledCalls": cancelledCalls.Load(), "activeCalls": active.Load(), "childClosedCleanly": childClosed.Load(), "stderrPrivateLeak": stderrLeak})
 		default:
-			http.Error(w, "unknown test operation", 400)
+			http.Error(w, "unknown test operation", http.StatusBadRequest)
 		}
 	})
 	host := httptest.NewUnstartedServer(handler)

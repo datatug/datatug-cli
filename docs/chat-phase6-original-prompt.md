@@ -7,7 +7,7 @@ specify, plan, implement, test, review, and land recordset charts plus
 adaptive recordset views.
 
 First inspect the repository, specs, current Bubble Tea models,
-recordset/grid implementation, DTQL integration, keybindings, and
+recordset/grid implementation, TugQL integration, keybindings, and
 conventions. Reuse existing abstractions. Do not stop after planning:
 continue through implementation, tests, review, CI, and merge unless
 genuinely blocked.

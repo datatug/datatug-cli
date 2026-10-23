@@ -26,11 +26,11 @@ require (
 	github.com/charmbracelet/ultraviolet v0.0.0-20260812204455-68fa937c71be
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/dal-go/dalgo v0.95.2
-	github.com/dal-go/dalgo2bigquery v0.3.2-0.20261023114546-7dd4b3e0708b
+	github.com/dal-go/dalgo2bigquery v0.3.2
 	github.com/dal-go/dalgo2http v0.4.0
 	github.com/dal-go/dalgo2postgres v0.9.4
 	github.com/dal-go/dalgo2sql v0.29.7
-	github.com/dal-go/dalgo2sqlite v0.4.5
+	github.com/dal-go/dalgo2sqlite v0.4.7
 	github.com/dal-go/record v0.1.5
 	github.com/datatug/cliformat v0.0.3
 	github.com/datatug/datatug-core v0.76.0

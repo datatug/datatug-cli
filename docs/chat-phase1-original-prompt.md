@@ -1,10 +1,10 @@
 Chat command in datatug-cli
 
-DataTug Chat PoC — AI → DTQL → Interactive Grid
+DataTug Chat PoC — AI → TugQL → Interactive Grid
 
 Implement the first proof of concept for datatug chat.
 
-The purpose of this phase is deliberately narrow: prove that a user can ask a simple natural-language question about real data, an inexpensive AI model can translate the request into DTQL, DataTug can execute that DTQL using its existing data/query infrastructure, and the result can be displayed as a useful interactive grid directly inside the terminal chat.
+The purpose of this phase is deliberately narrow: prove that a user can ask a simple natural-language question about real data, an inexpensive AI model can translate the request into TugQL, DataTug can execute that TugQL using its existing data/query infrastructure, and the result can be displayed as a useful interactive grid directly inside the terminal chat.
 
 Do not build the complete DataTug Chat vision yet. Get this vertical slice working cleanly, test it with real data, review it, and merge it to main once the PoC is solid.
 
@@ -21,8 +21,8 @@ against a DataTug project configured with the Chinook sample database and type:
 DataTug should:
 
 1. send the user’s request plus the necessary project/schema context to the AI agent;
-2. have the agent produce DTQL rather than SQL or formatted table output;
-3. validate and execute the DTQL through normal DataTug query infrastructure;
+2. have the agent produce TugQL rather than SQL or formatted table output;
+3. validate and execute the TugQL through normal DataTug query infrastructure;
 4. receive a structured result/RecordSet;
 5. render that result as an inline interactive terminal grid inside the chat.
 
@@ -32,7 +32,7 @@ Another canonical scenario:
 
 The result must come from the actual Chinook database.
 
-Do not hard-code these prompts, SQL, DTQL, table names, filters, or results.
+Do not hard-code these prompts, SQL, TugQL, table names, filters, or results.
 
 The point of the PoC is to demonstrate the generic pipeline.
 
@@ -46,9 +46,9 @@ DataTug Chat
   ↓
 AI agent
   ↓
-DTQL
+TugQL
   ↓
-DTQL validation/execution
+TugQL validation/execution
   ↓
 existing DataTug data-source/query infrastructure
   ↓
@@ -63,11 +63,11 @@ Maintain this separation.
 In particular:
 
 * the LLM must not produce an ASCII/Markdown table;
-* the LLM should not generate SQL when DTQL is the appropriate DataTug abstraction;
+* the LLM should not generate SQL when TugQL is the appropriate DataTug abstraction;
 * the TUI should not parse textual model output to discover table data;
 * query execution belongs to DataTug;
 * grid rendering belongs to DataTug;
-* the model’s responsibility is primarily understanding intent and producing an appropriate structured action/DTQL.
+* the model’s responsibility is primarily understanding intent and producing an appropriate structured action/TugQL.
 
 3. Start by inspecting what already exists
 
@@ -76,7 +76,7 @@ Before designing or implementing anything, inspect the current DataTug repositor
 Understand:
 
 * CLI architecture and conventions;
-* current DTQL implementation;
+* current TugQL implementation;
 * existing query execution paths;
 * project/data-source configuration;
 * database/schema discovery;
@@ -132,7 +132,7 @@ Start with a small model such as GPT-5.6 Luna, Claude Haiku, or DeepSeek Flash a
 
 Prefer Luna initially if there is no strong implementation reason otherwise.
 
-Do not use an expensive frontier model as the default runtime model for translating straightforward requests into DTQL.
+Do not use an expensive frontier model as the default runtime model for translating straightforward requests into TugQL.
 
 However, avoid tightly coupling DataTug Chat to one provider/model. Model selection should be configurable enough that we can cheaply compare Luna, Haiku and DeepSeek later.
 
@@ -150,7 +150,7 @@ relevant DataTug project/schema context
         ↓
 understand intent
         ↓
-produce valid DTQL / invoke appropriate DataTug query tool
+produce valid TugQL / invoke appropriate DataTug query tool
 
 DataTug then validates and executes the request.
 
@@ -166,7 +166,7 @@ Query execution should produce a structured result that the UI consumes.
 
 Conceptually:
 
-DTQL
+TugQL
   ↓
 execute
   ↓
@@ -260,7 +260,7 @@ Show 10 tracks by AC/DC
 
 The exact wording should not matter.
 
-Validate the generated DTQL and returned rows against deterministic database queries where practical.
+Validate the generated TugQL and returned rows against deterministic database queries where practical.
 
 If Chinook terminology differs from “orders” (for example invoices represent purchases), the agent should resolve the user’s ordinary-language intent through schema understanding rather than requiring database-specific wording.
 
@@ -270,8 +270,8 @@ Add focused automated tests around boundaries that can be tested deterministical
 
 At minimum test:
 
-* model/tool response → DTQL handling;
-* DTQL validation/execution;
+* model/tool response → TugQL handling;
+* TugQL validation/execution;
 * result → RecordSet conversion;
 * RecordSet → grid model;
 * malformed/invalid agent output;
@@ -369,8 +369,8 @@ $ datatug chat
 and:
 
 * a cheap/fast AI model actually interprets the request;
-* it produces DTQL through the intended agent/tool architecture;
-* DataTug validates and executes the DTQL;
+* it produces TugQL through the intended agent/tool architecture;
+* DataTug validates and executes the TugQL;
 * existing DataTug data access/query infrastructure is reused;
 * results come from a real Chinook database;
 * results remain structured throughout the pipeline;

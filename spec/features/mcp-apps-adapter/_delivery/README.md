@@ -123,9 +123,24 @@ This supplemental run used the maintained browser command; the literal documente
 |---|---|
 | [website-main-f5fc8b1-checks.json](website-main-f5fc8b1-checks.json) | `534ce821fe4ace13cec21af29060786dc4fde47bb6ce136cbf729c08a955208f` |
 
+## Lifecycle confirmation
+
+Verification passed all10 criteria at `2bd815ec`; recap found no drift for all10 at `16e8215a`. Independent final review at `01adea1557e2b0fc5445c835fda5908bd8dd53e6` reported zero findings and independently read exact source CI/release conclusions. The configured release delegate returned `RELEASE_OK v0.113.0` after confirming public artifact/source identity, native execution, signatures and notarization. Feature lifecycle status transitioned through the SpecScore CLI; this does not broaden the developer-preview host/platform scope. Final WB publication and cleanup are later operations and are not asserted by these records.
+
+Recap review r1 caught aggregate-value wording in the execution narrator. The original isolated narrator corrected it to Rock TracksPurchased values14/17; r2 approved the corrected report with verdict/evidence unchanged. Original review r1 remains unchanged.
+
+| Evidence | SHA256 |
+|---|---|
+| [review-verify-checkpoint.md](review-verify-checkpoint.md) | `f11f10655f96074bdc1e397fe20c5c732cfdfbc8700140ae3fa29cfa14ef3dc1` |
+| [review-recap-checkpoint-r1.md](review-recap-checkpoint-r1.md) | `60cd58c9ccc8d57dac9be723bf5f01e3f7ddfc7b8397828827dd59421fb45dbb` |
+| [review-recap-checkpoint-r2.md](review-recap-checkpoint-r2.md) | `fdbaa7457409e131b3296805e6bd42bf42f9415afbc615e78ff346d458cb8fb7` |
+| [review-final-stage.md](review-final-stage.md) | `b5dfe3e653be983555651178a8551c3af93c2c3ab3d3006342866d1bfeb47c7b` |
+| [release-delegate-confirmation.md](release-delegate-confirmation.md) | `3ebe30d316d073b73c65be2ac76a28f037d6dd79525fefdf53b7cebd3e7883d1` |
+| [ship-preflight.json](ship-preflight.json) | `546f10613869bb0aabdcc8492dc0ca13fb1b114980405996fceae7bc4c1ca98b` |
+
 ## Open Questions
 
-Website full post-merge CI subsequently passed; its original pending snapshot remains unchanged. Exact CLI4e Go CI, automatic release and supplemental v0.113.0 acceptance passed. No task/feature/plan transition or cleanup completion is asserted by this evidence update. The [independent website live-evidence review](review-website-live-r1.md) personally verified the three deploys and11 live page receipts, preserved the pending post-merge CI distinction, and reported zero findings.
+Website full post-merge CI subsequently passed; its original pending snapshot remains unchanged. Exact CLI4e Go CI, automatic release and supplemental v0.113.0 acceptance passed. The lifecycle confirmation above records the later transition; final WB publication and cleanup completion remain separate. The [independent website live-evidence review](review-website-live-r1.md) personally verified the three deploys and11 live page receipts, preserved the pending post-merge CI distinction, and reported zero findings.
 
 ---
 *This document follows the https://specscore.md/features-index-specification*

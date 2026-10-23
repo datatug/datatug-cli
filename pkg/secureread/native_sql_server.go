@@ -82,7 +82,7 @@ func sqlWords(scheme, text string) (words []string, refusal string) {
 		switch {
 		case c == ';':
 			return nil, "a second statement"
-		case strings.HasPrefix(text[i:], "/*!") || strings.HasPrefix(strings.ToUpper(text[i:]), "/*M!"):
+		case strings.HasPrefix(text[i:], "/*!") || len(text)-i >= 4 && strings.EqualFold(text[i:i+4], "/*M!"):
 			return nil, "a MySQL comment that the server runs"
 		case strings.HasPrefix(text[i:], "/*"):
 			end := strings.Index(text[i+2:], "*/")

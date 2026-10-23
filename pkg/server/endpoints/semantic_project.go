@@ -49,7 +49,7 @@ func loadModuleEntities(dir string) ([]*datatug.Entity, error) {
 // loadModuleQueries reads every queries/**/*.query.json file under dir into
 // the module's datatug.QueryDef type. Applicable only needs ID/Type/
 // Parameters, all present in the .query.json file itself — the sibling
-// .query.<ext> body (SQL/DTQL/HTTP text) is never read here.
+// .query.<ext> body (SQL/TugQL/HTTP text) is never read here.
 //
 // canonicalIDs maps each returned *datatug.QueryDef pointer to its
 // canonical, folder-qualified id (its path relative to queries/, "/"-joined

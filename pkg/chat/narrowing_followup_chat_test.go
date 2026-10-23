@@ -32,7 +32,7 @@ func TestModelCanReadAnOmittedTable(t *testing.T) {
 	t.Parallel()
 	llm := &scriptedProvider{steps: []scriptedStep{
 		{toolCalls: []ai.ToolCall{toolCall("1", toolDescribeRelation, map[string]any{"name": "Track"})}},
-		{toolCalls: []ai.ToolCall{toolCall("2", toolRunDTQL, map[string]any{"title": "Tracks", "dtql": "from: {name: Track}\ncolumns: [{field: Name}]\nlimit: 5"})}},
+		{toolCalls: []ai.ToolCall{toolCall("2", toolRunTugQL, map[string]any{"title": "Tracks", "tugql": "from: {name: Track}\ncolumns: [{field: Name}]\nlimit: 5"})}},
 		{text: "Here are the tracks."},
 	}}
 	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"Name"}}}
@@ -265,7 +265,7 @@ func TestDescribeRelationIsLimitedPerTurnAndDegradesGracefully(t *testing.T) {
 		{toolCalls: []ai.ToolCall{toolCall("1", toolDescribeRelation, map[string]any{"name": "Track"})}},
 		{toolCalls: []ai.ToolCall{toolCall("2", toolDescribeRelation, map[string]any{"name": "Album"})}},
 		{toolCalls: []ai.ToolCall{toolCall("3", toolDescribeRelation, map[string]any{"name": "Artist"})}},
-		{toolCalls: []ai.ToolCall{toolCall("4", toolRunDTQL, map[string]any{"title": "Tracks", "dtql": "from: {name: Track}\ncolumns: [{field: Name}]\nlimit: 5"})}},
+		{toolCalls: []ai.ToolCall{toolCall("4", toolRunTugQL, map[string]any{"title": "Tracks", "tugql": "from: {name: Track}\ncolumns: [{field: Name}]\nlimit: 5"})}},
 		{text: "Done."},
 	}}
 	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"Name"}}}
@@ -305,7 +305,7 @@ func TestNetInputBytesOnChinook(t *testing.T) {
 			steps = append(steps, scriptedStep{toolCalls: []ai.ToolCall{toolCall("1", toolDescribeRelation, map[string]any{"name": "Track"})}})
 		}
 		steps = append(steps,
-			scriptedStep{toolCalls: []ai.ToolCall{toolCall("2", toolRunDTQL, map[string]any{"title": "Sales", "dtql": "from: {name: Invoice}\ncolumns: [{field: BillingCountry}]\nlimit: 5"})}},
+			scriptedStep{toolCalls: []ai.ToolCall{toolCall("2", toolRunTugQL, map[string]any{"title": "Sales", "tugql": "from: {name: Invoice}\ncolumns: [{field: BillingCountry}]\nlimit: 5"})}},
 			scriptedStep{text: "Here."})
 		llm := &scriptedProvider{steps: steps}
 		conversation, err := NewAIConversation(llm, &fakeExecutor{result: secureread.Result{Columns: []string{"BillingCountry"}}}, "sqlite:///chinook.db", chinookFullSchema(), options...)
@@ -470,7 +470,7 @@ func TestDescribeRelationIsWithdrawnOnceTheTurnHasSpentIt(t *testing.T) {
 	llm := &scriptedProvider{steps: []scriptedStep{
 		{toolCalls: []ai.ToolCall{toolCall("1", toolDescribeRelation, map[string]any{"name": "Track"})}},
 		{toolCalls: []ai.ToolCall{toolCall("2", toolDescribeRelation, map[string]any{"name": "Album"})}},
-		{toolCalls: []ai.ToolCall{toolCall("3", toolRunDTQL, map[string]any{"title": "Tracks", "dtql": "from: {name: Track}\ncolumns: [{field: Name}]\nlimit: 5"})}},
+		{toolCalls: []ai.ToolCall{toolCall("3", toolRunTugQL, map[string]any{"title": "Tracks", "tugql": "from: {name: Track}\ncolumns: [{field: Name}]\nlimit: 5"})}},
 		{text: "Done."},
 	}}
 	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"Name"}}}
@@ -491,8 +491,8 @@ func TestDescribeRelationIsWithdrawnOnceTheTurnHasSpentIt(t *testing.T) {
 		}
 	}
 	// Withdrawing it leaves every other tool in place, and the next turn has it again.
-	if !slices.Contains(toolNames(llm.requests[3]), toolRunDTQL) {
-		t.Errorf("run_dtql went missing: %v", toolNames(llm.requests[3]))
+	if !slices.Contains(toolNames(llm.requests[3]), toolRunTugQL) {
+		t.Errorf("run_tugql went missing: %v", toolNames(llm.requests[3]))
 	}
 	conversation.resetTurn()
 	llm2 := &scriptedProvider{steps: []scriptedStep{{text: "ok"}}}

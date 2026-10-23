@@ -611,11 +611,11 @@ func (r BackendRef) OpenForTest(ctx context.Context) (dal.DB, error) {
 // structured-query compilation): dal-go/dalgo2sql#179 added FROM-source
 // alias support to compileStructuredSQL, which used to unconditionally
 // reject any structured query whose FROM source carried an alias — this
-// project's own demo query (queries/customers/customer-invoices.query.dtql,
+// project's own demo query (queries/customers/customer-invoices.query.tugql.yaml,
 // `from: {name: Invoice, alias: i}`) uses exactly that shape, and used to
 // turn into a hard error the moment this dialect was enabled. With #179
-// fixed, existing non-aggregate DTQL queries (see dalgo2sql's own
-// dtql_datatug_inventory_test.go) compile cleanly, so protected reads now
+// fixed, existing non-aggregate TugQL queries (see dalgo2sql's own
+// tugql_datatug_inventory_test.go) compile cleanly, so protected reads now
 // get the dialect's real guarantees: every dal.Constant value becomes a
 // genuine `?` placeholder + bound arg (not a quoted-string literal), and
 // unsupported shapes (such as joins and cursors) fail closed. GROUP BY and

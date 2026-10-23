@@ -6,7 +6,7 @@ import (
 	"io"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/dal-go/dalgo2http"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
@@ -84,17 +84,17 @@ func (e *Executor) runStructured(ctx context.Context, sourceURL string, query da
 	return result, nil
 }
 
-// RunDTQL deserializes a DTQL-YAML document (dal-go/dalgo/dtql.Deserialize)
-// and executes it exactly like RunStructured (REQ:dtql-query-type).
-func (e *Executor) RunDTQL(ctx context.Context, sourceURL string, dtqlDoc []byte, variables map[string]any) (Result, error) {
-	query, err := dtql.Deserialize(dtqlDoc)
+// RunTugQL deserializes a TugQL-YAML document (dal-go/dalgo/tugql.Deserialize)
+// and executes it exactly like RunStructured (REQ:tugql-query-type).
+func (e *Executor) RunTugQL(ctx context.Context, sourceURL string, tugqlDoc []byte, variables map[string]any) (Result, error) {
+	query, err := tugql.Deserialize(tugqlDoc)
 	if err != nil {
-		return Result{}, fmt.Errorf("secureread: parse DTQL: %w", err)
+		return Result{}, fmt.Errorf("secureread: parse TugQL: %w", err)
 	}
 	return e.RunStructured(ctx, sourceURL, query, variables)
 }
 
-// runThroughPolicies is the shared tail of RunStructured/RunDTQL and
+// runThroughPolicies is the shared tail of RunStructured/RunTugQL and
 // RunNativeSQL: run the query through accesspolicies.Run against db, collect
 // the admitted rows, and translate the policy Explain lines into Result
 // Limitations.
@@ -133,7 +133,7 @@ func (e *Executor) runThroughPolicies(ctx context.Context, db dal.DB, query dal.
 // dbcopy.Parse's own descriptive error. The returned close func is always
 // safe to call, even when the backend has no Close method.
 //
-// Every Executor call — RunStructured, RunDTQL, RunNativeSQL — runs the
+// Every Executor call — RunStructured, RunTugQL, RunNativeSQL — runs the
 // result through accesspolicies.Run before a caller ever sees a row (see
 // runThroughPolicies), so openSource always opens through
 // dbcopy.BackendRef.OpenProtected/OpenProtectedForTest, never plain

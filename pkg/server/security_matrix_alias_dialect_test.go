@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
 
@@ -15,7 +15,7 @@ import (
 // security_matrix_test.go already proves: it exercises the actual
 // production shape dbcopy.BackendRef.OpenProtected's doc comment
 // describes — a protected sqlite:// read of datatug-demo-projects
-// demo-project-1's own customer-invoices.query.dtql
+// demo-project-1's own customer-invoices.query.tugql.yaml
 // (`from: {name: Invoice, alias: i}`), now compiled through dalgo2sql's
 // "sqlite" StructuredQueryDialect (dal-go/dalgo2sql#179 added the
 // FROM-source alias support that made opting in possible at all — see
@@ -62,12 +62,12 @@ bindings:
     support: [support]
 `
 
-// aliasDialectCustomerInvoicesDTQL is datatug-demo-projects demo-project-1's
-// own queries/customers/customer-invoices.query.dtql, copied verbatim: the
+// aliasDialectCustomerInvoicesTugQL is datatug-demo-projects demo-project-1's
+// own queries/customers/customer-invoices.query.tugql.yaml, copied verbatim: the
 // exact `from: {name: Invoice, alias: i}` shape dal-go/dalgo2sql v0.12.0's
 // compileStructuredSQL rejected outright ("structured SQL query source
 // aliases are not supported") until #179.
-const aliasDialectCustomerInvoicesDTQL = `from:
+const aliasDialectCustomerInvoicesTugQL = `from:
   name: Invoice
   alias: i
 columns:
@@ -129,9 +129,9 @@ func TestRunStructured_AliasedCustomerInvoices_RowRestrictionComposesWithAlias(t
 	}
 	executor := secureread.NewExecutor(session)
 
-	query, err := dtql.Deserialize([]byte(aliasDialectCustomerInvoicesDTQL))
+	query, err := tugql.Deserialize([]byte(aliasDialectCustomerInvoicesTugQL))
 	if err != nil {
-		t.Fatalf("dtql.Deserialize(customer-invoices): %v", err)
+		t.Fatalf("tugql.Deserialize(customer-invoices): %v", err)
 	}
 
 	sourceURL := "sqlite://" + dbPath

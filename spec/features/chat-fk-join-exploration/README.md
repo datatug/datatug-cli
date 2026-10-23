@@ -23,7 +23,7 @@ Chat currently displays an immutable query result but gives the user no schema-a
 
 #### REQ: fk-edges
 
-For each exact relation instance in a parsed DTQL source tree, DataTug MUST discover outgoing and incoming foreign-key edges from the configured source's schema metadata. A composite FK is one edge. An edge carries source-instance path and alias, stable source constraint ID, ordered field pairs, target relation, direction, cardinality, and `foreign-key` evidence. Candidate order is deterministic. Missing FK capability yields a compact empty state, never an inferred relationship.
+For each exact relation instance in a parsed TugQL source tree, DataTug MUST discover outgoing and incoming foreign-key edges from the configured source's schema metadata. A composite FK is one edge. An edge carries source-instance path and alias, stable source constraint ID, ordered field pairs, target relation, direction, cardinality, and `foreign-key` evidence. Candidate order is deterministic. Missing FK capability yields a compact empty state, never an inferred relationship.
 
 Candidate exposure and application MUST fail closed for a policy-secured session when the target relation cannot be proven readable without row or field restrictions. DALgo's secure-read authorization is the execution authority; a no-row-read preflight using the same policy set may filter candidates. Nested joins MUST be refused before execution if the DALgo policy path does not authorize every nested source. No JOIN may bypass a target relation's policy by being attached to an allowed base relation.
 
@@ -35,7 +35,7 @@ DataTug MUST distinguish two FKs to the same target, repeated aliases of one phy
 
 #### REQ: deterministic-join
 
-Both the terminal and agent MUST invoke one DataTug-owned ApplyJoinCandidate operation identified by a RecordSet and exact candidate identity. The operation MUST revalidate current FK metadata, derive a JOIN with qualified FK equality predicates in real DTQL, validate it, and execute through the existing DALgo-backed secure-read executor. The model MUST NOT supply ON predicates or SQL for this operation. The Chat `run_dtql` model tool MUST refuse JOIN-shaped DTQL so it cannot bypass this operation; other DataTug DTQL execution routes retain normal JOIN support.
+Both the terminal and agent MUST invoke one DataTug-owned ApplyJoinCandidate operation identified by a RecordSet and exact candidate identity. The operation MUST revalidate current FK metadata, derive a JOIN with qualified FK equality predicates in real TugQL, validate it, and execute through the existing DALgo-backed secure-read executor. The model MUST NOT supply ON predicates or SQL for this operation. The Chat `run_tugql` model tool MUST refuse JOIN-shaped TugQL so it cannot bypass this operation; other DataTug TugQL execution routes retain normal JOIN support.
 
 #### REQ: projection-and-aliases
 
@@ -49,7 +49,7 @@ The candidate area MUST appear directly below its grid, grouped by source instan
 
 #### REQ: immutable-lineage
 
-An applied JOIN MUST create a new immutable RecordSet through the normal query path, retaining parent RecordSet ID, exact FK edge identity, and derived DTQL. Chat storage MUST migrate existing v1–v3 databases transactionally to a new lineage-aware schema; bookmark snapshot encoding MUST preserve lineage while decoding old snapshots without it. Restart MUST restore the result and lineage without re-executing it; candidate lists may be recomputed from current metadata. Existing Views, Selections, attachments, docks, bookmarks, and tags must continue to reference the new RecordSet normally.
+An applied JOIN MUST create a new immutable RecordSet through the normal query path, retaining parent RecordSet ID, exact FK edge identity, and derived TugQL. Chat storage MUST migrate existing v1–v3 databases transactionally to a new lineage-aware schema; bookmark snapshot encoding MUST preserve lineage while decoding old snapshots without it. Restart MUST restore the result and lineage without re-executing it; candidate lists may be recomputed from current metadata. Existing Views, Selections, attachments, docks, bookmarks, and tags must continue to reference the new RecordSet normally.
 
 #### REQ: safe-agent-selection
 
@@ -59,7 +59,7 @@ The agent MUST see bounded candidate identities and metadata, not row values. If
 
 ### AC: schema-edge-cases
 
-Given synthetic schemas with forward, reverse, composite, two-to-one-target, self and cyclic FKs, and a nested DTQL query with repeated table aliases
+Given synthetic schemas with forward, reverse, composite, two-to-one-target, self and cyclic FKs, and a nested TugQL query with repeated table aliases
 When DataTug discovers candidates for every relation instance
 Then each edge has stable distinct identity and correct ordered ON field pairs/cardinality, exact active edges are suppressed, and discovery terminates without recursively traversing the schema graph.
 
@@ -67,7 +67,7 @@ Then each edge has stable distinct identity and correct ordered ON field pairs/c
 
 Given a real Chinook Invoice RecordSet and its FK candidates
 When the user selects Customer and presses Space, then applies another candidate from the resulting query
-Then each action produces valid derived DTQL, runs through the normal executor, displays real joined rows, and offers candidates for all participating instances.
+Then each action produces valid derived TugQL, runs through the normal executor, displays real joined rows, and offers candidates for all participating instances.
 
 ### AC: policy-safe-joins
 
@@ -79,7 +79,7 @@ Then DataTug does not execute a query that can read that target, and reports a c
 
 Given the same RecordSet and candidate catalog
 When the agent asks DataTug to apply an exact Customer edge
-Then the same application operation and DTQL derivation run as for Space; when two Address FKs match only a target name, DataTug returns a clarification without executing a query.
+Then the same application operation and TugQL derivation run as for Space; when two Address FKs match only a target name, DataTug returns a clarification without executing a query.
 
 ### AC: restart-and-context
 

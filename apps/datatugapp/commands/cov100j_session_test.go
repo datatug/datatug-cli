@@ -2480,7 +2480,7 @@ func TestSessionRemainingCoverage100(t *testing.T) {
 	sessionInterpretDetailed = func(ctx context.Context, req chat.InterpretRequest) (chat.InterpretResult, error) {
 		require.Equal(t, "anthropic-messages", req.Provider.Protocol)
 		require.Equal(t, "https://api.anthropic.com", req.Provider.BaseURL)
-		return chat.InterpretResult{DTQL: "SELECT 1"}, nil
+		return chat.InterpretResult{TugQL: "SELECT 1"}, nil
 	}
 	cmdSendClaude := sessionCommand()
 	cmdSendClaude.SetIn(strings.NewReader(`{"text":"hello","schema":"Invoice(InvoiceId integer)"}`))
@@ -2491,7 +2491,7 @@ func TestSessionRemainingCoverage100(t *testing.T) {
 	sessionInterpretDetailed = func(ctx context.Context, req chat.InterpretRequest) (chat.InterpretResult, error) {
 		require.Equal(t, "openai-chat", req.Provider.Protocol)
 		require.Equal(t, "https://api.openai.com", req.Provider.BaseURL)
-		return chat.InterpretResult{DTQL: "SELECT 2"}, nil
+		return chat.InterpretResult{TugQL: "SELECT 2"}, nil
 	}
 	cmdSendOpenAI := sessionCommand()
 	cmdSendOpenAI.SetIn(strings.NewReader(`{"text":"hello","schema":"Invoice(InvoiceId integer)"}`))

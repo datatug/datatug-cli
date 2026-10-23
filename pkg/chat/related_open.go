@@ -49,7 +49,7 @@ func (c *SessionChat) acceptRelatedPreview(ctx context.Context, sessionID, paren
 	if err != nil {
 		return ChatSession{}, QueryResult{}, err
 	}
-	query, err := c.store.AppendQuery(ctx, sessionID, origin.ID, source, QueryResult{Title: item.target().Relation, Source: source, SourceID: parent.Database, DTQL: item.document, Result: item.result, Lineage: &JoinLineage{ParentRecordSetID: parent.ID}})
+	query, err := c.store.AppendQuery(ctx, sessionID, origin.ID, source, QueryResult{Title: item.target().Relation, Source: source, SourceID: parent.Database, TugQL: item.document, Result: item.result, Lineage: &JoinLineage{ParentRecordSetID: parent.ID}})
 	if err != nil {
 		return ChatSession{}, QueryResult{}, err
 	}

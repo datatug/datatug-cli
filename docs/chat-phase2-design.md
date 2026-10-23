@@ -9,7 +9,7 @@ verbatim for historical context.
    environment, database, and access-policy scope opens, or a new one is
    created. Its prior messages and grids are visible without database reads.
 2. Ask a question: DataTug saves the user's message, executes model-produced
-   DTQL through the existing secure executor, and atomically saves the query,
+   TugQL through the existing secure executor, and atomically saves the query,
    result snapshot, and artifact message. The visible grid comes from that
    structured result.
 3. Use `/new`, `/sessions`, `/switch`, `/rename`, `/clear`, and `/delete` in the
@@ -28,12 +28,12 @@ Store one private database per canonical project path in
 principal-plus-policy fingerprint. A changed principal or policy set cannot
 reopen an older scope's cached data. The database has four tables: sessions,
 ordered messages, executed queries, and immutable RecordSets. Foreign keys
-cascade session clear/delete to its session-scoped data. Each successful DTQL
+cascade session clear/delete to its session-scoped data. Each successful TugQL
 tool execution immediately commits its query and immutable snapshot together;
 the model's final text is saved separately. SQLite JSON payloads retain typed
 cell values and remain inspectable.
 
-Each RecordSet has a stable UUID, source/environment/database, exact DTQL,
+Each RecordSet has a stable UUID, source/environment/database, exact TugQL,
 query/message IDs, creation time, columns, rows, and limitations. Re-execution
 creates a new ID and never updates the old snapshot. A future longer-lived
 bookmark could copy or reference one snapshot under a different owner, but

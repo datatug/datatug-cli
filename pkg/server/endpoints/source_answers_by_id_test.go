@@ -97,7 +97,7 @@ func fileSourceRoutes(t *testing.T, scope apicontract.Scope) map[string]fileSour
 		"exec/run_query": {semanticTestSource, func() routeAnswer {
 			payload, err := json.Marshal(apicontract.ExecutionRequest{
 				Project: scope.Project, Environment: scope.Environment, SecurityContextID: scope.SecurityContextID,
-				Source: semanticTestSource, DTQL: "from: {name: Customer}\n", Mode: apicontract.ProvenanceModeLive,
+				Source: semanticTestSource, TugQL: "from: {name: Customer}\n", Mode: apicontract.ProvenanceModeLive,
 			})
 			require.NoError(t, err)
 			rec := httptest.NewRecorder()

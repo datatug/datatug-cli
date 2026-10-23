@@ -15,7 +15,7 @@ import (
 // TestEnterOpensAndClosesCellDetailWithoutChangingSelection was ported onto
 // ChatUI's cellDetailOverlay in chatui_inspector_test.go.
 
-func TestPreviewRelatedUsesDTQLAndStructuredResult(t *testing.T) {
+func TestPreviewRelatedUsesTugQLAndStructuredResult(t *testing.T) {
 	t.Parallel()
 	executor := &joinExecutorStub{}
 	application := ForeignKeyJoinApplication{Source: "sqlite:///fixture.db", Snapshot: joinSnapshot(), Executor: executor}
@@ -28,7 +28,7 @@ func TestPreviewRelatedUsesDTQLAndStructuredResult(t *testing.T) {
 		t.Fatalf("unexpected preview: %#v", preview)
 	}
 	if !strings.Contains(executor.doc, "Customer") || !strings.Contains(executor.doc, "CustomerId") || !strings.Contains(executor.doc, "limit: 5") {
-		t.Fatalf("expected bounded DTQL: %s", executor.doc)
+		t.Fatalf("expected bounded TugQL: %s", executor.doc)
 	}
 }
 
@@ -91,8 +91,8 @@ func TestPreviewRelatedRespectsCanReadTarget(t *testing.T) {
 	})
 }
 
-// TestPreviewRelatedPropagatesExecutorError covers the RunDTQL error
-// passthrough (dtql.Serialize itself has no realistic failure mode here --
+// TestPreviewRelatedPropagatesExecutorError covers the RunTugQL error
+// passthrough (tugql.Serialize itself has no realistic failure mode here --
 // the query is always built from the same fixed shape).
 func TestPreviewRelatedPropagatesExecutorError(t *testing.T) {
 	t.Parallel()
@@ -136,7 +136,7 @@ func TestPreviewRelatedQualifiesNonMainSchemaTarget(t *testing.T) {
 		t.Fatalf("preview = %#v, err = %v", preview, err)
 	}
 	if !strings.Contains(executor.doc, "lookup") {
-		t.Fatalf("qualified schema target missing from DTQL: %s", executor.doc)
+		t.Fatalf("qualified schema target missing from TugQL: %s", executor.doc)
 	}
 }
 

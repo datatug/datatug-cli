@@ -15,7 +15,7 @@ status: Implementing
 
 ## Summary
 
-`query` is the resource group the [CLI umbrella](../README.md) reserves for running queries; `query run` is its first verb. It runs one ad-hoc [DTQL](https://github.com/dal-go/dalgo/tree/main/dtql) query against a database URL exactly as a policy-secured application would for a chosen principal: through DALgo's declarative access policies, discovered from the user's `~/.datatug/policies/` directory, so a "global" policy written once applies to every query the user runs. The rows a real caller would receive go to stdout in the chosen format; the limitations the policies imposed — the deciding rule, the row condition, the field allow-list, the binding — go to stderr, so a pipeline consumes clean data while the operator sees why rows or fields are missing. The SQL `execute` command can later join the same verb behind a `--sql` flag.
+`query` is the resource group the [CLI umbrella](../README.md) reserves for running queries; `query run` is its first verb. It runs one ad-hoc [TugQL](https://github.com/dal-go/dalgo/tree/main/tugql) query against a database URL exactly as a policy-secured application would for a chosen principal: through DALgo's declarative access policies, discovered from the user's `~/.datatug/policies/` directory, so a "global" policy written once applies to every query the user runs. The rows a real caller would receive go to stdout in the chosen format; the limitations the policies imposed — the deciding rule, the row condition, the field allow-list, the binding — go to stderr, so a pipeline consumes clean data while the operator sees why rows or fields are missing. The SQL `execute` command can later join the same verb behind a `--sql` flag.
 
 This is the first consumer of `dalgo/access` row-level conditions, principal bindings and field patterns outside DALgo itself.
 
@@ -26,7 +26,7 @@ Policy authors have no way to see what a DALgo access policy will do to a real q
 ## Synopsis
 
 ```
-datatug query run --db <url|datatug://<project>/<db>[?env=<ENV>]> (-f <dtql-file>|--from <collection> [--limit <n>] [--offset <n>]) \
+datatug query run --db <url|datatug://<project>/<db>[?env=<ENV>]> (-f <tugql-file>|--from <collection> [--limit <n>] [--offset <n>]) \
   [--format grid|json|jsonl|yaml|csv] \
   [--as <user-id>] [--role <role>]... [--group <group>]... [--var <name>=<value>]... \
   [--policy <file>]... [--policies-dir <dir>] [--no-policies] [-q|--quiet] \
@@ -47,7 +47,7 @@ datatug query results annotate --id <id> --prompt-stdin
 
 #### REQ: query-input
 
-`query run` MUST accept the query either as a DTQL document (`-f <path>`, YAML or JSON; `-f -` reads stdin) or as `--from <collection>`, which selects every row and every field of one root collection. Exactly one of the two MUST be given; otherwise the command MUST exit 2 with a usage error. Parameters in the query document (`param:` nodes on the right-hand side of a `where` comparison) MUST be substituted from `--var` before execution; an unresolved query parameter MUST exit 2 naming `$name`. A parameter anywhere else (columns, the left-hand side, `orderBy`, `groupBy`, `having`) is not supported and MUST exit 2 naming it.
+`query run` MUST accept the query either as a TugQL document (`-f <path>`, YAML or JSON; `-f -` reads stdin) or as `--from <collection>`, which selects every row and every field of one root collection. Exactly one of the two MUST be given; otherwise the command MUST exit 2 with a usage error. Parameters in the query document (`param:` nodes on the right-hand side of a `where` comparison) MUST be substituted from `--var` before execution; an unresolved query parameter MUST exit 2 naming `$name`. A parameter anywhere else (columns, the left-hand side, `orderBy`, `groupBy`, `having`) is not supported and MUST exit 2 naming it.
 
 #### REQ: limit-flag
 
@@ -121,15 +121,15 @@ With `--result-id`, stdout MUST be one JSON line with no id, no path and no row:
 
 #### REQ: result-data
 
-`data.json` is `{"format":"datatug.query-result.data","version":1,"id":…,"recordset":<apicontract.Recordset>}`, with `$key` first and then the result's columns in **source order**, which is not the order `stdout-rows` prints (stdout keeps its own documented order: request order, else the sorted union). Source order is: for a query that names columns (a DTQL `columns` list, `--from` never does), that list as written; for a query with no `columns` list or a wildcard (`--from <table>`, a DTQL `from` alone), the columns of each source relation in the order the table or view declares them (the project's scanned metadata, by `ordinalPosition`, when the project holds the relation, else the database's own description; a view's SELECT list), the root's first; for a saved or ad-hoc native SQL query, its SELECT list (read from the statement on the same read-only connection, no rows). A column the source order does not name (an alias, a computed value, a source that cannot be read) follows the named ones in sorted order, and a result whose source order is unknown is the sorted union as before. `$key` is the record key, never a field: it is kept in the data (as the first column of every row, holding the record's key, which for most SQL tables is the placeholder `__dalgo_record_id`) so readers that predate the marker keep working, and `meta.json` marks it `"internal": true` (see below); results written before source order existed keep their alphabetical columns and read the same. Every cell is a typed value: integers are kept exact as text, binary becomes `<binary N bytes>` and a nested value its JSON text (recorded as the column's `encoding`), and a column whose values have several kinds is a string column listing them in `observedTypes`. The ad-hoc form MUST stop reading after `--result-rows` + 1 records; a saved query keeps the first `--result-rows` rows of its collected result. A cell over 64 KiB is cut on a UTF-8 boundary (counted in `cutCells`), and rows stop before the file would pass 4,000,000 bytes (`truncatedBy: bytes`).
+`data.json` is `{"format":"datatug.query-result.data","version":1,"id":…,"recordset":<apicontract.Recordset>}`, with `$key` first and then the result's columns in **source order**, which is not the order `stdout-rows` prints (stdout keeps its own documented order: request order, else the sorted union). Source order is: for a query that names columns (a TugQL `columns` list, `--from` never does), that list as written; for a query with no `columns` list or a wildcard (`--from <table>`, a TugQL `from` alone), the columns of each source relation in the order the table or view declares them (the project's scanned metadata, by `ordinalPosition`, when the project holds the relation, else the database's own description; a view's SELECT list), the root's first; for a saved or ad-hoc native SQL query, its SELECT list (read from the statement on the same read-only connection, no rows). A column the source order does not name (an alias, a computed value, a source that cannot be read) follows the named ones in sorted order, and a result whose source order is unknown is the sorted union as before. `$key` is the record key, never a field: it is kept in the data (as the first column of every row, holding the record's key, an opaque identifier supplied by the source reader) so readers that predate the marker keep working, and `meta.json` marks it `"internal": true` (see below); results written before source order existed keep their alphabetical columns and read the same. Every cell is a typed value: integers are kept exact as text, binary becomes `<binary N bytes>` and a nested value its JSON text (recorded as the column's `encoding`), and a column whose values have several kinds is a string column listing them in `observedTypes`. The ad-hoc form MUST stop reading after `--result-rows` + 1 records; a saved query keeps the first `--result-rows` rows of its collected result. A cell over 64 KiB is cut on a UTF-8 boundary (counted in `cutCells`), and rows stop before the file would pass 4,000,000 bytes (`truncatedBy: bytes`).
 
 #### REQ: result-meta
 
-`meta.json` is `{"format":"datatug.query-result.meta","version":1,…}` with `id`, `createdAt`, `expiresAt`, `cliVersion`, `dataBytes`; `db` (`ref`, `project`, `env`, `source`: the full `datatug://<project>/<db>?env=<env>` reference of a source of a registered project, else `null`; and `driver`); `query` (`kind` `from`|`dtql`|`saved`, `dtql` as given or the equivalent document of `--from`, `from`, `savedQueryId` and `savedQueryType` for a saved query, typed `parameters`, and `policy` `none`|`discovered`|`dir`|`explicit`|`project`; and the editor-ready members `text`, `language`, `dbRef` and `params`: `text` is the canonical text the query editor accepts (the DTQL of an ad-hoc or `--from`/`--limit` run; for a saved query, the DTQL or native SQL it holds, which is the person's own saved text and is now copied here; none for a saved HTTP query), `language` is `dtql`|`sql`|`http`, `dbRef` is the `db.ref` reference (absent when the run was not against a registered project source; never a path, connection string or credential) and `params` are the run's own parameters as `[{name, value}]` sorted by name, `value` a typed scalar or set exactly as in `parameters`; `kind` stays `from`|`dtql`|`saved`, and a saved native SQL query is `kind: saved`, `language: sql`); `rows` (`kept`, `hasMore`, `truncatedBy`); `provenance` (`mode` and `observedAt` of an HTTP source, else `null`); `prompt` (`text`, `truncated`, `at`; absent until `query results annotate`, see `result-prompt`); and `columns` (`name`, `type`, `declaredType`, `nullable`, `pk`, `source`, `foreignKeys`, `encoding`, `cutCells`, `observedTypes`, and `internal`: a boolean written only as `true`, today only on `$key`, meaning "bookkeeping, not a field: a consumer that shows fields hides it"; absent in results written before it existed, whose `$key` consumers still hide by name; the recordset column descriptors in `data.json` keep the contract shape `{name, type}`), in the same order as `data.json`, `participants` and `related` (see `result-sources`). It MUST hold no row value, connection string, path, host, user, password, environment variable or policy path. `dtql` and `parameters` past 256 KiB together are dropped (`unavailable.query: too-large`); `text` and `params` have their own 256 KiB bound, past which only those two are dropped and `unavailable.editor: too-large` is set (a consumer can tell dropped from absent; `unavailable.query` keeps meaning the legacy members, whose `parameters` stay so the parameters remain recoverable; results written before the flag lack it and read the same); at most 400 columns are described (`unavailable.columns: too-many`); the file stays within 1 MiB.
+`meta.json` is `{"format":"datatug.query-result.meta","version":1,…}` with `id`, `createdAt`, `expiresAt`, `cliVersion`, `dataBytes`; `db` (`ref`, `project`, `env`, `source`: the full `datatug://<project>/<db>?env=<env>` reference of a source of a registered project, else `null`; and `driver`); `query` (`kind` `from`|`tugql`|`saved`, `tugql` as given or the equivalent document of `--from`, `from`, `savedQueryId` and `savedQueryType` for a saved query, typed `parameters`, and `policy` `none`|`discovered`|`dir`|`explicit`|`project`; and the editor-ready members `text`, `language`, `dbRef` and `params`: `text` is the canonical text the query editor accepts (the TugQL of an ad-hoc or `--from`/`--limit` run; for a saved query, the TugQL or native SQL it holds, which is the person's own saved text and is now copied here; none for a saved HTTP query), `language` is `tugql`|`sql`|`http`, `dbRef` is the `db.ref` reference (absent when the run was not against a registered project source; never a path, connection string or credential) and `params` are the run's own parameters as `[{name, value}]` sorted by name, `value` a typed scalar or set exactly as in `parameters`; `kind` stays `from`|`tugql`|`saved`, and a saved native SQL query is `kind: saved`, `language: sql`); `rows` (`kept`, `hasMore`, `truncatedBy`); `provenance` (`mode` and `observedAt` of an HTTP source, else `null`); `prompt` (`text`, `truncated`, `at`; absent until `query results annotate`, see `result-prompt`); and `columns` (`name`, `type`, `declaredType`, `nullable`, `pk`, `source`, `foreignKeys`, `encoding`, `cutCells`, `observedTypes`, and `internal`: a boolean written only as `true`, today only on `$key`, meaning "bookkeeping, not a field: a consumer that shows fields hides it"; absent in results written before it existed, whose `$key` consumers still hide by name; the recordset column descriptors in `data.json` keep the contract shape `{name, type}`), in the same order as `data.json`, `participants` and `related` (see `result-sources`). It MUST hold no row value, connection string, path, host, user, password, environment variable or policy path. `tugql` and `parameters` past 256 KiB together are dropped (`unavailable.query: too-large`); `text` and `params` have their own 256 KiB bound, past which only those two are dropped and `unavailable.editor: too-large` is set (a consumer can tell dropped from absent; `unavailable.query` keeps meaning the legacy members, whose `parameters` stay so the parameters remain recoverable; results written before the flag lack it and read the same); at most 400 columns are described (`unavailable.columns: too-many`); the file stays within 1 MiB.
 
 #### REQ: result-sources
 
-`participants` MUST come from the query's own tree: one per source occurrence of the DTQL (for `--from`, its one-collection document), with `instance` (`root` or the join path), `schema`, `relation`, `alias`, `kind` (`table`|`view`|`unknown`), `role` (`from`|`join`), the `join` type and its `on` field pairs, and for a federated saved query each participant's own `db` reference. A saved native SQL query has none (`unavailable.participants` and `related`: `native-sql`); a saved HTTP query has one, its collection. `related` MUST come from the chat's join-candidate discovery over the foreign keys that DALgo's engine-neutral schema calls (`dbschema.ListCollections` and `DescribeCollection`, shared with the chat in `pkg/joinmeta`) report for each participant's database: `candidateId`, `fromInstance`, `target` (`schema`, `relation`, `kind`), `constraintId`, `direction`, `cardinality`, the ordered `fields` pairs and `evidence: foreign-key`. A relationship the query already joins is not listed. Nothing is filtered by permission. A provider without schema metadata, or a database that declares no foreign keys, gives `related: []` with `unavailable.related: no-relationship-metadata`; a schema that cannot be read gives `schema-unreadable`; over 500 collections gives `too-many`. A column that reads one source's field directly gets that field's `source`, portable `declaredType`, `nullable`, primary-key position and foreign keys, and its data type follows the declared type when every value fits it; where the definition cannot be read they stay `null` with `unavailable.declaredTypes`. At most 32 participants and 200 related are kept (`too-many`). Reading this metadata reads no row of any table.
+`participants` MUST come from the query's own tree: one per source occurrence of the TugQL (for `--from`, its one-collection document), with `instance` (`root` or the join path), `schema`, `relation`, `alias`, `kind` (`table`|`view`|`unknown`), `role` (`from`|`join`), the `join` type and its `on` field pairs, and for a federated saved query each participant's own `db` reference. A saved native SQL query has none (`unavailable.participants` and `related`: `native-sql`); a saved HTTP query has one, its collection. `related` MUST come from the chat's join-candidate discovery over the foreign keys that DALgo's engine-neutral schema calls (`dbschema.ListCollections` and `DescribeCollection`, shared with the chat in `pkg/joinmeta`) report for each participant's database: `candidateId`, `fromInstance`, `target` (`schema`, `relation`, `kind`), `constraintId`, `direction`, `cardinality`, the ordered `fields` pairs and `evidence: foreign-key`. A relationship the query already joins is not listed. Nothing is filtered by permission. A provider without schema metadata, or a database that declares no foreign keys, gives `related: []` with `unavailable.related: no-relationship-metadata`; a schema that cannot be read gives `schema-unreadable`; over 500 collections gives `too-many`. A column that reads one source's field directly gets that field's `source`, portable `declaredType`, `nullable`, primary-key position and foreign keys, and its data type follows the declared type when every value fits it; where the definition cannot be read they stay `null` with `unavailable.declaredTypes`. At most 32 participants and 200 related are kept (`too-many`). Reading this metadata reads no row of any table.
 
 #### REQ: result-prompt
 
@@ -161,7 +161,7 @@ A result lives 7 days. Every `--result-id` write MUST prune expired results, res
 
 ### AC: query-file-stdin (verifies REQ:query-input)
 
-**Given** a DTQL document on stdin selecting `name` from `products` where `price >= 10`
+**Given** a TugQL document on stdin selecting `name` from `products` where `price >= 10`
 **When** the user runs `datatug query run --db ingitdb://<dir> -f - --format json --no-policies`
 **Then** stdout contains only the matching products with `$key` and `name`, and the exit code is 0.
 
@@ -173,7 +173,7 @@ A result lives 7 days. Every `--result-id` write MUST prune expired results, res
 
 ### AC: query-param-substituted (verifies REQ:query-input)
 
-**Given** a DTQL document whose `where` compares `price` with `{ param: minPrice }`
+**Given** a TugQL document whose `where` compares `price` with `{ param: minPrice }`
 **When** the user runs it with `--var minPrice=10 --no-policies`, and again without `--var`
 **Then** the first run returns the two products priced 10 or more, and the second exits 2 naming `$minPrice`.
 
@@ -263,25 +263,25 @@ A result lives 7 days. Every `--result-id` write MUST prune expired results, res
 
 ### AC: hidden-field-filter-denied (verifies REQ:secured-execution)
 
-**Given** the same policy and a DTQL document whose `where` is `passwordHash == "h1"`
+**Given** the same policy and a TugQL document whose `where` is `passwordHash == "h1"`
 **When** the user runs it as alice
 **Then** stdout is empty, stderr names `passwordHash`, and the exit code is 5.
 
 ### AC: hidden-field-select-denied (verifies REQ:secured-execution)
 
-**Given** the same policy and a DTQL document selecting `name` and `passwordHash`
+**Given** the same policy and a TugQL document selecting `name` and `passwordHash`
 **When** the user runs it as alice
 **Then** stdout is empty, stderr names `passwordHash`, and the exit code is 5.
 
 ### AC: alias-refused-under-field-lists (verifies REQ:secured-execution)
 
-**Given** the same policy and a DTQL document selecting `passwordHash` as `public_hash`
+**Given** the same policy and a TugQL document selecting `passwordHash` as `public_hash`
 **When** the user runs it as alice
 **Then** stdout is empty, stderr names `public_hash`, and the exit code is 2.
 
 ### AC: param-outside-where-exit-2 (verifies REQ:query-input)
 
-**Given** a DTQL document whose `orderBy` is `{ param: col }`
+**Given** a TugQL document whose `orderBy` is `{ param: col }`
 **When** the user runs it with `--var col=name`
 **Then** the command exits 2 naming `$col`.
 
@@ -323,7 +323,7 @@ A result lives 7 days. Every `--result-id` write MUST prune expired results, res
 
 ### AC: header-follows-request-order (verifies REQ:stdout-rows)
 
-**Given** the global policy and a DTQL document selecting `name` then `email` from `customers`
+**Given** the global policy and a TugQL document selecting `name` then `email` from `customers`
 **When** the user runs it as alice with `--format csv`
 **Then** the header is `$key,name,email` (request order, not the sorted union) and no `passwordHash` column appears.
 
@@ -359,7 +359,7 @@ A result lives 7 days. Every `--result-id` write MUST prune expired results, res
 
 ### AC: result-meta-describes-the-run (verifies REQ:result-meta)
 
-**Given** a DTQL file with a parameter, a `datatug://` reference of a registered project, an HTTP source and saved DTQL, SQL and HTTP queries
+**Given** a TugQL file with a parameter, a `datatug://` reference of a registered project, an HTTP source and saved TugQL, SQL and HTTP queries
 **When** each runs with `--result-id`
 **Then** `meta.json` holds the query text, the typed parameters and the policy mode (never the policy path), the full reference with project, environment and source for the reference (and `null` for a path or an unregistered project), the provenance mode of the HTTP source (never its URL), and `kind: saved` with `savedQueryId`, `savedQueryType` and `policy: project` for the saved queries.
 
@@ -372,7 +372,7 @@ A result lives 7 days. Every `--result-id` write MUST prune expired results, res
 ### AC: result-sources-and-related (verifies REQ:result-sources)
 
 **Given** the Chinook SQLite fixture and the same tables on a PostgreSQL server
-**When** `--from Invoice` and the DTQL `Invoice JOIN Customer ON Invoice.CustomerId = Customer.CustomerId` run with `--result-id`
+**When** `--from Invoice` and the TugQL `Invoice JOIN Customer ON Invoice.CustomerId = Customer.CustomerId` run with `--result-id`
 **Then** `--from Invoice` relates `Customer` (outgoing, many-to-one) and `InvoiceLine` (incoming, one-to-many); the join lists `Invoice` (from) and `Customer` (join, with its `on` pair) and relates `InvoiceLine` and `Employee` (outgoing from Customer by `SupportRepId`), never the Invoice-Customer key it already joins; PostgreSQL gives the same lists; an HTTP source gives `related: []` with `no-relationship-metadata`; a saved native SQL query gives `native-sql`; a federated saved query's participants carry their databases' references; and no `meta.json` holds a row value, the database path, or the PostgreSQL user, host or password.
 
 ### AC: results-pruned-and-removed (verifies REQ:result-lifetime)
@@ -388,7 +388,7 @@ A result lives 7 days. Every `--result-id` write MUST prune expired results, res
   - `ParseVariables` (name grammar, reserved names, YAML scalar or sequence values).
   - `Run(ctx, session, query, Options) (Result, error)`: principal and variables on the context, query-parameter placement and substitution (`condeval.Substitute` + `dal.WithWhere`), the alias refusal and the hidden-field reference check over columns and clauses against every field list DALgo's decisions expose (`Decision.Writes`, mirroring DALgo's pattern matcher), `access.SecureReadSession`, and `Result{Reader, Lines}`; running with no policies requires `Options.Unrestricted`.
   - `Line{Policy, Source, Resource, Rule, Allowed, Condition, Bindings, FieldLists, Via, Explanation}` with `String()` rendering the pinned report format; `Explain` produces the lines from one `Decide` per policy.
-- `apps/datatugapp/commands/cmd_query.go`: the `query` group (help only) and `run`: flags, DTQL/`--from` query construction, `pkg/dbcopy` URL backend, exit-code mapping, and row formatting (`query_output.go`: rows normalised to JSON-shaped maps; `grid`, `json`, `jsonl`, `yaml`, `csv`).
+- `apps/datatugapp/commands/cmd_query.go`: the `query` group (help only) and `run`: flags, TugQL/`--from` query construction, `pkg/dbcopy` URL backend, exit-code mapping, and row formatting (`query_output.go`: rows normalised to JSON-shaped maps; `grid`, `json`, `jsonl`, `yaml`, `csv`).
 - `pkg/queryresults`: the result store (root checks, atomic writes, locate, prune, remove), the collector that builds `data.json` within its bounds, and the `meta.json` types; `apps/datatugapp/commands/query_result_files.go` connects it to both forms of `query run`, and `cmd_query_results.go` is `query results`. The Git checks are `pkg/gitpath`, shared with `pkg/executionstore`.
 - `~/.datatug/` sits beside the umbrella's proposed `~/.datatug.yaml`; `DATATUG_POLICIES_DIR` follows its `DATATUG_*` naming.
 - No change to DALgo.
@@ -416,7 +416,7 @@ Deferred — no `specscore rehearse` scenarios yet; the command tests below are 
 - Writing data through policies (the command is read-only).
 - Project-scoped policies (`<project>/policies/`) and policy management verbs (`datatug policy list|check`).
 - Pagination and cursors; the query runs once and the rows are buffered before output.
-- Joins: DTQL documents do not express them, so the report covers the base collection only.
+- Joins: TugQL documents do not express them, so the report covers the base collection only.
 
 ## Open Questions
 

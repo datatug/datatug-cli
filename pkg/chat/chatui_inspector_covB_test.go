@@ -66,7 +66,7 @@ func focusedGridStoreBackedTestUI(t *testing.T, query QueryResult) *ChatUI {
 func TestChatUIGridKeyQOpensSaveQueryDialog(t *testing.T) {
 	t.Parallel()
 	u := focusedGridStoreBackedTestUI(t, QueryResult{
-		Title: "Widgets", DTQL: "from: {name: Widget}\nlimit: 2\n",
+		Title: "Widgets", TugQL: "from: {name: Widget}\nlimit: 2\n",
 		Result: secureread.Result{Columns: []string{"Id", "Name"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 1, "Name": "Alpha"}}}},
 	})
 	u.savedQueryService = &savedQueryStub{}
@@ -332,7 +332,7 @@ func TestChatUIOpenCellDetailQualifiedColumnButNoJoinApplicationSkipsPreview(t *
 		t.Fatal(err)
 	}
 	if _, err := store.AppendQuery(ctx, sessions.activeID, user.ID, "sqlite:///fixture.db", QueryResult{
-		Title: "Invoices", DTQL: "from: {name: Invoice}\ncolumns: [{field: CustomerId}]\nlimit: 5\n",
+		Title: "Invoices", TugQL: "from: {name: Invoice}\ncolumns: [{field: CustomerId}]\nlimit: 5\n",
 		Result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 1}}}},
 	}); err != nil {
 		t.Fatal(err)
@@ -451,7 +451,7 @@ func TestChatUIOpenSaveQueryDialogGuardsAndBranches(t *testing.T) {
 	if cmd := u.openSaveQueryDialog(); cmd != nil {
 		t.Fatal("expected no command without a focused RecordSet")
 	}
-	if !strings.Contains(u.shell.View().Content, "Focus a DTQL or HTTP result") {
+	if !strings.Contains(u.shell.View().Content, "Focus a TugQL or HTTP result") {
 		t.Fatalf("expected the focus-a-result hint:\n%s", u.shell.View().Content)
 	}
 
@@ -550,18 +550,18 @@ func TestChatUIOpenSaveQueryDialogHTTPNonGETMethod(t *testing.T) {
 	}
 }
 
-// TestChatUIOpenSaveQueryDialogDTQLWithParametersIsRejected covers
-// openSaveQueryDialog's DTQL-parameterized-result branch.
-func TestChatUIOpenSaveQueryDialogDTQLWithParametersIsRejected(t *testing.T) {
+// TestChatUIOpenSaveQueryDialogTugQLWithParametersIsRejected covers
+// openSaveQueryDialog's TugQL-parameterized-result branch.
+func TestChatUIOpenSaveQueryDialogTugQLWithParametersIsRejected(t *testing.T) {
 	t.Parallel()
 	u := focusedGridStoreBackedTestUI(t, QueryResult{
-		Title: "Filtered", DTQL: "from: {name: Customer}\nlimit: {parameter: n}\n",
+		Title: "Filtered", TugQL: "from: {name: Customer}\nlimit: {parameter: n}\n",
 		Parameters: map[string]any{"n": nil},
 		Result:     secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 1}}}},
 	})
 	u.savedQueryService = &savedQueryStub{}
 	if cmd := u.openSaveQueryDialog(); cmd != nil {
-		t.Fatal("expected no command for a parameterized DTQL result")
+		t.Fatal("expected no command for a parameterized TugQL result")
 	}
 	if !strings.Contains(u.shell.View().Content, "parameters") {
 		t.Fatalf("expected the parameterized-result hint:\n%s", u.shell.View().Content)
@@ -570,7 +570,7 @@ func TestChatUIOpenSaveQueryDialogDTQLWithParametersIsRejected(t *testing.T) {
 
 // TestChatUIOpenSaveQueryDialogUnsavableRecordSetFallsBack covers
 // openSaveQueryDialog's final "request.Type == ”" fallback: a RecordSet
-// with neither an HTTPResponseID nor a DTQL.
+// with neither an HTTPResponseID nor a TugQL.
 func TestChatUIOpenSaveQueryDialogUnsavableRecordSetFallsBack(t *testing.T) {
 	t.Parallel()
 	u := focusedGridStoreBackedTestUI(t, QueryResult{
@@ -581,7 +581,7 @@ func TestChatUIOpenSaveQueryDialogUnsavableRecordSetFallsBack(t *testing.T) {
 	if cmd := u.openSaveQueryDialog(); cmd != nil {
 		t.Fatal("expected no command for an unsavable RecordSet")
 	}
-	if !strings.Contains(u.shell.View().Content, "Focus a DTQL or HTTP result") {
+	if !strings.Contains(u.shell.View().Content, "Focus a TugQL or HTTP result") {
 		t.Fatalf("expected the focus-a-result fallback hint:\n%s", u.shell.View().Content)
 	}
 }
@@ -733,7 +733,7 @@ func TestChatUIHandleSaveQueryDoneSuccessReportsTitle(t *testing.T) {
 func TestSaveQueryOverlayViewShowsTagChipsAndError(t *testing.T) {
 	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
-	o := newSaveQueryOverlay(u, SavedQuerySaveRequest{Title: "Q", Type: "DTQL"})
+	o := newSaveQueryOverlay(u, SavedQuerySaveRequest{Title: "Q", Type: "TugQL"})
 	o.tags = []string{"reporting", "weekly"}
 	o.err = "Something went wrong."
 	view := ansi.Strip(o.View(60, 20))
@@ -985,7 +985,7 @@ func TestChatUIOpenCellDetailFetchesRelatedRecordsAsync(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := store.AppendQuery(ctx, sessions.activeID, user.ID, "sqlite:///fixture.db", QueryResult{
-		Title: "Invoices", DTQL: "from: {name: Invoice}\ncolumns: [{field: CustomerId}]\nlimit: 5\n",
+		Title: "Invoices", TugQL: "from: {name: Invoice}\ncolumns: [{field: CustomerId}]\nlimit: 5\n",
 		Result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 1}}}},
 	}); err != nil {
 		t.Fatal(err)
@@ -996,7 +996,7 @@ func TestChatUIOpenCellDetailFetchesRelatedRecordsAsync(t *testing.T) {
 		t.Fatal(err)
 	}
 	// columnMeta's "qualified" attribution (openCellDetail's own gate for
-	// starting the async preview) needs a catalog table matching the DTQL's
+	// starting the async preview) needs a catalog table matching the TugQL's
 	// relation, not just a configured join application -- the JOIN-picker
 	// path chatui_test.go's TestChatUIInlineFKJoinNavigationAndApply drives
 	// doesn't share this requirement, hence the distinct setup here.

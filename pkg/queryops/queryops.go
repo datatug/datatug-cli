@@ -1,6 +1,6 @@
-// Package queryops derives bounded, previewable DTQL operations without running
+// Package queryops derives bounded, previewable TugQL operations without running
 // a query or resolving any source. It only transforms DALgo's typed AST and
-// returns a canonical DTQL document for the caller to inspect or submit.
+// returns a canonical TugQL document for the caller to inspect or submit.
 package queryops
 
 import (
@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 )
 
 var (
@@ -37,9 +37,9 @@ type SortTerm struct {
 	Descending bool
 }
 
-// Preview is the exact validated DTQL document and its resulting projection.
+// Preview is the exact validated TugQL document and its resulting projection.
 type Preview struct {
-	DTQL          string
+	TugQL         string
 	OutputColumns []string
 	Scope         Scope
 }
@@ -54,13 +54,13 @@ var safeAlias = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // DeriveGroup creates a bounded query preview grouped by selected projected
 // columns. Count adds only an explicit COUNT(*) output; no other aggregates are
 // inferred. Empty groupColumns is refused.
-func DeriveGroup(originalDTQL string, groupColumns []string, count bool, scope Scope) (Preview, error) {
-	return DeriveGroupAggregates(originalDTQL, groupColumns, count, nil, scope)
+func DeriveGroup(originalTugQL string, groupColumns []string, count bool, scope Scope) (Preview, error) {
+	return DeriveGroupAggregates(originalTugQL, groupColumns, count, nil, scope)
 }
 
 // DeriveSort creates a bounded query preview ordered by selected projected
 // columns. It deliberately replaces the query's final ordering and output cap.
-func DeriveSort(originalDTQL string, terms []SortTerm, scope Scope) (Preview, error) {
+func DeriveSort(originalTugQL string, terms []SortTerm, scope Scope) (Preview, error) {
 	if len(terms) == 0 {
 		return Preview{}, fmt.Errorf("%w: sorting needs at least one selected column", ErrInvalidColumn)
 	}
@@ -68,7 +68,7 @@ func DeriveSort(originalDTQL string, terms []SortTerm, scope Scope) (Preview, er
 	for i, term := range terms {
 		names[i] = term.Column
 	}
-	query, err := parseOriginal(originalDTQL)
+	query, err := parseOriginal(originalTugQL)
 	if err != nil {
 		return Preview{}, err
 	}
@@ -117,29 +117,29 @@ func DeriveSort(originalDTQL string, terms []SortTerm, scope Scope) (Preview, er
 
 func parseOriginal(raw string) (dal.StructuredQuery, error) {
 	if strings.TrimSpace(raw) == "" {
-		return nil, fmt.Errorf("%w: empty DTQL", ErrUnsupported)
+		return nil, fmt.Errorf("%w: empty TugQL", ErrUnsupported)
 	}
-	query, err := dtql.Deserialize([]byte(raw))
+	query, err := tugql.Deserialize([]byte(raw))
 	if err != nil || query.From() == nil || dal.ValidateJoinTree(query.From()) != nil {
-		return nil, fmt.Errorf("%w: invalid original DTQL: %v", ErrUnsupported, err)
+		return nil, fmt.Errorf("%w: invalid original TugQL: %v", ErrUnsupported, err)
 	}
 	return query, nil
 }
 
 func serializePreview(query dal.StructuredQuery, columns []string, scope Scope) (Preview, error) {
-	encoded, err := dtql.Serialize(query)
+	encoded, err := tugql.Serialize(query)
 	var parsed dal.StructuredQuery
 	if err == nil {
-		parsed, err = dtql.Deserialize(encoded)
+		parsed, err = tugql.Deserialize(encoded)
 	}
 	var roundTrip []byte
 	if err == nil {
-		roundTrip, err = dtql.Serialize(parsed)
+		roundTrip, err = tugql.Serialize(parsed)
 	}
 	if err != nil || !bytes.Equal(encoded, roundTrip) {
-		return Preview{}, fmt.Errorf("%w: derived query cannot be represented as DTQL: %v", ErrUnsupported, err)
+		return Preview{}, fmt.Errorf("%w: derived query cannot be represented as TugQL: %v", ErrUnsupported, err)
 	}
-	return Preview{DTQL: string(encoded), OutputColumns: append([]string(nil), columns...), Scope: scope}, nil
+	return Preview{TugQL: string(encoded), OutputColumns: append([]string(nil), columns...), Scope: scope}, nil
 }
 
 func resolveProjection(query dal.StructuredQuery, names []string, scope Scope) ([]projectedColumn, error) {

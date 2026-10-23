@@ -7,14 +7,14 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 )
 
 func httpResponseChanged(current, previous HTTPResponse) bool {
 	return current.StatusCode != previous.StatusCode || current.ContentType != previous.ContentType || !bytes.Equal(current.Body, previous.Body)
 }
 
-// RefreshRecordSet re-executes the exact stored DTQL through the normal,
+// RefreshRecordSet re-executes the exact stored TugQL through the normal,
 // policy-bound DataTug executor and appends an immutable result version.
 func (c *SessionChat) RefreshRecordSet(ctx context.Context, sessionID, recordSetID string) (ChatSession, error) {
 	c.mu.Lock()
@@ -40,12 +40,12 @@ func (c *SessionChat) RefreshRecordSet(ctx context.Context, sessionID, recordSet
 	if !ok || !storedSourceNames(record.Source, live) {
 		return ChatSession{}, fmt.Errorf("the saved data source is no longer available")
 	}
-	doc := strings.TrimSpace(record.DTQL)
-	query, err := dtql.Deserialize([]byte(doc))
+	doc := strings.TrimSpace(record.TugQL)
+	query, err := tugql.Deserialize([]byte(doc))
 	if err != nil || query.Limit() < 1 || query.Limit() > maxRows {
 		return ChatSession{}, fmt.Errorf("the saved query is no longer valid")
 	}
-	result, err := c.queryExecutor.RunDTQL(ctx, live, []byte(doc), record.Parameters)
+	result, err := c.queryExecutor.RunTugQL(ctx, live, []byte(doc), record.Parameters)
 	if err != nil {
 		return ChatSession{}, fmt.Errorf("query failed: %s", publicQueryError(err, record.Parameters))
 	}
@@ -56,7 +56,7 @@ func (c *SessionChat) RefreshRecordSet(ctx context.Context, sessionID, recordSet
 	if err != nil {
 		return ChatSession{}, err
 	}
-	_, err = c.store.AppendQuery(ctx, session.ID, origin.ID, live, QueryResult{Title: record.Title, DTQL: doc, Source: live, SourceID: record.Database, Parameters: record.Parameters, Result: result, RefreshParentID: record.ID})
+	_, err = c.store.AppendQuery(ctx, session.ID, origin.ID, live, QueryResult{Title: record.Title, TugQL: doc, Source: live, SourceID: record.Database, Parameters: record.Parameters, Result: result, RefreshParentID: record.ID})
 	if err != nil {
 		return ChatSession{}, err
 	}

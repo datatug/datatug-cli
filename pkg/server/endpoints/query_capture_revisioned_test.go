@@ -126,12 +126,12 @@ func TestCaptureQuery_RealStore_CreateLandsAsAnUncommittedPair(t *testing.T) {
 	}
 
 	folder := filepath.Join(projectDir, "queries", "customers")
-	body, err := os.ReadFile(filepath.Join(folder, "customer-invoices-captured.query.dtql"))
+	body, err := os.ReadFile(filepath.Join(folder, "customer-invoices-captured.query.tugql.yaml"))
 	if err != nil {
-		t.Fatalf("the DTQL body sidecar was not written: %v", err)
+		t.Fatalf("the TugQL body sidecar was not written: %v", err)
 	}
-	if string(body) != captureTestDTQL {
-		t.Errorf("body = %q, want the captured DTQL", body)
+	if string(body) != captureTestTugQL {
+		t.Errorf("body = %q, want the captured TugQL", body)
 	}
 	metadata, err := os.ReadFile(filepath.Join(folder, "customer-invoices-captured.query.json"))
 	if err != nil {
@@ -141,7 +141,7 @@ func TestCaptureQuery_RealStore_CreateLandsAsAnUncommittedPair(t *testing.T) {
 	if err := json.Unmarshal(metadata, &stored); err != nil {
 		t.Fatal(err)
 	}
-	if stored.Type != datatug.QueryTypeDTQL || stored.Purpose != req.Query.Purpose || stored.Text != "" {
+	if stored.Type != datatug.QueryTypeTugQL || stored.Purpose != req.Query.Purpose || stored.Text != "" {
 		t.Errorf("metadata = %s", metadata)
 	}
 	if len(stored.Parameters) != 1 || stored.Parameters[0].Meta == nil || *stored.Parameters[0].Meta != (datatug.EntityFieldRef{Entity: "Customer", Field: "ID"}) {
@@ -177,7 +177,7 @@ func TestCaptureQuery_RealStore_CreateLandsAsAnUncommittedPair(t *testing.T) {
 		t.Errorf("capture made a Git commit: %s commits", got)
 	}
 	status := runGit(t, projectDir, "status", "--porcelain", "--untracked-files=all")
-	for _, want := range []string{"?? queries/customers/customer-invoices-captured.query.json", "?? queries/customers/customer-invoices-captured.query.dtql"} {
+	for _, want := range []string{"?? queries/customers/customer-invoices-captured.query.json", "?? queries/customers/customer-invoices-captured.query.tugql.yaml"} {
 		if !strings.Contains(status, want) {
 			t.Errorf("git status does not show %q as an uncommitted change:\n%s", want, status)
 		}
@@ -327,7 +327,7 @@ func TestCapturedQueryDef_RoundTrips(t *testing.T) {
 		t.Errorf("round trip = %+v, want %+v", got, record)
 	}
 	record.Query.Parameters, record.Query.BindingOrigins = []capturedParameter{}, []captureBindingOrigin{}
-	record.Query.DTQL = "from:\n  name: Invoice\n"
+	record.Query.TugQL = "from:\n  name: Invoice\n"
 	if got := capturedRecordOf(capturedQueryDef(record)); !reflect.DeepEqual(got, record) {
 		t.Errorf("parameterless round trip = %+v, want %+v", got, record)
 	}

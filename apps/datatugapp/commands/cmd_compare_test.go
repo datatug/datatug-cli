@@ -172,7 +172,7 @@ func TestCompareCommandInfersLiveMappedKeyThroughRealServer(t *testing.T) {
 	queryDir := filepath.Join(projectDir, "queries")
 	require.NoError(t, os.MkdirAll(queryDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(queryDir, "shipping-rate-config.query.json"), []byte(`{
-      "createdAt":"2026-01-01T00:00:00Z","id":"shipping-rate-config","title":"Shipping rates","type":"DTQL",
+      "createdAt":"2026-01-01T00:00:00Z","id":"shipping-rate-config","title":"Shipping rates","type":"TugQL",
       "recordsets":[{
         "id":"rates","title":"Rates","type":"recordset",
         "primaryKey":{"name":"PK_Rate","columns":["id"]},
@@ -183,7 +183,7 @@ func TestCompareCommandInfersLiveMappedKeyThroughRealServer(t *testing.T) {
         ]
       }]
     }`), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(queryDir, "shipping-rate-config.query.dtql"), []byte("from:\n  name: Rate\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(queryDir, "shipping-rate-config.query.tugql.yaml"), []byte("from:\n  name: Rate\n"), 0o600))
 	projectStore := filestore.NewProjectStore(projectID, projectDir)
 	registerEnvironment := func(environment string, rows [][3]any) {
 		t.Helper()

@@ -224,7 +224,10 @@ func TestSessionAndTelemetryRecordTheDecision(t *testing.T) {
 			sessions.ConfigureTelemetry(reporter, ai.ClientContext{InstallationID: "550e8400-e29b-41d4-a716-446655440000"})
 			if streaming {
 				seq, finish := sessions.StreamAsk(ctx, narrowingQuestion)
-				for range seq {
+				for _, streamErr := range seq {
+					if streamErr != nil {
+						t.Fatal(streamErr)
+					}
 				}
 				if _, err := finish(); err != nil {
 					t.Fatal(err)

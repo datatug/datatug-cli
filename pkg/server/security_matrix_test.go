@@ -27,7 +27,7 @@ import (
 // This file is the Feature core-investigation-loop security matrix at the
 // HTTP level (brief item 3/4, plan tasks 6 and 12): restricted-rows-and-
 // columns-server, hidden-column-refused, native-sql-labelled and
-// dtql-query-runs, run against a synthetic project shaped like
+// tugql-query-runs, run against a synthetic project shaped like
 // datatug-demo-projects/demo-project-1's Customer table and
 // policies/customers.yaml (row-restricted-by-Country, Email hidden for
 // `support`) — the real demo project ships no committed .sqlite file, so
@@ -93,10 +93,10 @@ bindings:
     support: [support]
 `
 
-// customerByIDDTQL selects every field of Customer filtered by CustomerId, the
+// customerByIDTugQL selects every field of Customer filtered by CustomerId, the
 // same "wildcard select, policy hides the rest" shape
-// core-investigation-loop's saved DTQL queries use.
-const customerByIDDTQL = `from:
+// core-investigation-loop's saved TugQL queries use.
+const customerByIDTugQL = `from:
   name: Customer
 where:
   op: "=="
@@ -106,11 +106,11 @@ where:
     param: CustomerId
 `
 
-// customerEmailExplicitDTQL explicitly selects the Email column — the
+// customerEmailExplicitTugQL explicitly selects the Email column — the
 // hand-crafted "ask for the hidden column directly" shape AC
 // hidden-column-refused exercises: an explicit reference must be refused
 // outright, not silently redacted.
-const customerEmailExplicitDTQL = `from:
+const customerEmailExplicitTugQL = `from:
   name: Customer
 columns:
   - field: CustomerId
@@ -146,7 +146,7 @@ func securityMatrixSession(t *testing.T, as, role string) secureread.Session {
 // newSecurityMatrixProject builds a synthetic project directory: a SQLite
 // fixture DB with a Customer table (two rows: a Brazilian and a Canadian
 // customer), an environment + DB catalog pointing at it (DbModel AND
-// catalog ID both "chinook" — see securityMatrixSource), and a saved DTQL
+// catalog ID both "chinook" — see securityMatrixSource), and a saved TugQL
 // query ("customer-by-id") and a saved SQL query ("customers-sql"). It
 // returns the pathsByID map ServeHTTP expects and the project ID.
 func newSecurityMatrixProject(t *testing.T) (map[string]string, string) {
@@ -220,12 +220,16 @@ func newSecurityMatrixProject(t *testing.T) (map[string]string, string) {
 		if err := os.WriteFile(filepath.Join(queriesDir, id+".query.json"), encoded, 0o600); err != nil {
 			t.Fatalf("write query json %s: %v", id, err)
 		}
-		sidecar := fmt.Sprintf("%s.query.%s", id, strings.ToLower(string(queryType)))
+		extension := strings.ToLower(string(queryType))
+		if queryType == datatug.QueryTypeTugQL {
+			extension += ".yaml"
+		}
+		sidecar := fmt.Sprintf("%s.query.%s", id, extension)
 		if err := os.WriteFile(filepath.Join(queriesDir, sidecar), []byte(text), 0o600); err != nil {
 			t.Fatalf("write query sidecar %s: %v", id, err)
 		}
 	}
-	saveQuery("customer-by-id", "Customer by ID", datatug.QueryTypeDTQL, customerByIDDTQL,
+	saveQuery("customer-by-id", "Customer by ID", datatug.QueryTypeTugQL, customerByIDTugQL,
 		datatug.Parameters{{ID: "CustomerId", Type: "integer", IsRequired: true}})
 	// customers-sql declares NO parameters: its text lists every customer
 	// unconditionally, matching requiresSQLParameterBinding's "unparameterized
@@ -299,7 +303,7 @@ func intParam(id string, value int64) (apicontract.TypedValue, apicontract.Bindi
 
 // TestRunQuery_RestrictedRowsAndColumns is AC restricted-rows-and-columns-server:
 // `datatug serve --as <support>`; POST /datatug/exec/run_query runs a saved
-// DTQL query for a Brazilian customer (zero rows, rowsFiltered) and then a
+// TugQL query for a Brazilian customer (zero rows, rowsFiltered) and then a
 // Canadian customer (rows without Email, hiddenColumns=[Email]); agent-info
 // reports principal support with its explicit role.
 func TestRunQuery_RestrictedRowsAndColumns(t *testing.T) {
@@ -397,10 +401,10 @@ func TestRunQuery_RestrictedRowsAndColumns(t *testing.T) {
 	})
 }
 
-// TestRunQuery_DTQL_RunsForAdmin is (the admin half of) AC dtql-query-runs:
-// a saved DTQL query runs through the policy path and returns rows, with
+// TestRunQuery_TugQL_RunsForAdmin is (the admin half of) AC tugql-query-runs:
+// a saved TugQL query runs through the policy path and returns rows, with
 // execution-confirmed bindingsApplied.
-func TestRunQuery_DTQL_RunsForAdmin(t *testing.T) {
+func TestRunQuery_TugQL_RunsForAdmin(t *testing.T) {
 	pathsByID, projectID := newSecurityMatrixProject(t)
 	session := securityMatrixSession(t, "boss", "admin")
 	baseURL := startServeHTTPWithSession(t, pathsByID, session)
@@ -443,7 +447,7 @@ func TestRunQuery_DTQL_RunsForAdmin(t *testing.T) {
 }
 
 // TestRunQuery_HiddenColumnExplicit_Refused is AC hidden-column-refused: a
-// hand-crafted ad-hoc DTQL document that explicitly selects Email must be
+// hand-crafted ad-hoc TugQL document that explicitly selects Email must be
 // refused with ACCESS_DENIED and no row data, naming the field but never
 // leaking the hidden value.
 func TestRunQuery_HiddenColumnExplicit_Refused(t *testing.T) {
@@ -455,7 +459,7 @@ func TestRunQuery_HiddenColumnExplicit_Refused(t *testing.T) {
 	value, origin := intParam("CustomerId", 2)
 	request := apicontract.ExecutionRequest{
 		Project: projectID, Environment: securityMatrixEnv, SecurityContextID: info.SecurityContextID,
-		Source: securityMatrixSource, DTQL: customerEmailExplicitDTQL,
+		Source: securityMatrixSource, TugQL: customerEmailExplicitTugQL,
 		Parameters:     map[string]apicontract.TypedValueOrSet{"CustomerId": apicontract.ScalarValue(value)},
 		BindingOrigins: []apicontract.BindingOriginEntry{origin},
 		Mode:           apicontract.ProvenanceModeLive,

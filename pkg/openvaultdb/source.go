@@ -13,9 +13,9 @@ import (
 
 	"github.com/dal-go/dalgo/access"
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
-	az "github.com/dal-go/dalgo/dtql/authorization"
 	"github.com/dal-go/dalgo/recordset"
+	"github.com/dal-go/dalgo/tugql"
+	az "github.com/dal-go/dalgo/tugql/authorization"
 	"github.com/dal-go/record"
 )
 
@@ -108,7 +108,7 @@ func (s *source) ExecuteQueryToRecordsReader(ctx context.Context, q dal.Query) (
 	if !ok {
 		return nil, dal.ErrNotSupported
 	}
-	doc, err := dtql.Serialize(query)
+	doc, err := tugql.Serialize(query)
 	if err != nil {
 		return nil, err
 	}

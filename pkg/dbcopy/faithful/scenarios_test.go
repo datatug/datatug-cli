@@ -575,7 +575,7 @@ func TestChaosSweep(t *testing.T) {
 		t.Run(s.name, func(t *testing.T) {
 			t.Parallel()
 			base := &faultPlan{}
-			runScenario(t, s, base, false)
+			func() { scoped := &scenarioRunScope{TB: t}; defer scoped.close(); runScenario(scoped, s, base, false) }()
 			n := base.total()
 			if n == 0 {
 				t.Fatal("the scenario made no call")
@@ -597,7 +597,9 @@ func TestChaosSweep(t *testing.T) {
 						done := make(chan struct{})
 						go func() {
 							defer close(done)
-							runScenario(t, s, &faultPlan{failAt: r.k, mode: r.mode}, false)
+							scoped := &scenarioRunScope{TB: t}
+							defer scoped.close()
+							runScenario(scoped, s, &faultPlan{failAt: r.k, mode: r.mode}, false)
 						}()
 						<-done
 					}
@@ -619,3 +621,26 @@ func TestChaosSweep(t *testing.T) {
 }
 
 var _ = fmt.Sprint
+
+// scenarioRunScope preserves the parent test's assertions but releases each fault
+// run's connections and directories before the next run. Registering those on the
+// parent retained every sql.DB opener until an entire exhaustive sweep completed.
+type scenarioRunScope struct {
+	testing.TB
+	cleanups []func()
+}
+
+func (s *scenarioRunScope) Cleanup(cleanup func()) { s.cleanups = append(s.cleanups, cleanup) }
+func (s *scenarioRunScope) TempDir() string {
+	directory, err := os.MkdirTemp("", "datatug-chaos-run-*")
+	if err != nil {
+		s.Fatal(err)
+	}
+	s.Cleanup(func() { _ = os.RemoveAll(directory) })
+	return directory
+}
+func (s *scenarioRunScope) close() {
+	for i := len(s.cleanups) - 1; i >= 0; i-- {
+		s.cleanups[i]()
+	}
+}

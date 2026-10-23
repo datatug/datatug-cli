@@ -51,7 +51,7 @@ func AgentInfo(w http.ResponseWriter, r *http.Request) {
 		Projects:          projects,
 		Capabilities: apicontract.AgentCapabilities{
 			// ProtectedQueries: this process can always run policy-enforced
-			// DTQL/structured execution (REQ:server-acl-all-reads) — true
+			// TugQL/structured execution (REQ:server-acl-all-reads) — true
 			// even for an Unrestricted (--no-policies) session, which still
 			// executes through the same secureread.Executor path, simply
 			// with no policy documents to apply.

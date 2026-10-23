@@ -153,8 +153,8 @@ func installLocalChinookFixture(t *testing.T, projectDir string) {
 // parameter-effect's own required proof (S64 brief item 4): "two different
 // Customer.ID values give different rows through exec/run_query against
 // the demo project, driver-bound, never textual substitution." It runs the
-// real customer-invoices DTQL query (queries/customers/customer-invoices.
-// query.dtql) through the real, rewritten POST /datatug/exec/run_query
+// real customer-invoices TugQL query (queries/customers/customer-invoices.
+// query.tugql) through the real, rewritten POST /datatug/exec/run_query
 // against a temp copy of the real demo-project-1 and its real
 // ~/datatug/dbs/chinook-local.sqlite Chinook data (resolved through the
 // project's real environments/local/catalogs/chinook-local record — the
@@ -234,7 +234,7 @@ func TestDemoProject_RunQuery_RealParameterEffect(t *testing.T) {
 	if invoiceIDColumn < 0 {
 		t.Fatalf("customer-invoices recordset has no InvoiceId column; got %+v", resultOne.Recordset.Columns)
 	}
-	// InvoiceId comes through this real DTQL/structured-query path typed
+	// InvoiceId comes through this real TugQL/structured-query path typed
 	// "number" (a float64 driver value), not "integer": dalgo2sqlite's
 	// structured-query row scan does not preserve SQLite's declared INTEGER
 	// column affinity distinctly from REAL through condeval.ToMap — see
@@ -282,7 +282,7 @@ func TestDemoProject_RunQuery_RealParameterEffect(t *testing.T) {
 		t.Fatalf("Provenance.Source = %q, want %q", resultOne.Provenance.Source, demoProjectSource)
 	}
 	if resultOne.Provenance.ExecutionProfile != apicontract.ExecutionProfileProtected {
-		t.Fatalf("Provenance.ExecutionProfile = %q, want protected (DTQL through the policy path)", resultOne.Provenance.ExecutionProfile)
+		t.Fatalf("Provenance.ExecutionProfile = %q, want protected (TugQL through the policy path)", resultOne.Provenance.ExecutionProfile)
 	}
 }
 

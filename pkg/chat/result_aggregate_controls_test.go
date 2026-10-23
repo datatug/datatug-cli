@@ -14,7 +14,7 @@ func TestUnifiedWorkspaceAutomaticAggregatesUseAuthoritativeKeysAndExactLoadedVa
 	t.Parallel()
 	names := []string{"RowKey", "CustomerId", "Quantity", "Amount", "Total", "Category"}
 	document := "from: {schema: main, name: Item}\ncolumns: [{field: RowKey}, {field: CustomerId}, {field: Quantity}, {field: Amount}, {field: Total}, {field: Category}]\nlimit: 2\n"
-	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Items", DTQL: document, Result: secureread.Result{Columns: names, Rows: []secureread.Row{
+	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Items", TugQL: document, Result: secureread.Result{Columns: names, Rows: []secureread.Row{
 		{Data: map[string]any{"RowKey": 1, "CustomerId": 10, "Quantity": int64(9007199254740993), "Amount": json.Number("0.1"), "Total": 19.8, "Category": "A"}},
 		{Data: map[string]any{"RowKey": 2, "CustomerId": 10, "Quantity": int64(2), "Amount": json.Number("0.2"), "Total": 2.5, "Category": "A"}},
 	}}})
@@ -112,7 +112,7 @@ func TestUnifiedWorkspaceUnknownForeignKeysDoNotInferIntegerSums(t *testing.T) {
 
 func TestUnifiedWorkspaceDerivedTypesSurviveReloadWithoutInventingEntityIdentity(t *testing.T) {
 	t.Parallel()
-	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Grouped invoices", DTQL: "from: {schema: main, name: Invoice}\ncolumns: [{field: CustomerId}, {aggregate: {function: sum, args: [{field: Total}]}, as: sum_Total}]\ngroupBy: [{field: CustomerId}]\n", Result: secureread.Result{
+	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Grouped invoices", TugQL: "from: {schema: main, name: Invoice}\ncolumns: [{field: CustomerId}, {aggregate: {function: sum, args: [{field: Total}]}, as: sum_Total}]\ngroupBy: [{field: CustomerId}]\n", Result: secureread.Result{
 		Columns: []string{"CustomerId", "sum_Total"}, ColumnTypes: map[string]string{"CustomerId": "INTEGER", "sum_Total": "DECIMAL"},
 		Rows: []secureread.Row{{Data: map[string]any{"CustomerId": int64(29), "sum_Total": json.Number("0.3")}}},
 	}})
@@ -140,7 +140,7 @@ func TestUnifiedWorkspaceDerivedTypesSurviveReloadWithoutInventingEntityIdentity
 
 func TestUnifiedWorkspaceGroupedGridDoesNotRenderSourceEntityJoinHints(t *testing.T) {
 	t.Parallel()
-	query := QueryResult{Title: "Invoices", DTQL: "from: {schema: main, name: Invoice}\ncolumns: [{field: CustomerId}, {field: Total}]\nlimit: 5\n", Result: secureread.Result{
+	query := QueryResult{Title: "Invoices", TugQL: "from: {schema: main, name: Invoice}\ncolumns: [{field: CustomerId}, {field: Total}]\nlimit: 5\n", Result: secureread.Result{
 		Columns: []string{"CustomerId", "Total"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": int64(1), "Total": 27.29}}},
 	}}
 	u := focusedGridStoreBackedTestUI(t, query)
@@ -151,7 +151,7 @@ func TestUnifiedWorkspaceGroupedGridDoesNotRenderSourceEntityJoinHints(t *testin
 		t.Fatalf("fixture does not render source relationships: %s", view)
 	}
 	query.Title = "Group: Invoices"
-	query.DTQL = "from: {schema: main, name: Invoice}\ncolumns: [{field: CustomerId}, {aggregate: {function: sum, args: [{field: Total}]}, as: sum_Total}]\ngroupBy: [{field: CustomerId}]\n"
+	query.TugQL = "from: {schema: main, name: Invoice}\ncolumns: [{field: CustomerId}, {aggregate: {function: sum, args: [{field: Total}]}, as: sum_Total}]\ngroupBy: [{field: CustomerId}]\n"
 	query.Result.Columns = []string{"CustomerId", "sum_Total"}
 	query.Result.Rows[0].Data = map[string]any{"CustomerId": int64(1), "sum_Total": 27.29}
 	_, parent, _ := u.activeGrid()

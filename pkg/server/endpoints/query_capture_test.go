@@ -20,9 +20,9 @@ import (
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 )
 
-// captureTestDTQL reads Invoice rows for one customer - the ad-hoc lookup a
+// captureTestTugQL reads Invoice rows for one customer - the ad-hoc lookup a
 // user would capture from the Customer page.
-const captureTestDTQL = "from:\n  name: Invoice\ncolumns:\n  - field: InvoiceId\n  - field: Total\n" +
+const captureTestTugQL = "from:\n  name: Invoice\ncolumns:\n  - field: InvoiceId\n  - field: Total\n" +
 	"where:\n  op: ==\n  left:\n    field: CustomerId\n  right:\n    param: Customer.ID\n"
 
 // fakeCaptureStore is an in-memory queryCaptureStore with the revisioned
@@ -114,7 +114,7 @@ func validCaptureRequest(scope apicontract.Scope) captureQueryRequest {
 			Title:      "Customer invoices",
 			Purpose:    "Which invoices does this customer have?",
 			Source:     semanticTestSource,
-			DTQL:       captureTestDTQL,
+			TugQL:      captureTestTugQL,
 			Parameters: []capturedParameter{{
 				ID: "Customer.ID", Type: "integer", Title: "Customer", IsRequired: true,
 				Meta: &entityFieldRef{Entity: "Customer", Field: "ID"},
@@ -305,8 +305,8 @@ func TestCaptureQuery_UpdateOfAMissingQueryConflicts(t *testing.T) {
 
 func TestCaptureQuery_RejectsInvalidRequests(t *testing.T) {
 	scope, fake := captureTestSetup(t, "admin", []string{"admin"}, true)
-	withDTQL := func(dtql string) func(r *captureQueryRequest) {
-		return func(r *captureQueryRequest) { r.Query.DTQL = dtql }
+	withTugQL := func(tugql string) func(r *captureQueryRequest) {
+		return func(r *captureQueryRequest) { r.Query.TugQL = tugql }
 	}
 	tests := []struct {
 		name   string
@@ -327,9 +327,9 @@ func TestCaptureQuery_RejectsInvalidRequests(t *testing.T) {
 		{"id with a colon", func(r *captureQueryRequest) { r.Query.ID = "c:q" }, "query.id"},
 		{"over-long id", func(r *captureQueryRequest) { r.Query.ID = strings.Repeat("q", 129) }, "query.id"},
 
-		{"password in a URL in the dtql", withDTQL(strings.Replace(captureTestDTQL, "field: Total",
-			"field: Total\n  - field: Note\n    alias: \"postgres://u:secret@db.example/prod\"", 1)), "query.dtql"},
-		{"password literal in the dtql", withDTQL("from:\n  name: Invoice\nwhere:\n  op: ==\n  left:\n    field: Dsn\n  right:\n    value: \"Password=secret\"\n"), "query.dtql"},
+		{"password in a URL in the tugql", withTugQL(strings.Replace(captureTestTugQL, "field: Total",
+			"field: Total\n  - field: Note\n    alias: \"postgres://u:secret@db.example/prod\"", 1)), "query.tugql"},
+		{"password literal in the tugql", withTugQL("from:\n  name: Invoice\nwhere:\n  op: ==\n  left:\n    field: Dsn\n  right:\n    value: \"Password=secret\"\n"), "query.tugql"},
 		{"DSN in the purpose", func(r *captureQueryRequest) { r.Query.Purpose = "copied from app:hunter2@tcp(db)/prod" }, "query.purpose"},
 		{"password key in the title", func(r *captureQueryRequest) { r.Query.Title = "uid=app;pwd=hunter2" }, "query.title"},
 		{"password in a parameter title", func(r *captureQueryRequest) { r.Query.Parameters[0].Title = "https://a:b@example.com" }, "query.parameters"},
@@ -338,13 +338,13 @@ func TestCaptureQuery_RejectsInvalidRequests(t *testing.T) {
 		{"missing title", func(r *captureQueryRequest) { r.Query.Title = " " }, "query.title"},
 		{"over-long title", func(r *captureQueryRequest) { r.Query.Title = strings.Repeat("t", 201) }, "query.title"},
 		{"missing purpose", func(r *captureQueryRequest) { r.Query.Purpose = "" }, "query.purpose"},
-		{"missing dtql", withDTQL(""), "query.dtql"},
-		{"dtql that does not parse", withDTQL("from: [unterminated\n"), "query.dtql"},
-		{"dtql with a misplaced parameter", withDTQL("from:\n  name: Invoice\nwhere:\n  op: ==\n  left:\n    param: Customer.ID\n  right:\n    field: CustomerId\n"), "query.dtql"},
-		{"dtql parameter that is not declared", func(r *captureQueryRequest) {
+		{"missing tugql", withTugQL(""), "query.tugql"},
+		{"tugql that does not parse", withTugQL("from: [unterminated\n"), "query.tugql"},
+		{"tugql with a misplaced parameter", withTugQL("from:\n  name: Invoice\nwhere:\n  op: ==\n  left:\n    param: Customer.ID\n  right:\n    field: CustomerId\n"), "query.tugql"},
+		{"tugql parameter that is not declared", func(r *captureQueryRequest) {
 			r.Query.Parameters, r.Query.BindingOrigins = nil, nil
 		}, "query.parameters"},
-		{"declared parameter the dtql never uses", func(r *captureQueryRequest) {
+		{"declared parameter the tugql never uses", func(r *captureQueryRequest) {
 			r.Query.Parameters = append(r.Query.Parameters, capturedParameter{ID: "Since", Type: "date"})
 		}, "query.parameters"},
 		{"unknown parameter type", func(r *captureQueryRequest) { r.Query.Parameters[0].Type = "text" }, "query.parameters"},
@@ -390,7 +390,7 @@ func TestCaptureQuery_RejectsResultRowsAndForeignFields(t *testing.T) {
 	base := string(marshalCapture(t, validCaptureRequest(scope)))
 	tests := map[string]string{
 		"result rows at the top level":  strings.Replace(base, `"query":`, `"rows":[[1,"Leonie"]],"query":`, 1),
-		"a recordset inside the query":  strings.Replace(base, `"dtql":`, `"recordset":{"rows":[[1]]},"dtql":`, 1),
+		"a recordset inside the query":  strings.Replace(base, `"tugql":`, `"recordset":{"rows":[[1]]},"tugql":`, 1),
 		"a captured default value":      strings.Replace(base, `"isRequired":`, `"defaultValue":5,"isRequired":`, 1),
 		"a session-local fact id":       strings.Replace(base, `"origin":"selection"`, `"origin":"selection","factId":"f1"`, 1),
 		"a client-claimed author":       strings.Replace(base, `"query":`, `"author":"root","query":`, 1),
@@ -628,7 +628,7 @@ func TestCaptureQuery_RootFolderWithoutParameters(t *testing.T) {
 	req.Query.FolderPath = ""
 	req.Query.ID = "all-invoices"
 	req.Query.Purpose = "Every invoice.\nA starting point for anything billing-related."
-	req.Query.DTQL = "from:\n  name: Invoice\n"
+	req.Query.TugQL = "from:\n  name: Invoice\n"
 	req.Query.Parameters, req.Query.BindingOrigins = nil, nil
 	w := postCapture(t, req)
 	if w.Code != http.StatusCreated {

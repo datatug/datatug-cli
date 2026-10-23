@@ -305,7 +305,7 @@ func TestBlockForGridJoinCandidatesErrorReturnsBareGrid(t *testing.T) {
 		t.Fatal(err)
 	}
 	query, err := store.AppendQuery(ctx, sessions.activeID, user.ID, "sqlite:///fixture.db", QueryResult{
-		Title: "Invoices", DTQL: "from: {name: Invoice}\nlimit: 1\n",
+		Title: "Invoices", TugQL: "from: {name: Invoice}\nlimit: 1\n",
 		Result: secureread.Result{Columns: []string{"InvoiceId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 1}}}},
 	})
 	if err != nil {
@@ -347,7 +347,7 @@ func TestBlockForGridSortsMultipleCandidates(t *testing.T) {
 		t.Fatal(err)
 	}
 	query, err := store.AppendQuery(ctx, sessions.activeID, user.ID, "sqlite:///fixture.db", QueryResult{
-		Title: "Invoices", DTQL: "from: {name: Invoice}\nlimit: 1\n",
+		Title: "Invoices", TugQL: "from: {name: Invoice}\nlimit: 1\n",
 		Result: secureread.Result{Columns: []string{"InvoiceId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 1}}}},
 	})
 	if err != nil {
@@ -416,7 +416,7 @@ func TestLoadSessionShowsPersistedLimitations(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := store.AppendQuery(ctx, sessions.activeID, user.ID, "sqlite:///fixture.db", QueryResult{
-		Title: "Customers", DTQL: "from: {name: Customer}\nlimit: 1\n",
+		Title: "Customers", TugQL: "from: {name: Customer}\nlimit: 1\n",
 		Result: secureread.Result{
 			Columns: []string{"CustomerId"},
 			Limitations: []secureread.Limitation{

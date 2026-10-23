@@ -13,7 +13,7 @@ import (
 
 	"github.com/dal-go/dalgo/access"
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 )
 
 func TestSourceDescriptorFailsClosed(t *testing.T) {
@@ -29,7 +29,7 @@ func TestSourceDescriptorFailsClosed(t *testing.T) {
 	}
 }
 func TestSourceRejectsMalformedRecordsAndPreservesKeys(t *testing.T) {
-	query, err := dtql.Deserialize([]byte("from: {name: customers}\n"))
+	query, err := tugql.Deserialize([]byte("from: {name: customers}\n"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -14,11 +14,11 @@ type AggregateTerm struct{ Column, Function, Alias string }
 // DeriveGroupAggregates preserves the chosen input scope and emits the exact,
 // ordered key, optional COUNT(*), and explicit measure projection. Missing
 // measure aliases use readable, collision-safe defaults; caller inputs stay intact.
-func DeriveGroupAggregates(originalDTQL string, keys []string, count bool, terms []AggregateTerm, scope Scope) (Preview, error) {
+func DeriveGroupAggregates(originalTugQL string, keys []string, count bool, terms []AggregateTerm, scope Scope) (Preview, error) {
 	if len(keys) == 0 {
 		return Preview{}, fmt.Errorf("%w: grouping needs at least one selected column", ErrInvalidColumn)
 	}
-	original, err := parseOriginal(originalDTQL)
+	original, err := parseOriginal(originalTugQL)
 	if err != nil {
 		return Preview{}, err
 	}

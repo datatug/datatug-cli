@@ -4,7 +4,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"fmt"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/strongo/aichat/tui/chatshell"
 	"slices"
 	"strings"
@@ -67,7 +67,7 @@ func (u *ChatUI) rememberResult(record RecordSet) {
 		}
 	}
 	if groupedRecord(&record) {
-		if q, err := dtql.Deserialize([]byte(record.DTQL)); err == nil {
+		if q, err := tugql.Deserialize([]byte(record.TugQL)); err == nil {
 			var names []string
 			for _, field := range q.GroupBy() {
 				names = append(names, field.String())
@@ -127,7 +127,7 @@ func (u *ChatUI) showTrailNode(id string) bool {
 		u.shell.ShowTranscript()
 		if g.entryID == "" {
 			record := u.snapshot.RecordSets[node.recordID]
-			g.entryID = u.appendBlockWithID("grid", u.blockForGrid(g.Model, node.recordID, record.DTQL))
+			g.entryID = u.appendBlockWithID("grid", u.blockForGrid(g.Model, node.recordID, record.TugQL))
 		}
 		u.shell.FocusEntry(g.entryID)
 	}
@@ -340,7 +340,7 @@ func (u *ChatUI) reconcileResults(snapshot ChatSession, skipOwnedPrompt ...bool)
 			u.resultScope(existing, record)
 			continue
 		}
-		u.appendGridResult(QueryResult{RecordSetID: record.ID, Title: record.Title, DTQL: record.DTQL, Source: record.Source, SourceID: record.Database, Result: record.Result, Lineage: record.Lineage})
+		u.appendGridResult(QueryResult{RecordSetID: record.ID, Title: record.Title, TugQL: record.TugQL, Source: record.Source, SourceID: record.Database, Result: record.Result, Lineage: record.Lineage})
 		if response, ok := snapshot.HTTPResponses[record.HTTPResponseID]; ok {
 			u.gridsByRecordSetID[record.ID].attachHTTPResponse(response.Body, &response)
 		}

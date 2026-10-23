@@ -31,7 +31,7 @@ import (
 func TestChatUISavedQueryErrorDoesNotPersistParameterValue(t *testing.T) {
 	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
-	service := &savedQueryStub{queries: []SavedQuery{{ID: "x", Title: "Private query", Type: "DTQL"}}, runErr: errors.New("invalid --var CustomerId=secret123")}
+	service := &savedQueryStub{queries: []SavedQuery{{ID: "x", Title: "Private query", Type: "TugQL"}}, runErr: errors.New("invalid --var CustomerId=secret123")}
 	if err := u.SetSavedQueryService(service); err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestChatUISaveQueryFailureHidesErrorDetails(t *testing.T) {
 	if err := u.SetSavedQueryService(service); err != nil {
 		t.Fatal(err)
 	}
-	overlay := newSaveQueryOverlay(u, SavedQuerySaveRequest{Type: "DTQL", Text: "from: {name: Customer}"})
+	overlay := newSaveQueryOverlay(u, SavedQuerySaveRequest{Type: "TugQL", Text: "from: {name: Customer}"})
 	overlay.values[0] = "Customers"
 	_, cmd, done := overlay.save()
 	if done || cmd == nil {
@@ -76,7 +76,7 @@ func TestChatUISaveQueryFailureHidesErrorDetails(t *testing.T) {
 
 func TestChatUISaveQueryRejectsParameterizedResultBeforeOpeningDraft(t *testing.T) {
 	t.Parallel()
-	// See TestChatUISaveQueryDialogCollectsNameAndTagChips's comment: DTQL/
+	// See TestChatUISaveQueryDialogCollectsNameAndTagChips's comment: TugQL/
 	// Parameters are set on the already-persisted RecordSet after focusing
 	// it for real, rather than through the scripted Turn.
 	turn := Turn{Queries: []QueryResult{{Title: "Invoices", RecordSetID: "invoices", Result: secureread.Result{Columns: []string{"InvoiceId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 7}}}}}}}
@@ -91,7 +91,7 @@ func TestChatUISaveQueryRejectsParameterizedResultBeforeOpeningDraft(t *testing.
 		t.Fatal("grid did not report a focused RecordSet")
 	}
 	record := u.snapshot.RecordSets[recordSetID]
-	record.DTQL = "from: {name: Invoice}\nwhere: {op: '==', left: {field: CustomerId}, right: {param: CustomerId}}"
+	record.TugQL = "from: {name: Invoice}\nwhere: {op: '==', left: {field: CustomerId}, right: {param: CustomerId}}"
 	record.Parameters = map[string]any{"CustomerId": 5}
 	u.snapshot.RecordSets[recordSetID] = record
 	if cmd := u.openSaveQueryDialog(); cmd != nil {
@@ -106,8 +106,8 @@ func TestChatUISavedQueryAutocompleteAliasesFilterAndExecute(t *testing.T) {
 	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	service := &savedQueryStub{queries: []SavedQuery{
-		{ID: "customers/prague", Title: "Prague customers", Type: "DTQL", Tags: []string{"city"}},
-		{ID: "customers/berlin", Title: "Berlin customers", Type: "DTQL", Tags: []string{"city"}},
+		{ID: "customers/prague", Title: "Prague customers", Type: "TugQL", Tags: []string{"city"}},
+		{ID: "customers/berlin", Title: "Berlin customers", Type: "TugQL", Tags: []string{"city"}},
 		{ID: "orders/recent", Title: "Recent orders", Type: "HTTP"},
 	}}
 	if err := u.SetSavedQueryService(service); err != nil {
@@ -120,7 +120,7 @@ func TestChatUISavedQueryAutocompleteAliasesFilterAndExecute(t *testing.T) {
 	// single match still runs directly instead (below).
 	drainCmd(t, u, u.Submit("/query city"))
 	view := u.shell.View().Content
-	if !strings.Contains(view, "Prague customers") || !strings.Contains(view, "Berlin customers") || strings.Contains(view, "Recent orders") || !strings.Contains(view, "[DTQL]") {
+	if !strings.Contains(view, "Prague customers") || !strings.Contains(view, "Berlin customers") || strings.Contains(view, "Recent orders") || !strings.Contains(view, "[TugQL]") {
 		t.Fatalf("tag alias did not filter/label saved queries:\n%s", view)
 	}
 	// Enter on the picker's first (default-selected) match runs it, the
@@ -149,14 +149,14 @@ func TestChatUISavedQueryAutocompleteAliasesFilterAndExecute(t *testing.T) {
 
 func TestChatUISaveQueryDialogCollectsNameAndTagChips(t *testing.T) {
 	t.Parallel()
-	// The Turn deliberately carries no DTQL/Database: those come from a
+	// The Turn deliberately carries no TugQL/Database: those come from a
 	// real agent tool call in production, which contextualStub doesn't
 	// simulate, and setting them here caused the scripted turn's
 	// persistence to silently fail (a real, but out-of-scope-to-chase, gap
 	// in this test double — not a ChatUI bug). Once the grid is focused for
 	// real (proving the RecordSetID chatshell reports — grid.Model.Current
 	// reports the highlighted ROW's ref, so the fixture needs at least one
-	// row or FocusedRef is nil), the DTQL/Database fields
+	// row or FocusedRef is nil), the TugQL/Database fields
 	// openSaveQueryDialog needs are set directly on the already-persisted
 	// RecordSet.
 	turn := Turn{Queries: []QueryResult{{Title: "Prague customers", RecordSetID: "rs1", Result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 5}}}}}}}
@@ -171,7 +171,7 @@ func TestChatUISaveQueryDialogCollectsNameAndTagChips(t *testing.T) {
 	}
 	record := u.snapshot.RecordSets[recordSetID]
 	record.Title = "Prague customers"
-	record.DTQL = "from: {name: Customer}\nlimit: 50\n"
+	record.TugQL = "from: {name: Customer}\nlimit: 50\n"
 	record.Database = "chinook"
 	u.snapshot.RecordSets[recordSetID] = record
 	service := &savedQueryStub{}
@@ -195,7 +195,7 @@ func TestChatUISaveQueryDialogCollectsNameAndTagChips(t *testing.T) {
 		t.Fatal("Ctrl+S did not save the query")
 	}
 	drainCmd(t, u, cmd)
-	if service.saved.Title != "Prague customers" || service.saved.Type != "DTQL" || service.saved.Database != "chinook" || len(service.saved.Tags) != 1 || service.saved.Tags[0] != "customers" {
+	if service.saved.Title != "Prague customers" || service.saved.Type != "TugQL" || service.saved.Database != "chinook" || len(service.saved.Tags) != 1 || service.saved.Tags[0] != "customers" {
 		t.Fatalf("wrong save request: %+v", service.saved)
 	}
 }
@@ -203,7 +203,7 @@ func TestChatUISaveQueryDialogCollectsNameAndTagChips(t *testing.T) {
 func TestChatUIParameterizedSavedQueryPromptsThenRunsWithValues(t *testing.T) {
 	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
-	service := &savedQueryStub{queries: []SavedQuery{{ID: "customers/invoices", Title: "Customer invoices", Type: "DTQL", Parameters: []SavedQueryParameter{{ID: "CustomerId", Type: "integer", Required: true}}}}}
+	service := &savedQueryStub{queries: []SavedQuery{{ID: "customers/invoices", Title: "Customer invoices", Type: "TugQL", Parameters: []SavedQueryParameter{{ID: "CustomerId", Type: "integer", Required: true}}}}}
 	if err := u.SetSavedQueryService(service); err != nil {
 		t.Fatal(err)
 	}

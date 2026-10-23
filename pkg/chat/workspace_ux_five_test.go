@@ -121,7 +121,7 @@ type uxDelayedExecutor struct {
 	release chan struct{}
 }
 
-func (e *uxDelayedExecutor) RunDTQL(ctx context.Context, _ string, _ []byte, _ map[string]any) (secureread.Result, error) {
+func (e *uxDelayedExecutor) RunTugQL(ctx context.Context, _ string, _ []byte, _ map[string]any) (secureread.Result, error) {
 	e.started <- ctx
 	<-e.release
 	return secureread.Result{Columns: []string{"Id", "Category", "Value"}, Rows: []secureread.Row{{Data: map[string]any{"Id": int64(2), "Category": "A", "Value": int64(20)}}}}, nil
@@ -249,7 +249,7 @@ func TestWorkspaceUXTrailBranchPreservesGridSearchScrollAndReconcile(t *testing.
 		}
 		rows[i] = secureread.Row{Data: data}
 	}
-	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Origin", DTQL: "from: {name: Item}\nlimit: 35", Result: secureread.Result{Columns: names, Rows: rows}})
+	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Origin", TugQL: "from: {name: Item}\nlimit: 35", Result: secureread.Result{Columns: names, Rows: rows}})
 	origin := u.activeRecordSetID()
 	g := u.gridsByRecordSetID[origin]
 	for range len(names) - 1 {
@@ -274,7 +274,7 @@ func TestWorkspaceUXTrailBranchPreservesGridSearchScrollAndReconcile(t *testing.
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = u.sessions.store.AppendQuery(t.Context(), u.sessionID, m.ID, "sqlite:///fixture.db", QueryResult{Title: label, DTQL: "from: {name: Item}\nlimit: 1", Result: secureread.Result{Columns: []string{"Id"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 1}}}}, Lineage: &JoinLineage{ParentRecordSetID: origin}})
+		_, err = u.sessions.store.AppendQuery(t.Context(), u.sessionID, m.ID, "sqlite:///fixture.db", QueryResult{Title: label, TugQL: "from: {name: Item}\nlimit: 1", Result: secureread.Result{Columns: []string{"Id"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 1}}}}, Lineage: &JoinLineage{ParentRecordSetID: origin}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -322,7 +322,7 @@ func TestWorkspaceUXTrailBranchPreservesGridSearchScrollAndReconcile(t *testing.
 func TestWorkspaceUXAggregateExplanationsFollowSchemaAndOverrides(t *testing.T) {
 	t.Parallel()
 	names := []string{"Key", "Customer", "Quantity", "Total", "Unknown"}
-	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Measures", DTQL: "from: {schema: main, name: Item}\ncolumns: [{field: Key},{field: Customer},{field: Quantity},{field: Total},{field: Unknown}]\nlimit: 1", Result: secureread.Result{Columns: names, Rows: []secureread.Row{{Data: map[string]any{"Key": 1, "Customer": 2, "Quantity": 3, "Total": 1.5, "Unknown": 4}}}}})
+	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Measures", TugQL: "from: {schema: main, name: Item}\ncolumns: [{field: Key},{field: Customer},{field: Quantity},{field: Total},{field: Unknown}]\nlimit: 1", Result: secureread.Result{Columns: names, Rows: []secureread.Row{{Data: map[string]any{"Key": 1, "Customer": 2, "Quantity": 3, "Total": 1.5, "Unknown": 4}}}}})
 	_, record, _ := u.activeGrid()
 	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "table", SourceID: record.Database, ObjectID: "main.Item"}, Columns: names, PrimaryKey: []string{"Key"}, ColumnTypes: map[string]string{"Key": "INTEGER", "Customer": "INTEGER", "Quantity": "INTEGER", "Total": "REAL", "Unknown": "INTEGER"}}}}
 	u.sessions.ConfigureJoinApplication(ForeignKeyJoinApplication{Source: record.Source, Snapshot: ForeignKeySnapshot{Source: record.Source, Columns: map[string][]string{"main.item": names}, Keys: []ForeignKey{{Schema: "main", FromRelation: "Item", FromFields: []string{"Customer"}}}}})
@@ -373,7 +373,7 @@ func (*uxIgnoringJoin) Candidates(context.Context, RecordSet) ([]JoinCandidate, 
 func (a *uxIgnoringJoin) Apply(_ context.Context, r RecordSet, _ JoinCandidateID) (QueryResult, error) {
 	close(a.started)
 	<-a.release
-	return QueryResult{Title: r.Title + " + Customer", DTQL: r.DTQL, Source: r.Source, Result: r.Result, Lineage: &JoinLineage{ParentRecordSetID: r.ID, CandidateID: "x"}}, nil
+	return QueryResult{Title: r.Title + " + Customer", TugQL: r.TugQL, Source: r.Source, Result: r.Result, Lineage: &JoinLineage{ParentRecordSetID: r.ID, CandidateID: "x"}}, nil
 }
 
 type uxDelayedSaved struct {
@@ -385,7 +385,7 @@ type uxDelayedSaved struct {
 func (s *uxDelayedSaved) Run(ctx context.Context, _ string) (QueryResult, error) {
 	s.started <- ctx
 	<-s.release
-	return QueryResult{Title: "Saved", DTQL: "from: {name: Item}\nlimit: 1", Source: "sqlite:///fixture.db", Result: secureread.Result{Columns: []string{"Id"}}}, nil
+	return QueryResult{Title: "Saved", TugQL: "from: {name: Item}\nlimit: 1", Source: "sqlite:///fixture.db", Result: secureread.Result{Columns: []string{"Id"}}}, nil
 }
 func uxAsyncResult(cmd tea.Cmd) tea.Msg {
 	msg := cmd()
@@ -763,7 +763,7 @@ func TestWorkspaceUXReviewBridgeRetriesContendedNotification(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			query, err := u.sessions.store.AppendQuery(t.Context(), u.sessionID, message.ID, parent.Source, QueryResult{Title: "External child", DTQL: parent.DTQL, Result: parent.Result})
+			query, err := u.sessions.store.AppendQuery(t.Context(), u.sessionID, message.ID, parent.Source, QueryResult{Title: "External child", TugQL: parent.TugQL, Result: parent.Result})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1041,7 +1041,7 @@ func TestWorkspaceUXNativeSQLExecutionAndEmptyResultScope(t *testing.T) {
 	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Native SQL", Source: "sqlite:///fixture.db", Result: secureread.Result{Columns: []string{"Id"}}})
 	id := u.activeRecordSetID()
 	record := u.snapshot.RecordSets[id]
-	if id == "" || record.DTQL != "" || record.QueryID == "" {
+	if id == "" || record.TugQL != "" || record.QueryID == "" {
 		t.Fatal("native SQL fixture lacks empty-result execution provenance")
 	}
 	view := ansi.Strip(u.shell.View().Content)

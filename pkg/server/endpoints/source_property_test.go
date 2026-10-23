@@ -31,7 +31,7 @@ import (
 // is in the error text, in the HTTP body, in stderr or in the log.
 //
 // The client-sent source is read through every message that echoes one: the
-// unknown-source message (ad-hoc DTQL), the not-an-authorized-target message (a
+// unknown-source message (ad-hoc TugQL), the not-an-authorized-target message (a
 // saved query, with the eligible targets stubbed so that branch is reached) and
 // the not-a-catalog-source message of a query capture (checkCaptureSource).
 //
@@ -79,14 +79,14 @@ func TestProperty_ServeNeverEchoesASourceSecret(t *testing.T) {
 		// A source a client sent as an ID, through the resolver and the contract.
 		_, err = apiResolveSource(ctx, nil, projectDir, "", c.Source)
 		note(err)
-		// Each request reaches a different message: the ad-hoc DTQL one says the
+		// Each request reaches a different message: the ad-hoc TugQL one says the
 		// source is unknown, the saved-query one that it is not an authorized target.
 		for _, request := range []struct {
 			name       string
 			req        apicontract.ExecutionRequest
 			wantPhrase string
 		}{
-			{"ad-hoc DTQL", apicontract.ExecutionRequest{DTQL: "from: {name: t}", Source: c.Source}, "unknown source"},
+			{"ad-hoc TugQL", apicontract.ExecutionRequest{TugQL: "from: {name: t}", Source: c.Source}, "unknown source"},
 			{"saved query", apicontract.ExecutionRequest{QueryID: "q", Source: c.Source}, "is not an authorized target"},
 		} {
 			_, err = resolveExecutionSource(ctx, nil, projectDir, request.req, &datatug.QueryDef{ID: "q"})
@@ -131,7 +131,7 @@ func TestProperty_ServeNeverEchoesASourceSecret(t *testing.T) {
 			wantPhrase string
 		}{
 			{"saved query with no eligible source", apicontract.ExecutionRequest{QueryID: "q", Environment: c.Source}, "has no eligible source in environment"},
-			{"ad-hoc DTQL", apicontract.ExecutionRequest{DTQL: "from: {name: t}", Source: "chinook", Environment: c.Source}, "list catalogs for environment"},
+			{"ad-hoc TugQL", apicontract.ExecutionRequest{TugQL: "from: {name: t}", Source: "chinook", Environment: c.Source}, "list catalogs for environment"},
 		} {
 			_, err = resolveExecutionSource(ctx, catalogStore, projectDir, request.req, &datatug.QueryDef{ID: "q"})
 			var contract *contractError
@@ -306,7 +306,7 @@ func TestProperty_RunQueryNeverEchoesAProjectOrQueryIDThatIsASourceString(t *tes
 		if queryID != "" {
 			req.QueryID = queryID
 		} else {
-			req.Source, req.DTQL = "chinook", runQueryTestCustomerByIDDTQL
+			req.Source, req.TugQL = "chinook", runQueryTestCustomerByIDTugQL
 		}
 		return req
 	}

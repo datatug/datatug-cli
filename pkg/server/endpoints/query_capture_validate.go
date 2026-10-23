@@ -9,7 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
@@ -18,7 +18,7 @@ import (
 )
 
 var captureProjectStoreFor = api.ProjectStoreFor
-var dtqlCollectionHook = dtqlCollection
+var tugqlCollectionHook = tugqlCollection
 
 // Bounds on a captured query. Names become file and directory names in a
 // git-tracked tree; the rest bounds what one capture can put into it.
@@ -26,7 +26,7 @@ const (
 	maxCaptureNameLength    = 128
 	maxCaptureTitleLength   = 200
 	maxCapturePurposeLength = 2000
-	maxCaptureDTQLBytes     = 256 << 10
+	maxCaptureTugQLBytes    = 256 << 10
 	maxCaptureParameters    = 32
 )
 
@@ -49,7 +49,7 @@ var captureParameterTypes = map[string]bool{
 var captureOrigins = map[string]bool{"selection": true, "context": true, "manual": true}
 
 // validateCapturedQuery checks a captured query before any project data is
-// read or written and returns the collection its DTQL reads. Every failure
+// read or written and returns the collection its TugQL reads. Every failure
 // is 400 INVALID_REQUEST naming the "query.<field>" it concerns.
 func validateCapturedQuery(q capturedQuery) (collection string, err error) {
 	if err := validateCaptureLocation("query.id", q.ID); err != nil {
@@ -78,7 +78,7 @@ func validateCapturedQuery(q capturedQuery) (collection string, err error) {
 	if err := validateCaptureBindingOrigins(q.BindingOrigins, declared); err != nil {
 		return "", err
 	}
-	return validateCaptureDTQL(q.DTQL, q.Parameters)
+	return validateCaptureTugQL(q.TugQL, q.Parameters)
 }
 
 // validateCaptureLocation checks one folder segment or the query id: first
@@ -151,7 +151,7 @@ func validateCaptureParameters(params []capturedParameter) (map[string]bool, err
 			return newInvalidRequest(field, fmt.Sprintf("index %d: ", i)+fmt.Sprintf(format, args...))
 		}
 		if !dal.ValidParamName(p.ID) {
-			return nil, invalid("id %q is not a valid DTQL parameter name", p.ID)
+			return nil, invalid("id %q is not a valid TugQL parameter name", p.ID)
 		}
 		if !captureParameterTypes[p.Type] {
 			return nil, invalid("type %q must be one of string, number, integer, decimal, boolean, date or datetime", p.Type)
@@ -193,26 +193,26 @@ func validateCaptureBindingOrigins(origins []captureBindingOrigin, declared map[
 	return nil
 }
 
-// validateCaptureDTQL checks the query text: present, bounded, free of
-// credentials, real DTQL reading one named collection, with parameters
+// validateCaptureTugQL checks the query text: present, bounded, free of
+// credentials, real TugQL reading one named collection, with parameters
 // only where Run can bind them and exactly the declared ones. It returns
 // that collection.
-func validateCaptureDTQL(text string, params []capturedParameter) (string, error) {
-	const field = "query.dtql"
+func validateCaptureTugQL(text string, params []capturedParameter) (string, error) {
+	const field = "query.tugql"
 	if strings.TrimSpace(text) == "" {
 		return "", newInvalidRequest(field, "is required")
 	}
-	if len(text) > maxCaptureDTQLBytes {
-		return "", newInvalidRequest(field, fmt.Sprintf("is longer than %d bytes", maxCaptureDTQLBytes))
+	if len(text) > maxCaptureTugQLBytes {
+		return "", newInvalidRequest(field, fmt.Sprintf("is longer than %d bytes", maxCaptureTugQLBytes))
 	}
 	if reason, found := querywrite.CredentialReason(text); found {
 		return "", newInvalidRequest(field, reason)
 	}
-	query, err := dtql.Deserialize([]byte(text))
+	query, err := tugql.Deserialize([]byte(text))
 	if err != nil {
-		return "", newInvalidRequest(field, "does not parse as DTQL: "+err.Error())
+		return "", newInvalidRequest(field, "does not parse as TugQL: "+err.Error())
 	}
-	collection := dtqlCollectionHook(query)
+	collection := tugqlCollectionHook(query)
 	if collection == "" {
 		return "", newInvalidRequest(field, "must read one named collection")
 	}
@@ -227,21 +227,21 @@ func validateCaptureDTQL(text string, params []capturedParameter) (string, error
 	used := make(map[string]bool, len(referenced))
 	for _, name := range referenced {
 		if !declared[name] {
-			return "", newInvalidRequest("query.parameters", fmt.Sprintf("the dtql references parameter %q, which is not declared", name))
+			return "", newInvalidRequest("query.parameters", fmt.Sprintf("the tugql references parameter %q, which is not declared", name))
 		}
 		used[name] = true
 	}
 	for _, p := range params {
 		if !used[p.ID] {
-			return "", newInvalidRequest("query.parameters", fmt.Sprintf("parameter %q is declared but the dtql never uses it", p.ID))
+			return "", newInvalidRequest("query.parameters", fmt.Sprintf("parameter %q is declared but the tugql never uses it", p.ID))
 		}
 	}
 	return collection, nil
 }
 
-// dtqlCollection returns the name of the collection query reads, or ""
+// tugqlCollection returns the name of the collection query reads, or ""
 // when it reads anything else.
-func dtqlCollection(query dal.StructuredQuery) string {
+func tugqlCollection(query dal.StructuredQuery) string {
 	from := query.From()
 	if from == nil {
 		return ""
@@ -271,7 +271,7 @@ func checkCaptureSource(ctx context.Context, projectID, projectDir, environment,
 	if err != nil {
 		return captureInternal(err)
 	}
-	target := &datatug.QueryDef{Type: datatug.QueryTypeDTQL, Targets: []datatug.QueryDefTarget{{Catalog: source}}}
+	target := &datatug.QueryDef{Type: datatug.QueryTypeTugQL, Targets: []datatug.QueryDefTarget{{Catalog: source}}}
 	eligible, err := api.EligibleTargets(ctx, projStore, projectDir, environment, target)
 	if err == nil {
 		for _, s := range eligible {

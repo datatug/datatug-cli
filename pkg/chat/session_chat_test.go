@@ -41,7 +41,7 @@ func TestSessionChatRebuildsContextAfterRestartAndSwitch(t *testing.T) {
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
-	firstAgent := &contextualStub{turns: []Turn{{Queries: []QueryResult{{Title: "Orders", DTQL: "from: {name: Invoice}\nlimit: 2", Result: secureread.Result{
+	firstAgent := &contextualStub{turns: []Turn{{Queries: []QueryResult{{Title: "Orders", TugQL: "from: {name: Invoice}\nlimit: 2", Result: secureread.Result{
 		Columns: []string{"InvoiceId", "CustomerId"},
 		Rows: []secureread.Row{
 			{Data: map[string]any{"InvoiceId": 412, "CustomerId": 58}},
@@ -157,7 +157,7 @@ func (m *blockingFinalLLM) Stream(_ context.Context, _ ai.ChatRequest) iter.Seq2
 			return
 		}
 		if m.calls == 1 {
-			call := ai.ToolCall{ID: "1", Name: toolRunDTQL, Arguments: mustJSON(map[string]any{"title": "One customer", "dtql": "from: {name: Customer}\nlimit: 1"})}
+			call := ai.ToolCall{ID: "1", Name: toolRunTugQL, Arguments: mustJSON(map[string]any{"title": "One customer", "tugql": "from: {name: Customer}\nlimit: 1"})}
 			if !yield(ai.Event{Type: ai.EventToolCall, ToolCall: &call}, nil) {
 				return
 			}
@@ -215,13 +215,13 @@ func TestSuccessfulQueryIsDurableBeforeModelFinishes(t *testing.T) {
 	}
 }
 
-func TestRepeatedSuccessfulDTQLExecutionsHaveDistinctSnapshots(t *testing.T) {
+func TestRepeatedSuccessfulTugQLExecutionsHaveDistinctSnapshots(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	doc := "from: {name: Customer}\nlimit: 1"
 	step := func(id string) scriptedStep {
-		return scriptedStep{toolCalls: []ai.ToolCall{toolCall(id, toolRunDTQL, map[string]any{"dtql": doc})}}
+		return scriptedStep{toolCalls: []ai.ToolCall{toolCall(id, toolRunTugQL, map[string]any{"tugql": doc})}}
 	}
 	llm := &scriptedProvider{steps: []scriptedStep{step("1"), step("2"), {text: "Done"}}}
 	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 5}}}}}
@@ -248,7 +248,7 @@ func TestRepeatedSuccessfulDTQLExecutionsHaveDistinctSnapshots(t *testing.T) {
 func TestSessionContextHasHardSizeLimit(t *testing.T) {
 	t.Parallel()
 	large := strings.Repeat("x", 40000)
-	record := RecordSet{ID: "rs", DTQL: large, Result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": large}}}}}
+	record := RecordSet{ID: "rs", TugQL: large, Result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": large}}}}}
 	session := ChatSession{RecordSets: map[string]RecordSet{"rs": record}, Messages: []ChatMessage{{Role: "You", Kind: "text", Text: large}, {Kind: "grid", RecordSetID: "rs"}}}
 	contextText := buildSessionContext(session)
 	if len(contextText) > maxContextChars || !strings.Contains(contextText, "truncated") {
@@ -268,7 +268,7 @@ func TestSessionChatStreamAskPersistsSameAsAsk(t *testing.T) {
 	defer func() { _ = store.Close() }()
 	doc := "from: {name: Customer}\nlimit: 1\n"
 	llm := &scriptedProvider{steps: []scriptedStep{
-		{toolCalls: []ai.ToolCall{toolCall("1", toolRunDTQL, map[string]any{"title": "Customers", "dtql": doc})}},
+		{toolCalls: []ai.ToolCall{toolCall("1", toolRunTugQL, map[string]any{"title": "Customers", "tugql": doc})}},
 		{text: "Here you go."},
 	}}
 	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 1}}}}}

@@ -172,7 +172,7 @@ func TestChatUISubmitWithNoQueriesAppendsFallbackText(t *testing.T) {
 	view := u.shell.View().Content
 	// finalizeTurn's empty-turn fallback text was generalized in
 	// datatug-cli#291 from "I couldn't construct a valid query for that
-	// request." (which claimed a DTQL parse attempt that never happened
+	// request." (which claimed a TugQL parse attempt that never happened
 	// for a stub agent returning a bare empty Turn) to this provider-
 	// neutral message.
 	if !strings.Contains(view, "The AI model returned no query or answer") {
@@ -250,7 +250,7 @@ func TestChatUIJoinCandidatesWireIntoJoinBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 	query, err := store.AppendQuery(ctx, sessions.activeID, user.ID, "sqlite:///fixture.db", QueryResult{
-		Title: "Invoices", DTQL: "from: {name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 5\n",
+		Title: "Invoices", TugQL: "from: {name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 5\n",
 		Result: secureread.Result{Columns: []string{"InvoiceId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 1}}}},
 	})
 	if err != nil {
@@ -350,7 +350,7 @@ func TestChatUIInlineFKJoinNavigationAndApply(t *testing.T) {
 		t.Fatal(err)
 	}
 	base, err := store.AppendQuery(ctx, sessions.activeID, user.ID, "sqlite:///fixture.db", QueryResult{
-		Title: "Invoices", DTQL: "from: {name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 5\n",
+		Title: "Invoices", TugQL: "from: {name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 5\n",
 		Result: secureread.Result{Columns: []string{"InvoiceId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 1}}}},
 	})
 	if err != nil {

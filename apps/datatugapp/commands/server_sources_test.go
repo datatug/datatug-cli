@@ -78,7 +78,7 @@ func TestScanCommand_MySQLAndOracleFlags(t *testing.T) {
 	_, err = runScanCommand(t, "-d", dir, "-D", "oracle", "-s", "db.example.com", "--db", "hr", "--env", "local")
 	assert.ErrorContains(t, err, "--server not accepted for an oracle scan")
 	_, err = runScanCommand(t, "-d", dir, "-D", "sqlite3", "--dsn-env", "DATATUG_X", "--db", "x", "--env", "local")
-	assert.EqualError(t, err, "--dsn-env applies only to -D postgres, mysql or oracle")
+	assert.EqualError(t, err, "--dsn-env applies only to -D postgres, mysql, oracle or sqlserver")
 }
 
 func TestScanAndQuery_MySQLThroughAStandIn(t *testing.T) {
@@ -102,10 +102,13 @@ func TestScanAndQuery_MySQLThroughAStandIn(t *testing.T) {
 	queries := filepath.Join(projectDir, "queries")
 	require.NoError(t, os.MkdirAll(queries, 0o755))
 	writeSavedQuery(t, queries, "ada", "SQL", "SELECT id, name FROM customer WHERE id = 1")
-	writeSavedQuery(t, queries, "alan", "DTQL", "from: {name: customer}\nwhere: {op: '==', left: {field: id}, right: {value: 2}}\n")
+	writeSavedQuery(t, queries, "alan", "TugQL", "from: {name: customer}\nwhere: {op: '==', left: {field: id}, right: {value: 2}}\n")
 	stdout, stderr, code = runQuery(t, "", "--project", projectDir, "--query", "ada", "--env", "local", "--format", "json")
 	require.Zero(t, code, stderr)
-	assert.Equal(t, []map[string]any{{"id": float64(1), "name": "Ada"}}, decodeObjects(t, stdout))
+	rows := decodeObjects(t, stdout)
+	require.Len(t, rows, 1)
+	assert.Equal(t, float64(1), rows[0]["id"])
+	assert.Equal(t, "Ada", rows[0]["name"])
 	stdout, stderr, code = runQuery(t, "", "--project", projectDir, "--query", "alan", "--env", "local", "--format", "json")
 	require.Zero(t, code, stderr)
 	assert.Equal(t, "Alan", decodeObjects(t, stdout)[0]["name"])

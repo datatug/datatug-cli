@@ -33,6 +33,10 @@ func standInForServers(t *testing.T) (dsns *[]string) {
 			got = append(got, dsn)
 			return &fakeServerDB{}, nil
 		},
+		SQLServer: func(_ context.Context, dsn string) (SchemaScanDB, error) {
+			got = append(got, dsn)
+			return &fakeServerDB{}, nil
+		},
 	}))
 	return &got
 }
@@ -94,7 +98,7 @@ func TestParseServerURLs(t *testing.T) {
 		})
 	}
 	_, err := ParseServerTarget("postgres", "postgres://a@b/c")
-	assert.EqualError(t, err, "postgres is not a MySQL or an Oracle scheme")
+	assert.EqualError(t, err, "postgres is not a MySQL, Oracle or SQL Server scheme")
 }
 
 func TestParseServerURLRefusals(t *testing.T) {
@@ -228,17 +232,20 @@ func TestServerOpenFailuresNameNoPartOfTheURL(t *testing.T) {
 
 func TestTheRealServerOpenersAreTheAdapters(t *testing.T) {
 	real := RealServerOpeners()
-	// The DSN is one the MySQL driver refuses to parse, so nothing is dialled.
+	// Each URL is one its driver refuses to read, so nothing is dialled.
 	_, err := real.MySQL("not a dsn")
 	assert.Error(t, err)
-	_, err = real.Oracle(context.Background(), "oracle://u:p@h/s")
-	assert.ErrorIs(t, err, errOracleAdapterMissing)
+	_, err = real.Oracle(context.Background(), "oracle://%zz")
+	assert.Error(t, err)
+	_, err = real.SQLServer(context.Background(), "sqlserver://%zz")
+	assert.Error(t, err)
 
 	restore := SetServerOpenersForTest(ServerOpeners{})
 	restore()
 	assert.PanicsWithValue(t, "a test of pkg/dbcopy opened a MySQL database for real: it must stand in and never dial",
 		func() { _, _ = newMySQLDatabase("x") })
 	assert.Panics(t, func() { _, _ = newOracleDatabase(context.Background(), "x") })
+	assert.Panics(t, func() { _, _ = newSQLServerDatabase(context.Background(), "x") })
 }
 
 // A ref that did not come from Parse is read again before it is opened, and refused the same way.

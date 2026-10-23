@@ -25,9 +25,13 @@ func init() {
 		Oracle: func(context.Context, string) (dbcopy.SchemaScanDB, error) {
 			panic("a test of pkg/secureread opened an Oracle database for real")
 		},
+		SQLServer: func(context.Context, string) (dbcopy.SchemaScanDB, error) {
+			panic("a test of pkg/secureread opened a SQL Server database for real")
+		},
 	})
 	_ = os.Unsetenv(dbcopy.MySQLPreviewEnv)
 	_ = os.Unsetenv(dbcopy.OraclePreviewEnv)
+	_ = os.Unsetenv(dbcopy.SQLServerPreviewEnv)
 }
 
 // neverDialPostgres panics: a test that reaches it did not stand in, and the next thing the real constructor

@@ -232,17 +232,17 @@ func TestMySQLScanAndQueryJourney(t *testing.T) {
 	assert.Equal(t, []int{11}, realMySQLIDs(t, "from: {name: invoice}\nwhere: {op: '==', left: {field: customer_id}, right: {value: 3}}\n"))
 	stdout, stderr, code = runQuery(t, "from: {name: MixedCase}\n", "--db", "env:"+realMySQLScanVar, "-f", "-", "--format", "json", "--no-policies")
 	require.Zero(t, code, stderr)
-	assert.Equal(t, []map[string]any{{"OrderId": float64(7), "ItemName": "lamp"}}, decodeObjects(t, stdout), "a mixed-case table is read by its exact name")
+	assert.Equal(t, []map[string]any{{"OrderId": float64(7), "ItemName": "lamp"}}, withoutKey(decodeObjects(t, stdout)), "a mixed-case table is read by its exact name")
 	assert.Empty(t, server.partsIn(stdout+stderr))
 
 	// 3. Saved queries of the scanned project: a SQL one and a TugQL one, on the one database of environment local.
 	queries := filepath.Join(projectDir, "queries")
 	require.NoError(t, os.MkdirAll(queries, 0o755))
 	writeSavedQuery(t, queries, "top-customers", "SQL", "SELECT id, name FROM customer WHERE score IS NOT NULL ORDER BY score DESC;\n")
-	writeSavedQuery(t, queries, "graces", "DTQL", "from: {name: customer}\nwhere: {op: '==', left: {field: id}, right: {value: 3}}\n")
+	writeSavedQuery(t, queries, "graces", "TugQL", "from: {name: customer}\nwhere: {op: '==', left: {field: id}, right: {value: 3}}\n")
 	stdout, stderr, code = runQuery(t, "", "--project", projectDir, "--query", "top-customers", "--env", "local", "--format", "json")
 	require.Zero(t, code, stderr)
-	assert.Equal(t, []map[string]any{{"id": float64(1), "name": "Ada Lovelace"}, {"id": float64(3), "name": "Grace Hopper"}}, decodeObjects(t, stdout))
+	assert.Equal(t, []map[string]any{{"id": float64(1), "name": "Ada Lovelace"}, {"id": float64(3), "name": "Grace Hopper"}}, withoutKey(decodeObjects(t, stdout)))
 	stdout, stderr, code = runQuery(t, "", "--project", projectDir, "--query", "graces", "--env", "local", "--format", "json")
 	require.Zero(t, code, stderr)
 	rows := decodeObjects(t, stdout)
@@ -261,10 +261,23 @@ func TestMySQLScanAndQueryJourney(t *testing.T) {
 	assert.Equal(t, []int{1}, realMySQLIDs(t, "from: {name: customer}\nwhere: {op: '==', left: {field: name}, right: {value: Ada Lovelace}}\n"), "the row the update named is as it was")
 }
 
-// writeSavedQuery writes the saved query id of type queryType (SQL or DTQL) with text into the queries folder.
+// writeSavedQuery writes the saved query id of type queryType (SQL or TugQL) with text into the queries folder:
+// a SQL body as <id>.query.sql, a structured TugQL document as <id>.query.tugql.yaml.
 func writeSavedQuery(t *testing.T, queriesDir, id, queryType, text string) {
 	t.Helper()
 	meta := fmt.Sprintf(`{"createdAt":"2026-10-23T00:00:00Z","id":%q,"type":%q}`, id, queryType)
 	require.NoError(t, os.WriteFile(filepath.Join(queriesDir, id+".query.json"), []byte(meta), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(queriesDir, id+".query."+strings.ToLower(queryType)), []byte(text), 0o644))
+	body := id + ".query." + strings.ToLower(queryType)
+	if queryType == "TugQL" {
+		body += ".yaml"
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(queriesDir, body), []byte(text), 0o644))
+}
+
+// withoutKey is rows without the "$key" column the output adds to every row.
+func withoutKey(rows []map[string]any) []map[string]any {
+	for _, row := range rows {
+		delete(row, "$key")
+	}
+	return rows
 }

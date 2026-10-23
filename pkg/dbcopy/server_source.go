@@ -2,7 +2,6 @@ package dbcopy
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"maps"
 	"net"
@@ -15,19 +14,24 @@ import (
 	"time"
 
 	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/dalgo2mssql"
 	"github.com/dal-go/dalgo2mysql"
+	"github.com/dal-go/dalgo2oracle"
 	"github.com/dal-go/dalgo2sql"
+	dalrecord "github.com/dal-go/record"
 	"github.com/go-sql-driver/mysql"
 	goora "github.com/sijms/go-ora/v3"
 )
 
-// A MySQL or Oracle source is a database server reached by a connection URL, like a PostgreSQL one:
-// mysql://user:password@host:port/database and oracle://user:password@host:port/service. The URL is
-// read from an environment variable ("env:NAME"), and a project names the variable and never the URL
-// (see PostgresDescriptor, which both share). A source of either is read only: a MySQL session is
-// opened with transaction_read_only on, and an Oracle read runs in a READ ONLY transaction (see
-// package dalgo2oracle). Nothing writes to one. Opening one for a read is behind a preview switch of
-// its own (MySQLPreviewEnv, OraclePreviewEnv), as PostgreSQL's is; a schema scan is not.
+// A MySQL, Oracle or SQL Server source is a database server reached by a connection URL, like a
+// PostgreSQL one: mysql://user:password@host:port/database, oracle://user:password@host:port/service
+// and sqlserver://user:password@host:port/database. The URL is read from an environment variable
+// ("env:NAME"), and a project names the variable and never the URL (see PostgresDescriptor, which they
+// share). DataTug only reads one: a MySQL session is opened with transaction_read_only on, and a records
+// read of an Oracle source runs in a READ ONLY transaction (see oracleReads). SQL Server has no read-only
+// session, so a SQL Server source relies on DataTug sending SELECT text only and on a read-only login.
+// Opening one for a read is behind a preview switch of its own (MySQLPreviewEnv, OraclePreviewEnv,
+// SQLServerPreviewEnv), as PostgreSQL's is; a schema scan is not.
 
 const (
 	// MySQLPreviewEnv is the environment variable that turns MySQL sources on: a mysql:// source is
@@ -37,6 +41,10 @@ const (
 	// OraclePreviewEnv is the environment variable that turns Oracle sources on: an oracle:// source
 	// is opened for a read only while it is "1".
 	OraclePreviewEnv = "DATATUG_PREVIEW_ORACLE"
+
+	// SQLServerPreviewEnv is the environment variable that turns SQL Server sources on: a sqlserver://
+	// source is opened for a read only while it is "1".
+	SQLServerPreviewEnv = "DATATUG_PREVIEW_SQLSERVER"
 )
 
 // serverEngine is what differs between the database servers a source URL of this file names.
@@ -67,6 +75,11 @@ var (
 		queryKeys: map[string]bool{"ssl": true, "ssl verify": true, "timeout": true, "connection timeout": true, "wallet": true},
 		preview:   &refusedError{"Oracle sources are a preview and are switched off: set " + OraclePreviewEnv + "=1 to use them"},
 	}
+	sqlServerEngine = serverEngine{
+		scheme: "sqlserver", title: "SQL Server", previewEnv: SQLServerPreviewEnv, defaultPort: 1433, pathNames: "database",
+		queryKeys: map[string]bool{"encrypt": true, "trustservercertificate": true, "connection timeout": true},
+		preview:   &refusedError{"SQL Server sources are a preview and are switched off: set " + SQLServerPreviewEnv + "=1 to use them"},
+	}
 )
 
 // serverEngineOf is the engine of a source scheme, and false for a scheme that is not a MySQL or an
@@ -77,6 +90,8 @@ func serverEngineOf(scheme string) (serverEngine, bool) {
 		return mysqlEngine, true
 	case "oracle":
 		return oracleEngine, true
+	case "sqlserver":
+		return sqlServerEngine, true
 	}
 	return serverEngine{}, false
 }
@@ -218,12 +233,12 @@ func parseServerURL(engine serverEngine, rawURL string) (serverURL, error) {
 	}, nil
 }
 
-// ParseServerTarget reads the destination a mysql:// or oracle:// URL states. No error quotes the
-// URL.
+// ParseServerTarget reads the destination a mysql://, oracle:// or sqlserver:// URL states. No error
+// quotes the URL.
 func ParseServerTarget(scheme, rawURL string) (ServerTarget, error) {
 	engine, ok := serverEngineOf(scheme)
 	if !ok {
-		return ServerTarget{}, fmt.Errorf("%s is not a MySQL or an Oracle scheme", scheme)
+		return ServerTarget{}, fmt.Errorf("%s is not a MySQL, Oracle or SQL Server scheme", scheme)
 	}
 	parsed, err := parseServerURL(engine, rawURL)
 	return parsed.ServerTarget, err
@@ -288,34 +303,93 @@ func oracleURL(parsed serverURL) string {
 // binary of this package replaces them with ones that stop the run.
 var (
 	newMySQLDatabase = func(dsn string) (SchemaScanDB, error) {
-		return dalgo2mysql.NewDatabaseWithOptions(dsn, dal.NewSchema(nil, nil), dalgo2sql.DbOptions{})
+		return dalgo2mysql.NewDatabaseWithOptions(dsn, dal.NewSchema(nil, nil), dalgo2sql.DbOptions{StructuredQueryDialect: "mysql"})
 	}
 	newOracleDatabase = func(ctx context.Context, dsn string) (SchemaScanDB, error) {
-		return nil, errOracleAdapterMissing
+		return asSchemaScanDB(dalgo2oracle.NewDatabase(ctx, dsn))
+	}
+	newSQLServerDatabase = func(ctx context.Context, dsn string) (SchemaScanDB, error) {
+		return asSchemaScanDB(dalgo2mssql.NewDatabase(ctx, dsn))
 	}
 )
 
-var errOracleAdapterMissing = errors.New("the Oracle adapter is not wired yet")
+// asSchemaScanDB is what an adapter's constructor returned, as a SchemaScanDB: an error stays an
+// error with no database, so a nil pointer of the adapter's type never becomes a non-nil interface.
+func asSchemaScanDB[T SchemaScanDB](db T, err error) (SchemaScanDB, error) {
+	if err != nil {
+		return nil, err
+	}
+	return db, nil
+}
 
-// errServerReadOnly refuses to open a MySQL or an Oracle source for writing.
+// oracleReads is an Oracle database whose records reads each run in a READ ONLY transaction
+// (dalgo2oracle turns RunReadonlyTransaction into SET TRANSACTION READ ONLY): the server refuses a
+// write that a query's text might hold. The rows are read in full inside the transaction and handed
+// over from memory, because the transaction ends when the read returns.
+type oracleReads struct{ SchemaScanDB }
+
+// ExecuteQueryToRecordsReader runs query in a READ ONLY transaction (see oracleReads).
+func (o oracleReads) ExecuteQueryToRecordsReader(ctx context.Context, query dal.Query) (dal.RecordsReader, error) {
+	var records []dalrecord.Record
+	err := o.RunReadonlyTransaction(ctx, func(ctx context.Context, tx dal.ReadTransaction) error {
+		reader, err := tx.ExecuteQueryToRecordsReader(ctx, query)
+		if err != nil {
+			return err
+		}
+		records, err = dal.ReadAllToRecords(ctx, reader)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return dal.NewRecordsReader(records), nil
+}
+
+// errServerReadOnly refuses to open a MySQL, Oracle or SQL Server source for writing.
 func errServerReadOnly(engine serverEngine) error {
 	return &refusedError{engine.title + " sources are read only in DataTug: only a read opens one"}
 }
 
-// openServerDatabase opens this MySQL or Oracle source through its adapter, read only.
+// sqlServerURL is the go-mssqldb connection URL of a parsed SQL Server URL: the database moves from
+// the path, which go-mssqldb reads as an instance name, to the database parameter.
+func sqlServerURL(parsed serverURL) string {
+	query := url.Values{}
+	for key, values := range parsed.query {
+		query.Set(key, values[len(values)-1])
+	}
+	query.Set("database", parsed.Database)
+	if !query.Has("connection timeout") {
+		query.Set("connection timeout", strconv.Itoa(int(serverConnectTimeout/time.Second)))
+	}
+	return (&url.URL{
+		Scheme:   "sqlserver",
+		User:     url.UserPassword(parsed.User, parsed.password),
+		Host:     net.JoinHostPort(parsed.Host, strconv.Itoa(parsed.Port)),
+		RawQuery: query.Encode(),
+	}).String()
+}
+
+// openServerDatabase opens this MySQL, Oracle or SQL Server source through its adapter, for reading.
 func (r BackendRef) openServerDatabase(ctx context.Context, engine serverEngine) (SchemaScanDB, error) {
 	parsed, err := parseServerURL(engine, r.Path)
 	if err != nil {
 		return nil, err
 	}
-	if engine.scheme == "mysql" {
+	switch engine.scheme {
+	case "mysql":
 		dsn, err := mysqlDSN(parsed)
 		if err != nil {
 			return nil, err
 		}
 		return newMySQLDatabase(dsn)
+	case "oracle":
+		db, err := newOracleDatabase(ctx, oracleURL(parsed))
+		if err != nil {
+			return nil, err
+		}
+		return oracleReads{db}, nil
 	}
-	return newOracleDatabase(ctx, oracleURL(parsed))
+	return newSQLServerDatabase(ctx, sqlServerURL(parsed))
 }
 
 // openServer is openSource's case for a MySQL or an Oracle source: the preview switch first, then a

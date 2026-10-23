@@ -47,6 +47,7 @@ type Server struct {
 	SMS                    SMSSender
 	Telegram               TelegramSender
 	TelegramCallbackSecret string
+	TelegramRouteID        string
 	PublicUIURL            string
 	ProjectUIURLs          map[string]string
 	Limits                 Limits
@@ -186,7 +187,7 @@ func (s *Server) userRequest(w http.ResponseWriter, r *http.Request, path string
 		if limitsErr != nil {
 			err = limitsErr
 		}
-		result = map[string]any{"id": c.ID, "namespace": c.Namespace, "project": c.Project, "environment": c.Environment, "sharedEditor": c.SharedEditor, "tier": c.Tier, "telegramConnected": connected, "channels": map[string]bool{"in_app": true, "email": c.Email != "" && s.Email != nil, "sms": c.Tier == "paid" && c.Phone != "" && s.SMS != nil, "telegram": s.Telegram != nil && s.TelegramCallbackSecret != ""}, "limits": limits}
+		result = map[string]any{"id": c.ID, "namespace": c.Namespace, "project": c.Project, "environment": c.Environment, "sharedEditor": c.SharedEditor, "tier": c.Tier, "telegramConnected": connected, "channels": map[string]bool{"in_app": true, "email": c.Email != "" && s.Email != nil, "sms": c.Tier == "paid" && c.Phone != "" && s.SMS != nil, "telegram": s.telegramConfigured()}, "limits": limits}
 	case path == "definitions" && r.Method == "GET":
 		var list []watch.Definition
 		list, err = s.Store.ListDefinitions(r.Context(), a)
@@ -253,7 +254,7 @@ func (s *Server) userRequest(w http.ResponseWriter, r *http.Request, path string
 		err = decode(w, r, &b)
 		if err == nil {
 			for _, channel := range b.Channels {
-				if channel == "email" && s.Email == nil || channel == "sms" && s.SMS == nil || channel == "telegram" && (s.Telegram == nil || s.TelegramCallbackSecret == "") {
+				if channel == "email" && s.Email == nil || channel == "sms" && s.SMS == nil || channel == "telegram" && !s.telegramConfigured() {
 					err = watch.ErrInvalid
 				}
 			}

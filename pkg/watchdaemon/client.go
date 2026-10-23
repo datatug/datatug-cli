@@ -122,6 +122,9 @@ type Runner struct {
 	Client                      Client
 	Executor                    Executor
 	PollInterval, RenewInterval time.Duration
+	RegistrationInterval        time.Duration
+	// beforeSubmit is a local test seam for cancellation after renewal stops.
+	beforeSubmit func()
 }
 
 // Run uses the same HTTP registration/claim/renew/complete protocol locally and
@@ -133,6 +136,10 @@ func (r Runner) Run(ctx context.Context) error {
 	poll := r.PollInterval
 	if poll <= 0 {
 		poll = 2 * time.Second
+	}
+	registration := r.RegistrationInterval
+	if registration <= 0 {
+		registration = 30 * time.Second
 	}
 	for {
 		if ctx.Err() != nil {
@@ -150,7 +157,7 @@ func (r Runner) Run(ctx context.Context) error {
 		}
 		registered := time.Now()
 		for ctx.Err() == nil {
-			if time.Since(registered) > 30*time.Second {
+			if time.Since(registered) > registration {
 				break
 			}
 			claim, err := r.Client.Claim(ctx)
@@ -212,6 +219,9 @@ func (r Runner) executeClaim(ctx context.Context, claim watch.Claim) error {
 	renewErr := <-renewResult
 	if renewErr != nil {
 		return renewErr
+	}
+	if r.beforeSubmit != nil {
+		r.beforeSubmit()
 	}
 	if ctx.Err() != nil {
 		return ctx.Err()

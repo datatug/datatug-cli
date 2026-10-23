@@ -321,6 +321,7 @@ func TestWatchTelegramLinkCallbackAndProvider(t *testing.T) {
 	f := protocolFixture(t)
 	f.server.Telegram = &FileTelegramSink{Sink: &FileEmailSink{Path: filepath.Join(t.TempDir(), "telegram")}}
 	f.server.TelegramCallbackSecret = strings.Repeat("bridge-", 8)
+	f.server.TelegramRouteID = "local"
 	code, body := f.request(t, "alice", "POST", "telegram/connect", struct{}{})
 	if code != 200 {
 		t.Fatalf("connect %d %s", code, body)

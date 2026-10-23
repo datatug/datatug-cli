@@ -36,6 +36,19 @@ type FileEmailSink struct {
 	mu   sync.Mutex
 }
 
+type sinkTemporaryFile interface {
+	Write([]byte) (int, error)
+	Sync() error
+	Close() error
+	Name() string
+}
+
+var sinkCreateTemp = func(dir, pattern string) (sinkTemporaryFile, error) { return os.CreateTemp(dir, pattern) }
+var sinkLink = os.Link
+var sinkLstat = os.Lstat
+var sinkReadFile = os.ReadFile
+var sinkOpenDirectory = os.Open
+
 func (s *FileEmailSink) Send(ctx context.Context, message EmailMessage) error {
 	if err := validateEmail(message); err != nil {
 		return err
@@ -48,30 +61,30 @@ func (s *FileEmailSink) Send(ctx context.Context, message EmailMessage) error {
 	if err := os.MkdirAll(s.Path, 0700); err != nil {
 		return errors.New("Watch email sink is unavailable")
 	}
-	info, err := os.Lstat(s.Path)
+	info, err := sinkLstat(s.Path)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return errors.New("Watch email sink must be a private directory")
 	}
 	sum := sha256.Sum256([]byte(message.ID))
 	target := filepath.Join(s.Path, fmt.Sprintf("%x.json", sum))
 	checkExisting := func() error {
-		info, err := os.Lstat(target)
+		info, err := sinkLstat(target)
 		if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() > 128*1024 {
 			return errors.New("Watch email sink entry is unavailable")
 		}
-		body, err := os.ReadFile(target)
+		body, err := sinkReadFile(target)
 		var prior EmailMessage
 		if err != nil || json.Unmarshal(body, &prior) != nil || prior != message {
 			return errors.New("Watch email message identity conflicts")
 		}
 		return nil
 	}
-	if _, err = os.Lstat(target); err == nil {
+	if _, err = sinkLstat(target); err == nil {
 		return checkExisting()
 	} else if !os.IsNotExist(err) {
 		return errors.New("Watch email sink entry is unavailable")
 	}
-	f, err := os.CreateTemp(s.Path, ".pending-")
+	f, err := sinkCreateTemp(s.Path, ".pending-")
 	if err != nil {
 		return errors.New("Watch email sink is unavailable")
 	}
@@ -85,13 +98,13 @@ func (s *FileEmailSink) Send(ctx context.Context, message EmailMessage) error {
 	}
 	// Link publishes without replacing an existing ID. An interrupted temporary
 	// file is ignored, and a retry validates the complete published message.
-	if err = os.Link(f.Name(), target); err != nil {
+	if err = sinkLink(f.Name(), target); err != nil {
 		if os.IsExist(err) {
 			return checkExisting()
 		}
 		return errors.New("Watch email sink cannot publish delivery")
 	}
-	dir, err := os.Open(s.Path)
+	dir, err := sinkOpenDirectory(s.Path)
 	if err != nil {
 		return errors.New("Watch email sink directory unavailable")
 	}

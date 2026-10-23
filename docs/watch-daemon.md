@@ -95,6 +95,7 @@ deployment is:
     "emailSink":"/absolute/private/watch-mail",
     "smsSink":"/absolute/private/watch-sms",
     "telegramSink":"/absolute/private/watch-telegram",
+    "telegramRouteID":"local",
     "telegramCallbackSecretEnv":"DATATUG_WATCH_BOT_BRIDGE_SECRET"
   },
   "limits": {
@@ -170,9 +171,11 @@ acceptance acknowledgement is lost.
 
 Telegram requires connecting the subscriber's account. `telegram/connect` returns
 a short-lived, one-use `DataTugBot` start link. The existing bot owner forwards only
-a private `/start watch-<nonce>` update to the operator-allowlisted Coordinator's
+a private `/start watch-<routeID>_<nonce>` update to the selected operator-allowlisted Coordinator's
 `/v1/watch/telegram/update`, authenticated with the configured bridge secret.
-The browser cannot provide a chat ID. No Watch process changes the production
+`telegramRouteID` is a unique 1–8 character alphanumeric host route identifier;
+the bot forwards only to that route, never broadcasts account proofs to other
+Coordinators. The browser cannot provide a chat ID. No Watch process changes the production
 bot webhook or starts polling.
 
 Self-hosted production delivery uses `telegramGatewayURL` and

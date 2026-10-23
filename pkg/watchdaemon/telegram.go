@@ -20,6 +20,8 @@ import (
 	"github.com/datatug/datatug-cli/pkg/watch"
 )
 
+var telegramRandomRead = rand.Read
+
 type TelegramMessage struct{ ID, ChatID, Body, DeliveryCapability string }
 type TelegramSender interface {
 	Send(context.Context, TelegramMessage) error
@@ -91,6 +93,19 @@ type telegramLinkStore interface {
 	TelegramStatus(context.Context, watch.Actor) (bool, error)
 	DisconnectTelegram(context.Context, watch.Actor) error
 }
+
+func (s *Server) telegramConfigured() bool {
+	if s.Telegram == nil || len(s.TelegramCallbackSecret) < 32 || len(s.TelegramRouteID) < 1 || len(s.TelegramRouteID) > 8 {
+		return false
+	}
+	for _, r := range s.TelegramRouteID {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+			return false
+		}
+	}
+	return true
+}
+
 type telegramCapabilityStore interface {
 	CompleteTelegramLinkWithCapability(context.Context, string, string, string) error
 }
@@ -158,12 +173,12 @@ func (s *Server) telegramUser(w http.ResponseWriter, r *http.Request, path strin
 			fail(w, watch.ErrInvalid)
 			return true
 		}
-		if s.Telegram == nil || s.TelegramCallbackSecret == "" {
+		if !s.telegramConfigured() {
 			fail(w, errors.New("Telegram link bridge unavailable"))
 			return true
 		}
 		var raw [32]byte
-		if _, err := rand.Read(raw[:]); err != nil {
+		if _, err := telegramRandomRead(raw[:]); err != nil {
 			fail(w, err)
 			return true
 		}
@@ -173,7 +188,7 @@ func (s *Server) telegramUser(w http.ResponseWriter, r *http.Request, path strin
 		if err := store.BeginTelegramLink(r.Context(), a, hex.EncodeToString(hash[:]), expires); err != nil {
 			fail(w, err)
 		} else {
-			reply(w, 200, map[string]any{"url": "https://t.me/DataTugBot?start=watch-" + nonce, "expiresAt": expires})
+			reply(w, 200, map[string]any{"url": "https://t.me/DataTugBot?start=watch-" + s.TelegramRouteID + "_" + nonce, "expiresAt": expires})
 		}
 	case path == "telegram/disconnect" && r.Method == "POST":
 		var empty struct{}
@@ -242,7 +257,12 @@ func (s *Server) telegramUpdate(w http.ResponseWriter, r *http.Request) {
 		fail(w, watch.ErrInvalid)
 		return
 	}
-	nonce := strings.TrimPrefix(fields[1], "watch-")
+	prefix := "watch-" + s.TelegramRouteID + "_"
+	if s.TelegramRouteID == "" || !strings.HasPrefix(fields[1], prefix) {
+		fail(w, watch.ErrInvalid)
+		return
+	}
+	nonce := strings.TrimPrefix(fields[1], prefix)
 	raw, err := base64.RawURLEncoding.DecodeString(nonce)
 	if err != nil || len(raw) != 32 || base64.RawURLEncoding.EncodeToString(raw) != nonce {
 		fail(w, watch.ErrInvalid)

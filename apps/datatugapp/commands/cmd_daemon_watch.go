@@ -162,7 +162,7 @@ func watchDaemonAction(cmd *cobra.Command, _ []string) error {
 			return errors.New("Watch transactional coordinator storage could not be opened")
 		}
 		defer store.Close()
-		service := &watchdaemon.Server{Store: store, Auth: auth, AllowedOrigins: cfg.AllowedOrigins, PublicUIURL: cfg.PublicUIURL, ProjectUIURLs: cfg.ProjectUIURLs, Limits: cfg.Limits, TelegramCallbackSecret: os.Getenv(cfg.Notifications.TelegramCallbackSecretEnv)}
+		service := &watchdaemon.Server{Store: store, Auth: auth, AllowedOrigins: cfg.AllowedOrigins, PublicUIURL: cfg.PublicUIURL, ProjectUIURLs: cfg.ProjectUIURLs, Limits: cfg.Limits, TelegramRouteID: cfg.Notifications.TelegramRouteID, TelegramCallbackSecret: os.Getenv(cfg.Notifications.TelegramCallbackSecretEnv)}
 		if cfg.Notifications.EmailSink != "" {
 			service.Email = &watchdaemon.FileEmailSink{Path: cfg.Notifications.EmailSink}
 		} else if cfg.Notifications.SMTP != nil {

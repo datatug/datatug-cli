@@ -41,6 +41,7 @@ type Config struct {
 		TelegramCallbackSecretEnv string      `json:"telegramCallbackSecretEnv,omitempty"`
 		TelegramGatewayURL        string      `json:"telegramGatewayURL,omitempty"`
 		TelegramGatewayTokenEnv   string      `json:"telegramGatewayTokenEnv,omitempty"`
+		TelegramRouteID           string      `json:"telegramRouteID,omitempty"`
 	} `json:"notifications"`
 }
 

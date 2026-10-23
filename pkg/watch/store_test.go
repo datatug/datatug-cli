@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -802,5 +803,43 @@ func TestAbandonedDeliveryLeaseAttemptsBounded(t *testing.T) {
 	deliveries, _ := s.ListDeliveries(ctx, a, d.ID)
 	if len(deliveries) != 1 || deliveries[0].State != "failed" || deliveries[0].Attempts != s.config.MaxAttempts {
 		t.Fatalf("bounded outcome %+v", deliveries)
+	}
+}
+func TestPrivateStoragePermissionsAndTelegramExpiry(t *testing.T) {
+	s, c, path := fixture(t)
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if opened, err := NewSQLiteStore(path, s.config); err == nil {
+		_ = opened.Close()
+		t.Fatal("world-readable coordinator database accepted")
+	}
+	if err := os.Chmod(path, 0600); err != nil {
+		t.Fatal(err)
+	}
+	opened, err := NewSQLiteStore(path, s.config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = opened.Close() }()
+	a := actor("alice")
+	hash := stable("expiring-cap")
+	if err = opened.BeginTelegramLink(context.Background(), a, hash, c.now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	body := fmt.Sprintf(`{"exp":%d}`, c.now().Add(time.Hour).Unix())
+	capability := base64.RawURLEncoding.EncodeToString([]byte(body)) + ".host-signature"
+	if err = opened.CompleteTelegramLinkWithCapability(context.Background(), hash, "12345", capability); err != nil {
+		t.Fatal(err)
+	}
+	if linked, _ := opened.TelegramStatus(context.Background(), a); !linked {
+		t.Fatal("fresh Telegram connection missing")
+	}
+	c.advance(2 * time.Hour)
+	if linked, _ := opened.TelegramStatus(context.Background(), a); linked {
+		t.Fatal("expired Telegram capability advertised connected")
 	}
 }

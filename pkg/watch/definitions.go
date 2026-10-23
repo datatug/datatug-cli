@@ -385,7 +385,7 @@ func (s *Store) Subscribe(ctx context.Context, a Actor, sub Subscription) error 
 			return ErrNotFound
 		}
 		if seen["telegram"] {
-			if _, err := read[telegramLink](ctx, tx, telegramLinks, a.Scope, a.ID); err != nil {
+			if link, err := read[telegramLink](ctx, tx, telegramLinks, a.Scope, a.ID); err != nil || !link.ExpiresAt.IsZero() && !link.ExpiresAt.After(s.now()) {
 				return ErrForbidden
 			}
 		}

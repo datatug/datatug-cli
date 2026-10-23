@@ -65,7 +65,7 @@ func NewSQLiteStore(connection string, c Config) (*Store, error) {
 	if !filepath.IsAbs(path) || strings.ContainsAny(path, "?#") || strings.HasPrefix(path, "//") {
 		return nil, fmt.Errorf("%w: SQLite storage requires an absolute local file path", ErrInvalid)
 	}
-	if info, e := os.Lstat(path); e == nil && (!info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0) {
+	if info, e := os.Lstat(path); e == nil && (!info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0077 != 0) {
 		return nil, ErrInvalid
 	} else if e != nil && !errors.Is(e, os.ErrNotExist) {
 		return nil, e

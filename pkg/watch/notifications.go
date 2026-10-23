@@ -51,6 +51,9 @@ func (s *Store) notify(ctx context.Context, tx dal.ReadwriteTransaction, d Defin
 				if err != nil {
 					return false, err
 				}
+				if !link.ExpiresAt.IsZero() && !link.ExpiresAt.After(s.now()) {
+					continue
+				}
 				delivery.TelegramChatID = link.ChatID
 				delivery.TelegramDeliveryCapability = link.DeliveryCapability
 			}
@@ -188,7 +191,7 @@ func (s *Store) ClaimNotifications(ctx context.Context) (*Delivery, error) {
 				if e != nil && !errors.Is(e, ErrNotFound) {
 					return e
 				}
-				valid = valid && e == nil && link.ChatID == item.TelegramChatID && link.DeliveryCapability == item.TelegramDeliveryCapability
+				valid = valid && e == nil && link.ChatID == item.TelegramChatID && link.DeliveryCapability == item.TelegramDeliveryCapability && (link.ExpiresAt.IsZero() || link.ExpiresAt.After(now))
 			}
 			if !valid {
 				item.State = "cancelled"

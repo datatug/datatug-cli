@@ -2,7 +2,10 @@ package watch
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/dal-go/dalgo/dal"
@@ -15,7 +18,8 @@ const (
 )
 
 type telegramLink struct {
-	DeliveryCapability string `json:"deliveryCapability,omitempty"`
+	ExpiresAt          time.Time `json:"expiresAt,omitempty"`
+	DeliveryCapability string    `json:"deliveryCapability,omitempty"`
 	Scope
 	UserID string    `json:"userId"`
 	ChatID string    `json:"chatId"`
@@ -62,10 +66,21 @@ func (s *Store) CompleteTelegramLinkWithCapability(ctx context.Context, nonceHas
 	if capability == "" || len(capability) > 2048 {
 		return ErrInvalid
 	}
+	if _, err := capabilityExpiry(capability); err != nil {
+		return err
+	}
 	return s.completeTelegramLink(ctx, nonceHash, chatID, capability)
 }
 
 func (s *Store) completeTelegramLink(ctx context.Context, nonceHash, chatID, capability string) error {
+	var expiresAt time.Time
+	if capability != "" {
+		var err error
+		expiresAt, err = capabilityExpiry(capability)
+		if err != nil || !expiresAt.After(s.now()) || expiresAt.After(s.now().Add(31*24*time.Hour)) {
+			return ErrInvalid
+		}
+	}
 	if len(nonceHash) != 64 || len(chatID) == 0 || len(chatID) > 20 {
 		return ErrInvalid
 	}
@@ -95,7 +110,7 @@ func (s *Store) completeTelegramLink(ctx context.Context, nonceHash, chatID, cap
 					return ErrConflict
 				}
 			}
-			link := telegramLink{Scope: item.Scope, UserID: item.UserID, ChatID: chatID, DeliveryCapability: capability, At: s.now()}
+			link := telegramLink{Scope: item.Scope, UserID: item.UserID, ChatID: chatID, DeliveryCapability: capability, ExpiresAt: expiresAt, At: s.now()}
 			if err = s.save(ctx, tx, telegramLinks, item.Scope, item.UserID, "", item.UserID, "", link); err != nil {
 				return err
 			}
@@ -111,11 +126,11 @@ func (s *Store) TelegramStatus(ctx context.Context, a Actor) (bool, error) {
 	if err := s.actor(a); err != nil {
 		return false, err
 	}
-	_, err := read[telegramLink](ctx, s.db, telegramLinks, a.Scope, a.ID)
+	link, err := read[telegramLink](ctx, s.db, telegramLinks, a.Scope, a.ID)
 	if errors.Is(err, ErrNotFound) {
 		return false, nil
 	}
-	return err == nil, err
+	return err == nil && (link.ExpiresAt.IsZero() || link.ExpiresAt.After(s.now())), err
 }
 func (s *Store) DisconnectTelegram(ctx context.Context, a Actor) error {
 	if err := s.actor(a); err != nil {
@@ -152,4 +167,22 @@ func (s *Store) DisconnectTelegram(ctx context.Context, a Actor) error {
 		}
 		return s.log(ctx, tx, a.Scope, a.ID, "telegram.disconnect", a.ID)
 	})
+}
+
+func capabilityExpiry(capability string) (time.Time, error) {
+	parts := strings.Split(capability, ".")
+	if len(parts) != 2 {
+		return time.Time{}, ErrInvalid
+	}
+	body, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return time.Time{}, ErrInvalid
+	}
+	var claims struct {
+		Expires int64 `json:"exp"`
+	}
+	if json.Unmarshal(body, &claims) != nil || claims.Expires <= 0 {
+		return time.Time{}, ErrInvalid
+	}
+	return time.Unix(claims.Expires, 0).UTC(), nil
 }

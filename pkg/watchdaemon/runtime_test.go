@@ -217,7 +217,7 @@ func TestWatchHTTPGuardsAndConfiguration(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		response.Body.Close()
+		_ = response.Body.Close()
 		if response.StatusCode != tc.want {
 			t.Fatalf("%s %d", tc.path, response.StatusCode)
 		}

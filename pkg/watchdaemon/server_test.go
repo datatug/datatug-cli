@@ -86,7 +86,7 @@ func (f *httpFixture) request(t *testing.T, actor, method, path string, input an
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	data, _ := io.ReadAll(response.Body)
 	return response.StatusCode, data
 }
@@ -242,7 +242,7 @@ func TestWatchHTTPStaleCompletionInboxAndDurableEmail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response.Body.Close()
+	_ = response.Body.Close()
 	if response.StatusCode != 503 {
 		t.Fatal("closed DB reported ready")
 	}

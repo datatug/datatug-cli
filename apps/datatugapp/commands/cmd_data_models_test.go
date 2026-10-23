@@ -375,3 +375,26 @@ func TestDataModelsResolvePreservesHostWorkingDirectoryFailure(t *testing.T) {
 		t.Fatal("host cwd failure lost", out, err)
 	}
 }
+
+// A host may return a stale path after Getwd succeeds. Exercise this separately
+// from a Getwd error so both filesystem outcomes are covered on every platform.
+func TestDataModelsResolveRejectsStaleWorkingDirectory(t *testing.T) {
+	staleDirectory := filepath.Join(t.TempDir(), "removed")
+	if err := os.Mkdir(staleDirectory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(staleDirectory); err != nil {
+		t.Fatal(err)
+	}
+	original := dataModelWorkingDirectory
+	t.Cleanup(func() { dataModelWorkingDirectory = original })
+	dataModelWorkingDirectory = func() (string, error) { return staleDirectory, nil }
+	out, err := executeDataModels(t, func(meaninggraph.Config) (dataModelResolver, error) {
+		t.Fatal("resolver reached for a stale working directory")
+		return nil, nil
+	}, "--reference", "first")
+	var pathError *os.PathError
+	if !errors.As(err, &pathError) || !errors.Is(err, os.ErrNotExist) || pathError.Path != staleDirectory || pathError.Op != "stat" || out != "" {
+		t.Fatalf("stale working directory: output=%q error=%v", out, err)
+	}
+}

@@ -60,14 +60,14 @@ func TestWatchSMTPDevelopmentReceiverAndProviderFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 	received := make(chan string, 1)
 	go func() {
 		conn, err := listener.Accept()
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		reader := bufio.NewReader(conn)
 		_, _ = io.WriteString(conn, "220 Watch test SMTP\r\n")
 		var message strings.Builder

@@ -264,7 +264,7 @@ func TestWatchDaemonCoordinatorProvidersAndShutdown(t *testing.T) {
 			for {
 				response, err := http.Get("http://" + addr + "/health")
 				if err == nil {
-					response.Body.Close()
+					_ = response.Body.Close()
 					if response.StatusCode == 200 {
 						break
 					}

@@ -25,20 +25,20 @@ func fakeOwnBot(t *testing.T, updates func(http.ResponseWriter, *http.Request), 
 	p := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/getMe"):
-			fmt.Fprint(w, `{"ok":true,"result":{"id":123,"is_bot":true,"username":"PrivateWatchBot"}}`)
+			_, _ = fmt.Fprint(w, `{"ok":true,"result":{"id":123,"is_bot":true,"username":"PrivateWatchBot"}}`)
 		case strings.HasSuffix(r.URL.Path, "/getWebhookInfo"):
-			fmt.Fprint(w, `{"ok":true,"result":{"url":""}}`)
+			_, _ = fmt.Fprint(w, `{"ok":true,"result":{"url":""}}`)
 		case strings.HasSuffix(r.URL.Path, "/getUpdates"):
 			if updates != nil {
 				updates(w, r)
 			} else {
-				fmt.Fprint(w, `{"ok":true,"result":[]}`)
+				_, _ = fmt.Fprint(w, `{"ok":true,"result":[]}`)
 			}
 		case strings.HasSuffix(r.URL.Path, "/sendMessage"):
 			if send != nil {
 				send(w, r)
 			} else {
-				fmt.Fprint(w, `{"ok":true,"result":{"message_id":1}}`)
+				_, _ = fmt.Fprint(w, `{"ok":true,"result":{"message_id":1}}`)
 			}
 		default:
 			t.Error("unexpected Bot API method", r.URL.Path)
@@ -78,7 +78,7 @@ func TestWatchOwnBotVerifiesIdentityWebhookAndSecrets(t *testing.T) {
 		t.Fatal("insecure provider")
 	}
 	for _, response := range []string{`{"ok":false}`, `not json`, `{"ok":true,"result":{}}`, `{"ok":true,"result":{"id":999,"is_bot":true,"username":"OtherBot"}}`, `{"ok":true,"result":{"id":123,"is_bot":false,"username":"PrivateWatchBot"}}`} {
-		p := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, response) }))
+		p := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = fmt.Fprint(w, response) }))
 		_, e = newTelegramBot(ctx, cfg, p.URL, nil)
 		p.Close()
 		if e == nil {
@@ -87,9 +87,9 @@ func TestWatchOwnBotVerifiesIdentityWebhookAndSecrets(t *testing.T) {
 	}
 	hooked := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/getMe") {
-			fmt.Fprint(w, `{"ok":true,"result":{"id":123,"is_bot":true,"username":"PrivateWatchBot"}}`)
+			_, _ = fmt.Fprint(w, `{"ok":true,"result":{"id":123,"is_bot":true,"username":"PrivateWatchBot"}}`)
 		} else {
-			fmt.Fprint(w, `{"ok":true,"result":{"url":"https://existing.example/webhook"}}`)
+			_, _ = fmt.Fprint(w, `{"ok":true,"result":{"url":"https://existing.example/webhook"}}`)
 		}
 	}))
 	defer hooked.Close()
@@ -187,7 +187,8 @@ func TestWatchOwnBotScopedRunnerLinksAndDelivers(t *testing.T) {
 			t.Error("unbounded polling")
 		}
 		poll := polled.Add(1)
-		if poll == 1 {
+		switch poll {
+		case 1:
 			// A real Unicode backlog must be consumed instead of repeating a
 			// response larger than the bounded provider decoder can accept.
 			batch := make([]map[string]any, 5)
@@ -195,15 +196,15 @@ func TestWatchOwnBotScopedRunnerLinksAndDelivers(t *testing.T) {
 				batch[i] = map[string]any{"update_id": 6 + i, "message": map[string]string{"text": strings.Repeat("🚢", 4096)}}
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": batch})
-		} else if poll == 2 {
-			fmt.Fprintf(w, `{"ok":true,"result":[{"update_id":11,"message":{"text":"/start %s","from":{"id":42},"chat":{"id":42,"type":"private"}}}]}`, payload)
-		} else {
+		case 2:
+			_, _ = fmt.Fprintf(w, `{"ok":true,"result":[{"update_id":11,"message":{"text":"/start %s","from":{"id":42},"chat":{"id":42,"type":"private"}}}]}`, payload)
+		default:
 			select {
 			case <-r.Context().Done():
 				return
 			case <-time.After(15 * time.Millisecond):
 			}
-			fmt.Fprint(w, `{"ok":true,"result":[]}`)
+			_, _ = fmt.Fprint(w, `{"ok":true,"result":[]}`)
 		}
 	}, func(w http.ResponseWriter, r *http.Request) {
 		var m struct {
@@ -215,7 +216,7 @@ func TestWatchOwnBotScopedRunnerLinksAndDelivers(t *testing.T) {
 			t.Error("wrong recipient or unsafe notification", m)
 		}
 		delivered.Add(1)
-		fmt.Fprint(w, `{"ok":true,"result":{"message_id":1}}`)
+		_, _ = fmt.Fprint(w, `{"ok":true,"result":{"message_id":1}}`)
 	})
 	cfg := ownBotConfig(t)
 	b, e := newTelegramBot(ctx, cfg, p.URL, nil)
@@ -371,20 +372,21 @@ func TestWatchOwnBotMultipleSubscribersAndBlockedRecipientIsolation(t *testing.T
 			return
 		case <-time.After(10 * time.Millisecond):
 		}
-		fmt.Fprint(w, `{"ok":true,"result":[]}`)
+		_, _ = fmt.Fprint(w, `{"ok":true,"result":[]}`)
 	}, func(w http.ResponseWriter, r *http.Request) {
 		var m struct {
 			ChatID string `json:"chat_id"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&m)
-		if m.ChatID == "42" {
+		switch m.ChatID {
+		case "42":
 			blocked.Add(1)
 			w.WriteHeader(403)
-			fmt.Fprint(w, `{"ok":false,"error_code":403,"description":"Forbidden: bot was blocked by the user"}`)
-		} else if m.ChatID == "43" {
+			_, _ = fmt.Fprint(w, `{"ok":false,"error_code":403,"description":"Forbidden: bot was blocked by the user"}`)
+		case "43":
 			delivered.Add(1)
-			fmt.Fprint(w, `{"ok":true,"result":{"message_id":1}}`)
-		} else {
+			_, _ = fmt.Fprint(w, `{"ok":true,"result":{"message_id":1}}`)
+		default:
 			t.Error("arbitrary recipient", m.ChatID)
 		}
 	})
@@ -442,7 +444,7 @@ func TestWatchOwnBotMultipleSubscribersAndBlockedRecipientIsolation(t *testing.T
 func TestWatchOwnBotRateLimitErrorExposesOnlySafeBound(t *testing.T) {
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(429)
-		fmt.Fprint(w, `{"ok":false,"error_code":429,"description":"sensitive provider text","parameters":{"retry_after":60}}`)
+		_, _ = fmt.Fprint(w, `{"ok":false,"error_code":429,"description":"sensitive provider text","parameters":{"retry_after":60}}`)
 	}))
 	defer provider.Close()
 	bot := telegramBot{base: provider.URL, token: "123:private", http: provider.Client()}

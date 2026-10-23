@@ -90,7 +90,7 @@ func (s *Server) notificationText(n watch.Notification) string {
 		check := query.Get("check")
 		valid := queryErr == nil && len(query["check"]) == 1 && check != "" && len(check) <= 128 && check != "." && check != ".." && query.Get("project") == n.Project && query.Get("environment") == n.Environment && query.Get("watch") == n.WatchID
 		for _, c := range check {
-			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-' || c == '.') {
+			if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '_' && c != '-' && c != '.' {
 				valid = false
 			}
 		}

@@ -341,7 +341,12 @@ func TestDataModelsResolveReportsUnavailableWorkingDirectory(t *testing.T) {
 }
 
 func TestDataModelsRealResolverRejectsMismatchedCatalog(t *testing.T) {
-	fixture := t.TempDir()
+	// The real resolver deliberately rejects symlinks in fixture ancestors.
+	// Darwin's temporary directory can be rooted through /var -> /private/var.
+	fixture, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(fixture, "catalog.json"), []byte("{}\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -352,8 +357,21 @@ func TestDataModelsRealResolverRejectsMismatchedCatalog(t *testing.T) {
 	command.SetErr(&bytes.Buffer{})
 	command.SetArgs([]string{"resolve", "--address", dataModelTestAddress, "--source-commit", strings.Repeat("a", 40),
 		"--registry-commit", strings.Repeat("b", 40), "--catalog-sha256", strings.Repeat("c", 64), "--fixture-root", fixture})
-	err := command.Execute()
+	err = command.Execute()
 	if showExitCodeOf(t, err) != 1 || !strings.Contains(err.Error(), "retained digest mismatch: catalog.json") || out.Len() != 0 {
 		t.Fatalf("catalog digest mismatch: output=%q error=%v", out.String(), err)
+	}
+}
+
+func TestDataModelsResolvePreservesHostWorkingDirectoryFailure(t *testing.T) {
+	original := dataModelWorkingDirectory
+	t.Cleanup(func() { dataModelWorkingDirectory = original })
+	dataModelWorkingDirectory = func() (string, error) { return "", os.ErrNotExist }
+	out, err := executeDataModels(t, func(meaninggraph.Config) (dataModelResolver, error) {
+		t.Fatal("resolver reached after working-directory failure")
+		return nil, nil
+	}, "--reference", "first")
+	if !errors.Is(err, os.ErrNotExist) || out != "" {
+		t.Fatal("host cwd failure lost", out, err)
 	}
 }

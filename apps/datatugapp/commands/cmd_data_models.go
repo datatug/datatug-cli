@@ -11,6 +11,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Host filesystem port keeps unavailable-cwd behavior deterministic across OSes.
+var dataModelWorkingDirectory = os.Getwd
+
 type dataModelResolver interface {
 	Resolve(context.Context, datatug.DataModelReference) (*meaninggraph.Resolution, error)
 }
@@ -115,7 +118,12 @@ func dataModelReferenceForCommand(command *cobra.Command) (datatug.DataModelRefe
 	}
 	if project == "" && directory == "" {
 		var err error
-		if directory, err = os.Getwd(); err != nil {
+		if directory, err = dataModelWorkingDirectory(); err != nil {
+			return datatug.DataModelReference{}, err
+		}
+		// Some platforms can return the removed working directory's old name.
+		// Preserve the filesystem failure rather than misreporting a project.
+		if _, err = os.Stat(directory); err != nil {
 			return datatug.DataModelReference{}, err
 		}
 	}

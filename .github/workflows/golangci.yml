@@ -246,3 +246,61 @@ jobs:
           # strongo_workflow above.
           CGO_ENABLED: '1'
         run: ./scripts/check-journey-postgres.sh
+
+  # Runs in the always-present Go CI workflow so exact-commit release gating
+  # observes browser/asset regressions as well as Go tests. No path filter/skip.
+  mcp-apps-browser:
+    name: MCP Apps browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      DATATUG_TELEMETRY: '0'
+      DO_NOT_TRACK: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Authenticate private Core dependency
+        uses: ./.github/actions/private-core
+        with:
+          private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: '1.27.3'
+          cache: true
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: pkg/mcpserver/app/package-lock.json
+      - name: Check out exact public demo fixture
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: datatug/datatug-demo-project
+          ref: 08cc4d367e33cca82269bff54dc8a35b242e9937
+          path: .browser-fixtures/demo
+          persist-credentials: false
+      - name: Verify locked App source and embedded asset
+        working-directory: pkg/mcpserver/app
+        run: |
+          npm ci --ignore-scripts
+          npm test
+          npm run build:check
+          npx --no-install playwright install --with-deps chromium
+      - name: Build actual CLI using the release pure-Go configuration
+        env:
+          CGO_ENABLED: '0'
+        run: go build -o "$RUNNER_TEMP/datatug-mcp-apps" .
+      - name: Exercise official sandbox and actual CLI saved SQL
+        run: |
+          DATATUG_MCP_TEST_BINARY="$RUNNER_TEMP/datatug-mcp-apps" \
+          DATATUG_DEMO_PROJECT_DIR="$GITHUB_WORKSPACE/.browser-fixtures/demo/demo-project-1" \
+          DATATUG_MCP_APPS_ARTIFACTS="$RUNNER_TEMP/mcp-apps-browser-artifacts" \
+          npm --prefix pkg/mcpserver/app run test:browser
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: mcp-apps-browser
+          path: ${{ runner.temp }}/mcp-apps-browser-artifacts
+          if-no-files-found: error

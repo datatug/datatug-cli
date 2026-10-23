@@ -391,11 +391,21 @@ func TestWatchOwnBotMultipleSubscribersAndBlockedRecipientIsolation(t *testing.T
 	done := make(chan error, 1)
 	go func() { done <- bot.runLease(ctx, c, *lease) }()
 	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && (delivered.Load() == 0 || blocked.Load() == 0) {
+	acknowledged := false
+	for time.Now().Before(deadline) {
+		aliceCode, aliceBody := f.request(t, "alice", "GET", "telegram/status", nil)
+		bobCode, bobBody := f.request(t, "bob", "GET", "deliveries?watchId=shared-ownbot", nil)
+		if aliceCode == 200 && bytes.Contains(aliceBody, []byte(`"reconnectRequired":true`)) && bobCode == 200 && bytes.Contains(bobBody, []byte(`"channel":"telegram"`)) && bytes.Contains(bobBody, []byte(`"state":"delivered"`)) {
+			acknowledged = true
+			break
+		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	cancel()
 	<-done
+	if !acknowledged {
+		t.Fatal("recipient status and delivery were not durably acknowledged")
+	}
 	if delivered.Load() != 1 || blocked.Load() != 1 {
 		t.Fatal("fanout affected other recipient", delivered.Load(), blocked.Load())
 	}

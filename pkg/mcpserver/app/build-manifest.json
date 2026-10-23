@@ -1,12 +1,13 @@
 {
   "format": "datatug.mcp-app.build.v1",
+  "consoleCallsRemoved": true,
   "sdk": {
     "name": "@modelcontextprotocol/ext-apps",
     "version": "2.0.3",
     "integrity": "sha512-Tn+4+cyhO4f4cQSDxNyLiIfEE+qlTTuIbWBJB8JTinEXOhDYgCT4wDTQplxD9MBYZH5pCYGC59GaxiwIT4bu8w==",
     "gitHead": "82221c0c8ce7661efa6771c9d461511b1650495f"
   },
-  "lockSHA256": "6f476bc2ac2f929300d5a853b211b5eea34a5505cae6661d7d8f3f329f3c1dc9",
+  "lockSHA256": "7a1ee3a1ed3fa51f04fe29a042d43e98563c467a3abd62a41bbadb9fc8b8097a",
   "upstream": {
     "repository": "https://github.com/datatug/ai-plugin",
     "commit": "d4ff0c5beac346eb8ead527144630978c5052ff5",
@@ -64,23 +65,23 @@
   "inputs": [
     {
       "path": "main.mjs",
-      "sha256": "b6e0da17a28e5b457043d1f0a86f31cbb08173487b378225420ed15340680eec"
+      "sha256": "afb159e711c576cd5402d0ebb936527ccefa7552b07097cd5028e70eb8d2bcfa"
     },
     {
       "path": "package.json",
-      "sha256": "f209d021c21ae426b39bccfa3f5e90b14d57a5b107f43779d70e82f81e63c120"
+      "sha256": "d70891f9a302970c06ae9c8f629f0ee6eb5fadb90a9ae9625ddfae6e25b48040"
     },
     {
       "path": "scripts/build.mjs",
-      "sha256": "1f1d3663bbecf497ae97264ae34c256e0b42c5a22eeec6fab6cb290d34a13fe1"
+      "sha256": "df068c3e83f35a213b73858a42df4f8141bcbf2929152cdf9176e11a1c68eb96"
     },
     {
       "path": "state.mjs",
-      "sha256": "8051674969c54c1bc373086580c80a892dbe5b78ada99df02efff5967170849b"
+      "sha256": "ab0490ea08acf388fee8282eea5022f94a5f67ee8208153210c024bd80d05244"
     },
     {
       "path": "style.css",
-      "sha256": "f5eff194444d44e69fcd98d827ef33d3e2e3f3b1977dbf34916c77277c131f3e"
+      "sha256": "f749dc2d832f3ae72863ca0bdc1938e33016777f2d2d7b75635973b81cdcd52f"
     },
     {
       "path": "template.html",
@@ -99,6 +100,6 @@
       "sha256": "09ebd3dd6a4280f5868d4bb49e04cfdb8762e0653895aef9963e9b72b77e5b0d"
     }
   ],
-  "htmlSHA256": "e54fe6ecea30f2fc58bd6b2b916bd7dde98bc2a1d63aadbc64f000b2888d9b7e",
-  "htmlBytes": 737697
+  "htmlSHA256": "8a9b9d77b710e2c4430436c5784627083c07a1bc1f83dd7b37b6ee0821f541ab",
+  "htmlBytes": 658297
 }

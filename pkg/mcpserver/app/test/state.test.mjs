@@ -57,7 +57,7 @@ test('first notification automatically renders once; late host notification cann
   m.notify(result('b'.repeat(64))); assert.equal(m.current.handle, 'a'.repeat(64)); assert.equal(m.previous, true);
   d.resolve(result('c'.repeat(64))); await pending;
   assert.deepEqual(args[0], { name: 'datatug_apps_rerun', arguments: { handle: 'a'.repeat(64), parameters: { CustomerId: '9007199254740993', enabled: 'false' } } });
-  assert.equal(args[1].timeout, 30000); assert.equal(m.current.handle, 'c'.repeat(64)); assert.equal(m.previous, false);
+  assert.equal(args[1].timeout, 30000); assert.equal(args[1].maxTotalTimeout, 30000); assert.equal(args[1].resetTimeoutOnProgress, false); assert.equal(m.current.handle, 'c'.repeat(64)); assert.equal(m.previous, false);
   m.notify(result('d'.repeat(64))); assert.equal(m.current.handle, 'c'.repeat(64));
 });
 test('one concurrent UI call; failed rerun retains previous rows with honest status', async () => {
@@ -107,4 +107,10 @@ test('mixed core-valid cell types survive JSON export and remain visually distin
   assert.notEqual(cellDisplay(p.typedRows[0][0]), cellDisplay({type:'string', value:'2'}));
   assert.equal(cellDisplay(p.typedRows[4][0]), '9007199254740993');
   assert.equal(cellDisplay(p.typedRows[5][0]), '9007199254740992.10');
+});
+
+test('official SDK2 REQUEST_TIMEOUT code produces honest timeout state without error data', async () => {
+  const m = new Explorer(); m.connected = true; m.notify(result());
+  await m.request(() => { throw Object.assign(Error('private transport detail'), {code:'REQUEST_TIMEOUT'}); }, false);
+  assert.match(m.status,/timed out/); assert.doesNotMatch(m.status,/private transport detail/); assert.equal(m.previous,true);
 });

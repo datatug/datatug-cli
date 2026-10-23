@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/datatug/datatug-cli/pkg/queryparams"
 	"github.com/datatug/datatug-cli/pkg/querywrite"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
@@ -409,6 +410,17 @@ func bindParameters(def datatug.Parameters, supplied map[string]string) (map[str
 		}
 		parameters[id] = apicontract.ScalarValue(v)
 		origins = append(origins, apicontract.BindingOriginEntry{ParameterID: id, Origin: apicontract.BindingOriginManual})
+	}
+	for _, p := range def {
+		if _, supplied := supplied[p.ID]; supplied || p.DefaultValue == nil {
+			continue
+		}
+		v, err := queryparams.ScalarDefault(p)
+		if err != nil {
+			return nil, nil, errors.New("TYPE_MISMATCH: invalid or unsupported parameter default")
+		}
+		parameters[p.ID] = apicontract.ScalarValue(v)
+		origins = append(origins, apicontract.BindingOriginEntry{ParameterID: p.ID, Origin: apicontract.BindingOriginDefault})
 	}
 	sort.Slice(origins, func(i, j int) bool { return origins[i].ParameterID < origins[j].ParameterID })
 	return parameters, origins, nil

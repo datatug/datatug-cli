@@ -18,6 +18,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/httpsource"
 	"github.com/datatug/datatug-cli/pkg/querybody"
+	"github.com/datatug/datatug-cli/pkg/queryparams"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
@@ -485,7 +486,7 @@ func validateDefaultBindingOrigins(req apicontract.ExecutionRequest, queryDef *d
 		if actual.Scalar == nil {
 			return newInvalidRequest("bindingOrigins", "default origin must resolve to one declared scalar default")
 		}
-		expected, err := fromGoValue(parameter.DefaultValue, parameter.Type)
+		expected, err := queryparams.ScalarDefault(parameter)
 		if err != nil || !typedValueEqual(expected, *actual.Scalar) {
 			return newInvalidRequest("bindingOrigins", "default origin does not match the declared query default")
 		}

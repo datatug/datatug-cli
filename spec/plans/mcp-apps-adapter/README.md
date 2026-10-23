@@ -63,7 +63,8 @@ Build browser renderer with locked published official SDK, exact upstream helper
 
 **Verifies:** mcp-apps-adapter#ac:privacy, mcp-apps-adapter#ac:execution, mcp-apps-adapter#ac:precision-reuse, mcp-apps-adapter#ac:views, mcp-apps-adapter#ac:ux, mcp-apps-adapter#ac:sdk-offline
 **Id:** task-5
-**Status:** planning
+**Status:** complete
+**Evidence:** /private/tmp/mcp-apps-review-task5-source-r2-20261023.md, /private/tmp/mcp-apps-task5-browser-frozen-final.log, /private/tmp/mcp-apps-task5-final-manifest.json
 
 Use official App+AppBridge/reference sandbox with explicit capability and privacy-safe logging, actual child CLI stdio/authenticated serve/committed Chinook; perform automatic render and parameter rerun. Exercise origin/source/network negatives, transcript sentinels, precision copy/sort and narrow/wide light/dark keyboard states; fixtures own and clean all processes/temp files.
 
@@ -71,7 +72,8 @@ Use official App+AppBridge/reference sandbox with explicit capability and privac
 
 **Verifies:** mcp-apps-adapter#ac:delivery, mcp-apps-adapter#ac:sdk-offline
 **Id:** task-6
-**Status:** planning
+**Status:** in_progress
+**Note:** Root owns exact-head CI, WB landing, public-artifact and documented-recipe acceptance, website publication and final lifecycle evidence; these remain pending.
 
 Parent drives independent implementation review, exact-head CI and WB landing using the repository datatug-release delegate/automatic release convention, never manual tags. Verify the exact downloaded public binary offline/no Node with the same child and official-host browser acceptance, update accurate tested-host/setup/privacy/SQLite website docs and clean task worktrees after receipts.
 

@@ -111,14 +111,14 @@ export class Explorer {
     this.controller = new AbortController();
     this.busy = true; this.previous = true; this.status = rerun ? 'Running saved query… Previous result shown.' : 'Checking retained result… Previous result shown.'; this.changed();
     try {
-      const result = await call({ name: rerun ? 'datatug_apps_rerun' : 'datatug_apps_result', arguments: rerun ? { handle, parameters } : { handle } }, { signal: this.controller.signal, timeout: 30000 });
+      const result = await call({ name: rerun ? 'datatug_apps_rerun' : 'datatug_apps_result', arguments: rerun ? { handle, parameters } : { handle } }, { signal: this.controller.signal, timeout: 30000, maxTotalTimeout: 30000, resetTimeoutOnProgress: false });
       if (this.closed || epoch !== this.epoch) return;
       const p = readPayload(result);
       if (rerun && p.handle === handle) throw Error('Unavailable');
       this.accept(p); this.initialized = true;
     } catch (e) {
       if (this.closed || epoch !== this.epoch) return;
-      this.status = e?.code === -32001 || e?.name === 'TimeoutError' ? 'Request timed out. Previous result shown; retry is available.' : unavailable + ' Previous result shown.';
+      this.status = e?.code === 'REQUEST_TIMEOUT' || e?.code === -32001 || e?.name === 'TimeoutError' ? 'Request timed out. Previous result shown; retry is available.' : unavailable + ' Previous result shown.';
     } finally {
       if (!this.closed && epoch === this.epoch) { this.busy = false; this.controller = undefined; this.changed(); }
     }

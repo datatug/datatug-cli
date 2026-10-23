@@ -118,7 +118,7 @@ function renderParameters() {
     input.value = Object.hasOwn(p.values, param.id) ? p.values[param.id] : ''; input.required = param.required;
     input.disabled = !!param.multiValue;
     input.setAttribute('aria-describedby', `help-${i} error-${i}`);
-    holder.append(label, input, node('p', `${param.type}${param.required ? ' · required' : ' · optional'}${input.disabled ? ' · editing unavailable' : ''}`, { id: `help-${i}`, class: 'caption' }), node('p', '', { id: `error-${i}`, class: 'error' }));
+    holder.append(label, input, node('p', `${param.type}${param.required ? ' · required' : param.type === 'string' ? ' · optional; empty text is a value' : ' · optional; blank uses saved default or remains unset'}${input.disabled ? ' · editing unavailable' : ''}`, { id: `help-${i}`, class: 'caption' }), node('p', '', { id: `error-${i}`, class: 'error' }));
   });
 }
 editor.addEventListener('submit', event => {

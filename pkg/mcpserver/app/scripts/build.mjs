@@ -14,7 +14,7 @@ for (const file of upstream.files) {
 const lock = JSON.parse(readFileSync(resolve(base, 'package-lock.json')));
 const sdk = lock.packages['node_modules/@modelcontextprotocol/ext-apps'];
 if (sdk.version !== '2.0.3' || sdk.integrity !== 'sha512-Tn+4+cyhO4f4cQSDxNyLiIfEE+qlTTuIbWBJB8JTinEXOhDYgCT4wDTQplxD9MBYZH5pCYGC59GaxiwIT4bu8w==') throw Error('Unreviewed official SDK');
-const compiled = await build({ absWorkingDir: base, entryPoints: ['main.mjs'], bundle: true, write: false, format: 'esm', platform: 'browser', target: 'es2022', minify: true, legalComments: 'inline', metafile: true, charset: 'utf8', treeShaking: true });
+const compiled = await build({ absWorkingDir: base, entryPoints: ['main.mjs'], bundle: true, write: false, format: 'esm', platform: 'browser', target: 'es2022', minify: true, legalComments: 'inline', metafile: true, charset: 'utf8', treeShaking: true, drop: ['console'] });
 if (compiled.outputFiles.length !== 1) throw Error('Expected one offline script');
 const packages = [...new Set(Object.keys(compiled.metafile.inputs).filter(path => path.includes('node_modules/')).map(path => {
   const tail = path.split('node_modules/').at(-1).split('/'); return tail[0].startsWith('@') ? tail.slice(0, 2).join('/') : tail[0];
@@ -36,11 +36,11 @@ notices += `## datatug/ai-plugin ${upstream.commit} lib/rows.js\n\n${readFileSyn
 const script = compiled.outputFiles[0].text.replace(/<\/script/gi, '<\\/script');
 const style = readFileSync(resolve(base, 'style.css'), 'utf8');
 const template = readFileSync(resolve(base, 'template.html'), 'utf8');
-const html = `<!--\n${notices}\n-->\n` + template.replace('/* STYLE */', style).replace('/* SCRIPT */', script);
+const html = `<!--\n${notices}\n-->\n` + template.replace('/* STYLE */', () => style).replace('/* SCRIPT */', () => script);
 if (Buffer.byteLength(html) > 1500000) throw Error('Embedded app exceeds 1.5 MB bound');
 if (html.includes(base) || html.includes('sourceMappingURL=')) throw Error('Nonportable build output');
 const manifest = {
-  format: 'datatug.mcp-app.build.v1', sdk: { name: '@modelcontextprotocol/ext-apps', version: sdk.version, integrity: sdk.integrity, gitHead: '82221c0c8ce7661efa6771c9d461511b1650495f' },
+  format: 'datatug.mcp-app.build.v1', consoleCallsRemoved: true, sdk: { name: '@modelcontextprotocol/ext-apps', version: sdk.version, integrity: sdk.integrity, gitHead: '82221c0c8ce7661efa6771c9d461511b1650495f' },
   lockSHA256: hash(readFileSync(resolve(base, 'package-lock.json'))), upstream,
   bundledPackages: packages.map(name => ({ name, version: lock.packages[`node_modules/${name}`].version, integrity: lock.packages[`node_modules/${name}`].integrity })),
   inputs: [...Object.keys(compiled.metafile.inputs).filter(path => !path.includes('node_modules/')), 'style.css', 'template.html', 'package.json', 'scripts/build.mjs', 'vendor/LICENSE', 'vendor/upstream.json'].sort().map(path => ({ path, sha256: hash(readFileSync(resolve(base, path))) })),

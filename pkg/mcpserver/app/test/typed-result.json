@@ -1,0 +1,27 @@
+{
+  "_meta": {
+    "datatug": {
+      "version": 1,
+      "handle": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "queryId": "precision-customers",
+      "parameters": [{"id":"CustomerId","type":"integer","required":true},{"id":"enabled","type":"boolean","required":false}],
+      "values": {"CustomerId":"9007199254740993","enabled":"false"},
+      "result": {
+        "recordset": {
+          "columns": [{"name":"id","type":"integer"},{"name":"amount","type":"decimal"},{"name":"label","type":"string"},{"name":"enabled","type":"boolean"},{"name":"ratio","type":"number"},{"name":"day","type":"date"},{"name":"instant","type":"datetime"}],
+          "rows": [
+            [{"type":"integer","value":"9007199254740993"},{"type":"decimal","value":"9007199254740992.2"},{"type":"string","value":""},{"type":"boolean","value":false},{"type":"number","value":1e-100},{"type":"date","value":"2026-10-23"},{"type":"datetime","value":"2026-10-23T12:00:00Z"}],
+            [{"type":"integer","value":"9007199254740992"},{"type":"decimal","value":"9007199254740992.1"},{"type":"null","value":null},{"type":"boolean","value":true},{"type":"number","value":2.5},{"type":"date","value":"2026-10-22"},{"type":"datetime","value":"2026-10-22T12:00:00Z"}],
+            [{"type":"integer","value":"9007199254740993"},{"type":"decimal","value":"9007199254740992.10"},{"type":"string","value":"line one\nline two, \"quoted\""},{"type":"boolean","value":false},{"type":"number","value":-2},{"type":"null","value":null},{"type":"null","value":null}]
+          ]
+        },
+        "limitations": [{"policy":"saved-sql-read-only","rowsFiltered":false,"hiddenColumns":[]}],
+        "bindingsApplied": [],
+        "provenance": {"source":"chinook","queryId":"precision-customers","mode":"live","observedAt":"2026-10-23T12:00:00Z","executionProfile":"opaque-privileged"},
+        "truncated": true
+      }
+    }
+  },
+  "content": [{"type":"text","text":"3 captured rows; private result available to App"}],
+  "structuredContent": {"capturedRows":3,"status":"complete"}
+}

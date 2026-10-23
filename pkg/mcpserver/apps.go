@@ -170,7 +170,7 @@ func (a *appsProtocol) addResource(s *mcp.Server) {
 	s.AddResource(&mcp.Resource{URI: appsResourceURI, Name: "DataTug query explorer", MIMEType: appsMIME},
 		func(context.Context, *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 			return &mcp.ReadResourceResult{Contents: []*mcp.ResourceContents{{URI: appsResourceURI, MIMEType: appsMIME, Text: appsHTML,
-				Meta: mcp.Meta{"ui": map[string]any{"csp": map[string]any{"connectDomains": []string{}, "resourceDomains": []string{}, "frameDomains": []string{}}}}}}}, nil
+				Meta: mcp.Meta{"ui": map[string]any{"csp": map[string]any{"connectDomains": []string{}, "resourceDomains": []string{}, "frameDomains": []string{}}, "permissions": map[string]any{"clipboardWrite": map[string]any{}}}}}}}, nil
 		})
 }
 

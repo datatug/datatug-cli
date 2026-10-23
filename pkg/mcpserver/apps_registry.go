@@ -147,9 +147,9 @@ func (r *appsRegistry) retain(ctx context.Context, input runInput, fingerprint s
 		return nil, errAppsUnavailable
 	}
 	random := make([]byte, 32)
-	if _, err = rand.Read(random); err != nil {
-		return nil, errAppsUnavailable
-	}
+	// crypto/rand.Read fills the slice and never returns an error; an entropy
+	// failure terminates the process (Go 1.27 API contract).
+	_, _ = rand.Read(random)
 	handle := hex.EncodeToString(random)
 	public, err := publicQuery(&q.QueryDef, input.QueryID, false)
 	if err != nil {

@@ -1,0 +1,104 @@
+{
+  "format": "datatug.mcp-app.build.v1",
+  "sdk": {
+    "name": "@modelcontextprotocol/ext-apps",
+    "version": "2.0.3",
+    "integrity": "sha512-Tn+4+cyhO4f4cQSDxNyLiIfEE+qlTTuIbWBJB8JTinEXOhDYgCT4wDTQplxD9MBYZH5pCYGC59GaxiwIT4bu8w==",
+    "gitHead": "82221c0c8ce7661efa6771c9d461511b1650495f"
+  },
+  "lockSHA256": "6f476bc2ac2f929300d5a853b211b5eea34a5505cae6661d7d8f3f329f3c1dc9",
+  "upstream": {
+    "repository": "https://github.com/datatug/ai-plugin",
+    "commit": "d4ff0c5beac346eb8ead527144630978c5052ff5",
+    "license": "MIT",
+    "files": [
+      {
+        "path": "lib/rows.js",
+        "destination": "rows.js",
+        "sha256": "380bf4d2f986e1faf451a0e0051dfa4d84dcba16ed057752fb7ae56231fd19b6"
+      }
+    ]
+  },
+  "bundledPackages": [
+    {
+      "name": "@modelcontextprotocol/client",
+      "version": "2.4.0",
+      "integrity": "sha512-LgrD2OphHuG12vfKFKz6SOnq7bKHQmhGJIAYdD+MZBn2npHEyry6uD8zvktodtl5CQM85MO0anUyD9JwmUmxww=="
+    },
+    {
+      "name": "@modelcontextprotocol/core",
+      "version": "2.4.0",
+      "integrity": "sha512-z8QBKqdfXLPzkLQuG4xp8hrVEMm1PZ1IgxMN2sMbJiFiAKOWXnAzogXn2W4aqIBlP1ea6U5yiqVquvUNM1Cj6Q=="
+    },
+    {
+      "name": "@modelcontextprotocol/ext-apps",
+      "version": "2.0.3",
+      "integrity": "sha512-Tn+4+cyhO4f4cQSDxNyLiIfEE+qlTTuIbWBJB8JTinEXOhDYgCT4wDTQplxD9MBYZH5pCYGC59GaxiwIT4bu8w=="
+    },
+    {
+      "name": "eventsource",
+      "version": "3.0.7",
+      "integrity": "sha512-CRT1WTyuQoD771GW56XEZFQ/ZoSfWid1alKGDYMmkt2yl8UXrVR4pspqWNEcqKvVIzg6PAltWjxcSSPrboA4iA=="
+    },
+    {
+      "name": "eventsource-parser",
+      "version": "3.1.1",
+      "integrity": "sha512-EKN1vKAMcZ8MlYMpaNuxN6R9yakzH6uajHcHVTqWJzvu5pWw9DyhbP35HH8MVBQ+dZjAfDxk+A8NiR9KWaXiyQ=="
+    },
+    {
+      "name": "jose",
+      "version": "6.2.13",
+      "integrity": "sha512-7TIg10ZE1x82YediN+lcrPNvGMKge9yFHQD+Qho/b8y2adfugU3AsvvHfxV0fzyFllT6l9xCjf4RWY9g/Z9PJQ=="
+    },
+    {
+      "name": "pkce-challenge",
+      "version": "5.0.1",
+      "integrity": "sha512-wQ0b/W4Fr01qtpHlqSqspcj3EhBvimsdh0KlHhH8HRZnMsEa0ea2fTULOXOS9ccQr3om+GcGRk4e+isrZWV8qQ=="
+    },
+    {
+      "name": "zod",
+      "version": "4.6.7",
+      "integrity": "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg=="
+    }
+  ],
+  "inputs": [
+    {
+      "path": "main.mjs",
+      "sha256": "b6e0da17a28e5b457043d1f0a86f31cbb08173487b378225420ed15340680eec"
+    },
+    {
+      "path": "package.json",
+      "sha256": "f209d021c21ae426b39bccfa3f5e90b14d57a5b107f43779d70e82f81e63c120"
+    },
+    {
+      "path": "scripts/build.mjs",
+      "sha256": "1f1d3663bbecf497ae97264ae34c256e0b42c5a22eeec6fab6cb290d34a13fe1"
+    },
+    {
+      "path": "state.mjs",
+      "sha256": "8051674969c54c1bc373086580c80a892dbe5b78ada99df02efff5967170849b"
+    },
+    {
+      "path": "style.css",
+      "sha256": "f5eff194444d44e69fcd98d827ef33d3e2e3f3b1977dbf34916c77277c131f3e"
+    },
+    {
+      "path": "template.html",
+      "sha256": "472372cd9b30f5f3be02848d02f2ab2c0fb4bba656939de48e9ac6272e2e6321"
+    },
+    {
+      "path": "vendor/LICENSE",
+      "sha256": "91336f7b140d8793f0ff3c7f02f3068ca99a9ffb2516c3ff6a57be0759d4a801"
+    },
+    {
+      "path": "vendor/rows.js",
+      "sha256": "380bf4d2f986e1faf451a0e0051dfa4d84dcba16ed057752fb7ae56231fd19b6"
+    },
+    {
+      "path": "vendor/upstream.json",
+      "sha256": "09ebd3dd6a4280f5868d4bb49e04cfdb8762e0653895aef9963e9b72b77e5b0d"
+    }
+  ],
+  "htmlSHA256": "e54fe6ecea30f2fc58bd6b2b916bd7dde98bc2a1d63aadbc64f000b2888d9b7e",
+  "htmlBytes": 737697
+}

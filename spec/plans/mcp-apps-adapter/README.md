@@ -54,7 +54,8 @@ Layer memory-only registry over existing saved-query execution and contract vali
 
 **Verifies:** mcp-apps-adapter#ac:precision-reuse, mcp-apps-adapter#ac:views, mcp-apps-adapter#ac:ux, mcp-apps-adapter#ac:sdk-offline
 **Id:** task-4
-**Status:** planning
+**Status:** complete
+**Evidence:** /private/tmp/mcp-apps-review-task4-r2-20261023.md, /private/tmp/mcp-apps-ui-r2-integrated.log
 
 Build browser renderer with locked published official SDK, exact upstream helpers, deterministic bundle and go:embed assets. Implement automatic five-view display, precise DTO, sorting/paging/record/history/copy/parameters, single toolbar and all accessible loading/error states; record vendor/build provenance.
 

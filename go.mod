@@ -61,7 +61,7 @@ require (
 	github.com/strongo/aichat v0.15.0
 	github.com/strongo/buildinfo v0.3.0
 	github.com/strongo/cli-helpers v0.27.1
-	github.com/strongo/deviceauth v0.1.0
+	github.com/strongo/deviceauth v0.1.4-0.20261016205155-a31a74edf302
 	github.com/strongo/logus v0.4.3
 	github.com/strongo/random v0.0.3
 	github.com/strongo/slice v0.3.13

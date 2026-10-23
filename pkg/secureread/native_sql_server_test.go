@@ -54,6 +54,10 @@ func TestServerQueryText(t *testing.T) {
 		{"mysql", "SELECT a-1 FROM t WHERE a=a--1", "SELECT a-1 FROM t WHERE a=a--1"},
 		{"mysql", "SELECT CAST(name AS CHAR CHARACTER SET utf8mb4) FROM t --\n", "SELECT CAST(name AS CHAR CHARACTER SET utf8mb4) FROM t --"},
 		{"mysql", "SELECT `a\\b` FROM t", "SELECT `a\\b` FROM t"},
+		{"postgres", "SELECT $1, name FROM customer WHERE id = $2;", "SELECT $1, name FROM customer WHERE id = $2"},
+		{"postgres", "SELECT $a, $ FROM t", "SELECT $a, $ FROM t"},
+		{"postgres", "SELECT $abc", "SELECT $abc"},
+		{"postgres", `SELECT "update", 'insert' FROM "order" -- ends here`, `SELECT "update", 'insert' FROM "order" -- ends here`},
 		{"oracle", "SELECT 1 FROM dual --no space needed\n", "SELECT 1 FROM dual --no space needed"},
 		{"sqlserver", "SELECT t1.c2, 1.5e3, 0x1F FROM t1", "SELECT t1.c2, 1.5e3, 0x1F FROM t1"},
 		{"sqlserver", "SELECT [update], N'insert' FROM [order] -- ends here", "SELECT [update], N'insert' FROM [order] -- ends here"},
@@ -82,6 +86,12 @@ func TestServerQueryText(t *testing.T) {
 		{"oracle", "WITH FUNCTION f RETURN NUMBER IS BEGIN RETURN 1 END SELECT f FROM dual", "FUNCTION"},
 		{"oracle", "SELECT q'[it's]' FROM dual", "an Oracle quoted literal (q'...')"},
 		{"oracle", `SELECT "id" FROM "customer" FOR UPDATE`, "UPDATE"},
+		{"postgres", "SELECT $$ x $$", "a PostgreSQL dollar-quoted string"},
+		{"postgres", "SELECT $tag$ x; COMMIT $tag$", "a PostgreSQL dollar-quoted string"},
+		{"postgres", "SELECT $_t1$ x $_t1$", "a PostgreSQL dollar-quoted string"},
+		{"postgres", `SELECT E'a\'; DELETE FROM t --'`, "a backslash in a PostgreSQL literal"},
+		{"postgres", "SELECT set_config('default_transaction_read_only', 'off', false)", "SET_CONFIG"},
+		{"postgres", "SELECT * INTO copy FROM t", "INTO"},
 		{"mysql", "SELECT * FROM t INTO OUTFILE '/tmp/x'", "INTO"},
 		{"mysql", "SELECT 1 /*!50000 , SLEEP(1) */", "a MySQL comment that the server runs"},
 		{"mysql", "SELECT 1 /*M! INTO OUTFILE '/tmp/x' */", "a MySQL comment that the server runs"},
@@ -107,8 +117,6 @@ func TestServerQueryText(t *testing.T) {
 
 func TestRunNativeSQL_MySQLAndOracle(t *testing.T) {
 	opens := standInForServers(t)
-	t.Setenv(dbcopy.MySQLPreviewEnv, "1")
-	t.Setenv(dbcopy.OraclePreviewEnv, "1")
 	t.Setenv("DATATUG_NATIVE_MY", "mysql://alice:pw@db.example.com/shop")
 	t.Setenv("DATATUG_NATIVE_ORA", "oracle://scott:pw@db.example.com/FREEPDB1")
 	executor := NewExecutor(Session{Unrestricted: true})
@@ -125,11 +133,6 @@ func TestRunNativeSQL_MySQLAndOracle(t *testing.T) {
 	assert.ErrorIs(t, err, ErrNativeSQLUnsupported)
 	assert.Equal(t, 2, *opens, "a refused text never opens the source")
 
-	t.Setenv(dbcopy.MySQLPreviewEnv, "")
-	_, err = executor.RunNativeSQL(context.Background(), "env:DATATUG_NATIVE_MY", "SELECT 1")
-	assert.EqualError(t, err, "MySQL sources are a preview and are switched off: set DATATUG_PREVIEW_MYSQL=1 to use them")
-
-	t.Setenv(dbcopy.MySQLPreviewEnv, "1")
 	_, err = executor.RunNativeSQL(context.Background(), "env:DATATUG_NATIVE_MY", "SELECT * FROM missing_table")
 	assert.Error(t, err, "a query the database refuses fails")
 	assert.False(t, errors.Is(err, ErrNativeSQLUnsupported))

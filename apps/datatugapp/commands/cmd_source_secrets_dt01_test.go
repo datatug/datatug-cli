@@ -77,7 +77,7 @@ func TestDBOpen_ParseFailureShowsNeitherTheArgumentsNorTheParserText(t *testing.
 
 // Every message `db copy` writes about --from or --to, whichever scheme.
 func TestDBCopy_NeverEchoesAPasswordFromEitherSide(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "") // the preview is off: the side that is PostgreSQL stops at its sentence
+	failingServerOpeners(t) // nothing is dialled: the side that is a server source fails with a driver's text that quotes its URL
 	t.Setenv("DT01_COPY_PG", "postgres://alice:"+sourceSecret+"@127.0.0.1:1/shop")
 	// Both sides must reach Open: the other side is a real, empty SQLite file.
 	dir := t.TempDir()

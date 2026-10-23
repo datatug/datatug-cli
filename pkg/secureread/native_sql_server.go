@@ -9,9 +9,9 @@ import (
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 )
 
-// runServerNativeSQL is RunNativeSQL for a MySQL, Oracle or SQL Server source. The source is opened as
-// every read of one is (OpenProtected, behind its preview switch): a MySQL session has
-// transaction_read_only on, an Oracle read runs in a READ ONLY transaction, and a SQL Server read runs in a
+// runServerNativeSQL is RunNativeSQL for a PostgreSQL, MySQL, Oracle or SQL Server source. The source is opened
+// as every read of one is (OpenProtected): a PostgreSQL session has default_transaction_read_only on, a MySQL
+// session transaction_read_only, an Oracle read runs in a READ ONLY transaction, and a SQL Server read runs in a
 // transaction that is always rolled back. None of these stops everything (a COMMIT inside a SQL Server batch
 // ends the transaction, an Oracle function with an autonomous transaction commits its own writes), so before
 // the text reaches the server it must be one query that writes nothing DataTug can see (see serverQueryText).
@@ -25,9 +25,9 @@ func (e *Executor) runServerNativeSQL(ctx context.Context, sourceURL string, ref
 		return Result{}, err
 	}
 	defer closeSource()
-	// A read through policies is refused before the source opens (dbcopy.CheckServerRead, in openSource) while
-	// these sources are a preview, so a session that gets here has none to label the result for: when that
-	// refusal goes, the result must carry nativeSQLLimitation as RunNativeSQL's SQLite one does.
+	// A read through policies is refused before the source opens (dbcopy.CheckServerRead, in openSource), so a
+	// session that gets here has none to label the result for: when that refusal goes, the result must carry
+	// nativeSQLLimitation as RunNativeSQL's SQLite one does.
 	return e.runThroughPolicies(ctx, db, dal.NewTextQuery(text, nil, args...), nil)
 }
 
@@ -58,8 +58,9 @@ func serverQueryText(scheme, sqlText string) (string, error) {
 	return text, nil
 }
 
-// writeWords are the words, upper case, that write, run code, lock or end a transaction in MySQL, Oracle or SQL
-// Server. A query has no use for them outside a string literal or a quoted name.
+// writeWords are the words, upper case, that write, run code, lock or end a transaction in PostgreSQL, MySQL,
+// Oracle or SQL Server (SET_CONFIG is PostgreSQL's function that sets a session's settings, the read-only one
+// among them). A query has no use for them outside a string literal or a quoted name.
 var writeWords = map[string]bool{
 	"INSERT": true, "UPDATE": true, "DELETE": true, "MERGE": true, "UPSERT": true, "INTO": true, "OUTFILE": true, "DUMPFILE": true,
 	"CREATE": true, "ALTER": true, "DROP": true, "TRUNCATE": true, "RENAME": true, "GRANT": true, "REVOKE": true, "DENY": true,
@@ -67,7 +68,22 @@ var writeWords = map[string]bool{
 	"SET": true, "DECLARE": true, "EXEC": true, "EXECUTE": true, "CALL": true, "FUNCTION": true, "PROCEDURE": true, "PRAGMA": true,
 	"TRIGGER": true, "LOCK": true, "UNLOCK": true, "HANDLER": true, "LOAD": true, "USE": true, "KILL": true, "SHUTDOWN": true,
 	"RECONFIGURE": true, "DBCC": true, "BACKUP": true, "RESTORE": true, "BULK": true, "OPENROWSET": true, "OPENQUERY": true,
-	"OPENDATASOURCE": true,
+	"OPENDATASOURCE": true, "SET_CONFIG": true,
+}
+
+// isDollarQuote reports whether text starts with the opening of a PostgreSQL dollar-quoted string: $$, or $tag$
+// where the tag is a name. A "$" followed by digits is a parameter ($1), not a quote.
+func isDollarQuote(text string) bool {
+	for i := 1; i < len(text); i++ {
+		switch c := text[i]; {
+		case c == '$':
+			return true
+		case c >= '0' && c <= '9' && i > 1, c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z':
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 // sqlWords returns the words of text, upper case, outside its string literals, quoted names and comments, or the
@@ -108,10 +124,12 @@ func sqlWords(scheme, text string) (words []string, refusal string) {
 			if !ok {
 				return nil, "a string or a name that is not closed"
 			}
-			if scheme == "mysql" && c != '`' && strings.IndexByte(text[i+1:end], '\\') >= 0 {
-				return nil, "a backslash in a MySQL literal"
+			if (scheme == "mysql" || scheme == "postgres") && c != '`' && strings.IndexByte(text[i+1:end], '\\') >= 0 {
+				return nil, "a backslash in a " + dbcopy.ServerTitle(scheme) + " literal"
 			}
 			i = end + 1
+		case c == '$' && scheme == "postgres" && isDollarQuote(text[i:]):
+			return nil, "a PostgreSQL dollar-quoted string"
 		case c >= '0' && c <= '9':
 			// A number ends where a letter starts, as the servers read it: SQL Server runs "SELECT 1COMMIT" as
 			// SELECT 1 and COMMIT, so the letters after the digits are a word of their own.

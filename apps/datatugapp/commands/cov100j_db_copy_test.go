@@ -363,7 +363,6 @@ func TestDBCopySeamBranches(t *testing.T) {
 	require.Contains(t, errBuf.String(), "db copy warning: copy-warning-msg")
 
 	// 5. ErrSourceHasNoTables with postgres srcRef (lines 153-157)
-	t.Setenv("DATATUG_PREVIEW_POSTGRES", "1")
 	restoreOpener := dbcopy.SetPostgresOpenerForTest(func(string, dal.Schema, dalgo2sql.DbOptions, ...dalgo2postgres.Option) (*dalgo2postgres.Database, error) {
 		return &dalgo2postgres.Database{}, nil
 	})

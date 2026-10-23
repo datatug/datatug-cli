@@ -213,7 +213,6 @@ func TestIsPostgresConnectionFailure(t *testing.T) {
 		"a connection that was lost": {lost, true},
 		"a lost connection, wrapped": {fmt.Errorf("read: %w", lost), true},
 		"an open of a file source":   {file.OpenFailure(errors.New("unable to open database file")), false},
-		"the preview is off":         {ErrPostgresPreview, false},
 		"a statement's error":        {errors.New("relation does not exist"), false},
 		"no error":                   {nil, false},
 	} {

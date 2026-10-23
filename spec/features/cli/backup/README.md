@@ -52,7 +52,7 @@ A backup is **`db copy` plus a destination policy**, not a second engine: every 
 
 | Capability | Today | Source |
 |---|---|---|
-| Source schemes | `sqlite`, `ingitdb` (local), `postgres` (preview, `DATATUG_PREVIEW_POSTGRES=1`, read-only session), `http(s)` DataTug query projects, `openvaultdb`, and `env:NAME` holding any of them; `datatug://<project>/<db>[?env=…]` resolves a project source | `pkg/dbcopy/url.go` (`supportedSchemes`), `pkg/dbcopy/datatug_ref.go` |
+| Source schemes | `sqlite`, `ingitdb` (local), `postgres` (read-only session), `http(s)` DataTug query projects, `openvaultdb`, and `env:NAME` holding any of them; `datatug://<project>/<db>[?env=…]` resolves a project source | `pkg/dbcopy/url.go` (`supportedSchemes`), `pkg/dbcopy/datatug_ref.go` |
 | Destination schemes of `db copy` | `sqlite`, `ingitdb` (local paths only; remote refused, exit 2), `postgres` (preview), `bigquery` (create-only), `sqlscript` (a MySQL script file from a SQLite source, PR #421) | [db copy REQ:supported-schemes](../db/copy/README.md#req-supported-schemes) |
 | Remote storage (git push, S3, GCS, Azure Blob) | **None.** No command writes to a git remote or object storage. go-git v5 is already a dependency (`--git=none\|stage\|commit` of [mutation-git-integration](../../mutation-git-integration/README.md)); no S3/GCS/Azure Blob SDK is | `go.mod`, `apps/datatugapp/commands/git_integration.go` |
 | `db export` | `db export --from <url> --to ingitdb://<dir>`: `--to` is required, must be `ingitdb://`, must not exist; staged and published atomically; one native records file per collection (`--records-format json\|jsonl\|ingr\|csv\|yaml`); writes the `source_schema` block | `apps/datatugapp/commands/cmd_db_export.go`, `pkg/dbcopy/export_ingitdb.go` |
@@ -263,7 +263,7 @@ A restore of point N MUST produce the source as it was at point N: rows deleted 
 
 #### REQ: restore-postgres-preview
 
-A restore to PostgreSQL and a run from PostgreSQL MUST obey the same preview switch as `db copy` (`DATATUG_PREVIEW_POSTGRES=1`; otherwise exit `4` with `db copy`'s fixed sentence, before any connection).
+A restore to PostgreSQL and a run from PostgreSQL MUST open it as `db copy` does. PostgreSQL is no longer behind a preview switch (founder, 2026-10-23: database sources are fully active), so neither is gated by one.
 
 ### Verification
 
@@ -543,9 +543,9 @@ The whole journey MUST run as one hermetic end-to-end test: a Chinook SQLite sou
 
 **Requirements:** backup#req:restore-postgres-preview
 
-**Given** `DATATUG_PREVIEW_POSTGRES` unset and a profile whose source is a PostgreSQL project source
+**Given** no `DATATUG_PREVIEW_*` variable set and a profile whose source is a PostgreSQL project source
 **When** the user runs `backup run` or `backup restore --to postgres://…`
-**Then** both exit `4` with `db copy`'s fixed preview sentence and no connection attempt.
+**Then** both open PostgreSQL as `db copy` does, with no preview refusal.
 
 ### AC: public-github-repo-refused
 

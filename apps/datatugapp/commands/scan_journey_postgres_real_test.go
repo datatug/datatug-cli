@@ -121,6 +121,7 @@ var realPgFixtureDDL = []string{
 		customer_id bigint NOT NULL REFERENCES customer(id),
 		total numeric(12,2) NOT NULL DEFAULT 0,
 		status text NOT NULL DEFAULT 'open')`,
+	`CREATE INDEX ix_invoice_customer ON invoice (customer_id)`,
 	`CREATE TABLE "MixedCase" (
 		"OrderId" integer PRIMARY KEY,
 		"ItemName" text,
@@ -480,6 +481,8 @@ func TestPostgresScanJourney(t *testing.T) {
 		"connections/local/shop.json",
 		"datatug-project.json",
 		"dbmodels/shop/shop.dbmodel.json",
+		"dbmodels/shop/shop.indexes.json",
+		"dbmodels/shop/shop.refs.json",
 		"environments/local/catalogs/shop/shop.db.json",
 		"environments/local/local.env.json")
 	slices.Sort(wantFiles)
@@ -487,6 +490,7 @@ func TestPostgresScanJourney(t *testing.T) {
 		"the files of the scan: one columns file per table and view of each schema, a view and a materialized view among the views, and the two tables called customer each in its own schema")
 
 	assertScanEnvironmentOwnership(t, projectDir)
+	assertScannedKeysAndIndexes(t, projectDir, "public")
 
 	store, id := filestore.NewSingleProjectStore(projectDir, "")
 	projStore := store.GetProjectStore(id)
@@ -562,6 +566,16 @@ func TestPostgresScanJourney(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, sources, 1)
 	assert.Equal(t, "env:"+realPgScanVar, sources[0].URL, "the source is the variable, never the URL")
+
+	// SQL text on the command line runs against the scanned source, read-only, and a dollar-quoted string is
+	// refused before it reaches the server.
+	stdout, sqlStderr, code := runQuery(t, "", "--db", "env:"+realPgScanVar, "--sql", "SELECT id, name FROM customer ORDER BY id", "--format", "json", "--no-policies")
+	require.Zero(t, code, "--sql runs: %s", sqlStderr)
+	assert.Equal(t, []map[string]any{{"id": float64(1), "name": "Ada Lovelace"}, {"id": float64(2), "name": "Alan Turing"}}, withoutKey(decodeObjects(t, stdout)))
+	stderrs = append(stderrs, stdout, sqlStderr)
+	_, sqlStderr, code = runQuery(t, "", "--db", "env:"+realPgScanVar, "--sql", "SELECT $$x$$", "--no-policies")
+	assert.Equal(t, exitCodeUsage, code)
+	assert.Contains(t, sqlStderr, "a PostgreSQL dollar-quoted string")
 
 	// 4. A second scan of an unchanged database leaves the folder byte-identical.
 	first := treeHashes(t, projectDir, "")

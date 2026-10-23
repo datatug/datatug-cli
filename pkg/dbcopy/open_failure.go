@@ -45,7 +45,7 @@ func (e *openError) Unwrap() error { return e.cause }
 //
 // The errors this package wrote itself (the missing-file error CheckSourceFile
 // returns, an error OpenFailure returned before, the fixed refusals such as
-// ErrPostgresPreview) carry text built from the display form of the source or from
+// errPostgresReadOnlyOff) carry text built from the display form of the source or from
 // no source at all, and pass through unchanged. They are recognised by what they are, never
 // by errors.Is: a driver can wrap one of them around its own text. A nil err
 // stays nil.

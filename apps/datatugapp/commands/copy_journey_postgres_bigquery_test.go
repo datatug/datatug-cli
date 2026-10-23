@@ -66,7 +66,6 @@ func (noNetworkBigQueryTransport) RoundTrip(*http.Request) (*http.Response, erro
 
 func TestPostgresToBigQueryProviderNeutralCopyPreservesRows(t *testing.T) {
 	server := newRealPgServer(t)
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	execAll(t, server.scanURL,
 		`ALTER TABLE invoice ALTER COLUMN total TYPE numeric(30,8)`,
 		`INSERT INTO invoice (id, customer_id, total, status) VALUES (31, 1, 12345678901234567890.12345678, 'paid')`,

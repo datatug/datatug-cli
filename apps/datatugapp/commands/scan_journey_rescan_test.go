@@ -105,6 +105,10 @@ func TestScanJourneySecondEnvironmentKeepsTheFirst(t *testing.T) {
 
 	// Scanning either again, with nothing changed in its database, changes nothing.
 	both := treeHashes(t, projectDir, "")
+	// The model's foreign keys and indexes are shared by the environments: dev's database has no
+	// order_line, and its scan leaves the key and the indexes local's scan saved for it.
+	assert.Equal(t, "4d4d7fa8efaf95f3128962db0edc41bf6edfa397bd800c5cec5e23e2e6bff385", both["dbmodels/shop/shop.refs.json"], "local's foreign key")
+	assert.Equal(t, "e86036b01038bc930f833333c7cdb8b871e7abc123269451812262052fe87428", both["dbmodels/shop/shop.indexes.json"], "local's indexes")
 	assert.Empty(t, scan("local", localPath))
 	assert.Equal(t, both, treeHashes(t, projectDir, ""), "a rescan of local")
 	assert.Equal(t, localPath, catalogPath("local"))

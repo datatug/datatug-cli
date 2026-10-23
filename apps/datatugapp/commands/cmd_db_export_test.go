@@ -12,15 +12,15 @@ import (
 )
 
 func TestDBExportFailureRedactsSourcePassword(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "")
 	secret := "export-secret-marker"
+	failingServerOpeners(t)
 	command := dbExportCommand()
 	command.SilenceUsage = true
 	command.SilenceErrors = true
 	command.SetArgs([]string{"--from", "postgres://alice:" + secret + "@example.invalid/shop", "--to", "ingitdb://" + filepath.Join(t.TempDir(), "native")})
 	err := command.Execute()
 	if err == nil {
-		t.Fatal("preview source unexpectedly opened")
+		t.Fatal("a source whose open fails unexpectedly opened")
 	}
 	if strings.Contains(err.Error(), secret) {
 		t.Fatalf("source password leaked: %v", err)

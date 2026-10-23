@@ -39,7 +39,7 @@ func (r BackendRef) SQLEngine() string {
 // OpenSQL opens the database/sql handle that the faithful SQLite/PostgreSQL copy reads or writes
 // through. A SQLite file that is written is created when it is missing (its folder too); one that
 // is read must exist. A PostgreSQL URL gets the same session defaults and refusals as every other
-// open (see postgresConnectionString), and the preview switch is asked first. The error is safe
+// open (see postgresConnectionString). The error is safe
 // to show (see OpenFailure).
 func (r BackendRef) OpenSQL(ctx context.Context, forWrite bool) (*sql.DB, error) {
 	db, err := r.openSQL(ctx, forWrite)
@@ -90,9 +90,6 @@ func (r BackendRef) openSQL(ctx context.Context, forWrite bool) (*sql.DB, error)
 		}
 		return db, nil
 	case "postgres":
-		if err := CheckPostgresPreview(); err != nil {
-			return nil, err
-		}
 		connection, err := postgresConnectionString(r.Path, forWrite)
 		if err != nil {
 			return nil, err

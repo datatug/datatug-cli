@@ -171,6 +171,8 @@ func TestScanJourneyHonoursTheDbModel(t *testing.T) {
 		"dbmodels/retail-model/main/tables/order_line/main.order_line.columns.json",
 		"dbmodels/retail-model/main/views/customer_names/main.customer_names.columns.json",
 		"dbmodels/retail-model/retail-model.dbmodel.json",
+		"dbmodels/retail-model/retail-model.indexes.json",
+		"dbmodels/retail-model/retail-model.refs.json",
 		"environments/local/catalogs/shop/shop.db.json",
 		"environments/local/local.env.json",
 	}, projectFiles(t, projectDir, ""))

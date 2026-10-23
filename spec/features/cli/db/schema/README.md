@@ -44,7 +44,7 @@ When `--db env:NAME` is given the URL is read from the environment variable `NAM
 
 #### REQ: supported-providers
 
-SQLite and PostgreSQL MUST list their tables and views. PostgreSQL stays behind the existing preview switch (`DATATUG_PREVIEW_POSTGRES=1`) and is opened read-only.
+SQLite and PostgreSQL MUST list their tables and views. PostgreSQL is opened read-only.
 
 #### REQ: unsupported-provider
 

@@ -362,3 +362,16 @@ func TestDataModelsRealResolverRejectsMismatchedCatalog(t *testing.T) {
 		t.Fatalf("catalog digest mismatch: output=%q error=%v", out.String(), err)
 	}
 }
+
+func TestDataModelsResolvePreservesHostWorkingDirectoryFailure(t *testing.T) {
+	original := dataModelWorkingDirectory
+	t.Cleanup(func() { dataModelWorkingDirectory = original })
+	dataModelWorkingDirectory = func() (string, error) { return "", os.ErrNotExist }
+	out, err := executeDataModels(t, func(meaninggraph.Config) (dataModelResolver, error) {
+		t.Fatal("resolver reached after working-directory failure")
+		return nil, nil
+	}, "--reference", "first")
+	if !errors.Is(err, os.ErrNotExist) || out != "" {
+		t.Fatal("host cwd failure lost", out, err)
+	}
+}

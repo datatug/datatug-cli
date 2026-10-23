@@ -188,7 +188,7 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 	router.GlobalOPTIONS = http.HandlerFunc(guard.Wrap(globalOptionsHandler))
 	// What the router answers by itself (unknown path, wrong method) is behind the guard too, so
 	// an unauthenticated caller cannot tell which routes exist.
-	router.NotFound = http.HandlerFunc(guard.Wrap(http.NotFound))
+	router.NotFound = http.HandlerFunc(guard.Wrap(notFound))
 	router.MethodNotAllowed = http.HandlerFunc(guard.Wrap(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 	}))
@@ -234,6 +234,19 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 		err = nil
 	}
 	return err
+}
+
+// notFound answers a path that no route serves. A preflight of such a path is answered as the
+// preflight of any other path (globalOptionsHandler): the router hands an OPTIONS request to
+// GlobalOPTIONS only for a path some route serves, and a refused preflight makes the browser drop
+// the real request, so the page would see a network failure (status 0) instead of the 404 that
+// the real request gets.
+func notFound(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		globalOptionsHandler(w, r)
+		return
+	}
+	http.NotFound(w, r)
 }
 
 func root(writer http.ResponseWriter, _ *http.Request) {

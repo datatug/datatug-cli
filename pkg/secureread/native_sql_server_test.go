@@ -84,6 +84,8 @@ func TestServerQueryText(t *testing.T) {
 		{"oracle", `SELECT "id" FROM "customer" FOR UPDATE`, "UPDATE"},
 		{"mysql", "SELECT * FROM t INTO OUTFILE '/tmp/x'", "INTO"},
 		{"mysql", "SELECT 1 /*!50000 , SLEEP(1) */", "a MySQL comment that the server runs"},
+		{"mysql", "SELECT 1 /*M! INTO OUTFILE '/tmp/x' */", "a MySQL comment that the server runs"},
+		{"mysql", "SELECT 1 /*m!100000 INTO OUTFILE '/tmp/x' */", "a MySQL comment that the server runs"},
 		{"mysql", "SELECT 1 /* never closed", "a comment that is not closed"},
 		{"sqlserver", "SELECT 1 /* /* */ ' */ COMMIT DELETE FROM t --'", "a comment inside a comment"},
 		{"sqlserver", "SELECT 1 /* /* */ ' */ EXEC xp_cmdshell 'whoami' --'", "a comment inside a comment"},

@@ -71,7 +71,7 @@ var writeWords = map[string]bool{
 }
 
 // sqlWords returns the words of text, upper case, outside its string literals, quoted names and comments, or the
-// reason it refuses the text: a statement separator (";"), a MySQL comment the server runs ("/*!"), a comment
+// reason it refuses the text: a statement separator (";"), a MySQL or MariaDB comment the server runs ("/*!", "/*M!"), a comment
 // inside a comment (SQL Server nests them, so where one ends depends on the engine), an Oracle quoted literal
 // (q'...') or a backslash in a MySQL literal (whose ends depend on the server's settings), or a literal, a name
 // or a comment left open. Where the engines differ it follows the one it reads for: MySQL takes "--" for a
@@ -82,7 +82,7 @@ func sqlWords(scheme, text string) (words []string, refusal string) {
 		switch {
 		case c == ';':
 			return nil, "a second statement"
-		case strings.HasPrefix(text[i:], "/*!"):
+		case strings.HasPrefix(text[i:], "/*!") || strings.HasPrefix(strings.ToUpper(text[i:]), "/*M!"):
 			return nil, "a MySQL comment that the server runs"
 		case strings.HasPrefix(text[i:], "/*"):
 			end := strings.Index(text[i+2:], "*/")

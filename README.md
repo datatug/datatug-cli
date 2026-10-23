@@ -469,8 +469,8 @@ string literals, quoted names and comments). Second, the connection: a MySQL ses
 on Oracle every read runs in a `READ ONLY` transaction, and SQL Server, which has no read-only session, runs every read
 in a transaction that DataTug always rolls back. Neither layer stops a function or a procedure already on the server
 that writes when a query calls it (an Oracle function with an autonomous transaction commits its own writes), so give
-DataTug a login that can only read: on SQL Server `db_datareader` and `VIEW DEFINITION`, on Oracle `CREATE SESSION`
-and `SELECT` on the tables. Queries through access policies
+DataTug a login that can only read: on MySQL `SELECT` and no `FILE` privilege, on SQL Server `db_datareader` and
+`VIEW DEFINITION`, on Oracle `CREATE SESSION` and `SELECT` on the tables. Queries through access policies
 (`--policies`) are not available in the preview: use `--no-policies`. The scan saves no foreign keys or indexes yet.
 
 ## For developers

@@ -24,14 +24,10 @@ func (e *Executor) runServerNativeSQL(ctx context.Context, sourceURL string, ref
 		return Result{}, err
 	}
 	defer closeSource()
-	result, err := e.runThroughPolicies(ctx, db, dal.NewTextQuery(text, nil, args...), nil)
-	if err != nil {
-		return Result{}, err
-	}
-	if !e.session.Unrestricted {
-		result.Limitations = append(result.Limitations, nativeSQLLimitation)
-	}
-	return result, nil
+	// A read through policies is refused before the source opens (dbcopy.CheckServerRead, in openSource) while
+	// these sources are a preview, so a session that gets here has none to label the result for: when that
+	// refusal goes, the result must carry nativeSQLLimitation as RunNativeSQL's SQLite one does.
+	return e.runThroughPolicies(ctx, db, dal.NewTextQuery(text, nil, args...), nil)
 }
 
 // serverQueryText is sqlText without its trailing semicolons (the Oracle driver refuses one, and a
@@ -69,7 +65,7 @@ func serverQueryText(scheme, sqlText string) (string, error) {
 	case "SELECT", "WITH":
 		return text, nil
 	}
-	return "", fmt.Errorf("%w: a %s source runs a query (SELECT or WITH) and nothing else", ErrNativeSQLUnsupported, dbcopy.ServerTitle(scheme))
+	return "", fmt.Errorf("%w: on %s, DataTug runs a query (SELECT or WITH) and nothing else", ErrNativeSQLUnsupported, dbcopy.ServerTitle(scheme))
 }
 
 func isWordRune(r rune) bool {

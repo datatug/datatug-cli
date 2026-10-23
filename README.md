@@ -426,7 +426,7 @@ the web app talks to (see [spec/features/cli/serve](spec/features/cli/serve/READ
 | PostgreSQL | supported: every schema the role can use, tables and views, columns with their defaults, primary keys (no foreign keys or indexes yet); the connection URL stays in an environment variable | preview, read-only: set `DATATUG_PREVIEW_POSTGRES=1`; `--db env:NAME` and saved TugQL queries |
 | MySQL | supported: the tables of the database of the URL, columns, primary keys; the connection URL stays in an environment variable | preview, read-only: set `DATATUG_PREVIEW_MYSQL=1`; `--db env:NAME`, saved TugQL and SQL (`SELECT`/`WITH`) queries |
 | Oracle | supported: the tables and views of the session's schema, columns, primary keys; the connection URL stays in an environment variable | preview, read-only: set `DATATUG_PREVIEW_ORACLE=1`; `--db env:NAME`, saved TugQL and SQL (`SELECT`/`WITH`) queries |
-| SQL Server | supported: the tables and views of the login's default schema, columns, primary keys; the connection URL stays in an environment variable | preview: set `DATATUG_PREVIEW_SQLSERVER=1`; `--db env:NAME`, saved TugQL and SQL (`SELECT`/`WITH`) queries. Use a read-only login: SQL Server has no read-only session |
+| SQL Server | supported: the tables and views of the login's default schema, columns, primary keys; the connection URL stays in an environment variable | preview, read-only: set `DATATUG_PREVIEW_SQLSERVER=1`; `--db env:NAME`, saved TugQL and SQL (`SELECT`/`WITH`) queries |
 | inGitDB | not supported yet | supported: `--db ingitdb://./path-to-the-database` |
 | OpenVaultDB | not supported yet | not tested in this release |
 | Firestore | not supported yet | not supported yet |
@@ -462,9 +462,10 @@ real schema is called. The URL may carry only a few query parameters (MySQL: `tl
 `SSL VERIFY`, `TIMEOUT`, `CONNECTION TIMEOUT`, `WALLET`; SQL Server: `encrypt`, `TrustServerCertificate`,
 `connection timeout`); any other is refused.
 
-Reads are read-only. A MySQL session has `transaction_read_only` on, so the server refuses any write; an Oracle saved SQL
-query runs in a `READ ONLY` transaction; SQL Server has no read-only session, so give DataTug a read-only login
-(`db_datareader` and `VIEW DEFINITION`). On every engine, structured queries compile to a `SELECT`, and a saved SQL query
+Reads are read-only. A MySQL session has `transaction_read_only` on, so the server refuses any write; on Oracle every
+read runs in a `READ ONLY` transaction; SQL Server has no read-only session, so every read runs in a transaction that
+DataTug always rolls back, and a write slipped into a query is undone. A read-only login (`db_datareader` and
+`VIEW DEFINITION`) is still the safer choice for SQL Server. On every engine, structured queries compile to a `SELECT`, and a saved SQL query
 must be one `SELECT` or `WITH` query or it is refused before it reaches the server. Queries through access policies
 (`--policies`) are not available in the preview: use `--no-policies`. The scan saves no foreign keys or indexes yet.
 

@@ -180,6 +180,7 @@ require (
 	github.com/skeema/knownhosts v1.3.2 // indirect
 	github.com/strongo/analytics v0.2.8 // indirect
 	github.com/strongo/decimal v0.1.2 // indirect
+	github.com/strongo/gotwilio v0.0.0-20160123000810-f024bbefe80f // indirect
 	github.com/strongo/strongoapp v0.31.55 // indirect
 	github.com/tiendc/go-deepcopy v1.7.2 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect

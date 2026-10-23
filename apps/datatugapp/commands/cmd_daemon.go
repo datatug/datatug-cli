@@ -44,6 +44,7 @@ func daemonCommand() *cobra.Command {
 			"Any command run with --client claude-mod (or DATATUG_CLIENT) ensures it is running afterwards.",
 	}
 	cmd.AddCommand(daemonStatusCommand(), daemonStartCommand(), daemonStopCommand(), daemonURLCommand())
+	addWatchDaemonFlags(cmd)
 	return cmd
 }
 

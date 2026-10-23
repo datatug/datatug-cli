@@ -369,6 +369,9 @@ func (s *LocalStore) executeRunAction(ctx context.Context, id, actor string, req
 		if e != nil {
 			return e
 		}
+		if e = checkWatchCatalog(ctx, catalog, checkID, op.QueryRevisions); e != nil {
+			return e
+		}
 		admittedRevisions = op.QueryRevisions
 		if checkID != "" {
 			if req.CaseID != "" {

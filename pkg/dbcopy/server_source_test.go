@@ -3,6 +3,7 @@ package dbcopy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -54,25 +55,33 @@ func TestServerSchemesAndTitles(t *testing.T) {
 	assert.Contains(t, SupportedSchemes(), "oracle")
 }
 
-func TestServerPreviewSwitches(t *testing.T) {
-	assert.ErrorIs(t, CheckServerPreview("postgres"), ErrPostgresPreview)
-	assert.EqualError(t, CheckServerPreview("mysql"), "MySQL sources are a preview and are switched off: set DATATUG_PREVIEW_MYSQL=1 to use them")
-	assert.EqualError(t, CheckServerPreview("oracle"), "Oracle sources are a preview and are switched off: set DATATUG_PREVIEW_ORACLE=1 to use them")
-	assert.NoError(t, CheckServerPreview("sqlite"))
-	t.Setenv(MySQLPreviewEnv, "1")
-	assert.NoError(t, CheckServerPreview("mysql"))
-	t.Setenv(OraclePreviewEnv, "yes")
-	assert.Error(t, CheckServerPreview("oracle"), "only 1 turns it on")
+func TestCheckServerRead(t *testing.T) {
+	for scheme, title := range map[string]string{"postgres": "PostgreSQL", "mysql": "MySQL", "oracle": "Oracle", "sqlserver": "SQL Server"} {
+		ref := BackendRef{Scheme: scheme}
+		assert.NoError(t, CheckServerRead(ref, 0), scheme+": no policy is no policy-enforced read")
+		for _, policies := range []int{1, 3} {
+			assert.EqualError(t, CheckServerRead(ref, policies), "policy-enforced reads on "+title+" sources are not available yet: run with --no-policies", scheme)
+		}
+	}
+	assert.NoError(t, CheckServerRead(BackendRef{Scheme: "sqlite"}, 3), "only a server source is refused")
+	assert.NoError(t, CheckServerRead(BackendRef{Scheme: "ingitdb"}, 2))
 }
 
-func TestCheckServerRead(t *testing.T) {
-	mysqlRef := BackendRef{Scheme: "mysql"}
-	assert.ErrorIs(t, CheckServerRead(mysqlRef, 0), mysqlEngine.preview, "the switch is asked first")
-	t.Setenv(MySQLPreviewEnv, "1")
-	assert.NoError(t, CheckServerRead(mysqlRef, 0))
-	assert.EqualError(t, CheckServerRead(mysqlRef, 1), "policy-enforced reads on MySQL sources are not available in this preview")
-	assert.ErrorIs(t, CheckServerRead(BackendRef{Scheme: "postgres"}, 0), ErrPostgresPreview, "a PostgreSQL source is CheckPostgresRead's")
-	assert.NoError(t, CheckServerRead(BackendRef{Scheme: "sqlite"}, 3))
+// OpenFailure passes the fixed refusals through unchanged: they were built from fixed sentences,
+// and wrapping them in "open postgres source ...: the driver could not open the source" would
+// bury the one thing the person has to do.
+func TestOpenFailure_PassesTheFixedRefusalsThrough(t *testing.T) {
+	ref := BackendRef{Scheme: "postgres", Raw: "env:DATATUG_SHOP_PG_URL", Path: "postgres://alice:" + markerPassword + "@db.example.com/shop"}
+	policy := CheckServerRead(ref, 1)
+	require.Error(t, policy)
+	for _, refusal := range []error{policy, errPostgresReadOnlyOff} {
+		assert.Same(t, refusal, ref.OpenFailure(refusal))
+	}
+	wrapped := fmt.Errorf("driver text with %s: %w", markerPassword, policy)
+	got := ref.OpenFailure(wrapped)
+	assert.NotSame(t, policy, got, "a driver that wrapped a refusal's text does not make its own text safe")
+	assert.NotContains(t, got.Error(), markerPassword, "OpenFailure's message is a fixed sentence (the chain is kept for errors.Is, by design)")
+	assert.ErrorIs(t, got, policy)
 }
 
 func TestParseServerURLs(t *testing.T) {
@@ -177,9 +186,7 @@ func TestOpenServerSources(t *testing.T) {
 	ctx := context.Background()
 
 	_, err = mysqlRef.Open(ctx)
-	assert.ErrorIs(t, err, mysqlEngine.preview, "off until the switch is on")
-	t.Setenv(MySQLPreviewEnv, "1")
-	t.Setenv(OraclePreviewEnv, "1")
+	require.NoError(t, err, "a MySQL source opens with no switch")
 	_, err = mysqlRef.OpenForWrite(ctx)
 	assert.EqualError(t, err, "MySQL sources are read only in DataTug: only a read opens one")
 
@@ -188,12 +195,12 @@ func TestOpenServerSources(t *testing.T) {
 	assert.NotNil(t, db)
 	_, err = oracleRef.Open(ctx)
 	require.NoError(t, err)
-	require.Len(t, *dsns, 2)
+	require.Len(t, *dsns, 3)
 	assert.Contains(t, (*dsns)[0], "transaction_read_only=1")
-	assert.True(t, strings.HasPrefix((*dsns)[1], "oracle://scott:"))
+	assert.Contains(t, (*dsns)[1], "transaction_read_only=1")
+	assert.True(t, strings.HasPrefix((*dsns)[2], "oracle://scott:"))
 
-	// A scan is not behind the switch.
-	t.Setenv(MySQLPreviewEnv, "")
+	// A schema scan opens the source the same way.
 	scanDB, err := mysqlRef.OpenSchemaScan(ctx)
 	require.NoError(t, err)
 	assert.NotNil(t, scanDB)
@@ -202,7 +209,6 @@ func TestOpenServerSources(t *testing.T) {
 }
 
 func TestServerOpenFailuresNameNoPartOfTheURL(t *testing.T) {
-	t.Setenv(MySQLPreviewEnv, "1")
 	cause := errors.New("dial tcp db.example.com:3306 alice:" + serverSecret)
 	t.Cleanup(SetServerOpenersForTest(ServerOpeners{MySQL: func(string) (SchemaScanDB, error) { return nil, cause }}))
 

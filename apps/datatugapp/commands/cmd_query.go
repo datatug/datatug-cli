@@ -104,6 +104,7 @@ Examples:
 	flags.String(queryDBFlag, "", "Database URL ("+dbSchemesHelp()+"), or datatug://<project>/<db>[?env=<ENV>] for a database that is a source of a registered project (datatug:///<db> for the current project)")
 	flags.StringP(queryFileFlag, "f", "", "TugQL query document (YAML or JSON); '-' reads stdin")
 	flags.String(queryFromFlag, "", "Select every row and field of this root collection (alternative to -f)")
+	flags.String(querySQLFlag, "", "SQL query to run against --db (alternative to -f): on PostgreSQL, MySQL, Oracle and SQL Server one SELECT or WITH query, read-only; '-' reads stdin")
 	flags.String(queryProjectFlag, "", "Project directory or registered project ID (alternative to --db; runs a saved --query by ID)")
 	flags.String(queryQueryFlag, "", "Saved query ID to run, e.g. customers/customer-invoices (requires --project)")
 	flags.String(queryEnvFlag, "", "Environment ID the saved query runs against (default: the project's only environment)")
@@ -127,6 +128,7 @@ type queryOptions struct {
 	db          string
 	file        string
 	from        string
+	sql         string
 	limit       int
 	offset      int
 	format      string
@@ -154,6 +156,7 @@ func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
 	o.db, _ = flags.GetString(queryDBFlag)
 	o.file, _ = flags.GetString(queryFileFlag)
 	o.from, _ = flags.GetString(queryFromFlag)
+	o.sql, _ = flags.GetString(querySQLFlag)
 	o.limit, _ = flags.GetInt(queryLimitFlag)
 	o.offset, _ = flags.GetInt(queryOffsetFlag)
 	o.format, _ = flags.GetString(queryFormatFlag)
@@ -175,20 +178,28 @@ func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
 	}
 
 	savedQueryMode := o.project != "" || o.query != ""
-	adHocMode := o.db != "" || o.file != "" || o.from != ""
+	adHocMode := o.db != "" || o.file != "" || o.from != "" || o.sql != ""
+	queryInputs := 0
+	for _, given := range []bool{o.file != "", o.from != "", o.sql != ""} {
+		if given {
+			queryInputs++
+		}
+	}
 	switch {
 	case savedQueryMode && adHocMode:
-		return o, Exit("--project/--query and --db/-f/--from are mutually exclusive", exitCodeUsage)
+		return o, Exit("--project/--query and --db/-f/--from/--sql are mutually exclusive", exitCodeUsage)
 	case savedQueryMode && (o.project == "" || o.query == ""):
 		return o, Exit("--project and --query must be given together", exitCodeUsage)
 	case savedQueryMode && (len(o.policies) > 0 || o.policiesDir != "" || o.noPolicies):
 		return o, Exit("--policy/--policies-dir/--no-policies are not supported with --project/--query; policies come from the project's own policies/ directory, exactly like `serve`", exitCodeUsage)
 	case !savedQueryMode && strings.TrimSpace(o.db) == "":
 		return o, Exit("one of --project+--query or --db is required", exitCodeUsage)
-	case !savedQueryMode && o.file == "" && o.from == "":
-		return o, Exit("one of -f/--file or --from is required", exitCodeUsage)
-	case !savedQueryMode && o.file != "" && o.from != "":
-		return o, Exit("-f/--file and --from are mutually exclusive", exitCodeUsage)
+	case !savedQueryMode && queryInputs == 0:
+		return o, Exit("one of -f/--file, --from or --sql is required", exitCodeUsage)
+	case !savedQueryMode && queryInputs > 1:
+		return o, Exit("-f/--file, --from and --sql are mutually exclusive", exitCodeUsage)
+	case o.sql != "" && o.resultID != "":
+		return o, Exit("--result-id is not supported with --sql yet", exitCodeUsage)
 	}
 	switch {
 	case o.limit < 0 || o.offset < 0:
@@ -215,7 +226,7 @@ func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
 // Production code always runs with this default. SQLite uses the validated
 // structured-query dialect so grouped TugQL is rendered as native SQL (and
 // literals remain bound parameters), and PostgreSQL, MySQL, Oracle and SQL Server open as a
-// protected read: a read-only session, behind each one's preview switch; other sources keep their
+// protected read: a read-only session; other sources keep their
 // existing open behavior. Both paths retain the HTTPS-only HTTP-source
 // enforcement.
 var openBackend = func(ctx context.Context, backend dbcopy.BackendRef) (dal.DB, error) {
@@ -250,6 +261,9 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	if o.project != "" && o.query != "" {
 		return runSavedQueryCommand(cmd, o)
 	}
+	if o.sql != "" {
+		return runSQLQueryCommand(cmd, o)
+	}
 	query, queryText, err := buildQuery(o, cmd.InOrStdin())
 	if err != nil {
 		return err
@@ -261,11 +275,6 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	// The flag the source was typed on is what a failure of a PostgreSQL source says its connection string is read
 	// from (an env:NAME source says the variable).
 	backend = backend.WithFlag("--db")
-	// A PostgreSQL source is a preview that is off unless the person turns it on: that is the first
-	// thing they are told, before anything about policies, which turning it on would not change.
-	if err = dbcopy.CheckServerRead(backend, 0); err != nil {
-		return Exit(err.Error(), exitCodeDatabase)
-	}
 	loaded, err := accesspolicies.Load(accesspolicies.LoadOptions{Dir: o.policiesDir, Files: o.policies, None: o.noPolicies})
 	if err != nil {
 		return Exit(err.Error(), exitCodeUsage)
@@ -285,7 +294,7 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	// With the preview on, a read of a PostgreSQL source through policies is not available in it: that is
+	// A read of a PostgreSQL, MySQL, Oracle or SQL Server source through policies is not available yet: that is
 	// answered before the source is opened.
 	if err = dbcopy.CheckServerRead(backend, len(loaded)); err != nil {
 		return Exit(err.Error(), exitCodeUsage)

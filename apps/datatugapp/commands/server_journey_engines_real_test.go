@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/dal-go/dalgo/dal"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	_ "github.com/microsoft/go-mssqldb" // registers the "sqlserver" database/sql driver for the fixture
 	_ "github.com/sijms/go-ora/v3"      // registers the "oracle" database/sql driver for the fixture
 	"github.com/stretchr/testify/assert"
@@ -32,8 +34,8 @@ import (
 // realServer is the fixture database of one test: what the commands connect with, and the parts of that
 // connection that no project file and no output may hold.
 type realServer struct {
-	driver, previewEnv, scanVar, scanURL string
-	parts                                []string
+	driver, scanVar, scanURL string
+	parts                    []string
 	// sql is the saved SQL query that reads the ids and names of the customers that have a score, highest first.
 	sql string
 }
@@ -47,6 +49,7 @@ func serverJourneyDDL(q func(string) string, bigint, integer, text, decimal stri
 			q("customer"), q("id"), bigint, q("name"), text, q("email"), text, q("score"), integer),
 		fmt.Sprintf(`CREATE TABLE %s (%s %s PRIMARY KEY, %s %s NOT NULL REFERENCES %s(%s), %s %s(12,2) DEFAULT 0 NOT NULL)`,
 			q("invoice"), q("id"), integer, q("customer_id"), bigint, q("customer"), q("id"), q("total"), decimal),
+		fmt.Sprintf(`CREATE INDEX %s ON %s (%s)`, q("ix_invoice_customer"), q("invoice"), q("customer_id")),
 		fmt.Sprintf(`CREATE TABLE %s (%s %s PRIMARY KEY, %s %s(40))`, q("MixedCase"), q("OrderId"), integer, q("ItemName"), text),
 		fmt.Sprintf(`CREATE TABLE %s (%s %s NOT NULL, %s %s NOT NULL, %s %s(20), PRIMARY KEY (%s, %s))`,
 			q("order_line"), q("order_id"), integer, q("line_no"), integer, q("sku"), text, q("line_no"), q("order_id")),
@@ -149,20 +152,25 @@ func (s realServer) journey(t *testing.T) (projectDir, queries string) {
 	require.Len(t, mixed, 2)
 	assert.Equal(t, "OrderId", mixed[0].Name, "a mixed-case name is recorded as the server reports it")
 	storedColumnsOf(t, projectDir, "default/tables/invoice")
+	assertScannedKeysAndIndexes(t, projectDir, "default")
 
-	// 2. An ad-hoc TugQL query, behind the preview switch. DALgo's NULL order: first ascending, last descending.
-	_, stderr, code := runQuery(t, "from: {name: customer}\n", "--db", "env:"+s.scanVar, "-f", "-", "--format", "json", "--no-policies")
-	assert.Equal(t, exitCodeDatabase, code, "with the switch off the query is refused")
-	assert.Contains(t, stderr, s.previewEnv)
-	t.Setenv(s.previewEnv, "1")
+	// 2. An ad-hoc TugQL query. DALgo's NULL order: first ascending, last descending.
 	assert.Equal(t, []int{1, 2, 3}, s.ids(t, "from: {name: customer}\norderBy:\n  - field: id\n"))
 	assert.Equal(t, []int{2, 3, 1}, s.ids(t, "from: {name: customer}\norderBy:\n  - field: score\n  - field: id\n"))
 	assert.Equal(t, []int{1, 3}, s.ids(t, "from: {name: customer}\norderBy:\n  - field: score\n    desc: true\n  - field: id\nlimit: 2\n"))
 	assert.Equal(t, []int{3}, s.ids(t, "from: {name: customer}\nwhere: {op: '==', left: {field: name}, right: {value: Grace Hopper}}\n"))
 	assert.Equal(t, []int{11}, s.ids(t, "from: {name: invoice}\nwhere: {op: '==', left: {field: customer_id}, right: {value: 3}}\n"))
-	stdout, stderr, code = runQuery(t, "from: {name: MixedCase}\n", "--db", "env:"+s.scanVar, "-f", "-", "--format", "json", "--no-policies")
+	stdout, stderr, code := runQuery(t, "from: {name: MixedCase}\n", "--db", "env:"+s.scanVar, "-f", "-", "--format", "json", "--no-policies")
 	require.Zero(t, code, stderr)
 	assert.Equal(t, []map[string]any{{"OrderId": float64(7), "ItemName": "lamp"}}, withoutKey(decodeObjects(t, stdout)), "a mixed-case table is read by its exact name")
+
+	// SQL text on the command line, as a saved SQL query runs.
+	stdout, stderr, code = runQuery(t, "", "--db", "env:"+s.scanVar, "--sql", s.sql, "--format", "json", "--no-policies")
+	require.Zero(t, code, "--sql runs: %s", stderr)
+	sqlRows := withoutKey(decodeObjects(t, stdout))
+	require.Len(t, sqlRows, 2)
+	assert.Equal(t, []any{"Ada Lovelace", "Grace Hopper"}, []any{sqlRows[0]["name"], sqlRows[1]["name"]})
+	assert.Empty(t, s.partsIn(stdout+stderr))
 
 	// 3. Saved queries of the scanned project, SQL and TugQL, on the one database of environment local.
 	queries = filepath.Join(projectDir, "queries")
@@ -253,7 +261,7 @@ END;`, user))
 	t.Setenv(realOracleScanVar, scanDSN)
 	useTheRealServerOpeners(t)
 	server := realServer{
-		driver: "oracle", previewEnv: dbcopy.OraclePreviewEnv, scanVar: realOracleScanVar, scanURL: scanDSN,
+		driver: "oracle", scanVar: realOracleScanVar, scanURL: scanDSN,
 		parts: []string{password, user, strings.ToLower(user), ":" + admin.Port(), "oracle://"},
 		sql:   `SELECT "id", "name" FROM "customer" WHERE "score" IS NOT NULL ORDER BY "score" DESC;`,
 	}
@@ -305,7 +313,7 @@ func TestSQLServerScanAndQueryJourney(t *testing.T) {
 	t.Setenv(realMSSQLScanVar, scan.String())
 	useTheRealServerOpeners(t)
 	server := realServer{
-		driver: "sqlserver", previewEnv: dbcopy.SQLServerPreviewEnv, scanVar: realMSSQLScanVar, scanURL: scan.String(),
+		driver: "sqlserver", scanVar: realMSSQLScanVar, scanURL: scan.String(),
 		parts: []string{password, login, database, ":" + admin.Port(), "sqlserver://"},
 		sql:   `SELECT id, name FROM customer WHERE score IS NOT NULL ORDER BY score DESC;`,
 	}
@@ -349,4 +357,38 @@ func writeThroughTheRead(t *testing.T, scanVar, text string) error {
 	}
 	_, err = dal.ReadAllToRecords(context.Background(), reader)
 	return err
+}
+
+// assertScannedKeysAndIndexes checks what a scan of the journey's fixture saved beside its db model: the
+// foreign key of invoice.customer_id to customer.id, in dbmodels/shop/shop.refs.json, and the index
+// ix_invoice_customer on invoice.customer_id, in dbmodels/shop/shop.indexes.json, both under schema.
+func assertScannedKeysAndIndexes(t *testing.T, projectDir, schema string) {
+	t.Helper()
+	keys, err := filestore.LoadModelForeignKeys(projectDir, "shop")
+	require.NoError(t, err)
+	var found bool
+	for _, table := range keys {
+		if table.Table.Schema() != schema || table.Table.Name() != "invoice" {
+			continue
+		}
+		for _, key := range table.ForeignKeys {
+			if slices.Equal(key.Columns, []string{"customer_id"}) && key.RefTable.Name() == "customer" && slices.Equal(key.RefColumns, []string{"id"}) {
+				found = true
+			}
+		}
+	}
+	assert.True(t, found, "the scan saved the foreign key of invoice.customer_id: %+v", keys)
+
+	indexes, err := filestore.LoadModelIndexes(projectDir, "shop")
+	require.NoError(t, err)
+	found = false
+	for _, table := range indexes {
+		for _, index := range table.Indexes {
+			if table.Table.Schema() == schema && table.Table.Name() == "invoice" && index.Name == "ix_invoice_customer" &&
+				len(index.Columns) == 1 && index.Columns[0].Name == "customer_id" {
+				found = true
+			}
+		}
+	}
+	assert.True(t, found, "the scan saved the index ix_invoice_customer: %+v", indexes)
 }

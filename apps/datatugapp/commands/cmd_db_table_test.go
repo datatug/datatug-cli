@@ -324,7 +324,6 @@ func catalogFixture() fakeCatalog {
 
 func useCatalog(t *testing.T, catalog fakeCatalog) {
 	t.Helper()
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	withSchemaSource(t, func(context.Context, dbcopy.BackendRef) (dal.DB, error) { return catalog, nil })
 }
 

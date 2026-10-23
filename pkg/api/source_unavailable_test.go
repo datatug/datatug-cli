@@ -40,6 +40,7 @@ func TestSourceUnavailable_BuildsTheSentenceFromTheID(t *testing.T) {
 		t.Fatal(err)
 	}
 	missing := dbcopy.CheckSourceFile("/private/data/MARKER-path/missing.db")
+	policyRefusal := dbcopy.CheckServerRead(dbcopy.BackendRef{Scheme: "postgres"}, 1)
 
 	for _, tc := range []struct {
 		name string
@@ -54,8 +55,7 @@ func TestSourceUnavailable_BuildsTheSentenceFromTheID(t *testing.T) {
 		{"an open failure of a PostgreSQL source", pgRef.OpenFailure(errors.New("dial tcp: refused")), pgFailure},
 		{"the same under a wrapper", fmt.Errorf("open: %w", fileRef.OpenFailure(errors.New("x"))), `source "chinook" could not be opened`},
 		// The sentences that name no source are shown as they are.
-		{"the preview is off", dbcopy.ErrPostgresPreview, dbcopy.ErrPostgresPreview.Error()},
-		{"policy reads are refused", dbcopy.ErrPostgresPolicyReads, dbcopy.ErrPostgresPolicyReads.Error()},
+		{"policy reads are refused", policyRefusal, policyRefusal.Error()},
 	} {
 		logged.Reset()
 		got := SourceUnavailable("chinook", tc.err)

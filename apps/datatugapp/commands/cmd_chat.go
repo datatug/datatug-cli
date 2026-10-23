@@ -424,11 +424,7 @@ func (c unavailableSchemaConversation) AskWithContext(context.Context, string, s
 // PostgreSQL) and its foreign keys are read through DALgo's engine-neutral
 // schema calls, so every engine whose provider reports them gets JOINs.
 // openJoinMetadataDB is that opener; a package var so tests can make it fail.
-// A PostgreSQL source is read only behind its preview switch.
 var openJoinMetadataDB = func(ctx context.Context, backend dbcopy.BackendRef) (dal.DB, error) {
-	if err := dbcopy.CheckServerRead(backend, 0); err != nil {
-		return nil, err
-	}
 	return openBackend(ctx, backend)
 }
 

@@ -167,16 +167,13 @@ func (a *openAttempt) await(ctx context.Context) (*sharedPostgres, error) {
 // has none), and the session defaults of postgresConnectionString. Copy/export sources opt in to
 // exact NUMERIC and raw BYTEA reads; ordinary opens retain dalgo2sql's legacy conversions.
 //
-// The preview switch is asked first, before the URL is read any further. One handle is kept for each
+// One handle is kept for each
 // connection string (see handleCache), and the callers of a source that is being opened share the
 // outcome of that one open. A failure of the constructor is the adapter's own *ConnectionError,
 // which says what failed by its kind and its SQLSTATE and holds nothing of the connection string;
 // or a context error, bare, when the attempt ended with the context of the caller or the connect
 // timeout; or errPostgresOpenFailed. BackendRef.OpenFailure turns each into a fixed sentence.
 func (r BackendRef) openPostgres(ctx context.Context, mode openMode) (dal.DB, error) {
-	if err := CheckPostgresPreview(); err != nil {
-		return nil, err
-	}
 	connection, err := postgresConnectionString(r.Path, mode.forWrite)
 	if err != nil {
 		return nil, err

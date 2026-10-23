@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
@@ -161,19 +162,17 @@ func TestDBCopyFaithful_APathThatLooksLikeAURLIsNotCreated(t *testing.T) {
 	assert.NotContains(t, err.Error(), "hunter2")
 }
 
-func TestDBCopyFaithful_PostgresWithThePreviewOffIsRefused(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "")
+func TestDBCopyFaithful_PostgresTargetOpensOnlyOutsideADryRun(t *testing.T) {
 	source := sqliteFixture(t, `CREATE TABLE p (id INTEGER PRIMARY KEY)`)
-	// A dry run opens no target, but a PostgreSQL target is a preview all the same.
-	for _, extra := range [][]string{{"--dry-run", "--json"}, {}} {
-		_, _, err := runCopy(t, append([]string{"db", "copy", "--from", source, "--to", "postgres://u:pw@127.0.0.1:1/db"}, extra...)...)
-		require.Error(t, err)
-		assert.Equal(t, 4, exitCodeOf(t, err))
-		assert.Equal(t, "open --to: "+dbcopy.ErrPostgresPreview.Error(), err.Error())
-	}
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
+	failingServerOpeners(t)
 	_, _, err := runCopy(t, "db", "copy", "--from", source, "--to", "postgres://u:pw@127.0.0.1:1/db", "--dry-run", "--json")
-	require.NoError(t, err, "with the switch on, a dry run does not open the target")
+	require.NoError(t, err, "a dry run does not open the target")
+
+	_, _, err = runCopy(t, "db", "copy", "--from", source, "--to", "postgres://u:pw@127.0.0.1:1/db")
+	require.Error(t, err)
+	assert.Equal(t, 4, exitCodeOf(t, err))
+	assert.True(t, strings.HasPrefix(err.Error(), "open --to: "), err.Error())
+	assert.NotContains(t, err.Error(), "pw", "the driver's text is never shown")
 }
 
 func openSQLiteForTest(t *testing.T, path string) *sql.DB {
@@ -233,7 +232,6 @@ func (emptyPGRows) Close() error              { return nil }
 func (emptyPGRows) Next([]driver.Value) error { return io.EOF }
 
 func TestDBCopyFaithful_APostgresSourceWithNoTables(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	t.Cleanup(dbcopy.SetSQLOpenerForTest(func(string, string) (*sql.DB, error) { return sql.OpenDB(emptyPGConnector{}), nil }))
 	target := "sqlite://" + filepath.Join(t.TempDir(), "t.sqlite")
 
@@ -249,7 +247,6 @@ func TestDBCopyFaithful_APostgresSourceWithNoTables(t *testing.T) {
 
 // --decimals reaches the copy: with text a DECIMAL_TEXT whose values numeric would spell differently stays text.
 func TestDBCopyFaithful_DecimalsFlagReachesTheCopy(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	source := sqliteFixture(t, `CREATE TABLE n (id INTEGER PRIMARY KEY, v DECIMAL_TEXT(10,2))`, `INSERT INTO n VALUES (1, '.5'), (2, '1.50')`)
 	warnings := func(extra ...string) string {
 		stdout, _, err := runCopy(t, append([]string{"db", "copy", "--from", source, "--to", "postgres://u:pw@127.0.0.1:1/db", "--dry-run", "--json"}, extra...)...)

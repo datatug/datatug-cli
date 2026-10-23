@@ -98,7 +98,7 @@ func TestWatchCombinedDaemonRegistersThroughHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 	endpoint := "http://" + listener.Addr().String()
 	cfg.Listen = listener.Addr().String()
 	cfg.Runner.CoordinatorEndpoint = endpoint
@@ -126,7 +126,7 @@ func TestWatchCombinedDaemonRegistersThroughHTTP(t *testing.T) {
 		if e == nil {
 			var status watch.Status
 			_ = json.NewDecoder(response.Body).Decode(&status)
-			response.Body.Close()
+			_ = response.Body.Close()
 			if len(status.Runners) == 1 && status.Runners[0].Project == id {
 				registered = true
 				break

@@ -198,7 +198,7 @@ func TestWatchOwnBotLeaseAndProviderFailures(t *testing.T) {
 						return
 					}
 					if scenario == "nil-lease" {
-						fmt.Fprint(w, `{"lease":null}`)
+						_, _ = fmt.Fprint(w, `{"lease":null}`)
 						return
 					}
 					fence := int64(1)
@@ -225,7 +225,7 @@ func TestWatchOwnBotLeaseAndProviderFailures(t *testing.T) {
 						_ = json.NewEncoder(w).Encode(map[string]any{"delivery": watch.Delivery{Notification: watch.Notification{ID: "d"}, TelegramBotID: bot, TelegramChatID: chat, Fence: 2}, "body": body})
 						return
 					}
-					fmt.Fprint(w, `{"delivery":null}`)
+					_, _ = fmt.Fprint(w, `{"delivery":null}`)
 				case "complete":
 					var b map[string]any
 					_ = json.NewDecoder(r.Body).Decode(&b)
@@ -236,13 +236,13 @@ func TestWatchOwnBotLeaseAndProviderFailures(t *testing.T) {
 						if scenario != "send-rate" {
 							cancel()
 						}
-						fmt.Fprint(w, `{"ok":true}`)
+						_, _ = fmt.Fprint(w, `{"ok":true}`)
 					}
 				case "defer":
 					if scenario == "poll-rate-defer-error" {
 						w.WriteHeader(503)
 					} else {
-						fmt.Fprint(w, `{"ok":true}`)
+						_, _ = fmt.Fprint(w, `{"ok":true}`)
 					}
 				case "link":
 					w.WriteHeader(503)
@@ -251,7 +251,7 @@ func TestWatchOwnBotLeaseAndProviderFailures(t *testing.T) {
 						w.WriteHeader(503)
 					} else {
 						cancel()
-						fmt.Fprint(w, `{"ok":true}`)
+						_, _ = fmt.Fprint(w, `{"ok":true}`)
 					}
 				default:
 					t.Error("unexpected coordinator path", path)
@@ -263,7 +263,7 @@ func TestWatchOwnBotLeaseAndProviderFailures(t *testing.T) {
 				switch scenario {
 				case "poll-rate", "poll-rate-defer-error":
 					w.WriteHeader(429)
-					fmt.Fprint(w, `{"ok":false,"error_code":429,"parameters":{"retry_after":60}}`)
+					_, _ = fmt.Fprint(w, `{"ok":false,"error_code":429,"parameters":{"retry_after":60}}`)
 				case "poll-error":
 					w.WriteHeader(503)
 				case "renew-during-poll":
@@ -276,25 +276,26 @@ func TestWatchOwnBotLeaseAndProviderFailures(t *testing.T) {
 					updates := make([]telegramUpdate, 6)
 					_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": updates})
 				case "negative-update":
-					fmt.Fprint(w, `{"ok":true,"result":[{"update_id":-1}]}`)
+					_, _ = fmt.Fprint(w, `{"ok":true,"result":[{"update_id":-1}]}`)
 				case "overflow-update":
-					fmt.Fprint(w, `{"ok":true,"result":[{"update_id":9223372036854775807}]}`)
+					_, _ = fmt.Fprint(w, `{"ok":true,"result":[{"update_id":9223372036854775807}]}`)
 				case "old-update":
-					fmt.Fprint(w, `{"ok":true,"result":[{"update_id":1},{"update_id":5}]}`)
+					_, _ = fmt.Fprint(w, `{"ok":true,"result":[{"update_id":1},{"update_id":5}]}`)
 				case "link-error":
 					nonce := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
-					fmt.Fprintf(w, `{"ok":true,"result":[{"update_id":5,"message":{"text":"/start watch-%s","from":{"id":42},"chat":{"id":42,"type":"private"}}}]}`, nonce)
+					_, _ = fmt.Fprintf(w, `{"ok":true,"result":[{"update_id":5,"message":{"text":"/start watch-%s","from":{"id":42},"chat":{"id":42,"type":"private"}}}]}`, nonce)
 				default:
-					fmt.Fprint(w, `{"ok":true,"result":[{"update_id":5}]}`)
+					_, _ = fmt.Fprint(w, `{"ok":true,"result":[{"update_id":5}]}`)
 				}
 			}, func(w http.ResponseWriter, r *http.Request) {
-				if scenario == "send-rate" {
+				switch scenario {
+				case "send-rate":
 					w.WriteHeader(429)
-					fmt.Fprint(w, `{"ok":false,"error_code":429,"parameters":{"retry_after":60}}`)
-				} else if scenario == "send-failure" {
+					_, _ = fmt.Fprint(w, `{"ok":false,"error_code":429,"parameters":{"retry_after":60}}`)
+				case "send-failure":
 					w.WriteHeader(503)
-				} else {
-					fmt.Fprint(w, `{"ok":true,"result":{}}`)
+				default:
+					_, _ = fmt.Fprint(w, `{"ok":true,"result":{}}`)
 				}
 			})
 			bot := &telegramBot{token: "123:private", botID: "123", base: provider.URL, http: provider.Client()}
@@ -332,9 +333,9 @@ func TestWatchOwnBotRunnerLifecycleAndRetry(t *testing.T) {
 					if !bytes.Contains(raw, []byte("PrivateWatchBot")) {
 						t.Error("verified bot absent")
 					}
-					fmt.Fprint(w, `{"ok":true}`)
+					_, _ = fmt.Fprint(w, `{"ok":true}`)
 				case strings.HasSuffix(r.URL.Path, "runner/claim"):
-					fmt.Fprint(w, `{"claim":null}`)
+					_, _ = fmt.Fprint(w, `{"claim":null}`)
 				case strings.HasSuffix(r.URL.Path, "telegram/poll"):
 					calls.Add(1)
 					switch scenario {
@@ -343,9 +344,9 @@ func TestWatchOwnBotRunnerLifecycleAndRetry(t *testing.T) {
 					case "worker-retry":
 						w.WriteHeader(503)
 					case "expired-lease":
-						fmt.Fprint(w, `{"lease":{"botId":"123","fence":1}}`)
+						_, _ = fmt.Fprint(w, `{"lease":{"botId":"123","fence":1}}`)
 					default:
-						fmt.Fprint(w, `{"lease":null}`)
+						_, _ = fmt.Fprint(w, `{"lease":null}`)
 					}
 				case strings.HasSuffix(r.URL.Path, "telegram/renew"):
 					w.WriteHeader(409)
@@ -378,7 +379,7 @@ func TestWatchOwnBotCancellationAndWebhookInspectionFailure(t *testing.T) {
 	cfg := ownBotConfig(t)
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "getMe") {
-			fmt.Fprint(w, `{"ok":true,"result":{"id":123,"is_bot":true,"username":"PrivateWatchBot"}}`)
+			_, _ = fmt.Fprint(w, `{"ok":true,"result":{"id":123,"is_bot":true,"username":"PrivateWatchBot"}}`)
 		} else {
 			w.WriteHeader(503)
 		}
@@ -398,7 +399,7 @@ func TestWatchOwnBotCancellationAndWebhookInspectionFailure(t *testing.T) {
 	coordinator := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
 		cancel()
-		fmt.Fprint(w, `{"lease":null}`)
+		_, _ = fmt.Fprint(w, `{"lease":null}`)
 	}))
 	defer coordinator.Close()
 	if e := bot.run(ctx, Client{Endpoint: coordinator.URL, Token: strings.Repeat("runner", 8)}); !errors.Is(e, context.Canceled) {

@@ -76,7 +76,8 @@ func LoadConfig(path string) (Config, error) {
 	if err != nil {
 		return cfg, errors.New("watch daemon configuration is unavailable")
 	}
-	defer f.Close()
+	// This read-only descriptor has no buffered state to commit.
+	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil || !info.Mode().IsRegular() || info.Size() > 1024*1024 {
 		return cfg, errors.New("watch daemon configuration must be a bounded regular JSON file")

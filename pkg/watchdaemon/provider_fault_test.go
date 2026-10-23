@@ -129,7 +129,7 @@ func smtpFaultReceiver(t *testing.T, phase string) string {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
 		if phase == "greeting" {
 			_, _ = io.WriteString(conn, "500 rejected\r\n")

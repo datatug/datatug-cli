@@ -88,7 +88,8 @@ func (s *FileEmailSink) Send(ctx context.Context, message EmailMessage) error {
 	if err != nil {
 		return errors.New("watch email sink is unavailable")
 	}
-	defer os.Remove(f.Name())
+	// An orphaned pending file is ignored; cleanup cannot revoke publication.
+	defer func() { _ = os.Remove(f.Name()) }()
 	if err = json.NewEncoder(f).Encode(message); err == nil {
 		err = f.Sync()
 	}
@@ -108,7 +109,8 @@ func (s *FileEmailSink) Send(ctx context.Context, message EmailMessage) error {
 	if err != nil {
 		return errors.New("watch email sink directory unavailable")
 	}
-	defer dir.Close()
+	// Directory Sync below determines durability, not descriptor cleanup.
+	defer func() { _ = dir.Close() }()
 	return dir.Sync()
 }
 
@@ -127,7 +129,7 @@ func validateEmail(m EmailMessage) error {
 		return errors.New("invalid Watch email metadata")
 	}
 	for _, r := range m.ID {
-		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-') {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '.' && r != '_' && r != '-' {
 			return errors.New("invalid Watch email identity")
 		}
 	}
@@ -155,7 +157,8 @@ func (s SMTPSender) Send(ctx context.Context, m EmailMessage) error {
 	if err != nil {
 		return errors.New("watch SMTP connection failed")
 	}
-	defer conn.Close()
+	// Cleanup never turns a known DATA acceptance into a duplicate retry.
+	defer func() { _ = conn.Close() }()
 	deadline := time.Now().Add(30 * time.Second)
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
@@ -165,7 +168,7 @@ func (s SMTPSender) Send(ctx context.Context, m EmailMessage) error {
 	if err != nil {
 		return errors.New("watch SMTP greeting failed")
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	if ok, _ := client.Extension("STARTTLS"); ok {
 		if client.StartTLS(&tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}) != nil {
 			return errors.New("watch SMTP TLS failed")

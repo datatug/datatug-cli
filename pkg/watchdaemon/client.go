@@ -65,7 +65,8 @@ func (c Client) call(ctx context.Context, path string, input, output any) error 
 	if err != nil {
 		return errors.New("watch coordinator is unavailable")
 	}
-	defer resp.Body.Close()
+	// Closing a consumed response does not change its acknowledged result.
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 {
 		switch resp.StatusCode {
 		case 401, 403:

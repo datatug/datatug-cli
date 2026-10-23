@@ -183,7 +183,8 @@ func watchDaemonAction(cmd *cobra.Command, _ []string) error {
 		if err != nil {
 			return errors.New("watch transactional coordinator storage could not be opened")
 		}
-		defer store.Close()
+		// Transactions are durable before shutdown; close cannot revoke accepted work.
+		defer func() { _ = store.Close() }()
 		service := &watchdaemon.Server{Store: store, Auth: auth, AllowedOrigins: cfg.AllowedOrigins, PublicUIURL: cfg.PublicUIURL, ProjectUIURLs: cfg.ProjectUIURLs, Limits: cfg.Limits}
 		if cfg.Notifications.EmailSink != "" {
 			service.Email = &watchdaemon.FileEmailSink{Path: cfg.Notifications.EmailSink}

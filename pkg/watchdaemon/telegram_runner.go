@@ -109,7 +109,8 @@ func (b *telegramBot) call(ctx context.Context, method string, input, output any
 	if e != nil {
 		return errors.New("watch Telegram provider unavailable")
 	}
-	defer resp.Body.Close()
+	// Provider acknowledgement is independent of response descriptor cleanup.
+	defer func() { _ = resp.Body.Close() }()
 	var envelope struct {
 		OK          bool            `json:"ok"`
 		Result      json.RawMessage `json:"result"`

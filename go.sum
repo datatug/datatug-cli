@@ -124,8 +124,6 @@ github.com/dal-go/dalgo2oracle v0.0.1 h1:cc8j+jMCFAsmNNktGDc96S9P952cPWisFRWnLlI
 github.com/dal-go/dalgo2oracle v0.0.1/go.mod h1:hzQAEs9V6OqUKHElzC08UFPubZkXkmjfwjJGrncTQk0=
 github.com/dal-go/dalgo2postgres v0.9.4 h1:WMki+YsCbzwnl4mCU70Og3DzQWJfqzlCPZVf2beypVI=
 github.com/dal-go/dalgo2postgres v0.9.4/go.mod h1:Z9tl9l/M/A90UrKKuEWnCzOoP3U66oV7dQkUJ4A6A+Q=
-github.com/dal-go/dalgo2sql v0.29.7 h1:IPTLI3TP/WY9ldusfgIGNP7Zcmwle1Y9dDaA/7+e6A8=
-github.com/dal-go/dalgo2sql v0.29.7/go.mod h1:RU60NYTU0ao5iAuWcoBfbGabr0UAR6N9kSS7XCFVPEA=
 github.com/dal-go/dalgo2sql v0.30.0 h1:52q+LDO4IcehyOBYqTBLYKPL5S6oVWQbiLbYlJBd8R0=
 github.com/dal-go/dalgo2sql v0.30.0/go.mod h1:RU60NYTU0ao5iAuWcoBfbGabr0UAR6N9kSS7XCFVPEA=
 github.com/dal-go/dalgo2sqlite v0.4.5 h1:NRDK/aWLjI+XCDPfs/fa7KOg0c9a3zZDqws0m1oPsN8=

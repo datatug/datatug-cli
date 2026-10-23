@@ -28,6 +28,9 @@ require (
 	github.com/dal-go/dalgo v0.95.2
 	github.com/dal-go/dalgo2bigquery v0.3.2-0.20261023114546-7dd4b3e0708b
 	github.com/dal-go/dalgo2http v0.4.0
+	github.com/dal-go/dalgo2mssql v0.0.1
+	github.com/dal-go/dalgo2mysql v0.2.2
+	github.com/dal-go/dalgo2oracle v0.0.1
 	github.com/dal-go/dalgo2postgres v0.9.4
 	github.com/dal-go/dalgo2sql v0.30.0
 	github.com/dal-go/dalgo2sqlite v0.4.5
@@ -110,9 +113,6 @@ require (
 	github.com/crediterra/money v0.3.8 // indirect
 	github.com/cyphar/filepath-securejoin v0.7.0 // indirect
 	github.com/dal-go/dalgo2firestore v0.10.3 // indirect
-	github.com/dal-go/dalgo2mssql v0.0.1 // indirect
-	github.com/dal-go/dalgo2mysql v0.2.2 // indirect
-	github.com/dal-go/dalgo2oracle v0.0.1 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/dlclark/regexp2/v2 v2.6.0 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect

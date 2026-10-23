@@ -53,7 +53,6 @@ See [TEST-COVERAGE-PATTERNS.md](TEST-COVERAGE-PATTERNS.md) for how the tests are
 | `github.com/datatug/datatug-cli/pkg/projectschema` | n/a (no statements) |
 | `github.com/datatug/datatug-cli/pkg/querywrite` | 100.0% |
 | `github.com/datatug/datatug-cli/pkg/schemers/firestoreschema` | 100.0% |
-| `github.com/datatug/datatug-cli/pkg/schemers/mssqlschema` | 100.0% |
 | `github.com/datatug/datatug-cli/pkg/schemers/sqlinfoschema` | 100.0% |
 | `github.com/datatug/datatug-cli/pkg/schemers/sqliteschema` | 100.0% |
 | `github.com/datatug/datatug-cli/pkg/secureread` | 100.0% |

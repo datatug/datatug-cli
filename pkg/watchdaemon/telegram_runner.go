@@ -269,7 +269,7 @@ func (b *telegramBot) runLease(ctx context.Context, c Client, lease watch.Telegr
 			}
 		}
 		var updates []telegramUpdate
-		if e = b.call(leaseCtx, "getUpdates", map[string]any{"offset": lease.Offset, "limit": 25, "timeout": 5, "allowed_updates": []string{"message"}}, &updates); e != nil {
+		if e = b.call(leaseCtx, "getUpdates", map[string]any{"offset": lease.Offset, "limit": 5, "timeout": 5, "allowed_updates": []string{"message"}}, &updates); e != nil {
 			var rate *telegramRateLimitError
 			if errors.As(e, &rate) {
 				if deferError := c.call(leaseCtx, "runner/telegram/defer", map[string]any{"fence": lease.Fence, "retryAfterSeconds": rate.Seconds}, nil); deferError != nil {
@@ -278,7 +278,7 @@ func (b *telegramBot) runLease(ctx context.Context, c Client, lease watch.Telegr
 			}
 			return e
 		}
-		if len(updates) > 25 {
+		if len(updates) > 5 {
 			return errors.New("Watch Telegram update batch invalid")
 		}
 		next := lease.Offset

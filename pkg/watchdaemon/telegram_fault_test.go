@@ -273,7 +273,7 @@ func TestWatchOwnBotLeaseAndProviderFailures(t *testing.T) {
 					case <-time.After(300 * time.Millisecond):
 					}
 				case "oversized-batch":
-					updates := make([]telegramUpdate, 26)
+					updates := make([]telegramUpdate, 6)
 					_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": updates})
 				case "negative-update":
 					fmt.Fprint(w, `{"ok":true,"result":[{"update_id":-1}]}`)

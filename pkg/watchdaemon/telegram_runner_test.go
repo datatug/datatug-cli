@@ -181,11 +181,20 @@ func TestWatchOwnBotScopedRunnerLinksAndDelivers(t *testing.T) {
 			Limit, Timeout int
 		}
 		_ = json.NewDecoder(r.Body).Decode(&q)
-		if q.Limit != 25 || q.Timeout != 5 {
+		if q.Limit != 5 || q.Timeout != 5 {
 			t.Error("unbounded polling")
 		}
-		if polled.Add(1) == 1 {
-			fmt.Fprintf(w, `{"ok":true,"result":[{"update_id":10,"message":{"text":"ignored"}},{"update_id":11,"message":{"text":"/start %s","from":{"id":42},"chat":{"id":42,"type":"private"}}}]}`, payload)
+		poll := polled.Add(1)
+		if poll == 1 {
+			// A real Unicode backlog must be consumed instead of repeating a
+			// response larger than the bounded provider decoder can accept.
+			batch := make([]map[string]any, 5)
+			for i := range batch {
+				batch[i] = map[string]any{"update_id": 6 + i, "message": map[string]string{"text": strings.Repeat("🚢", 4096)}}
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": batch})
+		} else if poll == 2 {
+			fmt.Fprintf(w, `{"ok":true,"result":[{"update_id":11,"message":{"text":"/start %s","from":{"id":42},"chat":{"id":42,"type":"private"}}}]}`, payload)
 		} else {
 			select {
 			case <-r.Context().Done():

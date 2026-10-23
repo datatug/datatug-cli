@@ -188,7 +188,7 @@ belongs to one scope. Multiple authorized runners can cooperate, but only the
 current fenced provider-poll lease owner calls `getUpdates` and sends deliveries.
 Only processed updates advance the durable offset; renewal returns the current
 offset, resetting it after seven days without a processed update to accommodate
-Telegram's update-ID reset. Polls request at most 25 updates and 5 seconds; all
+Telegram's update-ID reset. Polls request at most 5 updates and 5 seconds; all
 provider calls are bounded and canceled when the lease or runner shuts down.
 
 The Coordinator owns durable Telegram quotas, subscriptions, outbox retries and

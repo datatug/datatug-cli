@@ -61,11 +61,11 @@ func (l Limits) Resolve() (Limits, error) {
 			*v.p = v.fallback
 		}
 		if *v.p < 1 || *v.p > v.max {
-			return Limits{}, errors.New("Watch deployment limits are outside supported bounds")
+			return Limits{}, errors.New("watch deployment limits are outside supported bounds")
 		}
 	}
 	if l.MinIntervalSeconds < 5 {
-		return Limits{}, errors.New("Watch minimum interval must be at least five seconds")
+		return Limits{}, errors.New("watch minimum interval must be at least five seconds")
 	}
 	return l, nil
 }
@@ -74,21 +74,21 @@ func LoadConfig(path string) (Config, error) {
 	var cfg Config
 	f, err := os.Open(path)
 	if err != nil {
-		return cfg, errors.New("Watch daemon configuration is unavailable")
+		return cfg, errors.New("watch daemon configuration is unavailable")
 	}
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil || !info.Mode().IsRegular() || info.Size() > 1024*1024 {
-		return cfg, errors.New("Watch daemon configuration must be a bounded regular JSON file")
+		return cfg, errors.New("watch daemon configuration must be a bounded regular JSON file")
 	}
 	decoder := json.NewDecoder(io.LimitReader(f, 1024*1024))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&cfg) != nil {
-		return cfg, errors.New("Watch daemon configuration is invalid")
+		return cfg, errors.New("watch daemon configuration is invalid")
 	}
 	var extra any
 	if decoder.Decode(&extra) != io.EOF {
-		return cfg, errors.New("Watch daemon configuration is invalid")
+		return cfg, errors.New("watch daemon configuration is invalid")
 	}
 	return cfg, nil
 }

@@ -61,7 +61,7 @@ func NewAuthenticator(credentials []Credential) (*Authenticator, error) {
 			return nil, errors.New("invalid Watch verified phone")
 		}
 		if c.ID == "" || c.Namespace == "" || c.Project == "" || c.Environment == "" || (c.Kind != "user" && c.Kind != "runner") || c.TokenEnv == "" {
-			return nil, errors.New("Watch credential requires identity, kind, scope and tokenEnv")
+			return nil, errors.New("watch credential requires identity, kind, scope and tokenEnv")
 		}
 		if c.TelegramBotID != "" {
 			if c.Kind != "runner" || !validChatID(c.TelegramBotID) {
@@ -69,10 +69,10 @@ func NewAuthenticator(credentials []Credential) (*Authenticator, error) {
 			}
 			scope := strings.Join([]string{c.Namespace, c.Project, c.Environment}, "\x00")
 			if previous, ok := botScopes[c.TelegramBotID]; ok && previous != scope {
-				return nil, errors.New("Watch Telegram bot belongs to another scope")
+				return nil, errors.New("watch Telegram bot belongs to another scope")
 			}
 			if previous, ok := scopeBots[scope]; ok && previous != c.TelegramBotID {
-				return nil, errors.New("Watch scope has conflicting Telegram bot grants")
+				return nil, errors.New("watch scope has conflicting Telegram bot grants")
 			}
 			botScopes[c.TelegramBotID] = scope
 			scopeBots[scope] = c.TelegramBotID
@@ -83,7 +83,7 @@ func NewAuthenticator(credentials []Credential) (*Authenticator, error) {
 		}
 		identities[key] = true
 		if c.Kind == "runner" && (c.Tier == "paid" || c.SharedEditor || c.Email != "" || c.Phone != "") {
-			return nil, errors.New("Watch runner credential cannot grant user account authority")
+			return nil, errors.New("watch runner credential cannot grant user account authority")
 		}
 		if c.Kind == "user" {
 			if tier, ok := accountTiers[c.AccountID]; ok && tier != c.Tier {
@@ -93,19 +93,19 @@ func NewAuthenticator(credentials []Credential) (*Authenticator, error) {
 		}
 		token := os.Getenv(c.TokenEnv)
 		if len(token) < 32 || strings.TrimSpace(token) != token {
-			return nil, errors.New("Watch credential environment variable must contain at least 32 characters")
+			return nil, errors.New("watch credential environment variable must contain at least 32 characters")
 		}
 		digest := sha256.Sum256([]byte(token))
 		for _, previous := range a.entries {
 			if subtle.ConstantTimeCompare(previous.digest[:], digest[:]) == 1 {
-				return nil, errors.New("Watch credentials must use distinct tokens")
+				return nil, errors.New("watch credentials must use distinct tokens")
 			}
 		}
 		c.Capabilities = append([]string(nil), c.Capabilities...)
 		a.entries = append(a.entries, credentialEntry{digest, c})
 	}
 	if len(a.entries) == 0 {
-		return nil, errors.New("Watch authentication has no configured identities")
+		return nil, errors.New("watch authentication has no configured identities")
 	}
 	return a, nil
 }

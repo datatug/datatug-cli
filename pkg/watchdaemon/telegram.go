@@ -1,18 +1,13 @@
 package watchdaemon
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -22,150 +17,64 @@ import (
 
 var telegramRandomRead = rand.Read
 
-type TelegramMessage struct{ ID, ChatID, Body, DeliveryCapability string }
-type TelegramSender interface {
-	Send(context.Context, TelegramMessage) error
-}
-type FileTelegramSink struct{ Sink *FileEmailSink }
-
-func (s FileTelegramSink) Send(ctx context.Context, m TelegramMessage) error {
-	if !validChatID(m.ChatID) {
-		return errors.New("invalid Watch Telegram recipient")
-	}
-	return s.Sink.Send(ctx, EmailMessage{ID: m.ID, To: m.ChatID + "@telegram.test", Subject: "DataTug Watch Telegram", Body: m.Body})
-}
 func validChatID(id string) bool {
-	n, err := strconv.ParseInt(id, 10, 64)
-	return err == nil && n > 0 && strconv.FormatInt(n, 10) == id
+	n, e := strconv.ParseInt(id, 10, 64)
+	return e == nil && n > 0 && strconv.FormatInt(n, 10) == id
 }
-
-// BotTelegramSender sends through the existing DataTugBot deployment identity.
-// This provider never registers a webhook or starts a competing polling owner.
-type BotTelegramSender struct {
-	TokenEnv, APIBaseURL string
-	HTTP                 *http.Client
-}
-
-func (s BotTelegramSender) Send(ctx context.Context, m TelegramMessage) error {
-	if !validChatID(m.ChatID) || len(m.Body) > 3500 {
-		return errors.New("invalid Watch Telegram message")
-	}
-	token := os.Getenv(s.TokenEnv)
-	if token == "" || strings.ContainsAny(token, "/\r\n? #") {
-		return errors.New("Watch Telegram token unavailable")
-	}
-	base := s.APIBaseURL
-	if base == "" {
-		base = "https://api.telegram.org"
-	}
-	if ValidateEndpoint(base) != nil {
-		return errors.New("Watch Telegram provider URL invalid")
-	}
-	body, _ := json.Marshal(map[string]any{"chat_id": m.ChatID, "text": m.Body, "disable_web_page_preview": true})
-	req, err := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(base, "/")+"/bot"+token+"/sendMessage", bytes.NewReader(body))
-	if err != nil {
-		return errors.New("Watch Telegram request invalid")
-	}
-	req.Header.Set("Content-Type", "application/json")
-	client := s.HTTP
-	if client == nil {
-		client = &http.Client{Timeout: 20 * time.Second}
-	}
-	owned := *client
-	owned.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	response, err := owned.Do(req)
-	if err != nil {
-		return errors.New("Watch Telegram delivery failed")
-	}
-	defer response.Body.Close()
-	var result struct {
-		OK bool `json:"ok"`
-	}
-	if response.StatusCode != 200 || json.NewDecoder(io.LimitReader(response.Body, 64*1024)).Decode(&result) != nil || !result.OK {
-		return errors.New("Watch Telegram delivery failed")
-	}
-	return nil
-}
-
-type telegramLinkStore interface {
-	BeginTelegramLink(context.Context, watch.Actor, string, time.Time) error
-	CompleteTelegramLink(context.Context, string, string) error
-	TelegramStatus(context.Context, watch.Actor) (bool, error)
-	DisconnectTelegram(context.Context, watch.Actor) error
-}
-
-func (s *Server) telegramConfigured() bool {
-	if s.Telegram == nil || len(s.TelegramCallbackSecret) < 32 || len(s.TelegramRouteID) < 1 || len(s.TelegramRouteID) > 8 {
+func validBotUsername(name string) bool {
+	if len(name) < 5 || len(name) > 32 || !strings.HasSuffix(strings.ToLower(name), "bot") {
 		return false
 	}
-	for _, r := range s.TelegramRouteID {
-		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+	for _, c := range name {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_') {
 			return false
 		}
 	}
 	return true
 }
 
-type telegramCapabilityStore interface {
-	CompleteTelegramLinkWithCapability(context.Context, string, string, string) error
+type telegramLinkStore interface {
+	BeginTelegramLink(context.Context, watch.Actor, string, time.Time) error
+	TelegramProviderStatus(context.Context, watch.Actor) (watch.TelegramProviderStatus, error)
+	DisconnectTelegram(context.Context, watch.Actor) error
+}
+type telegramRunnerStore interface {
+	ClaimTelegramPoll(context.Context, watch.RunnerIdentity) (*watch.TelegramPollLease, error)
+	RenewTelegramPoll(context.Context, watch.RunnerIdentity, int64) (*watch.TelegramPollLease, error)
+	AdvanceTelegramPoll(context.Context, watch.RunnerIdentity, int64, int64) error
+	DeferTelegramPoll(context.Context, watch.RunnerIdentity, int64, int) error
+	CompleteTelegramLinkByRunner(context.Context, watch.RunnerIdentity, int64, string, string) error
+	ClaimTelegramNotification(context.Context, watch.RunnerIdentity, int64) (*watch.Delivery, error)
+	FinishTelegramNotification(context.Context, watch.RunnerIdentity, int64, string, int64, string, ...int) error
 }
 
-// GatewayTelegramSender uses an operator-allowlisted existing bot host. The
-// opaque host-minted capability binds delivery to the chat proven during link.
-type GatewayTelegramSender struct {
-	Endpoint, TokenEnv string
-	HTTP               *http.Client
+func (s *Server) telegramProvider(ctx context.Context, a watch.Actor) (watch.TelegramProviderStatus, error) {
+	if st, ok := s.Store.(telegramLinkStore); ok {
+		return st.TelegramProviderStatus(ctx, a)
+	}
+	return watch.TelegramProviderStatus{}, nil
 }
-
-func (s GatewayTelegramSender) Send(ctx context.Context, m TelegramMessage) error {
-	if ValidateEndpoint(s.Endpoint) != nil || !validChatID(m.ChatID) || m.DeliveryCapability == "" || len(m.DeliveryCapability) > 4096 || len(m.Body) > 3500 {
-		return errors.New("Watch Telegram gateway configuration unavailable")
-	}
-	token := os.Getenv(s.TokenEnv)
-	if len(token) < 32 {
-		return errors.New("Watch Telegram gateway credential unavailable")
-	}
-	body, _ := json.Marshal(map[string]string{"deliveryId": m.ID, "chatId": m.ChatID, "body": m.Body, "deliveryCapability": m.DeliveryCapability})
-	req, err := http.NewRequestWithContext(ctx, "POST", s.Endpoint, bytes.NewReader(body))
-	if err != nil {
-		return errors.New("Watch Telegram gateway request invalid")
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-	client := s.HTTP
-	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Second}
-	}
-	owned := *client
-	owned.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	response, err := owned.Do(req)
-	if err != nil {
-		return errors.New("Watch Telegram gateway delivery failed")
-	}
-	defer response.Body.Close()
-	if response.StatusCode != 200 {
-		return errors.New("Watch Telegram gateway delivery failed")
-	}
-	return nil
+func (s *Server) telegramAvailable(ctx context.Context, a watch.Actor) bool {
+	p, e := s.telegramProvider(ctx, a)
+	return e == nil && p.BotID != "" && validBotUsername(p.BotUsername)
 }
-
 func (s *Server) telegramUser(w http.ResponseWriter, r *http.Request, path string, c Credential) bool {
 	if !strings.HasPrefix(path, "telegram/") {
 		return false
 	}
-	store, ok := s.Store.(telegramLinkStore)
+	st, ok := s.Store.(telegramLinkStore)
 	if !ok {
-		fail(w, errors.New("link store unavailable"))
+		fail(w, errors.New("Telegram link store unavailable"))
 		return true
 	}
 	a := credentialActor(c)
 	switch {
 	case path == "telegram/status" && r.Method == "GET":
-		connected, err := store.TelegramStatus(r.Context(), a)
-		if err != nil {
-			fail(w, err)
+		p, e := st.TelegramProviderStatus(r.Context(), a)
+		if e != nil {
+			fail(w, e)
 		} else {
-			reply(w, 200, map[string]any{"connected": connected, "botUsername": "DataTugBot"})
+			reply(w, 200, p)
 		}
 	case path == "telegram/connect" && r.Method == "POST":
 		var empty struct{}
@@ -173,31 +82,34 @@ func (s *Server) telegramUser(w http.ResponseWriter, r *http.Request, path strin
 			fail(w, watch.ErrInvalid)
 			return true
 		}
-		if !s.telegramConfigured() {
-			fail(w, errors.New("Telegram link bridge unavailable"))
+		p, e := st.TelegramProviderStatus(r.Context(), a)
+		if e != nil {
+			fail(w, e)
+			return true
+		}
+		if p.BotID == "" || !validBotUsername(p.BotUsername) {
+			fail(w, errors.New("Telegram runner unavailable"))
 			return true
 		}
 		var raw [32]byte
-		if _, err := telegramRandomRead(raw[:]); err != nil {
-			fail(w, err)
+		if _, e = telegramRandomRead(raw[:]); e != nil {
+			fail(w, e)
 			return true
 		}
 		nonce := base64.RawURLEncoding.EncodeToString(raw[:])
 		hash := sha256.Sum256([]byte(nonce))
 		expires := time.Now().UTC().Add(10 * time.Minute)
-		if err := store.BeginTelegramLink(r.Context(), a, hex.EncodeToString(hash[:]), expires); err != nil {
-			fail(w, err)
+		if e = st.BeginTelegramLink(r.Context(), a, hex.EncodeToString(hash[:]), expires); e != nil {
+			fail(w, e)
 		} else {
-			reply(w, 200, map[string]any{"url": "https://t.me/DataTugBot?start=watch-" + s.TelegramRouteID + "_" + nonce, "expiresAt": expires})
+			reply(w, 200, map[string]any{"url": "https://t.me/" + p.BotUsername + "?start=watch-" + nonce, "expiresAt": expires})
 		}
 	case path == "telegram/disconnect" && r.Method == "POST":
 		var empty struct{}
 		if decode(w, r, &empty) != nil {
 			fail(w, watch.ErrInvalid)
-			return true
-		}
-		if err := store.DisconnectTelegram(r.Context(), a); err != nil {
-			fail(w, err)
+		} else if e := st.DisconnectTelegram(r.Context(), a); e != nil {
+			fail(w, e)
 		} else {
 			reply(w, 200, map[string]bool{"ok": true})
 		}
@@ -206,86 +118,82 @@ func (s *Server) telegramUser(w http.ResponseWriter, r *http.Request, path strin
 	}
 	return true
 }
-
-// telegramUpdate accepts only an operator-configured existing bot owner's
-// authenticated forwarding request. A private chat proves its own recipient;
-// users never submit chat IDs through the browser API.
-func (s *Server) telegramUpdate(w http.ResponseWriter, r *http.Request) {
-	provided := r.Header.Get("X-Telegram-Bot-Api-Secret-Token")
-	secret := s.TelegramCallbackSecret
-	if r.Method != "POST" || len(secret) < 32 || subtle.ConstantTimeCompare([]byte(provided), []byte(secret)) != 1 {
-		reply(w, 401, map[string]any{"error": apiError{"UNAUTHENTICATED", "Telegram bridge authentication required"}})
-		return
+func (s *Server) telegramRunner(w http.ResponseWriter, r *http.Request, path string, id watch.RunnerIdentity) bool {
+	if !strings.HasPrefix(path, "runner/telegram/") {
+		return false
 	}
-	store, ok := s.Store.(telegramLinkStore)
+	if id.TelegramBotID == "" {
+		fail(w, watch.ErrForbidden)
+		return true
+	}
+	st, ok := s.Store.(telegramRunnerStore)
 	if !ok {
-		fail(w, errors.New("link store unavailable"))
-		return
+		fail(w, errors.New("Telegram runner store unavailable"))
+		return true
 	}
-	var update struct {
-		DeliveryCapability string `json:"deliveryCapability"`
-		Message            *struct {
-			Text string `json:"text"`
-			From *struct {
-				ID  int64 `json:"id"`
-				Bot bool  `json:"is_bot"`
-			} `json:"from"`
-			Chat struct {
-				ID   int64  `json:"id"`
-				Type string `json:"type"`
-			} `json:"chat"`
-		} `json:"message"`
+	var b struct {
+		Fence             int64  `json:"fence"`
+		Offset            int64  `json:"offset,omitempty"`
+		NonceHash         string `json:"nonceHash,omitempty"`
+		ChatID            string `json:"chatId,omitempty"`
+		DeliveryID        string `json:"deliveryId,omitempty"`
+		DeliveryFence     int64  `json:"deliveryFence,omitempty"`
+		FailureCode       string `json:"failureCode,omitempty"`
+		RetryAfterSeconds int    `json:"retryAfterSeconds,omitempty"`
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
-	decoder := json.NewDecoder(r.Body)
-	if decoder.Decode(&update) != nil {
+	if decode(w, r, &b) != nil {
 		fail(w, watch.ErrInvalid)
-		return
+		return true
 	}
-	var extra any
-	if decoder.Decode(&extra) != io.EOF {
-		fail(w, watch.ErrInvalid)
-		return
-	}
-	message := update.Message
-	if message == nil || message.From == nil || message.From.Bot || message.Chat.Type != "private" || message.Chat.ID <= 0 || message.From.ID != message.Chat.ID {
-		fail(w, watch.ErrInvalid)
-		return
-	}
-	fields := strings.Fields(message.Text)
-	if len(fields) != 2 || (fields[0] != "/start" && fields[0] != "/start@DataTugBot") || !strings.HasPrefix(fields[1], "watch-") {
-		fail(w, watch.ErrInvalid)
-		return
-	}
-	prefix := "watch-" + s.TelegramRouteID + "_"
-	if s.TelegramRouteID == "" || !strings.HasPrefix(fields[1], prefix) {
-		fail(w, watch.ErrInvalid)
-		return
-	}
-	nonce := strings.TrimPrefix(fields[1], prefix)
-	raw, err := base64.RawURLEncoding.DecodeString(nonce)
-	if err != nil || len(raw) != 32 || base64.RawURLEncoding.EncodeToString(raw) != nonce {
-		fail(w, watch.ErrInvalid)
-		return
-	}
-	hash := sha256.Sum256([]byte(nonce))
-	if _, gateway := s.Telegram.(GatewayTelegramSender); gateway && update.DeliveryCapability == "" {
-		fail(w, watch.ErrInvalid)
-		return
-	}
-	if update.DeliveryCapability != "" {
-		capabilityStore, ok := s.Store.(telegramCapabilityStore)
-		if !ok || len(update.DeliveryCapability) > 4096 {
-			fail(w, watch.ErrInvalid)
-			return
+	var result any = map[string]bool{"ok": true}
+	var e error
+	switch path {
+	case "runner/telegram/poll":
+		var lease *watch.TelegramPollLease
+		lease, e = st.ClaimTelegramPoll(r.Context(), id)
+		result = map[string]any{"lease": lease}
+	case "runner/telegram/renew":
+		var lease *watch.TelegramPollLease
+		lease, e = st.RenewTelegramPoll(r.Context(), id, b.Fence)
+		result = map[string]any{"lease": lease}
+	case "runner/telegram/defer":
+		e = st.DeferTelegramPoll(r.Context(), id, b.Fence, b.RetryAfterSeconds)
+	case "runner/telegram/advance":
+		e = st.AdvanceTelegramPoll(r.Context(), id, b.Fence, b.Offset)
+	case "runner/telegram/link":
+		if len(b.NonceHash) != 64 || !validChatID(b.ChatID) {
+			e = watch.ErrInvalid
+		} else {
+			_, e = hex.DecodeString(b.NonceHash)
+			if e == nil {
+				e = st.CompleteTelegramLinkByRunner(r.Context(), id, b.Fence, b.NonceHash, b.ChatID)
+			} else {
+				e = watch.ErrInvalid
+			}
 		}
-		err = capabilityStore.CompleteTelegramLinkWithCapability(r.Context(), hex.EncodeToString(hash[:]), strconv.FormatInt(message.Chat.ID, 10), update.DeliveryCapability)
+	case "runner/telegram/claim":
+		var d *watch.Delivery
+		d, e = st.ClaimTelegramNotification(r.Context(), id, b.Fence)
+		body := ""
+		if d != nil {
+			body = s.notificationText(d.Notification)
+			d.Email = ""
+			d.Phone = ""
+		}
+		result = map[string]any{"delivery": d, "body": body}
+	case "runner/telegram/complete":
+		if b.RetryAfterSeconds != 0 {
+			e = st.FinishTelegramNotification(r.Context(), id, b.Fence, b.DeliveryID, b.DeliveryFence, b.FailureCode, b.RetryAfterSeconds)
+		} else {
+			e = st.FinishTelegramNotification(r.Context(), id, b.Fence, b.DeliveryID, b.DeliveryFence, b.FailureCode)
+		}
+	default:
+		e = watch.ErrNotFound
+	}
+	if e != nil {
+		fail(w, e)
 	} else {
-		err = store.CompleteTelegramLink(r.Context(), hex.EncodeToString(hash[:]), strconv.FormatInt(message.Chat.ID, 10))
+		reply(w, 200, result)
 	}
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	reply(w, 200, map[string]bool{"ok": true})
+	return true
 }

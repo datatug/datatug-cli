@@ -5,11 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -218,7 +216,7 @@ func TestWatchHTTPStaleCompletionInboxAndDurableEmail(t *testing.T) {
 		t.Fatalf("duplicate sink delivery: %d", len(entries))
 	}
 	data, _ := os.ReadFile(filepath.Join(f.server.Email.(*FileEmailSink).Path, entries[0].Name()))
-	if !bytes.Contains(data, []byte("https://datatug.app/store/test/project/northwind/watch/shipping")) || bytes.Contains(data, []byte("Private business title")) {
+	if !bytes.Contains(data, []byte("https://datatug.app/store/test/project/northwind/watch/shipping")) || !bytes.Contains(data, []byte("https://datatug.app/store/test/project/northwind/checks/order-shipped")) || bytes.Contains(data, []byte("Private business title")) {
 		t.Fatalf("unsafe or missing Watch deep link %s", data)
 	}
 	if err = f.store.FinishNotification(ctx, d.ID, d.Fence, ""); err != nil {
@@ -314,69 +312,5 @@ func TestWatchHTTPExactlyOneClaimAndCancellationAfterPause(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("runner failed to cancel after lease revoked")
-	}
-}
-
-func TestWatchTelegramLinkCallbackAndProvider(t *testing.T) {
-	f := protocolFixture(t)
-	f.server.Telegram = &FileTelegramSink{Sink: &FileEmailSink{Path: filepath.Join(t.TempDir(), "telegram")}}
-	f.server.TelegramCallbackSecret = strings.Repeat("bridge-", 8)
-	f.server.TelegramRouteID = "local"
-	code, body := f.request(t, "alice", "POST", "telegram/connect", struct{}{})
-	if code != 200 {
-		t.Fatalf("connect %d %s", code, body)
-	}
-	var link struct {
-		URL string `json:"url"`
-	}
-	_ = json.Unmarshal(body, &link)
-	u, _ := url.Parse(link.URL)
-	payload := u.Query().Get("start")
-	if len(payload) > 64 {
-		t.Fatal("Telegram start payload too long")
-	}
-	update := map[string]any{"message": map[string]any{"text": "/start " + payload, "chat": map[string]any{"id": 12345, "type": "private"}, "from": map[string]any{"id": 12345, "is_bot": false}}}
-	data, _ := json.Marshal(update)
-	callback := func(secret string) int {
-		req, _ := http.NewRequest("POST", f.http.URL+"/v1/watch/telegram/update", bytes.NewReader(data))
-		req.Header.Set("X-Telegram-Bot-Api-Secret-Token", secret)
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		resp.Body.Close()
-		return resp.StatusCode
-	}
-	if callback("wrong") != 401 {
-		t.Fatal("forged bridge accepted")
-	}
-	if callback(f.server.TelegramCallbackSecret) != 200 {
-		t.Fatal("trusted link rejected")
-	}
-	if callback(f.server.TelegramCallbackSecret) == 200 {
-		t.Fatal("nonce replay accepted")
-	}
-	code, body = f.request(t, "alice", "GET", "telegram/status", nil)
-	if code != 200 || !bytes.Contains(body, []byte(`"connected":true`)) {
-		t.Fatalf("link status %d %s", code, body)
-	}
-	code, body = f.request(t, "bob", "GET", "telegram/status", nil)
-	if code != 200 || !bytes.Contains(body, []byte(`"connected":false`)) {
-		t.Fatal("link leaked to other user")
-	}
-	var calls atomic.Int32
-	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		var b map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&b)
-		if b["chat_id"] != "12345" {
-			t.Error("wrong linked chat")
-		}
-		_, _ = fmt.Fprint(w, `{"ok":true,"result":{"message_id":1}}`)
-	}))
-	defer provider.Close()
-	t.Setenv("WATCH_TEST_BOT_TOKEN", "123:fake")
-	if err := (BotTelegramSender{TokenEnv: "WATCH_TEST_BOT_TOKEN", APIBaseURL: provider.URL}).Send(context.Background(), TelegramMessage{ID: "telegram-1", ChatID: "12345", Body: "DataTug Watch update"}); err != nil || calls.Load() != 1 {
-		t.Fatalf("provider %d %v", calls.Load(), err)
 	}
 }

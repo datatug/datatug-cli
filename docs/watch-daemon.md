@@ -22,9 +22,12 @@ availability is `GET /v1/watch/status`.
 | Local Check admission, query revision pinning, durable run audit | CLI `pkg/detective/action.go`, `query_revisions.go`, new `watch.go` guard |
 | Saved TugQL, SQL, HTTP and optional OVDB execution | CLI `pkg/server/endpoints/detective.go`, `exec_run_query.go`, `pkg/secureread`, `pkg/api/resolver.go` |
 | Project manifest loading and durable saves | Core `pkg/datatug/project.go`, `project_file_json.go`, `pkg/storage/filestore/store_loader.go`, `store_project_saver.go` |
-| Coordinator transactions, state and outbox | CLI `pkg/watch`; DALGO SQLite transactions, no OVDB write API |
+| Coordinator transactions, state and outbox | CLI `pkg/watch`; DALGO SQLite transactions; `docs/architecture/watch-coordinator-storage.md` records the transactional gate and adapter decision, no OVDB write API |
 | SMS transport | Shared `sneat-go-core/twiliosms` kernel |
-| Existing hosted DataTugBot owner | Cloud bot host and Sneat bot start-command registry; no second webhook registration or polling owner |
+| Runner-owned Telegram bot | `pkg/watchdaemon/telegram_runner.go`; outbound Bot API, existing webhook rejected, provider lease and offset in DALGO |
+| CLI lifecycle and foreground role dispatch | `apps/datatugapp/commands/cmd_daemon.go`, `cmd_daemon_watch.go` |
+| Typed Context Bag input binding | Core `pkg/detective/evaluate.go` and CLI `pkg/server/endpoints/detective.go`; Watch passes typed saved inputs |
+| UI management and history | Apps project `/watch` and `/watch/:id` routes; existing Check details provide creation entry |
 
 `datatug-go-models` is not the domain authority; current project and Check models
 belong to Core. The hosted backend already has separate authenticated Detective
@@ -81,7 +84,8 @@ deployment is:
      "namespace":"northwind","project":"northwind","environment":"training",
      "sharedEditor":true,"email":"alice@example.test","tokenEnv":"DATATUG_WATCH_ALICE_TOKEN"},
     {"kind":"runner","id":"runner-a","namespace":"northwind",
-     "project":"northwind","environment":"training","tokenEnv":"DATATUG_WATCH_RUNNER_TOKEN"}
+     "project":"northwind","environment":"training","tokenEnv":"DATATUG_WATCH_RUNNER_TOKEN",
+     "telegramBotId":"123456789"}
   ],
   "runner": {
     "tokenEnv":"DATATUG_WATCH_RUNNER_TOKEN",
@@ -89,14 +93,12 @@ deployment is:
     "projectDir":"/absolute/private/northwind-working-copy",
     "environment":"training","principal":"local-watch-owner",
     "evidenceDir":"/absolute/private/watch-evidence",
-    "allowOpaqueSQL":false
+    "allowOpaqueSQL":false,
+    "telegram":{"botID":"123456789","secretEnv":"DATATUG_OWN_BOT_SECRET"}
   },
   "notifications": {
     "emailSink":"/absolute/private/watch-mail",
-    "smsSink":"/absolute/private/watch-sms",
-    "telegramSink":"/absolute/private/watch-telegram",
-    "telegramRouteID":"local",
-    "telegramCallbackSecretEnv":"DATATUG_WATCH_BOT_BRIDGE_SECRET"
+    "smsSink":"/absolute/private/watch-sms"
   },
   "limits": {
     "emailPerDay":50,"emailPerMinute":5,
@@ -153,8 +155,7 @@ For development, each sink is a directory containing complete JSON messages keye
 by a stable delivery ID hash. Publication uses an fsynced temporary file and an
 atomic non-replacing link. Interrupted temporary files do not poison the inbox;
 retries validate an existing message and do not duplicate it. Do not use symlink
-sink directories or message files. Sink recipient addresses for SMS and Telegram
-use `@sms.test` and `@telegram.test` to distinguish test channels.
+sink directories or message files. SMS sink recipient addresses use `@sms.test` to distinguish test messages.
 
 For SMTP configure `notifications.smtp` with `address`, `from`, optional
 `usernameEnv`/`passwordEnv`. TLS is required; explicit
@@ -169,25 +170,42 @@ variables documented by `sneat-go-core/twiliosms`. Tests use a fake transport an
 never spend money. Twilio transport delivery is also at least once when an
 acceptance acknowledgement is lost.
 
-Telegram requires connecting the subscriber's account. `telegram/connect` returns
-a short-lived, one-use `DataTugBot` start link. The existing bot owner forwards only
-a private `/start watch-<routeID>_<nonce>` update to the selected operator-allowlisted Coordinator's
-`/v1/watch/telegram/update`, authenticated with the configured bridge secret.
-`telegramRouteID` is a unique 1–8 character alphanumeric host route identifier;
-the bot forwards only to that route, never broadcasts account proofs to other
-Coordinators. The browser cannot provide a chat ID. No Watch process changes the production
-bot webhook or starts polling.
+Telegram uses the operator's own dedicated bot, configured only on the runner.
+Set `runner.telegram.botID` and `secretEnv`; the latter contains the secret part
+following the colon in the BotFather token. Alternatively `tokenEnv` contains the
+whole token and must match `botID`. Configure exactly one form. The Coordinator's
+runner credential must separately authorize that `telegramBotId`. Neither the
+bot secret nor its token is sent to the Coordinator, browser or project manifest.
+Runners verify `getMe` identity and username, then reject an existing webhook with
+instructions to use a dedicated bot. They never remove or replace a webhook.
+A runner without Telegram configuration can continue ordinary Check evaluation.
 
-Self-hosted production delivery uses `telegramGatewayURL` and
-`telegramGatewayTokenEnv`: an allowlisted existing bot-host gateway verifies the
-opaque chat/route/expiry capability created during account linking. The global
-DataTugBot token is not distributed to runners or self-hosted Coordinators.
-`telegramTokenEnv` is reserved for a deployment already trusted to own that bot
-identity; it is not a self-hosted onboarding requirement. The real bot forwarding
-adapter must be deployed and tested before claiming production DataTugBot linking.
+The subscriber chooses Connect Telegram and opens a short-lived, one-use link to
+the verified bot username. A private `/start watch-<nonce>` proves the matching
+sender and chat; browser requests cannot choose recipients. The nonce and durable
+link bind the authenticated subscriber, project, environment and bot ID. One bot
+belongs to one scope. Multiple authorized runners can cooperate, but only the
+current fenced provider-poll lease owner calls `getUpdates` and sends deliveries.
+Only processed updates advance the durable offset; renewal returns the current
+offset, resetting it after seven days without a processed update to accommodate
+Telegram's update-ID reset. Polls request at most 25 updates and 5 seconds; all
+provider calls are bounded and canceled when the lease or runner shuts down.
+
+The Coordinator owns durable Telegram quotas, subscriptions, outbox retries and
+both poll/delivery fences. Its notification worker never sends Telegram. The
+runner claims scoped deliveries, sends only to the linked bot/chat, and acknowledges
+the exact delivery fence. Explicit blocked/deactivated/chat-not-found failures mark only that recipient's
+Telegram connection as requiring reconnection. Other subscribers and channels
+continue independently. Provider/authentication failures keep links intact;
+validated Telegram429 `retry_after` creates a durable bot-wide cooldown and
+bounded delivery retry without charging the quota again. A crash after provider acceptance and before durable
+acknowledgement can produce at-least-once external Telegram delivery. No global
+DataTugBot, hosted gateway, forwarding callback, inbound runner listener or bot
+secret on the Coordinator is required. Tests use a local fake Bot API and never
+create a bot or message a real account.
 
 Outbound templates contain generic notification text and an operator-configured
-Watch deep link. They exclude titles, parameter values, rows, raw errors and source
+Watch and Check deep links. They exclude titles, parameter values, rows, raw errors and source
 URLs. Provider errors are reduced to safe status codes.
 
 ## API and troubleshooting
@@ -198,7 +216,9 @@ All API calls use `/v1/watch/` and an in-memory Bearer credential. `identity`,
 `lifecycle`, `delete`, `subscription`, `reset`, `retry`, `read` and Telegram
 connect/disconnect. Definition/lifecycle/delete/reset changes carry an operation
 ID and expected version. Runner POSTs are register, claim, heartbeat and complete;
-user credentials cannot enter these routes. Error responses contain stable codes
+user credentials cannot enter these routes. Telegram runners additionally use
+`runner/telegram/poll`, `renew`, `advance`, `defer`, `link`, `claim` and `complete`; fixed
+credential scope and authorized bot ID apply to every call. Error responses contain stable codes
 without storage errors or credentials.
 
 Create a Watch paused, subscribe, then enable it. This ensures an immediately true
@@ -214,12 +234,27 @@ project-owned; subscriber preferences and read state are separate.
 | Source changed | Review the Check and saved query revisions, edit root version if needed, then explicitly reset the baseline |
 | Secured project assets refused | Current local Detective asset admission requires local owner mode; no secured-grant bypass is provided |
 | Email/SMS/Telegram failed | Inspect own `deliveries`; provider/recipient/quota failure is distinct from Check outcome; explicitly retry after fixing the cause |
-| Telegram connect unavailable | Existing bot forwarding bridge and provider must be configured; never re-register the production webhook |
+| Telegram connect unavailable | An authorized bot runner must be online; verify bot ID/secret and use a dedicated bot without an existing webhook |
 
 The supported deployment is one Coordinator per namespace with local SQLite.
 It does not claim HA. Read-only Check execution may occur at least once after a
 crash. DALGO fencing prevents an expired worker from replacing an accepted newer
 result; transactional outbox keys deduplicate logical notification creation.
+
+## Build and integration dependencies
+
+The CLI pins published `datatug-core v0.79.0` (Coordination manifest support,
+release target `d3579d7c6a1d2280f3fd9b3a7a618857fd3070fc`). No local module
+replacement or `datatug-go-models` change is required. Watch adds no general OVDB
+write API. The storage ADR documents why transactional DALGO is required.
+SMTP uses Go's existing TLS-capable SMTP client; SMS reuses Sneat's Twilio kernel.
+The Apps UI uses the existing project navigation and typed Check inputs; its
+Coordinator URL/namespace come from Core's project model. Hosted Firebase identity
+and hosted paid-account billing remain separate adapters, not self-host claims.
+
+```sh
+wb run -- go build -o /absolute/private/datatug ./main.go
+```
 
 ## Verification
 

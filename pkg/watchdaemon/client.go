@@ -89,8 +89,9 @@ func (c Client) call(ctx context.Context, path string, input, output any) error 
 	}
 	return nil
 }
-func (c Client) Register(ctx context.Context) error {
-	return c.call(ctx, "runner/register", struct{}{}, nil)
+func (c Client) Register(ctx context.Context) error { return c.register(ctx, runnerRegistration{}) }
+func (c Client) register(ctx context.Context, registration runnerRegistration) error {
+	return c.call(ctx, "runner/register", registration, nil)
 }
 func (c Client) Claim(ctx context.Context) (*watch.Claim, error) {
 	var out struct {
@@ -119,6 +120,9 @@ func (f ExecutorFunc) Execute(ctx context.Context, c watch.Claim) (watch.Complet
 }
 
 type Runner struct {
+	Telegram                    *TelegramBotConfig
+	telegramAPIBase             string
+	telegramHTTP                *http.Client
 	Client                      Client
 	Executor                    Executor
 	PollInterval, RenewInterval time.Duration
@@ -133,6 +137,28 @@ func (r Runner) Run(ctx context.Context) error {
 	if r.Executor == nil {
 		return errors.New("Watch runner has no Check executor")
 	}
+	var bot *telegramBot
+	registrationBody := runnerRegistration{}
+	if r.Telegram != nil {
+		verifyCtx, verifyCancel := context.WithTimeout(ctx, 30*time.Second)
+		var err error
+		bot, err = newTelegramBot(verifyCtx, *r.Telegram, r.telegramAPIBase, r.telegramHTTP)
+		verifyCancel()
+		if err != nil {
+			return err
+		}
+		registrationBody = runnerRegistration{TelegramBotID: bot.botID, TelegramBotUsername: bot.username}
+	}
+	workerCtx, workerCancel := context.WithCancel(ctx)
+	defer workerCancel()
+	botDone := make(chan error, 1)
+	botStarted := false
+	defer func() {
+		workerCancel()
+		if botStarted {
+			<-botDone
+		}
+	}()
 	poll := r.PollInterval
 	if poll <= 0 {
 		poll = 2 * time.Second
@@ -145,7 +171,7 @@ func (r Runner) Run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if err := r.Client.Register(ctx); err != nil {
+		if err := r.Client.register(ctx, registrationBody); err != nil {
 			if errors.Is(err, watch.ErrForbidden) {
 				return err
 			}
@@ -155,12 +181,19 @@ func (r Runner) Run(ctx context.Context) error {
 			}
 			continue
 		}
+		if bot != nil && !botStarted {
+			botStarted = true
+			go func() { err := bot.run(workerCtx, r.Client); workerCancel(); botDone <- err }()
+		}
 		registered := time.Now()
 		for ctx.Err() == nil {
+			if workerCtx.Err() != nil {
+				return errors.New("Watch runner Telegram worker stopped")
+			}
 			if time.Since(registered) > registration {
 				break
 			}
-			claim, err := r.Client.Claim(ctx)
+			claim, err := r.Client.Claim(workerCtx)
 			if err != nil {
 				if errors.Is(err, watch.ErrForbidden) {
 					return err
@@ -169,7 +202,7 @@ func (r Runner) Run(ctx context.Context) error {
 			}
 			if claim != nil {
 				slog.Info("watch_job_claimed", "run", claim.RunID, "fence", claim.Fence)
-				if err := r.executeClaim(ctx, *claim); err != nil {
+				if err := r.executeClaim(workerCtx, *claim); err != nil {
 					slog.Warn("watch_job_unacknowledged", "run", claim.RunID, "code", "LEASE_OR_COORDINATOR_UNAVAILABLE")
 				} else {
 					slog.Info("watch_job_completed", "run", claim.RunID, "fence", claim.Fence)

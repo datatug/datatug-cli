@@ -38,3 +38,13 @@ func TestWatchRunnerDoesNotSendTokenToChangedManifestEndpoint(t *testing.T) {
 		t.Fatal(endpoint, err)
 	}
 }
+func TestWatchProjectRequiresCoordinationAfterTypedManifestLoad(t *testing.T) {
+	dir := t.TempDir()
+	body := `{"id":"northwind","title":"Northwind","access":"private","created":{"at":"2026-10-23T10:00:00Z"}}`
+	if e := os.WriteFile(filepath.Join(dir, storage.ProjectSummaryFileName), []byte(body), 0600); e != nil {
+		t.Fatal(e)
+	}
+	if _, _, _, e := watchProjectCoordination(dir); e == nil {
+		t.Fatal("missing coordination admitted")
+	}
+}

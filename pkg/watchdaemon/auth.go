@@ -14,18 +14,19 @@ import (
 // Credential is deployment-owned authority. Tokens are resolved from the
 // environment at startup, never accepted from a project or a request body.
 type Credential struct {
-	TokenEnv     string   `json:"tokenEnv"`
-	Kind         string   `json:"kind"` // user or runner
-	ID           string   `json:"id"`
-	AccountID    string   `json:"accountId,omitempty"`
-	Namespace    string   `json:"namespace"`
-	Project      string   `json:"project"`
-	Environment  string   `json:"environment"`
-	SharedEditor bool     `json:"sharedEditor,omitempty"`
-	Capabilities []string `json:"capabilities,omitempty"`
-	Email        string   `json:"email,omitempty"`
-	Tier         string   `json:"tier,omitempty"`
-	Phone        string   `json:"phone,omitempty"`
+	TelegramBotID string   `json:"telegramBotId,omitempty"`
+	TokenEnv      string   `json:"tokenEnv"`
+	Kind          string   `json:"kind"` // user or runner
+	ID            string   `json:"id"`
+	AccountID     string   `json:"accountId,omitempty"`
+	Namespace     string   `json:"namespace"`
+	Project       string   `json:"project"`
+	Environment   string   `json:"environment"`
+	SharedEditor  bool     `json:"sharedEditor,omitempty"`
+	Capabilities  []string `json:"capabilities,omitempty"`
+	Email         string   `json:"email,omitempty"`
+	Tier          string   `json:"tier,omitempty"`
+	Phone         string   `json:"phone,omitempty"`
 }
 
 type credentialEntry struct {
@@ -39,6 +40,8 @@ func NewAuthenticator(credentials []Credential) (*Authenticator, error) {
 	a := &Authenticator{}
 	identities := map[string]bool{}
 	accountTiers := map[string]string{}
+	botScopes := map[string]string{}
+	scopeBots := map[string]string{}
 	for _, c := range credentials {
 		if c.AccountID == "" {
 			c.AccountID = c.ID
@@ -59,6 +62,20 @@ func NewAuthenticator(credentials []Credential) (*Authenticator, error) {
 		}
 		if c.ID == "" || c.Namespace == "" || c.Project == "" || c.Environment == "" || (c.Kind != "user" && c.Kind != "runner") || c.TokenEnv == "" {
 			return nil, errors.New("Watch credential requires identity, kind, scope and tokenEnv")
+		}
+		if c.TelegramBotID != "" {
+			if c.Kind != "runner" || !validChatID(c.TelegramBotID) {
+				return nil, errors.New("invalid Watch runner Telegram bot grant")
+			}
+			scope := strings.Join([]string{c.Namespace, c.Project, c.Environment}, "\x00")
+			if previous, ok := botScopes[c.TelegramBotID]; ok && previous != scope {
+				return nil, errors.New("Watch Telegram bot belongs to another scope")
+			}
+			if previous, ok := scopeBots[scope]; ok && previous != c.TelegramBotID {
+				return nil, errors.New("Watch scope has conflicting Telegram bot grants")
+			}
+			botScopes[c.TelegramBotID] = scope
+			scopeBots[scope] = c.TelegramBotID
 		}
 		key := strings.Join([]string{c.Kind, c.Namespace, c.Project, c.Environment, c.ID}, "\x00")
 		if identities[key] {

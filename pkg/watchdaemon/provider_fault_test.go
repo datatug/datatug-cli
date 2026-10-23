@@ -6,8 +6,6 @@ import (
 	"errors"
 	"io"
 	"net"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -229,72 +227,5 @@ func TestWatchSMTPFailureClassificationAndKnownAcceptance(t *testing.T) {
 	}
 	if (SMTPSender{}).Send(context.Background(), EmailMessage{}) == nil {
 		t.Fatal("invalid SMTP message accepted")
-	}
-}
-
-func TestWatchTelegramProviderFaultsAndGatewayCapability(t *testing.T) {
-	ctx := context.Background()
-	m := TelegramMessage{ID: "telegram-1", ChatID: "12345", Body: "Generic Watch update", DeliveryCapability: "opaque-capability"}
-	t.Setenv("WATCH_TELEGRAM_PROVIDER", "123:fake")
-	t.Setenv("WATCH_TELEGRAM_GATEWAY", strings.Repeat("gateway", 8))
-	for _, sender := range []BotTelegramSender{{TokenEnv: "missing"}, {TokenEnv: "WATCH_TELEGRAM_PROVIDER", APIBaseURL: "http://evil.example"}} {
-		if sender.Send(ctx, m) == nil {
-			t.Fatal("invalid Telegram config accepted")
-		}
-	}
-	if (BotTelegramSender{}).Send(ctx, TelegramMessage{ChatID: "group"}) == nil {
-		t.Fatal("invalid recipient accepted")
-	}
-	failing := &http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) { return nil, errors.New("sensitive provider token") })}
-	if (BotTelegramSender{TokenEnv: "WATCH_TELEGRAM_PROVIDER", HTTP: failing}).Send(ctx, m) == nil {
-		t.Fatal("failed default provider accepted")
-	}
-	for _, status := range []int{200, 302, 500} {
-		provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Location", "https://evil.example")
-			w.WriteHeader(status)
-			_, _ = io.WriteString(w, `{"ok":false}`)
-		}))
-		if (BotTelegramSender{TokenEnv: "WATCH_TELEGRAM_PROVIDER", APIBaseURL: provider.URL}).Send(ctx, m) == nil {
-			t.Fatal("Telegram rejected delivery accepted")
-		}
-		provider.Close()
-	}
-	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer "+strings.Repeat("gateway", 8) {
-			t.Error("gateway auth missing")
-		}
-		_, _ = io.WriteString(w, `{"ok":true}`)
-	}))
-	defer provider.Close()
-	gateway := GatewayTelegramSender{Endpoint: provider.URL, TokenEnv: "WATCH_TELEGRAM_GATEWAY"}
-	if err := gateway.Send(ctx, m); err != nil {
-		t.Fatal(err)
-	}
-	if gateway.Send(nil, m) == nil {
-		t.Fatal("invalid request context accepted")
-	}
-	gateway.HTTP = failing
-	if gateway.Send(ctx, m) == nil {
-		t.Fatal("network failure accepted")
-	}
-	if (GatewayTelegramSender{}).Send(ctx, m) == nil {
-		t.Fatal("unconfigured gateway accepted")
-	}
-	gateway.Endpoint = provider.URL
-	gateway.TokenEnv = "missing"
-	if gateway.Send(ctx, m) == nil {
-		t.Fatal("missing gateway credential accepted")
-	}
-	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, provider.URL, 302) }))
-	defer redirect.Close()
-	gateway.Endpoint = redirect.URL
-	gateway.TokenEnv = "WATCH_TELEGRAM_GATEWAY"
-	gateway.HTTP = nil
-	if gateway.Send(ctx, m) == nil {
-		t.Fatal("gateway credential followed redirect")
-	}
-	if (BotTelegramSender{TokenEnv: "WATCH_TELEGRAM_PROVIDER", APIBaseURL: provider.URL}).Send(nil, m) == nil {
-		t.Fatal("invalid bot request context accepted")
 	}
 }

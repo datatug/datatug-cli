@@ -8,6 +8,8 @@ import (
 	"github.com/datatug/datatug-cli/pkg/detective"
 )
 
+var watchExecuteAction = (*detective.LocalStore).ExecuteWatchAction
+
 // ExecuteWatchCheck is a trusted local daemon boundary. It preserves Detective's
 // project asset admission, revision pinning and secured saved-query path. This
 // function is never registered as an unauthenticated HTTP route.
@@ -20,7 +22,7 @@ func ExecuteWatchCheck(ctx context.Context, project, environment, checkID, check
 		return detective.CheckRun{}, "", errors.New("Watch Check project asset access is unavailable")
 	}
 	req := detective.ActionRequest{Type: "run-check", Project: project, Environment: environment, CheckID: checkID, Inputs: inputs}
-	out, observedFingerprint, err := store.ExecuteWatchAction(ctx, operationID, actor, req, checkVersion, fingerprint, detectiveQueryRunner(project, api.SecurityContextID()), detectiveExecutionMetadata(project), detectiveQueryRevisionLookup(project))
+	out, observedFingerprint, err := watchExecuteAction(store, ctx, operationID, actor, req, checkVersion, fingerprint, detectiveQueryRunner(project, api.SecurityContextID()), detectiveExecutionMetadata(project), detectiveQueryRevisionLookup(project))
 	if err != nil {
 		return detective.CheckRun{}, observedFingerprint, err
 	}

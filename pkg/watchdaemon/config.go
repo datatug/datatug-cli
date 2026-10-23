@@ -23,25 +23,20 @@ type Config struct {
 		DALGOConnectionEnv string `json:"dalgoConnectionEnv"`
 	} `json:"storage"`
 	Runner struct {
-		TokenEnv            string `json:"tokenEnv"`
-		CoordinatorEndpoint string `json:"coordinatorEndpoint"`
-		ProjectDir          string `json:"projectDir"`
-		Environment         string `json:"environment"`
-		Principal           string `json:"principal"`
-		EvidenceDir         string `json:"evidenceDir"`
-		AllowOpaqueSQL      bool   `json:"allowOpaqueSQL,omitempty"`
+		TokenEnv            string             `json:"tokenEnv"`
+		CoordinatorEndpoint string             `json:"coordinatorEndpoint"`
+		ProjectDir          string             `json:"projectDir"`
+		Environment         string             `json:"environment"`
+		Principal           string             `json:"principal"`
+		EvidenceDir         string             `json:"evidenceDir"`
+		AllowOpaqueSQL      bool               `json:"allowOpaqueSQL,omitempty"`
+		Telegram            *TelegramBotConfig `json:"telegram,omitempty"`
 	} `json:"runner"`
 	Notifications struct {
-		EmailSink                 string      `json:"emailSink,omitempty"`
-		SMTP                      *SMTPConfig `json:"smtp,omitempty"`
-		SMSSink                   string      `json:"smsSink,omitempty"`
-		Twilio                    bool        `json:"twilio,omitempty"`
-		TelegramSink              string      `json:"telegramSink,omitempty"`
-		TelegramTokenEnv          string      `json:"telegramTokenEnv,omitempty"`
-		TelegramCallbackSecretEnv string      `json:"telegramCallbackSecretEnv,omitempty"`
-		TelegramGatewayURL        string      `json:"telegramGatewayURL,omitempty"`
-		TelegramGatewayTokenEnv   string      `json:"telegramGatewayTokenEnv,omitempty"`
-		TelegramRouteID           string      `json:"telegramRouteID,omitempty"`
+		EmailSink string      `json:"emailSink,omitempty"`
+		SMTP      *SMTPConfig `json:"smtp,omitempty"`
+		SMSSink   string      `json:"smsSink,omitempty"`
+		Twilio    bool        `json:"twilio,omitempty"`
 	} `json:"notifications"`
 }
 

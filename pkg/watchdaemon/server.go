@@ -40,17 +40,14 @@ type CoordinatorStore interface {
 }
 
 type Server struct {
-	Store                  CoordinatorStore
-	Auth                   *Authenticator
-	AllowedOrigins         []string
-	Email                  EmailSender
-	SMS                    SMSSender
-	Telegram               TelegramSender
-	TelegramCallbackSecret string
-	TelegramRouteID        string
-	PublicUIURL            string
-	ProjectUIURLs          map[string]string
-	Limits                 Limits
+	Store          CoordinatorStore
+	Auth           *Authenticator
+	AllowedOrigins []string
+	Email          EmailSender
+	SMS            SMSSender
+	PublicUIURL    string
+	ProjectUIURLs  map[string]string
+	Limits         Limits
 }
 
 type apiError struct {
@@ -99,7 +96,7 @@ func credentialActor(c Credential) watch.Actor {
 	return watch.Actor{ID: c.ID, AccountID: c.AccountID, Scope: credentialScope(c), SharedEditor: c.SharedEditor, Email: c.Email, Tier: c.Tier, Phone: c.Phone}
 }
 func credentialRunner(c Credential) watch.RunnerIdentity {
-	return watch.RunnerIdentity{ID: c.ID, Scope: credentialScope(c), Capabilities: append([]string(nil), c.Capabilities...)}
+	return watch.RunnerIdentity{ID: c.ID, Scope: credentialScope(c), Capabilities: append([]string(nil), c.Capabilities...), TelegramBotID: c.TelegramBotID}
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -123,10 +120,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	if r.URL.Path == "/v1/watch/telegram/update" {
-		s.telegramUpdate(w, r)
 		return
 	}
 	if r.URL.Path == "/health" && r.Method == http.MethodGet {
@@ -179,15 +172,13 @@ func (s *Server) userRequest(w http.ResponseWriter, r *http.Request, path string
 	}
 	switch {
 	case path == "identity" && r.Method == "GET":
-		connected := false
-		if linker, ok := s.Store.(telegramLinkStore); ok {
-			connected, err = linker.TelegramStatus(r.Context(), a)
-		}
+		provider, providerErr := s.telegramProvider(r.Context(), a)
+		err = providerErr
 		limits, limitsErr := s.Limits.Resolve()
 		if limitsErr != nil {
 			err = limitsErr
 		}
-		result = map[string]any{"id": c.ID, "namespace": c.Namespace, "project": c.Project, "environment": c.Environment, "sharedEditor": c.SharedEditor, "tier": c.Tier, "telegramConnected": connected, "channels": map[string]bool{"in_app": true, "email": c.Email != "" && s.Email != nil, "sms": c.Tier == "paid" && c.Phone != "" && s.SMS != nil, "telegram": s.telegramConfigured()}, "limits": limits}
+		result = map[string]any{"id": c.ID, "namespace": c.Namespace, "project": c.Project, "environment": c.Environment, "sharedEditor": c.SharedEditor, "tier": c.Tier, "telegramConnected": provider.Connected, "channels": map[string]bool{"in_app": true, "email": c.Email != "" && s.Email != nil, "sms": c.Tier == "paid" && c.Phone != "" && s.SMS != nil, "telegram": provider.BotID != ""}, "limits": limits}
 	case path == "definitions" && r.Method == "GET":
 		var list []watch.Definition
 		list, err = s.Store.ListDefinitions(r.Context(), a)
@@ -254,7 +245,7 @@ func (s *Server) userRequest(w http.ResponseWriter, r *http.Request, path string
 		err = decode(w, r, &b)
 		if err == nil {
 			for _, channel := range b.Channels {
-				if channel == "email" && s.Email == nil || channel == "sms" && s.SMS == nil || channel == "telegram" && !s.telegramConfigured() {
+				if channel == "email" && s.Email == nil || channel == "sms" && s.SMS == nil || channel == "telegram" && !s.telegramAvailable(r.Context(), a) {
 					err = watch.ErrInvalid
 				}
 			}
@@ -325,12 +316,19 @@ func (s *Server) runnerRequest(w http.ResponseWriter, r *http.Request, path stri
 		return
 	}
 	identity := credentialRunner(c)
+	if s.telegramRunner(w, r, path, identity) {
+		return
+	}
 	var result any
 	var err error
 	switch path {
 	case "runner/register":
-		var empty struct{}
-		err = decode(w, r, &empty)
+		var registration runnerRegistration
+		err = decode(w, r, &registration)
+		if err == nil && (registration.TelegramBotID != identity.TelegramBotID || (registration.TelegramBotID != "" && !validBotUsername(registration.TelegramBotUsername)) || (registration.TelegramBotID == "" && registration.TelegramBotUsername != "")) {
+			err = watch.ErrForbidden
+		}
+		identity.TelegramBotUsername = registration.TelegramBotUsername
 		if err == nil {
 			err = s.Store.RegisterRunner(r.Context(), identity)
 		}

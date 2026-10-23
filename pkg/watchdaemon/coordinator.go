@@ -71,16 +71,35 @@ func (s *Server) notificationText(n watch.Notification) string {
 		}
 	}
 	base, err := url.Parse(configured)
-	if err != nil || base.Scheme != "https" || base.Host == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
+	if err != nil || ValidateEndpoint(configured) != nil {
 		return text
 	}
-	if n.WatchID == "" || strings.ContainsAny(n.WatchID, "/\\?#\r\n") {
+	if n.WatchID == "" || n.WatchID == "." || n.WatchID == ".." || strings.ContainsAny(n.WatchID, "/\\?#\r\n") {
 		return text
 	}
 	// PublicUIURL is the operator's exact project-page URL. Construct its Watch
 	// child route ourselves; never forward a URL, title or raw error from data.
-	base.Path = strings.TrimRight(base.Path, "/") + "/watch/" + n.WatchID
-	return text + "\n\n" + base.String()
+	projectPath := strings.TrimRight(base.Path, "/")
+	base.Path = projectPath + "/watch/" + n.WatchID
+	text += "\n\n" + base.String()
+	// Extract only a validated Check identifier from the state-generated relative
+	// locator. Construct the URL from deployment authority; never forward raw URLs.
+	locator, parseErr := url.Parse(n.Link)
+	if parseErr == nil && locator.Scheme == "" && locator.Host == "" && locator.User == nil && locator.Fragment == "" && locator.Path == "/watch" {
+		query, queryErr := url.ParseQuery(locator.RawQuery)
+		check := query.Get("check")
+		valid := queryErr == nil && len(query["check"]) == 1 && check != "" && len(check) <= 128 && check != "." && check != ".." && query.Get("project") == n.Project && query.Get("environment") == n.Environment && query.Get("watch") == n.WatchID
+		for _, c := range check {
+			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-' || c == '.') {
+				valid = false
+			}
+		}
+		if valid {
+			base.Path = projectPath + "/checks/" + check
+			text += "\n" + base.String()
+		}
+	}
+	return text
 }
 func (s *Server) deliver(ctx context.Context, d watch.Delivery) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -97,10 +116,7 @@ func (s *Server) deliver(ctx context.Context, d watch.Delivery) error {
 		if s.SMS != nil {
 			return s.SMS.Send(ctx, SMSMessage{ID: d.ID, To: d.Phone, Body: body})
 		}
-	case "telegram":
-		if s.Telegram != nil {
-			return s.Telegram.Send(ctx, TelegramMessage{ID: d.ID, ChatID: d.TelegramChatID, Body: body, DeliveryCapability: d.TelegramDeliveryCapability})
-		}
+
 	}
 	return errors.New("Watch notification provider is unavailable")
 }

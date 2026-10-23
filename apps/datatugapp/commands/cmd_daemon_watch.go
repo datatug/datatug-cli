@@ -22,10 +22,31 @@ import (
 	"github.com/datatug/datatug-cli/pkg/server/endpoints"
 	"github.com/datatug/datatug-cli/pkg/watch"
 	"github.com/datatug/datatug-cli/pkg/watchdaemon"
+	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/sneat-co/sneat-go-core/twiliosms"
 	"github.com/spf13/cobra"
+)
+
+// Trusted host seams let tests force startup/shutdown failures without creating
+// persistent machine services or weakening the actual Coordinator/Runner ports.
+var (
+	watchUserHomeDir           = os.UserHomeDir
+	watchResolveCoordinator    = resolveWatchCoordinator
+	watchConfigureExecution    = configureWatchExecution
+	watchExecuteCheck          = endpoints.ExecuteWatchCheck
+	watchListen                = net.Listen
+	watchShutdownHTTP          = (*http.Server).Shutdown
+	watchOpenCoordinatorStore  = watch.NewSQLiteStore
+	watchWorkerShutdownTimeout = 10 * time.Second
+	watchRunRunner             = func(ctx context.Context, r *watchdaemon.Runner) error { return r.Run(ctx) }
+	watchServeHTTP             = func(s *http.Server, l net.Listener, cert, key string) error {
+		if cert != "" && key != "" {
+			return s.ServeTLS(l, cert, key)
+		}
+		return s.Serve(l)
+	}
 )
 
 func addWatchDaemonFlags(cmd *cobra.Command) {
@@ -48,7 +69,7 @@ func watchDaemonAction(cmd *cobra.Command, _ []string) error {
 	}
 	configPath, _ := cmd.Flags().GetString("watch-config")
 	if configPath == "" {
-		home, err := os.UserHomeDir()
+		home, err := watchUserHomeDir()
 		if err != nil {
 			return errors.New("Watch daemon configuration location unavailable")
 		}
@@ -81,7 +102,7 @@ func watchDaemonAction(cmd *cobra.Command, _ []string) error {
 		if err != nil {
 			return err
 		}
-		endpoint, err = resolveWatchCoordinator(manifestEndpoint, cfg.Runner.CoordinatorEndpoint, endpoint)
+		endpoint, err = watchResolveCoordinator(manifestEndpoint, cfg.Runner.CoordinatorEndpoint, endpoint)
 		if err != nil {
 			return err
 		}
@@ -95,7 +116,7 @@ func watchDaemonAction(cmd *cobra.Command, _ []string) error {
 		if cfg.Runner.Environment == "" || cfg.Runner.Principal == "" {
 			return errors.New("Watch runner requires an explicit environment and local principal")
 		}
-		cleanup, err := configureWatchExecution(cfg, projectID)
+		cleanup, err := watchConfigureExecution(cfg, projectID)
 		if err != nil {
 			return err
 		}
@@ -113,7 +134,7 @@ func watchDaemonAction(cmd *cobra.Command, _ []string) error {
 			// Attempt/fence is part of the local operation ID: an expired attempt
 			// never reuses an uncertain prior source execution journal.
 			op := "watch-" + claim.RunID + fmt.Sprintf("-%d", claim.Fence)
-			run, fingerprint, err := endpoints.ExecuteWatchCheck(ctx, d.Project, d.Environment, d.CheckID, d.CheckVersion, d.SourceFingerprint, op, d.Inputs)
+			run, fingerprint, err := watchExecuteCheck(ctx, d.Project, d.Environment, d.CheckID, d.CheckVersion, d.SourceFingerprint, op, d.Inputs)
 			completion := watch.Completion{ExecutionStatus: run.ExecutionStatus, Outcome: run.Outcome, Severity: run.Severity, DurationMS: time.Since(start).Milliseconds(), CheckRunRef: run.ID, SourceFingerprint: fingerprint}
 			if errors.Is(err, detective.ErrConflict) {
 				completion.ExecutionStatus = "error"
@@ -123,6 +144,7 @@ func watchDaemonAction(cmd *cobra.Command, _ []string) error {
 			}
 			return completion, err
 		})}
+		runner.Telegram = cfg.Runner.Telegram
 	}
 	if namespace != "" && namespace != cfg.Namespace {
 		return errors.New("Watch deployment namespace mismatch")
@@ -157,12 +179,12 @@ func watchDaemonAction(cmd *cobra.Command, _ []string) error {
 				paid[c.ID] = true
 			}
 		}
-		store, err = watch.NewSQLiteStore(dsn, watch.Config{Namespace: cfg.Namespace, IsPaidAccount: func(account string) bool { return paid[account] }, EmailDailyLimit: cfg.Limits.EmailPerDay, EmailMinuteLimit: cfg.Limits.EmailPerMinute, SMSDailyLimit: cfg.Limits.SMSPerDay, SMSMinuteLimit: cfg.Limits.SMSPerMinute, TelegramDailyLimit: cfg.Limits.TelegramPerDay, TelegramMinuteLimit: cfg.Limits.TelegramPerMinute, MaxWatchesPerUser: cfg.Limits.WatchesPerUser, MinIntervalSeconds: cfg.Limits.MinIntervalSeconds})
+		store, err = watchOpenCoordinatorStore(dsn, watch.Config{Namespace: cfg.Namespace, IsPaidAccount: func(account string) bool { return paid[account] }, EmailDailyLimit: cfg.Limits.EmailPerDay, EmailMinuteLimit: cfg.Limits.EmailPerMinute, SMSDailyLimit: cfg.Limits.SMSPerDay, SMSMinuteLimit: cfg.Limits.SMSPerMinute, TelegramDailyLimit: cfg.Limits.TelegramPerDay, TelegramMinuteLimit: cfg.Limits.TelegramPerMinute, MaxWatchesPerUser: cfg.Limits.WatchesPerUser, MinIntervalSeconds: cfg.Limits.MinIntervalSeconds})
 		if err != nil {
 			return errors.New("Watch transactional coordinator storage could not be opened")
 		}
 		defer store.Close()
-		service := &watchdaemon.Server{Store: store, Auth: auth, AllowedOrigins: cfg.AllowedOrigins, PublicUIURL: cfg.PublicUIURL, ProjectUIURLs: cfg.ProjectUIURLs, Limits: cfg.Limits, TelegramRouteID: cfg.Notifications.TelegramRouteID, TelegramCallbackSecret: os.Getenv(cfg.Notifications.TelegramCallbackSecretEnv)}
+		service := &watchdaemon.Server{Store: store, Auth: auth, AllowedOrigins: cfg.AllowedOrigins, PublicUIURL: cfg.PublicUIURL, ProjectUIURLs: cfg.ProjectUIURLs, Limits: cfg.Limits}
 		if cfg.Notifications.EmailSink != "" {
 			service.Email = &watchdaemon.FileEmailSink{Path: cfg.Notifications.EmailSink}
 		} else if cfg.Notifications.SMTP != nil {
@@ -177,16 +199,7 @@ func watchDaemonAction(cmd *cobra.Command, _ []string) error {
 			}
 			service.SMS = watchdaemon.TwilioSMSSender{Credentials: credentials}
 		}
-		if cfg.Notifications.TelegramSink != "" {
-			service.Telegram = watchdaemon.FileTelegramSink{Sink: &watchdaemon.FileEmailSink{Path: cfg.Notifications.TelegramSink}}
-		} else if cfg.Notifications.TelegramGatewayURL != "" {
-			if watchdaemon.ValidateEndpoint(cfg.Notifications.TelegramGatewayURL) != nil {
-				return errors.New("Watch Telegram gateway URL invalid")
-			}
-			service.Telegram = watchdaemon.GatewayTelegramSender{Endpoint: cfg.Notifications.TelegramGatewayURL, TokenEnv: cfg.Notifications.TelegramGatewayTokenEnv}
-		} else if cfg.Notifications.TelegramTokenEnv != "" {
-			service.Telegram = watchdaemon.BotTelegramSender{TokenEnv: cfg.Notifications.TelegramTokenEnv}
-		}
+
 		listen := cfg.Listen
 		if listen == "" {
 			listen = "127.0.0.1:8990"
@@ -201,23 +214,19 @@ func watchDaemonAction(cmd *cobra.Command, _ []string) error {
 				return errors.New("Watch non-loopback listener requires TLS certificate and key")
 			}
 		}
-		listener, err := net.Listen("tcp", listen)
+		listener, err := watchListen("tcp", listen)
 		if err != nil {
 			return errors.New("Watch Coordinator listener is unavailable")
 		}
 		httpServer = &http.Server{Handler: service, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024}
 		startWorker(func() error {
-			if cfg.TLSCertFile != "" && cfg.TLSKeyFile != "" {
-				return httpServer.ServeTLS(listener, cfg.TLSCertFile, cfg.TLSKeyFile)
-			} else {
-				return httpServer.Serve(listener)
-			}
+			return watchServeHTTP(httpServer, listener, cfg.TLSCertFile, cfg.TLSKeyFile)
 		})
 		startWorker(func() error { return service.RunCoordinator(ctx, time.Second) })
 		slog.Info("watch_coordinator_started", "namespace", cfg.Namespace, "roles", map[string]bool{"coordinate": true, "run": run})
 	}
 	if runner != nil {
-		startWorker(func() error { return runner.Run(ctx) })
+		startWorker(func() error { return watchRunRunner(ctx, runner) })
 		slog.Info("watch_runner_started", "namespace", cfg.Namespace)
 	}
 	select {
@@ -232,7 +241,7 @@ func watchDaemonAction(cmd *cobra.Command, _ []string) error {
 	if httpServer != nil {
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer shutdownCancel()
-		if shutdownErr := httpServer.Shutdown(shutdownCtx); shutdownErr != nil && err == nil {
+		if shutdownErr := watchShutdownHTTP(httpServer, shutdownCtx); shutdownErr != nil && err == nil {
 			err = errors.New("Watch Coordinator shutdown timed out")
 		}
 	}
@@ -240,7 +249,7 @@ func watchDaemonAction(cmd *cobra.Command, _ []string) error {
 	go func() { workers.Wait(); close(finished) }()
 	select {
 	case <-finished:
-	case <-time.After(10 * time.Second):
+	case <-time.After(watchWorkerShutdownTimeout):
 		if err == nil {
 			err = errors.New("Watch daemon worker shutdown timed out")
 		}
@@ -274,12 +283,11 @@ func watchProjectCoordination(projectDir string) (id, endpoint, namespace string
 	if err != nil || len(body) > 1024*1024 {
 		return "", "", "", errors.New("Watch project manifest unavailable")
 	}
-	var manifest struct {
-		Coordination struct{ Endpoint, Namespace string } `json:"coordination"`
-	}
-	if json.Unmarshal(body, &manifest) != nil || manifest.Coordination.Namespace == "" || watchdaemon.ValidateEndpoint(manifest.Coordination.Endpoint) != nil {
+	var manifest datatug.ProjectFile
+	if json.Unmarshal(body, &manifest) != nil || manifest.Coordination == nil || manifest.Coordination.Namespace == "" || watchdaemon.ValidateEndpoint(manifest.Coordination.Endpoint) != nil {
 		return "", "", "", errors.New("Watch project requires coordination endpoint and namespace")
 	}
+
 	return project.ID, manifest.Coordination.Endpoint, manifest.Coordination.Namespace, nil
 }
 
@@ -298,7 +306,7 @@ func configureWatchExecution(cfg watchdaemon.Config, projectID string) (func(), 
 	filestore.SetProjectPath(projectID, cfg.Runner.ProjectDir)
 	evidence := cfg.Runner.EvidenceDir
 	if evidence == "" {
-		home, err := os.UserHomeDir()
+		home, err := watchUserHomeDir()
 		if err != nil {
 			return nil, errors.New("Watch evidence location unavailable")
 		}

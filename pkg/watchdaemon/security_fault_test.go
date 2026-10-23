@@ -62,8 +62,7 @@ func TestWatchDeliveryChannelRoutingAndUnsafeMetadata(t *testing.T) {
 	f := protocolFixture(t)
 	ctx := context.Background()
 	f.server.SMS = FileSMSSink{Sink: &FileEmailSink{Path: filepath.Join(t.TempDir(), "sms")}}
-	f.server.Telegram = FileTelegramSink{Sink: &FileEmailSink{Path: filepath.Join(t.TempDir(), "telegram")}}
-	for _, channel := range []string{"in_app", "sms", "telegram"} {
+	for _, channel := range []string{"in_app", "sms"} {
 		d := watch.Delivery{Notification: watch.Notification{ID: channel + "-1", Scope: protocolScope, WatchID: "shipping"}, Channel: channel, Phone: "+353123456789", TelegramChatID: "12345"}
 		if err := f.server.deliver(ctx, d); err != nil {
 			t.Fatal(channel, err)
@@ -98,9 +97,7 @@ func TestWatchDeliveryChannelRoutingAndUnsafeMetadata(t *testing.T) {
 	if (FileSMSSink{}).Send(ctx, SMSMessage{To: "bad"}) == nil {
 		t.Fatal("invalid SMS sink recipient accepted")
 	}
-	if (FileTelegramSink{}).Send(ctx, TelegramMessage{ChatID: "-123"}) == nil {
-		t.Fatal("group Telegram sink accepted")
-	}
+
 }
 
 func TestWatchClientRejectsNetworkAndResponseFailuresWithoutLeakingTokens(t *testing.T) {
@@ -137,5 +134,26 @@ func TestWatchClientRejectsNetworkAndResponseFailuresWithoutLeakingTokens(t *tes
 	}
 	if err := (Client{Endpoint: bad.URL, Token: token}).call(ctx, "runner/register", make(chan int), nil); !errors.Is(err, watch.ErrInvalid) {
 		t.Fatal("unencodable request accepted")
+	}
+}
+func TestWatchNotificationBuildsWatchAndCheckLinksFromTrustedProjectBase(t *testing.T) {
+	f := protocolFixture(t)
+	n := watch.Notification{Scope: protocolScope, WatchID: "shipping", Link: "/watch?project=northwind&environment=local&watch=shipping&check=assignment-check"}
+	text := f.server.notificationText(n)
+	for _, path := range []string{"https://datatug.app/store/test/project/northwind/watch/shipping", "https://datatug.app/store/test/project/northwind/checks/assignment-check"} {
+		if !strings.Contains(text, path) {
+			t.Fatal("missing navigable link", text)
+		}
+	}
+	for _, link := range []string{"https://evil.example/watch?check=secret", "/watch?project=foreign&environment=local&watch=shipping&check=assignment-check", "/watch?project=northwind&environment=local&watch=shipping&check=../../escape", "/watch?project=northwind&environment=local&watch=shipping&check=one&check=two", "%invalid"} {
+		n.Link = link
+		if strings.Contains(f.server.notificationText(n), "/checks/") {
+			t.Fatal("untrusted Check locator forwarded", link)
+		}
+	}
+	n.Link = "/watch?project=northwind&environment=local&watch=shipping&check=assignment-check"
+	f.server.ProjectUIURLs["northwind"] = "http://127.0.0.1:4200/project/northwind"
+	if !strings.Contains(f.server.notificationText(n), "http://127.0.0.1:4200/project/northwind/checks/assignment-check") {
+		t.Fatal("loopback developer UI link missing")
 	}
 }

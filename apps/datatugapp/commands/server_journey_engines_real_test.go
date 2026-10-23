@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
@@ -222,7 +223,27 @@ func TestOracleScanAndQueryJourney(t *testing.T) {
 	execOn(t, "oracle", adminDSN,
 		fmt.Sprintf(`CREATE USER %s IDENTIFIED BY "%s" QUOTA UNLIMITED ON USERS`, user, password),
 		fmt.Sprintf(`GRANT CREATE SESSION, CREATE TABLE TO %s`, user))
-	t.Cleanup(func() { execOn(t, "oracle", adminDSN, fmt.Sprintf(`DROP USER %s CASCADE`, user)) })
+	// The commands of the test leave their pools' sessions open (a process of the CLI ends with its command):
+	// they are ended before the user is dropped, which Oracle refuses while one is connected (ORA-01940).
+	t.Cleanup(func() {
+		execOn(t, "oracle", adminDSN,
+			fmt.Sprintf(`BEGIN
+  FOR s IN (SELECT sid, serial# AS serial FROM v$session WHERE username = '%s') LOOP
+    EXECUTE IMMEDIATE 'ALTER SYSTEM KILL SESSION ''' || s.sid || ',' || s.serial || ''' IMMEDIATE';
+  END LOOP;
+END;`, user))
+		// A killed session can take a moment to end: the drop is tried again for a while.
+		db, err := sql.Open("oracle", adminDSN)
+		require.NoError(t, err)
+		defer func() { _ = db.Close() }()
+		for attempt := 0; ; attempt++ {
+			if _, err = db.Exec(fmt.Sprintf(`DROP USER %s CASCADE`, user)); err == nil || attempt == 20 {
+				break
+			}
+			time.Sleep(time.Second)
+		}
+		require.NoError(t, err, "the fixture's user is dropped")
+	})
 	quote := func(name string) string { return `"` + name + `"` }
 	execOn(t, "oracle", fixture(scan), serverJourneyDDL(quote, "NUMBER(19)", "NUMBER(10)", "VARCHAR2", "NUMBER")...)
 

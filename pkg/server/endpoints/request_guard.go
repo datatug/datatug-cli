@@ -34,7 +34,9 @@ const requestRefusedMessage = "this agent answers a request only when it comes f
 // also carry the session token (`Authorization: Bearer`), or it is a 401.
 //
 // A refusal is a 403 with a fixed sentence: no echo of what the request said, and no
-// Access-Control-Allow-Origin.
+// Access-Control-Allow-Origin. Every other answer to a request whose Origin is on the list, an
+// error as much as a success, carries Access-Control-Allow-Origin for that Origin and
+// Vary: Origin (writeCORSOrigin).
 type RequestGuard struct {
 	// host is the host the person configured, lower case and with no brackets; "" when none.
 	host string
@@ -68,9 +70,11 @@ func (g RequestGuard) Wrap(next http.HandlerFunc) http.HandlerFunc {
 			refuseRequest(w, r, http.StatusForbidden, requestRefusedMessage, reason)
 			return
 		}
+		// The Origin, when there is one, is on the list here: every answer from now on (a 401, the
+		// router's own 404 and 405, a route's error or success) carries the same CORS headers, so
+		// the page reads the real status instead of a network failure (status 0).
+		writeCORSOrigin(w, r)
 		if g.access != nil && !tokenExempt(r) && !g.access.Authorized(r) {
-			// The origin is on the list here, so the page may read the 401 and fetch a new code.
-			writeCORSOrigin(w, r)
 			refuseRequest(w, r, http.StatusUnauthorized, tokenRequiredMessage, "no valid session token")
 			return
 		}

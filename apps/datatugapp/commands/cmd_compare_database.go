@@ -386,9 +386,6 @@ func openCompareSource(ctx context.Context, sourceURL, schema, expectedStorage s
 	if schema != "" && ref.Scheme != "postgres" {
 		return nil, "", errors.New("schema selection is supported only for PostgreSQL sources")
 	}
-	if err := dbcopy.CheckPostgresRead(ref, 0); err != nil {
-		return nil, "", err
-	}
 	db, err := ref.OpenForCopy(ctx, schema)
 	if err != nil {
 		return nil, "", dbcopy.RedactErrorWithSecrets(err, sourceURL)

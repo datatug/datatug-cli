@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -146,6 +147,8 @@ var mainScanHashes = map[string]map[string]string{
 		"dbmodels/shop/main/tables/order_line/main.order_line.columns.json":        "38d435bd3da08216b0a49c7eadd3866b53046c0cb0bb2b54e43d337192bfd9f4",
 		"dbmodels/shop/main/views/customer_names/main.customer_names.columns.json": "6a9ac638498a970ff4d46d260771869391f525dafdcce3042334bc580521d49f",
 		"dbmodels/shop/shop.dbmodel.json":                                          "18394265b4cab95e1e196eaff2a2ff8cd32794c7f4b2267eac6c5519b9a16990",
+		"dbmodels/shop/shop.indexes.json":                                          "e86036b01038bc930f833333c7cdb8b871e7abc123269451812262052fe87428",
+		"dbmodels/shop/shop.refs.json":                                             "4d4d7fa8efaf95f3128962db0edc41bf6edfa397bd800c5cec5e23e2e6bff385",
 		"environments/local/catalogs/shop/shop.db.json":                            "c0e606238bd56bd89785fb3a266a0dcb4e300e0cefef4ad80fc51e842f860d1d",
 		"environments/local/local.env.json":                                        "7332f2864ae6b7ed3a5f3fafd0417425225f50bfde68c89f960fd6e177d20fad",
 	},
@@ -158,6 +161,8 @@ var mainScanHashes = map[string]map[string]string{
 		"dbmodels/shop/sales/tables/Invoice/sales.Invoice.columns.json":                "60665043ad6be662edd27dc75c95ad75f4c64b65c3d608f8e2496764ccd762ed",
 		"dbmodels/shop/sales/views/OpenInvoices/sales.OpenInvoices.columns.json":       "2090559f1501c3dae82b62a6651d6ac4cc6a0d41f1be40496ccafc26f8ca9786",
 		"dbmodels/shop/shop.dbmodel.json":                                              "18394265b4cab95e1e196eaff2a2ff8cd32794c7f4b2267eac6c5519b9a16990",
+		"dbmodels/shop/shop.indexes.json":                                              "856982dfaeeeab94c4151fa6ba1bca1a20ce46e9b49c7302f3f8d7b075576387",
+		"dbmodels/shop/shop.refs.json":                                                 "94a139b7dc56d262a7e7c968f5d1341979d23c8abb66f52147add4db6b6870b8",
 		"environments/local/catalogs/shop/shop.db.json":                                "c207b0a0fff521014195a671e7f29ab7a879cd0033a8c8b4389ac22e35250a5e",
 		"environments/local/local.env.json":                                            "ad7081589f8210463ceaa43070ef1aad91517d16c411545c06055da583a6a18f",
 	},
@@ -189,11 +194,34 @@ func TestScanJourneyIntoACleanFolderWritesWhatMainWrote(t *testing.T) {
 			_, ok := hashes["datatug-project.json"]
 			require.True(t, ok, "the project file is written")
 			delete(hashes, "datatug-project.json")
-			assert.Equal(t, mainScanHashes[driver.name], hashes, "every file of the scan has the content hash of the scan of main, and there is no other")
+			assertScanEnvironmentOwnership(t, projectDir)
+			delete(hashes, ".datatug-environments-owner.json")
+			delete(hashes, ".datatug-environments.lock")
+			assert.Equal(t, mainScanHashes[driver.name], hashes, "every scan data file retains its main content hash, with no unexpected files besides validated ownership metadata")
 
 			content, err := os.ReadFile(filepath.Join(projectDir, "datatug-project.json"))
 			require.NoError(t, err)
 			assert.Equal(t, mainProjectFile, regexp.MustCompile(`"at": "[^"]+"`).ReplaceAllString(string(content), `"at": "<time>"`))
 		})
 	}
+}
+
+func assertScanEnvironmentOwnership(t *testing.T, projectDir string) {
+	t.Helper()
+	// Core's environment owner and lock bind this scan to a runtime
+	// namespace. Check their relationship instead of hashing machine paths.
+	ownerBytes, err := os.ReadFile(filepath.Join(projectDir, ".datatug-environments-owner.json"))
+	require.NoError(t, err)
+	var owner struct {
+		Format      string `json:"format"`
+		RootDigest  string `json:"rootDigest"`
+		NamespaceID string `json:"namespaceId"`
+	}
+	require.NoError(t, json.Unmarshal(ownerBytes, &owner))
+	assert.Equal(t, "datatug-environment-owner/1", owner.Format)
+	require.Regexp(t, `^[a-f0-9]{64}$`, owner.RootDigest)
+	require.Regexp(t, `^[a-f0-9]{32}$`, owner.NamespaceID)
+	lockBytes, err := os.ReadFile(filepath.Join(projectDir, ".datatug-environments.lock"))
+	require.NoError(t, err)
+	assert.Equal(t, "environment-owner/1:"+owner.RootDigest+":"+owner.NamespaceID, strings.TrimSpace(string(lockBytes)))
 }

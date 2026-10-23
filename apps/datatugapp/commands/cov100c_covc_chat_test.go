@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,22 +49,22 @@ func TestCovCChatSaveRejections(t *testing.T) {
 
 	plain := service
 	plain.store = &covCStore{}
-	if _, err := plain.Save(ctx, chat.SavedQuerySaveRequest{Title: "t", Type: "DTQL", Text: "x"}); err == nil || !strings.Contains(err.Error(), "does not support") {
+	if _, err := plain.Save(ctx, chat.SavedQuerySaveRequest{Title: "t", Type: "TugQL", Text: "x"}); err == nil || !strings.Contains(err.Error(), "does not support") {
 		t.Fatalf("non-revisioned store: %v", err)
 	}
-	if _, err := service.Save(ctx, chat.SavedQuerySaveRequest{Title: "t", Type: "SQL", Text: "select 1"}); err == nil || !strings.Contains(err.Error(), "only DTQL and HTTP") {
+	if _, err := service.Save(ctx, chat.SavedQuerySaveRequest{Title: "t", Type: "SQL", Text: "select 1"}); err == nil || !strings.Contains(err.Error(), "only TugQL and HTTP") {
 		t.Fatalf("SQL save: %v", err)
 	}
-	if _, err := service.Save(ctx, chat.SavedQuerySaveRequest{Title: "  ", Type: "DTQL", Text: "x"}); err == nil || !strings.Contains(err.Error(), "required") {
+	if _, err := service.Save(ctx, chat.SavedQuerySaveRequest{Title: "  ", Type: "TugQL", Text: "x"}); err == nil || !strings.Contains(err.Error(), "required") {
 		t.Fatalf("blank title: %v", err)
 	}
 	restricted := covCChatService(t, dir, false)
-	if _, err := restricted.Save(ctx, chat.SavedQuerySaveRequest{Title: "t", Type: "DTQL", Text: covCItemDTQL}); err == nil || !strings.Contains(err.Error(), "denied") {
+	if _, err := restricted.Save(ctx, chat.SavedQuerySaveRequest{Title: "t", Type: "TugQL", Text: covCItemTugQL}); err == nil || !strings.Contains(err.Error(), "denied") {
 		t.Fatalf("restricted session: %v", err)
 	}
 	failing := service
 	failing.store = covCPutFailStore{ProjectStore: service.store, revisioned: service.store.(datatug.RevisionedQueriesStore)}
-	if _, err := failing.Save(ctx, chat.SavedQuerySaveRequest{Title: "t", Type: "DTQL", Text: covCItemDTQL}); err == nil || !strings.Contains(err.Error(), "put failed") {
+	if _, err := failing.Save(ctx, chat.SavedQuerySaveRequest{Title: "t", Type: "TugQL", Text: covCItemTugQL}); err == nil || !strings.Contains(err.Error(), "put failed") {
 		t.Fatalf("put failure: %v", err)
 	}
 }
@@ -73,7 +74,7 @@ func TestCovCChatListErrorsAndMeta(t *testing.T) {
 	if _, err := (chatSavedQueries{projectDir: "bad\x00dir"}).List(ctx); err == nil {
 		t.Fatal("unlistable project directory accepted")
 	}
-	dir := covCWriteProject(t, covCQueryFiles("f", "q", "DTQL", "dtql", covCItemDTQL, ""))
+	dir := covCWriteProject(t, covCQueryFiles("f", "q", "TugQL", "tugql", covCItemTugQL, ""))
 	boom := errors.New("covC load failed")
 	if _, err := (chatSavedQueries{projectDir: dir, store: &covCStore{queryErr: boom}}).List(ctx); !errors.Is(err, boom) {
 		t.Fatalf("load failure: %v", err)
@@ -89,7 +90,7 @@ func TestCovCChatListErrorsAndMeta(t *testing.T) {
 	}
 }
 
-const covCCustomerDTQL = "from: {name: Invoice}\nwhere: {op: '==', left: {field: CustomerId}, right: {param: CustomerId}}\n"
+const covCCustomerTugQL = "from: {name: Invoice}\nwhere: {op: '==', left: {field: CustomerId}, right: {param: CustomerId}}\n"
 
 const covCCustomerParams = `,"parameters":[{"id":"CustomerId","type":"int","isRequired":true,"meta":{"entity":"Customer","field":"CustomerId"}}]`
 
@@ -107,8 +108,8 @@ func TestCovCChatLookupParameter(t *testing.T) {
 	db := covCLookupDB(t)
 	dir := covCWriteProject(t, covCMerge(
 		covCEnvFiles(map[string]string{"main": db}),
-		covCQueryFiles("f", "inv", "DTQL", "dtql", covCCustomerDTQL, covCCustomerParams),
-		covCQueryFiles("f", "nolookup", "DTQL", "dtql", "from: {name: Invoice}\nlimit: 5\n", covCCustomerParams),
+		covCQueryFiles("f", "inv", "TugQL", "tugql", covCCustomerTugQL, covCCustomerParams),
+		covCQueryFiles("f", "nolookup", "TugQL", "tugql", "from: {name: Invoice}\nlimit: 5\n", covCCustomerParams),
 		covCQueryFiles("f", "sqlq", "SQL", "sql", "select 1", ""),
 	))
 	service := covCChatService(t, dir, true)
@@ -124,7 +125,7 @@ func TestCovCChatLookupParameter(t *testing.T) {
 		t.Fatalf("unknown parameter: %v %v", got, err)
 	}
 	if got, err := service.LookupParameter(ctx, "f/sqlq", "x"); got != nil || err != nil {
-		t.Fatalf("non-DTQL query: %v %v", got, err)
+		t.Fatalf("non-TugQL query: %v %v", got, err)
 	}
 	if _, err := service.LookupParameter(ctx, "f/absent", "x"); err == nil {
 		t.Fatal("unknown query accepted")
@@ -142,7 +143,7 @@ func TestCovCChatLookupParameter(t *testing.T) {
 	}
 
 	// no environment to resolve the source from
-	noEnv := covCWriteProject(t, covCQueryFiles("f", "inv", "DTQL", "dtql", covCCustomerDTQL, covCCustomerParams))
+	noEnv := covCWriteProject(t, covCQueryFiles("f", "inv", "TugQL", "tugql", covCCustomerTugQL, covCCustomerParams))
 	if _, err := covCChatService(t, noEnv, true).LookupParameter(ctx, "f/inv", "CustomerId"); err == nil {
 		t.Fatal("unresolvable source accepted")
 	}
@@ -150,7 +151,7 @@ func TestCovCChatLookupParameter(t *testing.T) {
 
 func TestCovCChatLookupParameterSourceKinds(t *testing.T) {
 	ctx := context.Background()
-	query := covCQueryFiles("f", "inv", "DTQL", "dtql", covCCustomerDTQL, covCCustomerParams)
+	query := covCQueryFiles("f", "inv", "TugQL", "tugql", covCCustomerTugQL, covCCustomerParams)
 	envFor := func(driver, path string) map[string]string {
 		return map[string]string{
 			"environments/local/local.env.json":             `{"id":"local","dbServers":[{"driver":"` + driver + `","catalogs":["main"]}]}`,
@@ -198,7 +199,7 @@ func TestCovCChatLookupParameterSeams(t *testing.T) {
 	ctx := context.Background()
 	dir := covCWriteProject(t, covCMerge(
 		covCEnvFiles(map[string]string{"main": covCLookupDB(t)}),
-		covCQueryFiles("f", "inv", "DTQL", "dtql", covCCustomerDTQL, covCCustomerParams),
+		covCQueryFiles("f", "inv", "TugQL", "tugql", covCCustomerTugQL, covCCustomerParams),
 	))
 	service := covCChatService(t, dir, true)
 
@@ -231,7 +232,7 @@ func TestCovCChatRunPaths(t *testing.T) {
 	httpQuery := covCQueryFiles("f", "web", "HTTP", "http", "https://example.test/x", "")
 	dir := covCWriteProject(t, covCMerge(
 		covCEnvFiles(map[string]string{"main": db}),
-		covCQueryFiles("f", "inv", "DTQL", "dtql", covCCustomerDTQL, covCCustomerParams),
+		covCQueryFiles("f", "inv", "TugQL", "tugql", covCCustomerTugQL, covCCustomerParams),
 		covCQueryFiles("f", "sqlq", "SQL", "sql", "SELECT InvoiceId FROM Invoice WHERE CustomerId = @CustomerId", `,"parameters":[{"id":"CustomerId","type":"int","isRequired":true}]`),
 		covCQueryFiles("f", "other", "GraphQL", "", "", ""),
 		httpQuery,
@@ -240,11 +241,11 @@ func TestCovCChatRunPaths(t *testing.T) {
 	service := covCChatService(t, dir, true)
 	vars := map[string]string{"CustomerId": "1"}
 
-	dtqlResult, err := service.RunDTQLWithVariables(ctx, "f/inv", vars)
-	if err != nil || len(dtqlResult.Result.Rows) != 2 || dtqlResult.DTQL == "" || dtqlResult.SourceID != "main" {
-		t.Fatalf("dtql: %+v %v", dtqlResult, err)
+	tugqlResult, err := service.RunTugQLWithVariables(ctx, "f/inv", vars)
+	if err != nil || len(tugqlResult.Result.Rows) != 2 || tugqlResult.TugQL == "" || tugqlResult.SourceID != "main" {
+		t.Fatalf("tugql: %+v %v", tugqlResult, err)
 	}
-	if _, err := service.RunDTQLWithVariables(ctx, "f/sqlq", vars); err == nil || !strings.Contains(err.Error(), "unavailable for browser") {
+	if _, err := service.RunTugQLWithVariables(ctx, "f/sqlq", vars); err == nil || !strings.Contains(err.Error(), "unavailable for browser") {
 		t.Fatalf("type gate: %v", err)
 	}
 	sqlResult, err := service.RunWithVariables(ctx, "f/sqlq", vars)
@@ -252,7 +253,7 @@ func TestCovCChatRunPaths(t *testing.T) {
 		t.Fatalf("sql: %+v %v", sqlResult, err)
 	}
 	if _, err := service.Run(ctx, "f/inv"); err == nil {
-		t.Fatal("DTQL run without its required parameter accepted")
+		t.Fatal("TugQL run without its required parameter accepted")
 	}
 	if _, err := service.Run(ctx, "f/other"); err == nil || !strings.Contains(err.Error(), "not runnable in chat") {
 		t.Fatalf("other type: %v", err)
@@ -263,8 +264,8 @@ func TestCovCChatRunPaths(t *testing.T) {
 	if _, err := service.Run(ctx, "f/broken"); err == nil {
 		t.Fatal("unloadable query accepted")
 	}
-	if _, err := service.RunDTQLWithVariables(ctx, "f/inv", map[string]string{"bad name": "x"}); err == nil {
-		t.Fatal("invalid DTQL parameter name accepted")
+	if _, err := service.RunTugQLWithVariables(ctx, "f/inv", map[string]string{"bad name": "x"}); err == nil {
+		t.Fatal("invalid TugQL parameter name accepted")
 	}
 	if _, err := service.RunHTTPWithVariables(ctx, "f/web", map[string]string{"bad name": "x"}); err == nil {
 		t.Fatal("invalid HTTP parameter name accepted")
@@ -283,16 +284,41 @@ func TestCovCChatRunPaths(t *testing.T) {
 	// environment problems surface from both resolution steps
 	noCatalogs := covCWriteProject(t, covCMerge(
 		map[string]string{"environments/local/local.env.json": `{"id":"local","dbServers":[{"driver":"sqlite3"}]}`},
-		covCQueryFiles("f", "inv", "DTQL", "dtql", covCCustomerDTQL, ""),
+		covCQueryFiles("f", "inv", "TugQL", "tugql", covCCustomerTugQL, ""),
 	))
 	if _, err := covCChatService(t, noCatalogs, true).Run(ctx, "f/inv"); err == nil {
 		t.Fatal("environment without catalogs accepted")
 	}
 	absent := covCWriteProject(t, covCMerge(
 		covCEnvFiles(map[string]string{"main": db}),
-		covCQueryFiles("f", "inv", "DTQL", "dtql", covCCustomerDTQL, `,"targets":[{"catalog":"absent"}]`),
+		covCQueryFiles("f", "inv", "TugQL", "tugql", covCCustomerTugQL, `,"targets":[{"catalog":"absent"}]`),
 	))
 	if _, err := covCChatService(t, absent, true).Run(ctx, "f/inv"); err == nil {
 		t.Fatal("unknown target catalog accepted")
+	}
+}
+
+func TestChatLookupTugQLTextRepresentation(t *testing.T) {
+	for _, mismatched := range []bool{false, true} {
+		t.Run(fmt.Sprint(mismatched), func(t *testing.T) {
+			db := covCLookupDB(t)
+			files := covCMerge(covCEnvFiles(map[string]string{"main": db}), covCQueryFiles("f", "text", "TugQL", "", "", covCCustomerParams))
+			body := "from Invoice\nwhere CustomerId = @CustomerId\nselect InvoiceId"
+			if mismatched {
+				body = covCCustomerTugQL
+			}
+			files["queries/f/text.query.tugql"] = body
+			dir := covCWriteProject(t, files)
+			lookup, err := covCChatService(t, dir, true).LookupParameter(context.Background(), "f/text", "CustomerId")
+			if mismatched {
+				if err == nil || !strings.Contains(err.Error(), "invalid TugQL text") {
+					t.Fatalf("mismatched body: %v", err)
+				}
+				return
+			}
+			if err != nil || lookup == nil || len(lookup.Result.Rows) != 2 {
+				t.Fatalf("text lookup unavailable: %+v / %v", lookup, err)
+			}
+		})
 	}
 }

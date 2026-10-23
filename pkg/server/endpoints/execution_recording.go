@@ -44,7 +44,7 @@ func recordQueryExecution(ctx context.Context, req apicontract.ExecutionRequest,
 	}
 	return persistExecution(ctx, executionInput{
 		Project: req.Project, Environment: req.Environment, SourceStoreID: req.StoreID,
-		QueryID: req.QueryID, QueryRevision: queryRevision, DTQL: req.DTQL,
+		QueryID: req.QueryID, QueryRevision: queryRevision, TugQL: req.TugQL,
 		Parameters: req.Parameters, Bindings: result.BindingsApplied, Incident: req.Incident,
 		Snapshot: req.Snapshot, Measurements: measurements, SemanticFields: querySemanticFields(queryDef),
 	}, result, started)
@@ -62,7 +62,7 @@ func recordRelatedRowsExecution(ctx context.Context, req apicontract.RelatedRows
 	value := apicontract.ScalarValue(req.Value)
 	return persistExecution(ctx, executionInput{
 		Project: req.Project, Environment: req.Environment, SourceStoreID: req.StoreID,
-		DTQLHash: hex.EncodeToString(hash[:]), Parameters: map[string]apicontract.TypedValueOrSet{"value": value},
+		TugQLHash: hex.EncodeToString(hash[:]), Parameters: map[string]apicontract.TypedValueOrSet{"value": value},
 		Bindings: []apicontract.Binding{{
 			ParameterID: "value", Value: value, Origin: apicontract.BindingOriginManual,
 			OriginEvidence: apicontract.BindingOriginEvidenceClientReported,
@@ -71,14 +71,14 @@ func recordRelatedRowsExecution(ctx context.Context, req apicontract.RelatedRows
 }
 
 type executionInput struct {
-	Project, Environment, SourceStoreID    string
-	QueryID, QueryRevision, DTQL, DTQLHash string
-	Parameters                             map[string]apicontract.TypedValueOrSet
-	Bindings                               []apicontract.Binding
-	Incident                               *apicontract.IncidentRef
-	Snapshot                               bool
-	Measurements                           []apicontract.ScalarMeasurement
-	SemanticFields                         map[string]datatug.EntityFieldRef
+	Project, Environment, SourceStoreID      string
+	QueryID, QueryRevision, TugQL, TugQLHash string
+	Parameters                               map[string]apicontract.TypedValueOrSet
+	Bindings                                 []apicontract.Binding
+	Incident                                 *apicontract.IncidentRef
+	Snapshot                                 bool
+	Measurements                             []apicontract.ScalarMeasurement
+	SemanticFields                           map[string]datatug.EntityFieldRef
 }
 
 func persistExecution(ctx context.Context, input executionInput, result apicontract.Result, started time.Time) (apicontract.ExecutionRef, error) {
@@ -118,16 +118,16 @@ func persistExecution(ctx context.Context, input executionInput, result apicontr
 	}
 	roles, groups := api.SecurePrincipalRolesGroups()
 	executedAt := started.UTC().Format(time.RFC3339Nano)
-	dtqlHash := input.DTQLHash
-	if input.DTQL != "" {
-		hash := sha256.Sum256([]byte(input.DTQL))
-		dtqlHash = hex.EncodeToString(hash[:])
+	tugqlHash := input.TugQLHash
+	if input.TugQL != "" {
+		hash := sha256.Sum256([]byte(input.TugQL))
+		tugqlHash = hex.EncodeToString(hash[:])
 	}
 	resultComplete := !result.Truncated
 	record := apicontract.ExecutionRecord{
 		Ref:     ref,
 		Scope:   apicontract.ExecutionRecordScope{StoreID: input.SourceStoreID, Project: input.Project, Environment: input.Environment},
-		QueryID: input.QueryID, QueryRevision: input.QueryRevision, DTQLHash: dtqlHash,
+		QueryID: input.QueryID, QueryRevision: input.QueryRevision, TugQLHash: tugqlHash,
 		Parameters: normalizeParameters(input.Parameters), BindingsApplied: normalizeBindings(input.Bindings),
 		Principal:         apicontract.ExecutionPrincipal{ID: principalID, Roles: roles, Groups: groups},
 		PolicyFingerprint: api.SecurePolicyFingerprint(), ExecutedAt: executedAt,

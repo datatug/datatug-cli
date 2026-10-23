@@ -159,7 +159,7 @@ func TestUnifiedWorkspaceActionMenuKeepsReplacementDialog(t *testing.T) {
 		want  string
 	}{{"detail", 3, "Cell · Id"}, {"save", 12, "Save as project query"}, {"export", 13, "Export RecordSet"}, {"join", 14, "JOIN relationship"}} {
 		t.Run(tc.name, func(t *testing.T) {
-			u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Widgets", DTQL: "from: {name: Widget}\nlimit: 2\n", Result: secureread.Result{Columns: []string{"Id"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 1}}}}})
+			u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Widgets", TugQL: "from: {name: Widget}\nlimit: 2\n", Result: secureread.Result{Columns: []string{"Id"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 1}}}}})
 			u.savedQueryService = &savedQueryStub{}
 			workspaceRoutingKey(u, "ctrl+space")
 			for i := 0; i < tc.index; i++ {
@@ -304,7 +304,7 @@ func TestUnifiedWorkspaceAdvertisedModifiedDialogsDispatch(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct{ key, want string }{{"ctrl+s", "Save as project query"}, {"ctrl+e", "Export RecordSet"}} {
 		t.Run(tc.key, func(t *testing.T) {
-			u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Widgets", DTQL: "from: {name: Widget}\nlimit: 2\n", Result: secureread.Result{Columns: []string{"Id"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 1}}}}})
+			u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Widgets", TugQL: "from: {name: Widget}\nlimit: 2\n", Result: secureread.Result{Columns: []string{"Id"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 1}}}}})
 			u.savedQueryService = &savedQueryStub{}
 			workspaceRoutingKey(u, tc.key)
 			if !strings.Contains(u.shell.View().Content, tc.want) {

@@ -372,6 +372,8 @@ func TestScanJourneyPostgres(t *testing.T) {
 
 	// The scan writes the layout every reader reads, the descriptor, and nothing else.
 	assert.Equal(t, []string{
+		".datatug-environments-owner.json",
+		".datatug-environments.lock",
 		"README.md",
 		"connections/local/shop.json",
 		"datatug-project.json",
@@ -381,6 +383,8 @@ func TestScanJourneyPostgres(t *testing.T) {
 		"dbmodels/shop/sales/tables/Invoice/sales.Invoice.columns.json",
 		"dbmodels/shop/sales/views/OpenInvoices/sales.OpenInvoices.columns.json",
 		"dbmodels/shop/shop.dbmodel.json",
+		"dbmodels/shop/shop.indexes.json",
+		"dbmodels/shop/shop.refs.json",
 		"environments/local/catalogs/shop/shop.db.json",
 		"environments/local/local.env.json",
 	}, projectFiles(t, projectDir, ""), "the files of the scan")
@@ -490,7 +494,8 @@ func TestScanJourneyPostgres(t *testing.T) {
 	// 5. I scan again. Nothing changed in the database, so nothing changes in the folder:
 	// every file is as it was, by content.
 	first := treeHashes(t, projectDir, "")
-	require.Len(t, first, 11)
+	assertScanEnvironmentOwnership(t, projectDir)
+	require.Len(t, first, 15)
 	stderr, err = scan()
 	require.NoError(t, err)
 	assert.Empty(t, stderr, "a rescan with nothing to leave out says nothing on stderr")
@@ -506,10 +511,14 @@ func TestScanJourneyPostgres(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, `removed: dbmodels/shop/public/tables/order_line: table "order_line" of schema "public" is no longer in the database`+"\n", stderr,
 		"one line for the folder that was removed, which names it")
-	added, removed, changed := diffTrees(first, treeHashes(t, projectDir, ""))
+	second := treeHashes(t, projectDir, "")
+	added, removed, changed := diffTrees(first, second)
 	assert.Equal(t, []string{"dbmodels/shop/sales/tables/Payment/sales.Payment.columns.json"}, added)
 	assert.Equal(t, []string{"dbmodels/shop/public/tables/order_line/public.order_line.columns.json"}, removed)
-	assert.Empty(t, changed, "every other file is as the first scan wrote it")
+	assert.Equal(t, []string{"dbmodels/shop/shop.indexes.json", "dbmodels/shop/shop.refs.json"}, changed,
+		"the dropped table held the only foreign key and the only index: the files that listed them are rewritten, now empty, and nothing else changed")
+	assert.Equal(t, "d41470f2588557674a3336837e129abfb5b47835139a998fbfb123d14b9d5e67", second["dbmodels/shop/shop.indexes.json"], "no index is left")
+	assert.Equal(t, "b1fe91af60710f2cecc79bfde2f35977d022c6e82b7543e1b3fb9d43fcdf1c36", second["dbmodels/shop/shop.refs.json"], "no foreign key is left")
 	assert.NoDirExists(t, filepath.Join(projectDir, "dbmodels", "shop", "public", "tables", "order_line"), "the folder of the dropped table is removed, not left empty")
 	assertNoSourceIn(t, projectDir)
 	project, err = projStore.LoadProject(ctx)

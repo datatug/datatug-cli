@@ -152,7 +152,7 @@ func TestReferenceToADatabaseOfSeveralEnvironmentsNeedsEnv(t *testing.T) {
 	_, err = runProjectMetadata(t, dbSchemaCommand(), "--db", "datatug://shop/shop")
 	require.Error(t, err)
 	assert.Equal(t, 2, exitCodeOf(t, err))
-	assert.EqualError(t, err, `database "shop": the source is listed in several environments (dev, local): add ?env=<ENV> to the reference`)
+	assert.EqualError(t, err, `database "shop": the source is listed in several environments (local, dev): add ?env=<ENV> to the reference`)
 	_, err = runProjectMetadata(t, dbSchemaCommand(), "--db", "datatug://shop/shop?env=dev")
 	require.NoError(t, err)
 }
@@ -181,7 +181,7 @@ func TestReferenceSaysWhyADatabaseCannotBeOpened(t *testing.T) {
 	dir := addProject(t)
 	catalogs := filepath.Join(dir, "environments", "local", "catalogs")
 	for id, catalog := range map[string]string{
-		"mssql": `{"id":"mssql","driver":"sqlserver","dbModel":"","schemas":[]}`,
+		"mssql": `{"id":"mssql","driver":"firestore","dbModel":"","schemas":[]}`,
 		"url":   `{"id":"url","driver":"sqlite3","path":"https://u:secret@h/x.db","dbModel":"","schemas":[]}`,
 		"pg":    `{"id":"pg","driver":"postgres","path":"connections/local/pg.json","dbModel":"","schemas":[]}`,
 	} {
@@ -191,7 +191,7 @@ func TestReferenceSaysWhyADatabaseCannotBeOpened(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "environments", "local", "local.env.json"), []byte(`{"id":"local"}`), 0o644))
 	_, err := runProjectMetadata(t, dbSchemaCommand(), "--db", "datatug://shop/mssql")
 	assert.Equal(t, 2, exitCodeOf(t, err))
-	assert.EqualError(t, err, `database "mssql" cannot be opened: its driver is not one that can be opened (sqlite3 or postgres)`)
+	assert.EqualError(t, err, `database "mssql" cannot be opened: its driver is not one that can be opened (sqlite3, postgres, mysql, oracle or sqlserver)`)
 	for _, id := range []string{"url", "pg"} {
 		_, err = runProjectMetadata(t, dbSchemaCommand(), "--db", "datatug://shop/"+id)
 		assert.Equal(t, 2, exitCodeOf(t, err), id)
@@ -213,7 +213,6 @@ func TestReferenceToAPostgresDatabaseIsReadFromItsVariable(t *testing.T) {
 	assert.Equal(t, 2, exitCodeOf(t, err))
 	assert.ErrorContains(t, err, "DATATUG_SHOP_PG")
 
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	t.Setenv("DATATUG_SHOP_PG", "postgres://alice:hunter2@db.example.com:5432/shop?sslmode=require")
 	var opened dbcopy.BackendRef
 	withSchemaSource(t, func(_ context.Context, ref dbcopy.BackendRef) (dal.DB, error) {

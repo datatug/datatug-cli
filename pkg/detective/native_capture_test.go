@@ -37,7 +37,7 @@ func TestNativeCaptureOwnsTransitiveDefinitionsAndQueries(t *testing.T) {
 	seen := map[string]bool{}
 	capture, err := s.CaptureNativeInput(ctx, NativeCaptureRequest{CheckID: "root", NativeOperationID: "native", Actor: "alice", Reference: ref}, func(_ context.Context, id string) (sessioncontext.DetectiveAcceptedQueryPin, error) {
 		seen[id] = true
-		raw, err := json.Marshal(map[string]string{"id": id, "title": id, "type": "SQL", "text": "select accepted"})
+		raw, err := json.Marshal(map[string]string{"createdAt": "2026-01-01T00:00:00Z", "id": id, "title": id, "type": "SQL", "text": "select accepted"})
 		return sessioncontext.DetectiveAcceptedQueryPin{QueryID: id, Revision: "revision", DefinitionJSON: raw}, err
 	})
 	if err != nil {
@@ -143,7 +143,7 @@ func TestNativeCaptureUsesAuthoritativeCaseDefaultsAndTypedManualData(t *testing
 	}
 	ref := apicontract.SessionInputReference{SchemaVersion: 1, StorageID: "local", DatabaseID: "db", ProjectID: "p", NamespaceID: "ns", SessionID: "session", InputSnapshotID: "input", ContextSetID: "context", EnvironmentID: "qa", IdentityDomain: "tenant"}
 	snapshot := func(context.Context, string) (sessioncontext.DetectiveAcceptedQueryPin, error) {
-		return sessioncontext.DetectiveAcceptedQueryPin{QueryID: "q", Revision: "revision", DefinitionJSON: json.RawMessage(`{"id":"q","title":"Query","type":"SQL","text":"select accepted"}`)}, nil
+		return sessioncontext.DetectiveAcceptedQueryPin{QueryID: "q", Revision: "revision", DefinitionJSON: json.RawMessage(`{"createdAt":"2026-01-01T00:00:00Z","id":"q","title":"Query","type":"SQL","text":"select accepted"}`)}, nil
 	}
 	req := NativeCaptureRequest{CheckID: "input-check", CaseID: item.ID, NativeOperationID: "native", Actor: "alice", Reference: ref}
 	capture, err := s.CaptureNativeInput(ctx, req, snapshot)

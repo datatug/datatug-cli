@@ -133,7 +133,7 @@ func TestScanJourneyMissingDriverNamesTheFlag(t *testing.T) {
 // read or written; a value that is not a plain name is not repeated (it may be a connection string).
 func TestScanJourneyUnsupportedDriverNamesTheFlag(t *testing.T) {
 	const secret = "s3cretpassword"
-	for name, driver := range map[string]string{"a driver of another database": "mysql", "a connection string": "postgres://alice:" + secret + "@db.example.com/shop"} {
+	for name, driver := range map[string]string{"a driver of another database": "db2", "a connection string": "postgres://alice:" + secret + "@db.example.com/shop"} {
 		t.Run(name, func(t *testing.T) {
 			projectDir := filepath.Join(t.TempDir(), "company")
 
@@ -141,15 +141,15 @@ func TestScanJourneyUnsupportedDriverNamesTheFlag(t *testing.T) {
 
 			require.Error(t, err)
 			assert.ErrorContains(t, err, "--driver")
-			assert.ErrorContains(t, err, "sqlite3, sqlserver or postgres", "and what it takes")
+			assert.ErrorContains(t, err, "sqlite3, postgres, mysql, oracle or sqlserver", "and what it takes")
 			assert.NotContains(t, err.Error(), secret)
 			assert.NotContains(t, err.Error(), "db.example.com")
 			assert.NotContains(t, stderr, secret)
 			assert.NoDirExists(t, projectDir, "nothing was made")
 		})
 	}
-	_, err := runScanCommand(t, "-d", t.TempDir(), "-D", "mysql", "--db", "shop", "--env", "local")
-	assert.ErrorContains(t, err, `"mysql"`, "a plain name is said as it was typed")
+	_, err := runScanCommand(t, "-d", t.TempDir(), "-D", "db2", "--db", "shop", "--env", "local")
+	assert.ErrorContains(t, err, `"db2"`, "a plain name is said as it was typed")
 }
 
 // --dbmodel is the id of the database model of the catalog, and its folder in the
@@ -163,12 +163,16 @@ func TestScanJourneyHonoursTheDbModel(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, []string{
+		".datatug-environments-owner.json",
+		".datatug-environments.lock",
 		"README.md",
 		"datatug-project.json",
 		"dbmodels/retail-model/main/tables/Customer/main.Customer.columns.json",
 		"dbmodels/retail-model/main/tables/order_line/main.order_line.columns.json",
 		"dbmodels/retail-model/main/views/customer_names/main.customer_names.columns.json",
 		"dbmodels/retail-model/retail-model.dbmodel.json",
+		"dbmodels/retail-model/retail-model.indexes.json",
+		"dbmodels/retail-model/retail-model.refs.json",
 		"environments/local/catalogs/shop/shop.db.json",
 		"environments/local/local.env.json",
 	}, projectFiles(t, projectDir, ""))
@@ -588,4 +592,14 @@ func TestScanJourneyRefusesANameThatDiffersOnlyByCaseFromOneTheProjectHas(t *tes
 			assert.Equal(t, before, treeHashes(t, projectDir, ""), "the project is as it was, with its tables")
 		})
 	}
+}
+
+func TestScanRelativeProjectRootMustBeLocatedBeforeWriting(t *testing.T) {
+	workDir := t.TempDir()
+	t.Chdir(workDir)
+	covDSetVar(t, &scanDirectoryAbs, func(string) (string, error) { return "", errors.New("working directory unavailable") })
+	_, err := runScanCommand(t, "-d", "project", "-D", "sqlite3", "--path", "shop.db", "--db", "shop", "--env", "local")
+	require.ErrorContains(t, err, "cannot locate the project folder")
+	assert.ErrorContains(t, err, "working directory unavailable")
+	assert.NoDirExists(t, filepath.Join(workDir, "project"))
 }

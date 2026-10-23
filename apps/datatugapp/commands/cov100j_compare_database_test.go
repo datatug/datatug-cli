@@ -10,6 +10,7 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	bigquery "github.com/dal-go/dalgo2bigquery"
+	"github.com/dal-go/dalgo2postgres"
 	"github.com/datatug/datatug-cli/pkg/dbcompare"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/datatug"
@@ -676,7 +677,8 @@ func TestOpenProjectCompareDatabaseRemainingEdges(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, sourceURL)
 
-	// openCompareSource postgres CheckPostgresRead error
+	// openCompareSource postgres open error
+	standInForPostgres(t, &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork})
 	_, _, err = openCompareSource(ctx, "postgres://user:pass@127.0.0.1:0/db", "", "postgres")
 	require.Error(t, err)
 

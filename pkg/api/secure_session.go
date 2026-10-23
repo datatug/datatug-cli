@@ -90,7 +90,7 @@ type Capabilities struct {
 // builds once for its whole process lifetime (REQ:principal-selection) into
 // every request this process handles, and records the project-id ->
 // filesystem-directory map serve already resolved (pathsByID) so a saved
-// query's SQL/DTQL sidecar file can be located — pkg/datatug-core's
+// query's SQL/TugQL sidecar file can be located — pkg/datatug-core's
 // LoadQuery does not hydrate QueryDef.Text back from that file yet (that
 // lands with the datatug-core sidecar-read story; see loadQueryDocument).
 //

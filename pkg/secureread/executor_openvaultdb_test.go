@@ -12,8 +12,9 @@ import (
 	"testing"
 
 	"github.com/dal-go/dalgo/access"
+	"github.com/dal-go/dalgo2openvaultdb"
 	"github.com/dal-go/record"
-	"github.com/datatug/datatug-cli/pkg/openvaultdb"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/openvaultdb/openvaultdb-go/pkg/auth"
 	"github.com/openvaultdb/openvaultdb-go/pkg/core"
 	"github.com/openvaultdb/openvaultdb-go/pkg/mount"
@@ -22,7 +23,7 @@ import (
 
 // Runs the actual DataTug executor over HTTP to the real OVDB server and both
 // storage engines. The existing fixed local session remains the upper ACL layer.
-func TestOpenVaultDBLayeredDTQL(t *testing.T) {
+func TestOpenVaultDBLayeredTugQL(t *testing.T) {
 	for _, engine := range []string{"sqlite", "ingitdb"} {
 		t.Run(engine, func(t *testing.T) {
 			dir := t.TempDir()
@@ -53,7 +54,7 @@ func TestOpenVaultDBLayeredDTQL(t *testing.T) {
 				}
 			}
 			policy := func(name, field, value string) string {
-				return fmt.Sprintf(`apiVersion: dtql.org/access/v1
+				return fmt.Sprintf(`apiVersion: tugql.org/access/v1
 kind: AccessPolicy
 metadata: {name: %s}
 target: {database: crm}
@@ -98,13 +99,13 @@ bindings: {roles: {reader: [read]}}
 			t.Setenv("ACL24_OVDB_TOKEN", token)
 			t.Setenv("ACL24_OVDB_TOKEN_BASE_URL", server.URL)
 			t.Setenv("ACL24_OVDB_TOKEN_PRINCIPAL_ID", "alice")
-			descriptor, _ := json.Marshal(openvaultdb.SourceConfig{BaseURL: server.URL, DatabaseID: "crm", TokenEnv: "ACL24_OVDB_TOKEN", PrincipalID: "alice"})
+			descriptor, _ := json.Marshal(dbcopy.OpenVaultDBDescriptor{BaseURL: server.URL, DatabaseID: "crm", TokenEnv: "ACL24_OVDB_TOKEN", PrincipalID: "alice"})
 			connection := filepath.Join(dir, "connection.json")
 			write(connection, string(descriptor))
 			sourceURL := "openvaultdb://" + connection
 			executor := NewExecutor(aliceSession(t, permissivePolicy))
 			query := "from: {name: customers}\ncolumns: [{field: name}]\norderBy: [{field: name}]\nlimit: 10\n"
-			result, err := executor.RunDTQL(context.Background(), sourceURL, []byte(query), nil)
+			result, err := executor.RunTugQL(context.Background(), sourceURL, []byte(query), nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -124,24 +125,24 @@ bindings: {roles: {reader: [read]}}
 				}
 			}
 			denied := NewExecutor(aliceSession(t, productsOnlyPolicy))
-			if _, err = denied.RunDTQL(context.Background(), sourceURL, []byte(query), nil); !errors.Is(err, access.ErrAccessDenied) {
+			if _, err = denied.RunTugQL(context.Background(), sourceURL, []byte(query), nil); !errors.Is(err, access.ErrAccessDenied) {
 				t.Fatalf("local denial=%v", err)
 			}
-			if _, err = executor.RunDTQL(context.Background(), sourceURL, []byte(strings.Replace(query, "field: name", "field: tenant", 1)), nil); !errors.Is(err, access.ErrAccessDenied) {
+			if _, err = executor.RunTugQL(context.Background(), sourceURL, []byte(strings.Replace(query, "field: name", "field: tenant", 1)), nil); !errors.Is(err, access.ErrAccessDenied) {
 				t.Fatalf("lower column denial=%v", err)
 			}
-			var denial *openvaultdb.AuthorizationError
+			var denial *dalgo2openvaultdb.AuthorizationError
 			if !errors.As(err, &denial) || len(denial.Decision.Blockers) == 0 || len(denial.Decision.Layers) == 0 {
 				t.Fatalf("real owner denial lost structured blockers: %v", err)
 			}
 			wrong := aliceSession(t, permissivePolicy)
 			wrong.Principal.ID = "bob"
-			if _, err = NewExecutor(wrong).RunDTQL(context.Background(), sourceURL, []byte(query), nil); !errors.Is(err, access.ErrAccessDenied) {
+			if _, err = NewExecutor(wrong).RunTugQL(context.Background(), sourceURL, []byte(query), nil); !errors.Is(err, access.ErrAccessDenied) {
 				t.Fatalf("credential principal mismatch=%v", err)
 			}
 			// Revocation must take effect on the next operation; no client cached allow.
 			t.Setenv("ACL24_OVDB_TOKEN", "revoked")
-			if _, err = executor.RunDTQL(context.Background(), sourceURL, []byte(query), nil); !errors.Is(err, access.ErrAccessDenied) {
+			if _, err = executor.RunTugQL(context.Background(), sourceURL, []byte(query), nil); !errors.Is(err, access.ErrAccessDenied) {
 				t.Fatalf("revoked token=%v", err)
 			}
 		})

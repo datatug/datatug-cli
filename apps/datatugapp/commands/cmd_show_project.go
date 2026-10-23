@@ -70,6 +70,9 @@ type showProjectCommand struct {
 	projectBaseCommand
 }
 
+// showDirectoryAbs preserves path spelling without resolving project-root links.
+var showDirectoryAbs = filepath.Abs
+
 func showCommandAction(cmd *cobra.Command, _ []string) error {
 	flags := cmd.Flags()
 	v := &showProjectCommand{}
@@ -94,6 +97,14 @@ func showCommandAction(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	v.projectBaseCommand = *base
+	if !filepath.IsAbs(v.ProjectDir) {
+		absoluteDir, err := showDirectoryAbs(v.ProjectDir)
+		if err != nil {
+			return fmt.Errorf("could not locate project directory: %w", err)
+		}
+		v.ProjectDir = absoluteDir
+		v.store, v.projectID = filestore.NewSingleProjectStore(v.ProjectDir, v.projectID)
+	}
 	ctx := cmd.Context()
 	if ctx == nil {
 		ctx = context.Background()

@@ -287,16 +287,16 @@ func TestCoverage_Federated(t *testing.T) {
 	e := &Executor{session: Session{Unrestricted: true}}
 
 	// Deserialize error
-	_, err := e.StreamFederatedDTQL(context.Background(), []byte("not valid DTQL json"), nil, nil)
+	_, err := e.StreamFederatedTugQL(context.Background(), []byte("not valid TugQL json"), nil, nil)
 	assert.Error(t, err)
 
-	// StreamFederatedDTQL openSource error (bad source URL)
+	// StreamFederatedTugQL openSource error (bad source URL)
 	rawDoc := []byte(federatedSalesQuery)
-	_, err = e.StreamFederatedDTQL(context.Background(), rawDoc, map[string]string{"orders": "unsupported://url"}, nil)
+	_, err = e.StreamFederatedTugQL(context.Background(), rawDoc, map[string]string{"orders": "unsupported://url"}, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "open database")
 
-	// RunFederatedDTQL with collectRows error
+	// RunFederatedTugQL with collectRows error
 	origCollect := collectRowsFederatedFn
 	collectRowsFederatedFn = func(reader dal.RecordsReader) ([]Row, *statisticsAccumulator, error) {
 		return nil, nil, errors.New("simulated federated collectRows error")
@@ -312,24 +312,24 @@ func TestCoverage_Federated(t *testing.T) {
 	_ = db2.Close()
 
 	sources := map[string]string{"orders": "sqlite://" + ordersPath, "countries": "sqlite://" + countriesPath}
-	_, err = e.RunFederatedDTQL(context.Background(), rawDoc, sources, nil)
+	_, err = e.RunFederatedTugQL(context.Background(), rawDoc, sources, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "simulated federated collectRows error")
 	collectRowsFederatedFn = origCollect
 
-	// RunFederatedDTQL where columnsFor returns empty (columns in query don't match row data)
-	origStream := streamFederatedDTQLFn
-	streamFederatedDTQLFn = func(e *Executor, ctx context.Context, document []byte, sourceURLs map[string]string, variables map[string]any) (*FederatedStream, error) {
+	// RunFederatedTugQL where columnsFor returns empty (columns in query don't match row data)
+	origStream := streamFederatedTugQLFn
+	streamFederatedTugQLFn = func(e *Executor, ctx context.Context, document []byte, sourceURLs map[string]string, variables map[string]any) (*FederatedStream, error) {
 		q := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("items", ""))).SelectColumns(dal.Column{Alias: "missing_col"})
 		rec := record.NewRecordWithData(record.NewKeyWithID("items", "1"), map[string]any{"actual_col": "val"})
 		r := dal.NewRecordsReader([]record.Record{rec})
 		lims := []Limitation{}
 		return &FederatedStream{Reader: r, Query: q, limitations: &lims}, nil
 	}
-	resFed, err := e.RunFederatedDTQL(context.Background(), rawDoc, sources, nil)
+	resFed, err := e.RunFederatedTugQL(context.Background(), rawDoc, sources, nil)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"actual_col"}, resFed.Columns)
-	streamFederatedDTQLFn = origStream
+	streamFederatedTugQLFn = origStream
 
 	// securedLeaf methods
 	leaf := securedLeaf{

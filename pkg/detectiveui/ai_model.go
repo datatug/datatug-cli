@@ -283,7 +283,7 @@ func (m *Model) updateAIKey(key string) (tea.Model, tea.Cmd) {
 		switch p.Draft.Kind {
 		case ai.KindQuery:
 			if x := p.Draft.Query; x != nil {
-				fields = append(fields, f("Query ID", x.ID, "saved query ID"), f("Query title", x.Title, ""), f("Query type", x.Type, ""), fm("Query text", x.Text, "editable SQL or DTQL"), f("Connection ID", x.ConnectionID, "admitted source"), f("Inputs", formatInputs(x.Inputs), "scalar or set query parameters"), f("Expected revision", x.ExpectedRevision, "empty creates; existing revision edits"))
+				fields = append(fields, f("Query ID", x.ID, "saved query ID"), f("Query title", x.Title, ""), f("Query type", x.Type, ""), fm("Query text", x.Text, "editable SQL or TugQL"), f("Connection ID", x.ConnectionID, "admitted source"), f("Inputs", formatInputs(x.Inputs), "scalar or set query parameters"), f("Expected revision", x.ExpectedRevision, "empty creates; existing revision edits"))
 			}
 		case ai.KindCheck:
 			if x := p.Draft.Check; x != nil {

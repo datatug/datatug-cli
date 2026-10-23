@@ -10,11 +10,11 @@ import (
 // the last spelling, so "project" and "Project" in one object are duplicates
 // the contract decoder must reject - where a struct field is the target.
 func TestDecodeContractBody_RejectsCaseVariantDuplicateKeys(t *testing.T) {
-	const query = `"query":{"folderPath":"","id":"q","title":"t","purpose":"p","source":"s","dtql":"from: X\n","parameters":[],"bindingOrigins":[]}`
+	const query = `"query":{"folderPath":"","id":"q","title":"t","purpose":"p","source":"s","tugql":"from: X\n","parameters":[],"bindingOrigins":[]}`
 	rejected := map[string]string{
 		"top level": `{"project":"a","Project":"b","environment":"e","securityContextId":"s","ifNoneMatch":true,` + query + `}`,
-		"nested":    `{"project":"a","environment":"e","securityContextId":"s","ifNoneMatch":true,"query":{"folderPath":"","id":"q","ID":"r","title":"t","purpose":"p","source":"s","dtql":"from: X\n","parameters":[],"bindingOrigins":[]}}`,
-		"in an array element": `{"project":"a","environment":"e","securityContextId":"s","ifNoneMatch":true,"query":{"folderPath":"","id":"q","title":"t","purpose":"p","source":"s","dtql":"from: X\n",` +
+		"nested":    `{"project":"a","environment":"e","securityContextId":"s","ifNoneMatch":true,"query":{"folderPath":"","id":"q","ID":"r","title":"t","purpose":"p","source":"s","tugql":"from: X\n","parameters":[],"bindingOrigins":[]}}`,
+		"in an array element": `{"project":"a","environment":"e","securityContextId":"s","ifNoneMatch":true,"query":{"folderPath":"","id":"q","title":"t","purpose":"p","source":"s","tugql":"from: X\n",` +
 			`"parameters":[{"id":"P","ID":"Q","type":"string","isRequired":true}],"bindingOrigins":[]}}`,
 	}
 	for name, body := range rejected {

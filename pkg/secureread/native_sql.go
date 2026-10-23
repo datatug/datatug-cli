@@ -10,8 +10,52 @@ import (
 	"github.com/dal-go/dalgo2sql"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 
-	_ "modernc.org/sqlite" // register the "sqlite" driver — the same one dalgo2sqlite uses
+	"modernc.org/sqlite"
 )
+
+const nativeReadOnlyDriver = "datatug-sqlite-readonly"
+
+func init() {
+	driver := &sqlite.Driver{}
+	driver.RegisterConnectionHook(installReadOnlyAuthorizer)
+	sql.Register(nativeReadOnlyDriver, driver)
+}
+
+// Every physical connection, including a replacement after cancellation, gets
+// this policy. Unlike query_only alone, SQL cannot turn the authorizer off.
+func installReadOnlyAuthorizer(conn sqlite.ExecQuerierContext, _ string) error {
+	registerer, ok := conn.(sqlite.AuthorizerRegisterer)
+	if !ok {
+		return fmt.Errorf("SQLite driver has no read-only authorizer")
+	}
+	return registerer.RegisterAuthorizer(authorizeReadOnlySQL)
+}
+
+func authorizeReadOnlySQL(action sqlite.AuthorizerActionCode, arg1, arg2, _, _ string) sqlite.AuthorizerReturnCode {
+	switch action {
+	case sqlite.AuthRead, sqlite.AuthSelect, sqlite.AuthRecursive, sqlite.AuthTransaction, sqlite.AuthSavepoint:
+		return sqlite.AuthorizerOK
+	case sqlite.AuthFunction:
+		switch strings.ToLower(arg2) {
+		case "load_extension", "writefile":
+			return sqlite.AuthorizerDeny
+		default:
+			return sqlite.AuthorizerOK
+		}
+	case sqlite.AuthPragma:
+		switch strings.ToLower(arg1) {
+		case "table_info", "table_xinfo", "index_list", "index_info", "index_xinfo", "foreign_key_list":
+			return sqlite.AuthorizerOK
+		case "query_only":
+			if arg2 == "" || strings.EqualFold(arg2, "ON") || arg2 == "1" {
+				return sqlite.AuthorizerOK
+			}
+		}
+	}
+	// Includes all writes, ATTACH, DETACH, VACUUM INTO's internal attachment,
+	// schema changes and unknown future actions.
+	return sqlite.AuthorizerDeny
+}
 
 // nativeSQLLimitation is appended to every RunNativeSQL Result the session's
 // policies govern (REQ:opaque-sql-limitation): row and column rules never
@@ -52,17 +96,15 @@ var nativeSQLLimitation = Limitation{
 // not string substitution into sqlText, so a value can never be mistaken
 // for SQL syntax).
 //
-// The SQLite session is pinned read-only at the engine level with
-// PRAGMA query_only on a dedicated, single-connection database handle, so
-// even a multi-statement injection inside sqlText cannot write — this is
-// stronger than the access-denied-by-default posture the ACL check alone
-// gives a syntactically valid but policy-forbidden write attempt.
+// SQLite opens its main file with mode=ro, retains PRAGMA query_only, and
+// installs a connection authorizer that rejects writes, attachments and
+// disabling query_only. Multi-statement SQL cannot weaken this boundary.
 //
-// Only sqlite:// sources support native SQL today: dalgo2ingitdb executes
-// only dal.StructuredQuery ("only StructuredQuery is supported"), and a
-// postgres:// source takes structured queries only (its read-only session is
-// for those, not for SQL text). A source without a SQL-text execution surface
-// fails with ErrNativeSQLUnsupported.
+// PostgreSQL, MySQL, Oracle and SQL Server sources run native SQL too, a query only
+// (see runServerNativeSQL). Otherwise only sqlite:// sources support native SQL:
+// dalgo2ingitdb executes only dal.StructuredQuery ("only StructuredQuery is
+// supported"). A source without a SQL-text execution surface fails with
+// ErrNativeSQLUnsupported.
 // A future SQL-capable adapter for another scheme should add a read-only
 // dal.DB.RunReadonlyTransaction branch alongside this PRAGMA one, per the
 // brief's "PRAGMA query_only for SQLite; read-only tx elsewhere" design.
@@ -74,8 +116,8 @@ func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, 
 	if err != nil {
 		return Result{}, err
 	}
-	if ref.Scheme == "postgres" {
-		return Result{}, fmt.Errorf("%w: PostgreSQL sources take structured queries only", ErrNativeSQLUnsupported)
+	if dbcopy.IsServerScheme(ref.Scheme) {
+		return e.runServerNativeSQL(ctx, sourceURL, ref, sqlText, args)
 	}
 	if ref.Scheme != "sqlite" {
 		return Result{}, fmt.Errorf("%w: scheme %q", ErrNativeSQLUnsupported, ref.Scheme)
@@ -150,7 +192,7 @@ func openReadOnlySQLite(ctx context.Context, path string) (dal.DB, func(), error
 func openReadOnlySQLiteDB(ctx context.Context, path string) (dal.DB, *sql.DB, func(), error) {
 	// The path is handed over as a "file:" URI: a bare path with a "?" in it is read by the
 	// driver as the file before it and its parameters (see dbcopy.SQLiteFileURI).
-	sqlDB, err := sqlOpenNative("sqlite", dbcopy.SQLiteFileURI(path))
+	sqlDB, err := sqlOpenNative(nativeReadOnlyDriver, dbcopy.SQLiteFileURIMode(path, dbcopy.SQLiteReadOnly))
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("secureread: open sqlite: %w", err)
 	}

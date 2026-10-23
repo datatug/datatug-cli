@@ -672,14 +672,14 @@ func TestCoverageFinish100_ProjectQueryAdapter_Helpers(t *testing.T) {
 	localGitOutputSeam = origOutput
 
 	// 6. stageLocalQueryPair
-	err = stageLocalQueryPair(ctx, st.root, dir, "prev_q", datatug.QueryTypeSQL, "", preview.metadata, preview.body)
+	err = stageLocalQueryPair(ctx, st.root, dir, "prev_q", datatug.QueryTypeSQL, "", preview.metadata, preview.body, false, false)
 	assert.NoError(t, err)
 
-	err = stageLocalQueryPair(ctx, st.root, dir, "prev_q", datatug.QueryTypeDTQL, datatug.QueryTypeSQL, preview.metadata, preview.body)
+	err = stageLocalQueryPair(ctx, st.root, dir, "prev_q", datatug.QueryTypeTugQL, datatug.QueryTypeSQL, preview.metadata, preview.body, false, false)
 	assert.NoError(t, err)
 
 	outsideDir := t.TempDir()
-	err = stageLocalQueryPair(ctx, st.root, outsideDir, "prev_q", datatug.QueryTypeSQL, "", preview.metadata, preview.body)
+	err = stageLocalQueryPair(ctx, st.root, outsideDir, "prev_q", datatug.QueryTypeSQL, "", preview.metadata, preview.body, false, false)
 	assert.Error(t, err)
 
 	origEval := filepathEvalSymlinks
@@ -689,7 +689,7 @@ func TestCoverageFinish100_ProjectQueryAdapter_Helpers(t *testing.T) {
 		}
 		return origEval(p)
 	}
-	err = stageLocalQueryPair(ctx, st.root, dir, "prev_q", datatug.QueryTypeSQL, "", preview.metadata, preview.body)
+	err = stageLocalQueryPair(ctx, st.root, dir, "prev_q", datatug.QueryTypeSQL, "", preview.metadata, preview.body, false, false)
 	assert.Error(t, err)
 
 	calledCount := 0
@@ -700,7 +700,7 @@ func TestCoverageFinish100_ProjectQueryAdapter_Helpers(t *testing.T) {
 		}
 		return origEval(p)
 	}
-	err = stageLocalQueryPair(ctx, st.root, dir, "prev_q", datatug.QueryTypeSQL, "", preview.metadata, preview.body)
+	err = stageLocalQueryPair(ctx, st.root, dir, "prev_q", datatug.QueryTypeSQL, "", preview.metadata, preview.body, false, false)
 	assert.Error(t, err)
 	filepathEvalSymlinks = origEval
 
@@ -708,7 +708,7 @@ func TestCoverageFinish100_ProjectQueryAdapter_Helpers(t *testing.T) {
 	localGitInputSeam = func(context.Context, string, []byte, ...string) (string, error) {
 		return "", errors.New("input err")
 	}
-	err = stageLocalQueryPair(ctx, st.root, dir, "prev_q", datatug.QueryTypeSQL, "", preview.metadata, preview.body)
+	err = stageLocalQueryPair(ctx, st.root, dir, "prev_q", datatug.QueryTypeSQL, "", preview.metadata, preview.body, false, false)
 	assert.Error(t, err)
 	localGitInputSeam = origInput
 
@@ -718,7 +718,7 @@ func TestCoverageFinish100_ProjectQueryAdapter_Helpers(t *testing.T) {
 		}
 		return origOutput(c, d, args...)
 	}
-	err = stageLocalQueryPair(ctx, st.root, dir, "prev_q", datatug.QueryTypeSQL, "", preview.metadata, preview.body)
+	err = stageLocalQueryPair(ctx, st.root, dir, "prev_q", datatug.QueryTypeSQL, "", preview.metadata, preview.body, false, false)
 	assert.Error(t, err)
 
 	localGitOutputSeam = func(c context.Context, d string, args ...string) (string, error) {
@@ -730,7 +730,7 @@ func TestCoverageFinish100_ProjectQueryAdapter_Helpers(t *testing.T) {
 		}
 		return origOutput(c, d, args...)
 	}
-	err = stageLocalQueryPair(ctx, st.root, dir, "prev_q", datatug.QueryTypeDTQL, datatug.QueryTypeSQL, preview.metadata, preview.body)
+	err = stageLocalQueryPair(ctx, st.root, dir, "prev_q", datatug.QueryTypeTugQL, datatug.QueryTypeSQL, preview.metadata, preview.body, false, false)
 	assert.Error(t, err)
 
 	localGitOutputSeam = func(c context.Context, d string, args ...string) (string, error) {
@@ -739,7 +739,7 @@ func TestCoverageFinish100_ProjectQueryAdapter_Helpers(t *testing.T) {
 		}
 		return origOutput(c, d, args...)
 	}
-	err = stageLocalQueryPair(ctx, st.root, dir, "prev_q", datatug.QueryTypeDTQL, datatug.QueryTypeSQL, preview.metadata, preview.body)
+	err = stageLocalQueryPair(ctx, st.root, dir, "prev_q", datatug.QueryTypeTugQL, datatug.QueryTypeSQL, preview.metadata, preview.body, false, false)
 	assert.ErrorIs(t, err, ErrProjectMutationOutcomeUncertain)
 
 	localGitOutputSeam = func(c context.Context, d string, args ...string) (string, error) {
@@ -748,7 +748,7 @@ func TestCoverageFinish100_ProjectQueryAdapter_Helpers(t *testing.T) {
 		}
 		return origOutput(c, d, args...)
 	}
-	err = stageLocalQueryPair(ctx, st.root, dir, "prev_q", datatug.QueryTypeSQL, "", preview.metadata, preview.body)
+	err = stageLocalQueryPair(ctx, st.root, dir, "prev_q", datatug.QueryTypeSQL, "", preview.metadata, preview.body, false, false)
 	assert.ErrorIs(t, err, ErrProjectMutationOutcomeUncertain)
 	localGitOutputSeam = origOutput
 
@@ -1030,6 +1030,7 @@ func TestCoverageFinish100_ProjectQueryAdapter_SaveQueryEdgeCases(t *testing.T) 
 		Complete:         false,
 		QueryID:          "edge_q1",
 		PreviousRevision: firstSaved.Revision,
+		OldBodyAttested:  true,
 		MetadataBytes:    []byte("{}"),
 		BodyBytes:        []byte("SELECT 100"),
 	}

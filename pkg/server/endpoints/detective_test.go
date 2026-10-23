@@ -99,7 +99,7 @@ func TestDetectiveScenarioAndCaseEventRoutes(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(project, "queries"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(project, "queries", "q.query.json"), []byte(`{"id":"q","type":"DTQL"}`), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(project, "queries", "q.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","id":"q","type":"TugQL"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	private := filepath.Join(t.TempDir(), "private")

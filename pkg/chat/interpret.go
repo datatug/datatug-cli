@@ -81,26 +81,26 @@ func validateProviderURL(raw string) error {
 	return nil
 }
 
-// browserDTQLExecutor is the single difference from the CLI Chat turn: its
-// tool validates and captures DTQL without reading project data. The browser
+// browserTugQLExecutor is the single difference from the CLI Chat turn: its
+// tool validates and captures TugQL without reading project data. The browser
 // executes the captured action through DALgo over its own IndexedDB.
-type browserDTQLExecutor struct{}
+type browserTugQLExecutor struct{}
 
-func (browserDTQLExecutor) RunDTQL(context.Context, string, []byte, map[string]any) (secureread.Result, error) {
+func (browserTugQLExecutor) RunTugQL(context.Context, string, []byte, map[string]any) (secureread.Result, error) {
 	return secureread.Result{}, nil
 }
 
-// Interpret uses the same agent conversation and run_dtql action as CLI Chat.
-// It returns only a validated DTQL document; model prose and results are not
+// Interpret uses the same agent conversation and run_tugql action as CLI Chat.
+// It returns only a validated TugQL document; model prose and results are not
 // part of the browser contract. Provider errors are deliberately sanitized.
 func Interpret(ctx context.Context, req InterpretRequest) (string, error) {
 	result, err := InterpretDetailed(ctx, req)
-	return result.DTQL, err
+	return result.TugQL, err
 }
 
-// InterpretResult contains the DTQL action and provider-reported token usage.
+// InterpretResult contains the TugQL action and provider-reported token usage.
 type InterpretResult struct {
-	DTQL  string      `json:"dtql"`
+	TugQL string      `json:"tugql"`
 	Usage *TokenUsage `json:"usage,omitempty"`
 }
 
@@ -143,7 +143,7 @@ func providerBaseURL(p InterpretProvider) string {
 }
 
 func interpretWithProviderDetailed(ctx context.Context, req InterpretRequest, provider ai.LLMProvider) (InterpretResult, error) {
-	conversation, err := NewAIConversation(provider, browserDTQLExecutor{}, "browser-indexeddb://active-project", req.Schema, WithBrowserInterpretation())
+	conversation, err := NewAIConversation(provider, browserTugQLExecutor{}, "browser-indexeddb://active-project", req.Schema, WithBrowserInterpretation())
 	if err != nil {
 		return InterpretResult{}, errors.New("could not initialize chat agent")
 	}
@@ -153,8 +153,8 @@ func interpretWithProviderDetailed(ctx context.Context, req InterpretRequest, pr
 	if err != nil {
 		return InterpretResult{}, errors.New("provider request failed")
 	}
-	if len(turn.Queries) != 1 || turn.Queries[0].Err != nil || strings.TrimSpace(turn.Queries[0].DTQL) == "" {
-		return InterpretResult{}, errors.New("provider did not return one valid DTQL action")
+	if len(turn.Queries) != 1 || turn.Queries[0].Err != nil || strings.TrimSpace(turn.Queries[0].TugQL) == "" {
+		return InterpretResult{}, errors.New("provider did not return one valid TugQL action")
 	}
-	return InterpretResult{DTQL: turn.Queries[0].DTQL, Usage: turn.Usage}, nil
+	return InterpretResult{TugQL: turn.Queries[0].TugQL, Usage: turn.Usage}, nil
 }

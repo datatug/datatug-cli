@@ -150,7 +150,7 @@ func TestApplyJoinCandidateGuardBranches(t *testing.T) {
 	// query.Source left empty: applyJoinCandidate must default it to
 	// c.source before persisting, rather than leave a query with no source.
 	chat.ConfigureJoinApplication(stubJoinApplication{applyResult: QueryResult{
-		Title: "Joined", DTQL: "from: {name: Invoice}\nlimit: 1",
+		Title: "Joined", TugQL: "from: {name: Invoice}\nlimit: 1",
 		Result: secureread.Result{Columns: []string{"InvoiceId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 1}}}},
 	}})
 	record, err := chat.ApplyJoinCandidate(ctx, recordSetID, "c1")
@@ -313,7 +313,8 @@ func TestStreamAskActiveDelegatesToStreamAsk(t *testing.T) {
 	t.Parallel()
 	chat, _ := newTestSessionChat(t)
 	seq, result := chat.StreamAskActive(context.Background(), "", "hello")
-	for range seq {
+	for _, streamErr := range seq {
+		_ = streamErr // The result callback or consumer-stop assertion below owns the terminal outcome.
 	}
 	if turn, err := result(); err != nil || turn.Text == "" {
 		t.Fatalf("StreamAskActive result = %+v, %v", turn, err)
@@ -349,7 +350,8 @@ func TestStreamAskConsumerBreaksEarly(t *testing.T) {
 	t.Parallel()
 	chat, _ := newTestSessionChat(t)
 	seq, _ := chat.StreamAsk(context.Background(), "hello")
-	for range seq {
+	for _, streamErr := range seq {
+		_ = streamErr // The result callback or consumer-stop assertion below owns the terminal outcome.
 		break
 	}
 
@@ -362,7 +364,8 @@ func TestStreamAskConsumerBreaksEarly(t *testing.T) {
 	}
 	streamingChat.agent = streamingAgent
 	streamSeq, _ := streamingChat.StreamAsk(context.Background(), "hello")
-	for range streamSeq {
+	for _, streamErr := range streamSeq {
+		_ = streamErr // This test intentionally stops the consumer before completion.
 		break
 	}
 }
@@ -406,7 +409,8 @@ func TestStreamAskStreamingAgentFatalErrorWithNoUsableResult(t *testing.T) {
 	}
 	chat.agent = streamingAgent
 	seq, result := chat.StreamAsk(context.Background(), "hello")
-	for range seq {
+	for _, streamErr := range seq {
+		_ = streamErr // The result callback or consumer-stop assertion below owns the terminal outcome.
 	}
 	turn, err := result()
 	if err != nil {
@@ -544,7 +548,7 @@ func TestPrepareTurnSessionMismatchAndLoadError(t *testing.T) {
 
 // TestPrepareTurnQueryObserverDefaultsEmptySource covers prepareTurn's own
 // withQueryObserver closure's source-defaulting branch: AIConversation's
-// real runDTQL always sets QueryResult.Source itself before capturing, so
+// real runTugQL always sets QueryResult.Source itself before capturing, so
 // this only fires for a ContextualConversation implementation that
 // doesn't -- exercised here by calling the installed observer directly.
 func TestPrepareTurnQueryObserverDefaultsEmptySource(t *testing.T) {
@@ -560,7 +564,7 @@ func TestPrepareTurnQueryObserverDefaultsEmptySource(t *testing.T) {
 	if !ok {
 		t.Fatal("prepareTurn did not install a query observer")
 	}
-	result, err := observer(QueryResult{Title: "Untitled", DTQL: "from: {name: Invoice}\nlimit: 1"})
+	result, err := observer(QueryResult{Title: "Untitled", TugQL: "from: {name: Invoice}\nlimit: 1"})
 	if err != nil {
 		t.Fatal(err)
 	}

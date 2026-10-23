@@ -22,7 +22,7 @@ func TestOpen_HTTPQueriesCannotBeListed(t *testing.T) {
 	if err := os.MkdirAll(queries, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(queries, "q1.query.json"), `{"id": "q1", "type": "HTTP"}`)
+	writeFile(t, filepath.Join(queries, "q1.query.json"), `{"createdAt":"2026-01-01T00:00:00Z","id": "q1", "type": "HTTP"}`)
 	cause := errors.New("disk unreadable")
 	origReadFile := osReadFile
 	t.Cleanup(func() { osReadFile = origReadFile })

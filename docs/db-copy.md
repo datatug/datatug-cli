@@ -7,7 +7,6 @@ PostgreSQL (`sqlite://`, `postgres://`) the copy keeps what the two engines can 
 for the differences listed under "Documented differences".
 
 ```sh
-export DATATUG_PREVIEW_POSTGRES=1          # PostgreSQL is a preview
 datatug db copy --from sqlite://./chinook.sqlite --to 'postgres://user@127.0.0.1/chinook'
 datatug db copy --from 'postgres://user@127.0.0.1/chinook' --to sqlite://./chinook-copy.sqlite
 datatug db copy --from sqlite://./a.sqlite --to sqlite://./b.sqlite   # exact: the stored CREATE statements
@@ -29,8 +28,7 @@ datatug db copy --from sqlite://./a.sqlite --to sqlite://./b.sqlite   # exact: t
 
 Column rules (`--columns`) do not exist yet for any copy. A target SQLite file is created when it is
 missing (its folder too; both are removed again if the copy fails), unless its path looks like a URL
-or holds a query string. A PostgreSQL target is a preview: it needs `DATATUG_PREVIEW_POSTGRES=1`,
-a dry run included.
+or holds a query string.
 
 ## What is carried
 

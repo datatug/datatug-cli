@@ -30,7 +30,7 @@ func newHTTPFixture(t *testing.T) string {
 	if err := os.MkdirAll(queriesDir, 0o755); err != nil {
 		t.Fatalf("mkdir queries: %v", err)
 	}
-	def := `{"id":"countries","type":"HTTP","parameters":[{"id":"code","type":"string","isRequired":true}]}`
+	def := `{"createdAt":"2026-01-01T00:00:00Z","id":"countries","type":"HTTP","parameters":[{"id":"code","type":"string","isRequired":true}]}`
 	if err := os.WriteFile(filepath.Join(queriesDir, "countries.query.json"), []byte(def), 0o600); err != nil {
 		t.Fatalf("write query def: %v", err)
 	}

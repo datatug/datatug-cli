@@ -18,9 +18,9 @@ import (
 
 func validExecutionRecord(storeID, projectID, executionID string) apicontract.ExecutionRecord {
 	return apicontract.ExecutionRecord{
-		Ref:      apicontract.ExecutionRef{StoreID: storeID, ProjectID: projectID, ExecutionID: executionID},
-		Scope:    apicontract.ExecutionRecordScope{StoreID: projectID, Project: projectID, Environment: "prod"},
-		DTQLHash: strings.Repeat("1", 64), Parameters: map[string]apicontract.TypedValueOrSet{}, BindingsApplied: []apicontract.Binding{},
+		Ref:       apicontract.ExecutionRef{StoreID: storeID, ProjectID: projectID, ExecutionID: executionID},
+		Scope:     apicontract.ExecutionRecordScope{StoreID: projectID, Project: projectID, Environment: "prod"},
+		TugQLHash: strings.Repeat("1", 64), Parameters: map[string]apicontract.TypedValueOrSet{}, BindingsApplied: []apicontract.Binding{},
 		Principal:         apicontract.ExecutionPrincipal{ID: "alice", Roles: []string{}, Groups: []string{}},
 		PolicyFingerprint: strings.Repeat("2", 64), ExecutedAt: "2026-09-13T10:11:12Z",
 		Limitations: []apicontract.Limitation{}, Provenance: apicontract.Provenance{

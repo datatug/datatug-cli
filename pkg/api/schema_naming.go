@@ -6,7 +6,9 @@ import "strings"
 // unqualified table/collection name to (SQLite's single implicit database
 // is always named "main"; PostgreSQL's default search_path entry is
 // "public"), or "" for a driver with no such convention (e.g. ingitdb, which
-// has no schema concept at all). Read from the resolved catalog's own
+// has no schema concept at all). A MySQL, Oracle or SQL Server catalog records its tables
+// under ServerDefaultSchema, the schema of the connection, whatever its real
+// name (see ServerDefaultSchema). Read from the resolved catalog's own
 // Driver field (see resolveSourceURL) rather than assumed unconditionally,
 // so a caller never strips a qualifier for a source where it would not
 // actually be the implicit default.
@@ -16,6 +18,8 @@ func DefaultSchemaForDriver(driver string) string {
 		return "main"
 	case "postgres", "postgresql", "pgx":
 		return "public"
+	case DriverMySQL, DriverOracle, DriverSQLServer:
+		return ServerDefaultSchema
 	default:
 		return ""
 	}

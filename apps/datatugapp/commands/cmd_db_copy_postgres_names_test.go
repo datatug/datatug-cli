@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -29,7 +28,6 @@ func sqliteFixture(t *testing.T, statements ...string) string {
 // the target is changed: the command exits 1 and names the table of the source. --dry-run never opens the target,
 // so the check is the one every copy makes before its first write.
 func TestDBCopy_ToPostgres_ARefusedNameExitsOneAndChangesNothing(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	long := "t_" + strings.Repeat("x", 70)
 	source := sqliteFixture(t,
 		`CREATE TABLE a1 (id INTEGER PRIMARY KEY)`,
@@ -47,7 +45,6 @@ func TestDBCopy_ToPostgres_ARefusedNameExitsOneAndChangesNothing(t *testing.T) {
 
 // A table name with a space is quoted, not refused, and the plan of a dry run shows keys and indexes.
 func TestDBCopy_ToPostgres_ADryRunShowsTheTablesKeysAndIndexes(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	source := sqliteFixture(t,
 		`CREATE TABLE "c 3" (id INTEGER PRIMARY KEY, val INTEGER)`,
 		`CREATE TABLE a1 (id INTEGER PRIMARY KEY, val INTEGER, c INTEGER REFERENCES "c 3"(id))`,

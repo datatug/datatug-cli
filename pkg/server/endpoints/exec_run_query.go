@@ -13,10 +13,11 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo2http"
+	"github.com/dal-go/dalgo2openvaultdb"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/httpsource"
-	"github.com/datatug/datatug-cli/pkg/openvaultdb"
+	"github.com/datatug/datatug-cli/pkg/querybody"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
@@ -68,7 +69,7 @@ var execRunProjectStoreFor = api.ProjectStoreFor
 var runQueryResponseValidateHook = (*apicontract.Result).Validate
 var executionQueryDocumentHook = executionQueryDocument
 var eligibleTargetsHook = api.EligibleTargets
-var runDTQLHook = (*secureread.Executor).RunDTQL
+var runTugQLHook = (*secureread.Executor).RunTugQL
 var resolveSourceHook = api.ResolveSource
 
 func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (apicontract.Result, error) {
@@ -86,15 +87,15 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 		return apicontract.Result{}, err
 	}
 	// req.Validate() is core's own structural check (datatug-core v0.27.0,
-	// pkg/apicontract — the schema authority): queryId/dtql exclusivity
-	// ("exactly one of queryId or dtql is required"), dtql-requires-source,
+	// pkg/apicontract — the schema authority): queryId/tugql exclusivity
+	// ("exactly one of queryId or tugql is required"), tugql-requires-source,
 	// every Parameters value's own TypedValue shape, bindingOrigins naming
 	// exactly the submitted parameters (no more, no fewer) with a
 	// recognized origin, mode's closed set {live,snapshot} with
 	// snapshot-requires-snapshotId, and — "an explicit limit: 0 is
 	// INVALID_REQUEST" per the lead session's semantics ruling for this
 	// stream — Limit, when the caller sent one, in (0,500]. This supersedes
-	// the hand-written queryId/dtql-exclusivity, mode-enum, and
+	// the hand-written queryId/tugql-exclusivity, mode-enum, and
 	// validateBindingOrigins checks that used to live here (S91's gap:
 	// exec/run_query was the one endpoint PR #215 left decoding through
 	// DecodeStrict/decodeContractBody without ever calling Validate(), unlike
@@ -232,15 +233,15 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 	var collection string
 
 	switch {
-	case req.DTQL != "":
+	case req.TugQL != "":
 		profile = apicontract.ExecutionProfileProtected
-		result, err = runDTQLHook(executor, runCtx, resolved.URL, []byte(req.DTQL), variables)
-	case queryDef.Type == datatug.QueryTypeDTQL:
+		result, err = runTugQLHook(executor, runCtx, resolved.URL, []byte(req.TugQL), variables)
+	case queryDef.Type == datatug.QueryTypeTugQL:
 		var doc string
 		doc, err = executionQueryDocument(req.Project, req.QueryID, queryDef, queryRevision)
 		if err == nil {
 			profile = apicontract.ExecutionProfileProtected
-			result, err = runDTQLHook(executor, runCtx, resolved.URL, []byte(doc), variables)
+			result, err = runTugQLHook(executor, runCtx, resolved.URL, []byte(doc), variables)
 		}
 	case queryDef.Type == datatug.QueryTypeSQL:
 		// The opaque-query-grant gate itself lives centrally in
@@ -274,7 +275,7 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 		}
 		if errors.Is(err, secureread.ErrAccessDenied) {
 			ce := contractErrAccessDenied(err.Error())
-			var remote *openvaultdb.AuthorizationError
+			var remote *dalgo2openvaultdb.AuthorizationError
 			if errors.As(err, &remote) {
 				ce.Details = map[string]any{"authorization": remote.Decision}
 			}
@@ -454,7 +455,7 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 // said, which quotes the path of the file, goes to the log of the server.
 func executionQueryDocument(projectID, queryID string, queryDef *datatug.QueryDef, queryRevision string) (string, error) {
 	if queryRevision != "" {
-		return queryDef.Text, nil
+		return querybody.Structured(queryDef)
 	}
 	document, err := api.LoadQueryDocument(projectID, queryID, queryDef.Type)
 	if err != nil {
@@ -494,16 +495,16 @@ func validateDefaultBindingOrigins(req apicontract.ExecutionRequest, queryDef *d
 
 // resolveExecutionSource applies api-contract.md's target-resolution rule
 // (see resolver.go's EligibleTargets doc) to one ExecutionRequest: ad-hoc
-// DTQL requires an explicit req.Source; a saved query obeys target
+// TugQL requires an explicit req.Source; a saved query obeys target
 // resolution (one eligible target auto-selected and reported; several need
 // an explicit, authorized req.Source or TARGET_REQUIRED; zero is
-// SOURCE_UNAVAILABLE). req.Source == "" alongside req.DTQL != "" can no
+// SOURCE_UNAVAILABLE). req.Source == "" alongside req.TugQL != "" can no
 // longer reach this function — computeRunQuery's req.Validate() call already
-// rejects that shape ("source: is required for ad-hoc dtql") before
+// rejects that shape ("source: is required for ad-hoc tugql") before
 // resolveExecutionSource is ever called, superseding the hand-written
 // newMissingParameter("source") check that used to guard it here.
 func resolveExecutionSource(ctx context.Context, projStore datatug.ProjectStore, projDir string, req apicontract.ExecutionRequest, queryDef *datatug.QueryDef) (api.ResolvedSource, error) {
-	if req.DTQL != "" {
+	if req.TugQL != "" {
 		resolved, err := resolveSourceHook(ctx, projStore, projDir, req.Environment, req.Source)
 		if err != nil {
 			return api.ResolvedSource{}, newSourceUnavailable(err.Error())
@@ -544,8 +545,8 @@ func candidateTargets(sources []api.ResolvedSource) []apicontract.CandidateTarge
 }
 
 // typedParametersToVariables converts req.Parameters (TypedValue) into the
-// plain map[string]any accesspolicies.Run/dtql substitution expects
-// (Executor.RunDTQL/RunStructured's variables parameter), validating each
+// plain map[string]any accesspolicies.Run/tugql substitution expects
+// (Executor.RunTugQL/RunStructured's variables parameter), validating each
 // value converts cleanly and, when queryDef is known, that its declared
 // type matches. missing lists required declared parameters with no
 // supplied value; mismatched lists parameters whose TypedValue.Type
@@ -654,7 +655,7 @@ func sqlQueryArgs(queryDef *datatug.QueryDef, variables map[string]any) []dal.Qu
 // applied before execution confirms them"): called only after Executor.Run*
 // has already succeeded, so every parameter here really did reach that
 // successful execution. For a saved query, "actually applied" means
-// declared on the query itself (queryDef.Parameters); for ad-hoc DTQL,
+// declared on the query itself (queryDef.Parameters); for ad-hoc TugQL,
 // every supplied parameter is reported (no query definition exists to
 // narrow against — see this file's Task-13-deferred note on deeper AST-level
 // confirmation).

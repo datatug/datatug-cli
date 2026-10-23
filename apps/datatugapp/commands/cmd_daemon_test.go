@@ -266,7 +266,7 @@ func TestDaemonURLReferenceRefusals(t *testing.T) {
 		"both forms by env": {[]string{"--db", "datatug://shop/shop?env=dev", "--env", "dev"}, exitCodeUsage, "not both"},
 		"no project":        {[]string{"--db", "datatug:///shop"}, exitCodeUsage, "names no project"},
 		"malformed":         {[]string{"--db", "datatug://shop/"}, exitCodeUsage, "datatug://<project>/<db>"},
-		"ambiguous env":     {[]string{"--db", "datatug://shop/shop"}, exitCodeUsage, "dev, local"},
+		"ambiguous env":     {[]string{"--db", "datatug://shop/shop"}, exitCodeUsage, "local, dev"},
 		"unknown project":   {[]string{"--db", "datatug://nope/shop"}, exitCodeNotFound, "unknown project"},
 		"unknown source":    {[]string{"--db", "datatug://shop/ghost"}, exitCodeNotFound, "not listed in any environment"},
 		"other scheme":      {[]string{"--project", "p", "--env", "e", "--db", "postgres://u:s3cret@h/d"}, exitCodeUsage, "never a connection URL"},

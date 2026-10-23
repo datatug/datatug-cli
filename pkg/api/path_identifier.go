@@ -96,6 +96,13 @@ var dbServerDrivers = []string{"sqlite3", "ingitdb", "openvaultdb", "https-json"
 // quotes it.
 var hostlessDrivers = []string{"sqlite3", "ingitdb", "openvaultdb", "https-json"}
 
+// hostAddressedDrivers are the drivers of dbServerDrivers whose server a db-server route reaches by
+// its host (it connects to it, or names it by the host in its ID). datatug-core accepts a server of
+// these drivers with no host since v0.77.0, for the server a scan records from a connection URL in an
+// environment variable, which no db-server route reaches: the routes keep refusing an empty host, as
+// datatug-core did before.
+var hostAddressedDrivers = []string{"sqlserver", "mysql", "oracle"}
+
 // DriverRule is the sentence that says which drivers a db server can have.
 var DriverRule = "must be one of " + strings.Join(dbServerDrivers, ", ")
 
@@ -175,6 +182,15 @@ func validateDbServer(server datatug.ServerRef) error {
 	if err := server.Validate(); err != nil {
 		return validation.NewBadRequestError(err)
 	}
+	return requireRouteHost(server)
+}
+
+// requireRouteHost refuses a server of hostAddressedDrivers with no host (see hostAddressedDrivers),
+// with the missing-field answer datatug-core gave before.
+func requireRouteHost(server datatug.ServerRef) error {
+	if server.Host == "" && slices.Contains(hostAddressedDrivers, server.Driver) {
+		return validation.NewBadRequestError(validation.NewErrRecordIsMissingRequiredField("host"))
+	}
 	return nil
 }
 
@@ -202,5 +218,5 @@ func validateProjDbServer(server datatug.ProjDbServer) error {
 	if err := server.Server.Validate(); err != nil {
 		return validation.NewBadRequestError(err)
 	}
-	return nil
+	return requireRouteHost(server.Server)
 }

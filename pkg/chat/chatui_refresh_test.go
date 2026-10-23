@@ -63,9 +63,9 @@ func TestChatUIHTTPRefreshAddsChangedImmutableVersion(t *testing.T) {
 	}
 }
 
-// TestChatUISavedNonDTQLResultDoesNotOfferRefresh is ported from
-// TestSavedNonDTQLResultDoesNotOfferRefresh.
-func TestChatUISavedNonDTQLResultDoesNotOfferRefresh(t *testing.T) {
+// TestChatUISavedNonTugQLResultDoesNotOfferRefresh is ported from
+// TestSavedNonTugQLResultDoesNotOfferRefresh.
+func TestChatUISavedNonTugQLResultDoesNotOfferRefresh(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())

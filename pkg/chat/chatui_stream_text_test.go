@@ -20,7 +20,7 @@ import (
 // resolves the turn.
 //
 // The scripted provider's one step emits BOTH a <think> reasoning block
-// (see agent.go's stripThinkTags) and a successful run_dtql tool call in the
+// (see agent.go's stripThinkTags) and a successful run_tugql tool call in the
 // same step, mirroring what a local/open model streamed over
 // ai/openaicompat can do. Because the turn also produced a query result,
 // AskWithContext/StreamAskWithContext deliberately clear the turn's final
@@ -43,7 +43,7 @@ func TestChatUIStreamedGridTurnDoesNotLeakRawStreamedProse(t *testing.T) {
 	provider := &scriptedProvider{steps: []scriptedStep{
 		{
 			text:      "<think>let me pick the right table</think>Checking the Customer table for Prague.",
-			toolCalls: []ai.ToolCall{toolCall("1", toolRunDTQL, map[string]any{"dtql": doc})},
+			toolCalls: []ai.ToolCall{toolCall("1", toolRunTugQL, map[string]any{"tugql": doc})},
 		},
 		// agent.Loop calls the model again after a successful tool result;
 		// this step's text is dropped from the final Turn ("the grid is the

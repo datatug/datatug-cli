@@ -60,60 +60,25 @@ func assertNoPgMarkers(t *testing.T, name string, outputs ...string) {
 	}
 }
 
-// With the switch off, `query run` on a PostgreSQL source answers the preview sentence, with or without policies, and
-// never calls the opener.
-func TestQuery_APostgresSourceWithThePreviewOffAnswersThePreviewSentence(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "")
-	opens := standInForPostgres(t, nil)
-	dir := policiesDir(t, map[string]string{"p.yaml": permissivePolicy})
-
-	for name, args := range map[string][]string{
-		"no policies":    {"--no-policies"},
-		"with a policy":  {"--policies-dir", dir, "--as", "alice"},
-		"an env source":  {"--no-policies"},
-		"a typed source": {"--no-policies", "-f", "-"},
-		// No policy flag at all and no policies directory: the person is told about the preview first, not about
-		// the policies, which turning the preview on would not change.
-		"no policy flag": {},
-	} {
-		source := pgMarkedSource
-		if name == "an env source" {
-			t.Setenv("DATATUG_DT02_PG_URL", pgMarkedSource)
-			source = "env:DATATUG_DT02_PG_URL"
-		}
-		stdout, stderr, code := runQuery(t, "from: {name: customers}\n", append([]string{"--db", source, "--from", "customers"}, args...)...)
-		if name == "a typed source" {
-			stdout, stderr, code = runQuery(t, "from: {name: customers}\n", append([]string{"--db", source}, args...)...)
-		}
-		assert.Equal(t, exitCodeDatabase, code, name)
-		assert.Contains(t, stderr, dbcopy.ErrPostgresPreview.Error(), name)
-		assert.Empty(t, stdout, name)
-		assertNoPgMarkers(t, name, stdout, stderr)
-	}
-	assert.Zero(t, opens.calls.Load(), "the opener is never called")
-}
-
-// With the switch on, a read through one or more policies on a PostgreSQL source is refused with the fixed sentence before the
+// A read through one or more policies on a PostgreSQL source is refused with the fixed sentence before the
 // source is opened: the opener is never called, and the exit code is the one of invalid use.
 func TestQuery_APostgresSourceReadThroughPoliciesIsRefused(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	opens := standInForPostgres(t, nil)
 	dir := policiesDir(t, map[string]string{"p.yaml": permissivePolicy})
 
 	stdout, stderr, code := runQuery(t, "", "--db", pgMarkedSource, "--from", "customers", "--policies-dir", dir, "--as", "alice")
 	assert.Equal(t, exitCodeUsage, code)
-	assert.Equal(t, "policy-enforced reads on PostgreSQL sources are not available in this preview\n", stderr)
+	assert.Equal(t, "policy-enforced reads on PostgreSQL sources are not available yet: run with --no-policies\n", stderr)
 	assert.Empty(t, stdout)
 	assert.Zero(t, opens.calls.Load(), "the opener is never called")
 }
 
-// With the switch on and no policy, the source is opened as a protected read: the connection string the adapter gets
+// With no policy, the source is opened as a protected read: the connection string the adapter gets
 // has the read-only session and the other defaults, and the failure of the open is the classified one, with the exit
 // code of its class and nothing of the source but the display form. Every class of failure of an open exits with 4, as
 // the specs of `query run` and `db copy` require (the database cannot be opened): the classes differ in the sentence,
 // which is the adapter's own, chosen by kind and SQLSTATE and never by text.
 func TestQuery_APostgresSourceIsOpenedReadOnlyAndItsFailuresAreClassified(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	for name, tc := range map[string]struct {
 		cause    error
 		wantCode int
@@ -150,7 +115,6 @@ const queryHint = "the PostgreSQL connection string is read from the --db flag"
 // the parameter. (Before the adapter classified such a failure, the read failed with the text pgx writes, which names the
 // user, and the command showed a sentence of its own.)
 func TestQuery_AReadThatLosesItsConnectionShowsOneFixedSentence(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	// The stand-in is built here, on the goroutine of the test: the opener runs on another one, where a failure of
 	// the setup (FailNow) would end that goroutine and not the test.
 	standIn := pgstandin.Unreachable(t, pgMarkerUser, pgMarkerPassword)
@@ -169,7 +133,6 @@ func TestQuery_AReadThatLosesItsConnectionShowsOneFixedSentence(t *testing.T) {
 // A URL that turns the read-only session off is refused by the read, and the refusal names the parameter and the
 // one place that writes, and nothing of the URL.
 func TestQuery_AURLThatTurnsReadOnlyOffIsRefused(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	opens := standInForPostgres(t, nil)
 	source := pgMarkedSource + "&default_transaction_read_only=off"
 	stdout, stderr, code := runQuery(t, "", "--db", source, "--from", "customers", "--no-policies")
@@ -181,33 +144,11 @@ func TestQuery_AURLThatTurnsReadOnlyOffIsRefused(t *testing.T) {
 	assert.Zero(t, opens.calls.Load())
 }
 
-// With the switch off, `db copy` answers the preview sentence for a PostgreSQL --from and for a PostgreSQL --to, names the
-// side, and never calls the opener.
-func TestDBCopy_APostgresSideWithThePreviewOffAnswersThePreviewSentence(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "")
-	opens := standInForPostgres(t, nil)
-	file := emptySQLiteFile(t)
-
-	for side, argv := range map[string][]string{
-		"--from": {"db", "copy", "--from", pgMarkedSource, "--to", file},
-		"--to":   {"db", "copy", "--from", file, "--to", pgMarkedSource},
-	} {
-		stdout, stderr, err := runCopy(t, argv...)
-		require.Error(t, err, side)
-		assert.Equal(t, "open "+side+": "+dbcopy.ErrPostgresPreview.Error(), err.Error(), side)
-		var coder ExitCoder
-		require.ErrorAs(t, err, &coder, side)
-		assert.Equal(t, 4, coder.ExitCode(), side)
-		assertNoPgMarkers(t, side, stdout.String(), stderr.String(), err.Error())
-	}
-	assert.Zero(t, opens.calls.Load(), "the opener is never called")
-}
-
-// With the switch on, a PostgreSQL --from that turns the read-only session off is refused before anything is dialled,
+// A PostgreSQL --from that turns the read-only session off is refused before anything is dialled,
 // and a --to that is not reachable exits 4 without showing the connection string. (That a --to is opened without the
 // read-only default is the test of postgresConnectionString in pkg/dbcopy.)
 func TestDBCopy_OnlyTheTargetIsOpenedForWriting(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
+	standInForPostgres(t, &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork, Host: "127.0.0.1", Port: "1", Database: "db"})
 	file := emptySQLiteFile(t)
 
 	// --to is not reachable (nothing listens on port 1): exit 4, the secret stays out of the text.
@@ -231,7 +172,7 @@ func TestDBCopy_OnlyTheTargetIsOpenedForWriting(t *testing.T) {
 // A PostgreSQL --from that cannot be reached names the flag it was typed in, exits 4, and shows nothing of the
 // connection string.
 func TestDBCopy_AnUnreachableFromSideNamesTheFromFlag(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
+	standInForPostgres(t, &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork, Host: "127.0.0.1", Port: "1", Database: "shop"})
 
 	stdout, stderr, err := runCopy(t, "db", "copy", "--from", "postgres://"+pgMarkerUser+":"+pgMarkerPassword+"@127.0.0.1:1/shop?sslmode=disable&connect_timeout=2", "--to", emptySQLiteFile(t))
 
@@ -246,7 +187,7 @@ func TestDBCopy_AnUnreachableFromSideNamesTheFromFlag(t *testing.T) {
 }
 
 // The help of `db copy` says that --to is the only place a PostgreSQL database is opened for writing, and that the
-// source is read-only and a preview.
+// source is read-only.
 func TestDBCopy_HelpSaysWhereAPostgresDatabaseIsWritten(t *testing.T) {
 	t.Parallel()
 	stdout, _, err := runCopy(t, "db", "copy", "--help")
@@ -254,7 +195,6 @@ func TestDBCopy_HelpSaysWhereAPostgresDatabaseIsWritten(t *testing.T) {
 	help := stdout.String()
 	assert.Contains(t, help, "the only way DataTug opens PostgreSQL for writing")
 	assert.Contains(t, help, "postgres:// read-only")
-	assert.Contains(t, help, dbcopy.PostgresPreviewEnv+"=1")
 	assert.Contains(t, help, "default_transaction_read_only")
 	for _, line := range strings.Split(help, "\n") {
 		assert.NotContains(t, line, "PWMARKER", fmt.Sprint(line))

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/datatug/datatug-cli/pkg/querybody"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/storage"
 )
@@ -123,7 +124,7 @@ func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, er
 			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
 		}
 		return dbcopy.LocalSourceURL("ingitdb", path), nil
-	case DriverPostgres:
+	case DriverPostgres, DriverMySQL, DriverOracle, DriverSQLServer:
 		// The catalog's path names a connection descriptor, a project file that
 		// names an environment variable and nothing else; the variable holds the
 		// connection URL, password included. The source is "env:NAME", so no
@@ -134,21 +135,21 @@ func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, er
 		if err != nil {
 			return "", err
 		}
-		// The variable must hold a postgres URL: a catalog labelled postgres whose
-		// variable held a sqlite or http source would otherwise be opened as that
-		// engine while policy naming still used the postgres label. Resolving it
+		// The variable must hold a URL of the catalog's driver: a catalog labelled
+		// postgres whose variable held a sqlite or http source would otherwise be
+		// opened as that engine while policy naming still used the postgres label. Resolving it
 		// also refuses a variable that is not set. No error names the value, only
 		// the variable and the scheme.
 		ref, err := dbcopyParse(source)
 		if err != nil {
 			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
 		}
-		if ref.Scheme != DriverPostgres {
-			return "", fmt.Errorf("catalog %q: environment variable %s must hold a postgres:// URL, not a %s source", catalog.ID, strings.TrimPrefix(source, "env:"), ref.Scheme)
+		if ref.Scheme != catalog.Driver {
+			return "", fmt.Errorf("catalog %q: environment variable %s must hold a %s:// URL, not a %s source", catalog.ID, strings.TrimPrefix(source, "env:"), catalog.Driver, ref.Scheme)
 		}
 		return source, nil
 	default:
-		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3, ingitdb, openvaultdb or postgres)", catalog.Driver)
+		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3, ingitdb, openvaultdb, postgres, mysql, oracle or sqlserver)", catalog.Driver)
 	}
 }
 
@@ -158,7 +159,7 @@ func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, er
 // the source is returned for a variable that is not set (opening it says so).
 func postgresDescriptorSource(catalog datatug.DbCatalog, projDir string) (string, error) {
 	if catalog.Path == "" {
-		return "", fmt.Errorf("catalog %q has no connection descriptor path configured for its postgres driver", catalog.ID)
+		return "", fmt.Errorf("catalog %q has no connection descriptor path configured for its %s driver", catalog.ID, catalog.Driver)
 	}
 	path, err := ResolveDescriptorPath(projDir, catalog.Path)
 	if err != nil {
@@ -171,7 +172,7 @@ func postgresDescriptorSource(catalog datatug.DbCatalog, projDir string) (string
 		// project: the answer for a client is built from the ID of the catalog.
 		var pathErr *fs.PathError
 		if errors.As(err, &pathErr) {
-			return "", sourceLookupFailed("catalog %q: the PostgreSQL connection descriptor cannot be read", "catalog %q", err, catalog.ID)
+			return "", sourceLookupFailed("catalog %q: the "+dbcopy.ServerTitle(catalog.Driver)+" connection descriptor cannot be read", "catalog %q", err, catalog.ID)
 		}
 		return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
 	}
@@ -223,7 +224,7 @@ func escapeSQLitePath(path string) string {
 // "<id>.query.json", the same convention filestore's saveQuery already
 // writes with (store_queries_saver.go). It exists because
 // fsQueriesStore.LoadQuery does not hydrate QueryDef.Text back from that
-// file (the read-back half of REQ:dtql-query-type's sidecar rule lands with
+// file (the read-back half of REQ:tugql-query-type's sidecar rule lands with
 // datatug-core PR #302 / the S1b module swap — see this stream's PR body).
 // LoadQueryDocument exports loadQueryDocument for pkg/server/endpoints'
 // exec/run_query rewrite (Task 12), which needs the same sidecar-text read
@@ -236,6 +237,21 @@ func loadQueryDocument(projectID, queryID string, queryType datatug.QueryType) (
 	dir, ok := projectDir(projectID)
 	if !ok || dir == "" {
 		return "", fmt.Errorf("no project directory configured for project %q", dbcopy.SourceIDDisplay(projectID))
+	}
+	if queryType == datatug.QueryTypeTugQL {
+		store, err := projectStoreForID(LocalStoreID, projectID)
+		if err != nil {
+			return "", err
+		}
+		query, err := store.LoadQuery(context.Background(), queryID)
+		if err != nil {
+			return "", fmt.Errorf("read query document %s: %w", queryID, err)
+		}
+		if query.Text == "" {
+			base := filepath.Join(dir, storage.QueriesFolder, filepath.FromSlash(queryID)+".query.")
+			return "", fmt.Errorf("read query document %s or %s: body is missing or empty", base+"tugql", base+"tugql.yaml")
+		}
+		return querybody.Structured(query)
 	}
 	folder, id := queryFolderAndID(queryID)
 	fileName := fmt.Sprintf("%s.%s.%s", id, storage.QueryFileSuffix, strings.ToLower(string(queryType)))

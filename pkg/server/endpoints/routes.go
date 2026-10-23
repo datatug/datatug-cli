@@ -32,7 +32,12 @@ func registerRoutesOn(path string, router router, wrapper wrapper, writeOnly boo
 	projectsRoutes(path, router, wrapper, writeOnly, caps)
 	foldersRoutes(path, router, wrapper, caps)
 	queriesRoutes(path, router, wrapper, writeOnly, caps)
+	if !writeOnly {
+		route(router, wrapper, http.MethodGet, path+"/meanings/catalog", projectMeaningsCatalogHandler)
+	}
+	route(router, wrapper, http.MethodPost, path+"/meanings/change", requireWriteCapability(caps, projectMeaningChangeHandler))
 	boardsRoutes(path, router, wrapper, writeOnly, caps)
+	cardsRoutes(path, router, wrapper, writeOnly, caps)
 	environmentsRoutes(path, router, wrapper, writeOnly, caps)
 	dbServerRoutes(path, router, wrapper, writeOnly, caps)
 	entitiesRoutes(path, router, wrapper, writeOnly, caps)
@@ -129,15 +134,27 @@ func boardsRoutes(path string, router router, wrap wrapper, writeOnly bool, caps
 	route(router, wrap, http.MethodDelete, path+"/boards/delete_board", requireWriteCapability(caps, deleteBoard))
 }
 
+func cardsRoutes(path string, router router, wrap wrapper, writeOnly bool, caps Capabilities) {
+	if !writeOnly {
+		route(router, wrap, http.MethodGet, path+"/cards/all_cards", getCards)
+		route(router, wrap, http.MethodGet, path+"/cards/card", getCard)
+	}
+	route(router, wrap, http.MethodPost, path+"/cards/create_card", requireWriteCapability(caps, createCard))
+	route(router, wrap, http.MethodPut, path+"/cards/save_card", requireWriteCapability(caps, saveCard))
+	route(router, wrap, http.MethodDelete, path+"/cards/delete_card", requireWriteCapability(caps, deleteCard))
+}
+
 func projectsRoutes(path string, router router, wrap wrapper, writeOnly bool, caps Capabilities) {
 	if !writeOnly {
 		route(router, wrap, http.MethodGet, path+"/projects/projects_summary", getProjects)
 		route(router, wrap, http.MethodGet, path+"/projects/project_summary", getProjectSummary)
 		route(router, wrap, http.MethodGet, path+"/projects/project_full", getProjectFull)
 		route(router, wrap, http.MethodGet, path+"/projects/capabilities", projectCapabilitiesHandler)
+		route(router, wrap, http.MethodGet, path+"/projects/item_tags", getProjectItemTags)
 		route(router, wrap, http.MethodGet, path+"/projects/connection_catalog", projectConnectionCatalogHandler)
 		route(router, wrap, http.MethodGet, path+"/projects/branches", projectBranchesHandler)
 	}
+	route(router, wrap, http.MethodPut, path+"/projects/item_tags", requireWriteCapability(caps, saveProjectItemTags))
 	projectEndpoints := ProjectAgentEndpoints{}
 	route(router, wrap, http.MethodPost, path+"/projects/create_project", requireWriteCapability(caps, projectEndpoints.createProject))
 	route(router, wrap, http.MethodDelete, path+"/projects/delete_project", requireWriteCapability(caps, projectEndpoints.deleteProject))
@@ -161,6 +178,7 @@ func environmentsRoutes(path string, router router, wrap wrapper, writeOnly bool
 func dbServerRoutes(path string, router router, wrap wrapper, writeOnly bool, caps Capabilities) {
 	if !writeOnly {
 		route(router, wrap, http.MethodGet, path+"/dbserver-summary", getDbServerSummary)
+		route(router, wrap, http.MethodGet, path+"/dbservers/all_dbservers", getProjectDbServers)
 		route(router, wrap, http.MethodGet, path+"/dbserver-databases", requireLiveConnections(caps, getServerDatabases))
 	}
 	route(router, wrap, http.MethodPost, path+"/dbserver-add", requireWriteCapability(caps, addDbServer))

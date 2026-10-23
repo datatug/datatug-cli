@@ -200,18 +200,18 @@ func TestRedactErrorWithSecrets_RemovesTheLiteralPasswordInAnyShape(t *testing.T
 		"decoded q=z and encoded q%3Dz and plus q%3Dz",
 		"pgx: dsn p%40ss%2Fw0rd",
 	} {
-		err := RedactErrorWithSecrets(fmt.Errorf("open: %w", ErrPostgresPreview), source) // chain check below
-		assert.ErrorIs(t, err, ErrPostgresPreview)
+		err := RedactErrorWithSecrets(fmt.Errorf("open: %w", errPostgresReadOnlyOff), source) // chain check below
+		assert.ErrorIs(t, err, errPostgresReadOnlyOff)
 
 		redacted := RedactErrorWithSecrets(errors.New(message), source)
 		for _, secret := range []string{"p%40ss%2Fw0rd", "p@ss/w0rd", "w0rd", "q%3Dz", "q=z"} {
 			assert.NotContains(t, redacted.Error(), secret, message)
 		}
 	}
-	original := fmt.Errorf("dial p@ss/w0rd: %w", ErrPostgresPreview)
+	original := fmt.Errorf("dial p@ss/w0rd: %w", errPostgresReadOnlyOff)
 	redacted := RedactErrorWithSecrets(original, source)
-	assert.ErrorIs(t, redacted, ErrPostgresPreview, "the chain survives")
-	assert.Equal(t, "dial xxxxx: "+ErrPostgresPreview.Error(), redacted.Error())
+	assert.ErrorIs(t, redacted, errPostgresReadOnlyOff, "the chain survives")
+	assert.Equal(t, "dial xxxxx: "+errPostgresReadOnlyOff.Error(), redacted.Error())
 	// A source that holds no secret leaves the error alone.
 	plain := errors.New("boom")
 	assert.Same(t, plain, RedactErrorWithSecrets(plain, "sqlite:///tmp/x.db"))

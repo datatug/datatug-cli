@@ -38,7 +38,7 @@ func TestSessionDetectiveHTTPDurablePinRetryAndAcceptedPrivacy(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(project, "queries"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(project, "queries", "q.query.json"), []byte(`{"id":"q","title":"Query","type":"SQL","text":"select old"}`), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(project, "queries", "q.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","id":"q","title":"Query","type":"SQL","text":"select old"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(project, "queries", "q.query.sql"), []byte("select old"), 0600); err != nil {
@@ -173,7 +173,7 @@ func TestSessionDetectiveHTTPDurablePinRetryAndAcceptedPrivacy(t *testing.T) {
 	if _, err = local.SaveCheck(ctx, check, "alice"); err != nil {
 		t.Fatal(err)
 	}
-	if err = os.WriteFile(filepath.Join(project, "queries", "q.query.json"), []byte(`{"id":"q","title":"Edited","type":"SQL","text":"select changed"}`), 0600); err != nil {
+	if err = os.WriteFile(filepath.Join(project, "queries", "q.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","id":"q","title":"Edited","type":"SQL","text":"select changed"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	send(http.MethodPost, "/detective", origin, request, http.StatusOK)

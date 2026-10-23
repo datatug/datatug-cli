@@ -2,7 +2,6 @@ package endpoints
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/dal-go/dalgo/dal"
@@ -16,7 +15,6 @@ import (
 // test binary the constructor that dbcopy opens a source through is one that stops the run.
 func init() {
 	dbcopy.SetPostgresOpenerForTest(neverDialPostgres)
-	_ = os.Unsetenv(dbcopy.PostgresPreviewEnv)
 }
 
 // neverDialPostgres panics: a test that reaches it did not stand in, and the next thing the real constructor does is
@@ -26,16 +24,10 @@ func neverDialPostgres(string, dal.Schema, dalgo2sql.DbOptions, ...dalgo2postgre
 }
 
 // The opener of this test binary is the one that stops the run, which the init above cannot show: the test opens a
-// PostgreSQL source with the preview on, and nothing stands in.
+// PostgreSQL source, and nothing stands in.
 func TestTheOpenerOfThisTestBinaryIsTheOneThatStopsTheRun(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	ref, err := dbcopy.Parse("postgres://alice:" + endpointSecret + "@127.0.0.1:1/shop")
 	assert.NoError(t, err)
 	assert.PanicsWithValue(t, "a test of an endpoint opened a PostgreSQL database for real: it must stand in and never dial",
 		func() { _, _ = ref.Open(context.Background()) })
-}
-
-// The switch of the developer's shell does not reach a test: the init above clears it.
-func TestThePreviewSwitchIsOffUnlessATestTurnsItOn(t *testing.T) {
-	assert.ErrorIs(t, dbcopy.CheckPostgresPreview(), dbcopy.ErrPostgresPreview)
 }

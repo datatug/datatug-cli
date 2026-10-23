@@ -91,11 +91,11 @@ func (o *resultColumnsOverlay) View(w, h int) string {
 	h = max(1, h)
 	o.targets = nil
 	if o.preview != nil {
-		text := fmt.Sprintf("Add %s\n\n%s\n\nSecure source-bound execution; the original result is retained.\nExact DTQL submitted:\n%s", strings.Join(o.preview.Fields, ", "), o.preview.Proof, o.preview.DTQL)
+		text := fmt.Sprintf("Add %s\n\n%s\n\nSecure source-bound execution; the original result is retained.\nExact TugQL submitted:\n%s", strings.Join(o.preview.Fields, ", "), o.preview.Proof, o.preview.TugQL)
 		o.viewport.SetWidth(w)
 		o.viewport.SetHeight(max(1, h-4))
 		// Keep the reviewed document's newlines and indentation visible while
-		// removing terminal controls. Apply still submits preview.DTQL unchanged.
+		// removing terminal controls. Apply still submits preview.TugQL unchanged.
 		o.viewport.SetContent(ansi.Wrap(strings.ReplaceAll(sanitizeMultilineText(text), "\t", "  "), w, " "))
 		lines := []string{"Review column query", o.viewport.View(), "Run on server ⇧↵ · Esc choices", o.err}
 		o.controlY = 1 + strings.Count(o.viewport.View(), "\n") + 1

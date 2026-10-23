@@ -10,18 +10,18 @@ verbatim; this link does not imply Phase 4 has been implemented.
 Phase 2 added durable, session-scoped chat state and RecordSet snapshots.
 See [the Phase 2 design](chat-phase2-design.md) for storage and lifecycle
 details. Phase 3 adds session-scoped workspace state: project objects,
-structured attachments, Views/Selections, and docks. The original AI → DTQL
+structured attachments, Views/Selections, and docks. The original AI → TugQL
 → secure execution → grid path below is unchanged.
 
 This phase proves one vertical slice:
 
 ```text
-user -> ai/agent.Loop -> run_dtql tool -> secureread.Executor -> DALgo backend
+user -> ai/agent.Loop -> run_tugql tool -> secureread.Executor -> DALgo backend
      -> secureread.Result -> tui/grid grid
 ```
 
 The model never executes SQL and never renders rows. Its only data tool accepts
-a DTQL YAML document. DataTug validates that document with `dtql.Deserialize`,
+a TugQL YAML document. DataTug validates that document with `tugql.Deserialize`,
 applies the normal access-policy path, executes it through the configured DALgo
 adapter, and gives the chat UI a structured `secureread.Result`.
 
@@ -236,18 +236,18 @@ exactly like other policy-secured DataTug reads.
   queries use the policy-bound saved-query runner; unlike an ad-hoc `/http get`
   card, they currently persist only its structured result, not the raw HTTP
   response and headers.
-  On a focused DTQL or HTTP result card, `q` opens the project-query save form:
+  On a focused TugQL or HTTP result card, `q` opens the project-query save form:
   enter a name, add multiple tag chips, then save. Request headers and cookies
   are never copied into a project query; HTTP URLs with unsaved parameters
   cannot be captured this way. The request form currently saves GET requests
   without custom headers only; POST/PUT/PATCH/DELETE can be submitted but not
   saved as project queries until project HTTP query execution supports them.
   Project HTTP queries require HTTPS.
-  Parameterized DTQL results cannot be captured by `q` yet because this form
+  Parameterized TugQL results cannot be captured by `q` yet because this form
   cannot save parameter declarations and bindings; create a project query with
   those declarations instead.
 - On a focused query, HTTP table or HTTP document, Ctrl+R refreshes the result.
-  Query refresh reuses stored DTQL through DataTug's policy-bound executor,
+  Query refresh reuses stored TugQL through DataTug's policy-bound executor,
   without a model call. Refresh creates a new immutable version marked
   `changed` or `unchanged`; earlier versions remain saved. HTTP requests with
   unsaved URL query parameters must be entered again to refresh safely.
@@ -264,7 +264,7 @@ exactly like other policy-secured DataTug reads.
 - Press `s` to sort by the selected column; press it again to reverse the order.
 - Enter opens the selected cell's detail dialog with the complete row, column
   metadata, and (when an authoritative foreign key is available) up to five
-  related records. The related read uses DTQL and normal DataTug access policy.
+  related records. The related read uses TugQL and normal DataTug access policy.
   Up/Down or the mouse wheel scrolls the dialog, `y` copies the cell value,
   and Escape returns to the grid.
 - `B` adds or removes the focused RecordSet from this session's export bucket;
@@ -314,23 +314,23 @@ change it at any time.
 - Schema context comes from the selected catalog's stored, scanned dbmodel. It
   does not independently introspect the live database for every prompt.
 - The PoC's `secureread.Result` remains the execution boundary. Phase 2 saves
-  immutable copies in session-owned RecordSets with IDs, DTQL, source identity,
+  immutable copies in session-owned RecordSets with IDs, TugQL, source identity,
   and originating turn. Phase 3 keeps Views, Selections, attachments, and docks
   separate from those immutable results. Bookmarks remain out of scope.
 - The agent receives opaque selection references, column names, counts, and
   local parameter names, but not selected row/cell values. DataTug resolves
-  selected values locally when it executes a follow-up DTQL query.
-- Current DTQL supports one root relation and deliberately rejects joins. A
+  selected values locally when it executes a follow-up TugQL query.
+- Current TugQL supports one root relation and deliberately rejects joins. A
   request such as "tracks by AC/DC" therefore receives an honest unsupported
   response instead of an SQL fallback. Invoice and Customer scenarios need no
   join and run end to end. Single-table aggregates, such as invoice totals by
   CustomerId, are supported; joining customer names into that result is not.
-- Every Chat-generated DTQL query must include a row limit from 1 to 1000. The
+- Every Chat-generated TugQL query must include a row limit from 1 to 1000. The
   agent defaults to 100 when the user gives no count, and DataTug validates the
   bound before executing the query.
 - A turn is limited to 90 seconds and three model calls
   (`agent.Loop.MaxSteps`); tool-call attempts are capped at 12 for the
-  terminal chat loop and 2 for the browser-bridge interpret loop (one DTQL
+  terminal chat loop and 2 for the browser-bridge interpret loop (one TugQL
   attempt plus one self-correction — see `pkg/chat/agent.go`'s `newLoop`),
   so a faulty agent loop cannot query or bill indefinitely.
 - Applied access-policy limitations remain attached to the structured result
@@ -348,7 +348,7 @@ loop (see [Provider routing](#provider-routing) above and
 `pkg/chat/agent.go`'s `newLoop`/`AskWithContext`/`StreamAskWithContext`), and
 `tui/chatshell` + `tui/grid` + `tui/transcript` provide the terminal shell
 (focus ring, transcript blocks, overlays, the SidePanel workspace pane, and
-the result grid). DataTug owns the DTQL tool (`run_dtql`), the workspace/join
+the result grid). DataTug owns the TugQL tool (`run_tugql`), the workspace/join
 tools, the prompt, session persistence, and all product UI built on top of
 chatshell's `SidePanel`/`Overlay`/`GlobalKeys` extension points.
 

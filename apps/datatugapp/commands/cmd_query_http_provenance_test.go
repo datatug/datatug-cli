@@ -68,7 +68,7 @@ func writeHTTPSourceProject(t *testing.T, urlTemplate string) string {
 	if err := os.MkdirAll(queriesDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	writeProvenanceTestFile(t, filepath.Join(queriesDir, "widgets.query.json"), `{
+	writeProvenanceTestFile(t, filepath.Join(queriesDir, "widgets.query.json"), `{"createdAt":"2026-01-01T00:00:00Z",
 		"id": "widgets",
 		"title": "Widgets",
 		"type": "HTTP",

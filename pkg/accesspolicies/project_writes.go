@@ -187,7 +187,7 @@ func (w *rewriter) rewritePath(scope *access.DocumentScope, parent []pathSegment
 			return nil, false, false
 		}
 		segment := pathSegment{value: decoded, raw: decoded, isID: i%2 == 1}
-		if segment.isID && isQueryIDPosition(segments) && !isIDWildcard(decoded) {
+		if segment.isID && isProjectFileIDPosition(segments) && !isIDWildcard(decoded) {
 			canonical := CanonicalQueryID(decoded)
 			if isIDWildcard(canonical) {
 				w.refuse(fmt.Sprintf("the policy names the query id %q, whose canonical form %q is a wildcard, "+
@@ -352,6 +352,15 @@ func displayPath(segments []pathSegment, trailingAll bool) string {
 		path = strings.TrimSuffix(path, "/") + "/**"
 	}
 	return path
+}
+
+// isProjectFileIDPosition covers file-backed metadata kinds whose resource
+// IDs use the same alias-safe canonical spelling as project queries.
+func isProjectFileIDPosition(prefix []pathSegment) bool {
+	if len(prefix) != 3 || prefix[0].isID || prefix[0].value != ProjectsCollection || prefix[2].isID {
+		return false
+	}
+	return prefix[2].value == ProjectQueriesCollection || prefix[2].value == "boards" || prefix[2].value == "dbservers"
 }
 
 // isQueryIDPosition reports whether the next segment after prefix is the

@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/dal-go/dalgo2http"
 	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
@@ -29,24 +29,24 @@ func TestCoverage100_Recursive_ErrorBranches(t *testing.T) {
 	e := NewExecutor(Session{Unrestricted: true})
 
 	// 1. Invalid variables (fails accesspolicies.ExactVariables)
-	if _, err := e.RunRecursiveDTQL(ctx, "sqlite://file", []byte("from: {name: Item}\ncolumns: [{field: Id}]\n"), map[string]any{"bad": float32(1.23)}); err == nil {
+	if _, err := e.RunRecursiveTugQL(ctx, "sqlite://file", []byte("from: {name: Item}\ncolumns: [{field: Id}]\n"), map[string]any{"bad": float32(1.23)}); err == nil {
 		t.Fatal("expected invalid variable error")
 	}
 
-	// 2. Invalid document (fails dtql.Deserialize)
-	if _, err := e.RunRecursiveDTQL(ctx, "sqlite://file", []byte("::: invalid"), nil); err == nil {
+	// 2. Invalid document (fails tugql.Deserialize)
+	if _, err := e.RunRecursiveTugQL(ctx, "sqlite://file", []byte("::: invalid"), nil); err == nil {
 		t.Fatal("expected deserialize error")
 	}
 
 	// 3. Invalid query validation (fails ValidateRecursiveQuery)
 	badQueryDoc := "from: {database: mydb, name: Item}\ncolumns: [{field: Id}]\n"
-	if _, err := e.RunRecursiveDTQL(ctx, "sqlite://file", []byte(badQueryDoc), nil); err == nil {
+	if _, err := e.RunRecursiveTugQL(ctx, "sqlite://file", []byte(badQueryDoc), nil); err == nil {
 		t.Fatal("expected validate error")
 	}
 
 	// 4. Misplaced parameter (fails bindRecursiveParameters -> accesspolicies.QueryParameters)
 	misplacedParamDoc := "from: {name: Item}\ncolumns: [{field: Id}]\nwhere: {op: '==', left: {param: p}, right: {field: Id}}\n"
-	if _, err := e.RunRecursiveDTQL(ctx, "sqlite://file", []byte(misplacedParamDoc), map[string]any{"p": 1}); err == nil {
+	if _, err := e.RunRecursiveTugQL(ctx, "sqlite://file", []byte(misplacedParamDoc), map[string]any{"p": 1}); err == nil {
 		t.Fatal("expected misplaced param error")
 	}
 
@@ -57,14 +57,14 @@ func TestCoverage100_Recursive_ErrorBranches(t *testing.T) {
 		return nil, errors.New("simulated substitute error")
 	}
 	paramDoc := "from: {name: Item}\ncolumns: [{field: Id}]\nwhere: {op: '==', left: {field: Id}, right: {param: p}}\n"
-	if _, err := e.RunRecursiveDTQL(ctx, "sqlite://file", []byte(paramDoc), map[string]any{"p": 1}); err == nil {
+	if _, err := e.RunRecursiveTugQL(ctx, "sqlite://file", []byte(paramDoc), map[string]any{"p": 1}); err == nil {
 		t.Fatal("expected substitute error")
 	}
 	condevalSubstitute = origSubstitute
 
 	// 6. Derived source with outer joins
 	subqueryWithJoins := "from: {query: {from: {name: Item}, columns: [{field: Id}], as: sub}, joins: [{from: {name: Other}, on: [{left: {field: Id, source: sub}, op: '==', right: {field: OtherId, source: Other}}]}]}\ncolumns: [{field: Id}]\n"
-	if q, err := dtql.Deserialize([]byte(subqueryWithJoins)); err == nil {
+	if q, err := tugql.Deserialize([]byte(subqueryWithJoins)); err == nil {
 		if _, err := bindRecursiveParameters(q, nil); err == nil {
 			t.Fatal("expected outer joins unsupported error")
 		}
@@ -74,7 +74,7 @@ func TestCoverage100_Recursive_ErrorBranches(t *testing.T) {
 
 	// 7. Inner query parameter binding error
 	subqueryWithBadParam := "from: {query: {from: {name: Item}, columns: [{field: Id}], where: {op: '==', left: {param: p}, right: {field: Id}}, as: sub}}\ncolumns: [{field: Id}]\n"
-	if q, err := dtql.Deserialize([]byte(subqueryWithBadParam)); err == nil {
+	if q, err := tugql.Deserialize([]byte(subqueryWithBadParam)); err == nil {
 		if _, err := bindRecursiveParameters(q, map[string]any{"p": 1}); err == nil {
 			t.Fatal("expected inner bind error")
 		}
@@ -84,7 +84,7 @@ func TestCoverage100_Recursive_ErrorBranches(t *testing.T) {
 
 	// 8. openSource error
 	validDoc := "from: {name: Item}\ncolumns: [{field: Id}]\n"
-	if _, err := e.RunRecursiveDTQL(ctx, "unsupported://db", []byte(validDoc), nil); err == nil {
+	if _, err := e.RunRecursiveTugQL(ctx, "unsupported://db", []byte(validDoc), nil); err == nil {
 		t.Fatal("expected openSource error")
 	}
 
@@ -95,7 +95,7 @@ func TestCoverage100_Recursive_ErrorBranches(t *testing.T) {
 	collectRowsFn = func(reader dal.RecordsReader) ([]Row, *statisticsAccumulator, error) {
 		return nil, nil, errors.New("simulated collect error")
 	}
-	if _, err := e.RunRecursiveDTQL(ctx, source, []byte(validDoc), nil); err == nil {
+	if _, err := e.RunRecursiveTugQL(ctx, source, []byte(validDoc), nil); err == nil {
 		t.Fatal("expected collectRows error")
 	}
 	collectRowsFn = origCollect
@@ -109,9 +109,9 @@ func TestCoverage100_Recursive_SuccessAndLeafReader(t *testing.T) {
 
 	// 1. Success with basic query
 	basicDoc := "from: {name: Item}\ncolumns: [{field: Id}, {field: Category}]\n"
-	res, err := e.RunRecursiveDTQL(ctx, source, []byte(basicDoc), nil)
+	res, err := e.RunRecursiveTugQL(ctx, source, []byte(basicDoc), nil)
 	if err != nil {
-		t.Fatalf("RunRecursiveDTQL failed: %v", err)
+		t.Fatalf("RunRecursiveTugQL failed: %v", err)
 	}
 	if len(res.Rows) == 0 {
 		t.Fatal("expected rows")
@@ -119,9 +119,9 @@ func TestCoverage100_Recursive_SuccessAndLeafReader(t *testing.T) {
 
 	// 2. Success with parameters
 	paramDoc := "from: {name: Item}\ncolumns: [{field: Id}, {field: Category}]\nwhere: {op: '==', left: {field: Id}, right: {param: id}}\n"
-	res, err = e.RunRecursiveDTQL(ctx, source, []byte(paramDoc), map[string]any{"id": 1})
+	res, err = e.RunRecursiveTugQL(ctx, source, []byte(paramDoc), map[string]any{"id": 1})
 	if err != nil {
-		t.Fatalf("RunRecursiveDTQL with param failed: %v", err)
+		t.Fatalf("RunRecursiveTugQL with param failed: %v", err)
 	}
 	if len(res.Rows) != 1 {
 		t.Fatalf("expected 1 row, got %d", len(res.Rows))
@@ -129,7 +129,7 @@ func TestCoverage100_Recursive_SuccessAndLeafReader(t *testing.T) {
 
 	// 3. Subquery execution and recursiveBoundQuery.From()
 	subDoc := "from: {query: {from: {name: Item}, columns: [{field: Id}, {field: Category}], as: sub}}\ncolumns: [{field: Id}]\n"
-	subQuery, err := dtql.Deserialize([]byte(subDoc))
+	subQuery, err := tugql.Deserialize([]byte(subDoc))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,9 +140,9 @@ func TestCoverage100_Recursive_SuccessAndLeafReader(t *testing.T) {
 	if boundQ.From() == nil {
 		t.Fatal("expected From() to return source")
 	}
-	res, err = e.RunRecursiveDTQL(ctx, source, []byte(subDoc), nil)
+	res, err = e.RunRecursiveTugQL(ctx, source, []byte(subDoc), nil)
 	if err != nil {
-		t.Fatalf("RunRecursiveDTQL subquery failed: %v", err)
+		t.Fatalf("RunRecursiveTugQL subquery failed: %v", err)
 	}
 	if len(res.Rows) == 0 {
 		t.Fatal("expected rows from subquery")
@@ -150,9 +150,9 @@ func TestCoverage100_Recursive_SuccessAndLeafReader(t *testing.T) {
 
 	// 4. Aggregation query (guardAggregation = true, exercises exactAggregationReader)
 	aggDoc := "from: {name: Item}\ncolumns: [{field: Category}]\ngroupBy: [{field: Category}]\n"
-	res, err = e.RunRecursiveDTQL(ctx, source, []byte(aggDoc), nil)
+	res, err = e.RunRecursiveTugQL(ctx, source, []byte(aggDoc), nil)
 	if err != nil {
-		t.Fatalf("RunRecursiveDTQL agg failed: %v", err)
+		t.Fatalf("RunRecursiveTugQL agg failed: %v", err)
 	}
 	if len(res.Rows) == 0 {
 		t.Fatal("expected aggregated rows")
@@ -163,7 +163,7 @@ func TestCoverage100_Recursive_SuccessAndLeafReader(t *testing.T) {
 		t.Fatal("expected subQuery to not have recursive aggregation")
 	}
 	aggSubDoc := "from: {query: {from: {name: Item}, columns: [{field: Category}], groupBy: [{field: Category}], as: sub}}\ncolumns: [{field: Category}]\n"
-	aggSubQ, _ := dtql.Deserialize([]byte(aggSubDoc))
+	aggSubQ, _ := tugql.Deserialize([]byte(aggSubDoc))
 	if !recursiveAggregation(aggSubQ) {
 		t.Fatal("expected recursiveAggregation to be true for inner query with groupBy")
 	}
@@ -187,19 +187,19 @@ func TestCoverage100_Recursive_SuccessAndLeafReader(t *testing.T) {
 	}
 
 	// Join count != 0
-	joinedQ, _ := dtql.Deserialize([]byte("from: {name: Item, joins: [{from: {name: Other}}]}\ncolumns: [{field: Id}]\n"))
+	joinedQ, _ := tugql.Deserialize([]byte("from: {name: Item, joins: [{from: {name: Other}}]}\ncolumns: [{field: Id}]\n"))
 	if _, err := leaf.ExecuteQueryToRecordsReader(ctx, joinedQ); err == nil {
 		t.Fatal("expected error for join query")
 	}
 
 	// Base not collection ref
-	querySourceQ, _ := dtql.Deserialize([]byte(subDoc))
+	querySourceQ, _ := tugql.Deserialize([]byte(subDoc))
 	if _, err := leaf.ExecuteQueryToRecordsReader(ctx, querySourceQ); err == nil {
 		t.Fatal("expected error for non-collection ref base in leaf")
 	}
 
 	// Base collection ref with Database != ""
-	namedDbQ, _ := dtql.Deserialize([]byte("from: {database: db1, name: Item}\ncolumns: [{field: Id}]\n"))
+	namedDbQ, _ := tugql.Deserialize([]byte("from: {database: db1, name: Item}\ncolumns: [{field: Id}]\n"))
 	if _, err := leaf.ExecuteQueryToRecordsReader(ctx, namedDbQ); err == nil {
 		t.Fatal("expected error for named database")
 	}
@@ -269,11 +269,11 @@ func TestCoverage100_ValidateRecursiveQuery(t *testing.T) {
 	}
 
 	// SUM / AVERAGE aggregation function in columns
-	sumQ, _ := dtql.Deserialize([]byte("from: {name: Item}\ncolumns: [{expression: {function: SUM, args: [{field: Id}]}}]\n"))
+	sumQ, _ := tugql.Deserialize([]byte("from: {name: Item}\ncolumns: [{expression: {function: SUM, args: [{field: Id}]}}]\n"))
 	if err := ValidateRecursiveQuery(sumQ); err == nil {
 		t.Fatal("expected error for SUM in query")
 	}
-	avgQ, _ := dtql.Deserialize([]byte("from: {name: Item}\ncolumns: [{expression: {function: AVERAGE, args: [{field: Id}]}}]\n"))
+	avgQ, _ := tugql.Deserialize([]byte("from: {name: Item}\ncolumns: [{expression: {function: AVERAGE, args: [{field: Id}]}}]\n"))
 	if err := ValidateRecursiveQuery(avgQ); err == nil {
 		t.Fatal("expected error for AVERAGE in query")
 	}
@@ -294,7 +294,7 @@ func TestCoverage100_ValidateRecursiveQuery(t *testing.T) {
 	}
 
 	// Aggregate with arg error (SUM inside COUNT)
-	countSumQ, _ := dtql.Deserialize([]byte("from: {name: Item}\ncolumns: [{expression: {function: COUNT, args: [{expression: {function: SUM, args: [{field: Id}]}}]}}]\n"))
+	countSumQ, _ := tugql.Deserialize([]byte("from: {name: Item}\ncolumns: [{expression: {function: COUNT, args: [{expression: {function: SUM, args: [{field: Id}]}}]}}]\n"))
 	if err := ValidateRecursiveQuery(countSumQ); err == nil {
 		t.Fatal("expected error for nested SUM in COUNT")
 	}
@@ -359,13 +359,13 @@ func TestCoverage100_ValidateRecursiveQuery(t *testing.T) {
 	}
 
 	// Joins error
-	joinQ, _ := dtql.Deserialize([]byte("from: {name: Item, joins: [{from: {name: Other}}]}\ncolumns: [{field: Id}]\n"))
+	joinQ, _ := tugql.Deserialize([]byte("from: {name: Item, joins: [{from: {name: Other}}]}\ncolumns: [{field: Id}]\n"))
 	if err := ValidateRecursiveQuery(joinQ); err == nil {
 		t.Fatal("expected error for joins in ValidateRecursiveQuery")
 	}
 
 	// *dal.QuerySource
-	validInner, _ := dtql.Deserialize([]byte("from: {name: Item}\ncolumns: [{field: Id}]\n"))
+	validInner, _ := tugql.Deserialize([]byte("from: {name: Item}\ncolumns: [{field: Id}]\n"))
 	qs := dal.NewQuerySource(validInner, "sub")
 	ptrQsQ := dal.NewQueryBuilder(dal.From(&qs)).SelectColumns(dal.Column{Expression: dal.NewFieldRef("Id", "")})
 	if err := ValidateRecursiveQuery(ptrQsQ); err != nil {
@@ -490,7 +490,7 @@ func TestCoverage100_ExactAggregate_EdgeCases(t *testing.T) {
 	ctx := context.Background()
 	e := NewExecutor(Session{Unrestricted: true})
 
-	// RunExactAggregateDTQL with openSource error
+	// RunExactAggregateTugQL with openSource error
 	p, err := exactPlanForRows(t, "INTEGER", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -499,11 +499,11 @@ func TestCoverage100_ExactAggregate_EdgeCases(t *testing.T) {
 	preview := exactPreview(t, original, queryops.MatchingSource, nil)
 	cols := []resultops.Column{{Name: "Category", Type: "TEXT"}, {Name: "Value", Type: "INTEGER"}}
 
-	if _, err := e.RunExactAggregateDTQL(ctx, "unsupported://db", []byte(original), []byte(preview.DTQL), nil, cols); err == nil {
+	if _, err := e.RunExactAggregateTugQL(ctx, "unsupported://db", []byte(original), []byte(preview.TugQL), nil, cols); err == nil {
 		t.Fatal("expected openSource error")
 	}
 
-	// Provenance recorder branch in RunExactAggregateDTQL
+	// Provenance recorder branch in RunExactAggregateTugQL
 	httpCtx := httpsource.ContextWithDispatch(context.Background(), dalgo2http.ModeSnapshot, false, 0)
 	httpSource := newHTTPSnapshotFixture(t)
 	httpOriginal := "from: {name: countries}\ncolumns: [{field: code}, {field: name}]\nlimit: 2\n"
@@ -512,7 +512,7 @@ func TestCoverage100_ExactAggregate_EdgeCases(t *testing.T) {
 		t.Fatal(err)
 	}
 	httpCols := []resultops.Column{{Name: "code", Type: "TEXT"}, {Name: "name", Type: "TEXT"}}
-	res, err := e.RunExactAggregateDTQL(httpCtx, httpSource, []byte(httpOriginal), []byte(httpPreview.DTQL), nil, httpCols)
+	res, err := e.RunExactAggregateTugQL(httpCtx, httpSource, []byte(httpOriginal), []byte(httpPreview.TugQL), nil, httpCols)
 	if err != nil {
 		t.Fatalf("HTTP exact aggregate: %v", err)
 	}
@@ -523,12 +523,12 @@ func TestCoverage100_ExactAggregate_EdgeCases(t *testing.T) {
 	// prepareExactAggregate edge cases:
 	// 1. Plan exceeds budget
 	hugeDoc := make([]byte, (1<<20)+1)
-	if _, err := prepareExactAggregate(hugeDoc, []byte(preview.DTQL), cols); err == nil {
+	if _, err := prepareExactAggregate(hugeDoc, []byte(preview.TugQL), cols); err == nil {
 		t.Fatal("expected metadata budget error")
 	}
 
 	// 2. Original deserialize error
-	if _, err := prepareExactAggregate([]byte(":::"), []byte(preview.DTQL), cols); err == nil {
+	if _, err := prepareExactAggregate([]byte(":::"), []byte(preview.TugQL), cols); err == nil {
 		t.Fatal("expected original deserialize error")
 	}
 
@@ -539,68 +539,68 @@ func TestCoverage100_ExactAggregate_EdgeCases(t *testing.T) {
 
 	// 4. Original has joins
 	joinOrig := "from: {name: Item, joins: [{from: {name: Other}}]}\ncolumns: [{field: Category}]\nlimit: 2\n"
-	if _, err := prepareExactAggregate([]byte(joinOrig), []byte(preview.DTQL), cols); err == nil {
+	if _, err := prepareExactAggregate([]byte(joinOrig), []byte(preview.TugQL), cols); err == nil {
 		t.Fatal("expected joins error")
 	}
 
 	// 5. Original base not CollectionRef
 	subOrig := "from: {query: {from: {name: Item}, columns: [{field: Category}], as: sub}}\ncolumns: [{field: Category}]\nlimit: 2\n"
-	if _, err := prepareExactAggregate([]byte(subOrig), []byte(preview.DTQL), cols); err == nil {
+	if _, err := prepareExactAggregate([]byte(subOrig), []byte(preview.TugQL), cols); err == nil {
 		t.Fatal("expected non-collection ref base error")
 	}
 
 	// 6. Original ref with Database != ""
 	dbOrig := "from: {database: db1, name: Item}\ncolumns: [{field: Category}]\nlimit: 2\n"
-	if _, err := prepareExactAggregate([]byte(dbOrig), []byte(preview.DTQL), cols); err == nil {
+	if _, err := prepareExactAggregate([]byte(dbOrig), []byte(preview.TugQL), cols); err == nil {
 		t.Fatal("expected named database error")
 	}
 
 	// 7. Original cursor / bound error (startFrom != "")
 	startOrig := original + "startFrom: \"abc\"\n"
-	if _, err := prepareExactAggregate([]byte(startOrig), []byte(preview.DTQL), cols); err == nil {
+	if _, err := prepareExactAggregate([]byte(startOrig), []byte(preview.TugQL), cols); err == nil {
 		t.Fatal("expected cursor error")
 	}
 
 	// 8. Original recursive validation error
 	valOrig := "from: {name: Item}\ncolumns: [{expression: {function: SUM, args: [{field: Value}]}}]\nlimit: 2\n"
-	if _, err := prepareExactAggregate([]byte(valOrig), []byte(preview.DTQL), cols); err == nil {
+	if _, err := prepareExactAggregate([]byte(valOrig), []byte(preview.TugQL), cols); err == nil {
 		t.Fatal("expected recursive validate error")
 	}
 
 	// 9. Preview having / unbounded:
-	badPreviewHaving := preview.DTQL + "having: {op: '>', left: {field: count}, right: {value: 1}}\n"
+	badPreviewHaving := preview.TugQL + "having: {op: '>', left: {field: count}, right: {value: 1}}\n"
 	if _, err := prepareExactAggregate([]byte(original), []byte(badPreviewHaving), cols); err == nil {
 		t.Fatal("expected having error")
 	}
 
 	// 10. Column with empty Name or Type
-	if _, err := prepareExactAggregate([]byte(original), []byte(preview.DTQL), []resultops.Column{{Name: "", Type: "INT"}}); err == nil {
+	if _, err := prepareExactAggregate([]byte(original), []byte(preview.TugQL), []resultops.Column{{Name: "", Type: "INT"}}); err == nil {
 		t.Fatal("expected empty name error")
 	}
-	if _, err := prepareExactAggregate([]byte(original), []byte(preview.DTQL), []resultops.Column{{Name: "A", Type: ""}}); err == nil {
+	if _, err := prepareExactAggregate([]byte(original), []byte(preview.TugQL), []resultops.Column{{Name: "A", Type: ""}}); err == nil {
 		t.Fatal("expected empty type error")
 	}
 
 	// 11. Duplicate column metadata
-	if _, err := prepareExactAggregate([]byte(original), []byte(preview.DTQL), []resultops.Column{{Name: "Category", Type: "TEXT"}, {Name: "Category", Type: "TEXT"}}); err == nil {
+	if _, err := prepareExactAggregate([]byte(original), []byte(preview.TugQL), []resultops.Column{{Name: "Category", Type: "TEXT"}, {Name: "Category", Type: "TEXT"}}); err == nil {
 		t.Fatal("expected duplicate metadata error")
 	}
 
 	// 12. Original with non-field expression (wildcard or complex)
 	wildOrig := "from: {name: Item}\ncolumns: [{wildcard: true}]\nlimit: 2\n"
-	if _, err := prepareExactAggregate([]byte(wildOrig), []byte(preview.DTQL), cols); err == nil {
+	if _, err := prepareExactAggregate([]byte(wildOrig), []byte(preview.TugQL), cols); err == nil {
 		t.Fatal("expected wildcard error")
 	}
 
 	// 13. Ambiguous original projection (duplicate alias)
 	dupAliasOrig := "from: {name: Item}\ncolumns: [{field: Category, as: X}, {field: Value, as: X}]\nlimit: 2\n"
-	if _, err := prepareExactAggregate([]byte(dupAliasOrig), []byte(preview.DTQL), cols); err == nil {
+	if _, err := prepareExactAggregate([]byte(dupAliasOrig), []byte(preview.TugQL), cols); err == nil {
 		t.Fatal("expected duplicate alias error")
 	}
 
 	// 14. Ambiguous original field projection (duplicate field)
 	dupFieldOrig := "from: {name: Item}\ncolumns: [{field: Category}, {field: Category}]\nlimit: 2\n"
-	if _, err := prepareExactAggregate([]byte(dupFieldOrig), []byte(preview.DTQL), cols); err == nil {
+	if _, err := prepareExactAggregate([]byte(dupFieldOrig), []byte(preview.TugQL), cols); err == nil {
 		t.Fatal("expected duplicate field error")
 	}
 
@@ -652,19 +652,19 @@ func TestCoverage100_ExactAggregate_EdgeCases(t *testing.T) {
 		t.Fatal("expected AVG unsupported aggregate error")
 	}
 
-	// 23. dtqlSerialize seam error
-	origSerialize := dtqlSerialize
-	defer func() { dtqlSerialize = origSerialize }()
-	dtqlSerialize = func(q dal.StructuredQuery) ([]byte, error) {
+	// 23. tugqlSerialize seam error
+	origSerialize := tugqlSerialize
+	defer func() { tugqlSerialize = origSerialize }()
+	tugqlSerialize = func(q dal.StructuredQuery) ([]byte, error) {
 		return nil, errors.New("simulated serialize error")
 	}
-	if _, err := prepareExactAggregate([]byte(original), []byte(preview.DTQL), cols); err == nil {
-		t.Fatal("expected dtqlSerialize error")
+	if _, err := prepareExactAggregate([]byte(original), []byte(preview.TugQL), cols); err == nil {
+		t.Fatal("expected tugqlSerialize error")
 	}
-	dtqlSerialize = origSerialize
+	tugqlSerialize = origSerialize
 
 	// 24. OrderBy field not in outputs
-	orderBadPrev := preview.DTQL + "orderBy: [{field: NonExistent}]\n"
+	orderBadPrev := preview.TugQL + "orderBy: [{field: NonExistent}]\n"
 	if _, err := prepareExactAggregate([]byte(original), []byte(orderBadPrev), cols); err == nil {
 		t.Fatal("expected orderby output error")
 	}
@@ -850,7 +850,7 @@ func newHTTPSnapshotFixture(t *testing.T) string {
 	if err := os.MkdirAll(queriesDir, 0o755); err != nil {
 		t.Fatalf("mkdir queries: %v", err)
 	}
-	def := `{"id":"countries","type":"HTTP","parameters":[{"id":"code","type":"string","isRequired":true}]}`
+	def := `{"createdAt":"2026-01-01T00:00:00Z","id":"countries","type":"HTTP","parameters":[{"id":"code","type":"string","isRequired":true}]}`
 	if err := os.WriteFile(filepath.Join(queriesDir, "countries.query.json"), []byte(def), 0o600); err != nil {
 		t.Fatalf("write query def: %v", err)
 	}
@@ -875,14 +875,14 @@ func TestCoverage100_RemainingFinalBlocks(t *testing.T) {
 	e := NewExecutor(Session{Unrestricted: true})
 	source := exactSQLite(t)
 	validDoc := "from: {name: Item}\ncolumns: [{field: Id}]\n"
-	origDTQL, err := dtql.Deserialize([]byte(exactOriginal))
+	origTugQL, err := tugql.Deserialize([]byte(exactOriginal))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// 1. recursive.go:21 (ExactVariables error in RunRecursiveDTQL)
-	if _, err := e.RunRecursiveDTQL(ctx, "sqlite://file", []byte(validDoc), map[string]any{"bad": int64(9007199254740993)}); err == nil {
-		t.Fatal("expected ExactVariables error in RunRecursiveDTQL")
+	// 1. recursive.go:21 (ExactVariables error in RunRecursiveTugQL)
+	if _, err := e.RunRecursiveTugQL(ctx, "sqlite://file", []byte(validDoc), map[string]any{"bad": int64(9007199254740993)}); err == nil {
+		t.Fatal("expected ExactVariables error in RunRecursiveTugQL")
 	}
 
 	// 2. recursive.go:42 (dalExecuteRecursiveQuery error)
@@ -891,13 +891,13 @@ func TestCoverage100_RemainingFinalBlocks(t *testing.T) {
 	dalExecuteRecursiveQuery = func(ctx context.Context, executor dal.QueryExecutor, q dal.StructuredQuery) (dal.RecordsReader, error) {
 		return nil, errors.New("simulated exec error")
 	}
-	if _, err := e.RunRecursiveDTQL(ctx, source, []byte(validDoc), nil); err == nil {
+	if _, err := e.RunRecursiveTugQL(ctx, source, []byte(validDoc), nil); err == nil {
 		t.Fatal("expected dalExecuteRecursiveQuery error")
 	}
 	dalExecuteRecursiveQuery = origExec
 
 	// 3. recursive.go:80-81 (*dal.QuerySource in bindRecursiveParameters)
-	qs := dal.NewQuerySource(origDTQL, "sub")
+	qs := dal.NewQuerySource(origTugQL, "sub")
 	qPtrQs := dal.NewQueryBuilder(dal.From(&qs)).SelectColumns(dal.Column{Expression: dal.NewFieldRef("Id", "")})
 	if _, err := bindRecursiveParameters(qPtrQs, map[string]any{"minimum": 0}); err != nil {
 		t.Fatalf("bindRecursiveParameters *dal.QuerySource: %v", err)
@@ -947,7 +947,7 @@ func TestCoverage100_RemainingFinalBlocks(t *testing.T) {
 	}
 
 	// 8. recursive.go:237 (joins in ValidateRecursiveQuery)
-	qWithJoin, err := dtql.Deserialize([]byte("from: {name: Item, joins: [{from: {name: Other}, on: [{left: {field: a, source: Item}, op: '==', right: {field: b, source: Other}}]}]}\ncolumns: [{field: a, source: Item}]\n"))
+	qWithJoin, err := tugql.Deserialize([]byte("from: {name: Item, joins: [{from: {name: Other}, on: [{left: {field: a, source: Item}, op: '==', right: {field: b, source: Other}}]}]}\ncolumns: [{field: a, source: Item}]\n"))
 	if err != nil {
 		t.Fatalf("deserialize join query: %v", err)
 	}
@@ -969,9 +969,9 @@ func TestCoverage100_RemainingFinalBlocks(t *testing.T) {
 	}
 
 	// 10. exact_aggregate.go:96 (joins in prepareExactAggregate)
-	origDeserialize := dtqlDeserialize
-	defer func() { dtqlDeserialize = origDeserialize }()
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
+	origDeserialize := tugqlDeserialize
+	defer func() { tugqlDeserialize = origDeserialize }()
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
 		return qWithJoin, nil
 	}
 	cols := []resultops.Column{{Name: "Category", Type: "TEXT"}}
@@ -983,7 +983,7 @@ func TestCoverage100_RemainingFinalBlocks(t *testing.T) {
 	qNegOffset := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("Item", ""))).
 		Offset(-1).
 		SelectColumns(dal.Column{Expression: dal.NewFieldRef("Category", "")})
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
 		return qNegOffset, nil
 	}
 	if _, err := prepareExactAggregate([]byte(exactOriginal), []byte(exactOriginal), cols); err == nil {
@@ -993,7 +993,7 @@ func TestCoverage100_RemainingFinalBlocks(t *testing.T) {
 	// 12. exact_aggregate.go:112 (ValidateRecursiveQuery failure in prepareExactAggregate)
 	qValErr := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("Item", ""))).
 		SelectColumns(dal.Column{Expression: dal.Binary(dal.NewFieldRef("a", ""), dal.Add, dal.NewFieldRef("b", ""))})
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
 		return qValErr, nil
 	}
 	if _, err := prepareExactAggregate([]byte(exactOriginal), []byte(exactOriginal), cols); err == nil {
@@ -1003,27 +1003,27 @@ func TestCoverage100_RemainingFinalBlocks(t *testing.T) {
 	prevBase := exactPreview(t, exactOriginal, queryops.MatchingSource, []queryops.AggregateTerm{{Column: "Value", Function: "SUM", Alias: "total"}})
 
 	// 13. exact_aggregate.go:136 (non-field in original columns)
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
 		if string(data) == "bad_orig" {
 			return dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("Item", ""))).SelectColumns(dal.Column{Expression: dal.Star()}), nil
 		}
 		return origDeserialize(data)
 	}
-	if _, err := prepareExactAggregate([]byte("bad_orig"), []byte(prevBase.DTQL), exactColumns); err == nil {
+	if _, err := prepareExactAggregate([]byte("bad_orig"), []byte(prevBase.TugQL), exactColumns); err == nil {
 		t.Fatal("expected non-field projection error in prepareExactAggregate")
 	}
-	dtqlDeserialize = origDeserialize
+	tugqlDeserialize = origDeserialize
 
 	// 14. exact_aggregate.go:151 (ambiguous original field projection)
-	dupOrigDTQL := "from: {name: Item}\ncolumns: [{field: Category, as: A}, {field: Category, as: B}]\nlimit: 2\n"
-	if _, err := prepareExactAggregate([]byte(dupOrigDTQL), []byte(prevBase.DTQL), []resultops.Column{{Name: "A", Type: "TEXT"}, {Name: "B", Type: "TEXT"}}); err == nil {
+	dupOrigTugQL := "from: {name: Item}\ncolumns: [{field: Category, as: A}, {field: Category, as: B}]\nlimit: 2\n"
+	if _, err := prepareExactAggregate([]byte(dupOrigTugQL), []byte(prevBase.TugQL), []resultops.Column{{Name: "A", Type: "TEXT"}, {Name: "B", Type: "TEXT"}}); err == nil {
 		t.Fatal("expected duplicate field expression error in prepareExactAggregate")
 	}
 
 	// 15. exact_aggregate.go:192: unsupported aggregate expression (args != 1)
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
 		if string(data) == "bad_args" {
-			q, _ := origDeserialize([]byte(prevBase.DTQL))
+			q, _ := origDeserialize([]byte(prevBase.TugQL))
 			q2 := dal.NewQueryBuilder(dal.From(q.From().Base())).
 				GroupBy(q.GroupBy()...).
 				Limit(q.Limit()).
@@ -1035,43 +1035,43 @@ func TestCoverage100_RemainingFinalBlocks(t *testing.T) {
 	if _, err := prepareExactAggregate([]byte(exactOriginal), []byte("bad_args"), exactColumns); err == nil {
 		t.Fatal("expected unsupported aggregate expression (args != 1) error")
 	}
-	dtqlDeserialize = origDeserialize
+	tugqlDeserialize = origDeserialize
 
 	// 16. exact_aggregate.go:196: DISTINCT aggregate
-	distinctDTQL := strings.Replace(prevBase.DTQL, "function: sum", "function: sum\n      distinct: true", 1)
-	if _, err := prepareExactAggregate([]byte(exactOriginal), []byte(distinctDTQL), exactColumns); err == nil {
+	distinctTugQL := strings.Replace(prevBase.TugQL, "function: sum", "function: sum\n      distinct: true", 1)
+	if _, err := prepareExactAggregate([]byte(exactOriginal), []byte(distinctTugQL), exactColumns); err == nil {
 		t.Fatal("expected distinct agg error")
 	}
 
 	// 17. exact_aggregate.go:200: COUNT(*) with alias != "count"
-	badCountAliasDTQL := strings.Replace(prevBase.DTQL, "as: count", "as: not_count", 1)
-	if _, err := prepareExactAggregate([]byte(exactOriginal), []byte(badCountAliasDTQL), exactColumns); err == nil {
+	badCountAliasTugQL := strings.Replace(prevBase.TugQL, "as: count", "as: not_count", 1)
+	if _, err := prepareExactAggregate([]byte(exactOriginal), []byte(badCountAliasTugQL), exactColumns); err == nil {
 		t.Fatal("expected COUNT(*) alias error")
 	}
 
 	// 18. exact_aggregate.go:208: aggregate with missing column
-	missingColDTQL := strings.Replace(prevBase.DTQL, "field: Value", "field: Missing", 1)
-	if _, err := prepareExactAggregate([]byte(exactOriginal), []byte(missingColDTQL), exactColumns); err == nil {
+	missingColTugQL := strings.Replace(prevBase.TugQL, "field: Value", "field: Missing", 1)
+	if _, err := prepareExactAggregate([]byte(exactOriginal), []byte(missingColTugQL), exactColumns); err == nil {
 		t.Fatal("expected missing arg error")
 	}
 
 	// 19. exact_aggregate.go:213: unsupported aggregate "AVG"
-	avgDTQL := strings.Replace(prevBase.DTQL, "function: sum", "function: avg", 1)
-	if _, err := prepareExactAggregate([]byte(exactOriginal), []byte(avgDTQL), exactColumns); err == nil {
+	avgTugQL := strings.Replace(prevBase.TugQL, "function: sum", "function: avg", 1)
+	if _, err := prepareExactAggregate([]byte(exactOriginal), []byte(avgTugQL), exactColumns); err == nil {
 		t.Fatal("expected AVG unsupported aggregate error")
 	}
 
 	// 20. exact_aggregate.go:235: DeriveGroupAggregates error (colliding alias)
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
 		if string(data) == "invalid_for_derive" {
-			return origDTQL, nil
+			return origTugQL, nil
 		}
 		return origDeserialize(data)
 	}
-	if _, err := prepareExactAggregate([]byte("invalid_for_derive"), []byte(prevBase.DTQL), exactColumns); err == nil {
+	if _, err := prepareExactAggregate([]byte("invalid_for_derive"), []byte(prevBase.TugQL), exactColumns); err == nil {
 		t.Fatal("expected DeriveGroupAggregates error")
 	}
-	dtqlDeserialize = origDeserialize
+	tugqlDeserialize = origDeserialize
 
 	// 21. exact_aggregate.go:245: > 1024 output columns
 	terms1025 := make([]queryops.AggregateTerm, 1024)
@@ -1082,23 +1082,23 @@ func TestCoverage100_RemainingFinalBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeriveGroupAggregates 1025 terms: %v", err)
 	}
-	origSerialize := dtqlSerialize
-	defer func() { dtqlSerialize = origSerialize }()
-	dtqlSerialize = func(q dal.StructuredQuery) ([]byte, error) {
-		return []byte(expected1025.DTQL), nil
+	origSerialize := tugqlSerialize
+	defer func() { tugqlSerialize = origSerialize }()
+	tugqlSerialize = func(q dal.StructuredQuery) ([]byte, error) {
+		return []byte(expected1025.TugQL), nil
 	}
-	if _, err := prepareExactAggregate([]byte(exactOriginal), []byte(expected1025.DTQL), exactColumns); err == nil {
+	if _, err := prepareExactAggregate([]byte(exactOriginal), []byte(expected1025.TugQL), exactColumns); err == nil {
 		t.Fatal("expected > 1024 output columns budget error")
 	}
-	dtqlSerialize = origSerialize
+	tugqlSerialize = origSerialize
 
 	// 22. exact_aggregate.go:254: orderBy not in outputs
-	origSerialize = dtqlSerialize
-	defer func() { dtqlSerialize = origSerialize }()
-	dtqlSerialize = func(q dal.StructuredQuery) ([]byte, error) {
-		return []byte(prevBase.DTQL), nil
+	origSerialize = tugqlSerialize
+	defer func() { tugqlSerialize = origSerialize }()
+	tugqlSerialize = func(q dal.StructuredQuery) ([]byte, error) {
+		return []byte(prevBase.TugQL), nil
 	}
-	qOrderBad, err := dtql.Deserialize([]byte(prevBase.DTQL))
+	qOrderBad, err := tugql.Deserialize([]byte(prevBase.TugQL))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1107,17 +1107,17 @@ func TestCoverage100_RemainingFinalBlocks(t *testing.T) {
 		OrderBy(dal.Ascending(dal.NewFieldRef("NonExistent", ""))).
 		Limit(qOrderBad.Limit()).
 		SelectColumns(qOrderBad.Columns()...)
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
 		if string(data) == exactOriginal {
-			return origDTQL, nil
+			return origTugQL, nil
 		}
 		return qOrderBadWithSort, nil
 	}
 	if _, err := prepareExactAggregate([]byte(exactOriginal), []byte("preview"), exactColumns); err == nil {
 		t.Fatal("expected orderBy not in outputs error")
 	}
-	dtqlDeserialize = origDeserialize
-	dtqlSerialize = origSerialize
+	tugqlDeserialize = origDeserialize
+	tugqlSerialize = origSerialize
 
 	// Now executeExactAggregate branches:
 	p, err := exactPlanForRows(t, "INTEGER", nil)

@@ -76,9 +76,6 @@ func filesUnder(t *testing.T, dir string) []string {
 	t.Helper()
 	var files []string
 	require.NoError(t, filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
-		if filepath.Base(path) == ".datatug-environments.lock" || filepath.Base(path) == ".datatug-environments-owner.json" {
-			return nil
-		}
 		if err != nil || entry.IsDir() {
 			return err
 		}
@@ -116,6 +113,8 @@ func TestSaveScannedProject_WritesTheCatalogFileAndOneColumnsFilePerTableAndView
 
 	assert.Empty(t, warnings.String())
 	assert.ElementsMatch(t, []string{
+		".datatug-environments-owner.json",
+		".datatug-environments.lock",
 		"README.md",
 		"datatug-project.json",
 		"dbmodels/shop/main/tables/Customer/main.Customer.columns.json",
@@ -549,7 +548,9 @@ func TestDriverTitle(t *testing.T) {
 		"sqlite3":   "SQLite",
 		"sqlserver": "SQL Server",
 		"postgres":  "PostgreSQL",
-		"mysql":     "mysql",
+		"mysql":     "MySQL",
+		"oracle":    "Oracle",
+		"db2":       "db2",
 	} {
 		assert.Equal(t, want, driverTitle(driver), driver)
 	}

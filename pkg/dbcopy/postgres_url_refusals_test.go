@@ -74,7 +74,6 @@ func TestParseWithEnv_RefusesTheSameShapesAndNamesTheVariable(t *testing.T) {
 // The source the person typed reaches no opener: Open and OpenProtected have no BackendRef to open.
 // The scope of a chat session that names such a source is the one of an unresolved source.
 func TestParse_ARefusedURLNeverReachesTheOpener(t *testing.T) {
-	previewOn(t)
 	stubPostgresOpener(t, func(string, dal.Schema, dalgo2sql.DbOptions, ...dalgo2postgres.Option) (*dalgo2postgres.Database, error) {
 		t.Fatal("a refused URL must never reach the opener")
 		return nil, nil
@@ -113,6 +112,6 @@ func TestPostgresURLRefusal_OnlyTheRefusalsOfTheParserAreRecognised(t *testing.T
 	for _, refusal := range postgresURLRefusals {
 		assert.Same(t, refusal, postgresURLRefusal(refusal))
 	}
-	assert.Nil(t, postgresURLRefusal(ErrPostgresPreview))
+	assert.Nil(t, postgresURLRefusal(errPostgresReadOnlyOff))
 	assert.Nil(t, postgresURLRefusal(nil))
 }

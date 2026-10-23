@@ -6,7 +6,7 @@ import (
 	"io"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/dal-go/dalgo2http"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
@@ -84,17 +84,17 @@ func (e *Executor) runStructured(ctx context.Context, sourceURL string, query da
 	return result, nil
 }
 
-// RunDTQL deserializes a DTQL-YAML document (dal-go/dalgo/dtql.Deserialize)
-// and executes it exactly like RunStructured (REQ:dtql-query-type).
-func (e *Executor) RunDTQL(ctx context.Context, sourceURL string, dtqlDoc []byte, variables map[string]any) (Result, error) {
-	query, err := dtql.Deserialize(dtqlDoc)
+// RunTugQL deserializes a TugQL-YAML document (dal-go/dalgo/tugql.Deserialize)
+// and executes it exactly like RunStructured (REQ:tugql-query-type).
+func (e *Executor) RunTugQL(ctx context.Context, sourceURL string, tugqlDoc []byte, variables map[string]any) (Result, error) {
+	query, err := tugql.Deserialize(tugqlDoc)
 	if err != nil {
-		return Result{}, fmt.Errorf("secureread: parse DTQL: %w", err)
+		return Result{}, fmt.Errorf("secureread: parse TugQL: %w", err)
 	}
 	return e.RunStructured(ctx, sourceURL, query, variables)
 }
 
-// runThroughPolicies is the shared tail of RunStructured/RunDTQL and
+// runThroughPolicies is the shared tail of RunStructured/RunTugQL and
 // RunNativeSQL: run the query through accesspolicies.Run against db, collect
 // the admitted rows, and translate the policy Explain lines into Result
 // Limitations.
@@ -133,7 +133,7 @@ func (e *Executor) runThroughPolicies(ctx context.Context, db dal.DB, query dal.
 // dbcopy.Parse's own descriptive error. The returned close func is always
 // safe to call, even when the backend has no Close method.
 //
-// Every Executor call — RunStructured, RunDTQL, RunNativeSQL — runs the
+// Every Executor call — RunStructured, RunTugQL, RunNativeSQL — runs the
 // result through accesspolicies.Run before a caller ever sees a row (see
 // runThroughPolicies), so openSource always opens through
 // dbcopy.BackendRef.OpenProtected/OpenProtectedForTest, never plain
@@ -141,11 +141,11 @@ func (e *Executor) runThroughPolicies(ctx context.Context, db dal.DB, query dal.
 // comment describes, and it is what wires dalgo2ingitdb v0.4.0's
 // WithStoredOnlyReads() option in for every source this package opens.
 //
-// policies is how many access policies the session reads through. A PostgreSQL
-// source read through one or more of them is refused here, before the source is
-// opened (dbcopy.CheckPostgresRead): the preview of PostgreSQL sources does not
-// serve policy-enforced reads yet. A session with no policy (Unrestricted) reads a
-// PostgreSQL source as any other, once the preview is on.
+// policies is how many access policies the session reads through. A PostgreSQL,
+// MySQL, Oracle or SQL Server source read through one or more of them is refused
+// here, before the source is opened (dbcopy.CheckServerRead): policy-enforced reads
+// of these sources are not served yet. A session with no policy (Unrestricted)
+// reads such a source as any other.
 //
 // insecureAllowLoopback, when true, opens an http(s):// source via
 // dbcopy.BackendRef.OpenProtectedForTest instead of OpenProtected (see
@@ -156,7 +156,7 @@ func openSource(ctx context.Context, sourceURL string, insecureAllowLoopback boo
 	if err != nil {
 		return nil, nil, err
 	}
-	if err = dbcopy.CheckPostgresRead(ref, policies); err != nil {
+	if err = dbcopy.CheckServerRead(ref, policies); err != nil {
 		return nil, nil, err
 	}
 	var db dal.DB

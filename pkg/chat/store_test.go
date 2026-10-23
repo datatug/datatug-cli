@@ -110,7 +110,7 @@ func TestSessionStoreSeparatesReconfiguredSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := store.AppendTurn(ctx, session.ID, user.ID, original.Sources[original.Database], Turn{Queries: []QueryResult{{
-		DTQL:   "from: {name: Customer}\nlimit: 1",
+		TugQL:  "from: {name: Customer}\nlimit: 1",
 		Result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 5}}}},
 	}}}); err != nil {
 		t.Fatal(err)
@@ -156,7 +156,7 @@ func TestLegacyChatScopeMigratesOnlyMatchingSource(t *testing.T) {
 			t.Fatal(err)
 		}
 		if _, err := store.AppendTurn(ctx, item.id, user.ID, item.source, Turn{Queries: []QueryResult{{
-			DTQL:   "from: {name: Customer}\nlimit: 1",
+			TugQL:  "from: {name: Customer}\nlimit: 1",
 			Result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 5}}}},
 		}}}); err != nil {
 			t.Fatal(err)
@@ -202,7 +202,7 @@ func TestRecordSetSnapshotRestoresTypedRowsWithoutQueryRerun(t *testing.T) {
 	date := time.Date(2013, 12, 22, 0, 0, 0, 0, time.UTC)
 	original := secureread.Result{Columns: []string{"InvoiceId", "InvoiceDate", "Total", "Note", "Binary"}, Rows: []secureread.Row{{Key: "k1", Data: map[string]any{"InvoiceId": int64(412), "InvoiceDate": date, "Total": 1.99, "Note": nil, "Binary": []byte{0, 255}}}}, Collection: "main.Invoice", Limitations: []secureread.Limitation{{Kind: secureread.LimitationPolicy, Note: "admin"}}}
 	doc := "from: {name: main.Invoice}\nlimit: 1"
-	turn, err := store.AppendTurn(ctx, session.ID, user.ID, "sqlite:///chinook.db", Turn{Queries: []QueryResult{{Title: "Newest invoice", DTQL: doc, Result: original}}})
+	turn, err := store.AppendTurn(ctx, session.ID, user.ID, "sqlite:///chinook.db", Turn{Queries: []QueryResult{{Title: "Newest invoice", TugQL: doc, Result: original}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,14 +217,14 @@ func TestRecordSetSnapshotRestoresTypedRowsWithoutQueryRerun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(saved.Queries) != 1 || saved.Queries[0].DTQL != doc || saved.Queries[0].OriginMessageID != user.ID {
+	if len(saved.Queries) != 1 || saved.Queries[0].TugQL != doc || saved.Queries[0].OriginMessageID != user.ID {
 		t.Fatalf("queries = %+v", saved.Queries)
 	}
 	if len(saved.Messages) != 2 || saved.Messages[1].RecordSetID != turn.Queries[0].RecordSetID {
 		t.Fatalf("messages = %+v", saved.Messages)
 	}
 	rs := saved.RecordSets[turn.Queries[0].RecordSetID]
-	if rs.DTQL != doc || rs.Source != "sqlite:///chinook.db" || rs.Database != "chinook" || rs.Environment != "local" || rs.OriginMessageID != user.ID {
+	if rs.TugQL != doc || rs.Source != "sqlite:///chinook.db" || rs.Database != "chinook" || rs.Environment != "local" || rs.OriginMessageID != user.ID {
 		t.Fatalf("provenance = %+v", rs)
 	}
 	if got := rs.Result.Rows[0].Data["InvoiceId"]; got != int64(412) {
@@ -244,7 +244,7 @@ func TestRecordSetSnapshotRestoresTypedRowsWithoutQueryRerun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := reloaded.AppendTurn(ctx, session.ID, user2.ID, "sqlite:///chinook.db", Turn{Queries: []QueryResult{{DTQL: doc, Result: original}}})
+	second, err := reloaded.AppendTurn(ctx, session.ID, user2.ID, "sqlite:///chinook.db", Turn{Queries: []QueryResult{{TugQL: doc, Result: original}}})
 	if err != nil || second.Queries[0].RecordSetID == rs.ID {
 		t.Fatalf("second ID = %+v, %v", second, err)
 	}
@@ -345,7 +345,7 @@ func TestStoreEmptyResultAndRecoveryErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := store.AppendTurn(ctx, session.ID, user.ID, "sqlite:///test.db", Turn{Queries: []QueryResult{{DTQL: "from: {name: Customer}\nlimit: 1", Result: secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{}}}}})
+	turn, err := store.AppendTurn(ctx, session.ID, user.ID, "sqlite:///test.db", Turn{Queries: []QueryResult{{TugQL: "from: {name: Customer}\nlimit: 1", Result: secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -379,7 +379,7 @@ func TestStoreRestoresRealEmptyResultShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := store.AppendTurn(ctx, session.ID, user.ID, "sqlite:///test.db", Turn{Queries: []QueryResult{{DTQL: "from: {name: Customer}\nlimit: 1", Result: secureread.Result{}}}})
+	turn, err := store.AppendTurn(ctx, session.ID, user.ID, "sqlite:///test.db", Turn{Queries: []QueryResult{{TugQL: "from: {name: Customer}\nlimit: 1", Result: secureread.Result{}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -429,7 +429,7 @@ func TestInterruptedTurnRollsBackQueryAndSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.AppendTurn(ctx, session.ID, user.ID, "sqlite:///test.db", Turn{Queries: []QueryResult{{DTQL: "from: {name: Customer}\nlimit: 1", Result: secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": func() {}}}}}}}})
+	_, err = store.AppendTurn(ctx, session.ID, user.ID, "sqlite:///test.db", Turn{Queries: []QueryResult{{TugQL: "from: {name: Customer}\nlimit: 1", Result: secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": func() {}}}}}}}})
 	if err == nil {
 		t.Fatal("expected result serialization error")
 	}
@@ -454,7 +454,7 @@ func TestCorruptSnapshotPayloadIsReported(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := store.AppendTurn(ctx, session.ID, user.ID, "sqlite:///test.db", Turn{Queries: []QueryResult{{DTQL: "from: {name: Customer}\nlimit: 1", Result: secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{}}}}})
+	turn, err := store.AppendTurn(ctx, session.ID, user.ID, "sqlite:///test.db", Turn{Queries: []QueryResult{{TugQL: "from: {name: Customer}\nlimit: 1", Result: secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -479,7 +479,7 @@ func bookmarkableSelection(t *testing.T, store *SessionStore) (ChatSession, Cont
 	}
 	when := time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)
 	turn, err := store.AppendTurn(ctx, session.ID, user.ID, "sqlite:///private.db?token=secret", Turn{Queries: []QueryResult{{
-		Title: "Invoices", DTQL: "from: {name: Invoice}", SourceID: "private",
+		Title: "Invoices", TugQL: "from: {name: Invoice}", SourceID: "private",
 		Result: secureread.Result{Columns: []string{"ID", "When", "Total"}, Rows: []secureread.Row{
 			{Key: "a", Data: map[string]any{"ID": int64(1), "When": when, "Total": 1.25}},
 			{Key: "b", Data: map[string]any{"ID": int64(2), "When": when.AddDate(0, 0, 1), "Total": 2.5}},
@@ -612,7 +612,7 @@ func TestJoinLineageMigrationFromV4AddsAppliedEdges(t *testing.T) {
 		t.Fatal(err)
 	}
 	edge := AppliedJoinEdge{JoinPath: "root/0", SourcePath: "root", ConstraintID: "fk_invoice_customer", Direction: "outgoing", CandidateID: "candidate", Fields: []JoinFieldPair{{"CustomerId", "CustomerId"}}}
-	query, err := migrated.AppendQuery(ctx, session.ID, user.ID, "sqlite:///fixture.db", QueryResult{Title: "Joined", DTQL: "from: {name: Invoice}\nlimit: 1", Result: secureread.Result{Columns: []string{"InvoiceId"}}, Lineage: &JoinLineage{ParentRecordSetID: "parent", CandidateID: edge.CandidateID, AppliedEdges: []AppliedJoinEdge{edge}}})
+	query, err := migrated.AppendQuery(ctx, session.ID, user.ID, "sqlite:///fixture.db", QueryResult{Title: "Joined", TugQL: "from: {name: Invoice}\nlimit: 1", Result: secureread.Result{Columns: []string{"InvoiceId"}}, Lineage: &JoinLineage{ParentRecordSetID: "parent", CandidateID: edge.CandidateID, AppliedEdges: []AppliedJoinEdge{edge}}})
 	if err != nil {
 		t.Fatal(err)
 	}

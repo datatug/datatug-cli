@@ -12,15 +12,15 @@ status: Draft
 
 ## Summary
 
-Implement Phase 5 in the Go CLI Chat without a second query engine: FK-backed candidate discovery, deterministic recursive DTQL derivation, shared UI/agent application, immutable lineage, and real Chinook acceptance. The original request is preserved at `docs/chat-phase5-original-prompt.md`.
+Implement Phase 5 in the Go CLI Chat without a second query engine: FK-backed candidate discovery, deterministic recursive TugQL derivation, shared UI/agent application, immutable lineage, and real Chinook acceptance. The original request is preserved at `docs/chat-phase5-original-prompt.md`.
 
 ## Approach
 
-Journey: open an existing RecordSet → see grouped FK edges below its grid → inspect/select an edge → Space or agent action calls the same application service → service rechecks the edge, derives and validates DTQL → secure-read DALgo execution produces a new immutable RecordSet → chat restores it and offers its next edges. A stale or ambiguous edge fails before execution.
+Journey: open an existing RecordSet → see grouped FK edges below its grid → inspect/select an edge → Space or agent action calls the same application service → service rechecks the edge, derives and validates TugQL → secure-read DALgo execution produces a new immutable RecordSet → chat restores it and offers its next edges. A stale or ambiguous edge fails before execution.
 
 1. Upgrade CLI to `github.com/dal-go/dalgo v0.85.0` and `github.com/dal-go/dalgo2sql v0.18.0`. Compile and execute a recursive-JOIN Chinook fixture as the dependency contract gate before feature wiring. Keep query execution exclusively in `secureread.Executor`/DALgo.
 2. At chat startup, read FK edges once from the configured source using DataTug's existing schema provider (SQLite/Chinook first); cache a source-scoped, deterministically ordered snapshot for cursor movement. Preserve SQLite PRAGMA FK id as a stable constraint name, group composite columns by id/sequence, qualify schema/table names, and resolve implicit target PK columns. A source with no supported FK metadata exposes no candidates, not inferred ones. Rescan/revalidate on apply.
-3. Walk the real DTQL `FromSource` tree and identify each relation instance by its zero-based source-tree path (`root=[]`, child joins append index) plus effective alias. Key an edge by source instance, stable FK constraint name, direction and complete ordered field pairs; normalize equality operand order to match active ON clauses. A recursive query tree may contain repeated physical tables, but discovery itself never recursively walks FK targets.
+3. Walk the real TugQL `FromSource` tree and identify each relation instance by its zero-based source-tree path (`root=[]`, child joins append index) plus effective alias. Key an edge by source instance, stable FK constraint name, direction and complete ordered field pairs; normalize equality operand order to match active ON clauses. A recursive query tree may contain repeated physical tables, but discovery itself never recursively walks FK targets.
 4. Derive an inner JOIN in the source tree with collision-safe aliases (`Customer`, `Customer2`, ...) using case-insensitive existing-alias checks. Rebuild the query through DALgo's AST/serializer so filters, limit and other clauses survive; qualify previously unqualified expressions only when the parent has one relation. Expand source wildcard projection from the catalog and append qualified target columns with unique aliases (e.g. `Customer_CustomerId`) to avoid map-key collisions. Reject unsupported projection/aggregation combinations rather than guessing or deleting an existing JOIN.
 5. Persist parent RecordSet and exact FK edge identity, including each applied relation-tree path, in optional lineage fields. Migrate v1–v4 stores transactionally to v5; update load/validation and bookmark snapshot copy, while decoding old bookmarks with empty lineage. Use one application operation for UI and agent; keep row/cell values local.
    DALgo's secure-read authorization evaluates flat JOIN sources and refuses joined-target residual row/field rules. For candidate exposure, use a no-row-read target policy probe with the same policy set; for execution, fail closed on nested sources until the DALgo authorization path covers them, and test denial/row/field restrictions plus multiple policies and schema-qualified relations.
@@ -47,7 +47,7 @@ Update the exact DALgo dependency pair and prove JOIN parse/serialize/SQLite exe
 **Depends-On:** 1
 **Status:** planning
 
-Build the pure candidate walker and exact-edge suppression over the parsed DTQL tree. Derive a validated JOIN using FK ON pairs and aliases, with deterministic tests for nested/repeated/self/cyclic cases and safe refusals.
+Build the pure candidate walker and exact-edge suppression over the parsed TugQL tree. Derive a validated JOIN using FK ON pairs and aliases, with deterministic tests for nested/repeated/self/cyclic cases and safe refusals.
 
 ### Task 3: Shared execution and lineage
 
@@ -65,7 +65,7 @@ Add one SessionChat application operation that revalidates the selected edge, ex
 **Depends-On:** 3
 **Status:** planning
 
-Expose bounded candidate metadata in context and an exact-candidate tool that calls the shared operation. Refuse JOIN-shaped `run_dtql` model calls, reject target-only ambiguous requests before execution, and assert parity with the UI path using a fake model.
+Expose bounded candidate metadata in context and an exact-candidate tool that calls the shared operation. Refuse JOIN-shaped `run_tugql` model calls, reject target-only ambiguous requests before execution, and assert parity with the UI path using a fake model.
 
 ### Task 5: Inline terminal interaction
 
@@ -83,7 +83,7 @@ Place grouped candidates directly below each grid; add candidate focus, navigati
 **Depends-On:** 4, 5
 **Status:** planning
 
-Run focused and broader tests, a real Chinook FK/DTQL/row/restart journey with the inexpensive configured model, inspect the terminal UX, address review findings, then land and verify the exact remote/CI/release/cleanup receipts.
+Run focused and broader tests, a real Chinook FK/TugQL/row/restart journey with the inexpensive configured model, inspect the terminal UX, address review findings, then land and verify the exact remote/CI/release/cleanup receipts.
 
 ## Open Questions
 

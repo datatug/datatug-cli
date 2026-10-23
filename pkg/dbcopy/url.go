@@ -9,9 +9,8 @@
 //   - sqlite://         fully wired via dalgo2sqlite
 //   - ingitdb://        fully wired via dalgo2ingitdb; local-paths-only
 //     (REQ:ingitdb-url-local-only)
-//   - postgres://       fully wired via dal-go/dalgo2postgres, behind the
-//     preview switch (see PostgresPreviewEnv): a read-only session
-//     unless the person says otherwise (see postgresConnectionString)
+//   - postgres://       fully wired via dal-go/dalgo2postgres: a read-only
+//     session unless the person says otherwise (see postgresConnectionString)
 //   - env:NAME          resolves the environment variable NAME, which holds
 //     any other supported URL (the way to give PostgreSQL its password
 //     without writing it in a project file or on a command line); see
@@ -34,7 +33,6 @@ import (
 	"github.com/dal-go/dalgo2sql"
 	"github.com/dal-go/dalgo2sqlite"
 	"github.com/datatug/datatug-cli/pkg/httpsource"
-	"github.com/datatug/datatug-cli/pkg/openvaultdb"
 	"github.com/ingitdb/dalgo2ingitdb"
 	"github.com/ingitdb/ingitdb-go/ingitdb/validator"
 	"github.com/xo/dburl"
@@ -42,7 +40,7 @@ import (
 
 // supportedSchemes is the MVP-supported scheme list, used both for dispatch
 // and to construct the error message for REQ:unknown-scheme-rejected.
-var supportedSchemes = []string{"sqlite", "ingitdb", "postgres", "http", "https", "openvaultdb", "bigquery"}
+var supportedSchemes = []string{"sqlite", "ingitdb", "postgres", "mysql", "oracle", "sqlserver", "http", "https", "openvaultdb", "bigquery"}
 
 // SupportedSchemes returns the exact schemes Parse/Open dispatch, in
 // dispatch order. It is the single source of truth other packages should
@@ -216,6 +214,11 @@ func parseEnvSource(rawURL string, lookupEnv func(string) (string, bool)) (Backe
 	}
 	ref, err := parseURL(value)
 	if err != nil {
+		var serverRefusal *serverURLRefusal
+		if errors.As(err, &serverRefusal) {
+			// The same for a MySQL, Oracle or SQL Server URL: a fixed sentence that quotes none of it.
+			return BackendRef{}, fmt.Errorf("environment variable %s does not hold a usable connection URL: %w", name, serverRefusal)
+		}
 		if refusal := postgresURLRefusal(err); refusal != nil {
 			// A fixed sentence about the shape of the URL that quotes none of it, so the
 			// variable's value stays out of the message and the person is still told what to fix.
@@ -290,6 +293,9 @@ func parseURL(rawURL string) (BackendRef, error) {
 			return BackendRef{}, fmt.Errorf("invalid postgres URL: %w", err)
 		}
 		return BackendRef{Scheme: "postgres", Path: path, Raw: display}, nil
+	case "mysql", "oracle", "sqlserver":
+		engine, _ := serverEngineOf(scheme)
+		return parseServerSource(engine, rest, display)
 	case "sqlite":
 		return parseSQLite(rawURL, scheme+separator+rest, rest, true)
 	}
@@ -505,8 +511,7 @@ func LocalSourceURL(scheme, path string) string {
 //   - sqlite:      opens via dalgo2sqlite.NewDatabase.
 //   - ingitdb:     opens via dalgo2ingitdb.NewDatabase with the default
 //     validator-backed CollectionsReader.
-//   - postgres:    opens via dalgo2postgres.NewDatabaseWithOptions, only while
-//     the preview switch is on (see PostgresPreviewEnv), read-only
+//   - postgres:    opens via dalgo2postgres.NewDatabaseWithOptions, read-only
 //     (see postgresConnectionString), and one handle for the
 //     process per connection string (see handleCache).
 //   - http/https:  opens via httpsource.Open, translating every HTTP
@@ -611,11 +616,11 @@ func (r BackendRef) OpenForTest(ctx context.Context) (dal.DB, error) {
 // structured-query compilation): dal-go/dalgo2sql#179 added FROM-source
 // alias support to compileStructuredSQL, which used to unconditionally
 // reject any structured query whose FROM source carried an alias — this
-// project's own demo query (queries/customers/customer-invoices.query.dtql,
+// project's own demo query (queries/customers/customer-invoices.query.tugql.yaml,
 // `from: {name: Invoice, alias: i}`) uses exactly that shape, and used to
 // turn into a hard error the moment this dialect was enabled. With #179
-// fixed, existing non-aggregate DTQL queries (see dalgo2sql's own
-// dtql_datatug_inventory_test.go) compile cleanly, so protected reads now
+// fixed, existing non-aggregate TugQL queries (see dalgo2sql's own
+// tugql_datatug_inventory_test.go) compile cleanly, so protected reads now
 // get the dialect's real guarantees: every dal.Constant value becomes a
 // genuine `?` placeholder + bound arg (not a quoted-string literal), and
 // unsupported shapes (such as joins and cursors) fail closed. GROUP BY and
@@ -683,7 +688,7 @@ func (r BackendRef) CheckFile() error {
 func (r BackendRef) openSource(ctx context.Context, mode openMode) (dal.DB, error) {
 	switch r.Scheme {
 	case "openvaultdb":
-		return openvaultdb.OpenSource(r.Path)
+		return OpenOpenVaultDBSource(r.Path)
 	case "sqlite":
 		// A SQLite file that is written (the target of `db copy`) is created when it is missing;
 		// one that is read must exist.
@@ -729,8 +734,11 @@ func (r BackendRef) openSource(ctx context.Context, mode openMode) (dal.DB, erro
 		return db, nil
 
 	case "postgres":
-		// The preview switch is asked first, inside openPostgres.
 		return r.openPostgres(ctx, mode)
+
+	case "mysql", "oracle", "sqlserver":
+		engine, _ := serverEngineOf(r.Scheme)
+		return r.openServer(ctx, engine, mode)
 
 	case "http", "https":
 		var opts []httpsource.Option

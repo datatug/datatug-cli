@@ -36,9 +36,6 @@ func treeBytes(t *testing.T, dir string) map[string]string {
 	t.Helper()
 	files := map[string]string{}
 	require.NoError(t, filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
-		if filepath.Base(path) == ".datatug-environments.lock" || filepath.Base(path) == ".datatug-environments-owner.json" {
-			return nil
-		}
 		require.NoError(t, err)
 		if !entry.IsDir() {
 			data, readErr := os.ReadFile(path)
@@ -64,7 +61,9 @@ func TestAddProjectSourceSQLiteIsWrittenAsAScanWritesIt(t *testing.T) {
 	assert.Contains(t, files["environments/local/catalogs/shop/shop.db.json"], `"dbModel": ""`)
 	assert.Contains(t, files["environments/local/catalogs/shop/shop.db.json"], filepath.ToSlash(file))
 	assert.Contains(t, files["environments/local/local.env.json"], `"shop"`)
-	assert.Len(t, files, 3, "the project file, the environment file and the catalog file")
+	assert.Len(t, files, 5, "the project, environment and catalog files plus the environment owner sidecar and lock")
+	assert.Equal(t, "datatug-environment-owner/1", decodeJSONFile(t, filepath.Join(dir, ".datatug-environments-owner.json"))["format"])
+	assert.True(t, strings.HasPrefix(files[".datatug-environments.lock"], "environment-owner/1:"))
 
 	before := treeBytes(t, dir)
 	again, err := AddProjectSource(context.Background(), store, dir, ProjectSourceRequest{Environment: "local", ID: "shop", SQLitePath: file})
@@ -373,7 +372,7 @@ func TestResolveProjectSourceURLThatCannotBeResolved(t *testing.T) {
 	dir, store := sourceProject(t)
 	ctx := context.Background()
 	for id, catalog := range map[string]datatug.DbCatalogBase{
-		"mssql": {Driver: "sqlserver"},
+		"mssql": {Driver: "firestore"},
 		"url":   {Driver: "sqlite3", Path: "https://user:secret@host/x.db"},
 		"pg":    {Driver: "postgres", Path: "../outside.json"},
 	} {
@@ -381,7 +380,7 @@ func TestResolveProjectSourceURLThatCannotBeResolved(t *testing.T) {
 		require.NoError(t, store.SaveEnvDbCatalog(ctx, "local", "", id, &datatug.DbCatalog{DbCatalogBase: catalog, Schemas: datatug.DbSchemas{}}))
 	}
 	for id, message := range map[string]string{
-		"mssql": "its driver is not one that can be opened (sqlite3 or postgres)",
+		"mssql": "its driver is not one that can be opened (sqlite3, postgres, mysql, oracle or sqlserver)",
 		"url":   "its catalog path or connection descriptor cannot be resolved",
 		"pg":    "its catalog path or connection descriptor cannot be resolved",
 	} {

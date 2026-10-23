@@ -228,8 +228,8 @@ func TestBookmarkUsesActualSafeSourceIDAcrossSessions(t *testing.T) {
 	}
 	llm := &scriptedProvider{steps: []scriptedStep{
 		{toolCalls: []ai.ToolCall{toolCall("1", toolFindBookmarks, map[string]any{})}},
-		{toolCalls: []ai.ToolCall{toolCall("2", toolRunDTQL, map[string]any{
-			"sourceId": "private", "title": "Invoices", "dtql": "from: {name: Invoice}\nwhere:\n  op: In\n  left: {field: CustomerId}\n  right: {param: selection_1_c1}\nlimit: 20",
+		{toolCalls: []ai.ToolCall{toolCall("2", toolRunTugQL, map[string]any{
+			"sourceId": "private", "title": "Invoices", "tugql": "from: {name: Invoice}\nwhere:\n  op: In\n  left: {field: CustomerId}\n  right: {param: selection_1_c1}\nlimit: 20",
 		})}},
 		{text: "Done."},
 	}}

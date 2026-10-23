@@ -23,8 +23,7 @@ func TestUnavailableSource(t *testing.T) {
 	lost := &postgresConnectionError{sqlState: "28P01"}
 
 	for name, want := range map[string]error{
-		"the preview is off":                 ErrPostgresPreview,
-		"policy reads are refused":           ErrPostgresPolicyReads,
+		"policy reads are refused":           CheckServerRead(ref, 1),
 		"a URL that turns read-only off":     errPostgresReadOnlyOff,
 		"a service file in the URL":          errPostgresServiceFile,
 		"a classified open failure":          classified,

@@ -191,7 +191,7 @@ func TestChatUIStatusBarJoinFocusedHint(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := store.AppendQuery(ctx, sessions.activeID, user.ID, "sqlite:///fixture.db", QueryResult{
-		Title: "Invoices", DTQL: "from: {name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 5\n",
+		Title: "Invoices", TugQL: "from: {name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 5\n",
 		Result: secureread.Result{Columns: []string{"InvoiceId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 1}}}},
 	}); err != nil {
 		t.Fatal(err)

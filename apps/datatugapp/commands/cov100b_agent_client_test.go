@@ -214,7 +214,7 @@ func TestCovBExecutionListOutputs(t *testing.T) {
 func TestCovBExecutionShow(t *testing.T) {
 	ref := apicontract.ExecutionRef{StoreID: "st", ProjectID: "p", ExecutionID: "e1"}
 	scope := apicontract.ExecutionRecordScope{StoreID: "st", Project: "p", Environment: "prod"}
-	record := covBJSON(t, apicontract.ExecutionRecord{Ref: ref, Scope: scope, DTQLHash: "abc", RowCount: 4, ResultFingerprint: "fp"})
+	record := covBJSON(t, apicontract.ExecutionRecord{Ref: ref, Scope: scope, TugQLHash: "abc", RowCount: 4, ResultFingerprint: "fp"})
 	recordQ := covBJSON(t, apicontract.ExecutionRecord{Ref: ref, Scope: scope, QueryID: "saved-q", RowCount: 1})
 	snapshotNoData := covBJSON(t, apicontract.SnapshotReadResponse{Execution: ref, SnapshotRef: "snap", SnapshotState: apicontract.SnapshotState{Availability: apicontract.SnapshotExpired}})
 	snapshotData := covBJSON(t, apicontract.SnapshotReadResponse{
@@ -238,7 +238,7 @@ func TestCovBExecutionShow(t *testing.T) {
 
 	out, err := covBRun(executionCommand(), append(base, "show", "e1")...)
 	require.NoError(t, err)
-	require.Contains(t, out, "ad-hoc DTQL abc")
+	require.Contains(t, out, "ad-hoc TugQL abc")
 	require.Contains(t, out, "rows: 4")
 
 	current.Store(recordQ)

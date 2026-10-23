@@ -44,6 +44,7 @@ func writePersonalQuery(t *testing.T, projectID, id, title string) {
 	personalDir := filepath.Join(dir, "queries")
 	mustMkdirAll(t, personalDir)
 	mustWriteFile(t, filepath.Join(personalDir, id+".query.json"), `{
+		"createdAt":"2026-01-01T00:00:00Z",
 		"id": "`+id+`",
 		"title": "`+title+`",
 		"type": "SQL"
@@ -61,6 +62,7 @@ func writeLegacyPersonalQuery(t *testing.T, projectDir, principalID, id, title s
 	legacyDir := filepath.Join(projectDir, "user:"+principalID, "queries")
 	mustMkdirAll(t, legacyDir)
 	mustWriteFile(t, filepath.Join(legacyDir, id+".query.json"), `{
+		"createdAt":"2026-01-01T00:00:00Z",
 		"id": "`+id+`",
 		"title": "`+title+`",
 		"type": "SQL"

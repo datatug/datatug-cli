@@ -134,7 +134,7 @@ func writeHTTPSourceProject(t *testing.T, urlTemplate, fixtureBody string) strin
 	root := t.TempDir()
 	queriesDir := filepath.Join(root, "queries", "reference")
 	assert.NoError(t, os.MkdirAll(queriesDir, 0o755))
-	assert.NoError(t, os.WriteFile(filepath.Join(queriesDir, "greeting.query.json"), []byte(`{
+	assert.NoError(t, os.WriteFile(filepath.Join(queriesDir, "greeting.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z",
 		"id": "greeting",
 		"title": "Greeting",
 		"type": "HTTP",
@@ -194,16 +194,6 @@ func TestOpen_HTTP_NoQueriesErrors(t *testing.T) {
 	assert.NoError(t, err)
 	_, err = ref.Open(context.Background())
 	assert.Error(t, err)
-}
-
-func TestOpen_Postgres_AnswersThePreviewSentenceWhileTheSwitchIsOff(t *testing.T) {
-	t.Parallel()
-	ref, err := Parse("postgres://user@host/db")
-	assert.NoError(t, err)
-	db, openErr := ref.Open(context.Background())
-	assert.Nil(t, db)
-	assert.True(t, errors.Is(openErr, ErrPostgresPreview),
-		"expected ErrPostgresPreview, got %v", openErr)
 }
 
 // TestOpen_SQLite_OpensChinookFixture exercises the sqlite Open path against
@@ -517,12 +507,18 @@ func TestStructuredDialect_StringParamEmitsPlaceholderNotLiteral(t *testing.T) {
 		WhereField("BillingCountry", dal.Equal, aliasDialectMaliciousBillingCountry).
 		SelectColumns(dal.Column{Expression: dal.Field("InvoiceId")})
 
+	mock.ExpectQuery(`SELECT name, type, "notnull", pk FROM pragma_table_xinfo\(\?\)`).
+		WithArgs("Invoice").WillReturnRows(sqlmock.NewRows([]string{"name", "type", "notnull", "pk"}).
+		AddRow("InvoiceId", "INTEGER", 1, 1).AddRow("BillingCountry", "TEXT", 0, 0))
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM pragma_index_list\(\?\) WHERE origin = 'pk'`).WithArgs("Invoice").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectQuery("SELECT `InvoiceId` FROM `Invoice` AS `i` WHERE \\(\\+`BillingCountry` COLLATE BINARY\\) = \\?").
 		WithArgs(aliasDialectMaliciousBillingCountry).
 		WillReturnRows(sqlmock.NewRows([]string{"InvoiceId"}))
 
 	reader, err := sqlDB.ExecuteQueryToRecordsReader(context.Background(), q)
-	assert.NoError(t, err)
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer func() { _ = reader.Close() }()
 	_, err = reader.Next()
 	assert.ErrorIs(t, err, dal.ErrNoMoreRecords)

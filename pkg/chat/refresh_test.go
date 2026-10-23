@@ -60,7 +60,7 @@ func TestHTTPChangeIndicatorIncludesStatusAndContentType(t *testing.T) {
 	}
 }
 
-func TestRefreshRecordSetUsesSavedDTQLAndPreservesPrevious(t *testing.T) {
+func TestRefreshRecordSetUsesSavedTugQLAndPreservesPrevious(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
@@ -74,7 +74,7 @@ func TestRefreshRecordSetUsesSavedDTQLAndPreservesPrevious(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc := "from: {name: Invoice}\nlimit: 20"
-	query, err := store.AppendQuery(ctx, first, origin.ID, "sqlite:///chinook.db", QueryResult{Title: "Invoices", DTQL: doc, SourceID: "chinook", Result: secureread.Result{Columns: []string{"InvoiceId"}}})
+	query, err := store.AppendQuery(ctx, first, origin.ID, "sqlite:///chinook.db", QueryResult{Title: "Invoices", TugQL: doc, SourceID: "chinook", Result: secureread.Result{Columns: []string{"InvoiceId"}}})
 	if err != nil {
 		t.Fatal(err)
 	}

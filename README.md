@@ -76,9 +76,9 @@ Environment local
 
 ```console
 $ datatug query run --db sqlite://./shop.db --from Customer --no-policies
-$key               CustomerId  FirstName  LastName
-__dalgo_record_id  1           Ada        Lovelace
-__dalgo_record_id  2           Alan       Turing
+$key  CustomerId  FirstName  LastName
+1     1           Ada        Lovelace
+2     2           Alan       Turing
 ```
 
 **4. Scan PostgreSQL the same way.** Put the connection URL in an environment variable whose name starts with
@@ -129,7 +129,7 @@ Source table names that inGitDB cannot use as collection IDs are encoded as `dt_
 
 `--records-format` accepts `json`, `jsonl`, `ingr`, `csv`, and `yaml` (also `yml`), case-insensitively. JSON, INGR, and YAML use record-ID-keyed maps; JSONL and CSV carry a separate `$ID` transport key. CSV uses typed JSON-literal cells, preserving null versus empty text, exact integers, and quoted values.
 
-The export uses DataTug's DALgo source URL dispatcher, including local `sqlite://`, native `ingitdb://`, OpenVaultDB HTTP URLs, and `env:NAME` for a URL stored in an environment variable. PostgreSQL URL support remains a preview capability and may reject a source before export. The current native root export requires collections without namespaces, databases, or parent scopes; it reports a clear error for a source it cannot map. Provider capabilities differ; an unreadable collection or value that cannot be represented fails the export explicitly. Source constraint checking, when available, is a preflight check. Native inGitDB does not execute SQL foreign-key actions or other SQL constraints on later writes, and a mutable source can change after the preflight check. For a consistent snapshot, hold a source-side snapshot or read lock during export. Re-exporting an inGitDB project through a provider without physical storage-class metadata retains logical values and source schema but marks constraints unverified; it cannot claim the original SQLite INTEGER-versus-REAL cell classes. The inGitDB DALgo reader does not currently load `source-collections.json`, so a second native-to-native export treats encoded collection IDs as its source names and does not preserve the first source-name mapping.
+The export uses DataTug's DALgo source URL dispatcher, including local `sqlite://`, native `ingitdb://`, OpenVaultDB HTTP URLs, and `env:NAME` for a URL stored in an environment variable. The current native root export requires collections without namespaces, databases, or parent scopes; it reports a clear error for a source it cannot map. Provider capabilities differ; an unreadable collection or value that cannot be represented fails the export explicitly. Source constraint checking, when available, is a preflight check. Native inGitDB does not execute SQL foreign-key actions or other SQL constraints on later writes, and a mutable source can change after the preflight check. For a consistent snapshot, hold a source-side snapshot or read lock during export. Re-exporting an inGitDB project through a provider without physical storage-class metadata retains logical values and source schema but marks constraints unverified; it cannot claim the original SQLite INTEGER-versus-REAL cell classes. The inGitDB DALgo reader does not currently load `source-collections.json`, so a second native-to-native export treats encoded collection IDs as its source names and does not preserve the first source-name mapping.
 
 ## Our approach to development
 
@@ -309,6 +309,9 @@ app to scan databases & execute SQL requests.
 It runs on your machine under your user account. The connection URL of a PostgreSQL source stays in an environment
 variable of yours, and a project never holds it.
 
+AI clients can use [`datatug mcp`](docs/mcp.md) over stdio to discover local
+projects and schemas and run saved SQL through that agent's read-only session.
+
 ## Would you steal my data?
 
 No, we won't.
@@ -422,11 +425,13 @@ the web app talks to (see [spec/features/cli/serve](spec/features/cli/serve/READ
 
 | Database | Scan (`datatug scan`) | Query (`datatug query run`) |
 |---|---|---|
-| SQLite | supported | supported |
-| PostgreSQL | supported: every schema the role can use, tables and views, columns with their defaults, primary keys (no foreign keys or indexes yet); the connection URL stays in an environment variable | preview, read-only: set `DATATUG_PREVIEW_POSTGRES=1` |
+| SQLite | supported: tables and views, columns, primary keys, foreign keys and indexes | supported, read-only: `--db sqlite://...` with TugQL (`-f`, `--from`) or SQL (`--sql`), and saved TugQL and SQL queries |
+| PostgreSQL | supported: every schema the role can use, tables and views, columns with their defaults, primary keys, foreign keys and indexes; the connection URL stays in an environment variable | supported, read-only: `--db env:NAME` with TugQL (`-f`, `--from`) or SQL (`--sql`, one `SELECT` or `WITH` query), and saved TugQL and SQL queries |
+| MySQL | supported: the tables of the database of the URL, columns, primary keys, foreign keys and indexes; the connection URL stays in an environment variable | supported, read-only: `--db env:NAME` with TugQL (`-f`, `--from`) or SQL (`--sql`, one `SELECT` or `WITH` query), and saved TugQL and SQL queries |
+| Oracle | supported: the tables and views of the session's schema, columns, primary keys, foreign keys and indexes; the connection URL stays in an environment variable | supported, read-only: `--db env:NAME` with TugQL (`-f`, `--from`) or SQL (`--sql`, one `SELECT` or `WITH` query), and saved TugQL and SQL queries |
+| SQL Server | supported: the tables and views of the login's default schema, columns, primary keys, foreign keys and indexes; the connection URL stays in an environment variable | supported, read-only: `--db env:NAME` with TugQL (`-f`, `--from`) or SQL (`--sql`, one `SELECT` or `WITH` query), and saved TugQL and SQL queries |
 | inGitDB | not supported yet | supported: `--db ingitdb://./path-to-the-database` |
 | OpenVaultDB | not supported yet | not tested in this release |
-| SQL Server | accepted by `scan -D sqlserver`, not tested in this release | not supported yet |
 | Firestore | not supported yet | not supported yet |
 
 A database that is not in this table is not supported by this release. We are open for pull requests.
@@ -434,8 +439,53 @@ A database that is not in this table is not supported by this release. We are op
 **PostgreSQL**, via [dalgo2postgres](https://github.com/dal-go/dalgo2postgres). `datatug scan -D postgres --dsn-env
 DATATUG_SHOP_PG_URL --db shop --env local` reads the connection URL from the environment variable (it is never written to
 the project) and saves every schema the role can use, the system schemas apart: tables, views and materialized views
-(as views), columns with their defaults (the text of the SQL expression) and primary keys, a folder for each schema.
-The scan does not save foreign keys or indexes yet.
+(as views), columns with their defaults (the text of the SQL expression), primary keys, foreign keys and indexes, a
+folder for each schema.
+
+**MySQL, Oracle and SQL Server**, via [dalgo2mysql](https://github.com/dal-go/dalgo2mysql),
+[dalgo2oracle](https://github.com/dal-go/dalgo2oracle) and [dalgo2mssql](https://github.com/dal-go/dalgo2mssql), work the
+same way. Put the connection URL in an environment variable whose name starts with `DATATUG_` and name the variable:
+
+```bash
+export DATATUG_SHOP_MY_URL='mysql://user:password@host:3306/shop'
+datatug scan -D mysql --dsn-env DATATUG_SHOP_MY_URL --db shop --env local
+
+export DATATUG_HR_ORA_URL='oracle://user:password@host:1521/FREEPDB1'
+datatug scan -D oracle --dsn-env DATATUG_HR_ORA_URL --db hr --env local
+
+export DATATUG_SALES_MS_URL='sqlserver://user:password@host:1433/sales'
+datatug scan -D sqlserver --dsn-env DATATUG_SALES_MS_URL --db sales --env local
+
+datatug query run --db env:DATATUG_SHOP_MY_URL -f top-customers.tugql
+datatug query run --db env:DATATUG_SHOP_MY_URL --sql 'SELECT id, name FROM customer ORDER BY id'
+```
+
+Every scan, of these servers, PostgreSQL and SQLite alike, saves the foreign keys of the database's tables in
+`dbmodels/<db>/<db>.refs.json` and their indexes in `dbmodels/<db>/<db>.indexes.json` (an index on an expression is
+left out), beside the columns files of the tables.
+
+The project holds the name of the variable (`connections/<env>/<db>.json`) and never the URL or any part of it: not the
+host, the port, the user, the password or the database. The tables are saved under the schema `default`, whatever the
+real schema is called. The URL may carry only a few query parameters (MySQL: `tls`, `timeout`; Oracle: `SSL`,
+`SSL VERIFY`, `TIMEOUT`, `CONNECTION TIMEOUT`, `WALLET`; SQL Server: `encrypt`, `TrustServerCertificate`,
+`connection timeout`); any other is refused.
+
+Reads are read-only, in two layers. First, structured queries compile to a `SELECT`, and a saved SQL query must be
+one `SELECT` or `WITH` query: DataTug refuses, before it reaches the server, a text with a second statement or with a
+word that writes, runs code or ends a transaction (`UPDATE`, `INTO`, `COMMIT`, `EXEC`, `SET`, `FUNCTION`, ... outside
+string literals, quoted names and comments). Second, the connection: a MySQL session has `transaction_read_only` on,
+on Oracle every read runs in a `READ ONLY` transaction, and SQL Server, which has no read-only session, runs every read
+in a transaction that DataTug always rolls back. Neither layer stops a function or a procedure already on the server
+that writes when a query calls it (an Oracle function with an autonomous transaction commits its own writes), so give
+DataTug a login that can only read: on PostgreSQL a role with `SELECT` only, on MySQL `SELECT` and no `FILE`
+privilege, on SQL Server `db_datareader` and `VIEW DEFINITION`, on Oracle `CREATE SESSION` and `SELECT` on the tables.
+PostgreSQL is read the same two ways: the text is checked as above (a dollar-quoted string, a backslash in a string, a
+character that is not ASCII outside a string and `set_config`, quoted or not, are refused too), the session has
+`default_transaction_read_only` on, and SQL text runs in a read-only transaction that DataTug always rolls back, so a
+setting a called function changes for the session is undone with it.
+
+Reads of these servers through access policies are not available yet: when policies are loaded, run the query with
+`--no-policies`. SQL text (`--sql` and saved SQL queries) is never read through the row and column rules of policies.
 
 ## For developers
 

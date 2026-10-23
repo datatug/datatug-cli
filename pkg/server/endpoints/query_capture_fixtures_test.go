@@ -109,7 +109,7 @@ func TestCaptureQuery_ErrorsMatchCoreFixtures(t *testing.T) {
 		"error_capture_credentials.json": func(t *testing.T) *httptest.ResponseRecorder {
 			scope, _ := captureTestSetup(t, "admin", []string{"admin"}, true)
 			req := validCaptureRequest(scope)
-			req.Query.DTQL = strings.Replace(captureTestDTQL, "field: Total", "field: Total\n  - field: Note\n    alias: \"postgres://u:secret@db/prod\"", 1)
+			req.Query.TugQL = strings.Replace(captureTestTugQL, "field: Total", "field: Total\n  - field: Note\n    alias: \"postgres://u:secret@db/prod\"", 1)
 			return postCapture(t, req)
 		},
 		"error_capture_result_rows.json": func(t *testing.T) *httptest.ResponseRecorder {

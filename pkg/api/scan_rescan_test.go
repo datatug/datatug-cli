@@ -86,9 +86,6 @@ func hashesUnder(t *testing.T, dir string) map[string]string {
 	t.Helper()
 	hashes := map[string]string{}
 	require.NoError(t, filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
-		if filepath.Base(path) == ".datatug-environments.lock" || filepath.Base(path) == ".datatug-environments-owner.json" {
-			return nil
-		}
 		if err != nil {
 			return err
 		}
@@ -983,7 +980,8 @@ func TestScannedServer(t *testing.T) {
 	assert.Equal(t, datatug.ServerRef{Driver: "sqlite3"}, ScannedServer("sqlite3", network), "SQLite has no host or port: the path is the catalog's")
 	connection, err := dbconnection.NewConnectionString("sqlserver", "db.example.com", "sa", "pw", "shop", "port=1434")
 	require.NoError(t, err)
-	assert.Equal(t, datatug.ServerRef{Driver: "sqlserver", Host: "db.example.com", Port: 1434}, ScannedServer("sqlserver", connection))
+	assert.Equal(t, datatug.ServerRef{Driver: "sqlserver"}, ScannedServer("sqlserver", connection), "a server's connection URL stays in an environment variable: no host or port")
+	assert.Equal(t, datatug.ServerRef{Driver: "db2", Host: "db.example.com", Port: 1434}, ScannedServer("db2", connection), "a driver with a host records it")
 }
 
 func TestCheckScanNamesAgainstProject(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 )
 
 const simpleQuery = `from: {name: Sales, alias: s}
@@ -20,13 +20,13 @@ columns: [{field: category, source: s, as: category}, {field: total, source: s, 
 
 func parsePreview(t *testing.T, preview Preview) dal.StructuredQuery {
 	t.Helper()
-	query, err := dtql.Deserialize([]byte(preview.DTQL))
+	query, err := tugql.Deserialize([]byte(preview.TugQL))
 	if err != nil {
-		t.Fatalf("preview did not deserialize: %v\n%s", err, preview.DTQL)
+		t.Fatalf("preview did not deserialize: %v\n%s", err, preview.TugQL)
 	}
-	encoded, err := dtql.Serialize(query)
-	if err != nil || !bytes.Equal(encoded, []byte(preview.DTQL)) {
-		t.Fatalf("preview not canonical/exact: %v\n%s\n%s", err, encoded, preview.DTQL)
+	encoded, err := tugql.Serialize(query)
+	if err != nil || !bytes.Equal(encoded, []byte(preview.TugQL)) {
+		t.Fatalf("preview not canonical/exact: %v\n%s\n%s", err, encoded, preview.TugQL)
 	}
 	return query
 }
@@ -47,8 +47,8 @@ func TestDeriveMatchingSourceGroupKeepsSourceFilterParametersAndBoundsOutput(t *
 	if _, ok := query.From().Base().(dal.CollectionRef); !ok {
 		t.Fatalf("matching source was unexpectedly wrapped: %T", query.From().Base())
 	}
-	if query.Where() == nil || !strings.Contains(preview.DTQL, "param: Region") {
-		t.Fatalf("source filter parameter was not retained:\n%s", preview.DTQL)
+	if query.Where() == nil || !strings.Contains(preview.TugQL, "param: Region") {
+		t.Fatalf("source filter parameter was not retained:\n%s", preview.TugQL)
 	}
 	if len(query.GroupBy()) != 1 || query.GroupBy()[0].String() != "s.category" {
 		t.Fatalf("group keys = %v", query.GroupBy())
@@ -56,7 +56,7 @@ func TestDeriveMatchingSourceGroupKeepsSourceFilterParametersAndBoundsOutput(t *
 	if len(query.Columns()) != 2 || query.Columns()[1].Alias != "count" || query.Limit() == 0 {
 		t.Fatalf("group/count projection or bound = %+v", query.Columns())
 	}
-	original, err := dtql.Deserialize([]byte(simpleQuery))
+	original, err := tugql.Deserialize([]byte(simpleQuery))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,8 +81,8 @@ func TestDeriveMatchingSourceSortCanReachRowsOutsideOriginalLimit(t *testing.T) 
 	if len(query.OrderBy()) != 1 || query.OrderBy()[0].Expression().String() != "s.total" || !query.OrderBy()[0].Descending() {
 		t.Fatalf("matching-source sort = %v", query.OrderBy())
 	}
-	if query.Where() == nil || !strings.Contains(preview.DTQL, "param: Region") {
-		t.Fatalf("sort lost filter or parameter:\n%s", preview.DTQL)
+	if query.Where() == nil || !strings.Contains(preview.TugQL, "param: Region") {
+		t.Fatalf("sort lost filter or parameter:\n%s", preview.TugQL)
 	}
 }
 
@@ -103,8 +103,8 @@ func TestOriginalOutputRetainsInnerLimitAndSortsOnlyItsOutput(t *testing.T) {
 	if len(query.OrderBy()) != 1 || query.OrderBy()[0].Expression().String() != "original.total" {
 		t.Fatalf("outer sort = %v", query.OrderBy())
 	}
-	if !strings.Contains(preview.DTQL, "param: Region") {
-		t.Fatalf("inner parameter was dropped:\n%s", preview.DTQL)
+	if !strings.Contains(preview.TugQL, "param: Region") {
+		t.Fatalf("inner parameter was dropped:\n%s", preview.TugQL)
 	}
 }
 
@@ -137,8 +137,8 @@ func TestOriginalOutputGroupRetainsExistingAggregationHavingAndLimit(t *testing.
 	if len(query.Columns()) != 2 || query.Columns()[1].Alias != "count" {
 		t.Fatalf("outer explicit count = %+v", query.Columns())
 	}
-	if !strings.Contains(preview.DTQL, "param: Region") || !strings.Contains(preview.DTQL, "having:") {
-		t.Fatalf("preview lost inner parameter/HAVING:\n%s", preview.DTQL)
+	if !strings.Contains(preview.TugQL, "param: Region") || !strings.Contains(preview.TugQL, "having:") {
+		t.Fatalf("preview lost inner parameter/HAVING:\n%s", preview.TugQL)
 	}
 }
 
@@ -229,8 +229,8 @@ columns: [{field: Name, source: c, as: customer}, {field: Total, source: i, as: 
 	if len(derived.From().Joins()) != 1 || len(derived.From().Joins()[0].On()) != 1 {
 		t.Fatalf("join tree/predicate lost: %+v", derived.From().Joins())
 	}
-	if derived.Where() == nil || !strings.Contains(preview.DTQL, "param: Country") {
-		t.Fatalf("WHERE parameter lost:\n%s", preview.DTQL)
+	if derived.Where() == nil || !strings.Contains(preview.TugQL, "param: Country") {
+		t.Fatalf("WHERE parameter lost:\n%s", preview.TugQL)
 	}
 	if derived.OrderBy()[0].Expression().String() != "i.Total" || !derived.OrderBy()[0].Descending() {
 		t.Fatalf("joined field ordering = %v", derived.OrderBy())
@@ -247,8 +247,8 @@ func TestOriginalOutputGroupWithoutCountIsKeyOnly(t *testing.T) {
 	if len(query.Columns()) != 1 || query.Columns()[0].Alias != "category" || len(preview.OutputColumns) != 1 {
 		t.Fatalf("key-only grouping inferred an aggregate: %+v %+v", query.Columns(), preview.OutputColumns)
 	}
-	if strings.Contains(preview.DTQL, "aggregate:") {
-		t.Fatalf("unexpected inferred aggregate:\n%s", preview.DTQL)
+	if strings.Contains(preview.TugQL, "aggregate:") {
+		t.Fatalf("unexpected inferred aggregate:\n%s", preview.TugQL)
 	}
 }
 
@@ -258,9 +258,9 @@ func TestQueryOpsRemainingValidationAndErrorBranches(t *testing.T) {
 	if _, err := DeriveSort(simpleQuery, nil, MatchingSource); !errors.Is(err, ErrInvalidColumn) {
 		t.Fatalf("expected ErrInvalidColumn for empty terms, got %v", err)
 	}
-	// Empty DTQL in DeriveSort.
+	// Empty TugQL in DeriveSort.
 	if _, err := DeriveSort("   ", []SortTerm{{Column: "total"}}, MatchingSource); !errors.Is(err, ErrUnsupported) {
-		t.Fatalf("expected ErrUnsupported for empty DTQL, got %v", err)
+		t.Fatalf("expected ErrUnsupported for empty TugQL, got %v", err)
 	}
 	// Unknown scope in DeriveSort.
 	if _, err := DeriveSort(simpleQuery, []SortTerm{{Column: "total"}}, Scope(99)); !errors.Is(err, ErrUnsupported) {

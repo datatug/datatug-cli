@@ -28,7 +28,7 @@ func writeSyntheticProjectWithURL(t *testing.T, countryFactsURLTemplate string) 
 	if err := os.MkdirAll(queriesDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	writeFile(t, filepath.Join(queriesDir, "country-facts.query.json"), `{
+	writeFile(t, filepath.Join(queriesDir, "country-facts.query.json"), `{"createdAt":"2026-01-01T00:00:00Z",
 		"id": "country-facts",
 		"title": "Country facts (currency by country name)",
 		"type": "HTTP",
@@ -41,7 +41,7 @@ func writeSyntheticProjectWithURL(t *testing.T, countryFactsURLTemplate string) 
 	if err := os.MkdirAll(sqlDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	writeFile(t, filepath.Join(sqlDir, "customer-invoices.query.json"), `{
+	writeFile(t, filepath.Join(sqlDir, "customer-invoices.query.json"), `{"createdAt":"2026-01-01T00:00:00Z",
 		"id": "customer-invoices",
 		"title": "Customer invoices",
 		"type": "SQL",

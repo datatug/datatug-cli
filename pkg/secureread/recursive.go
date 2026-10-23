@@ -6,22 +6,22 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 )
 
-// RunRecursiveDTQL evaluates a derived query over one explicitly selected
+// RunRecursiveTugQL evaluates a derived query over one explicitly selected
 // source. Every nested leaf passes through the same policy session and bound
 // variables. Named databases are refused: they require a routing executor.
-func (e *Executor) RunRecursiveDTQL(ctx context.Context, sourceURL string, document []byte, variables map[string]any) (Result, error) {
+func (e *Executor) RunRecursiveTugQL(ctx context.Context, sourceURL string, document []byte, variables map[string]any) (Result, error) {
 	variables, err := accesspolicies.ExactVariables(variables)
 	if err != nil {
 		return Result{}, err
 	}
-	query, err := dtql.Deserialize(document)
+	query, err := tugql.Deserialize(document)
 	if err != nil {
-		return Result{}, fmt.Errorf("parse recursive DTQL: %w", err)
+		return Result{}, fmt.Errorf("parse recursive TugQL: %w", err)
 	}
 	if err = ValidateRecursiveQuery(query); err != nil {
 		return Result{}, err

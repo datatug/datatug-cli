@@ -21,12 +21,11 @@ import (
 
 // A test of the chat must never dial a PostgreSQL server: the real one is the journey test of CI. For the whole test
 // binary the constructor that dbcopy opens a source through is one that stops the run, and a test that reaches a
-// PostgreSQL source with the preview on stands in with a fake of its own.
+// PostgreSQL source stands in with a fake of its own.
 func init() {
 	dbcopy.SetPostgresOpenerForTest(func(string, dal.Schema, dalgo2sql.DbOptions, ...dalgo2postgres.Option) (*dalgo2postgres.Database, error) {
 		panic("a test of the chat opened a PostgreSQL database for real: it must stand in and never dial")
 	})
-	_ = os.Unsetenv(dbcopy.PostgresPreviewEnv)
 }
 
 const chatPostgresPassword = "PWMARKER-dt02-chat"
@@ -46,9 +45,8 @@ scopes:
 `
 
 // The chat reads a source through the executor, so what the executor answers for a PostgreSQL source is what the chat
-// says: with the preview off the sentence about the preview, with it on and a policy in the session the sentence about
-// policy-enforced reads, and in both cases the opener is never called.
-func TestRunDTQL_APostgresSourceIsAnsweredBeforeItIsOpened(t *testing.T) {
+// says: with a policy in the session the sentence about policy-enforced reads, and the opener is never called.
+func TestRunTugQL_APostgresSourceIsAnsweredBeforeItIsOpened(t *testing.T) {
 	// Not parallel: mutates environment variables and dbcopy Postgres opener.
 	var opens atomic.Int32
 	restore := dbcopy.SetPostgresOpenerForTest(func(string, dal.Schema, dalgo2sql.DbOptions, ...dalgo2postgres.Option) (*dalgo2postgres.Database, error) {
@@ -67,15 +65,12 @@ func TestRunDTQL_APostgresSourceIsAnsweredBeforeItIsOpened(t *testing.T) {
 	const source = "postgres://alice:" + chatPostgresPassword + "@db.example.com/shop"
 
 	for name, tc := range map[string]struct {
-		preview string
-		want    string
+		want string
 	}{
-		"the preview is off":                             {"", "Query failed: " + dbcopy.ErrPostgresPreview.Error()},
-		"the preview is on and the session has a policy": {"1", "Query failed: " + dbcopy.ErrPostgresPolicyReads.Error()},
+		"the session has a policy": {"Query failed: policy-enforced reads on PostgreSQL sources are not available yet: run with --no-policies"},
 	} {
-		t.Setenv(dbcopy.PostgresPreviewEnv, tc.preview)
 		conversation := &AIConversation{}
-		response, err := conversation.runDTQL(context.Background(), secureread.NewExecutor(secured), source, runDTQLArgs{DTQL: "from: {name: customers}\nlimit: 5"})
+		response, err := conversation.runTugQL(context.Background(), secureread.NewExecutor(secured), source, runTugQLArgs{TugQL: "from: {name: customers}\nlimit: 5"})
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
@@ -89,10 +84,9 @@ func TestRunDTQL_APostgresSourceIsAnsweredBeforeItIsOpened(t *testing.T) {
 }
 
 // The opener of this test binary is the one that stops the run, which the init above cannot show: the test opens a
-// PostgreSQL source with the preview on, and nothing stands in.
+// PostgreSQL source, and nothing stands in.
 func TestTheOpenerOfThisTestBinaryIsTheOneThatStopsTheRun(t *testing.T) {
 	// Not parallel: mutates environment variables.
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	ref, err := dbcopy.Parse("postgres://alice:" + chatPostgresPassword + "@127.0.0.1:1/shop")
 	if err != nil {
 		t.Fatal(err)
@@ -106,20 +100,11 @@ func TestTheOpenerOfThisTestBinaryIsTheOneThatStopsTheRun(t *testing.T) {
 	t.Fatal("the open returned: the opener of this test binary is not the one that stops the run")
 }
 
-// The switch of the developer's shell does not reach a test: the init above clears it.
-func TestThePreviewSwitchIsOffUnlessATestTurnsItOn(t *testing.T) {
-	t.Parallel()
-	if err := dbcopy.CheckPostgresPreview(); err != dbcopy.ErrPostgresPreview { //nolint:errorlint // the sentinel itself
-		t.Fatalf("CheckPostgresPreview() = %v, want the preview sentence", err)
-	}
-}
-
-// With the preview on and a session with no policy, a source that opened and whose pool cannot make a connection again
+// With a session with no policy, a source that opened and whose pool cannot make a connection again
 // (the server was restarted, the password was changed) fails the read with the text pgx writes, which names the user and
 // holds the password. What the chat answers, which goes to the message, the model and the store, is one fixed sentence.
-func TestRunDTQL_AReadThatLosesItsConnectionAnswersOneFixedSentence(t *testing.T) {
+func TestRunTugQL_AReadThatLosesItsConnectionAnswersOneFixedSentence(t *testing.T) {
 	// Not parallel: mutates environment variables, dbcopy Postgres opener, and standard logger.
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	const user = "USERMARKER-dt02-chat"
 	// The stand-in is built here, on the goroutine of the test: the opener runs on another one, where a failure of
 	// the setup (FailNow) would end that goroutine and not the test.
@@ -137,7 +122,7 @@ func TestRunDTQL_AReadThatLosesItsConnectionAnswersOneFixedSentence(t *testing.T
 	t.Cleanup(func() { log.SetOutput(savedLog) })
 
 	conversation := &AIConversation{}
-	response, err := conversation.runDTQL(context.Background(), secureread.NewExecutor(secured), "postgres://"+user+":"+chatPostgresPassword+"@db.example.com/shop", runDTQLArgs{DTQL: "from: {name: customers}\nlimit: 5"})
+	response, err := conversation.runTugQL(context.Background(), secureread.NewExecutor(secured), "postgres://"+user+":"+chatPostgresPassword+"@db.example.com/shop", runTugQLArgs{TugQL: "from: {name: customers}\nlimit: 5"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,9 +146,8 @@ func TestRunDTQL_AReadThatLosesItsConnectionAnswersOneFixedSentence(t *testing.T
 // A source of the chat is "env:NAME" in the usual case, and the failure it answers names the variable the connection
 // string is read from (and not the fallback hint of a source given as a literal URL), with the adapter's sentence and
 // nothing of the URL the variable holds.
-func TestRunDTQL_AnEnvSourceThatCannotBeReachedNamesTheVariable(t *testing.T) {
+func TestRunTugQL_AnEnvSourceThatCannotBeReachedNamesTheVariable(t *testing.T) {
 	// Not parallel: mutates environment variables and dbcopy Postgres opener.
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	const variable = "DATATUG_CHAT_SHOP_PG_URL"
 	t.Setenv(variable, "postgres://alice:"+chatPostgresPassword+"@db.example.com:5433/shop")
 	t.Cleanup(dbcopy.SetPostgresOpenerForTest(func(string, dal.Schema, dalgo2sql.DbOptions, ...dalgo2postgres.Option) (*dalgo2postgres.Database, error) {
@@ -175,7 +159,7 @@ func TestRunDTQL_AnEnvSourceThatCannotBeReachedNamesTheVariable(t *testing.T) {
 	}
 
 	conversation := &AIConversation{}
-	response, err := conversation.runDTQL(context.Background(), secureread.NewExecutor(secured), "env:"+variable, runDTQLArgs{DTQL: "from: {name: customers}\nlimit: 5"})
+	response, err := conversation.runTugQL(context.Background(), secureread.NewExecutor(secured), "env:"+variable, runTugQLArgs{TugQL: "from: {name: customers}\nlimit: 5"})
 	if err != nil {
 		t.Fatal(err)
 	}

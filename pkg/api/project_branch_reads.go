@@ -125,6 +125,39 @@ func LocalProjectBoard(ctx context.Context, ref dto.ProjectItemRef, branch strin
 	return value.(*datatug.Board), nil
 }
 
+// LocalProjectCards returns card briefs from the selected current branch.
+func LocalProjectCards(ctx context.Context, ref dto.ProjectRef, branch string) ([]datatug.CardBrief, error) {
+	value, err := withCurrentBranchRead(ctx, ref, branch, func(reader *qualifiedProjectReader) (any, error) {
+		cards, err := readQualifiedCards(reader)
+		if err != nil {
+			return nil, itemsNotLoaded("cards", ref.ProjectID, err)
+		}
+		return cards.Briefs(), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return value.([]datatug.CardBrief), nil
+}
+
+// LocalProjectCard returns a full card from the selected current branch.
+func LocalProjectCard(ctx context.Context, ref dto.ProjectItemRef, branch string) (*datatug.Card, error) {
+	value, err := withCurrentBranchRead(ctx, ref.ProjectRef, branch, func(reader *qualifiedProjectReader) (any, error) {
+		if err := validateCardItem(ref.ProjectID, ref.ID); err != nil {
+			return nil, err
+		}
+		card, err := reader.readQualifiedCard(ref.ID)
+		if err != nil {
+			return nil, itemNotFound("card", ref.ID, err)
+		}
+		return card, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return value.(*datatug.Card), nil
+}
+
 // LocalProjectEntities returns entity briefs from the selected current branch.
 func LocalProjectEntities(ctx context.Context, ref dto.ProjectRef, branch string) ([]datatug.ProjEntityBrief, error) {
 	value, err := withCurrentBranchRead(ctx, ref, branch, func(reader *qualifiedProjectReader) (any, error) {

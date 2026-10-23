@@ -101,13 +101,7 @@ func TestOpenSQLHandleFailures(t *testing.T) {
 func TestOpenSQLPostgres(t *testing.T) {
 	ref := BackendRef{Scheme: "postgres", Path: "postgres://user:secret@127.0.0.1:5432/db"}
 
-	t.Setenv(PostgresPreviewEnv, "")
-	_, err := ref.OpenSQL(context.Background(), false)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), PostgresPreviewEnv)
-
-	t.Setenv(PostgresPreviewEnv, "1")
-	_, err = BackendRef{Scheme: "postgres", Path: "postgres://h/%zz"}.OpenSQL(context.Background(), false)
+	_, err := BackendRef{Scheme: "postgres", Path: "postgres://h/%zz"}.OpenSQL(context.Background(), false)
 	require.Error(t, err, "an unreadable URL")
 
 	t.Cleanup(SetSQLOpenerForTest(func(string, string) (*sql.DB, error) { return nil, errors.New("secret") }))

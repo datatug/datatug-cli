@@ -53,9 +53,6 @@ func entriesOfTheScan(t *testing.T, scan rescanScan) (files, folders []string) {
 	_, err := scan.save(t, projectDir)
 	require.NoError(t, err)
 	require.NoError(t, filepath.WalkDir(projectDir, func(path string, entry fs.DirEntry, err error) error {
-		if filepath.Base(path) == ".datatug-environments.lock" || filepath.Base(path) == ".datatug-environments-owner.json" {
-			return nil
-		}
 		rel, _ := filepath.Rel(projectDir, path)
 		switch {
 		case err != nil || rel == ".":
@@ -127,7 +124,13 @@ func TestSaveScannedProject_WritesNoFileThroughALink(t *testing.T) {
 					_, err := scan.save(t, projectDir)
 
 					require.Error(t, err, "a scan that would write through a link is refused")
-					assert.ErrorContains(t, err, entry, "and names the path of the link inside the project")
+					if entry == "datatug-project.json" {
+						// datatug-core (v0.77.0) refuses a project metadata file that is not a regular
+						// file with its own fixed sentence, which names it by what it is.
+						assert.ErrorContains(t, err, "project metadata is not a regular file")
+					} else {
+						assert.ErrorContains(t, err, entry, "and names the path of the link inside the project")
+					}
 					assert.NotContains(t, err.Error(), outside, "and never where it leads")
 					assert.Equal(t, outsideBefore, treeWithLinks(t, outside), "the tree outside is byte-identical and nothing new is in it")
 				})
@@ -142,9 +145,6 @@ func treeWithLinks(t *testing.T, dir string) map[string]string {
 	t.Helper()
 	tree := map[string]string{}
 	require.NoError(t, filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
-		if filepath.Base(path) == ".datatug-environments.lock" || filepath.Base(path) == ".datatug-environments-owner.json" {
-			return nil
-		}
 		require.NoError(t, err)
 		rel, _ := filepath.Rel(dir, path)
 		switch {

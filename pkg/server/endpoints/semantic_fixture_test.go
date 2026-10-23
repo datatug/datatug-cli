@@ -58,7 +58,15 @@ const (
 //     scenario.
 func writeSemanticTestProject(t *testing.T) (projectDir, projectID string) {
 	t.Helper()
+	return writeSemanticTestProjectWithSetup(t, nil)
+}
+
+func writeSemanticTestProjectWithSetup(t *testing.T, setup func(string)) (projectDir, projectID string) {
+	t.Helper()
 	dir := t.TempDir()
+	if setup != nil {
+		setup(dir)
+	}
 	projectID = "semantic-test-" + strings.NewReplacer("/", "-", " ", "-").Replace(t.Name())
 	filestore.SetProjectPath(projectID, dir)
 
@@ -229,7 +237,7 @@ func writeApplicableQueries(t *testing.T, dir string) {
 	t.Helper()
 	customersDir := filepath.Join(dir, "queries", "customers")
 	mustMkdirAll(t, customersDir)
-	mustWriteFile(t, filepath.Join(customersDir, "customer-invoices.query.json"), `{
+	mustWriteFile(t, filepath.Join(customersDir, "customer-invoices.query.json"), `{"createdAt":"2026-01-01T00:00:00Z",
 		"id": "customer-invoices",
 		"title": "Customer invoices",
 		"type": "SQL",
@@ -237,7 +245,7 @@ func writeApplicableQueries(t *testing.T, dir string) {
 			{"id": "CustomerId", "type": "integer", "isRequired": true, "meta": {"entity": "Customer", "field": "ID"}}
 		]
 	}`)
-	mustWriteFile(t, filepath.Join(customersDir, "customer-export.query.json"), `{
+	mustWriteFile(t, filepath.Join(customersDir, "customer-export.query.json"), `{"createdAt":"2026-01-01T00:00:00Z",
 		"id": "customer-export",
 		"title": "Customer export",
 		"type": "SQL",
@@ -248,7 +256,7 @@ func writeApplicableQueries(t *testing.T, dir string) {
 	}`)
 	invoicesDir := filepath.Join(dir, "queries", "invoices")
 	mustMkdirAll(t, invoicesDir)
-	mustWriteFile(t, filepath.Join(invoicesDir, "invoice-lines.query.json"), `{
+	mustWriteFile(t, filepath.Join(invoicesDir, "invoice-lines.query.json"), `{"createdAt":"2026-01-01T00:00:00Z",
 		"id": "invoice-lines",
 		"title": "Invoice lines",
 		"type": "SQL",
@@ -269,7 +277,7 @@ func writeHTTPCountryQuery(t *testing.T, dir string) {
 	t.Helper()
 	refDir := filepath.Join(dir, "queries", "reference")
 	mustMkdirAll(t, refDir)
-	mustWriteFile(t, filepath.Join(refDir, "country-facts.query.json"), `{
+	mustWriteFile(t, filepath.Join(refDir, "country-facts.query.json"), `{"createdAt":"2026-01-01T00:00:00Z",
 		"id": "country-facts",
 		"title": "Country facts",
 		"type": "HTTP",

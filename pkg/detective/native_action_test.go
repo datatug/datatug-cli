@@ -32,7 +32,7 @@ func nativeCaptureFixture(t *testing.T, withCase bool) (*LocalStore, NativeCaptu
 	}
 	req := NativeCaptureRequest{CheckID: "check", CaseID: caseID, NativeOperationID: "native", Actor: "alice", Reference: apicontract.SessionInputReference{SchemaVersion: 1, StorageID: "local", DatabaseID: "db", ProjectID: "p", NamespaceID: "ns", SessionID: "session", InputSnapshotID: "input", ContextSetID: "context", EnvironmentID: "qa", IdentityDomain: "tenant"}}
 	capture, err := s.CaptureNativeInput(ctx, req, func(context.Context, string) (sessioncontext.DetectiveAcceptedQueryPin, error) {
-		return sessioncontext.DetectiveAcceptedQueryPin{QueryID: "q", Revision: "old", DefinitionJSON: json.RawMessage(`{"id":"q","title":"Query","type":"SQL","text":"select old"}`)}, nil
+		return sessioncontext.DetectiveAcceptedQueryPin{QueryID: "q", Revision: "old", DefinitionJSON: json.RawMessage(`{"createdAt":"2026-01-01T00:00:00Z","id":"q","title":"Query","type":"SQL","text":"select old"}`)}, nil
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -253,7 +253,7 @@ func TestNativeDependencyQueryRechecksDurableFence(t *testing.T) {
 	}
 	req := NativeCaptureRequest{CheckID: "check", NativeOperationID: "native", Actor: "alice", Reference: apicontract.SessionInputReference{SchemaVersion: 1, StorageID: "local", DatabaseID: "db", ProjectID: "p", NamespaceID: "ns", SessionID: "session", InputSnapshotID: "input", ContextSetID: "context", EnvironmentID: "qa", IdentityDomain: "tenant"}}
 	capture, e := s.CaptureNativeInput(ctx, req, func(context.Context, string) (sessioncontext.DetectiveAcceptedQueryPin, error) {
-		return sessioncontext.DetectiveAcceptedQueryPin{QueryID: "q", Revision: "old", DefinitionJSON: json.RawMessage(`{"id":"q","title":"Query","type":"SQL","text":"select 1"}`)}, nil
+		return sessioncontext.DetectiveAcceptedQueryPin{QueryID: "q", Revision: "old", DefinitionJSON: json.RawMessage(`{"createdAt":"2026-01-01T00:00:00Z","id":"q","title":"Query","type":"SQL","text":"select 1"}`)}, nil
 	})
 	if e != nil {
 		t.Fatal(e)

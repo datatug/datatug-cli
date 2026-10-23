@@ -12,8 +12,9 @@ import (
 	"testing"
 
 	"github.com/dal-go/dalgo/access"
+	"github.com/dal-go/dalgo2openvaultdb"
 	"github.com/dal-go/record"
-	"github.com/datatug/datatug-cli/pkg/openvaultdb"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/openvaultdb/openvaultdb-go/pkg/auth"
 	"github.com/openvaultdb/openvaultdb-go/pkg/core"
 	"github.com/openvaultdb/openvaultdb-go/pkg/mount"
@@ -98,7 +99,7 @@ bindings: {roles: {reader: [read]}}
 			t.Setenv("ACL24_OVDB_TOKEN", token)
 			t.Setenv("ACL24_OVDB_TOKEN_BASE_URL", server.URL)
 			t.Setenv("ACL24_OVDB_TOKEN_PRINCIPAL_ID", "alice")
-			descriptor, _ := json.Marshal(openvaultdb.SourceConfig{BaseURL: server.URL, DatabaseID: "crm", TokenEnv: "ACL24_OVDB_TOKEN", PrincipalID: "alice"})
+			descriptor, _ := json.Marshal(dbcopy.OpenVaultDBDescriptor{BaseURL: server.URL, DatabaseID: "crm", TokenEnv: "ACL24_OVDB_TOKEN", PrincipalID: "alice"})
 			connection := filepath.Join(dir, "connection.json")
 			write(connection, string(descriptor))
 			sourceURL := "openvaultdb://" + connection
@@ -130,7 +131,7 @@ bindings: {roles: {reader: [read]}}
 			if _, err = executor.RunTugQL(context.Background(), sourceURL, []byte(strings.Replace(query, "field: name", "field: tenant", 1)), nil); !errors.Is(err, access.ErrAccessDenied) {
 				t.Fatalf("lower column denial=%v", err)
 			}
-			var denial *openvaultdb.AuthorizationError
+			var denial *dalgo2openvaultdb.AuthorizationError
 			if !errors.As(err, &denial) || len(denial.Decision.Blockers) == 0 || len(denial.Decision.Layers) == 0 {
 				t.Fatalf("real owner denial lost structured blockers: %v", err)
 			}

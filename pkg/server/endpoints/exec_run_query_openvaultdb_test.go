@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/datatug/datatug-cli/pkg/openvaultdb"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
@@ -39,7 +39,7 @@ func TestExecRunQuery_OpenVaultDBCatalog(t *testing.T) {
 	t.Setenv("ACL24_ENDPOINT_TOKEN", "fixture-token")
 	t.Setenv("ACL24_ENDPOINT_TOKEN_BASE_URL", server.URL)
 	t.Setenv("ACL24_ENDPOINT_TOKEN_PRINCIPAL_ID", "alice")
-	descriptor, err := json.Marshal(openvaultdb.SourceConfig{BaseURL: server.URL, DatabaseID: "crm", TokenEnv: "ACL24_ENDPOINT_TOKEN", PrincipalID: "alice"})
+	descriptor, err := json.Marshal(dbcopy.OpenVaultDBDescriptor{BaseURL: server.URL, DatabaseID: "crm", TokenEnv: "ACL24_ENDPOINT_TOKEN", PrincipalID: "alice"})
 	if err != nil {
 		t.Fatal(err)
 	}

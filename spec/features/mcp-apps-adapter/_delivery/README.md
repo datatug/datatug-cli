@@ -4,7 +4,7 @@ format: https://specscore.md/features-index-specification
 
 # MCP Apps delivery evidence
 
-This is the durable evidence index for the [private MCP Apps saved query explorer](../README.md). Evidence was collected on 2026-10-23 and updated on 2026-10-24. CLI delivery and public macOS arm64 acceptance passed. Website publication and direct live acceptance now passed as recorded below. Website full post-merge CI remains pending in the captured observation. This evidence-only addition does not change feature, task or plan lifecycle status.
+This is the durable evidence index for the [private MCP Apps saved query explorer](../README.md). Evidence was collected on 2026-10-23 and updated on 2026-10-24. CLI delivery and public macOS arm64 acceptance passed. Website publication and direct live acceptance now passed as recorded below. The initial live receipt captured pending post-merge CI; the final exact-main observation below subsequently passed. This evidence-only addition does not change feature, task or plan lifecycle status.
 
 ## Released identity
 
@@ -81,7 +81,7 @@ Website repository `datatug/websites` PR139 landed reviewed candidate `14690083a
 
 The parent's [actual deployment and live acceptance receipt](website-live-acceptance.json), observed2026-10-23T23:26:23.356903+00:00, records all three Cloudflare deployment workflows succeeding on the merge and all11 direct live page checks passing with status200. It captures localized accepted CLI/harness/fixture identities and recipe on datatug.io, Apps developer-preview claims on datatug.io/datatug.ai/datatug.app, and UI Bubbles remaining planned. Existing Pro checkout remains open; configuration was unchanged. This is deployed-page acceptance, not a named customer desktop-host acceptance claim.
 
-**Website full post-merge CI run40039403748 was still in_progress**, with no conclusion in that receipt. Its deployment jobs and candidate CI successes do not imply that this separate full run passed. The parent is awaiting the final check before final cleanup. Retained worktrees are for required evidence/lifecycle publication and final checks.
+**Website full post-merge CI run40039403748 was still in_progress**, with no conclusion in that receipt. Its deployment jobs and candidate CI successes do not imply that this separate full run passed. The later final exact-main check receipt below supersedes this historical pending observation. Retained worktrees are for required evidence/lifecycle publication and final checks.
 
 CLI main subsequently advanced to `4e30fd76afdc9c51bb14242e0ab17b804dd212b9`; the [incoming CLI review](review-cli-incoming-4e30fd76.md) verifies all54 reviewed file hashes unchanged. [Go CI for that exact head](integration-4e30fd76-ci.json) passed; its automatic release and supplemental v0.113.0 acceptance subsequently passed as recorded below. Public v0.112.0 remains the literal contributor recipe acceptance identity. The [initial evidence review](review-delivery-evidence-r1.md) preserves its earlier43-file scope and then-pending website status unchanged.
 
@@ -115,9 +115,17 @@ This supplemental run used the maintained browser command; the literal documente
 | [review-public-integration-v0.113.0.md](review-public-integration-v0.113.0.md) | `81f65f5f0dcaacc972455a3c0e802256c0a7f61dbeac0ce8bf80c0fc205c353c` |
 | [review-batch4-r2.md](review-batch4-r2.md) | `bd2a92f5e0991947c5fd1f40e42c6a61ecf4bd5cb0c5d684dbac7a55afa6940f` |
 
+## Final website CI observation
+
+[Exact-main checks](website-main-f5fc8b1-checks.json) at `f5fc8b1b7ea5a1b97c6f0b889a92c183e8809bc5` passed all26 observed checks with two stable observations. This includes the full post-merge build and browser matrix. The earlier live receipt and review retain their original pending snapshot unchanged; the later provider observation establishes completion separately.
+
+| Evidence | SHA256 |
+|---|---|
+| [website-main-f5fc8b1-checks.json](website-main-f5fc8b1-checks.json) | `534ce821fe4ace13cec21af29060786dc4fde47bb6ce136cbf729c08a955208f` |
+
 ## Open Questions
 
-Final website full post-merge CI remains with the parent owner. Exact CLI4e Go CI, automatic release and supplemental v0.113.0 acceptance passed. No task/feature/plan transition or cleanup completion is asserted by this evidence update. The [independent website live-evidence review](review-website-live-r1.md) personally verified the three deploys and11 live page receipts, preserved the pending post-merge CI distinction, and reported zero findings.
+Website full post-merge CI subsequently passed; its original pending snapshot remains unchanged. Exact CLI4e Go CI, automatic release and supplemental v0.113.0 acceptance passed. No task/feature/plan transition or cleanup completion is asserted by this evidence update. The [independent website live-evidence review](review-website-live-r1.md) personally verified the three deploys and11 live page receipts, preserved the pending post-merge CI distinction, and reported zero findings.
 
 ---
 *This document follows the https://specscore.md/features-index-specification*

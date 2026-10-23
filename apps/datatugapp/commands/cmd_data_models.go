@@ -118,6 +118,11 @@ func dataModelReferenceForCommand(command *cobra.Command) (datatug.DataModelRefe
 		if directory, err = os.Getwd(); err != nil {
 			return datatug.DataModelReference{}, err
 		}
+		// Some platforms can return the removed working directory's old name.
+		// Preserve the filesystem failure rather than misreporting a project.
+		if _, err = os.Stat(directory); err != nil {
+			return datatug.DataModelReference{}, err
+		}
 	}
 	base, err := openProjectForRead(project, directory)
 	if err != nil {

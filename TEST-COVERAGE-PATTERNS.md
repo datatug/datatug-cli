@@ -39,19 +39,6 @@ catalog output with tables, columns, FKs, indexes, and alternate keys.
 without failing the outer test, pass a fresh `inner := &testing.T{}` and check `inner.Failed()`
 after the call.
 
-### sqlmock `QueryMatcherEqual` option for `sqlinfoschema` providers
-
-`sqlinfoschema` providers store a pre-built SQL string in a struct field and pass it verbatim.
-Use `sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))` so that only the exact
-SQL string matches; fall back to the default regex matcher for PRAGMA queries where the exact
-string varies.
-
-### `mock.MatchExpectationsInOrder(false)` for parallel fan-out
-
-`InformationSchema.GetDatabase` calls `getColumns`, `getConstraints`, and `getIndexes` in
-parallel. Disable sqlmock ordering with `mock.MatchExpectationsInOrder(false)` so the
-expectations match whichever goroutine queries first.
-
 ### `parallel.Run` error-propagation testing
 
 `GetDatabase` wraps three parallel sub-queries. To test that a failure in one sub-query is
@@ -186,9 +173,3 @@ Register route handlers on `mux` for the exact GitHub API paths under test.
 `osOpen`, `goAsync`, `appStop`). Create a `stateSeams` struct with a `backupSeams()` constructor
 and a `restore()` method to save/restore all of them atomically per test. Also use `tempStateDir`
 helper that sets `filePathFn` to a `t.TempDir()` path for isolation.
-
-## Notes
-
-- A nil-check guard is missing before the `defer rows.Close()` in `sqlinfoschema.getTables`;
-  this prevents testing the `Query` error path at the `GetDatabase` level (production bug).
-  Documented gap — do not try to write that test until the production code is fixed.

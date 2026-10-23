@@ -34,7 +34,7 @@ const (
 	operations    = "dt_watch_operations"
 )
 
-var tables = []string{definitions, observations, runs, runners, subscriptions, inbox, outbox, audit, operations, telegramLinks, telegramRequests, quotas}
+var tables = []string{definitions, observations, runs, runners, subscriptions, inbox, outbox, audit, operations, telegramLinks, telegramRequests, quotas, telegramProviders, telegramBots, telegramPolls}
 
 // Store separates durable project definitions from bounded runtime tables. Every
 // transition uses the same DALGO read/write transaction, with SQLite IMMEDIATE

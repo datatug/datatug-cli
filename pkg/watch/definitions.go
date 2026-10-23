@@ -384,10 +384,17 @@ func (s *Store) Subscribe(ctx context.Context, a Actor, sub Subscription) error 
 		if !visible(a, d) {
 			return ErrNotFound
 		}
-		if seen["telegram"] {
-			if link, err := read[telegramLink](ctx, tx, telegramLinks, a.Scope, a.ID); err != nil || !link.ExpiresAt.IsZero() && !link.ExpiresAt.After(s.now()) {
+		sub.TelegramBotID = ""
+		if seen["telegram"] && !sub.Unsubscribed {
+			provider, err := s.telegramProvider(ctx, tx, a.Scope)
+			if err != nil {
 				return ErrForbidden
 			}
+			link, err := read[telegramLink](ctx, tx, telegramLinks, a.Scope, a.ID)
+			if err != nil || link.BotID != provider.BotID {
+				return ErrForbidden
+			}
+			sub.TelegramBotID = provider.BotID
 		}
 		if err = s.save(ctx, tx, subscriptions, a.Scope, stable(sub.WatchID, a.ID), sub.WatchID, a.ID, d.Visibility, sub); err != nil {
 			return err

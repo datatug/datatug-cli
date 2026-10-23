@@ -36,9 +36,11 @@ type Actor struct {
 
 // RunnerIdentity contains only grants verified by the coordinator transport.
 type RunnerIdentity struct {
-	ID           string
-	Scope        Scope
-	Capabilities []string
+	TelegramBotID       string
+	TelegramBotUsername string
+	ID                  string
+	Scope               Scope
+	Capabilities        []string
 }
 
 type Schedule struct {
@@ -80,15 +82,16 @@ type DefinitionRepository interface {
 	PutDefinition(context.Context, Actor, Definition, string, int64) (Definition, error)
 }
 type Subscription struct {
-	AccountID    string   `json:"accountId,omitempty"`
-	Tier         string   `json:"tier,omitempty"`
-	Phone        string   `json:"phone,omitempty"`
-	WatchID      string   `json:"watchId"`
-	UserID       string   `json:"userId"`
-	Channels     []string `json:"channels"`
-	NotifyOn     []string `json:"notifyOn,omitempty"`
-	Email        string   `json:"email,omitempty"`
-	Unsubscribed bool     `json:"unsubscribed,omitempty"`
+	TelegramBotID string   `json:"telegramBotId,omitempty"`
+	AccountID     string   `json:"accountId,omitempty"`
+	Tier          string   `json:"tier,omitempty"`
+	Phone         string   `json:"phone,omitempty"`
+	WatchID       string   `json:"watchId"`
+	UserID        string   `json:"userId"`
+	Channels      []string `json:"channels"`
+	NotifyOn      []string `json:"notifyOn,omitempty"`
+	Email         string   `json:"email,omitempty"`
+	Unsubscribed  bool     `json:"unsubscribed,omitempty"`
 }
 type Observation struct {
 	SourceFingerprint string    `json:"sourceFingerprint,omitempty"`
@@ -143,6 +146,8 @@ type Completion struct {
 	FailureCode       string `json:"failureCode,omitempty"`
 }
 type Runner struct {
+	TelegramBotID       string `json:"telegramBotId,omitempty"`
+	TelegramBotUsername string `json:"telegramBotUsername,omitempty"`
 	Scope
 	ID           string    `json:"id"`
 	Capabilities []string  `json:"capabilities"`
@@ -161,11 +166,11 @@ type Notification struct {
 	ReadAt    time.Time `json:"readAt,omitempty"`
 }
 type Delivery struct {
-	TelegramDeliveryCapability string `json:"telegramDeliveryCapability,omitempty"`
-	TelegramChatID             string `json:"telegramChatId,omitempty"`
-	AccountID                  string `json:"accountId,omitempty"`
-	Phone                      string `json:"phone,omitempty"`
-	QuotaReserved              bool   `json:"quotaReserved"`
+	TelegramBotID  string `json:"telegramBotId,omitempty"`
+	TelegramChatID string `json:"telegramChatId,omitempty"`
+	AccountID      string `json:"accountId,omitempty"`
+	Phone          string `json:"phone,omitempty"`
+	QuotaReserved  bool   `json:"quotaReserved"`
 	Notification
 	Channel     string    `json:"channel"`
 	Email       string    `json:"email,omitempty"`
@@ -206,4 +211,21 @@ type Config struct {
 	ExecutionTimeout    time.Duration
 	MaxAttempts         int
 	HistoryLimit        int
+}
+
+// TelegramProviderStatus exposes only the registered public bot identity and the
+// requesting user's verified link. Bot secrets remain on provider runners.
+type TelegramProviderStatus struct {
+	Connected   bool   `json:"connected"`
+	BotID       string `json:"botId,omitempty"`
+	BotUsername string `json:"botUsername,omitempty"`
+}
+
+// TelegramPollLease fences a single provider poller and its persisted update
+// offset. Offset is advanced only after an update has been handled.
+type TelegramPollLease struct {
+	BotID      string    `json:"botId"`
+	Fence      int64     `json:"fence"`
+	Offset     int64     `json:"offset"`
+	LeaseUntil time.Time `json:"leaseUntil"`
 }

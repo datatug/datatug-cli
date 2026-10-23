@@ -2,13 +2,10 @@ package watch
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
-	"errors"
-	"strings"
-	"time"
-
 	"github.com/dal-go/dalgo/dal"
+	"regexp"
+	"strconv"
+	"time"
 )
 
 const (
@@ -18,120 +15,107 @@ const (
 )
 
 type telegramLink struct {
-	ExpiresAt          time.Time `json:"expiresAt,omitempty"`
-	DeliveryCapability string    `json:"deliveryCapability,omitempty"`
 	Scope
-	UserID string    `json:"userId"`
-	ChatID string    `json:"chatId"`
-	At     time.Time `json:"at"`
+	BotID     string    `json:"botId"`
+	UserID    string    `json:"userId"`
+	ChatID    string    `json:"chatId"`
+	At        time.Time `json:"at"`
+	ExpiresAt time.Time `json:"expiresAt,omitempty"`
 }
 type telegramRequest struct {
 	Scope
-	UserID    string    `json:"userId"`
-	Hash      string    `json:"hash"`
-	ExpiresAt time.Time `json:"expiresAt"`
+	BotID          string    `json:"botId"`
+	UserID         string    `json:"userId"`
+	Hash           string    `json:"hash"`
+	ExpiresAt      time.Time `json:"expiresAt"`
+	ConsumedChatID string    `json:"consumedChatId,omitempty"`
 }
 
+var nonceHashPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
+
+// BeginTelegramLink binds a short-lived connection request to the authenticated
+// user, project scope and one registered bot. No browser supplies a chat ID.
 func (s *Store) BeginTelegramLink(ctx context.Context, a Actor, nonceHash string, expiresAt time.Time) error {
 	if err := s.actor(a); err != nil {
 		return err
 	}
-	if len(nonceHash) != 64 || !expiresAt.After(s.now()) || expiresAt.After(s.now().Add(15*time.Minute)) {
+	if !nonceHashPattern.MatchString(nonceHash) || !expiresAt.After(s.now()) || expiresAt.After(s.now().Add(15*time.Minute)) {
 		return ErrInvalid
 	}
 	return s.transaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
-		items, err := list[telegramRequest](ctx, tx, telegramRequests, a.Scope, "")
+		provider, err := s.telegramProvider(ctx, tx, a.Scope)
 		if err != nil {
 			return err
 		}
-		for _, item := range items {
-			if item.UserID == a.ID {
-				if err = tx.Delete(ctx, key(telegramRequests, item.Scope, item.Hash)); err != nil {
+		requests, err := list[telegramRequest](ctx, tx, telegramRequests, a.Scope, "")
+		if err != nil {
+			return err
+		}
+		for _, request := range requests {
+			if request.UserID == a.ID {
+				if err = tx.Delete(ctx, key(telegramRequests, request.Scope, request.Hash)); err != nil {
 					return err
 				}
 			}
 		}
-		item := telegramRequest{Scope: a.Scope, UserID: a.ID, Hash: nonceHash, ExpiresAt: expiresAt}
-		return s.save(ctx, tx, telegramRequests, a.Scope, nonceHash, "", a.ID, "", item)
+		request := telegramRequest{Scope: a.Scope, BotID: provider.BotID, UserID: a.ID, Hash: nonceHash, ExpiresAt: expiresAt}
+		return s.save(ctx, tx, telegramRequests, a.Scope, nonceHash, "", a.ID, "", request)
 	})
 }
 
-// CompleteTelegramLink is called only after the daemon verifies DataTugBot's
-// webhook secret. A browser-supplied chat ID is never accepted as identity proof.
-func (s *Store) CompleteTelegramLink(ctx context.Context, nonceHash, chatID string) error {
-	return s.completeTelegramLink(ctx, nonceHash, chatID, "")
-}
-
-func (s *Store) CompleteTelegramLinkWithCapability(ctx context.Context, nonceHash, chatID, capability string) error {
-	if capability == "" || len(capability) > 2048 {
-		return ErrInvalid
-	}
-	if _, err := capabilityExpiry(capability); err != nil {
-		return err
-	}
-	return s.completeTelegramLink(ctx, nonceHash, chatID, capability)
-}
-
-func (s *Store) completeTelegramLink(ctx context.Context, nonceHash, chatID, capability string) error {
-	var expiresAt time.Time
-	if capability != "" {
-		var err error
-		expiresAt, err = capabilityExpiry(capability)
-		if err != nil || !expiresAt.After(s.now()) || expiresAt.After(s.now().Add(31*24*time.Hour)) {
-			return ErrInvalid
-		}
-	}
-	if len(nonceHash) != 64 || len(chatID) == 0 || len(chatID) > 20 {
-		return ErrInvalid
-	}
-	for _, r := range chatID {
-		if r < '0' || r > '9' {
-			return ErrInvalid
-		}
-	}
+// CompleteTelegramLinkByRunner accepts proof only from the fenced provider
+// poller whose operator grant owns this bot and scope. Replayed messages for the
+// same chat are idempotent; another chat never steals a consumed connection.
+func (s *Store) CompleteTelegramLinkByRunner(ctx context.Context, id RunnerIdentity, pollFence int64, nonceHash, chatID string) error {
 	return s.transaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
-		items, err := list[telegramRequest](ctx, tx, telegramRequests, Scope{Namespace: s.config.Namespace}, "")
+		if _, err := s.poll(ctx, tx, id, pollFence); err != nil {
+			return err
+		}
+		if !nonceHashPattern.MatchString(nonceHash) {
+			return ErrInvalid
+		}
+		chat, err := strconv.ParseInt(chatID, 10, 64)
+		if err != nil || chat <= 0 || strconv.FormatInt(chat, 10) != chatID {
+			return ErrInvalid
+		}
+		request, err := read[telegramRequest](ctx, tx, telegramRequests, id.Scope, nonceHash)
 		if err != nil {
 			return err
 		}
-		for _, item := range items {
-			if item.Hash != nonceHash {
-				continue
+		if request.BotID != id.TelegramBotID {
+			return ErrForbidden
+		}
+		if request.ConsumedChatID != "" {
+			if request.ConsumedChatID == chatID {
+				return nil
 			}
-			if !item.ExpiresAt.After(s.now()) {
+			return ErrForbidden
+		}
+		if !request.ExpiresAt.After(s.now()) {
+			return ErrForbidden
+		}
+		links, err := list[telegramLink](ctx, tx, telegramLinks, Scope{Namespace: s.config.Namespace}, "")
+		if err != nil {
+			return err
+		}
+		for _, link := range links {
+			if link.BotID == id.TelegramBotID && link.ChatID == chatID && (link.Scope != request.Scope || link.UserID != request.UserID) {
 				return ErrForbidden
 			}
-			existing, err := list[telegramLink](ctx, tx, telegramLinks, Scope{Namespace: s.config.Namespace}, "")
-			if err != nil {
-				return err
-			}
-			for _, link := range existing {
-				if link.ChatID == chatID && link.UserID != item.UserID {
-					return ErrConflict
-				}
-			}
-			link := telegramLink{Scope: item.Scope, UserID: item.UserID, ChatID: chatID, DeliveryCapability: capability, ExpiresAt: expiresAt, At: s.now()}
-			if err = s.save(ctx, tx, telegramLinks, item.Scope, item.UserID, "", item.UserID, "", link); err != nil {
-				return err
-			}
-			if err = tx.Delete(ctx, key(telegramRequests, item.Scope, item.Hash)); err != nil {
-				return err
-			}
-			return s.log(ctx, tx, item.Scope, item.UserID, "telegram.connect", item.UserID)
 		}
-		return ErrNotFound
+		link := telegramLink{Scope: request.Scope, BotID: id.TelegramBotID, UserID: request.UserID, ChatID: chatID, At: s.now()}
+		if err = s.save(ctx, tx, telegramLinks, link.Scope, link.UserID, "", link.UserID, "", link); err != nil {
+			return err
+		}
+		request.ConsumedChatID = chatID
+		return s.save(ctx, tx, telegramRequests, request.Scope, request.Hash, "", request.UserID, "", request)
 	})
 }
 func (s *Store) TelegramStatus(ctx context.Context, a Actor) (bool, error) {
-	if err := s.actor(a); err != nil {
-		return false, err
-	}
-	link, err := read[telegramLink](ctx, s.db, telegramLinks, a.Scope, a.ID)
-	if errors.Is(err, ErrNotFound) {
-		return false, nil
-	}
-	return err == nil && (link.ExpiresAt.IsZero() || link.ExpiresAt.After(s.now())), err
+	status, err := s.TelegramProviderStatus(ctx, a)
+	return status.Connected, err
 }
+
 func (s *Store) DisconnectTelegram(ctx context.Context, a Actor) error {
 	if err := s.actor(a); err != nil {
 		return err
@@ -167,22 +151,4 @@ func (s *Store) DisconnectTelegram(ctx context.Context, a Actor) error {
 		}
 		return s.log(ctx, tx, a.Scope, a.ID, "telegram.disconnect", a.ID)
 	})
-}
-
-func capabilityExpiry(capability string) (time.Time, error) {
-	parts := strings.Split(capability, ".")
-	if len(parts) != 2 {
-		return time.Time{}, ErrInvalid
-	}
-	body, err := base64.RawURLEncoding.DecodeString(parts[0])
-	if err != nil {
-		return time.Time{}, ErrInvalid
-	}
-	var claims struct {
-		Expires int64 `json:"exp"`
-	}
-	if json.Unmarshal(body, &claims) != nil || claims.Expires <= 0 {
-		return time.Time{}, ErrInvalid
-	}
-	return time.Unix(claims.Expires, 0).UTC(), nil
 }

@@ -14,7 +14,10 @@ func (s *Store) RegisterRunner(ctx context.Context, identity RunnerIdentity) err
 		return ErrForbidden
 	}
 	return s.transaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
-		r := Runner{Scope: identity.Scope, ID: identity.ID, Capabilities: identity.Capabilities, LastSeen: s.now()}
+		if err := s.registerTelegramProvider(ctx, tx, identity); err != nil {
+			return err
+		}
+		r := Runner{Scope: identity.Scope, ID: identity.ID, Capabilities: identity.Capabilities, LastSeen: s.now(), TelegramBotID: identity.TelegramBotID, TelegramBotUsername: identity.TelegramBotUsername}
 		if err := s.save(ctx, tx, runners, r.Scope, r.ID, "", r.ID, "", r); err != nil {
 			return err
 		}

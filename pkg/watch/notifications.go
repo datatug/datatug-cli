@@ -55,7 +55,10 @@ func (s *Store) notify(ctx context.Context, tx dal.ReadwriteTransaction, d Defin
 					continue
 				}
 				delivery.TelegramChatID = link.ChatID
-				delivery.TelegramDeliveryCapability = link.DeliveryCapability
+				if sub.TelegramBotID == "" || sub.TelegramBotID != link.BotID {
+					continue
+				}
+				delivery.TelegramBotID = link.BotID
 			}
 			if err = s.save(ctx, tx, outbox, d.Scope, id, d.ID, sub.UserID, "", delivery); err != nil {
 				return false, err
@@ -94,7 +97,6 @@ func (s *Store) ListDeliveries(ctx context.Context, a Actor, watchID string) ([]
 			item.Email = ""
 			item.Phone = ""
 			item.TelegramChatID = ""
-			item.TelegramDeliveryCapability = ""
 			out = append(out, item)
 		}
 	}
@@ -151,9 +153,20 @@ func (s *Store) reserveQuota(ctx context.Context, tx dal.ReadwriteTransaction, d
 // ClaimNotifications is an internal coordinator worker API. HTTP must never
 // expose it to browser users or runners: it contains delivery-only addresses.
 func (s *Store) ClaimNotifications(ctx context.Context) (*Delivery, error) {
+	return s.claimNotifications(ctx, nil, 0)
+}
+func (s *Store) ClaimTelegramNotification(ctx context.Context, id RunnerIdentity, pollFence int64) (*Delivery, error) {
+	return s.claimNotifications(ctx, &id, pollFence)
+}
+func (s *Store) claimNotifications(ctx context.Context, identity *RunnerIdentity, pollFence int64) (*Delivery, error) {
 	var result *Delivery
 	err := s.transaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
 		result = nil
+		if identity != nil {
+			if _, err := s.poll(ctx, tx, *identity, pollFence); err != nil {
+				return err
+			}
+		}
 		items, err := list[Delivery](ctx, tx, outbox, Scope{Namespace: s.config.Namespace}, "")
 		if err != nil {
 			return err
@@ -161,6 +174,12 @@ func (s *Store) ClaimNotifications(ctx context.Context) (*Delivery, error) {
 		sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt.Before(items[j].CreatedAt) })
 		now := s.now()
 		for _, item := range items {
+			if identity == nil && item.Channel == "telegram" {
+				continue
+			}
+			if identity != nil && (item.Channel != "telegram" || item.Scope != identity.Scope || item.TelegramBotID != identity.TelegramBotID) {
+				continue
+			}
 			if item.State == "delivered" || item.State == "cancelled" || item.State == "failed" || item.Channel == "in_app" || item.RetryAt.After(now) || item.State == "sending" && item.LeaseUntil.After(now) {
 				continue
 			}
@@ -191,7 +210,7 @@ func (s *Store) ClaimNotifications(ctx context.Context) (*Delivery, error) {
 				if e != nil && !errors.Is(e, ErrNotFound) {
 					return e
 				}
-				valid = valid && e == nil && link.ChatID == item.TelegramChatID && link.DeliveryCapability == item.TelegramDeliveryCapability && (link.ExpiresAt.IsZero() || link.ExpiresAt.After(now))
+				valid = valid && e == nil && link.ChatID == item.TelegramChatID && link.BotID == item.TelegramBotID && sub.TelegramBotID == item.TelegramBotID && (link.ExpiresAt.IsZero() || link.ExpiresAt.After(now))
 			}
 			if !valid {
 				item.State = "cancelled"
@@ -235,15 +254,32 @@ func (s *Store) ClaimNotifications(ctx context.Context) (*Delivery, error) {
 	return result, err
 }
 func (s *Store) FinishNotification(ctx context.Context, id string, fence int64, failureCode string) error {
+	return s.finishNotification(ctx, nil, 0, id, fence, failureCode)
+}
+func (s *Store) FinishTelegramNotification(ctx context.Context, identity RunnerIdentity, pollFence int64, id string, fence int64, failureCode string) error {
+	return s.finishNotification(ctx, &identity, pollFence, id, fence, failureCode)
+}
+func (s *Store) finishNotification(ctx context.Context, identity *RunnerIdentity, pollFence int64, id string, fence int64, failureCode string) error {
 	if len(failureCode) > 64 {
 		return ErrInvalid
 	}
 	return s.transaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
+		if identity != nil {
+			if _, err := s.poll(ctx, tx, *identity, pollFence); err != nil {
+				return err
+			}
+		}
 		items, err := list[Delivery](ctx, tx, outbox, Scope{Namespace: s.config.Namespace}, "")
 		if err != nil {
 			return err
 		}
 		for _, item := range items {
+			if identity == nil && item.Channel == "telegram" {
+				continue
+			}
+			if identity != nil && (item.Channel != "telegram" || item.Scope != identity.Scope || item.TelegramBotID != identity.TelegramBotID) {
+				continue
+			}
 			if item.ID != id {
 				continue
 			}

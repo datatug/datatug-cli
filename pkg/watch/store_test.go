@@ -2,7 +2,6 @@ package watch
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -352,14 +351,15 @@ func TestPaidSMSDailyQuotaRetryAndTelegramLink(t *testing.T) {
 	if err := s.Subscribe(ctx, a, Subscription{WatchID: d.ID, Channels: []string{"telegram"}}); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("unlinked Telegram=%v", err)
 	}
+	bot, poll := registerTelegramFixture(t, s, "provider", "123456", "OwnerWatchBot")
 	hash := stable("nonce")
 	if err := s.BeginTelegramLink(ctx, a, hash, c.now().Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CompleteTelegramLink(ctx, hash, "1234567"); err != nil {
+	if err := s.CompleteTelegramLinkByRunner(ctx, bot, poll.Fence, hash, "1234567"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CompleteTelegramLink(ctx, hash, "1234567"); !errors.Is(err, ErrNotFound) {
+	if err := s.CompleteTelegramLinkByRunner(ctx, bot, poll.Fence, hash, "1234567"); err != nil {
 		t.Fatalf("nonce replay=%v", err)
 	}
 	subscribe(t, s, a, d.ID, "in_app", "email", "sms", "telegram")
@@ -628,6 +628,7 @@ func TestDeadlinePauseDeleteAndNonceRevocation(t *testing.T) {
 	if _, err = s.FinishRun(ctx, r, done(next, "pass")); !errors.Is(err, ErrStaleLease) {
 		t.Fatalf("deleted accepted result=%v", err)
 	}
+	bot, poll := registerTelegramFixture(t, s, "provider", "123456", "OwnerWatchBot")
 	hash := stable("revocable")
 	if err = s.BeginTelegramLink(ctx, alice, hash, c.now().Add(time.Minute)); err != nil {
 		t.Fatal(err)
@@ -635,7 +636,7 @@ func TestDeadlinePauseDeleteAndNonceRevocation(t *testing.T) {
 	if err = s.DisconnectTelegram(ctx, alice); err != nil {
 		t.Fatal(err)
 	}
-	if err = s.CompleteTelegramLink(ctx, hash, "12345"); !errors.Is(err, ErrNotFound) {
+	if err = s.CompleteTelegramLinkByRunner(ctx, bot, poll.Fence, hash, "12345"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unlink left nonce usable=%v", err)
 	}
 }
@@ -826,20 +827,24 @@ func TestPrivateStoragePermissionsAndTelegramExpiry(t *testing.T) {
 	}
 	defer func() { _ = opened.Close() }()
 	a := actor("alice")
-	hash := stable("expiring-cap")
+	bot, poll := registerTelegramFixture(t, opened, "provider", "123456", "OwnerWatchBot")
+	hash := stable("expiring-link")
 	if err = opened.BeginTelegramLink(context.Background(), a, hash, c.now().Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	body := fmt.Sprintf(`{"exp":%d}`, c.now().Add(time.Hour).Unix())
-	capability := base64.RawURLEncoding.EncodeToString([]byte(body)) + ".host-signature"
-	if err = opened.CompleteTelegramLinkWithCapability(context.Background(), hash, "12345", capability); err != nil {
+	c.advance(2 * time.Minute)
+	// Renew provider registration and acquire a fresh poll fence after the nonce expired.
+	if err = opened.RegisterRunner(context.Background(), bot); err != nil {
 		t.Fatal(err)
 	}
-	if linked, _ := opened.TelegramStatus(context.Background(), a); !linked {
-		t.Fatal("fresh Telegram connection missing")
+	poll, err = opened.ClaimTelegramPoll(context.Background(), bot)
+	if err != nil {
+		t.Fatal(err)
 	}
-	c.advance(2 * time.Hour)
+	if err = opened.CompleteTelegramLinkByRunner(context.Background(), bot, poll.Fence, hash, "12345"); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("expired nonce accepted: %v", err)
+	}
 	if linked, _ := opened.TelegramStatus(context.Background(), a); linked {
-		t.Fatal("expired Telegram capability advertised connected")
+		t.Fatal("expired connection request advertised connected")
 	}
 }

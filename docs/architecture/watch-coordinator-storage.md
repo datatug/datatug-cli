@@ -113,11 +113,32 @@ change the Watch's execution state.
 Canonical channel identifiers are `in_app`, `email`, `sms` and `telegram`.
 Email is free. SMS requires a paid entitlement from authenticated deployment
 identity and a verified telephone number. Telegram is free and requires a
-connected DataTugBot account. Clients cannot select another user or invent a
-recipient: email and telephone recipients are copied from verified identity.
-Telegram connects using a random, single-use, expiring nonce; only its hash is
-stored. The bot's authenticated callback proves the private chat ID. Unlinking
-revokes outstanding nonces and pending Telegram deliveries.
+connected account on the operator's own Telegram bot. The bot ID is a fixed
+runner credential grant; its secret stays on the outbound provider runner. The
+runner verifies its public identity with Telegram before registration. One bot
+can serve one project/environment scope in this coordinator, and one active bot
+can serve that scope. User status exposes its public ID and username only while
+an eligible provider runner remains registered and online.
+
+Clients cannot select another user or invent a recipient: email and telephone
+recipients are copied from verified identity. Telegram connects using a random,
+expiring nonce bound transactionally to the verified user, scope and registered
+bot; only its hash is stored. A fenced provider poller proves the private chat ID
+by processing that bot's `/start` update. An exact nonce/chat replay is idempotent;
+a different chat cannot reuse it. Unlinking revokes outstanding nonces and pending
+Telegram deliveries. Replacing the configured bot cancels its pending deliveries
+and requires connection and subscription consent for the replacement bot.
+
+Provider polling has a separate durable DALGO lease and fence per bot. A second
+process using even the same runner identity cannot claim an active poll lease.
+Renewals return the authoritative offset. The runner advances it only after an
+update is accepted or deliberately classified as irrelevant; a crash before the
+advance replays the update safely. After seven days without a processed update,
+renewal atomically resets the offset to zero for Telegram's randomized update-ID
+restart behavior. Renewing an idle poll does not count as processing an update.
+Telegram delivery claims require the same live scoped bot grant and poll fence,
+in addition to the delivery fence. Coordinator email/SMS workers skip Telegram.
+No inbound bot webhook or shared DataTug-owned bot is used by this flow.
 
 Each accepted event has deterministic per-user/channel delivery IDs. In-app
 notifications persist immediately in the same acceptance transaction and maintain
@@ -139,7 +160,7 @@ reservation. There is no automatic paid-message retry loop without a bound.
 
 There are separate queryable DALGO tables for definitions, observations, runs,
 runner registrations, subscriptions, inbox, outbox, audit, idempotency operations,
-account links, link requests and quotas. Payloads have a 128 KiB cap; there are at
+account links, link requests, quotas, bot/scope registrations and bot poll leases/offsets. Payloads have a 128 KiB cap; there are at
 most 1,000 definitions per namespace and, by default, 100 active definitions
 per user. The default minimum interval is five seconds; deployments can raise
 that minimum (up to one hour) and adjust the user count (up to 1,000). Terminal runtime history defaults to 1,000

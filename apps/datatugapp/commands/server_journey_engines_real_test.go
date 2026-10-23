@@ -209,14 +209,22 @@ func TestOracleScanAndQueryJourney(t *testing.T) {
 	password := "Pw" + randomHex(t, 10)
 	scan := *admin
 	scan.User = url.UserPassword(user, password)
-	adminDSN, scanDSN := admin.String(), scan.String()
+	// The fixture opens go-ora itself, with fast login off as dalgo2oracle opens it: with it on, every later
+	// connection of the process to Oracle Database Free ends in EOF. DataTug is given the URL without the option.
+	fixture := func(u url.URL) string {
+		query := u.Query()
+		query.Set("FAST LOGIN", "false")
+		u.RawQuery = query.Encode()
+		return u.String()
+	}
+	adminDSN, scanDSN := fixture(*admin), scan.String()
 
 	execOn(t, "oracle", adminDSN,
 		fmt.Sprintf(`CREATE USER %s IDENTIFIED BY "%s" QUOTA UNLIMITED ON USERS`, user, password),
 		fmt.Sprintf(`GRANT CREATE SESSION, CREATE TABLE TO %s`, user))
 	t.Cleanup(func() { execOn(t, "oracle", adminDSN, fmt.Sprintf(`DROP USER %s CASCADE`, user)) })
 	quote := func(name string) string { return `"` + name + `"` }
-	execOn(t, "oracle", scanDSN, serverJourneyDDL(quote, "NUMBER(19)", "NUMBER(10)", "VARCHAR2", "NUMBER")...)
+	execOn(t, "oracle", fixture(scan), serverJourneyDDL(quote, "NUMBER(19)", "NUMBER(10)", "VARCHAR2", "NUMBER")...)
 
 	t.Setenv(realOracleScanVar, scanDSN)
 	useTheRealServerOpeners(t)

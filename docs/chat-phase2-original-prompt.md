@@ -1,6 +1,6 @@
 # DataTug Chat Phase 2 — Durable Sessions and RecordSets
 
-The `datatug chat` PoC is implemented and working: natural-language requests are translated by an inexpensive AI model into DTQL, DataTug executes the query against real data, and structured results are rendered as inline interactive grids.
+The `datatug chat` PoC is implemented and working: natural-language requests are translated by an inexpensive AI model into TugQL, DataTug executes the query against real data, and structured results are rendered as inline interactive grids.
 
 Now implement **Phase 2: durable chat sessions and RecordSets**.
 
@@ -15,7 +15,7 @@ This is foundational. Do not treat persistence as something that can be retrofit
 A DataTug Chat session must survive process termination and restart without losing:
 
 - conversation history;
-- generated/executed DTQL;
+- generated/executed TugQL;
 - query results;
 - inline grids;
 - enough structured context to continue working with previous results.
@@ -57,8 +57,8 @@ First inspect the current repository and understand exactly what the PoC impleme
 - `datatug chat` command structure;
 - ADK/agent integration;
 - model/provider abstraction;
-- DTQL generation;
-- DTQL execution;
+- TugQL generation;
+- TugQL execution;
 - current RecordSet/result representation;
 - inline grid implementation;
 - chat message representation;
@@ -147,7 +147,7 @@ Users must be able to rename sessions manually.
 
 # 5. Durable RecordSets
 
-Every successfully executed data-producing DTQL query should result in a durable session-scoped RecordSet.
+Every successfully executed data-producing TugQL query should result in a durable session-scoped RecordSet.
 
 Conceptually:
 
@@ -155,7 +155,7 @@ Conceptually:
 RecordSet
 ├── stable ID
 ├── session ID
-├── originating DTQL
+├── originating TugQL
 ├── source/database reference
 ├── schema/columns
 ├── rows/result snapshot
@@ -189,7 +189,7 @@ Example:
 ```text
 > Show last 100 orders
 
-DTQL
+TugQL
   ↓
 execute
   ↓
@@ -262,7 +262,7 @@ Every RecordSet should know how it was produced.
 
 At minimum preserve:
 
-- exact DTQL executed;
+- exact TugQL executed;
 - relevant parameters;
 - data source/database identity;
 - execution timestamp;
@@ -367,7 +367,7 @@ Preserve distinctions where relevant between:
 - user messages;
 - assistant text;
 - tool/query operations;
-- DTQL;
+- TugQL;
 - RecordSet/grid artifacts;
 - errors/status.
 
@@ -519,7 +519,7 @@ execute query
 → persist RecordSet
 → terminate/recreate application state
 → reload RecordSet
-→ verify schema + rows + DTQL + metadata
+→ verify schema + rows + TugQL + metadata
 ```
 
 ### Session isolation
@@ -651,12 +651,12 @@ Phase 2 is complete when:
 - every successful data query produces a stable, immutable RecordSet snapshot;
 - RecordSets persist across restart;
 - restored grids render from persisted RecordSets without rerunning queries;
-- exact DTQL and basic provenance are retained;
+- exact TugQL and basic provenance are retained;
 - session state is isolated correctly;
 - clearing/deleting a session removes its session-scoped cache;
 - DataTug, not ADK/LLM state, is authoritative for durable context;
 - a restored conversation can continue using previous structured context;
-- the existing PoC AI → DTQL → execution → grid flow remains working;
+- the existing PoC AI → TugQL → execution → grid flow remains working;
 - tests cover persistence and lifecycle semantics;
 - implementation remains small enough to understand and evolve.
 

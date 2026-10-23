@@ -2,13 +2,13 @@
 
 Implement **Phase 5: interactive FK-based JOIN discovery and exploration** on top of the merged Phases 1–4.
 
-The goal: for every relation instance already participating in a DTQL query, show relations that can be joined through database foreign keys, let the user navigate/apply those joins directly from the grid, derive real DTQL, execute it through normal DataTug/DALGO infrastructure, and continue exploring.
+The goal: for every relation instance already participating in a TugQL query, show relations that can be joined through database foreign keys, let the user navigate/apply those joins directly from the grid, derive real TugQL, execute it through normal DataTug/DALGO infrastructure, and continue exploring.
 
 For MVP, **foreign keys are the only JOIN-candidate evidence source**. Design for future DataTug project metadata / `entity.field` mappings, ModelSpec relationships and inferred relationships, but do not implement them now.
 
 ## 1. Inspect first
 
-Before implementation inspect the actual repository: DTQL AST and JOIN/nested-JOIN support, aliases/relation instances, DALGO execution, schema/FK introspection, RecordSet lineage, Views, grids/focus, shared application actions, agent tools, persistence, bookmarks, and Chinook setup.
+Before implementation inspect the actual repository: TugQL AST and JOIN/nested-JOIN support, aliases/relation instances, DALGO execution, schema/FK introspection, RecordSet lineage, Views, grids/focus, shared application actions, agent tools, persistence, bookmarks, and Chinook setup.
 
 Do not create a parallel query model. Write a concise design and plan based on the real code, critically review it, then work autonomously through implementation, tests, UX review and merge.
 
@@ -71,7 +71,7 @@ You can JOIN:
 
 The UI may omit aliases when unambiguous, but internal identity must never rely only on the physical table name.
 
-Nested/multi-relation DTQL queries must be walked using their actual structure. Do not flatten away aliases or JOIN semantics.
+Nested/multi-relation TugQL queries must be walked using their actual structure. Do not flatten away aliases or JOIN semantics.
 
 ## 4. JoinCandidate is an edge
 
@@ -93,7 +93,7 @@ JoinCandidate
 
 For Phase 5: `evidence = foreign-key`.
 
-Reuse existing schema/DTQL types where appropriate.
+Reuse existing schema/TugQL types where appropriate.
 
 ## 5. Same target through multiple fields
 
@@ -189,11 +189,11 @@ Order.ShippingAddressId
 
 ## 10. Applying a JOIN
 
-Interactive JOINs must derive **real DTQL**:
+Interactive JOINs must derive **real TugQL**:
 
 ```text
-current DTQL + JoinCandidate
-→ derived DTQL
+current TugQL + JoinCandidate
+→ derived TugQL
 → validate
 → normal DataTug/DALGO execution
 → new immutable RecordSet
@@ -210,16 +210,16 @@ Example:
 Invoice.CustomerId → Customer.CustomerId
 ```
 
-produces the DTQL equivalent of:
+produces the TugQL equivalent of:
 
 ```text
 JOIN Customer
 ON Invoice.CustomerId = Customer.CustomerId
 ```
 
-Use existing/default DTQL JOIN-type semantics. Do not turn this phase into a full JOIN-type editor.
+Use existing/default TugQL JOIN-type semantics. Do not turn this phase into a full JOIN-type editor.
 
-Follow existing DTQL projection/wildcard rules and keep duplicate column names distinguishable.
+Follow existing TugQL projection/wildcard rules and keep duplicate column names distinguishable.
 
 ## 11. Space and removal
 
@@ -229,7 +229,7 @@ Adding must work in Phase 5.
 
 If dependency-aware removal is clean with the existing AST, implement full toggle. If removing a JOIN can invalidate SELECT/FILTER/ORDER/etc., do not implement unsafe deletion. Provide a controlled failure/removal path and keep the domain action model ready for proper toggling.
 
-Never silently create invalid DTQL.
+Never silently create invalid TugQL.
 
 ## 12. Chained exploration
 
@@ -313,7 +313,7 @@ Display meaningfully:
 Employee: Employee (ManagerId)
 ```
 
-Generate readable collision-safe aliases according to existing DTQL conventions.
+Generate readable collision-safe aliases according to existing TugQL conventions.
 
 Repeated target joins such as billing/shipping Address must get independent aliases.
 
@@ -330,7 +330,7 @@ rs-101 Invoice
        rs-102 Invoice + Customer
 ```
 
-Retain applied edge identity, derived DTQL, parent/query lineage where appropriate, execution metadata and schema metadata.
+Retain applied edge identity, derived TugQL, parent/query lineage where appropriate, execution metadata and schema metadata.
 
 JOIN-derived results must work normally with Views, Selections, context attachments, docks, bookmarks and tags.
 
@@ -378,7 +378,7 @@ Add deterministic coverage for:
 - self FK and alias generation;
 - nested JOIN queries;
 - cycles/no infinite traversal;
-- candidate → valid derived DTQL;
+- candidate → valid derived TugQL;
 - chained JOIN rediscovery;
 - provenance/lineage;
 - persistence/restart;
@@ -402,8 +402,8 @@ Navigate to Customer and apply it.
 Verify:
 
 1. exact FK edge selected;
-2. correct DTQL JOIN/ON derived;
-3. DTQL validates;
+2. correct TugQL JOIN/ON derived;
+3. TugQL validates;
 4. normal DataTug/DALGO execution is used;
 5. new immutable RecordSet produced;
 6. joined data displayed;
@@ -418,7 +418,7 @@ Also:
 > Join customers.
 ```
 
-must invoke the same domain operation and produce equivalent DTQL/result.
+must invoke the same domain operation and produce equivalent TugQL/result.
 
 Restart DataTug and verify the joined result restores and candidate discovery still works without rerunning historical queries.
 
@@ -441,14 +441,14 @@ Do not implement:
 
 Work autonomously:
 
-1. inspect merged code and current DTQL JOIN support;
+1. inspect merged code and current TugQL JOIN support;
 2. specify JoinCandidate/edge semantics;
 3. adversarially review aliases, reverse direction, same-target FKs, composites, self joins, nested joins, cycles and removal safety;
 4. plan;
 5. implement deterministic FK discovery;
 6. render/navigate candidates under grids;
 7. implement shared application action;
-8. derive/execute real DTQL;
+8. derive/execute real TugQL;
 9. integrate agent actions;
 10. add lineage;
 11. verify persistence/restart;
@@ -474,7 +474,7 @@ Phase 5 is complete when:
 - nested/multi-relation queries work;
 - keyboard navigation is practical;
 - details explain exact fields/evidence/cardinality;
-- applying a candidate derives valid DTQL and uses normal execution;
+- applying a candidate derives valid TugQL and uses normal execution;
 - FK metadata, not AI guessing, defines ON;
 - joined results are immutable RecordSets with lineage;
 - candidates are rediscovered after JOINs;

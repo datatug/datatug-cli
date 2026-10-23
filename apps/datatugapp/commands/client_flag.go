@@ -16,10 +16,10 @@ import (
 var knownCallers = map[string]bool{"claude-mod": true, "codex-mod": true}
 
 // noDaemonCommands are the top-level commands that never trigger the --client
-// wrapper: daemon (stop must not be undone), serve (the server itself),
+// wrapper: daemon (stop must not be undone), serve (the server itself), mcp (a separately owned client),
 // version/help/completion (probes) and the installers.
 var noDaemonCommands = map[string]bool{
-	"daemon": true, "serve": true, "version": true, "help": true, "completion": true,
+	"daemon": true, "serve": true, "mcp": true, "version": true, "help": true, "completion": true,
 	"self-update": true, "install": true, "upgrade": true,
 }
 

@@ -539,7 +539,7 @@ The whole journey MUST run as one hermetic end-to-end test: a Chinook SQLite sou
 **When** the user runs `backup run` and then the same with `--require-consistent-snapshot`
 **Then** the first succeeds with a `no-consistent-snapshot` warning and `consistency: none` in the manifest; the second exits `1` and writes nothing.
 
-### AC: postgres-preview-gated
+### AC: postgres-opens-without-a-switch
 
 **Requirements:** backup#req:restore-postgres-preview
 

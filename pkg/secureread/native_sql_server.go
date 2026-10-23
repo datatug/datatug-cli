@@ -2,10 +2,12 @@ package secureread
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 )
 
@@ -25,10 +27,42 @@ func (e *Executor) runServerNativeSQL(ctx context.Context, sourceURL string, ref
 		return Result{}, err
 	}
 	defer closeSource()
+	if ref.Scheme == "postgres" {
+		db = rolledBackReads{DB: db}
+	}
 	// A read through policies is refused before the source opens (dbcopy.CheckServerRead, in openSource), so a
 	// session that gets here has none to label the result for: when that refusal goes, the result must carry
 	// nativeSQLLimitation as RunNativeSQL's SQLite one does.
 	return e.runThroughPolicies(ctx, db, dal.NewTextQuery(text, nil, args...), nil)
+}
+
+// rolledBackReads runs each read of PostgreSQL SQL text in a read-only transaction that is always rolled
+// back. The session is read-only already (default_transaction_read_only), but a function a query calls can
+// change a setting of the session for the rest of its life, the read-only one among them (set_config with
+// is_local false), and the connection is kept in a pool: a rollback undoes such a change with the rest of
+// the transaction. The rows are read in full inside the transaction, which ends when the read returns.
+type rolledBackReads struct{ dal.DB }
+
+// errReadRolledBack is what the worker of a rolled-back read returns to end its transaction with a rollback.
+var errReadRolledBack = errors.New("the read is rolled back")
+
+// ExecuteQueryToRecordsReader runs query in a read-only transaction that is rolled back.
+func (r rolledBackReads) ExecuteQueryToRecordsReader(ctx context.Context, query dal.Query) (dal.RecordsReader, error) {
+	var records []record.Record
+	err := r.RunReadonlyTransaction(ctx, func(ctx context.Context, tx dal.ReadTransaction) error {
+		reader, err := tx.ExecuteQueryToRecordsReader(ctx, query)
+		if err != nil {
+			return err
+		}
+		if records, err = dal.ReadAllToRecords(ctx, reader); err != nil {
+			return err
+		}
+		return errReadRolledBack
+	})
+	if !errors.Is(err, errReadRolledBack) {
+		return nil, err
+	}
+	return dal.NewRecordsReader(records), nil
 }
 
 // serverQueryText is sqlText without its trailing semicolons (the Oracle driver refuses one, and a
@@ -71,20 +105,8 @@ var writeWords = map[string]bool{
 	"OPENDATASOURCE": true, "SET_CONFIG": true,
 }
 
-// isDollarQuote reports whether text starts with the opening of a PostgreSQL dollar-quoted string: $$, or $tag$
-// where the tag is a name. A "$" followed by digits is a parameter ($1), not a quote.
-func isDollarQuote(text string) bool {
-	for i := 1; i < len(text); i++ {
-		switch c := text[i]; {
-		case c == '$':
-			return true
-		case c >= '0' && c <= '9' && i > 1, c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z':
-		default:
-			return false
-		}
-	}
-	return false
-}
+// functionWords are the writeWords that name a function, which a query calls by its name quoted too.
+var functionWords = map[string]bool{"SET_CONFIG": true, "OPENROWSET": true, "OPENQUERY": true, "OPENDATASOURCE": true}
 
 // sqlWords returns the words of text, upper case, outside its string literals, quoted names and comments, or the
 // reason it refuses the text: a statement separator (";"), a MySQL or MariaDB comment the server runs ("/*!", "/*M!"), a comment
@@ -127,9 +149,20 @@ func sqlWords(scheme, text string) (words []string, refusal string) {
 			if (scheme == "mysql" || scheme == "postgres") && c != '`' && strings.IndexByte(text[i+1:end], '\\') >= 0 {
 				return nil, "a backslash in a " + dbcopy.ServerTitle(scheme) + " literal"
 			}
+			if c != '\'' {
+				// A quoted name is a name, and a name can call a function: one that writes is refused quoted too.
+				if name := strings.ToUpper(text[i+1 : end]); functionWords[name] || scheme == "sqlserver" && (strings.HasPrefix(name, "XP_") || strings.HasPrefix(name, "SP_")) {
+					return nil, name
+				}
+			}
 			i = end + 1
-		case c == '$' && scheme == "postgres" && isDollarQuote(text[i:]):
+		case scheme == "postgres" && c == '$' && (i+1 == len(text) || text[i+1] < '0' || text[i+1] > '9'):
+			// A "$" is a parameter ($1) or the start of a dollar-quoted string, whose tag can be any name.
 			return nil, "a PostgreSQL dollar-quoted string"
+		case scheme == "postgres" && c >= 0x80:
+			// PostgreSQL takes a letter that is not ASCII as a letter of a name: it is refused outside a
+			// literal, so a name the lexer cannot read never starts or ends where the server's does.
+			return nil, "a character that is not ASCII outside a string"
 		case c >= '0' && c <= '9':
 			// A number ends where a letter starts, as the servers read it: SQL Server runs "SELECT 1COMMIT" as
 			// SELECT 1 and COMMIT, so the letters after the digits are a word of their own.

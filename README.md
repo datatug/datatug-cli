@@ -479,8 +479,10 @@ in a transaction that DataTug always rolls back. Neither layer stops a function 
 that writes when a query calls it (an Oracle function with an autonomous transaction commits its own writes), so give
 DataTug a login that can only read: on PostgreSQL a role with `SELECT` only, on MySQL `SELECT` and no `FILE`
 privilege, on SQL Server `db_datareader` and `VIEW DEFINITION`, on Oracle `CREATE SESSION` and `SELECT` on the tables.
-PostgreSQL is read the same two ways: the text is checked as above (a dollar-quoted string, a backslash in a string and
-`set_config` are refused too), and the session has `default_transaction_read_only` on.
+PostgreSQL is read the same two ways: the text is checked as above (a dollar-quoted string, a backslash in a string, a
+character that is not ASCII outside a string and `set_config`, quoted or not, are refused too), the session has
+`default_transaction_read_only` on, and SQL text runs in a read-only transaction that DataTug always rolls back, so a
+setting a called function changes for the session is undone with it.
 
 Reads of these servers through access policies are not available yet: when policies are loaded, run the query with
 `--no-policies`. SQL text (`--sql` and saved SQL queries) is never read through the row and column rules of policies.

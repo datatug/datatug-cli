@@ -53,7 +53,7 @@ func TestOpenVaultDBLayeredDTQL(t *testing.T) {
 				}
 			}
 			policy := func(name, field, value string) string {
-				return fmt.Sprintf(`apiVersion: dtql.org/access/v1
+				return fmt.Sprintf(`apiVersion: tugql.org/access/v1
 kind: AccessPolicy
 metadata: {name: %s}
 target: {database: crm}

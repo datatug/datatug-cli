@@ -209,12 +209,12 @@ func TestSDKRunLifecycleAndOutputBounds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ss.Close()
+	defer func() { _ = ss.Close() }()
 	cs, err = mcp.NewClient(&mcp.Implementation{Name: "bounds-test"}, nil).Connect(ctx, ct, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer cs.Close()
+	defer func() { _ = cs.Close() }()
 	out, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "bounded", Arguments: map[string]any{}})
 	if err != nil || !out.IsError {
 		t.Fatalf("unbounded output accepted: %v %v", out, err)

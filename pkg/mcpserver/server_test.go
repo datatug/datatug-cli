@@ -75,12 +75,12 @@ func TestSDKDiscoveryAndSafeReadTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ss.Close()
+	defer func() { _ = ss.Close() }()
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test"}, nil).Connect(ctx, ct, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer cs.Close()
+	defer func() { _ = cs.Close() }()
 	tools, err := cs.ListTools(ctx, nil)
 	if err != nil || len(tools.Tools) != 8 {
 		t.Fatalf("tools %v: %v", tools, err)

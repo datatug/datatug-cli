@@ -39,6 +39,19 @@ func (e *EnvironmentError) Error() string { return e.Message }
 func environmentError(code string, status int) *EnvironmentError {
 	return &EnvironmentError{code, status, code}
 }
+
+// Seams over the clock, the environment-file transaction and the authoritative state read, so the
+// fences around a mutation (a revoked session, a moved branch, a lost commit) can be exercised.
+var (
+	environmentNow           = time.Now
+	environmentFilesSeam     = filestore.WithEnvironmentFiles
+	environmentReadFilesSeam = filestore.ReadEnvironmentFiles
+	environmentStateSeam     = localEnvironmentState
+	environmentCommitSeam    = func(f *filestore.EnvironmentFiles, changes map[string][]byte, expected map[string]string, binding string, result dto.EnvironmentOperationResult) error {
+		return f.CommitChecked(changes, expected, binding, result)
+	}
+)
+
 func envDigest(b []byte) string { x := sha256.Sum256(b); return hex.EncodeToString(x[:]) }
 func envScopeBinding(s dto.EnvironmentScope, actor string) string {
 	parts := []any{"environment-scope/1", s.StoreID, s.ProjectID, s.SpaceID, s.ProjectAPI, s.Branch, s.AuthorityID, s.ResolvedBranch, s.RepositoryID, s.Owner, s.Repository, s.Folder, actor}
@@ -54,7 +67,9 @@ func envPolicy(projectID string) (actor string, c dto.EnvironmentCapabilities, p
 	secureMu.RLock()
 	defer secureMu.RUnlock()
 	if securityContextID == "" || secureSession.Principal == nil || secureSession.Principal.ID == nil {
-		return "", c, "", "", environmentError("UNAUTHENTICATED", 401)
+		// The session token was already accepted: a missing serving principal is a refusal (403, as
+		// the legacy environment read answers it), never a 401 the app would read as a bad token.
+		return "", c, "", "", environmentError("ACCESS_DENIED", 403)
 	}
 	actor = fmt.Sprint(secureSession.Principal.ID)
 	private = capabilities.EnvironmentPrivateDir
@@ -64,10 +79,13 @@ func envPolicy(projectID string) (actor string, c dto.EnvironmentCapabilities, p
 		c.CanReadOrder = p.CanReadOrder
 		c.CanWriteOrder = p.CanWriteOrder && capabilities.AllowWrites
 		c.CanCreateEnvironment = p.CanCreateEnvironment && capabilities.AllowWrites
-	} else if secureSession.Unrestricted {
+	} else {
+		// Any authenticated principal may read the environment list and its shared order, as the
+		// legacy GET /environments/all_environments already lets it; only an unrestricted session,
+		// or an explicit metadata policy above, may change them.
 		c.CanReadOrder = true
-		c.CanWriteOrder = capabilities.AllowWrites
-		c.CanCreateEnvironment = capabilities.AllowWrites
+		c.CanWriteOrder = secureSession.Unrestricted && capabilities.AllowWrites
+		c.CanCreateEnvironment = secureSession.Unrestricted && capabilities.AllowWrites
 	}
 	c.Reasons = map[string]string{}
 	if !c.CanReadOrder {
@@ -142,14 +160,10 @@ func withLocalEnvironment(ctx context.Context, requested dto.EnvironmentScope, i
 		}
 		if initialize {
 			gitLock = flock.New(filepath.Join(state.gitDir, "datatug-project-api.lock"))
-			ok, e := gitLock.TryLockContext(ctx, 25*time.Millisecond)
-			if e != nil {
-				return e
+			if ok, e := flockTryLockContextSeam(gitLock, ctx, 25*time.Millisecond); e != nil || !ok {
+				return environmentError("TEMPORARILY_UNAVAILABLE", 503)
 			}
-			if !ok {
-				return ctx.Err()
-			}
-			defer gitLock.Unlock()
+			defer func() { _ = gitLock.Unlock() }()
 		}
 		resolved.ResolvedBranch = &state.branch
 		fence = state.branch + ":" + state.head
@@ -173,9 +187,9 @@ func withLocalEnvironment(ctx context.Context, requested dto.EnvironmentScope, i
 	binding := envScopeBinding(resolved, actor)
 	run := func(callback func(*filestore.EnvironmentFiles) error) error {
 		if initialize {
-			return filestore.WithEnvironmentFiles(ctx, root, private, callback)
+			return environmentFilesSeam(ctx, root, private, callback)
 		}
-		return filestore.ReadEnvironmentFiles(ctx, root, callback)
+		return environmentReadFilesSeam(ctx, root, callback)
 	}
 	return run(func(f *filestore.EnvironmentFiles) error {
 		actor2, c2, _, authority2, e := envPolicy(requested.ProjectID)
@@ -206,47 +220,45 @@ func withLocalEnvironment(ctx context.Context, requested dto.EnvironmentScope, i
 		return nil
 	})
 }
-func localEnvironmentState(ctx context.Context, f *filestore.EnvironmentFiles, s dto.EnvironmentScope, binding string, c dto.EnvironmentCapabilities, fence string) (*dto.EnvironmentState, error) {
+
+// localEnvironmentState is the authoritative read inside the environment-file lock. It returns the
+// exact project-file bytes its revision covers, so a save fences and patches those same bytes.
+func localEnvironmentState(ctx context.Context, f *filestore.EnvironmentFiles, s dto.EnvironmentScope, binding string, c dto.EnvironmentCapabilities, fence string) (*dto.EnvironmentState, []byte, error) {
+	raw, e := os.ReadFile(filepath.Join(f.Root, "datatug-project.json"))
+	if e != nil {
+		return nil, nil, e
+	}
 	project, e := f.LoadProjectFile()
 	if e != nil {
-		return nil, e
+		return nil, nil, e
 	}
 	environments, e := f.LoadEnvironments(ctx)
 	if e != nil {
-		return nil, e
+		return nil, nil, e
 	}
 	briefs := make([]dto.EnvironmentBrief, 0, len(environments))
 	for _, env := range environments {
-		b, e := json.Marshal(env)
-		if e != nil {
-			return nil, e
-		}
+		// An environment loaded from JSON always encodes; decoding it into the brief keeps only
+		// the safe fields and fails only on stored presentation metadata of the wrong shape.
+		b, _ := json.Marshal(env)
 		var safe dto.EnvironmentBrief
 		if e = json.Unmarshal(b, &safe); e != nil {
-			return nil, e
+			return nil, nil, e
 		}
 		briefs = append(briefs, safe)
 	}
 	sort.Slice(briefs, func(i, j int) bool { d, _ := datatug.CompareEnvironmentIDs(briefs[i].ID, briefs[j].ID); return d < 0 })
-	order, repair, e := datatug.ResolveEnvironmentOrder(environments.IDs(), project.EnvironmentOrder)
-	if e != nil {
-		return nil, e
-	}
-	raw, e := os.ReadFile(filepath.Join(f.Root, "datatug-project.json"))
-	if e != nil {
-		return nil, e
-	}
-	membership, e := json.Marshal(environments)
-	if e != nil {
-		return nil, e
-	}
+	// LoadEnvironments has just resolved this same order over the same IDs, so it cannot fail here.
+	order, repair, _ := datatug.ResolveEnvironmentOrder(environments.IDs(), project.EnvironmentOrder)
+	membership, _ := json.Marshal(environments)
 	revision := "environment-revision/1." + envDigest(append(append([]byte(binding+":"+fence+":"), raw...), membership...))
-	return &dto.EnvironmentState{Contract: "environment-state/1", Scope: s, ScopeBinding: binding, Environments: briefs, SavedOrder: project.EnvironmentOrder, Order: order, NeedsRepair: repair, Revision: revision, Capabilities: c}, nil
+	return &dto.EnvironmentState{Contract: "environment-state/1", Scope: s, ScopeBinding: binding, Environments: briefs, SavedOrder: project.EnvironmentOrder, Order: order, NeedsRepair: repair, Revision: revision, Capabilities: c}, raw, nil
 }
 func LocalEnvironmentState(ctx context.Context, s dto.EnvironmentScope) (result *dto.EnvironmentState, err error) {
 	err = withLocalEnvironment(ctx, s, false, func(f *filestore.EnvironmentFiles, s dto.EnvironmentScope, b string, c dto.EnvironmentCapabilities, fence string) error {
-		result, err = localEnvironmentState(ctx, f, s, b, c, fence)
-		return err
+		var e error
+		result, _, e = environmentStateSeam(ctx, f, s, b, c, fence)
+		return e
 	})
 	return
 }
@@ -277,9 +289,7 @@ func environmentNewID(name string, ids []string) string {
 	}
 	if collision {
 		var b [16]byte
-		if _, e := rand.Read(b[:]); e != nil {
-			return ""
-		}
+		_, _ = rand.Read(b[:]) // crypto/rand.Read never fails (it aborts the process instead)
 		if id != "" {
 			id += "-"
 		}
@@ -328,11 +338,7 @@ func localEnvironmentMutation(ctx context.Context, r dto.EnvironmentMutation, ki
 			if old.PayloadDigest != digest {
 				return environmentError("OPERATION_CONFLICT", 409)
 			}
-			until, e := time.Parse(time.RFC3339Nano, old.ReplayUntil)
-			if e != nil {
-				return e
-			}
-			if !time.Now().Before(until) {
+			if until, e := time.Parse(time.RFC3339Nano, old.ReplayUntil); e != nil || !environmentNow().Before(until) {
 				return environmentError("OPERATION_EXPIRED", 410)
 			}
 			result = old
@@ -341,7 +347,7 @@ func localEnvironmentMutation(ctx context.Context, r dto.EnvironmentMutation, ki
 		if !os.IsNotExist(e) {
 			return e
 		}
-		state, e := localEnvironmentState(ctx, f, s, b, c, fence)
+		state, raw, e := environmentStateSeam(ctx, f, s, b, c, fence)
 		if e != nil {
 			return e
 		}
@@ -350,7 +356,7 @@ func localEnvironmentMutation(ctx context.Context, r dto.EnvironmentMutation, ki
 		}
 		changes := map[string][]byte{}
 		expected := map[string]string{}
-		now := time.Now().UTC()
+		now := environmentNow().UTC()
 		result = &dto.EnvironmentOperationResult{OperationID: r.OperationID, Kind: kind, PayloadDigest: digest, AcceptedAt: now.Format(time.RFC3339Nano), ReplayUntil: now.Add(7 * 24 * time.Hour).Format(time.RFC3339Nano), Status: "committed"}
 		if kind == "save-environment-order" {
 			ids := make([]string, len(state.Environments))
@@ -360,20 +366,15 @@ func localEnvironmentMutation(ctx context.Context, r dto.EnvironmentMutation, ki
 			if datatug.ValidateEnvironmentPermutation(ids, order) != nil {
 				return environmentError("INVALID_REQUEST", 400)
 			}
-			raw, e := os.ReadFile(filepath.Join(f.Root, "datatug-project.json"))
-			if e != nil {
-				return e
-			}
 			expected["datatug-project.json"] = envDigest(raw)
+			// The state read parsed these bytes as a project object (or null), so they decode into
+			// fields, and fields of valid raw JSON always encode. Only environmentOrder changes.
 			var fields map[string]json.RawMessage
-			if e = json.Unmarshal(raw, &fields); e != nil {
-				return e
+			if _ = json.Unmarshal(raw, &fields); fields == nil { // a null project file
+				fields = map[string]json.RawMessage{}
 			}
 			fields["environmentOrder"], _ = json.Marshal(order)
-			changes["datatug-project.json"], e = json.MarshalIndent(fields, "", "\t")
-			if e != nil {
-				return e
-			}
+			changes["datatug-project.json"], _ = json.MarshalIndent(fields, "", "\t")
 			result.EnvironmentOrder = append([]string{}, order...)
 		} else {
 			ids := make([]string, len(state.Environments))
@@ -388,9 +389,6 @@ func localEnvironmentMutation(ctx context.Context, r dto.EnvironmentMutation, ki
 				}
 			}
 			id := environmentNewID(name, ids)
-			if id == "" {
-				return errors.New("random environment ID unavailable")
-			}
 			body, _ := json.Marshal(map[string]any{"id": id, "title": name, "dbServers": []any{}})
 			changes["environments/"+id+"/"+id+".env.json"] = body
 			expected["environments/"+id+"/"+id+".env.json"] = "absent"
@@ -404,19 +402,15 @@ func localEnvironmentMutation(ctx context.Context, r dto.EnvironmentMutation, ki
 			for i, v := range prospective.Environments {
 				ids[i] = v.ID
 			}
-			prospective.Order, _, e = datatug.ResolveEnvironmentOrder(ids, state.SavedOrder)
-			if e != nil {
-				return e
-			}
+			// The new ID is an ASCII slug or UUID that no live environment has, so this cannot fail.
+			prospective.Order, _, _ = datatug.ResolveEnvironmentOrder(ids, state.SavedOrder)
 		} else {
 			prospective.SavedOrder = append([]string{}, order...)
 			prospective.Order = append([]string{}, order...)
 		}
-		result.AfterStateDigest, e = dto.EnvironmentStateDigest(prospective)
-		if e != nil {
-			return e
-		}
-		reread, e := localEnvironmentState(ctx, f, s, b, c, fence)
+		// Every ID was validated by the state read; the digest fails only on invalid Unicode IDs.
+		result.AfterStateDigest, _ = dto.EnvironmentStateDigest(prospective)
+		reread, _, e := environmentStateSeam(ctx, f, s, b, c, fence)
 		if e != nil {
 			return e
 		}
@@ -432,15 +426,14 @@ func localEnvironmentMutation(ctx context.Context, r dto.EnvironmentMutation, ki
 				return environmentError("ENVIRONMENT_REVISION_CONFLICT", 409)
 			}
 		}
-		if e = f.CommitChecked(changes, expected, b, *result); e != nil {
+		if e = environmentCommitSeam(f, changes, expected, b, *result); e != nil {
 			return environmentError("OUTCOME_UNCERTAIN", 409)
 		}
-		confirmed, e := localEnvironmentState(ctx, f, s, b, c, fence)
+		confirmed, _, e := environmentStateSeam(ctx, f, s, b, c, fence)
 		if e != nil {
 			return environmentError("OUTCOME_UNCERTAIN", 409)
 		}
-		after, e := dto.EnvironmentStateDigest(*confirmed)
-		if e != nil || after != result.AfterStateDigest {
+		if after, _ := dto.EnvironmentStateDigest(*confirmed); after != result.AfterStateDigest {
 			return environmentError("OUTCOME_UNCERTAIN", 409)
 		}
 		return nil

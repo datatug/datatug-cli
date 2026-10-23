@@ -332,16 +332,13 @@ func readQualifiedEnvironments(reader *qualifiedProjectReader) ([]qualifiedEnvir
 	if _, err := reader.readJSON("datatug-project.json", &project); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
 	}
-	live := make([]string, len(environments))
-	byID := map[string]qualifiedEnvironmentData{}
-	for i, v := range environments {
-		live[i] = v.env.ID
-		byID[v.env.ID] = v
+	// environments[i] was read from the directory ids[i]. Those IDs are unique, validated
+	// identifiers, so resolving the shared order over them cannot fail.
+	byID := make(map[string]qualifiedEnvironmentData, len(ids))
+	for i, id := range ids {
+		byID[id] = environments[i]
 	}
-	order, _, err := datatug.ResolveEnvironmentOrder(live, project.EnvironmentOrder)
-	if err != nil {
-		return nil, err
-	}
+	order, _, _ := datatug.ResolveEnvironmentOrder(ids, project.EnvironmentOrder)
 	for i, id := range order {
 		environments[i] = byID[id]
 	}

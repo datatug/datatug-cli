@@ -48,11 +48,7 @@ func TestRoutes_EveryRouteNeedsTheTokenExceptTheExchange(t *testing.T) {
 				defer func() { _ = recover() }() // a handler without its dependencies may panic: it ran
 				route.handler(w, r)
 			}()
-			if strings.HasSuffix(route.path, "/environments/state") {
-				assert.Contains(t, w.Body.String(), "UNAUTHENTICATED")
-			} else {
-				assert.NotEqual(t, http.StatusUnauthorized, w.Code, route.method+" "+route.path)
-			}
+			assert.NotEqual(t, http.StatusUnauthorized, w.Code, route.method+" "+route.path)
 		}
 	}
 	assert.Equal(t, 2, exchanges, "the exchange is registered once per mode")

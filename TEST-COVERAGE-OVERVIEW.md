@@ -29,6 +29,7 @@ See [TEST-COVERAGE-PATTERNS.md](TEST-COVERAGE-PATTERNS.md) for how the tests are
 | `github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers/clouds/gcloud/gcloudui` | 100.0% |
 | `github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers/dbviewer` | 100.0% |
 | `github.com/datatug/datatug-cli/internal/hermetictest` | 100.0% |
+| `github.com/datatug/datatug-cli/internal/strictjson` | 100.0% |
 | `github.com/datatug/datatug-cli/pkg/accesspolicies` | 100.0% |
 | `github.com/datatug/datatug-cli/pkg/api` | 100.0% |
 | `github.com/datatug/datatug-cli/pkg/auth` | 100.0% |
@@ -48,7 +49,6 @@ See [TEST-COVERAGE-PATTERNS.md](TEST-COVERAGE-PATTERNS.md) for how the tests are
 | `github.com/datatug/datatug-cli/pkg/executionstore` | 100.0% |
 | `github.com/datatug/datatug-cli/pkg/httpsource` | 100.0% |
 | `github.com/datatug/datatug-cli/pkg/incidentstore` | 100.0% |
-| `github.com/datatug/datatug-cli/pkg/openvaultdb` | 100.0% |
 | `github.com/datatug/datatug-cli/pkg/personalqueries` | 100.0% |
 | `github.com/datatug/datatug-cli/pkg/projectschema` | n/a (no statements) |
 | `github.com/datatug/datatug-cli/pkg/querywrite` | 100.0% |

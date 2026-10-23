@@ -11,7 +11,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/datatug/datatug-cli/pkg/openvaultdb"
+	"github.com/datatug/datatug-cli/internal/strictjson"
 )
 
 const (
@@ -22,7 +22,7 @@ const (
 	// DescriptorEnvAllowList names the operator-set variable that lists, comma or
 	// space separated, the other variables a project descriptor may name. It
 	// follows the shape of the OpenVaultDB descriptor, whose token is bound to a
-	// destination the operator sets (pkg/openvaultdb/source.go): the project
+	// destination the operator sets (openvaultdb_source.go): the project
 	// file proposes, the operator's own environment decides.
 	DescriptorEnvAllowList = "DATATUG_DSN_ENV_ALLOW"
 )
@@ -111,7 +111,7 @@ func readPostgresDescriptor(path string, lookupEnv func(string) (string, bool)) 
 // only when the name is a plain identifier.
 func DecodePostgresDescriptor(data []byte) (PostgresDescriptor, error) {
 	var fields map[string]json.RawMessage
-	if err := openvaultdb.DecodeJSONObjectStrict(data, &fields); err != nil {
+	if err := strictjson.DecodeObject(data, &fields); err != nil {
 		return PostgresDescriptor{}, errors.New("invalid PostgreSQL connection descriptor")
 	}
 	keys := make([]string, 0, len(fields))

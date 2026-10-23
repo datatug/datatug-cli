@@ -1502,13 +1502,17 @@ func TestSourceResolverAPI(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "SELECT * FROM customers", doc)
 
-	// TugQL: the structured YAML body wins, the text body is the fallback,
-	// and a missing pair reports the first (structured) path.
+	// TugQL: either body alone is read, both together are an error, and a
+	// missing pair reports the first (structured) path.
 	require.NoError(t, os.WriteFile(filepath.Join(qDir, "t1.query.tugql"), []byte("text body"), 0644))
 	doc, err = LoadQueryDocument("p1", "sales/t1", datatug.QueryTypeTugQL)
 	require.NoError(t, err)
 	assert.Equal(t, "text body", doc)
 	require.NoError(t, os.WriteFile(filepath.Join(qDir, "t1.query.tugql.yaml"), []byte("from: {name: A}"), 0644))
+	_, err = LoadQueryDocument("p1", "sales/t1", datatug.QueryTypeTugQL)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "more than one body file")
+	require.NoError(t, os.Remove(filepath.Join(qDir, "t1.query.tugql")))
 	doc, err = LoadQueryDocument("p1", "sales/t1", datatug.QueryTypeTugQL)
 	require.NoError(t, err)
 	assert.Equal(t, "from: {name: A}", doc)

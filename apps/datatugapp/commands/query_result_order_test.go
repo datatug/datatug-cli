@@ -46,12 +46,12 @@ func TestQueryRunResultColumnsFollowTheTableOrder(t *testing.T) {
 	root := resultsHome(t)
 	path := writeOrderDB(t)
 	for _, c := range []struct {
-		name, from string
-		want       []string
+		name, from, key string
+		want            []string
 	}{
-		{"table", "Pet", []string{"$key", "id", "zone", "name", "age", "breed"}},
-		{"composite primary key", "LineItem", []string{"$key", "orderId", "lineNo", "sku", "qty"}},
-		{"view", "PetCard", []string{"$key", "zone", "id", "breed", "name"}},
+		{"table", "Pet", "1", []string{"$key", "id", "zone", "name", "age", "breed"}},
+		{"composite primary key", "LineItem", "0", []string{"$key", "orderId", "lineNo", "sku", "qty"}},
+		{"view", "PetCard", "0", []string{"$key", "zone", "id", "breed", "name"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			id := "o-" + strings.ToLower(c.from)
@@ -67,7 +67,7 @@ func TestQueryRunResultColumnsFollowTheTableOrder(t *testing.T) {
 			for i, column := range meta.Columns {
 				assert.Equal(t, i == 0, column.Internal, column.Name)
 			}
-			assert.NotEmpty(t, recordset.Rows[0][0].Str, "$key stays in the data for readers that predate the marker")
+			assert.Equal(t, c.key, recordset.Rows[0][0].Str, "$key stays in the data: the primary-key value for a single-column key, else the row position")
 		})
 	}
 }

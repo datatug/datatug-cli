@@ -238,24 +238,35 @@ func loadQueryDocument(projectID, queryID string, queryType datatug.QueryType) (
 		return "", fmt.Errorf("no project directory configured for project %q", dbcopy.SourceIDDisplay(projectID))
 	}
 	folder, id := queryFolderAndID(queryID)
-	var firstErr error
+	var (
+		firstErr error
+		found    []string
+		content  []byte
+	)
 	for _, ext := range queryDocumentExtensions(queryType) {
 		filePath := filepath.Join(dir, storage.QueriesFolder, folder, fmt.Sprintf("%s.%s.%s", id, storage.QueryFileSuffix, ext))
-		content, err := os.ReadFile(filePath)
-		if err == nil {
-			return string(content), nil
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("read query document %s: %w", filePath, err)
+			}
+			continue
 		}
-		if firstErr == nil {
-			firstErr = fmt.Errorf("read query document %s: %w", filePath, err)
-		}
+		found = append(found, filepath.Base(filePath))
+		content = data
 	}
-	return "", firstErr
+	switch len(found) {
+	case 0:
+		return "", firstErr
+	case 1:
+		return string(content), nil
+	}
+	return "", fmt.Errorf("query %q has more than one body file (%s); the file name decides, so exactly one is allowed", queryID, strings.Join(found, ", "))
 }
 
 // queryDocumentExtensions lists the body file extensions a saved query of
-// queryType may have, in lookup order. A TugQL query's structured YAML body
-// ("tugql.yaml", what DataTug writes) comes first, then its text body
-// ("tugql"); every other type has the one lowercase-type extension.
+// queryType may have. A TugQL query's structured YAML body
+// ("tugql.yaml", what DataTug writes) and its text body ("tugql") are alternatives: both present is an error; every other type has the one lowercase-type extension.
 func queryDocumentExtensions(queryType datatug.QueryType) []string {
 	if queryType == datatug.QueryTypeTugQL {
 		return []string{"tugql.yaml", "tugql"}

@@ -1,0 +1,105 @@
+{
+  "_meta": {
+    "datatug": {
+      "version": 1,
+      "handle": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "queryId": "precision-customers",
+      "parameters": [
+        {
+          "id": "CustomerId",
+          "type": "integer",
+          "required": true
+        },
+        {
+          "id": "enabled",
+          "type": "boolean",
+          "required": false
+        }
+      ],
+      "values": {
+        "CustomerId": "9007199254740993",
+        "enabled": "false"
+      },
+      "result": {
+        "recordset": {
+          "columns": [
+            {
+              "name": "value",
+              "type": "integer"
+            }
+          ],
+          "rows": [
+            [
+              {
+                "type": "integer",
+                "value": "2"
+              }
+            ],
+            [
+              {
+                "type": "string",
+                "value": "10"
+              }
+            ],
+            [
+              {
+                "type": "boolean",
+                "value": false
+              }
+            ],
+            [
+              {
+                "type": "string",
+                "value": "false"
+              }
+            ],
+            [
+              {
+                "type": "integer",
+                "value": "9007199254740993"
+              }
+            ],
+            [
+              {
+                "type": "decimal",
+                "value": "9007199254740992.10"
+              }
+            ],
+            [
+              {
+                "type": "null",
+                "value": null
+              }
+            ]
+          ]
+        },
+        "limitations": [
+          {
+            "policy": "saved-sql-read-only",
+            "rowsFiltered": false,
+            "hiddenColumns": []
+          }
+        ],
+        "bindingsApplied": [],
+        "provenance": {
+          "source": "chinook",
+          "queryId": "precision-customers",
+          "mode": "live",
+          "observedAt": "2026-10-23T12:00:00Z",
+          "executionProfile": "opaque-privileged"
+        },
+        "truncated": true
+      }
+    }
+  },
+  "content": [
+    {
+      "type": "text",
+      "text": "3 captured rows; private result available to App"
+    }
+  ],
+  "structuredContent": {
+    "capturedRows": 3,
+    "status": "complete"
+  }
+}

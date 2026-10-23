@@ -74,6 +74,7 @@ func DatatugCommand() *cobra.Command {
 		renderCommandArgs(),
 		scanCommandArgs(),
 		serveCommandArgs(),
+		mcpCommand(),
 		daemonCommand(),
 		showCommandArgs(),
 		testCommandArgs(),

@@ -19,7 +19,7 @@ func actor(id string) Actor {
 	return Actor{ID: id, Email: id + "@example.test", Scope: testScope, SharedEditor: true, AccountID: id, Tier: "free"}
 }
 func definition(id string) Definition {
-	return Definition{Scope: testScope, ID: id, Title: id, Visibility: "personal", CheckID: "order-shipped", Schedule: Schedule{IntervalSeconds: 5}, Trigger: "becomes_true", InitialObservation: "baseline", Mode: "continuous", NotificationPolicy: NotificationPolicy{Recovery: true}}
+	return Definition{Scope: testScope, ID: id, Title: id, Visibility: "personal", CheckID: "order-shipped", CheckVersion: "1", Schedule: Schedule{IntervalSeconds: 5}, Trigger: "becomes_true", InitialObservation: "baseline", Mode: "continuous", NotificationPolicy: NotificationPolicy{Recovery: true}}
 }
 
 type clock struct{ n atomic.Int64 }
@@ -207,8 +207,9 @@ func TestRetryUnknownBaselineOneShotAndInvalidation(t *testing.T) {
 	completion := done(bad, "unknown")
 	completion.ExecutionStatus = "error"
 	completion.FailureCode = "SOURCE_UNAVAILABLE"
+	completion.SourceFingerprint = ""
 	run, err := s.FinishRun(ctx, r, completion)
-	if err != nil || run.State != "retry" {
+	if err != nil || run.State != "retry" || run.FailureCode != "SOURCE_UNAVAILABLE" {
 		t.Fatalf("error result=%+v %v", run, err)
 	}
 	c.advance(3 * time.Second)

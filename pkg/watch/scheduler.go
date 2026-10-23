@@ -281,7 +281,7 @@ func (s *Store) FinishRun(ctx context.Context, identity RunnerIdentity, c Comple
 		r.FailureCode = c.FailureCode
 		r.FinishedAt = now
 		r.State = "completed"
-		if obs.SourceFingerprint != "" && c.SourceFingerprint != obs.SourceFingerprint {
+		if obs.SourceFingerprint != "" && c.SourceFingerprint != "" && c.SourceFingerprint != obs.SourceFingerprint {
 			r.ExecutionStatus = "error"
 			r.Outcome = "unknown"
 			r.FailureCode = "SOURCE_CHANGED"

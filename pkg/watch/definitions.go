@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/mail"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -49,6 +50,10 @@ func (s *Store) GetDefinition(ctx context.Context, a Actor, id string) (Definiti
 	return d, nil
 }
 func validateDefinition(d Definition) error {
+	checkVersion, versionErr := strconv.ParseInt(d.CheckVersion, 10, 64)
+	if versionErr != nil || checkVersion <= 0 {
+		return fmt.Errorf("%w: Check version must be a positive integer", ErrInvalid)
+	}
 	if d.ID == "" || len(d.ID) > 128 || d.Title == "" || len(d.Title) > 200 || d.CheckID == "" || len(d.CheckID) > 200 || len(d.Requirements) > 32 {
 		return ErrInvalid
 	}

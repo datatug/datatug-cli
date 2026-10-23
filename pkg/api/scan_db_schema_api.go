@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/datatug/datatug-cli/pkg/schemers/mssqlschema"
-	"github.com/datatug/datatug-cli/pkg/schemers/sqliteschema"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dbconnection"
 	"github.com/datatug/datatug-core/pkg/dto"
@@ -21,7 +20,6 @@ import (
 	"github.com/datatug/datatug-core/pkg/schemer"
 	"github.com/strongo/slice"
 	"github.com/strongo/validation"
-	_ "modernc.org/sqlite" // registers the pure-Go "sqlite" driver sqliteScanDriver names
 )
 
 // ProjectLoader defines an interface to load project info
@@ -336,12 +334,6 @@ func newProjectWithDatabase(projectID, environment string, dbServer datatug.Serv
 	return project, err
 }
 
-// sqliteScanDriver is the database/sql driver a SQLite scan opens: modernc.org/sqlite,
-// which is pure Go and is the driver the rest of the CLI opens SQLite files with. A
-// release is built with cgo off, where the cgo driver registered as "sqlite3" is a
-// stub that fails on its first use.
-const sqliteScanDriver = "sqlite"
-
 // existingSQLiteFile is the path of the SQLite file connectionParams name, which
 // must be an existing file. A scan must not open a path that is not one: SQLite
 // creates an empty database there, and the scan of a mistyped path would succeed
@@ -443,19 +435,12 @@ func scanCatalog(ctx context.Context, server datatug.ServerRef, connectionParams
 		// environment variable: there is no connection string to give database/sql.
 		return scanPostgresCatalog(ctx, connectionParams)
 	}
-	var db *sql.DB
-
-	driverName := server.Driver
-	dsn := connectionParams.ConnectionString()
 	if server.Driver == dbconnection.DriverSQLite3 {
-		var path string
-		if path, err = existingSQLiteFile(connectionParams); err != nil {
-			return nil, err
-		}
-		driverName = sqliteScanDriver
-		dsn = sqliteReadOnlyDSN(path)
+		// SQLite is read through DALgo's schema reader too (dalgo2sqlite).
+		return scanSQLiteCatalog(ctx, connectionParams)
 	}
-	if db, err = sql.Open(driverName, dsn); err != nil {
+	var db *sql.DB
+	if db, err = sql.Open(server.Driver, connectionParams.ConnectionString()); err != nil {
 		return nil, fmt.Errorf("failed to open SQL db: %w", err)
 	}
 
@@ -468,8 +453,6 @@ func scanCatalog(ctx context.Context, server datatug.ServerRef, connectionParams
 	switch server.Driver {
 	case "sqlserver":
 		scanner = schemer.NewScanner(mssqlschema.NewSchemaProvider(db))
-	case dbconnection.DriverSQLite3:
-		scanner = schemer.NewScanner(sqliteschema.NewSchemaProviderWithWarnings(func() (*sql.DB, error) { return db, nil }, scanWarningsFrom(ctx)))
 	default:
 		return nil, fmt.Errorf("unsupported DB driver: %v", server.Driver)
 	}

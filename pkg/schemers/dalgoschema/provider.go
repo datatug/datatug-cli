@@ -16,6 +16,10 @@
 // lists no schema in its references reads, so for that reader a foreign key into
 // another schema is left out of the scan.
 //
+// A provider made with Options can also say what it leaves out of a scan, and why,
+// instead of failing it (Options.Warnings), and can report what the reader keeps of
+// the database's own catalog (Options.SourceDefinitions): the SQLite scan uses both.
+//
 // A scan opens connections to somebody's server, so the provider bounds how many
 // reads and counts it has in flight at once (maxConcurrentReads): the core
 // scanner starts a goroutine per table for each of them, and without a bound a
@@ -99,10 +103,46 @@ func NewSchemaProvider(reader dbschema.SchemaReader, counter RecordsCounter, cat
 // NewSchemaProviderWithErrorObserver calls observe for each reader failure before
 // the scanner can flatten its error chain. The observer must be safe for concurrent calls.
 func NewSchemaProviderWithErrorObserver(reader dbschema.SchemaReader, counter RecordsCounter, catalog, schema string, observe func(error)) schemer.SchemaProvider {
+	return NewSchemaProviderWithOptions(reader, counter, catalog, schema, Options{Observe: observe})
+}
+
+// Options are what a provider does beyond reading what the reader reports.
+type Options struct {
+	// Observe is called for each reader failure before the scanner can flatten its
+	// error chain. It must be safe for concurrent calls. nil observes nothing.
+	Observe func(error)
+
+	// Warnings is where the provider names, one line each, what it leaves out of a
+	// scan and why, so that the scan of a database with a mistake in it reads the
+	// rest: a collection with no name, a view whose definition cannot be read (it
+	// names a table that was dropped), and a foreign key to a table the reader did
+	// not list. nil fails the scan on a view that cannot be read, and logs a foreign
+	// key that is left out.
+	Warnings io.Writer
+
+	// SourceDefinitions reports what the reader keeps of the database's own catalog
+	// (dbschema.SourceDefinition) where it keeps it: a column's declared type and the
+	// text of its default, and every index of a table with its origin, those the
+	// portable definition cannot hold included (the index of a primary key, one on
+	// an expression). Without it a column has its portable type.
+	SourceDefinitions bool
+
+	// ZeroBasedOrdinals counts a table's columns from 0, as SQLite's PRAGMA
+	// table_info does and as SQLite projects were scanned, instead of from 1, as
+	// information_schema does.
+	ZeroBasedOrdinals bool
+}
+
+// NewSchemaProviderWithOptions is NewSchemaProvider with opts.
+func NewSchemaProviderWithOptions(reader dbschema.SchemaReader, counter RecordsCounter, catalog, schema string, opts Options) schemer.SchemaProvider {
 	if reader == nil {
 		panic("reader cannot be nil")
 	}
-	return &provider{reader: reader, counter: counter, catalog: catalog, schema: schema, slots: make(chan struct{}, maxConcurrentReads), observe: observe}
+	firstOrdinal := 1
+	if opts.ZeroBasedOrdinals {
+		firstOrdinal = 0
+	}
+	return &provider{reader: reader, counter: counter, catalog: catalog, schema: schema, slots: make(chan struct{}, maxConcurrentReads), observe: opts.Observe, warnings: opts.Warnings, source: opts.SourceDefinitions, firstOrdinal: firstOrdinal}
 }
 
 type provider struct {
@@ -110,6 +150,10 @@ type provider struct {
 	counter RecordsCounter
 	catalog string
 	schema  string
+
+	warnings     io.Writer // nil says nothing (see Options.Warnings)
+	source       bool      // see Options.SourceDefinitions
+	firstOrdinal int       // the ordinal position of a table's first column (see Options.ZeroBasedOrdinals)
 
 	// slots holds one entry for every call to the reader or the counter in flight.
 	slots   chan struct{}
@@ -309,8 +353,9 @@ func (p *provider) isListed(ctx context.Context, schema, name string) (bool, err
 
 // listViews reads which of the collections the reader lists are views, by schema and
 // name (see relationKey): of every schema when the reader lists them (see SchemaLister),
-// of its own when it is a ViewLister, and none when it cannot tell.
-func (p *provider) listViews(ctx context.Context) (map[string]bool, error) {
+// of its own when it is a ViewLister, and none when it cannot tell. It returns the
+// views' references too, in the order the reader lists them.
+func (p *provider) listViews(ctx context.Context) (map[string]bool, []dal.CollectionRef, error) {
 	var refs []dal.CollectionRef
 	var err error
 	switch reader := p.reader.(type) {
@@ -324,45 +369,87 @@ func (p *provider) listViews(ctx context.Context) (map[string]bool, error) {
 			err = fmt.Errorf("list views: %w", err)
 		}
 	default:
-		return nil, nil
+		return nil, nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	views := make(map[string]bool, len(refs))
 	for i := range refs {
 		views[p.key(&refs[i])] = true
 	}
-	return views, nil
+	return views, refs, nil
 }
 
 // GetCollections lists every collection the reader reports: a table, or a view when
 // the reader says it is one (see ViewLister), in the schema its reference names or
 // else in the provider's own. A reference that names its schema stays the reference
 // the columns of the collection are read through, so that two collections of one name
-// in two schemas are two.
+// in two schemas are two. A view the reader lists apart from its collections (a
+// ViewLister whose ListCollections lists tables only, as dalgo2sqlite's does) is
+// listed after them.
+//
+// A collection with no name is left out. So is a view the reader cannot describe,
+// when the provider has somewhere to say so (Options.Warnings): its columns are
+// read now, before the scan reads any other, so that one broken view does not fail
+// the scan of the whole database.
 func (p *provider) GetCollections(ctx context.Context, _ *record.Key) (schemer.CollectionsReader, error) {
-	refs, _, err := p.listCollections(ctx)
+	refs, listed, err := p.listCollections(ctx)
 	if err != nil {
 		return nil, err
 	}
-	views, err := p.listViews(ctx)
+	views, viewRefs, err := p.listViews(ctx)
 	if err != nil {
 		return nil, err
 	}
-	collections := make([]*datatug.CollectionInfo, len(refs))
+	for i := range viewRefs {
+		if !listed[p.key(&viewRefs[i])] {
+			refs = append(refs, viewRefs[i])
+		}
+	}
+	collections := make([]*datatug.CollectionInfo, 0, len(refs))
 	for i := range refs {
 		kind, dbType := datatug.CollectionTypeTable, dbTypeBaseTable
 		if views[p.key(&refs[i])] {
 			kind, dbType = datatug.CollectionTypeView, dbTypeView
 		}
+		if refs[i].Name() == "" {
+			// A collection key without a name is a programming error in datatug-core.
+			p.warnf("warning: %s %q of schema %q is left out of the project: its name is empty\n", strings.ToLower(string(kind)), "", p.schemaOf(&refs[i]))
+			continue
+		}
+		if kind == datatug.CollectionTypeView && p.warnings != nil {
+			if _, describeErr := p.describe(ctx, &refs[i]); describeErr != nil {
+				p.warnf("warning: view %q of schema %q is left out of the project: its definition cannot be read: %q\n", refs[i].Name(), p.schemaOf(&refs[i]), rootCause(describeErr).Error())
+				continue
+			}
+		}
 		key := datatug.NewCollectionKey(kind, refs[i].Name(), p.schemaOf(&refs[i]), p.catalog, nil)
 		if refs[i].Schema() != "" {
 			key.Ref = refs[i]
 		}
-		collections[i] = &datatug.CollectionInfo{DBCollectionKey: key, TableProps: datatug.TableProps{DbType: dbType}}
+		collections = append(collections, &datatug.CollectionInfo{DBCollectionKey: key, TableProps: datatug.TableProps{DbType: dbType}})
 	}
 	return &collectionsReader{items: collections}, nil
+}
+
+// warnf writes a line to the provider's warnings, if it has somewhere to write them.
+func (p *provider) warnf(format string, args ...any) {
+	if p.warnings != nil {
+		_, _ = fmt.Fprintf(p.warnings, format, args...)
+	}
+}
+
+// rootCause is the innermost error of err's chain: the database's own words, without
+// what each layer above it said it was doing.
+func rootCause(err error) error {
+	for {
+		inner := errors.Unwrap(err)
+		if inner == nil {
+			return err
+		}
+		err = inner
+	}
 }
 
 type collectionsReader struct {
@@ -393,6 +480,7 @@ func (p *provider) GetColumns(ctx context.Context, _ string, filter schemer.Colu
 	for i, name := range def.PrimaryKey {
 		primaryKey[name] = i + 1
 	}
+	declared := p.sourceColumns(def)
 	var columns []schemer.Column
 	for i, field := range def.Fields {
 		if filter.ColNameRegex != nil && !filter.ColNameRegex.MatchString(string(field.Name)) {
@@ -400,11 +488,18 @@ func (p *provider) GetColumns(ctx context.Context, _ string, filter schemer.Colu
 		}
 		column := schemer.Column{TableRef: tableRef}
 		column.Name = string(field.Name)
-		column.OrdinalPosition = i + 1
+		column.OrdinalPosition = i + p.firstOrdinal
 		column.PrimaryKeyPosition = primaryKey[field.Name]
 		column.IsNullable = field.Nullable
 		column.DbType = field.Type.String()
 		column.Default = defaultText(field.Default)
+		if source, ok := declared[string(field.Name)]; ok {
+			column.DbType = source.DeclaredType
+			if source.DefaultSQL != nil {
+				text := *source.DefaultSQL
+				column.Default = &text
+			}
+		}
 		if field.Length != nil && (field.Type == dbschema.String || field.Type == dbschema.Bytes) {
 			length := *field.Length
 			column.CharMaxLength = &length
@@ -412,6 +507,36 @@ func (p *provider) GetColumns(ctx context.Context, _ string, filter schemer.Colu
 		columns = append(columns, column)
 	}
 	return columns, nil
+}
+
+// sourceColumns is the source catalog's columns of def by name, when the provider
+// reports them (Options.SourceDefinitions) and the reader keeps them; nil otherwise.
+func (p *provider) sourceColumns(def *dbschema.CollectionDef) map[string]dbschema.SourceColumnDef {
+	if !p.source || def.SourceDefinition == nil {
+		return nil
+	}
+	columns := make(map[string]dbschema.SourceColumnDef, len(def.SourceDefinition.Columns))
+	for _, column := range def.SourceDefinition.Columns {
+		columns[column.Name] = column
+	}
+	return columns
+}
+
+// sourceIndexes is the source catalog's indexes of the table ref names, when the
+// provider reports them (Options.SourceDefinitions) and the reader keeps them: then
+// found is true, though the table may have none.
+func (p *provider) sourceIndexes(ctx context.Context, ref *dal.CollectionRef) (indexes []dbschema.SourceIndexDef, found bool, err error) {
+	if !p.source {
+		return nil, false, nil
+	}
+	def, err := p.describe(ctx, ref)
+	if err != nil {
+		return nil, false, err
+	}
+	if def.SourceDefinition == nil {
+		return nil, false, nil
+	}
+	return def.SourceDefinition.Indexes, true, nil
 }
 
 func (p *provider) GetColumnsReader(ctx context.Context, catalog string, filter schemer.ColumnsFilter) (schemer.ColumnsReader, error) {
@@ -436,13 +561,30 @@ func (r *columnsReader) NextColumn() (schemer.Column, error) {
 }
 
 // GetIndexes lists the table's indexes; GetIndexColumns lists their columns.
+// From the source catalog (Options.SourceDefinitions) an index also has its origin
+// ("c" for CREATE INDEX, "u" for a UNIQUE constraint, "pk" for a primary key, in
+// SQLite) and whether it is partial.
 func (p *provider) GetIndexes(ctx context.Context, _, schema, table string) (schemer.IndexesReader, error) {
 	ref := p.ref(schema, table)
+	tableRef := schemer.TableRef{SchemaName: p.schemaOf(ref), TableName: table}
+	source, found, err := p.sourceIndexes(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		items := make([]*schemer.Index, len(source))
+		for i, index := range source {
+			items[i] = &schemer.Index{TableRef: tableRef, Index: &datatug.Index{
+				Name: index.Name, Type: indexType, Origin: index.Origin, IsUnique: index.Unique,
+				IsPrimaryKey: index.Origin == "pk", IsUniqueConstraint: index.Origin == "u", IsPartial: index.Partial,
+			}}
+		}
+		return &indexesReader{items: items}, nil
+	}
 	indexes, err := p.listIndexes(ctx, ref)
 	if err != nil {
 		return nil, err
 	}
-	tableRef := schemer.TableRef{SchemaName: p.schemaOf(ref), TableName: table}
 	items := make([]*schemer.Index, len(indexes))
 	for i, index := range indexes {
 		items[i] = &schemer.Index{
@@ -466,13 +608,39 @@ func (r *indexesReader) NextIndex() (*schemer.Index, error) {
 	return next, nil
 }
 
+// From the source catalog an index lists its key columns, a term that is an
+// expression with no name.
 func (p *provider) GetIndexColumns(ctx context.Context, _, schema, table, index string) (schemer.IndexColumnsReader, error) {
 	ref := p.ref(schema, table)
+	tableRef := schemer.TableRef{SchemaName: p.schemaOf(ref), TableName: table}
+	source, found, err := p.sourceIndexes(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		for _, candidate := range source {
+			if candidate.Name != index {
+				continue
+			}
+			var items []*schemer.IndexColumn
+			for _, term := range candidate.Columns {
+				if !term.Key {
+					continue
+				}
+				var name string
+				if term.Name != nil {
+					name = *term.Name
+				}
+				items = append(items, &schemer.IndexColumn{TableRef: tableRef, IndexName: index, IndexColumn: &datatug.IndexColumn{Name: name}})
+			}
+			return &indexColumnsReader{items: items}, nil
+		}
+		return nil, fmt.Errorf("index %q not found on %s", index, table)
+	}
 	indexes, err := p.listIndexes(ctx, ref)
 	if err != nil {
 		return nil, err
 	}
-	tableRef := schemer.TableRef{SchemaName: p.schemaOf(ref), TableName: table}
 	for _, candidate := range indexes {
 		if candidate.Name != index {
 			continue
@@ -527,8 +695,12 @@ func (p *provider) GetConstraints(ctx context.Context, _, schema, table string) 
 			return nil, err
 		}
 		if !listed {
-			log.Printf("dalgoschema: foreign key %s of %s.%s is left out: it references %s.%s, which the reader did not list (the role may not see it)",
-				key.Name, scanned, table, scanned, key.ReferencedCollection)
+			if p.warnings != nil {
+				p.warnf("warning: table %q of schema %q has a foreign key to %q, which is not a table of the database: the reference is not read\n", table, scanned, key.ReferencedCollection)
+			} else {
+				log.Printf("dalgoschema: foreign key %s of %s.%s is left out: it references %s.%s, which the reader did not list (the role may not see it)",
+					key.Name, scanned, table, scanned, key.ReferencedCollection)
+			}
 			continue
 		}
 		for i, field := range key.Fields {

@@ -213,8 +213,7 @@ func TestScanDbCatalog_SQLite3_NamesInTheFileAreNotSQL(t *testing.T) {
 			indexNames = append(indexNames, index.Name)
 		}
 		assert.Contains(t, indexNames, "qty'idx")
-		require.NotNil(t, relations["a]b"].RecordsCount, "the count of a table named with a bracket is read")
-		assert.Equal(t, 2, *relations["a]b"].RecordsCount)
+		assert.Nil(t, relations["a]b"].RecordsCount, "a scan counts no records: no project file holds a count")
 		assert.NotEmpty(t, relations["it's"].AlternateKeys, "the UNIQUE index of a table named with an apostrophe is read by its name")
 	})
 
@@ -310,7 +309,7 @@ func TestSQLiteReadOnlyDSN(t *testing.T) {
 	t.Run("a connection made with it cannot write", func(t *testing.T) {
 		dbPath := filepath.Join(t.TempDir(), "a#b.db")
 		writeSQLiteFile(t, dbPath, `CREATE TABLE widgets (id INTEGER PRIMARY KEY)`)
-		db, err := sql.Open(sqliteScanDriver, sqliteReadOnlyDSN(dbPath))
+		db, err := sql.Open("sqlite", sqliteReadOnlyDSN(dbPath))
 		require.NoError(t, err)
 		defer func() { _ = db.Close() }()
 

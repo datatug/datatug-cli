@@ -3,12 +3,16 @@ package dtviewers
 import (
 	"context"
 	"database/sql"
+	"io"
 	"path/filepath"
 
 	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/dalgo/dbschema"
 	"github.com/dal-go/dalgo2sql"
+	"github.com/dal-go/dalgo2sqlite"
+	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
-	"github.com/datatug/datatug-cli/pkg/schemers/sqliteschema"
+	"github.com/datatug/datatug-cli/pkg/schemers/dalgoschema"
 	"github.com/datatug/datatug-core/pkg/schemer"
 	"github.com/strongo/cli-helpers/fsutil"
 )
@@ -71,11 +75,69 @@ func GetSQLiteDbContext(path string) *SqlDBContext {
 		return sql.Open(driverName, dbcopy.SQLiteFileURIMode(path, dbcopy.SQLiteReadWrite))
 	}
 
-	schema := sqliteschema.NewSchemaProvider(func() (*sql.DB, error) {
-		return getSqlDB(context.Background(), driver.ID)
-	})
-
 	dbName := filepath.Base(path)
 
-	return NewSqlDBContext(driver, dbName, getSqlDB, schema)
+	return NewSqlDBContext(driver, dbName, getSqlDB, sqliteSchema(path))
+}
+
+// sqliteSchemaReader is what the viewer reads a SQLite file's schema with:
+// dalgo2sqlite's lenient schema reader, which also lists views.
+type sqliteSchemaReader interface {
+	dbschema.SchemaReader
+	dalgoschema.ViewLister
+}
+
+// openSQLiteSchema opens the SQLite database uri names for its schema: a seam, so a
+// test can see the URI. Always dalgo2sqlite in production.
+var openSQLiteSchema = func(uri string) (sqliteSchemaReader, error) {
+	db, err := dalgo2sqlite.NewDatabase(uri)
+	if err != nil {
+		return nil, err
+	}
+	return db.LenientSchema(), nil
+}
+
+// sqliteSchema is the schema of the SQLite file at path, read through DALgo's
+// schema reader the way a scan reads it: the file opened read-only, a column with
+// the type its table declares, and a view that cannot be read left out. A file that
+// cannot be opened fails every read of the schema with the reason.
+func sqliteSchema(path string) schemer.SchemaProvider {
+	var reader sqliteSchemaReader
+	reader, err := openSQLiteSchema(dbcopy.SQLiteFileURIMode(path, dbcopy.SQLiteReadOnly))
+	if err != nil {
+		reader = failedSchemaReader{err: err}
+	}
+	return dalgoschema.NewSchemaProviderWithOptions(reader, nil, "", "main", dalgoschema.Options{
+		Warnings:          io.Discard,
+		SourceDefinitions: true,
+		ZeroBasedOrdinals: true,
+	})
+}
+
+// failedSchemaReader answers every read with the error that kept the database from
+// being opened.
+type failedSchemaReader struct{ err error }
+
+func (r failedSchemaReader) ListCollections(context.Context, *record.Key) ([]dal.CollectionRef, error) {
+	return nil, r.err
+}
+
+func (r failedSchemaReader) ListViews(context.Context) ([]dal.CollectionRef, error) {
+	return nil, r.err
+}
+
+func (r failedSchemaReader) DescribeCollection(context.Context, *dal.CollectionRef) (*dbschema.CollectionDef, error) {
+	return nil, r.err
+}
+
+func (r failedSchemaReader) ListIndexes(context.Context, *dal.CollectionRef) ([]dbschema.IndexDef, error) {
+	return nil, r.err
+}
+
+func (r failedSchemaReader) ListConstraints(context.Context, *dal.CollectionRef) ([]dbschema.ConstraintDef, error) {
+	return nil, r.err
+}
+
+func (r failedSchemaReader) ListReferrers(context.Context, *dal.CollectionRef) ([]dbschema.Referrer, error) {
+	return nil, r.err
 }

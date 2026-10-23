@@ -4,12 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"path/filepath"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo2sql"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tuigoff/tuigoff/pkg/nav"
@@ -144,8 +146,8 @@ func TestGetSQLiteDbContext(t *testing.T) {
 	_, err := c.GetSqlDB(context.Background(), "no-such-driver")
 	assert.Error(t, err)
 	_, err = c.GetDB(context.Background())
-	assert.Error(t, err)                                                // sqlite3 driver is not linked into this test binary
-	_, err = c.Schema().RecordsCount(context.Background(), "", "", "t") // opens through the schema provider's getter
+	assert.Error(t, err)                                          // sqlite3 driver is not linked into this test binary
+	_, err = c.Schema().GetCollections(context.Background(), nil) // the file is not there: no schema to read
 	assert.Error(t, err)
 }
 
@@ -176,4 +178,48 @@ func TestNewSqlDBContext_SetsSQLiteStructuredQueryDialect(t *testing.T) {
 		assert.NotNil(t, db, driverID)
 		assert.Equal(t, want, got.StructuredQueryDialect, driverID)
 	}
+}
+
+func TestFailedSchemaReader(t *testing.T) {
+	boom := errors.New("boom")
+	r := failedSchemaReader{err: boom}
+	ctx := context.Background()
+	ref := dal.NewRootCollectionRef("t", "")
+	_, err := r.ListCollections(ctx, nil)
+	assert.ErrorIs(t, err, boom)
+	_, err = r.ListViews(ctx)
+	assert.ErrorIs(t, err, boom)
+	_, err = r.DescribeCollection(ctx, &ref)
+	assert.ErrorIs(t, err, boom)
+	_, err = r.ListIndexes(ctx, &ref)
+	assert.ErrorIs(t, err, boom)
+	_, err = r.ListConstraints(ctx, &ref)
+	assert.ErrorIs(t, err, boom)
+	_, err = r.ListReferrers(ctx, &ref)
+	assert.ErrorIs(t, err, boom)
+}
+
+// The viewer reads a SQLite file's schema read-only, through DALgo's lenient reader.
+func TestSQLiteSchema_OpensTheFileReadOnly(t *testing.T) {
+	saved := openSQLiteSchema
+	t.Cleanup(func() { openSQLiteSchema = saved })
+	var opened string
+	openSQLiteSchema = func(uri string) (sqliteSchemaReader, error) {
+		opened = uri
+		return saved(uri)
+	}
+	path := filepath.Join(t.TempDir(), "my.db")
+	file, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	_, err = file.Exec(`CREATE TABLE t (id INTEGER PRIMARY KEY, doc JSON)`)
+	require.NoError(t, err)
+	require.NoError(t, file.Close())
+
+	reader, err := sqliteSchema(path).GetCollections(context.Background(), nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, dbcopy.SQLiteFileURIMode(path, dbcopy.SQLiteReadOnly), opened)
+	collection, err := reader.NextCollection()
+	require.NoError(t, err)
+	assert.Equal(t, "t", collection.Name())
 }

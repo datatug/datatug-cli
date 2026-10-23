@@ -423,10 +423,12 @@ the web app talks to (see [spec/features/cli/serve](spec/features/cli/serve/READ
 | Database | Scan (`datatug scan`) | Query (`datatug query run`) |
 |---|---|---|
 | SQLite | supported | supported |
-| PostgreSQL | supported: every schema the role can use, tables and views, columns with their defaults, primary keys (no foreign keys or indexes yet); the connection URL stays in an environment variable | preview, read-only: set `DATATUG_PREVIEW_POSTGRES=1` |
+| PostgreSQL | supported: every schema the role can use, tables and views, columns with their defaults, primary keys (no foreign keys or indexes yet); the connection URL stays in an environment variable | preview, read-only: set `DATATUG_PREVIEW_POSTGRES=1`; `--db env:NAME` and saved TugQL queries |
+| MySQL | supported: the tables of the database of the URL, columns, primary keys; the connection URL stays in an environment variable | preview, read-only: set `DATATUG_PREVIEW_MYSQL=1`; `--db env:NAME`, saved TugQL and SQL (`SELECT`/`WITH`) queries |
+| Oracle | supported: the tables and views of the session's schema, columns, primary keys; the connection URL stays in an environment variable | preview, read-only: set `DATATUG_PREVIEW_ORACLE=1`; `--db env:NAME`, saved TugQL and SQL (`SELECT`/`WITH`) queries |
+| SQL Server | supported: the tables and views of the login's default schema, columns, primary keys; the connection URL stays in an environment variable | preview, read-only: set `DATATUG_PREVIEW_SQLSERVER=1`; `--db env:NAME`, saved TugQL and SQL (`SELECT`/`WITH`) queries |
 | inGitDB | not supported yet | supported: `--db ingitdb://./path-to-the-database` |
 | OpenVaultDB | not supported yet | not tested in this release |
-| SQL Server | accepted by `scan -D sqlserver`, not tested in this release | not supported yet |
 | Firestore | not supported yet | not supported yet |
 
 A database that is not in this table is not supported by this release. We are open for pull requests.
@@ -436,6 +438,40 @@ DATATUG_SHOP_PG_URL --db shop --env local` reads the connection URL from the env
 the project) and saves every schema the role can use, the system schemas apart: tables, views and materialized views
 (as views), columns with their defaults (the text of the SQL expression) and primary keys, a folder for each schema.
 The scan does not save foreign keys or indexes yet.
+
+**MySQL, Oracle and SQL Server**, via [dalgo2mysql](https://github.com/dal-go/dalgo2mysql),
+[dalgo2oracle](https://github.com/dal-go/dalgo2oracle) and [dalgo2mssql](https://github.com/dal-go/dalgo2mssql), work the
+same way. Put the connection URL in an environment variable whose name starts with `DATATUG_` and name the variable:
+
+```bash
+export DATATUG_SHOP_MY_URL='mysql://user:password@host:3306/shop'
+datatug scan -D mysql --dsn-env DATATUG_SHOP_MY_URL --db shop --env local
+
+export DATATUG_HR_ORA_URL='oracle://user:password@host:1521/FREEPDB1'
+datatug scan -D oracle --dsn-env DATATUG_HR_ORA_URL --db hr --env local
+
+export DATATUG_SALES_MS_URL='sqlserver://user:password@host:1433/sales'
+datatug scan -D sqlserver --dsn-env DATATUG_SALES_MS_URL --db sales --env local
+
+DATATUG_PREVIEW_MYSQL=1 datatug query run --db env:DATATUG_SHOP_MY_URL -f top-customers.tugql
+```
+
+The project holds the name of the variable (`connections/<env>/<db>.json`) and never the URL or any part of it: not the
+host, the port, the user, the password or the database. The tables are saved under the schema `default`, whatever the
+real schema is called. The URL may carry only a few query parameters (MySQL: `tls`, `timeout`; Oracle: `SSL`,
+`SSL VERIFY`, `TIMEOUT`, `CONNECTION TIMEOUT`, `WALLET`; SQL Server: `encrypt`, `TrustServerCertificate`,
+`connection timeout`); any other is refused.
+
+Reads are read-only, in two layers. First, structured queries compile to a `SELECT`, and a saved SQL query must be
+one `SELECT` or `WITH` query: DataTug refuses, before it reaches the server, a text with a second statement or with a
+word that writes, runs code or ends a transaction (`UPDATE`, `INTO`, `COMMIT`, `EXEC`, `SET`, `FUNCTION`, ... outside
+string literals, quoted names and comments). Second, the connection: a MySQL session has `transaction_read_only` on,
+on Oracle every read runs in a `READ ONLY` transaction, and SQL Server, which has no read-only session, runs every read
+in a transaction that DataTug always rolls back. Neither layer stops a function or a procedure already on the server
+that writes when a query calls it (an Oracle function with an autonomous transaction commits its own writes), so give
+DataTug a login that can only read: on MySQL `SELECT` and no `FILE` privilege, on SQL Server `db_datareader` and
+`VIEW DEFINITION`, on Oracle `CREATE SESSION` and `SELECT` on the tables. Queries through access policies
+(`--policies`) are not available in the preview: use `--no-policies`. The scan saves no foreign keys or indexes yet.
 
 ## For developers
 

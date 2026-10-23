@@ -372,7 +372,7 @@ func TestResolveProjectSourceURLThatCannotBeResolved(t *testing.T) {
 	dir, store := sourceProject(t)
 	ctx := context.Background()
 	for id, catalog := range map[string]datatug.DbCatalogBase{
-		"mssql": {Driver: "sqlserver"},
+		"mssql": {Driver: "firestore"},
 		"url":   {Driver: "sqlite3", Path: "https://user:secret@host/x.db"},
 		"pg":    {Driver: "postgres", Path: "../outside.json"},
 	} {
@@ -380,7 +380,7 @@ func TestResolveProjectSourceURLThatCannotBeResolved(t *testing.T) {
 		require.NoError(t, store.SaveEnvDbCatalog(ctx, "local", "", id, &datatug.DbCatalog{DbCatalogBase: catalog, Schemas: datatug.DbSchemas{}}))
 	}
 	for id, message := range map[string]string{
-		"mssql": "its driver is not one that can be opened (sqlite3 or postgres)",
+		"mssql": "its driver is not one that can be opened (sqlite3, postgres, mysql, oracle or sqlserver)",
 		"url":   "its catalog path or connection descriptor cannot be resolved",
 		"pg":    "its catalog path or connection descriptor cannot be resolved",
 	} {

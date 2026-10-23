@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/datatug/datatug-cli/internal/plainfs"
@@ -128,7 +127,7 @@ func scanCommandAction(cmd *cobra.Command, _ []string) error {
 	ctx := api.WithScanWarnings(context.Background(), stderr)
 	datatugProject, err := scanUpdateDbSchema(ctx, projectStore, newProjectID, v.Environment, v.Driver, v.DbModel, connParams)
 	if err != nil {
-		if dbcopy.IsPostgresConnectionFailure(err) {
+		if dbcopy.IsServerConnectionFailure(err) {
 			// The specification of `scan` names 4 for a database that cannot be connected to. The text is the
 			// error's own: it names no part of the connection.
 			return Exit(err.Error(), scanExitCodeConnection)
@@ -234,13 +233,8 @@ var scanLookupEnv = os.LookupEnv
 // production.
 var scanUpdateDbSchema = api.UpdateDbSchema
 
-// scanNewConnectionString is a seam over dbconnection.NewConnectionString,
-// whose error return the fixed, always-valid options connectionParams passes
-// can never trip. Always dbconnection.NewConnectionString in production.
-var scanNewConnectionString = dbconnection.NewConnectionString
-
 // scanDrivers are the drivers a scan reads, in the order the messages name them.
-var scanDrivers = []string{dbconnection.DriverSQLite3, "sqlserver", api.DriverPostgres}
+var scanDrivers = []string{dbconnection.DriverSQLite3, api.DriverPostgres, api.DriverMySQL, api.DriverOracle, api.DriverSQLServer}
 
 // checkScanDriver is an error, naming --driver and the drivers a scan reads, when driver is not
 // one of them. The value is said as it was typed only when it is a plain name: the flag may have
@@ -255,44 +249,43 @@ func checkScanDriver(driver string) error {
 	return nil
 }
 
-// scanDriverNames is "sqlite3, sqlserver or postgres".
+// scanDriverNames is "sqlite3, postgres, mysql, oracle or sqlserver".
 func scanDriverNames() string {
 	return strings.Join(scanDrivers[:len(scanDrivers)-1], ", ") + " or " + scanDrivers[len(scanDrivers)-1]
 }
 
 // connectionParams builds DB connection parameters from the scan flags.
 func (v *scanDbCommand) connectionParams() (dbconnection.Params, error) {
-	if v.Driver == api.DriverPostgres {
+	if api.IsServerDriver(v.Driver) {
 		return v.postgresConnectionParams()
 	}
 	if v.DSNEnv != "" {
-		return nil, fmt.Errorf("--dsn-env applies only to -D %s", api.DriverPostgres)
+		return nil, fmt.Errorf("--dsn-env applies only to -D %s, %s, %s or %s", api.DriverPostgres, api.DriverMySQL, api.DriverOracle, api.DriverSQLServer)
 	}
-	if v.Driver == dbconnection.DriverSQLite3 {
-		if v.Path == "" {
-			return nil, fmt.Errorf("scanning a sqlite3 database requires --path to the database file")
-		}
-		return dbconnection.NewSQLite3ConnectionParams(v.Path, v.Database, dbconnection.ModeReadOnly), nil
+	// sqlite3 is the one driver a scan reads that is not a server (checkScanDriver has refused any other).
+	if v.Path == "" {
+		return nil, fmt.Errorf("scanning a sqlite3 database requires --path to the database file")
 	}
-
-	if v.Host == "" {
-		// Deriving the server/host from the project's environment config is not implemented yet.
-		return nil, fmt.Errorf("deriving the DB server from environment config is not implemented yet — pass -s/--server")
-	}
-
-	options := []string{"mode=" + dbconnection.ModeReadOnly}
-	if v.Port != 0 {
-		options = append(options, "port="+strconv.Itoa(v.Port))
-	}
-
-	connParams, err := scanNewConnectionString(v.Driver, v.Host, v.User, v.Password, v.Database, options...)
-	if err != nil {
-		return nil, fmt.Errorf("invalid connection string: %w", err)
-	}
-	return connParams, nil
+	return dbconnection.NewSQLite3ConnectionParams(v.Path, v.Database, dbconnection.ModeReadOnly), nil
 }
 
-// postgresConnectionParams builds the parameters of a PostgreSQL scan. The only
+// scanArticle is driver with the article a sentence puts in front of it: "a postgres", "an oracle".
+func scanArticle(driver string) string {
+	if driver == api.DriverOracle {
+		return "an " + driver
+	}
+	return "a " + driver
+}
+
+// scanURLExamples is the shape of the connection URL of each driver a scan reads from --dsn-env.
+var scanURLExamples = map[string]string{
+	api.DriverPostgres:  "postgres://user:password@host/database",
+	api.DriverMySQL:     "mysql://user:password@host:3306/database",
+	api.DriverOracle:    "oracle://user:password@host:1521/service",
+	api.DriverSQLServer: "sqlserver://user:password@host:1433/database",
+}
+
+// postgresConnectionParams builds the parameters of a PostgreSQL, MySQL, Oracle or SQL Server scan. The only
 // way to connect is a connection URL held in an environment variable named by
 // --dsn-env: the URL carries the host, port, user and password together, so a
 // password is never on a command line (the process list and the shell history
@@ -309,10 +302,10 @@ func (v *scanDbCommand) postgresConnectionParams() (dbconnection.Params, error) 
 		}
 	}
 	if len(refused) > 0 {
-		return nil, fmt.Errorf("%s not accepted for a postgres scan: the host, port, user and password come from the connection URL in an environment variable, and --path is for sqlite3 files. Put the URL there and pass --dsn-env NAME, so a password never appears on a command line or in a project file", strings.Join(refused, ", "))
+		return nil, fmt.Errorf("%s not accepted for %s scan: the host, port, user and password come from the connection URL in an environment variable, and --path is for sqlite3 files. Put the URL there and pass --dsn-env NAME, so a password never appears on a command line or in a project file", strings.Join(refused, ", "), scanArticle(v.Driver))
 	}
 	if v.DSNEnv == "" {
-		return nil, fmt.Errorf("scanning a postgres database requires --dsn-env NAME, the environment variable that holds the connection URL (postgres://user:password@host/database)")
+		return nil, fmt.Errorf("scanning a %s database requires --dsn-env NAME, the environment variable that holds the connection URL (%s)", v.Driver, scanURLExamples[v.Driver])
 	}
 	if !dbcopy.ValidEnvName(v.DSNEnv) {
 		return nil, fmt.Errorf("--dsn-env must be an environment variable name: upper-case letters, digits and underscores, starting with a letter")
@@ -322,7 +315,7 @@ func (v *scanDbCommand) postgresConnectionParams() (dbconnection.Params, error) 
 	if err := dbcopy.CheckDescriptorEnvName(v.DSNEnv, scanLookupEnv); err != nil {
 		return nil, fmt.Errorf("--dsn-env: %w", err)
 	}
-	params, err := api.NewPostgresScanParams(scanLookupEnv, v.DSNEnv, v.Environment, v.Database)
+	params, err := api.NewServerScanParams(v.Driver, scanLookupEnv, v.DSNEnv, v.Environment, v.Database)
 	if err != nil {
 		return nil, err // not params: a nil *PostgresScanParams would be a non-nil Params
 	}
@@ -338,22 +331,27 @@ func scanCommandArgs() *cobra.Command {
 			"the columns of each with their defaults (the text of the SQL expression) and the primary keys, and saves them like any other scan, a folder for each schema. " +
 			"The connection URL (host, port, user and password) stays in the environment variable: the project holds the name of the variable in a connection descriptor, " +
 			"connections/<env>/<db>.json, and the driver and the database id in its environment file, and never a host, a port, a user or a password. " +
-			"The scan does not save foreign keys or indexes.",
+			"The scan does not save foreign keys or indexes.\n\n" +
+			"Scanning MySQL (-D mysql --dsn-env NAME, mysql://user:password@host:3306/database) reads the tables of the database of the URL; scanning Oracle " +
+			"(-D oracle --dsn-env NAME, oracle://user:password@host:1521/service) reads the tables and views of the session's schema; and scanning SQL Server " +
+			"(-D sqlserver --dsn-env NAME, sqlserver://user:password@host:1433/database) reads the tables and views of the login's default schema. The project records them " +
+			"under the schema \"default\" and, as for PostgreSQL, holds the name of the variable and never the URL or any part of it. " +
+			"-s/--server, --port, -U/--user and -P/--password are not accepted: a password on a command line stays in the shell history and the process list.",
 		RunE: scanCommandAction,
 	}
 	flags := cmd.Flags()
 	flags.StringP("project", "p", "", "Registered project id/name to scan into; with --directory, the id of a new project (default: the name of the folder)")
 	flags.StringP("directory", "d", "", "Path to the project directory (alternative to --project); made if it does not exist")
-	flags.StringP("driver", "D", "", "DB driver: sqlserver, sqlite3 or postgres (postgres reads every schema, the connection URL comes from the environment variable of --dsn-env)")
-	flags.StringP("server", "s", "", "Network server / host name")
-	flags.Int("port", 0, "Server network port (default if omitted)")
-	flags.StringP("user", "U", "", "DB login user")
-	flags.StringP("password", "P", "", "DB login password")
-	flags.String("db", "", "ID of database to scan: a plain name, as it is the name of a folder of the project (for sqlserver also the name of the database on the server)")
+	flags.StringP("driver", "D", "", "DB driver: sqlite3, postgres, mysql, oracle or sqlserver (postgres reads every schema; for every driver but sqlite3 the connection URL comes from the environment variable of --dsn-env)")
+	flags.StringP("server", "s", "", "Not accepted: a server's host is in the connection URL of --dsn-env")
+	flags.Int("port", 0, "Not accepted: a server's port is in the connection URL of --dsn-env")
+	flags.StringP("user", "U", "", "Not accepted: the user is in the connection URL of --dsn-env")
+	flags.StringP("password", "P", "", "Not accepted: the password is in the connection URL of --dsn-env")
+	flags.String("db", "", "ID of database to scan: a plain name, as it is the name of a folder of the project (the database on a server is the one of the connection URL)")
 	flags.String("dbmodel", "", "ID of DB model: a plain name (default: the model the project already records for the database in this environment, else the model the other environments record for it when they agree, else the ID of the database)")
 	flags.String("env", "", "Environment the DB belongs to: a plain name. E.g.: LOCAL, DEV, SIT, UAT, PERF, PROD.")
 	flags.String("path", "", "Path to the SQLite database file (required for -D sqlite3); it must exist")
-	flags.String("dsn-env", "", "Environment variable that holds the PostgreSQL connection URL, for -D postgres (postgres://user:password@host/database). The host, port, user and password stay in the variable and are never written to the project, which holds only the name of the variable. The name must start with "+dbcopy.DescriptorEnvPrefix+" or be listed in "+dbcopy.DescriptorEnvAllowList)
+	flags.String("dsn-env", "", "Environment variable that holds the connection URL, for -D postgres (postgres://user:password@host/database), -D mysql (mysql://user:password@host:3306/database), -D oracle (oracle://user:password@host:1521/service) or -D sqlserver (sqlserver://user:password@host:1433/database). The host, port, user and password stay in the variable and are never written to the project, which holds only the name of the variable. The name must start with "+dbcopy.DescriptorEnvPrefix+" or be listed in "+dbcopy.DescriptorEnvAllowList)
 	registerFollowProjectLinkFlag(cmd)
 	_ = cmd.MarkFlagRequired("db")
 	_ = cmd.MarkFlagRequired("env")

@@ -98,7 +98,7 @@ func TestParse_Env_RejectsBadNamesWithoutEchoingInput(t *testing.T) {
 
 func TestParse_Env_ErrorsNameTheVariableAndNeverEchoTheValue(t *testing.T) {
 	t.Parallel()
-	const secretURL = "mysql://alice:s3cret@db.example.com/shop"
+	const secretURL = "db2://alice:s3cret@db.example.com/shop"
 	tests := []struct {
 		name    string
 		env     map[string]string
@@ -121,7 +121,7 @@ func TestParse_Env_ErrorsNameTheVariableAndNeverEchoTheValue(t *testing.T) {
 			assert.Equal(t, BackendRef{}, ref)
 			assert.Contains(t, err.Error(), tc.wantMsg)
 			assert.Contains(t, err.Error(), "SHOP_PG_URL")
-			for _, secret := range []string{"s3cret", "alice", "db.example.com", "mysql://", "notaport"} {
+			for _, secret := range []string{"s3cret", "alice", "db.example.com", "db2://", "notaport"} {
 				assert.NotContains(t, err.Error(), secret)
 			}
 		})
@@ -130,7 +130,7 @@ func TestParse_Env_ErrorsNameTheVariableAndNeverEchoTheValue(t *testing.T) {
 
 func TestParse_Env_UnsupportedValueErrorListsSchemes(t *testing.T) {
 	t.Parallel()
-	_, err := parseSource("env:SHOP_PG_URL", fakeEnv(map[string]string{"SHOP_PG_URL": "mysql://u:p@h/db"}))
+	_, err := parseSource("env:SHOP_PG_URL", fakeEnv(map[string]string{"SHOP_PG_URL": "db2://u:p@h/db"}))
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), strings.Join(supportedSchemes, ", "))
 }
@@ -138,7 +138,7 @@ func TestParse_Env_UnsupportedValueErrorListsSchemes(t *testing.T) {
 func TestParse_LiteralCredentialsNeverEchoedByErrors(t *testing.T) {
 	t.Parallel()
 	for _, input := range []string{
-		"mysql://alice:s3cret@db.example.com/shop",      // unsupported scheme
+		"db2://alice:s3cret@db.example.com/shop",        // unsupported scheme
 		"postgres://alice:s3cret@db.example.com:bad/db", // malformed postgres URL
 		"postgres://alice:s3%zzcret@db.example.com/db",  // bad percent-escape
 	} {
@@ -187,9 +187,9 @@ func TestParse_InputThatIsNotAURLIsNeverEchoed(t *testing.T) {
 
 func TestParse_UnknownSchemeErrorNamesTheSchemeAndNothingElse(t *testing.T) {
 	t.Parallel()
-	_, err := Parse("mysql://alice:s3cret@db.example.com/shop")
+	_, err := Parse("db2://alice:s3cret@db.example.com/shop")
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), `unsupported scheme "mysql"`)
+	assert.Contains(t, err.Error(), `unsupported scheme "db2"`)
 	assert.NotContains(t, err.Error(), "db.example.com")
 	assert.NotContains(t, err.Error(), "alice")
 	assert.Contains(t, err.Error(), "env:NAME")

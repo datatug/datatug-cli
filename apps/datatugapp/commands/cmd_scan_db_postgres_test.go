@@ -141,15 +141,11 @@ func TestScanConnectionParams_PostgresNeedsAValidAllowedVariable(t *testing.T) {
 	assert.Equal(t, "env:SHOP_PG_URL", params.ConnectionString())
 }
 
-func TestScanConnectionParams_DsnEnvIsForPostgresOnly(t *testing.T) {
-	for _, v := range []*scanDbCommand{
-		{Driver: "sqlite3", DSNEnv: "DATATUG_X", Database: "demo", Path: "/tmp/demo.db"},
-		{Driver: "sqlserver", DSNEnv: "DATATUG_X", Host: "localhost", Database: "demo"},
-	} {
-		params, err := v.connectionParams()
-		assert.Nil(t, params, v.Driver)
-		assert.ErrorContains(t, err, "--dsn-env applies only to -D postgres", v.Driver)
-	}
+func TestScanConnectionParams_DsnEnvIsForServersOnly(t *testing.T) {
+	v := &scanDbCommand{Driver: "sqlite3", DSNEnv: "DATATUG_X", Database: "demo", Path: "/tmp/demo.db"}
+	params, err := v.connectionParams()
+	assert.Nil(t, params)
+	assert.EqualError(t, err, "--dsn-env applies only to -D postgres, mysql, oracle or sqlserver")
 }
 
 func stubScannedProject(t *testing.T, seen *dbconnection.Params) {
@@ -353,7 +349,7 @@ func TestScanCommand_HelpSaysWhatPostgresDoes(t *testing.T) {
 	assert.Contains(t, cmd.Flags().Lookup("driver").Usage, "postgres reads every schema")
 	assert.Contains(t, cmd.Long, "connections/<env>/<db>.json")
 	assert.Contains(t, cmd.Long, "never a host, a port, a user or a password")
-	assert.Contains(t, cmd.Flags().Lookup("driver").Usage, "sqlserver, sqlite3 or postgres")
+	assert.Contains(t, cmd.Flags().Lookup("driver").Usage, "sqlite3, postgres, mysql, oracle or sqlserver")
 	assert.Contains(t, cmd.Flags().Lookup("dsn-env").Usage, "postgres://user:password@host/database")
 	assert.Contains(t, cmd.Flags().Lookup("dsn-env").Usage, "never written to the project")
 }

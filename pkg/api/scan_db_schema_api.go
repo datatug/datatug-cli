@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -12,12 +11,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/datatug/datatug-cli/pkg/schemers/mssqlschema"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dbconnection"
 	"github.com/datatug/datatug-core/pkg/dto"
 	"github.com/datatug/datatug-core/pkg/parallel"
-	"github.com/datatug/datatug-core/pkg/schemer"
 	"github.com/strongo/slice"
 	"github.com/strongo/validation"
 )
@@ -56,7 +53,7 @@ func loggedTarget(params dbconnection.Params) string {
 // connection URL that stays in an environment variable: a project is pushed to places the
 // URL must never reach, so its server is the driver and nothing else.
 func serverHasHost(driver string) bool {
-	return driver != dbconnection.DriverSQLite3 && driver != DriverPostgres
+	return driver != dbconnection.DriverSQLite3 && !IsServerDriver(driver)
 }
 
 // ScannedServer is the server a scan of driver with dbConnParams reads, as the project
@@ -236,7 +233,7 @@ func updateProjectWithDbCatalog(project *datatug.Project, envID string, dbServer
 				// restore path as path might be normalized if pointing to user's directory.
 				// A PostgreSQL catalog's path is the connection descriptor the scan is writing
 				// now: the catalog and the descriptor are updated together, never apart.
-				if dbServerRef.Driver != DriverPostgres {
+				if !IsServerDriver(dbServerRef.Driver) {
 					dbCatalog.Path = projDbServer.Catalogs[j].Path
 				}
 				// TODO: currently replaces catalog with new info, should merge to preserver comments
@@ -413,10 +410,14 @@ func driverTitle(driver string) string {
 	switch driver {
 	case dbconnection.DriverSQLite3:
 		return "SQLite"
-	case "sqlserver":
+	case DriverSQLServer:
 		return "SQL Server"
 	case DriverPostgres:
 		return "PostgreSQL"
+	case DriverMySQL:
+		return "MySQL"
+	case DriverOracle:
+		return "Oracle"
 	default:
 		return driver
 	}
@@ -429,43 +430,17 @@ func scanDbCatalog(server datatug.ServerRef, connectionParams dbconnection.Param
 
 // scanCatalog reads the catalog connectionParams name. What it leaves out of a
 // SQLite catalog, and why, is named on the warnings of ctx (see WithScanWarnings).
-func scanCatalog(ctx context.Context, server datatug.ServerRef, connectionParams dbconnection.Params) (dbCatalog *datatug.DbCatalog, err error) {
-	if server.Driver == DriverPostgres {
+func scanCatalog(ctx context.Context, server datatug.ServerRef, connectionParams dbconnection.Params) (*datatug.DbCatalog, error) {
+	if IsServerDriver(server.Driver) {
 		// PostgreSQL is read through DALgo's schema reader, and opened from an
 		// environment variable: there is no connection string to give database/sql.
-		return scanPostgresCatalog(ctx, connectionParams)
+		return scanPostgresCatalog(ctx, server.Driver, connectionParams)
 	}
 	if server.Driver == dbconnection.DriverSQLite3 {
 		// SQLite is read through DALgo's schema reader too (dalgo2sqlite).
 		return scanSQLiteCatalog(ctx, connectionParams)
 	}
-	var db *sql.DB
-	if db, err = sql.Open(server.Driver, connectionParams.ConnectionString()); err != nil {
-		return nil, fmt.Errorf("failed to open SQL db: %w", err)
-	}
-
-	// Close the database connection pool after command executes
-	defer func() { _ = db.Close() }()
-
-	//informationSchema := schemer.NewInformationSchema(server, db)
-
-	var scanner schemer.Scanner
-	switch server.Driver {
-	case "sqlserver":
-		scanner = schemer.NewScanner(mssqlschema.NewSchemaProvider(db))
-	default:
-		return nil, fmt.Errorf("unsupported DB driver: %v", server.Driver)
-	}
-
-	dbCatalog, err = scanner.ScanCatalog(ctx, connectionParams.Catalog())
-	if err != nil {
-		return dbCatalog, fmt.Errorf("failed to get dbCatalog metadata: %w", err)
-	}
-	dbCatalog.ID = connectionParams.Catalog()
-	//if database, err = informationSchema.GetDatabase(connectionParams.Database()); err != nil {
-	//	return nil, fmt.Errorf("failed to get database metadata: %w", err)
-	//}
-	return
+	return nil, fmt.Errorf("unsupported DB driver: %v", server.Driver)
 }
 
 func updateDbModelWithDbCatalog(envID string, dbModel *datatug.DbModel, dbCatalog *datatug.DbCatalog) (err error) {

@@ -124,7 +124,13 @@ func TestSaveScannedProject_WritesNoFileThroughALink(t *testing.T) {
 					_, err := scan.save(t, projectDir)
 
 					require.Error(t, err, "a scan that would write through a link is refused")
-					assert.ErrorContains(t, err, entry, "and names the path of the link inside the project")
+					if entry == "datatug-project.json" {
+						// datatug-core (v0.77.0) refuses a project metadata file that is not a regular
+						// file with its own fixed sentence, which names it by what it is.
+						assert.ErrorContains(t, err, "project metadata is not a regular file")
+					} else {
+						assert.ErrorContains(t, err, entry, "and names the path of the link inside the project")
+					}
 					assert.NotContains(t, err.Error(), outside, "and never where it leads")
 					assert.Equal(t, outsideBefore, treeWithLinks(t, outside), "the tree outside is byte-identical and nothing new is in it")
 				})

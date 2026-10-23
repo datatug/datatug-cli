@@ -143,9 +143,9 @@ func (e *Executor) runThroughPolicies(ctx context.Context, db dal.DB, query dal.
 //
 // policies is how many access policies the session reads through. A PostgreSQL
 // source read through one or more of them is refused here, before the source is
-// opened (dbcopy.CheckPostgresRead): the preview of PostgreSQL sources does not
-// serve policy-enforced reads yet. A session with no policy (Unrestricted) reads a
-// PostgreSQL source as any other, once the preview is on.
+// opened (dbcopy.CheckServerRead): the previews of PostgreSQL, MySQL, Oracle and SQL Server
+// sources do not serve policy-enforced reads yet. A session with no policy
+// (Unrestricted) reads such a source as any other, once its preview is on.
 //
 // insecureAllowLoopback, when true, opens an http(s):// source via
 // dbcopy.BackendRef.OpenProtectedForTest instead of OpenProtected (see
@@ -156,7 +156,7 @@ func openSource(ctx context.Context, sourceURL string, insecureAllowLoopback boo
 	if err != nil {
 		return nil, nil, err
 	}
-	if err = dbcopy.CheckPostgresRead(ref, policies); err != nil {
+	if err = dbcopy.CheckServerRead(ref, policies); err != nil {
 		return nil, nil, err
 	}
 	var db dal.DB

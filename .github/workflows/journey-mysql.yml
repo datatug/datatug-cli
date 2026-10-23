@@ -6,7 +6,8 @@ name: Journey (MySQL)
 #
 # It loads the scripts of `datatug db copy --to sqlscript:...?dialect=mysql` into a real MySQL 8.4 server (the
 # mysql client inside the server's container) for the edge-case fixture and the pinned demo databases, and
-# runs the cross-engine verifier (internal/crossverify) over every one. See scripts/check-journey-mysql.sh.
+# runs the cross-engine verifier (internal/crossverify) over every one. Then, on the same server, the journey of a
+# MySQL source: the scan (-D mysql), query run and saved queries. See scripts/check-journey-mysql.sh.
 on:
   pull_request:
     paths:
@@ -14,9 +15,15 @@ on:
       - 'pkg/dbcopy/faithful/**'
       - 'internal/crossverify/**'
       - 'apps/datatugapp/commands/cmd_db_copy*.go'
+      - 'apps/datatugapp/commands/cmd_scan_db.go'
+      - 'apps/datatugapp/commands/cmd_query*.go'
+      - 'apps/datatugapp/commands/server_journey_*_real_test.go'
+      - 'pkg/api/**'
+      - 'pkg/secureread/**'
       - 'go.mod'
       - 'go.sum'
       - 'scripts/check-journey-mysql.sh'
+      - 'scripts/lib/source-journey.sh'
       - 'scripts/check-mysql-readiness.sh'
       - 'scripts/lib/mysql-readiness.sh'
       - 'scripts/journey-datasets.txt'
@@ -29,9 +36,15 @@ on:
       - 'pkg/dbcopy/faithful/**'
       - 'internal/crossverify/**'
       - 'apps/datatugapp/commands/cmd_db_copy*.go'
+      - 'apps/datatugapp/commands/cmd_scan_db.go'
+      - 'apps/datatugapp/commands/cmd_query*.go'
+      - 'apps/datatugapp/commands/server_journey_*_real_test.go'
+      - 'pkg/api/**'
+      - 'pkg/secureread/**'
       - 'go.mod'
       - 'go.sum'
       - 'scripts/check-journey-mysql.sh'
+      - 'scripts/lib/source-journey.sh'
       - 'scripts/check-mysql-readiness.sh'
       - 'scripts/lib/mysql-readiness.sh'
       - 'scripts/journey-datasets.txt'

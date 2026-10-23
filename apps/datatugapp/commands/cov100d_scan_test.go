@@ -64,13 +64,10 @@ func TestCovDScanCommandAction(t *testing.T) {
 	})
 }
 
-func TestCovDScanConnectionParamsInvalidConnectionString(t *testing.T) {
-	covDSetVar(t, &scanNewConnectionString, func(string, string, string, string, string, ...string) (dbconnection.GeneralParams, error) {
-		return dbconnection.GeneralParams{}, errors.New("conn boom")
-	})
-	v := &scanDbCommand{Driver: "sqlserver", Host: "h", Database: "d"}
+func TestCovDScanConnectionParamsSQLServerHostFlagsAreRefused(t *testing.T) {
+	v := &scanDbCommand{Driver: "sqlserver", Host: "h", User: "sa", Password: "pw", Port: 1433, Database: "d"}
 	params, err := v.connectionParams()
 	require.Error(t, err)
 	assert.Nil(t, params)
-	assert.Contains(t, err.Error(), "invalid connection string")
+	assert.Contains(t, err.Error(), "--server, --port, --user, --password not accepted for a sqlserver scan")
 }

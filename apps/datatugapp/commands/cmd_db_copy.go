@@ -12,9 +12,9 @@ import (
 	"github.com/dal-go/dalgo/dal"
 	bqwriter "github.com/dal-go/dalgo2bigquery"
 	"github.com/dal-go/dalgo2postgres"
+	"github.com/datatug/datatug-cli/internal/strictjson"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/dbcopy/filter"
-	"github.com/datatug/datatug-cli/pkg/openvaultdb"
 	"github.com/spf13/cobra"
 	"golang.org/x/oauth2/google"
 )
@@ -275,7 +275,7 @@ func decodeBigQueryLoadJobRef(referenceJSON string) (bqwriter.LoadJobRef, error)
 	if len(referenceJSON) > 4096 {
 		return ref, errors.New("BigQuery recovery reference is too large")
 	}
-	if err := openvaultdb.DecodeJSONObjectStrict([]byte(referenceJSON), nil); err != nil {
+	if err := strictjson.DecodeObject([]byte(referenceJSON), nil); err != nil {
 		return ref, err
 	}
 	decoder := json.NewDecoder(strings.NewReader(referenceJSON))

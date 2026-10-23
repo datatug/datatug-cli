@@ -318,3 +318,13 @@ func TestSQLiteReadOnlyDSN(t *testing.T) {
 		assert.ErrorContains(t, err, "readonly")
 	})
 }
+
+// TestScanDbCatalog_SQLite3NotADatabase covers a scan whose read of the catalog fails: the file is there,
+// so it is opened, but it is not a SQLite database, and the scanner's failure is the scan's.
+func TestScanDbCatalog_SQLite3NotADatabase(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "not-a-database.db")
+	require.NoError(t, os.WriteFile(dbPath, []byte("this file is plain text and not a SQLite database, long enough to have a header"), 0o600))
+	params := dbconnection.NewSQLite3ConnectionParams(dbPath, "main", dbconnection.ModeReadOnly)
+	_, err := scanDbCatalog(datatug.ServerRef{Driver: dbconnection.DriverSQLite3, Host: "localhost"}, params)
+	assert.ErrorContains(t, err, "failed to get dbCatalog metadata")
+}

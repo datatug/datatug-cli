@@ -64,7 +64,7 @@ func (s *Server) telegramUser(w http.ResponseWriter, r *http.Request, path strin
 	}
 	st, ok := s.Store.(telegramLinkStore)
 	if !ok {
-		fail(w, errors.New("Telegram link store unavailable"))
+		fail(w, errors.New("telegram link store unavailable"))
 		return true
 	}
 	a := credentialActor(c)
@@ -88,7 +88,7 @@ func (s *Server) telegramUser(w http.ResponseWriter, r *http.Request, path strin
 			return true
 		}
 		if p.BotID == "" || !validBotUsername(p.BotUsername) {
-			fail(w, errors.New("Telegram runner unavailable"))
+			fail(w, errors.New("telegram runner unavailable"))
 			return true
 		}
 		var raw [32]byte
@@ -128,7 +128,7 @@ func (s *Server) telegramRunner(w http.ResponseWriter, r *http.Request, path str
 	}
 	st, ok := s.Store.(telegramRunnerStore)
 	if !ok {
-		fail(w, errors.New("Telegram runner store unavailable"))
+		fail(w, errors.New("telegram runner store unavailable"))
 		return true
 	}
 	var b struct {

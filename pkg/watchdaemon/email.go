@@ -59,34 +59,34 @@ func (s *FileEmailSink) Send(ctx context.Context, message EmailMessage) error {
 		return err
 	}
 	if err := os.MkdirAll(s.Path, 0700); err != nil {
-		return errors.New("Watch email sink is unavailable")
+		return errors.New("watch email sink is unavailable")
 	}
 	info, err := sinkLstat(s.Path)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return errors.New("Watch email sink must be a private directory")
+		return errors.New("watch email sink must be a private directory")
 	}
 	sum := sha256.Sum256([]byte(message.ID))
 	target := filepath.Join(s.Path, fmt.Sprintf("%x.json", sum))
 	checkExisting := func() error {
 		info, err := sinkLstat(target)
 		if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() > 128*1024 {
-			return errors.New("Watch email sink entry is unavailable")
+			return errors.New("watch email sink entry is unavailable")
 		}
 		body, err := sinkReadFile(target)
 		var prior EmailMessage
 		if err != nil || json.Unmarshal(body, &prior) != nil || prior != message {
-			return errors.New("Watch email message identity conflicts")
+			return errors.New("watch email message identity conflicts")
 		}
 		return nil
 	}
 	if _, err = sinkLstat(target); err == nil {
 		return checkExisting()
 	} else if !os.IsNotExist(err) {
-		return errors.New("Watch email sink entry is unavailable")
+		return errors.New("watch email sink entry is unavailable")
 	}
 	f, err := sinkCreateTemp(s.Path, ".pending-")
 	if err != nil {
-		return errors.New("Watch email sink is unavailable")
+		return errors.New("watch email sink is unavailable")
 	}
 	defer os.Remove(f.Name())
 	if err = json.NewEncoder(f).Encode(message); err == nil {
@@ -94,7 +94,7 @@ func (s *FileEmailSink) Send(ctx context.Context, message EmailMessage) error {
 	}
 	closeErr := f.Close()
 	if err != nil || closeErr != nil {
-		return errors.New("Watch email sink cannot be written")
+		return errors.New("watch email sink cannot be written")
 	}
 	// Link publishes without replacing an existing ID. An interrupted temporary
 	// file is ignored, and a retry validates the complete published message.
@@ -102,11 +102,11 @@ func (s *FileEmailSink) Send(ctx context.Context, message EmailMessage) error {
 		if os.IsExist(err) {
 			return checkExisting()
 		}
-		return errors.New("Watch email sink cannot publish delivery")
+		return errors.New("watch email sink cannot publish delivery")
 	}
 	dir, err := sinkOpenDirectory(s.Path)
 	if err != nil {
-		return errors.New("Watch email sink directory unavailable")
+		return errors.New("watch email sink directory unavailable")
 	}
 	defer dir.Close()
 	return dir.Sync()
@@ -153,7 +153,7 @@ func (s SMTPSender) Send(ctx context.Context, m EmailMessage) error {
 	}
 	conn, err := (&net.Dialer{Timeout: 15 * time.Second}).DialContext(ctx, "tcp", cfg.Address)
 	if err != nil {
-		return errors.New("Watch SMTP connection failed")
+		return errors.New("watch SMTP connection failed")
 	}
 	defer conn.Close()
 	deadline := time.Now().Add(30 * time.Second)
@@ -163,36 +163,36 @@ func (s SMTPSender) Send(ctx context.Context, m EmailMessage) error {
 	_ = conn.SetDeadline(deadline)
 	client, err := smtp.NewClient(conn, host)
 	if err != nil {
-		return errors.New("Watch SMTP greeting failed")
+		return errors.New("watch SMTP greeting failed")
 	}
 	defer client.Close()
 	if ok, _ := client.Extension("STARTTLS"); ok {
 		if client.StartTLS(&tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}) != nil {
-			return errors.New("Watch SMTP TLS failed")
+			return errors.New("watch SMTP TLS failed")
 		}
 	} else if ip := net.ParseIP(host); !cfg.AllowLoopbackPlaintext || ip == nil || !ip.IsLoopback() {
-		return errors.New("Watch SMTP requires TLS")
+		return errors.New("watch SMTP requires TLS")
 	}
 	if cfg.UsernameEnv != "" || cfg.PasswordEnv != "" {
 		user, password := os.Getenv(cfg.UsernameEnv), os.Getenv(cfg.PasswordEnv)
 		if user == "" || password == "" {
-			return errors.New("Watch SMTP credentials are unavailable")
+			return errors.New("watch SMTP credentials are unavailable")
 		}
 		if client.Auth(smtp.PlainAuth("", user, password, host)) != nil {
-			return errors.New("Watch SMTP authentication failed")
+			return errors.New("watch SMTP authentication failed")
 		}
 	}
 	if client.Mail(from.Address) != nil || client.Rcpt(to.Address) != nil {
-		return errors.New("Watch SMTP recipient rejected")
+		return errors.New("watch SMTP recipient rejected")
 	}
 	w, err := client.Data()
 	if err != nil {
-		return errors.New("Watch SMTP data rejected")
+		return errors.New("watch SMTP data rejected")
 	}
 	body := strings.ReplaceAll(strings.ReplaceAll(m.Body, "\r\n", "\n"), "\n", "\r\n")
 	_, err = fmt.Fprintf(w, "From: %s\r\nTo: %s\r\nSubject: %s\r\nMessage-ID: <%s@datatug-watch>\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s\r\n", cfg.From, m.To, mime.QEncoding.Encode("UTF-8", m.Subject), m.ID, body)
 	if err != nil || w.Close() != nil {
-		return errors.New("Watch SMTP delivery failed")
+		return errors.New("watch SMTP delivery failed")
 	}
 	// A successful DATA close includes the provider's acceptance response.
 	// Losing the courtesy QUIT exchange cannot revoke that known acceptance.

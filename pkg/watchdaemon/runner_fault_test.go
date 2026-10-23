@@ -87,8 +87,11 @@ func TestWatchCancellationAtCompletionBoundary(t *testing.T) {
 	if err := runner.executeClaim(ctx, watch.Claim{ClaimID: "run", RunID: "run", Fence: 1}); !errors.Is(err, context.Canceled) {
 		t.Fatal("cancelled result submitted", err)
 	}
-	if err := (Client{Endpoint: "https://coordinator.example", Token: strings.Repeat("token", 9)}).Register(nil); !errors.Is(err, watch.ErrInvalid) {
-		t.Fatal("nil context submitted", err)
+	// Missing contexts are intentional negative input, never ordinary calls.
+	for _, missingContext := range []context.Context{nil} {
+		if err := (Client{Endpoint: "https://coordinator.example", Token: strings.Repeat("token", 9)}).Register(missingContext); !errors.Is(err, watch.ErrInvalid) {
+			t.Fatal("nil context submitted", err)
+		}
 	}
 }
 

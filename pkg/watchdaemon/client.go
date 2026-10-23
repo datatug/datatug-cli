@@ -21,7 +21,7 @@ import (
 func ValidateEndpoint(endpoint string) error {
 	u, err := url.Parse(endpoint)
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return errors.New("Watch endpoint must be an HTTPS URL without credentials, query or fragment")
+		return errors.New("watch endpoint must be an HTTPS URL without credentials, query or fragment")
 	}
 	if u.Scheme == "https" {
 		return nil
@@ -32,7 +32,7 @@ func ValidateEndpoint(endpoint string) error {
 			return nil
 		}
 	}
-	return errors.New("Watch endpoint requires HTTPS or loopback HTTP")
+	return errors.New("watch endpoint requires HTTPS or loopback HTTP")
 }
 
 type Client struct {
@@ -42,7 +42,7 @@ type Client struct {
 
 func (c Client) call(ctx context.Context, path string, input, output any) error {
 	if ValidateEndpoint(c.Endpoint) != nil || len(c.Token) < 32 {
-		return errors.New("Watch coordinator connection is invalid")
+		return errors.New("watch coordinator connection is invalid")
 	}
 	body, err := json.Marshal(input)
 	if err != nil {
@@ -63,7 +63,7 @@ func (c Client) call(ctx context.Context, path string, input, output any) error 
 	owned.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	resp, err := owned.Do(req)
 	if err != nil {
-		return errors.New("Watch coordinator is unavailable")
+		return errors.New("watch coordinator is unavailable")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
@@ -77,7 +77,7 @@ func (c Client) call(ctx context.Context, path string, input, output any) error 
 		case 404:
 			return watch.ErrNotFound
 		}
-		return errors.New("Watch coordinator is unavailable")
+		return errors.New("watch coordinator is unavailable")
 	}
 	if output == nil {
 		_, err = io.Copy(io.Discard, io.LimitReader(resp.Body, 2*1024*1024))
@@ -85,7 +85,7 @@ func (c Client) call(ctx context.Context, path string, input, output any) error 
 	}
 	decoder := json.NewDecoder(io.LimitReader(resp.Body, 2*1024*1024))
 	if decoder.Decode(output) != nil {
-		return errors.New("Watch coordinator response is invalid")
+		return errors.New("watch coordinator response is invalid")
 	}
 	return nil
 }
@@ -135,7 +135,7 @@ type Runner struct {
 // remotely. A runner needs no inbound listener or source credentials on server.
 func (r Runner) Run(ctx context.Context) error {
 	if r.Executor == nil {
-		return errors.New("Watch runner has no Check executor")
+		return errors.New("watch runner has no Check executor")
 	}
 	var bot *telegramBot
 	registrationBody := runnerRegistration{}
@@ -188,7 +188,7 @@ func (r Runner) Run(ctx context.Context) error {
 		registered := time.Now()
 		for ctx.Err() == nil {
 			if workerCtx.Err() != nil {
-				return errors.New("Watch runner Telegram worker stopped")
+				return errors.New("watch runner Telegram worker stopped")
 			}
 			if time.Since(registered) > registration {
 				break
@@ -276,7 +276,7 @@ func (r Runner) executeClaim(ctx context.Context, claim watch.Claim) error {
 			return err
 		}
 	}
-	return errors.New("Watch completion acknowledgement is unavailable")
+	return errors.New("watch completion acknowledgement is unavailable")
 }
 func waitContext(ctx context.Context, d time.Duration) error {
 	timer := time.NewTimer(d)

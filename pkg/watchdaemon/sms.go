@@ -64,7 +64,7 @@ func (s TwilioSMSSender) Send(ctx context.Context, m SMSMessage) error {
 	client := twiliosms.NewClient(s.Credentials, &http.Client{Timeout: 20 * time.Second, Transport: contextTransport{ctx, transport}})
 	_, exception, err := twiliosms.Send(client, s.Credentials, m.To, m.Body)
 	if err != nil || exception != nil {
-		return errors.New("Watch SMS delivery failed")
+		return errors.New("watch SMS delivery failed")
 	}
 	return nil
 }

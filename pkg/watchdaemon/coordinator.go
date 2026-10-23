@@ -15,7 +15,7 @@ import (
 // the durable delivery outbox. A failed delivery never changes evaluation truth.
 func (s *Server) RunCoordinator(ctx context.Context, interval time.Duration) error {
 	if s.Store == nil {
-		return errors.New("Watch coordinator storage is unavailable")
+		return errors.New("watch coordinator storage is unavailable")
 	}
 	if interval <= 0 {
 		interval = time.Second
@@ -118,5 +118,5 @@ func (s *Server) deliver(ctx context.Context, d watch.Delivery) error {
 		}
 
 	}
-	return errors.New("Watch notification provider is unavailable")
+	return errors.New("watch notification provider is unavailable")
 }

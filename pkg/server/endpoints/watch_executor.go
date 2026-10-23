@@ -19,7 +19,7 @@ func ExecuteWatchCheck(ctx context.Context, project, environment, checkID, check
 	}
 	store, actor, err := detectiveStore(project, api.SecurityContextID())
 	if err != nil {
-		return detective.CheckRun{}, "", errors.New("Watch Check project asset access is unavailable")
+		return detective.CheckRun{}, "", errors.New("watch Check project asset access is unavailable")
 	}
 	req := detective.ActionRequest{Type: "run-check", Project: project, Environment: environment, CheckID: checkID, Inputs: inputs}
 	out, observedFingerprint, err := watchExecuteAction(store, ctx, operationID, actor, req, checkVersion, fingerprint, detectiveQueryRunner(project, api.SecurityContextID()), detectiveExecutionMetadata(project), detectiveQueryRevisionLookup(project))

@@ -71,7 +71,7 @@ func watchDaemonAction(cmd *cobra.Command, _ []string) error {
 	if configPath == "" {
 		home, err := watchUserHomeDir()
 		if err != nil {
-			return errors.New("Watch daemon configuration location unavailable")
+			return errors.New("watch daemon configuration location unavailable")
 		}
 		configPath = filepath.Join(home, ".datatug", "watch-daemon.json")
 	}
@@ -107,14 +107,14 @@ func watchDaemonAction(cmd *cobra.Command, _ []string) error {
 			return err
 		}
 		if namespace != "" && namespace != manifestNamespace || cfg.Namespace != "" && cfg.Namespace != manifestNamespace {
-			return errors.New("Watch namespace differs from project manifest")
+			return errors.New("watch namespace differs from project manifest")
 		}
 		cfg.Namespace = manifestNamespace
 		if watchdaemon.ValidateEndpoint(endpoint) != nil {
-			return errors.New("Watch Coordinator endpoint is invalid")
+			return errors.New("watch Coordinator endpoint is invalid")
 		}
 		if cfg.Runner.Environment == "" || cfg.Runner.Principal == "" {
-			return errors.New("Watch runner requires an explicit environment and local principal")
+			return errors.New("watch runner requires an explicit environment and local principal")
 		}
 		cleanup, err := watchConfigureExecution(cfg, projectID)
 		if err != nil {
@@ -123,7 +123,7 @@ func watchDaemonAction(cmd *cobra.Command, _ []string) error {
 		defer cleanup()
 		token := os.Getenv(cfg.Runner.TokenEnv)
 		if len(token) < 32 {
-			return errors.New("Watch runner token is unavailable")
+			return errors.New("watch runner token is unavailable")
 		}
 		runner = &watchdaemon.Runner{Client: watchdaemon.Client{Endpoint: endpoint, Token: token}, Executor: watchdaemon.ExecutorFunc(func(ctx context.Context, claim watch.Claim) (watch.Completion, error) {
 			d := claim.Definition
@@ -147,7 +147,7 @@ func watchDaemonAction(cmd *cobra.Command, _ []string) error {
 		runner.Telegram = cfg.Runner.Telegram
 	}
 	if namespace != "" && namespace != cfg.Namespace {
-		return errors.New("Watch deployment namespace mismatch")
+		return errors.New("watch deployment namespace mismatch")
 	}
 	var store *watch.Store
 	var httpServer *http.Server
@@ -156,7 +156,7 @@ func watchDaemonAction(cmd *cobra.Command, _ []string) error {
 	startWorker := func(fn func() error) { workers.Add(1); go func() { defer workers.Done(); errCh <- fn() }() }
 	if coordinate {
 		if cfg.Namespace == "" {
-			return errors.New("Watch coordinator namespace is required")
+			return errors.New("watch coordinator namespace is required")
 		}
 		auth, err := watchdaemon.NewAuthenticator(cfg.Credentials)
 		if err != nil {
@@ -164,12 +164,12 @@ func watchDaemonAction(cmd *cobra.Command, _ []string) error {
 		}
 		for _, c := range cfg.Credentials {
 			if c.Namespace != cfg.Namespace {
-				return errors.New("Watch credential namespace differs from coordinator namespace")
+				return errors.New("watch credential namespace differs from coordinator namespace")
 			}
 		}
 		dsn := os.Getenv(cfg.Storage.DALGOConnectionEnv)
 		if dsn == "" {
-			return errors.New("Watch DALGO storage connection environment variable is unavailable")
+			return errors.New("watch DALGO storage connection environment variable is unavailable")
 		}
 		paid := map[string]bool{}
 		for _, c := range cfg.Credentials {
@@ -181,7 +181,7 @@ func watchDaemonAction(cmd *cobra.Command, _ []string) error {
 		}
 		store, err = watchOpenCoordinatorStore(dsn, watch.Config{Namespace: cfg.Namespace, IsPaidAccount: func(account string) bool { return paid[account] }, EmailDailyLimit: cfg.Limits.EmailPerDay, EmailMinuteLimit: cfg.Limits.EmailPerMinute, SMSDailyLimit: cfg.Limits.SMSPerDay, SMSMinuteLimit: cfg.Limits.SMSPerMinute, TelegramDailyLimit: cfg.Limits.TelegramPerDay, TelegramMinuteLimit: cfg.Limits.TelegramPerMinute, MaxWatchesPerUser: cfg.Limits.WatchesPerUser, MinIntervalSeconds: cfg.Limits.MinIntervalSeconds})
 		if err != nil {
-			return errors.New("Watch transactional coordinator storage could not be opened")
+			return errors.New("watch transactional coordinator storage could not be opened")
 		}
 		defer store.Close()
 		service := &watchdaemon.Server{Store: store, Auth: auth, AllowedOrigins: cfg.AllowedOrigins, PublicUIURL: cfg.PublicUIURL, ProjectUIURLs: cfg.ProjectUIURLs, Limits: cfg.Limits}
@@ -195,7 +195,7 @@ func watchDaemonAction(cmd *cobra.Command, _ []string) error {
 		} else if cfg.Notifications.Twilio {
 			credentials, ok := twiliosms.CredentialsFromEnv(os.Getenv)
 			if !ok {
-				return errors.New("Watch Twilio deployment credentials unavailable")
+				return errors.New("watch Twilio deployment credentials unavailable")
 			}
 			service.SMS = watchdaemon.TwilioSMSSender{Credentials: credentials}
 		}
@@ -206,17 +206,17 @@ func watchDaemonAction(cmd *cobra.Command, _ []string) error {
 		}
 		host, _, err := net.SplitHostPort(listen)
 		if err != nil {
-			return errors.New("Watch listen address is invalid")
+			return errors.New("watch listen address is invalid")
 		}
 		ip := net.ParseIP(host)
 		if cfg.TLSCertFile == "" || cfg.TLSKeyFile == "" {
 			if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
-				return errors.New("Watch non-loopback listener requires TLS certificate and key")
+				return errors.New("watch non-loopback listener requires TLS certificate and key")
 			}
 		}
 		listener, err := watchListen("tcp", listen)
 		if err != nil {
-			return errors.New("Watch Coordinator listener is unavailable")
+			return errors.New("watch Coordinator listener is unavailable")
 		}
 		httpServer = &http.Server{Handler: service, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024}
 		startWorker(func() error {
@@ -242,7 +242,7 @@ func watchDaemonAction(cmd *cobra.Command, _ []string) error {
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer shutdownCancel()
 		if shutdownErr := watchShutdownHTTP(httpServer, shutdownCtx); shutdownErr != nil && err == nil {
-			err = errors.New("Watch Coordinator shutdown timed out")
+			err = errors.New("watch Coordinator shutdown timed out")
 		}
 	}
 	finished := make(chan struct{})
@@ -251,7 +251,7 @@ func watchDaemonAction(cmd *cobra.Command, _ []string) error {
 	case <-finished:
 	case <-time.After(watchWorkerShutdownTimeout):
 		if err == nil {
-			err = errors.New("Watch daemon worker shutdown timed out")
+			err = errors.New("watch daemon worker shutdown timed out")
 		}
 	}
 	slog.Info("watch_daemon_stopped", "namespace", cfg.Namespace)
@@ -261,31 +261,31 @@ func watchDaemonAction(cmd *cobra.Command, _ []string) error {
 func resolveWatchCoordinator(manifestEndpoint, trustedEndpoint, explicitOverride string) (string, error) {
 	if explicitOverride != "" {
 		if watchdaemon.ValidateEndpoint(explicitOverride) != nil {
-			return "", errors.New("Watch Coordinator override is invalid")
+			return "", errors.New("watch Coordinator override is invalid")
 		}
 		return explicitOverride, nil
 	}
 	if watchdaemon.ValidateEndpoint(trustedEndpoint) != nil || strings.TrimRight(manifestEndpoint, "/") != strings.TrimRight(trustedEndpoint, "/") {
-		return "", errors.New("Watch manifest Coordinator differs from the deployment trusted endpoint; configure runner.coordinatorEndpoint or explicitly pass --coordinator")
+		return "", errors.New("watch manifest Coordinator differs from the deployment trusted endpoint; configure runner.coordinatorEndpoint or explicitly pass --coordinator")
 	}
 	return manifestEndpoint, nil
 }
 
 func watchProjectCoordination(projectDir string) (id, endpoint, namespace string, err error) {
 	if projectDir == "" {
-		return "", "", "", errors.New("Watch runner project directory is required")
+		return "", "", "", errors.New("watch runner project directory is required")
 	}
 	project, err := filestore.LoadProjectFile(projectDir)
 	if err != nil {
-		return "", "", "", errors.New("Watch runner project is unavailable")
+		return "", "", "", errors.New("watch runner project is unavailable")
 	}
 	body, err := os.ReadFile(filepath.Join(projectDir, storage.ProjectSummaryFileName))
 	if err != nil || len(body) > 1024*1024 {
-		return "", "", "", errors.New("Watch project manifest unavailable")
+		return "", "", "", errors.New("watch project manifest unavailable")
 	}
 	var manifest datatug.ProjectFile
 	if json.Unmarshal(body, &manifest) != nil || manifest.Coordination == nil || manifest.Coordination.Namespace == "" || watchdaemon.ValidateEndpoint(manifest.Coordination.Endpoint) != nil {
-		return "", "", "", errors.New("Watch project requires coordination endpoint and namespace")
+		return "", "", "", errors.New("watch project requires coordination endpoint and namespace")
 	}
 
 	return project.ID, manifest.Coordination.Endpoint, manifest.Coordination.Namespace, nil
@@ -299,7 +299,7 @@ func configureWatchExecution(cfg watchdaemon.Config, projectID string) (func(), 
 	// Detective deliberately has no secured project-asset grant yet. Preserve
 	// its existing fail-closed boundary instead of impersonating a local owner.
 	if !session.Unrestricted {
-		return nil, errors.New("Watch Check assets require explicit local owner mode; secured project asset grants are unavailable")
+		return nil, errors.New("watch Check assets require explicit local owner mode; secured project asset grants are unavailable")
 	}
 	paths := map[string]string{projectID: cfg.Runner.ProjectDir}
 	storage.NewDatatugStore = func(string) (storage.Store, error) { return filestore.NewStore("files", paths) }
@@ -308,13 +308,13 @@ func configureWatchExecution(cfg watchdaemon.Config, projectID string) (func(), 
 	if evidence == "" {
 		home, err := watchUserHomeDir()
 		if err != nil {
-			return nil, errors.New("Watch evidence location unavailable")
+			return nil, errors.New("watch evidence location unavailable")
 		}
 		evidence = filepath.Join(home, ".datatug", "watch-evidence")
 	}
 	api.ConfigureSecureSession(session, paths, api.Capabilities{EvidencePrivateDir: evidence, AllowOpaqueSQL: cfg.Runner.AllowOpaqueSQL})
 	if err = api.ConfigureExecutionEvidence(paths, nil, executionstore.Options{PrivateDir: evidence}); err != nil {
-		return nil, errors.New("Watch execution evidence unavailable")
+		return nil, errors.New("watch execution evidence unavailable")
 	}
 	return func() { _ = api.CloseExecutionEvidence() }, nil
 }

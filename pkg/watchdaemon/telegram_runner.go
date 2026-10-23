@@ -21,9 +21,9 @@ import (
 
 type telegramRateLimitError struct{ Seconds int }
 
-func (e *telegramRateLimitError) Error() string { return "Watch Telegram provider rate limited" }
+func (e *telegramRateLimitError) Error() string { return "watch Telegram provider rate limited" }
 
-var errTelegramRecipientUnavailable = errors.New("Watch Telegram recipient unavailable")
+var errTelegramRecipientUnavailable = errors.New("watch Telegram recipient unavailable")
 
 var telegramRenewInterval = 5 * time.Second
 var telegramRetryInterval = 2 * time.Second
@@ -46,25 +46,25 @@ type telegramBot struct {
 
 func newTelegramBot(ctx context.Context, c TelegramBotConfig, base string, client *http.Client) (*telegramBot, error) {
 	if !validChatID(c.BotID) || (c.SecretEnv == "") == (c.TokenEnv == "") {
-		return nil, errors.New("Watch runner Telegram requires botID and exactly one secretEnv or tokenEnv")
+		return nil, errors.New("watch runner Telegram requires botID and exactly one secretEnv or tokenEnv")
 	}
 	token := os.Getenv(c.TokenEnv)
 	if c.SecretEnv != "" {
 		secret := os.Getenv(c.SecretEnv)
 		if secret == "" {
-			return nil, errors.New("Watch runner Telegram secret unavailable")
+			return nil, errors.New("watch runner Telegram secret unavailable")
 		}
 		token = c.BotID + ":" + secret
 	}
 	parts := strings.Split(token, ":")
 	if len(parts) != 2 || parts[0] != c.BotID || len(parts[1]) < 20 || strings.ContainsAny(token, "/\r\n? #") {
-		return nil, errors.New("Watch runner Telegram credential invalid")
+		return nil, errors.New("watch runner Telegram credential invalid")
 	}
 	if base == "" {
 		base = "https://api.telegram.org"
 	}
 	if ValidateEndpoint(base) != nil {
-		return nil, errors.New("Watch Telegram provider URL invalid")
+		return nil, errors.New("watch Telegram provider URL invalid")
 	}
 	if client == nil {
 		client = &http.Client{Timeout: 20 * time.Second}
@@ -81,7 +81,7 @@ func newTelegramBot(ctx context.Context, c TelegramBotConfig, base string, clien
 		return nil, e
 	}
 	if strconv.FormatInt(me.ID, 10) != c.BotID || !me.Bot || !validBotUsername(me.Username) {
-		return nil, errors.New("Watch runner Telegram bot identity mismatch")
+		return nil, errors.New("watch runner Telegram bot identity mismatch")
 	}
 	b.username = me.Username
 	var hook struct {
@@ -91,23 +91,23 @@ func newTelegramBot(ctx context.Context, c TelegramBotConfig, base string, clien
 		return nil, e
 	}
 	if hook.URL != "" {
-		return nil, errors.New("Watch runner Telegram bot already has a webhook; configure a dedicated bot")
+		return nil, errors.New("watch runner Telegram bot already has a webhook; configure a dedicated bot")
 	}
 	return b, nil
 }
 func (b *telegramBot) call(ctx context.Context, method string, input, output any) error {
 	raw, e := json.Marshal(input)
 	if e != nil {
-		return errors.New("Watch Telegram request invalid")
+		return errors.New("watch Telegram request invalid")
 	}
 	req, e := http.NewRequestWithContext(ctx, "POST", b.base+"/bot"+b.token+"/"+method, bytes.NewReader(raw))
 	if e != nil {
-		return errors.New("Watch Telegram request invalid")
+		return errors.New("watch Telegram request invalid")
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, e := b.http.Do(req)
 	if e != nil {
-		return errors.New("Watch Telegram provider unavailable")
+		return errors.New("watch Telegram provider unavailable")
 	}
 	defer resp.Body.Close()
 	var envelope struct {
@@ -130,11 +130,11 @@ func (b *telegramBot) call(ctx context.Context, method string, input, output any
 				return errTelegramRecipientUnavailable
 			}
 		}
-		return errors.New("Watch Telegram provider rejected request")
+		return errors.New("watch Telegram provider rejected request")
 	}
 
 	if output != nil && json.Unmarshal(envelope.Result, output) != nil {
-		return errors.New("Watch Telegram provider response invalid")
+		return errors.New("watch Telegram provider response invalid")
 	}
 	return nil
 }
@@ -279,12 +279,12 @@ func (b *telegramBot) runLease(ctx context.Context, c Client, lease watch.Telegr
 			return e
 		}
 		if len(updates) > 5 {
-			return errors.New("Watch Telegram update batch invalid")
+			return errors.New("watch Telegram update batch invalid")
 		}
 		next := lease.Offset
 		for _, u := range updates {
 			if u.ID < 0 || u.ID == int64(^uint64(0)>>1) {
-				return errors.New("Watch Telegram update ID invalid")
+				return errors.New("watch Telegram update ID invalid")
 			}
 			if u.ID < next {
 				continue

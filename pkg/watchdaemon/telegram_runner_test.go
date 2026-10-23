@@ -103,8 +103,10 @@ func TestWatchOwnBotVerifiesIdentityWebhookAndSecrets(t *testing.T) {
 	if e = b.call(ctx, "getMe", make(chan bool), nil); e == nil {
 		t.Fatal("invalid JSON accepted")
 	}
-	if e = b.call(nil, "getMe", struct{}{}, nil); e == nil {
-		t.Fatal("invalid context")
+	for _, missingContext := range []context.Context{nil} {
+		if e = b.call(missingContext, "getMe", struct{}{}, nil); e == nil {
+			t.Fatal("invalid context")
+		}
 	}
 	if e = b.call(ctx, "getMe", struct{}{}, new([]int)); e == nil {
 		t.Fatal("invalid result accepted")
@@ -283,7 +285,9 @@ func TestWatchOwnBotNoCallbackAndNoCoordinatorProvider(t *testing.T) {
 	if f.server.deliver(context.Background(), watch.Delivery{Channel: "telegram"}) == nil {
 		t.Fatal("coordinator sent Telegram")
 	}
-	p := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "https://evil.example", 302) }))
+	p := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://evil.example", http.StatusFound)
+	}))
 	defer p.Close()
 	cfg := ownBotConfig(t)
 	if _, e := newTelegramBot(context.Background(), cfg, p.URL, nil); e == nil {

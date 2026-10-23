@@ -21,7 +21,7 @@ func TestSQLServerSources(t *testing.T) {
 	assert.Equal(t, ServerTarget{"db.example.com", 1434, "sa", "sales"}, target)
 	assert.Equal(t, "SQL Server", ServerTitle("sqlserver"))
 	assert.True(t, IsServerScheme("sqlserver"))
-	assert.EqualError(t, CheckServerPreview("sqlserver"), "SQL Server sources are a preview and are switched off: set DATATUG_PREVIEW_SQLSERVER=1 to use them")
+	assert.EqualError(t, CheckServerRead(ref, 1), "policy-enforced reads on SQL Server sources are not available yet: run with --no-policies")
 	_, err = Parse("sqlserver://sa:" + serverSecret + "@db.example.com/sales?app+name=x")
 	assert.ErrorContains(t, err, "accepts only connection timeout, encrypt, trustservercertificate")
 
@@ -31,7 +31,6 @@ func TestSQLServerSources(t *testing.T) {
 	assert.Equal(t, "sqlserver://sa:"+serverSecret+"@db.example.com:1433?connection+timeout=30&database=sales", sqlServerURL(parsed))
 
 	dsns := standInForServers(t)
-	t.Setenv(SQLServerPreviewEnv, "1")
 	_, err = ref.Open(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, []string{sqlServerURL(mustParseServer(t, sqlServerEngine, ref.Path))}, *dsns)
@@ -111,7 +110,6 @@ func TestOracleReadsRunInAReadOnlyTransaction(t *testing.T) {
 
 // An Oracle source is opened through oracleReads, and a failure of the open is OpenFailure's.
 func TestOpenOracleWrapsTheAdapter(t *testing.T) {
-	t.Setenv(OraclePreviewEnv, "1")
 	ref, err := Parse("oracle://scott:" + serverSecret + "@db.example.com/FREEPDB1")
 	require.NoError(t, err)
 	t.Cleanup(SetServerOpenersForTest(ServerOpeners{Oracle: func(context.Context, string) (SchemaScanDB, error) { return &fakeServerDB{}, nil }}))
@@ -160,7 +158,6 @@ func TestSQLServerReadsAreRolledBack(t *testing.T) {
 
 // A SQL Server source is opened through transactionReads that roll back, and a failure of the open is OpenFailure's.
 func TestOpenSQLServerWrapsTheAdapter(t *testing.T) {
-	t.Setenv(SQLServerPreviewEnv, "1")
 	ref, err := Parse("sqlserver://sa:" + serverSecret + "@db.example.com/sales")
 	require.NoError(t, err)
 	t.Cleanup(SetServerOpenersForTest(ServerOpeners{SQLServer: func(context.Context, string) (SchemaScanDB, error) { return &fakeServerDB{}, nil }}))

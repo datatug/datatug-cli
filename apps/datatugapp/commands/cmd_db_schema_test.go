@@ -143,10 +143,10 @@ func TestDBSchemaMissingDBFlag(t *testing.T) {
 	}
 }
 
-func TestDBSchemaPostgresPreviewOff(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "")
+func TestDBSchemaPostgresSourceThatCannotBeOpenedExitsWithTheDatabaseCode(t *testing.T) {
+	failingServerOpeners(t)
 	_, err := runDBSchema(t, "--db", "postgres://alice:hunter2@example.invalid/shop")
-	if err == nil || exitCodeOf(t, err) != exitCodeDatabase || strings.Contains(err.Error(), "hunter2") {
+	if err == nil || exitCodeOf(t, err) != exitCodeDatabase || strings.Contains(err.Error(), "hunter2") || strings.Contains(err.Error(), sourceSecret) {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -159,7 +159,6 @@ func withSchemaSource(t *testing.T, open func(context.Context, dbcopy.BackendRef
 }
 
 func TestDBSchemaOpenFailureNeverLeaksCredentials(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	withSchemaSource(t, func(context.Context, dbcopy.BackendRef) (dal.DB, error) {
 		return nil, errors.New("dial postgres://alice:hunter2@example.invalid/shop failed")
 	})
@@ -303,7 +302,6 @@ func (f fakePostgres) ListSchemaViews(_ context.Context, schema string) ([]dal.C
 }
 
 func TestDBSchemaPostgresListsSchemasSorted(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	withSchemaSource(t, func(context.Context, dbcopy.BackendRef) (dal.DB, error) {
 		return fakePostgres{
 			schemas:    []string{"sales", "public"},
@@ -341,7 +339,6 @@ func TestPostgresEntriesErrors(t *testing.T) {
 }
 
 func TestDBSchemaListFailureIsRedacted(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	withSchemaSource(t, func(context.Context, dbcopy.BackendRef) (dal.DB, error) {
 		return fakePostgres{schemasErr: errors.New("driver echoed postgres://alice:hunter2@db.example.com/shop")}, nil
 	})

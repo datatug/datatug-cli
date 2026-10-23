@@ -166,9 +166,6 @@ func openSchemaSession(cmd *cobra.Command, command string) (*schemaSession, erro
 	if !isSchemaProvider(ref.Scheme) {
 		return nil, Exit(fmt.Sprintf("unsupported provider %q for %s: supported providers are %s", ref.Scheme, command, strings.Join(schemaProviders, ", ")), exitCodeUsage)
 	}
-	if err = dbcopy.CheckServerRead(ref, 0); err != nil {
-		return nil, Exit(err.Error(), exitCodeDatabase)
-	}
 	db, err := openSchemaSource(ctx, ref)
 	if err != nil {
 		return nil, Exit(ref.OpenFailure(err).Error(), exitCodeDatabase)

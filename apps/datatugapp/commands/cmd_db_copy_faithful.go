@@ -169,14 +169,7 @@ func dbCopyFaithful(cmd *cobra.Command, srcRef, tgtRef dbcopy.BackendRef, fromSc
 	defer func() { _ = src.Close() }()
 	from := faithful.Endpoint{Engine: faithful.Engine(srcRef.SQLEngine()), DB: src, Display: srcRef.Display(), Schema: fromSchema}
 	to := faithful.Endpoint{Engine: faithful.Engine(tgtRef.SQLEngine()), Display: tgtRef.Display(), Schema: toSchema}
-	if dryRun {
-		// A dry run opens no target, but a PostgreSQL target is a preview all the same.
-		if tgtRef.Scheme == "postgres" {
-			if err := dbcopy.CheckPostgresPreview(); err != nil {
-				return finish(nil, 4, fmt.Sprintf("open --to: %v", err))
-			}
-		}
-	} else {
+	if !dryRun {
 		if tgtRef.Scheme == "sqlite" {
 			if _, statErr := os.Stat(tgtRef.Path); statErr != nil {
 				createdFile = tgtRef.Path

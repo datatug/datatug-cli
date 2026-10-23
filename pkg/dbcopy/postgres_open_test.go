@@ -21,9 +21,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// previewOn turns the preview switch on for one test.
-func previewOn(t *testing.T) { t.Helper(); t.Setenv(PostgresPreviewEnv, "1") }
-
 // markedHint is the hint of a source that no flag and no variable names.
 const markedHint = "the PostgreSQL connection string is the one the source was given"
 
@@ -38,7 +35,6 @@ func parseMarked(t *testing.T) BackendRef {
 // source is keyed by the primary key the adapter reads from the catalog), no dalgo2sql option of
 // DataTug's own, and one adapter option, the exact identifier mode.
 func TestOpen_APostgresSourceReachesTheAdapterWithTheSessionDefaults(t *testing.T) {
-	previewOn(t)
 	fake := &fakeOpener{}
 	stubPostgresOpener(t, fake.open)
 	ref := parseMarked(t)
@@ -60,7 +56,6 @@ func TestOpen_APostgresSourceReachesTheAdapterWithTheSessionDefaults(t *testing.
 }
 
 func TestTransferOpensPreserveExactNumericsAndBinaryValuesWithoutChangingOrdinaryReads(t *testing.T) {
-	previewOn(t)
 	fake := &fakeOpener{}
 	stubPostgresOpener(t, fake.open)
 	ref := parseMarked(t)
@@ -106,7 +101,6 @@ func TestIdentifierModeIsExact_TellsTheModesApart(t *testing.T) {
 // A URL that turns read-only off is refused on every read, before the opener, and the person who
 // really means to write through it can do so only with the copy target.
 func TestOpen_AURLThatTurnsReadOnlyOffIsRefusedOnEveryRead(t *testing.T) {
-	previewOn(t)
 	fake := &fakeOpener{}
 	stubPostgresOpener(t, fake.open)
 	ref, err := Parse("postgres://" + markerUser + ":" + markerPassword + "@db.example.com/shop?default_transaction_read_only=off&x=" + markerQuery)
@@ -130,7 +124,6 @@ func TestOpen_AURLThatTurnsReadOnlyOffIsRefusedOnEveryRead(t *testing.T) {
 // One handle per resolved connection string for the process: a second open of the same source reuses it,
 // another source or another access gets its own, and a failure is not remembered.
 func TestOpen_OneHandlePerConnectionString(t *testing.T) {
-	previewOn(t)
 	fake := &fakeOpener{}
 	stubPostgresOpener(t, fake.open)
 	first, err := Parse("postgres://alice:pw@db.example.com/shop")
@@ -160,7 +153,6 @@ func TestOpen_OneHandlePerConnectionString(t *testing.T) {
 }
 
 func TestOpen_AFailureIsNotRemembered(t *testing.T) {
-	previewOn(t)
 	fake := &fakeOpener{err: &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork}}
 	stubPostgresOpener(t, fake.open)
 	ref := parseMarked(t)
@@ -177,7 +169,6 @@ func TestOpen_AFailureIsNotRemembered(t *testing.T) {
 // Callers close what they open (the protected read of secureread does), but a handle is the
 // process's for its whole life: closing it is a no-op, and the process's exit is what closes it.
 func TestOpen_ClosingASharedHandleDoesNothing(t *testing.T) {
-	previewOn(t)
 	fake := &fakeOpener{}
 	stubPostgresOpener(t, fake.open)
 	ref := parseMarked(t)
@@ -194,7 +185,6 @@ func TestOpen_ClosingASharedHandleDoesNothing(t *testing.T) {
 
 // The decorator keeps everything the adapter offers that callers look for by type assertion.
 func TestOpen_TheHandleKeepsTheAdaptersCapabilities(t *testing.T) {
-	previewOn(t)
 	stubPostgresOpener(t, (&fakeOpener{}).open)
 	db, err := parseMarked(t).OpenProtected(context.Background())
 	require.NoError(t, err)
@@ -212,7 +202,6 @@ func TestOpen_TheHandleKeepsTheAdaptersCapabilities(t *testing.T) {
 
 // Many goroutines opening one source at once open it once.
 func TestOpen_ConcurrentOpensOfOneSourceOpenOnce(t *testing.T) {
-	previewOn(t)
 	var calls atomic.Int32
 	stubPostgresOpener(t, func(string, dal.Schema, dalgo2sql.DbOptions, ...dalgo2postgres.Option) (*dalgo2postgres.Database, error) {
 		calls.Add(1)
@@ -241,7 +230,6 @@ func TestOpen_ConcurrentOpensOfOneSourceOpenOnce(t *testing.T) {
 // The callers join the attempt in flight before it ends (the open is held until all of them have), so the count is
 // not a race. A call after the attempt ended opens again: a failure is not remembered.
 func TestOpen_TheCallersOfASourceBeingOpenedShareItsOutcome(t *testing.T) {
-	previewOn(t)
 	for name, tc := range map[string]struct {
 		cause   error
 		wantErr bool
@@ -306,7 +294,6 @@ func TestOpen_TheCallersOfASourceBeingOpenedShareItsOutcome(t *testing.T) {
 // A caller whose context ends stops waiting, with the classified sentence for a cancelled or a timed out attempt,
 // while the open goes on; the handle it opens is kept, and the next caller gets it with no second open.
 func TestOpen_ACallerWhoseContextEndsStopsWaitingAndTheOpenGoesOn(t *testing.T) {
-	previewOn(t)
 	var calls atomic.Int32
 	started := make(chan struct{})
 	release := make(chan struct{})
@@ -350,7 +337,6 @@ func TestOpen_ACallerWhoseContextEndsStopsWaitingAndTheOpenGoesOn(t *testing.T) 
 // gone does not dial. A handle that is already open is still answered, and a source whose open is under way is waited
 // for only until the context ends.
 func TestOpen_ACallerWhoseContextHasEndedDoesNotStartAnOpen(t *testing.T) {
-	previewOn(t)
 	fake := &fakeOpener{}
 	stubPostgresOpener(t, fake.open)
 	ref := parseMarked(t)
@@ -372,7 +358,6 @@ func TestOpen_ACallerWhoseContextHasEndedDoesNotStartAnOpen(t *testing.T) {
 // An opener that panics (the stop-the-run opener of a test binary does) panics in the caller, not in a goroutine
 // nobody can recover, and in every caller that waited for the same attempt.
 func TestOpen_APanicOfTheOpenerReachesEveryCallerThatWaited(t *testing.T) {
-	previewOn(t)
 	cache := &handleCache{}
 	release := make(chan struct{})
 	open := func() (*dalgo2postgres.Database, error) {
@@ -401,7 +386,6 @@ func TestOpen_APanicOfTheOpenerReachesEveryCallerThatWaited(t *testing.T) {
 // waited, and the entry does not keep the dead attempt: the next call opens again. The callers wait with a context that
 // ends, so that a regression is a failure of the test and not a hang.
 func TestOpen_AnOpenerThatEndsItsGoroutineEndsTheAttemptWithAFailure(t *testing.T) {
-	previewOn(t)
 	cache := &handleCache{}
 	release := make(chan struct{})
 	open := func() (*dalgo2postgres.Database, error) {
@@ -438,7 +422,6 @@ func TestOpen_AnOpenerThatEndsItsGoroutineEndsTheAttemptWithAFailure(t *testing.
 // A constructor that fails with an error that wraps a context error (a driver's text around a deadline) is the bare
 // context error: classified as a timeout or a cancellation, and nothing of the driver's text is kept.
 func TestOpen_AContextErrorOfTheConstructorIsTheBareContextError(t *testing.T) {
-	previewOn(t)
 	hostile := func(cause error) error { return fmt.Errorf("dial %q: %w", markedPostgresURL, cause) }
 	for name, tc := range map[string]struct {
 		cause error
@@ -459,7 +442,6 @@ func TestOpen_AContextErrorOfTheConstructorIsTheBareContextError(t *testing.T) {
 // password, the user name and a query parameter; each class is tried with a hostile cause that
 // quotes them.
 func TestOpen_FailuresAreClassifiedAndNeverShowTheSource(t *testing.T) {
-	previewOn(t)
 	const suffix = "; " + markedHint
 	hostile := fmt.Sprintf("dial %q: password=%s user=%s", markedPostgresURL, markerPassword, markerUser)
 	for name, tc := range map[string]struct {
@@ -499,7 +481,6 @@ const openedFailureReason = "the driver could not open the source (its own messa
 
 // The adapter's own error stays reachable for errors.As, with nothing of the driver in it.
 func TestOpen_TheAdaptersErrorStaysReachable(t *testing.T) {
-	previewOn(t)
 	stubPostgresOpener(t, (&fakeOpener{err: fmt.Errorf("x: %w", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureTimeout})}).open)
 	_, err := parseMarked(t).Open(context.Background())
 	var connection *dalgo2postgres.ConnectionError
@@ -509,7 +490,6 @@ func TestOpen_TheAdaptersErrorStaysReachable(t *testing.T) {
 
 // An env source is named by its variable, never by what the variable holds.
 func TestOpen_AnEnvSourceIsNamedByItsVariable(t *testing.T) {
-	previewOn(t)
 	stubPostgresOpener(t, (&fakeOpener{err: &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork}}).open)
 	ref, err := ParseWithEnv("env:DATATUG_SHOP_PG_URL", fakeEnv(map[string]string{"DATATUG_SHOP_PG_URL": markedPostgresURL}))
 	require.NoError(t, err)
@@ -521,7 +501,6 @@ func TestOpen_AnEnvSourceIsNamedByItsVariable(t *testing.T) {
 // The cache never holds the connection string: it is keyed by its hash, so no dump of it (a debugger, a %+v of a
 // struct that holds it) shows a user name, a password, a host or a parameter.
 func TestOpen_TheCacheHoldsNoConnectionString(t *testing.T) {
-	previewOn(t)
 	stubPostgresOpener(t, (&fakeOpener{}).open)
 	_, err := parseMarked(t).OpenProtected(context.Background())
 	require.NoError(t, err)

@@ -2,6 +2,7 @@ package dbcopy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -212,12 +213,12 @@ func TestParse_HTTPCredentialsAreRefusedWithoutEcho(t *testing.T) {
 func TestRedactError(t *testing.T) {
 	t.Parallel()
 	assert.NoError(t, RedactError(nil))
-	original := fmt.Errorf("dial postgres://alice:s3cret@h/db: %w", ErrPostgresPreview)
+	original := fmt.Errorf("dial postgres://alice:s3cret@h/db: %w", errPostgresReadOnlyOff)
 	redacted := RedactError(original)
 	assert.NotContains(t, redacted.Error(), "s3cret")
 	assert.Contains(t, redacted.Error(), "postgres://alice:xxxxx@h/db")
-	assert.ErrorIs(t, redacted, ErrPostgresPreview, "the wrapped chain must survive redaction")
-	assert.ErrorIs(t, fmt.Errorf("open: %w", redacted), ErrPostgresPreview)
+	assert.ErrorIs(t, redacted, errPostgresReadOnlyOff, "the wrapped chain must survive redaction")
+	assert.ErrorIs(t, fmt.Errorf("open: %w", redacted), errPostgresReadOnlyOff)
 }
 
 func TestParse_IngitdbNeverEchoesAPassword(t *testing.T) {
@@ -387,10 +388,13 @@ func TestOpen_ErrorsAreScrubbedOfTheRealURLsSecrets(t *testing.T) {
 	assert.ErrorIs(t, err, ErrSourceFileMissing)
 
 	// A driver that formats the DSN its own way is scrubbed by literal value.
+	fake := &fakeOpener{err: errors.New("dial postgres://alice:s3cret@127.0.0.1:1/shop?sslmode=disable: refused")}
+	stubPostgresOpener(t, fake.open)
 	postgres := BackendRef{Scheme: "postgres", Path: "postgres://alice:s3cret@127.0.0.1:1/shop?sslmode=disable"}
 	_, err = postgres.Open(context.Background())
-	assert.ErrorIs(t, err, ErrPostgresPreview, "an error without secrets is returned as it was")
-	assert.Equal(t, ErrPostgresPreview, err)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "s3cret", "the driver's own text is replaced by a sentence")
+	assert.NotContains(t, err.Error(), "alice")
 
 	// An http source whose path carries a secret-named parameter.
 	_, err = BackendRef{Scheme: "http", Path: filepath.Join(t.TempDir(), "nope") + "?api_key=K3Y-secret"}.Open(context.Background())

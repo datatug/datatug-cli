@@ -92,8 +92,7 @@ func TestScanAndQuery_MySQLThroughAStandIn(t *testing.T) {
 	columns := storedColumnsOf(t, projectDir, "default/tables/customer")
 	require.Len(t, columns, 2)
 
-	// An ad-hoc query behind the switch.
-	t.Setenv(dbcopy.MySQLPreviewEnv, "1")
+	// An ad-hoc query.
 	stdout, stderr, code := runQuery(t, "from: {name: customer}\norderBy:\n  - field: id\n", "--db", "env:DATATUG_CMD_MY_URL", "-f", "-", "--format", "json", "--no-policies")
 	require.Zero(t, code, stderr)
 	assert.Len(t, decodeObjects(t, stdout), 2)

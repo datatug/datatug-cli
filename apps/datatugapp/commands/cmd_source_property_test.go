@@ -49,23 +49,24 @@ import (
 // Nothing here relies on a redactor: Exit no longer calls one, and the
 // top-level handler in main.go that does is not run.
 //
-// This is the property with the preview switch of PostgreSQL sources off, which is how every command meets
-// a PostgreSQL source unless the person turns the preview on; the next test runs it again with the switch on.
-func TestProperty_NoCommandPathEchoesASourceSecret(t *testing.T) {
-	checkNoCommandPathEchoesASourceSecret(t)
-}
-
-// TestProperty_NoCommandPathEchoesASourceSecret_WithThePreviewOn is the same property with the preview switch on, so
-// that the path a PostgreSQL source takes once it is opened is inside it: every command that takes a source now opens
+// Every command that takes a source now opens
 // a PostgreSQL one through the opener, which here fails with an error that quotes the connection string it was given
 // (the URL as the command resolved it, the session defaults and the password included), as a driver does. No
 // generated secret reaches an output, an error, the log or a file.
-func TestProperty_NoCommandPathEchoesASourceSecret_WithThePreviewOn(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
+func TestProperty_NoCommandPathEchoesASourceSecret(t *testing.T) {
 	var opens atomic.Int32
 	t.Cleanup(dbcopy.SetPostgresOpenerForTest(func(dsn string, _ dal.Schema, _ dalgo2sql.DbOptions, _ ...dalgo2postgres.Option) (*dalgo2postgres.Database, error) {
 		opens.Add(1)
 		return nil, fmt.Errorf("failed to connect to %q: dial tcp: refused (connection string %s)", dsn, dsn)
+	}))
+	t.Cleanup(dbcopy.SetServerOpenersForTest(dbcopy.ServerOpeners{
+		MySQL: func(dsn string) (dbcopy.SchemaScanDB, error) { return nil, fmt.Errorf("dial %q: refused", dsn) },
+		Oracle: func(_ context.Context, dsn string) (dbcopy.SchemaScanDB, error) {
+			return nil, fmt.Errorf("dial %q: refused", dsn)
+		},
+		SQLServer: func(_ context.Context, dsn string) (dbcopy.SchemaScanDB, error) {
+			return nil, fmt.Errorf("dial %q: refused", dsn)
+		},
 	}))
 	checkNoCommandPathEchoesASourceSecret(t)
 	if opens.Load() == 0 {

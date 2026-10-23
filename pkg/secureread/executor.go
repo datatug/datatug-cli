@@ -141,11 +141,11 @@ func (e *Executor) runThroughPolicies(ctx context.Context, db dal.DB, query dal.
 // comment describes, and it is what wires dalgo2ingitdb v0.4.0's
 // WithStoredOnlyReads() option in for every source this package opens.
 //
-// policies is how many access policies the session reads through. A PostgreSQL
-// source read through one or more of them is refused here, before the source is
-// opened (dbcopy.CheckServerRead): the previews of PostgreSQL, MySQL, Oracle and SQL Server
-// sources do not serve policy-enforced reads yet. A session with no policy
-// (Unrestricted) reads such a source as any other, once its preview is on.
+// policies is how many access policies the session reads through. A PostgreSQL,
+// MySQL, Oracle or SQL Server source read through one or more of them is refused
+// here, before the source is opened (dbcopy.CheckServerRead): policy-enforced reads
+// of these sources are not served yet. A session with no policy (Unrestricted)
+// reads such a source as any other.
 //
 // insecureAllowLoopback, when true, opens an http(s):// source via
 // dbcopy.BackendRef.OpenProtectedForTest instead of OpenProtected (see

@@ -15,8 +15,11 @@ import (
 	"github.com/dal-go/dalgo/access"
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
+	"github.com/dal-go/dalgo2postgres"
+	"github.com/dal-go/dalgo2sql"
 	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/executionstore"
 	"github.com/datatug/datatug-cli/pkg/personalqueries"
 	"github.com/datatug/datatug-cli/pkg/secureread"
@@ -130,6 +133,10 @@ func TestFinal_SemanticColumns_And_Schema(t *testing.T) {
 	_ = os.Remove(filepath.Join(badEntDir, "corrupt.entity.json"))
 
 	// 4. semantic_schema.go:88 dbcopy.Parse / ref.Open error with postgres
+	restorePostgres := dbcopy.SetPostgresOpenerForTest(func(string, dal.Schema, dalgo2sql.DbOptions, ...dalgo2postgres.Option) (*dalgo2postgres.Database, error) {
+		return nil, &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork}
+	})
+	defer restorePostgres()
 	_, err = resolveSQLSourceURL(ctx, "src", "postgres://localhost/mydb", "items")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "PostgreSQL")

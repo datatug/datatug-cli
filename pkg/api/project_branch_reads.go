@@ -12,6 +12,7 @@ import (
 
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
+	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/gofrs/flock"
 )
 
@@ -288,7 +289,14 @@ func LocalProjectSummary(ctx context.Context, ref dto.ProjectRef, branch string)
 // are never serialized by this response.
 func LocalProjectEnvironments(ctx context.Context, ref dto.ProjectRef, branch string) ([]LocalEnvironmentBrief, error) {
 	value, err := withCurrentBranchRead(ctx, ref, branch, func(reader *qualifiedProjectReader) (any, error) {
-		environments, err := readQualifiedEnvironments(reader)
+		// Only the environment read waits for an environment mutation in progress (and its
+		// recovery); other branch reads never take the environment-file lock.
+		var environments []qualifiedEnvironmentData
+		err := filestore.ReadEnvironmentFiles(ctx, reader.root.Name(), func(*filestore.EnvironmentFiles) error {
+			var e error
+			environments, e = readQualifiedEnvironments(reader)
+			return e
+		})
 		if err != nil {
 			return nil, itemsNotLoaded("environments", ref.ProjectID, err)
 		}

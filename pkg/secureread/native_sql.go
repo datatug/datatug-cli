@@ -100,12 +100,11 @@ var nativeSQLLimitation = Limitation{
 // installs a connection authorizer that rejects writes, attachments and
 // disabling query_only. Multi-statement SQL cannot weaken this boundary.
 //
-// MySQL, Oracle and SQL Server sources run native SQL too, a query only (see
-// runServerNativeSQL). Otherwise only sqlite:// sources support native SQL: dalgo2ingitdb executes
-// only dal.StructuredQuery ("only StructuredQuery is supported"), and a
-// postgres:// source takes structured queries only (its read-only session is
-// for those, not for SQL text). A source without a SQL-text execution surface
-// fails with ErrNativeSQLUnsupported.
+// PostgreSQL, MySQL, Oracle and SQL Server sources run native SQL too, a query only
+// (see runServerNativeSQL). Otherwise only sqlite:// sources support native SQL:
+// dalgo2ingitdb executes only dal.StructuredQuery ("only StructuredQuery is
+// supported"). A source without a SQL-text execution surface fails with
+// ErrNativeSQLUnsupported.
 // A future SQL-capable adapter for another scheme should add a read-only
 // dal.DB.RunReadonlyTransaction branch alongside this PRAGMA one, per the
 // brief's "PRAGMA query_only for SQLite; read-only tx elsewhere" design.
@@ -117,10 +116,7 @@ func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, 
 	if err != nil {
 		return Result{}, err
 	}
-	if ref.Scheme == "postgres" {
-		return Result{}, fmt.Errorf("%w: PostgreSQL sources take structured queries only", ErrNativeSQLUnsupported)
-	}
-	if ref.Scheme == "mysql" || ref.Scheme == "oracle" || ref.Scheme == "sqlserver" {
+	if dbcopy.IsServerScheme(ref.Scheme) {
 		return e.runServerNativeSQL(ctx, sourceURL, ref, sqlText, args)
 	}
 	if ref.Scheme != "sqlite" {

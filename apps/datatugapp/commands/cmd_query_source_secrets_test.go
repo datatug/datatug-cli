@@ -56,7 +56,7 @@ func TestQuery_EnvSourceErrorsNameTheVariableOnly(t *testing.T) {
 }
 
 func TestQuery_PostgresPasswordOnTheCommandLineNeverAppears(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "") // the preview is off: nothing is dialled, and the answer is its sentence
+	failingServerOpeners(t) // nothing is dialled, and the driver's text quotes the URL
 	literal := "postgres://alice:" + sourceSecret + "@127.0.0.1:1/shop?sslmode=disable"
 	stdout, stderr, code := runQuery(t, "", "--db", literal, "--from", "customers", "--no-policies")
 	if code != exitCodeDatabase {
@@ -66,8 +66,8 @@ func TestQuery_PostgresPasswordOnTheCommandLineNeverAppears(t *testing.T) {
 	if strings.Contains(stderr, "alice") || strings.Contains(stderr, "127.0.0.1:1/shop?") {
 		t.Errorf("stderr must not show the user or the query of the URL: %q", stderr)
 	}
-	if !strings.Contains(stderr, dbcopy.ErrPostgresPreview.Error()) {
-		t.Errorf("stderr should say that PostgreSQL sources are a preview and are switched off: %q", stderr)
+	if !strings.Contains(stderr, "the PostgreSQL driver could not open the source") && !strings.Contains(stderr, "the driver could not open the source") {
+		t.Errorf("stderr should say that the source could not be opened: %q", stderr)
 	}
 
 	t.Setenv("DT01_QUERY_PG", literal)
@@ -87,7 +87,6 @@ func TestQuery_PostgresPasswordOnTheCommandLineNeverAppears(t *testing.T) {
 // display form (it holds the host): the failure says the sentence and the variable or the flag its connection
 // string is read from.
 func TestQuery_OpenFailureNamesTheSourceOnce(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1") // with the preview off the command answers before the open this test replaces
 	original := openBackend
 	t.Cleanup(func() { openBackend = original })
 	openBackend = func(_ context.Context, ref dbcopy.BackendRef) (dal.DB, error) {
@@ -120,7 +119,6 @@ func TestQuery_OpenFailureNamesTheSourceOnce(t *testing.T) {
 }
 
 func TestQuery_DriverErrorsThatQuoteTheURLAreNeverShown(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1") // with the preview off the command answers before the open this test replaces
 	literal := "postgres://alice:" + sourceSecret + "@127.0.0.1:1/shop"
 	original := openBackend
 	t.Cleanup(func() { openBackend = original })

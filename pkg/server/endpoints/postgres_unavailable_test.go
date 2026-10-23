@@ -102,32 +102,9 @@ func postAdhocRunQuery(t *testing.T, sourceURL string) (status int, env apicontr
 	return rec.Code, env, rec.Body.String()
 }
 
-// With the preview off, the semantic route and exec/run_query answer a PostgreSQL source the same way a file source
-// that is not there is answered: SOURCE_UNAVAILABLE, with the fixed sentence of the preview. Neither is a generic
-// internal error (which says nothing) or an invalid request (which blames the client); and the opener is never called.
-func TestRoutes_APostgresSourceWithThePreviewOffIsUnavailableWithThePreviewSentence(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "")
-	opened := false
-	standInOpener(t, func() (*dalgo2postgres.Database, error) { opened = true; return &dalgo2postgres.Database{}, nil })
-
-	for name, ask := range map[string]func(*testing.T, string) (int, apicontract.ErrorEnvelope, string){
-		"semantic/columns": getSemanticColumns,
-		"exec/run_query":   postAdhocRunQuery,
-	} {
-		logged := captureAgentLog(t)
-		status, env, body := ask(t, pgRouteSource)
-		assert.Equal(t, http.StatusServiceUnavailable, status, name)
-		assert.Equal(t, string(apicontract.ErrCodeSourceUnavailable), env.Error.Code, name)
-		assert.Equal(t, dbcopy.ErrPostgresPreview.Error(), env.Error.Message, name)
-		assertNoRouteMarkers(t, name, body, logged.String())
-	}
-	assert.False(t, opened, "the opener is never called")
-}
-
-// With the preview on, a URL that turns the read-only session off is refused by the route as the source being
+// A URL that turns the read-only session off is refused by the route as the source being
 // unavailable, with the sentence that names the parameter and the one place that writes.
 func TestRoutes_APostgresSourceThatTurnsReadOnlyOffIsUnavailable(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	opened := false
 	standInOpener(t, func() (*dalgo2postgres.Database, error) { opened = true; return &dalgo2postgres.Database{}, nil })
 
@@ -139,17 +116,16 @@ func TestRoutes_APostgresSourceThatTurnsReadOnlyOffIsUnavailable(t *testing.T) {
 	assert.False(t, opened)
 }
 
-// With the preview on, a read of a PostgreSQL source through the session's policies is refused before the source is
+// A read of a PostgreSQL source through the session's policies is refused before the source is
 // opened, and the route says the source is unavailable, with the fixed sentence.
 func TestRoutes_APolicyReadOfAPostgresSourceIsUnavailable(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	opened := false
 	standInOpener(t, func() (*dalgo2postgres.Database, error) { opened = true; return &dalgo2postgres.Database{}, nil })
 
 	status, env, body := postAdhocRunQuery(t, pgRouteSource)
 	assert.Equal(t, http.StatusServiceUnavailable, status)
 	assert.Equal(t, string(apicontract.ErrCodeSourceUnavailable), env.Error.Code)
-	assert.Equal(t, dbcopy.ErrPostgresPolicyReads.Error(), env.Error.Message)
+	assert.Equal(t, "policy-enforced reads on PostgreSQL sources are not available yet: run with --no-policies", env.Error.Message)
 	assertNoRouteMarkers(t, "exec/run_query", body)
 	assert.False(t, opened)
 }
@@ -162,7 +138,6 @@ const routeLostConnection = "the connection failed; the PostgreSQL connection st
 // changed) is unavailable as well, and the route shows the same text as for a source that cannot be opened: the
 // adapter's fixed sentence and the hint, not the text pgx writes, which names the user, in the body or in the agent log.
 func TestRoutes_APostgresSourceWhoseConnectionIsLostIsUnavailableWithAFixedSentence(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	// The stand-in is built here, on the goroutine of the test: the opener runs on another one, where a failure of
 	// the setup (FailNow) would end that goroutine and not the test.
 	standIn := pgstandin.Unreachable(t, pgRouteUser, pgRoutePassword)
@@ -182,7 +157,6 @@ func TestRoutes_APostgresSourceWhoseConnectionIsLostIsUnavailableWithAFixedSente
 // exec/run_query, for a session with no policy, says the same: a source whose pool cannot make a connection again is
 // unavailable, with one fixed sentence, and the body shows nothing pgx wrote.
 func TestRoutes_ARunQueryOnAPostgresSourceWhoseConnectionIsLostIsUnavailableWithAFixedSentence(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	// The stand-in is built here, on the goroutine of the test: the opener runs on another one, where a failure of
 	// the setup (FailNow) would end that goroutine and not the test.
 	standIn := pgstandin.Unreachable(t, pgRouteUser, pgRoutePassword)

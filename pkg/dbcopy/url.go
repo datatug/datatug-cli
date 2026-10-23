@@ -9,9 +9,8 @@
 //   - sqlite://         fully wired via dalgo2sqlite
 //   - ingitdb://        fully wired via dalgo2ingitdb; local-paths-only
 //     (REQ:ingitdb-url-local-only)
-//   - postgres://       fully wired via dal-go/dalgo2postgres, behind the
-//     preview switch (see PostgresPreviewEnv): a read-only session
-//     unless the person says otherwise (see postgresConnectionString)
+//   - postgres://       fully wired via dal-go/dalgo2postgres: a read-only
+//     session unless the person says otherwise (see postgresConnectionString)
 //   - env:NAME          resolves the environment variable NAME, which holds
 //     any other supported URL (the way to give PostgreSQL its password
 //     without writing it in a project file or on a command line); see
@@ -512,8 +511,7 @@ func LocalSourceURL(scheme, path string) string {
 //   - sqlite:      opens via dalgo2sqlite.NewDatabase.
 //   - ingitdb:     opens via dalgo2ingitdb.NewDatabase with the default
 //     validator-backed CollectionsReader.
-//   - postgres:    opens via dalgo2postgres.NewDatabaseWithOptions, only while
-//     the preview switch is on (see PostgresPreviewEnv), read-only
+//   - postgres:    opens via dalgo2postgres.NewDatabaseWithOptions, read-only
 //     (see postgresConnectionString), and one handle for the
 //     process per connection string (see handleCache).
 //   - http/https:  opens via httpsource.Open, translating every HTTP
@@ -736,7 +734,6 @@ func (r BackendRef) openSource(ctx context.Context, mode openMode) (dal.DB, erro
 		return db, nil
 
 	case "postgres":
-		// The preview switch is asked first, inside openPostgres.
 		return r.openPostgres(ctx, mode)
 
 	case "mysql", "oracle", "sqlserver":

@@ -87,6 +87,7 @@ var realMySQLFixtureDDL = []string{
 		customer_id BIGINT NOT NULL,
 		total DECIMAL(12,2) NOT NULL DEFAULT 0,
 		CONSTRAINT invoice_customer FOREIGN KEY (customer_id) REFERENCES customer(id))`,
+	`CREATE INDEX ix_invoice_customer ON invoice (customer_id)`,
 	"CREATE TABLE `MixedCase` (`OrderId` INT PRIMARY KEY, `ItemName` VARCHAR(40))",
 	"INSERT INTO `MixedCase` (`OrderId`, `ItemName`) VALUES (7, 'lamp')",
 	`CREATE TABLE order_line (order_id INT NOT NULL, line_no INT NOT NULL, sku VARCHAR(20), PRIMARY KEY (line_no, order_id))`,
@@ -219,20 +220,23 @@ func TestMySQLScanAndQueryJourney(t *testing.T) {
 	require.Len(t, mixed, 2)
 	assert.Equal(t, "OrderId", mixed[0].Name, "a mixed-case name is recorded as the server reports it")
 	storedColumnsOf(t, projectDir, "default/tables/invoice")
+	assertScannedKeysAndIndexes(t, projectDir, "default")
 
-	// 2. An ad-hoc TugQL query, behind the preview switch. DALgo's NULL order: first ascending, last descending.
-	stdout, stderr, code := runQuery(t, "from: {name: customer}\n", "--db", "env:"+realMySQLScanVar, "-f", "-", "--format", "json", "--no-policies")
-	assert.Equal(t, exitCodeDatabase, code, "with the switch off the query is refused: %s", stdout)
-	assert.Contains(t, stderr, dbcopy.MySQLPreviewEnv)
-	t.Setenv(dbcopy.MySQLPreviewEnv, "1")
+	// 2. An ad-hoc TugQL query. DALgo's NULL order: first ascending, last descending.
 	assert.Equal(t, []int{1, 2, 3}, realMySQLIDs(t, "from: {name: customer}\norderBy:\n  - field: id\n"))
 	assert.Equal(t, []int{2, 3, 1}, realMySQLIDs(t, "from: {name: customer}\norderBy:\n  - field: score\n  - field: id\n"))
 	assert.Equal(t, []int{1, 3}, realMySQLIDs(t, "from: {name: customer}\norderBy:\n  - field: score\n    desc: true\n  - field: id\nlimit: 2\n"))
 	assert.Equal(t, []int{3}, realMySQLIDs(t, "from: {name: customer}\nwhere: {op: '==', left: {field: name}, right: {value: Grace Hopper}}\n"))
 	assert.Equal(t, []int{11}, realMySQLIDs(t, "from: {name: invoice}\nwhere: {op: '==', left: {field: customer_id}, right: {value: 3}}\n"))
-	stdout, stderr, code = runQuery(t, "from: {name: MixedCase}\n", "--db", "env:"+realMySQLScanVar, "-f", "-", "--format", "json", "--no-policies")
+	stdout, stderr, code := runQuery(t, "from: {name: MixedCase}\n", "--db", "env:"+realMySQLScanVar, "-f", "-", "--format", "json", "--no-policies")
 	require.Zero(t, code, stderr)
 	assert.Equal(t, []map[string]any{{"OrderId": float64(7), "ItemName": "lamp"}}, withoutKey(decodeObjects(t, stdout)), "a mixed-case table is read by its exact name")
+	assert.Empty(t, server.partsIn(stdout+stderr))
+
+	// SQL text on the command line, as a saved SQL query runs.
+	stdout, stderr, code = runQuery(t, "", "--db", "env:"+realMySQLScanVar, "--sql", "SELECT id, name FROM customer WHERE score IS NOT NULL ORDER BY score DESC", "--format", "json", "--no-policies")
+	require.Zero(t, code, "--sql runs: %s", stderr)
+	assert.Equal(t, []map[string]any{{"id": float64(1), "name": "Ada Lovelace"}, {"id": float64(3), "name": "Grace Hopper"}}, withoutKey(decodeObjects(t, stdout)))
 	assert.Empty(t, server.partsIn(stdout+stderr))
 
 	// 3. Saved queries of the scanned project: a SQL one and a TugQL one, on the one database of environment local.

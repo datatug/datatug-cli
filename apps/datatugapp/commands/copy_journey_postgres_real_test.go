@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -40,7 +39,6 @@ func pgLabels(t *testing.T, rawURL, table string) []string {
 // where the tables before it are the ones a copy with --overwrite=recreate would have dropped first.
 func TestPostgresCopyJourneyRefusesANameAndLeavesTheTargetAsItWas(t *testing.T) {
 	server := newRealPgServer(t)
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	execAll(t, server.scanURL,
 		`CREATE TABLE dt_copy_first (id integer PRIMARY KEY, label text)`,
 		`INSERT INTO dt_copy_first VALUES (1, 'one'), (2, 'two')`,

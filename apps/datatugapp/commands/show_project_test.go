@@ -79,10 +79,14 @@ Environment local
         customer_id INTEGER
         sku TEXT
         qty INTEGER
+        ForeignKey FK_order_line_0 (customer_id) -> main.Customer (CustomerId)
       View customer_names
         CustomerId INTEGER
         full_name -
 `
+
+// showJourneySQLiteForeignKey is the line of showJourneySQLite that the foreign keys file of the scan adds.
+const showJourneySQLiteForeignKey = "        ForeignKey FK_order_line_0 (customer_id) -> main.Customer (CustomerId)\n"
 
 // What a scan wrote is what `show -d` lists: the project, each environment, each source with
 // its driver, each schema, each table and view with its columns, their types and key positions.
@@ -134,7 +138,12 @@ func TestShowFormatJSON(t *testing.T) {
 							map[string]any{"name": "customer_id", "type": "INTEGER", "nullable": true},
 							map[string]any{"name": "sku", "type": "TEXT", "nullable": true},
 							map[string]any{"name": "qty", "type": "INTEGER", "nullable": true},
-						}},
+						}, "foreignKeys": []any{map[string]any{ // what the scan saved in the refs file
+							"name":       "FK_order_line_0",
+							"columns":    []any{"customer_id"},
+							"refTable":   map[string]any{"schema": "main", "name": "Customer"},
+							"refColumns": []any{"CustomerId"},
+						}}},
 					},
 					"views": []any{
 						map[string]any{"name": "customer_names", "columns": []any{
@@ -175,6 +184,7 @@ Environment local
         customer_id int
         sku string
         qty int
+        ForeignKey fk_order_line_customer (customer_id) -> public.Customer (CustomerId)
       View customer_names
         CustomerId int
         full_name string
@@ -994,9 +1004,18 @@ func TestShowListsTheForeignKeysOfATable(t *testing.T) {
 
 // A model with no foreign keys file lists no key: the same bytes as before the requirement.
 func TestShowListsNoForeignKeysWithoutTheFile(t *testing.T) {
-	stdout, _, err := runShowCommand(t, "-d", scannedJourneyProject(t))
+	projectDir := scannedJourneyProject(t)
+	// The scan now saves the foreign keys of the database in the refs file; this test is about a
+	// model that has none, so the file the scan wrote is removed.
+	refsFile := filepath.Join(projectDir, "dbmodels", "shop", "shop.refs.json")
+	require.FileExists(t, refsFile, "the scan saved the foreign keys")
+	require.NoError(t, os.Remove(refsFile))
+
+	stdout, _, err := runShowCommand(t, "-d", projectDir)
 	require.NoError(t, err)
-	assert.Equal(t, showJourneySQLite, stdout)
+	assert.Contains(t, showJourneySQLite, showJourneySQLiteForeignKey)
+	assert.Equal(t, strings.Replace(showJourneySQLite, showJourneySQLiteForeignKey, "", 1), stdout)
+	assert.NotContains(t, stdout, "ForeignKey")
 }
 
 // A foreign keys file that cannot be read is a failure that names the source and the environment, and no path.

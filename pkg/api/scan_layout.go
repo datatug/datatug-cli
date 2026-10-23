@@ -147,7 +147,10 @@ func SaveScannedProject(ctx context.Context, store datatug.ProjectStore, project
 			}
 		}
 	}
-	return nil
+	if err := writeScannedForeignKeys(projectDir, catalog.DbModel, layout); err != nil {
+		return err
+	}
+	return writeScannedIndexes(projectDir, catalog.DbModel, layout)
 }
 
 // saveKeepingReadme saves project, and leaves the README.md of the project folder

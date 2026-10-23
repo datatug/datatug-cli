@@ -15,15 +15,10 @@ import (
 // It also gives the whole test binary an opener of PostgreSQL databases that stops the run: no
 // test of this package dials a server (the real server is the journey test of CI), so a test that
 // does not stand in with stubPostgresOpener or stubNewPostgresDatabase is stopped, not let
-// through to a host. And it clears the preview switch of the developer's own shell, so that a
-// test that needs it on says so (previewOn) and every other test sees it off.
+// through to a host.
 func TestMain(m *testing.M) {
 	newPostgresDatabase = neverDialPostgres
 	newPostgresDatabaseWithOptions = neverDialPostgresWithOptions
-	_ = os.Unsetenv(PostgresPreviewEnv)
 	newMySQLDatabase, newOracleDatabase, newSQLServerDatabase = neverDialMySQL, neverDialOracle, neverDialSQLServer
-	_ = os.Unsetenv(MySQLPreviewEnv)
-	_ = os.Unsetenv(OraclePreviewEnv)
-	_ = os.Unsetenv(SQLServerPreviewEnv)
 	os.Exit(hermetictest.Main(m))
 }

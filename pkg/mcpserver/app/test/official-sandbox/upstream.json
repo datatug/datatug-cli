@@ -1,0 +1,21 @@
+{
+  "repository": "https://github.com/modelcontextprotocol/ext-apps",
+  "commit": "82221c0c8ce7661efa6771c9d461511b1650495f",
+  "files": [
+    {
+      "path": "examples/basic-host/src/sandbox.ts",
+      "destination": "sandbox.ts",
+      "sha256": "41badf3e939ff62e952d30ebe3a5731d7f8c54f2f6021f47ef759ea857d0d88a"
+    },
+    {
+      "path": "examples/basic-host/sandbox.html",
+      "destination": "sandbox.html",
+      "sha256": "97c0b4a0e9097d5a01d5d1c63b48f27bd6f8e636ddc5bd5052cc7e1a934ea87a"
+    },
+    {
+      "path": "LICENSE",
+      "destination": "LICENSE",
+      "sha256": "0382b0057770ca05e9c350a50aa3b1c1fea84da0bc81d723bf00b9aa841be58a"
+    }
+  ]
+}

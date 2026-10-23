@@ -213,7 +213,6 @@ func TestReferenceToAPostgresDatabaseIsReadFromItsVariable(t *testing.T) {
 	assert.Equal(t, 2, exitCodeOf(t, err))
 	assert.ErrorContains(t, err, "DATATUG_SHOP_PG")
 
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	t.Setenv("DATATUG_SHOP_PG", "postgres://alice:hunter2@db.example.com:5432/shop?sslmode=require")
 	var opened dbcopy.BackendRef
 	withSchemaSource(t, func(_ context.Context, ref dbcopy.BackendRef) (dal.DB, error) {

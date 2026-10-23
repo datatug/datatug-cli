@@ -70,9 +70,16 @@ func TestEnvironmentStateHandlerSelectors(t *testing.T) {
 		t.Fatalf("projectApi state %d %s", w.Code, w.Body.String())
 	}
 	wantEnvironmentHTTP(t, environmentCall(environmentStateHandler, http.MethodGet, "/environments/state?storage=local&project=p&branch=main", nil), http.StatusConflict, "ENVIRONMENT_REVISION_CONFLICT")
+	wantEnvironmentHTTP(t, environmentCall(environmentStateHandler, http.MethodGet, "/environments/state?storage=local&project=unknown", nil), http.StatusNotFound, "PROJECT_NOT_FOUND")
 	// An error that is not an environment error keeps the project mutation mapping.
-	if w = environmentCall(environmentStateHandler, http.MethodGet, "/environments/state?storage=local&project=unknown", nil); w.Code < 400 {
-		t.Fatalf("unknown project %d", w.Code)
+	if err := os.WriteFile(filepath.Join(root, "datatug-project.json"), []byte(`{`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if w = environmentCall(environmentStateHandler, http.MethodGet, "/environments/state?storage=local&project=p", nil); w.Code < 400 {
+		t.Fatalf("malformed project %d", w.Code)
+	}
+	if err := os.WriteFile(filepath.Join(root, "datatug-project.json"), []byte(`{"id":"p"}`), 0o600); err != nil {
+		t.Fatal(err)
 	}
 	// A lock marker that is not a plain file needs recovery.
 	if err := os.Mkdir(filepath.Join(root, ".datatug-environments.lock"), 0o700); err != nil {

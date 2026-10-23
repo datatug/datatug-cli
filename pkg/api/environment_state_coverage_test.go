@@ -87,6 +87,14 @@ func TestEnvironmentPolicyGrants(t *testing.T) {
 	_, err = LocalEnvironmentState(ctx, scope)
 	wantEnvironmentCode(t, err, "ACCESS_DENIED")
 
+	// A project policy that names another principal: this one reads but never writes, even
+	// unrestricted.
+	ConfigureSecureSession(secureread.Session{Principal: &access.Principal{ID: "actor-B"}, Unrestricted: true}, paths, caps)
+	if state := mustEnvironmentState(t, scope); !state.Capabilities.CanReadOrder || state.Capabilities.CanWriteOrder || state.Capabilities.CanCreateEnvironment {
+		t.Fatalf("foreign-policy capabilities %+v", state.Capabilities)
+	}
+	delete(caps.EnvironmentMetadataPolicies, "p")
+
 	// A policy-restricted principal with no metadata policy reads, as the legacy route lets it,
 	// but may neither reorder nor create.
 	ConfigureSecureSession(secureread.Session{Principal: &access.Principal{ID: "actor-B"}}, paths, caps)
@@ -210,9 +218,17 @@ func TestEnvironmentGitFences(t *testing.T) {
 	_, err = LocalCreateEnvironment(ctx, environmentCreateRequest(state, 2, "QA"))
 	wantEnvironmentCode(t, err, "ENVIRONMENT_REVISION_CONFLICT")
 
+	// Once committed, a later head move does not turn the durable write into a rejection.
+	reset(4)
+	if _, err = LocalCreateEnvironment(ctx, environmentCreateRequest(state, 4, "QA")); err != nil {
+		t.Fatalf("head moved after the commit: %v", err)
+	}
+
+	reset()
+	state = mustEnvironmentState(t, scope)
 	reset()
 	flockTryLockContextSeam = func(*flock.Flock, context.Context, time.Duration) (bool, error) { return false, nil }
-	_, err = LocalCreateEnvironment(ctx, environmentCreateRequest(state, 3, "QA"))
+	_, err = LocalCreateEnvironment(ctx, environmentCreateRequest(state, 3, "UAT"))
 	wantEnvironmentCode(t, err, "TEMPORARILY_UNAVAILABLE")
 }
 
@@ -485,6 +501,27 @@ func TestEnvironmentMutationFences(t *testing.T) {
 	state := mustEnvironmentState(t, scope)
 	_, err := LocalCreateEnvironment(ctx, environmentCreateRequest(state, 200, "Lost"))
 	wantEnvironmentCode(t, err, "OUTCOME_UNCERTAIN")
+
+	// A session replaced right after the commit does not turn the durable write into a rejection.
+	environmentCommitSeam = func(f *filestore.EnvironmentFiles, changes map[string][]byte, expected map[string]string, binding string, result dto.EnvironmentOperationResult) error {
+		err := f.CommitChecked(changes, expected, binding, result)
+		ConfigureSecureSession(secureread.Session{Principal: &access.Principal{ID: "actor-A"}}, paths, caps)
+		return err
+	}
+	if _, err = LocalCreateEnvironment(ctx, environmentCreateRequest(state, 201, "Kept")); err != nil {
+		t.Fatalf("session replaced after the commit: %v", err)
+	}
+}
+
+func TestEnvironmentIDsCollideCaseInsensitively(t *testing.T) {
+	scope, _ := environmentFixture(t)
+	root, _ := servedProjectDir("p")
+	writeEnvironmentFile(t, root, "Dev", `{"id":"Dev","title":"Mixed"}`)
+	state := mustEnvironmentState(t, scope)
+	result, err := LocalCreateEnvironment(context.Background(), environmentCreateRequest(state, 1, "dev"))
+	if err != nil || !strings.HasPrefix(result.EnvironmentID, "dev-") {
+		t.Fatalf("create dev next to Dev: %v %v", result, err)
+	}
 }
 
 func TestQualifiedEnvironmentsFollowTheSharedOrder(t *testing.T) {

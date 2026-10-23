@@ -79,6 +79,9 @@ func envPolicy(projectID string) (actor string, c dto.EnvironmentCapabilities, p
 		c.CanReadOrder = p.CanReadOrder
 		c.CanWriteOrder = p.CanWriteOrder && capabilities.AllowWrites
 		c.CanCreateEnvironment = p.CanCreateEnvironment && capabilities.AllowWrites
+	} else if ok {
+		// The project's metadata policy names another principal: this one may read, never write.
+		c.CanReadOrder = true
 	} else {
 		// Any authenticated principal may read the environment list and its shared order, as the
 		// legacy GET /environments/all_environments already lets it; only an unrestricted session,
@@ -139,12 +142,11 @@ func withLocalEnvironment(ctx context.Context, requested dto.EnvironmentScope, i
 		return environmentError("INVALID_REQUEST", 400)
 	}
 	root, err := servedProjectDir(requested.ProjectID)
-	if err != nil {
-		return err
+	if err == nil {
+		root, err = filepath.EvalSymlinks(root)
 	}
-	root, err = filepath.EvalSymlinks(root)
 	if err != nil {
-		return err
+		return &EnvironmentError{"PROJECT_NOT_FOUND", 404, "project is not served by this agent"}
 	}
 	resolved := requested
 	state, gitErr := environmentGitState(ctx, root)
@@ -207,6 +209,11 @@ func withLocalEnvironment(ctx context.Context, requested dto.EnvironmentScope, i
 		}
 		if e = fn(f, resolved, binding, c2, fence); e != nil {
 			return e
+		}
+		if initialize {
+			// A mutation fences the session and the branch head itself before it commits. Once it
+			// has committed, a later change must not turn a durable write into a rejection.
+			return nil
 		}
 		if !ValidateSecurityContext(generation) {
 			return environmentError("ACCESS_DENIED", 403)
@@ -283,7 +290,8 @@ func environmentNewID(name string, ids []string) string {
 	}
 	collision := id == ""
 	for _, old := range ids {
-		if old == id {
+		// Case-insensitive: on a case-insensitive disk "dev" and "Dev" are the same directory.
+		if strings.EqualFold(old, id) {
 			collision = true
 		}
 	}

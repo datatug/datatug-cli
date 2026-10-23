@@ -548,7 +548,9 @@ func TestDriverTitle(t *testing.T) {
 		"sqlite3":   "SQLite",
 		"sqlserver": "SQL Server",
 		"postgres":  "PostgreSQL",
-		"mysql":     "mysql",
+		"mysql":     "MySQL",
+		"oracle":    "Oracle",
+		"db2":       "db2",
 	} {
 		assert.Equal(t, want, driverTitle(driver), driver)
 	}

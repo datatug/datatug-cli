@@ -426,7 +426,7 @@ func (c unavailableSchemaConversation) AskWithContext(context.Context, string, s
 // openJoinMetadataDB is that opener; a package var so tests can make it fail.
 // A PostgreSQL source is read only behind its preview switch.
 var openJoinMetadataDB = func(ctx context.Context, backend dbcopy.BackendRef) (dal.DB, error) {
-	if err := dbcopy.CheckPostgresRead(backend, 0); err != nil {
+	if err := dbcopy.CheckServerRead(backend, 0); err != nil {
 		return nil, err
 	}
 	return openBackend(ctx, backend)

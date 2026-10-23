@@ -76,6 +76,10 @@ func (r BackendRef) ConnectionHint() string { return r.connectionHint() }
 // postgresFailureText is the one text of a PostgreSQL source that cannot be reached: the sentence and the hint.
 func postgresFailureText(sentence, hint string) string { return sentence + "; " + hint }
 
+// IsServerConnectionFailure reports whether err, or an error it wraps, is the failure of a PostgreSQL, MySQL or Oracle
+// source that could not be opened or reached; see IsPostgresConnectionFailure, whose rules it shares.
+func IsServerConnectionFailure(err error) bool { return IsPostgresConnectionFailure(err) }
+
 // IsPostgresConnectionFailure reports whether err, or an error it wraps, is the failure of a PostgreSQL source that could
 // not be opened or reached: the text OpenFailure gives for such a source, or the answer of a call that lost its
 // connection (see guardPostgresError). It is how a command knows that it is to exit with the code of a connection that
@@ -86,5 +90,5 @@ func IsPostgresConnectionFailure(err error) bool {
 		failed *openError
 		lost   *postgresConnectionError
 	)
-	return (errors.As(err, &failed) && failed.postgres) || errors.As(err, &lost)
+	return (errors.As(err, &failed) && failed.server) || errors.As(err, &lost)
 }

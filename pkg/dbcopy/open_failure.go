@@ -21,10 +21,10 @@ var errUnsupportedBackend = errors.New("unsupported scheme (this is a bug; Parse
 type openError struct {
 	message string
 	cause   error
-	// postgres is true for the failure of a PostgreSQL source, whose text names no source (see OpenFailure). The text
-	// of any other holds the display form of the source: the path of its file, or the scheme, the host, the port and
-	// the database of a URL.
-	postgres bool
+	// server is true for the failure of a PostgreSQL, MySQL or Oracle source, whose text names no source (see
+	// OpenFailure). The text of any other holds the display form of the source: the path of its file, or the scheme,
+	// the host, the port and the database of a URL.
+	server bool
 }
 
 func (e *openError) Error() string { return e.message }
@@ -39,7 +39,7 @@ func (e *openError) Unwrap() error { return e.cause }
 // permission, a timeout, a cancelled attempt, a refused connection), why.
 // errors.Is and errors.As still see the driver's own error.
 //
-// A PostgreSQL source is not named at all: the text is the sentence the adapter chose for the failure and the hint of
+// A PostgreSQL, MySQL or Oracle source is not named at all: the text is the sentence the adapter chose for the failure and the hint of
 // where the connection string is read from (the name of the variable or of the flag), the text a call that fails
 // after the open gives too (see postgresFailureText). The display form of a PostgreSQL URL holds its host.
 //
@@ -54,14 +54,17 @@ func (r BackendRef) OpenFailure(err error) error {
 		return nil
 	}
 	switch err.(type) { //nolint:errorlint // an exact match is the point: see the doc comment
-	case *missingSourceFileError, *openError, *refusedError:
+	case *missingSourceFileError, *openError, *refusedError, *serverURLRefusal:
 		return err
 	}
 	if err == errUnsupportedBackend { //nolint:errorlint // an exact match is the point: see the doc comment
 		return err
 	}
+	if engine, ok := serverEngineOf(r.Scheme); ok {
+		return &openError{message: r.serverFailureText(engine, err), cause: err, server: true}
+	}
 	if r.Scheme == "postgres" {
-		return &openError{message: postgresFailureText(postgresFailureReason(err), r.connectionHint()), cause: err, postgres: true}
+		return &openError{message: postgresFailureText(postgresFailureReason(err), r.connectionHint()), cause: err, server: true}
 	}
 	return &openError{
 		message: fmt.Sprintf("open %s source %q: %s", r.Scheme, r.Display(), openFailureReason(err)),

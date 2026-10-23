@@ -3,13 +3,16 @@ package api
 import (
 	"bytes"
 	"context"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"path"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 
 	"github.com/dal-go/dalgo2postgres"
@@ -19,6 +22,7 @@ import (
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dbconnection"
 	"github.com/datatug/datatug-core/pkg/schemer"
+	"github.com/go-sql-driver/mysql"
 )
 
 // DriverPostgres is the driver name a PostgreSQL server and catalog carry in a
@@ -41,7 +45,11 @@ var recordableHost = regexp.MustCompile(`^[A-Za-z0-9:][A-Za-z0-9._:-]*$`)
 // (String and GoString). Their accessors do carry the host, port and user of the
 // URL, as dbconnection.Params has them; the scan records none of them in a project
 // (ScannedServer), and its log names only the environment variable.
+//
+// The same parameters serve a MySQL or an Oracle scan (NewServerScanParams), whose connection is a
+// mysql:// or oracle:// URL in the variable: driver says which.
 type PostgresScanParams struct {
+	driver         string
 	dsnEnv         string
 	catalog        string
 	ref            dbcopy.BackendRef
@@ -60,16 +68,28 @@ var _ dbconnection.Params = (*PostgresScanParams)(nil)
 // definition: the routes that read the project apply the same). The host of the URL is
 // required to be one host name or address, which dbconnection.Params.Server may expose to callers.
 func NewPostgresScanParams(lookupEnv func(string) (string, bool), dsnEnv, environment, catalog string) (*PostgresScanParams, error) {
+	return NewServerScanParams(DriverPostgres, lookupEnv, dsnEnv, environment, catalog)
+}
+
+// NewServerScanParams is NewPostgresScanParams for the scan of driver: postgres, mysql or oracle. The
+// variable must hold a URL of that driver's scheme.
+func NewServerScanParams(driver string, lookupEnv func(string) (string, bool), dsnEnv, environment, catalog string) (*PostgresScanParams, error) {
 	ref, err := dbcopy.ParseWithEnv("env:"+dsnEnv, lookupEnv)
 	if err != nil {
 		return nil, err
 	}
-	if ref.Scheme != "postgres" {
-		return nil, fmt.Errorf("environment variable %s must hold a postgres:// URL, not a %s source", dsnEnv, ref.Scheme)
+	if ref.Scheme != driver {
+		return nil, fmt.Errorf("environment variable %s must hold a %s:// URL, not a %s source", dsnEnv, driver, ref.Scheme)
 	}
 	// ParseWithEnv has read the URL with this same function and refused one it cannot read, so the error is
 	// never set here; a target that came back empty would be refused below, as one that names no host.
-	target, _ := dbcopy.ParsePostgresTarget(ref.Path)
+	var target dbcopy.PostgresTarget
+	if driver == DriverPostgres {
+		target, _ = dbcopy.ParsePostgresTarget(ref.Path)
+	} else {
+		server, _ := dbcopy.ParseServerTarget(driver, ref.Path)
+		target = dbcopy.PostgresTarget{Host: server.Host, Port: server.Port, Database: server.Database, User: server.User}
+	}
 	if target.Host == "" {
 		return nil, fmt.Errorf("the URL in environment variable %s names no host (a unix-socket connection cannot be scanned yet)", dsnEnv)
 	}
@@ -83,6 +103,7 @@ func NewPostgresScanParams(lookupEnv func(string) (string, bool), dsnEnv, enviro
 		return nil, fmt.Errorf("environment %q and database %q must each be a plain name (letters, digits, '.', '_' and '-', at most 128 characters, starting with a letter or a digit) to name the connection descriptor under %s/", dbcopy.SourceIDDisplay(environment), dbcopy.SourceIDDisplay(catalog), postgresDescriptorFolder)
 	}
 	return &PostgresScanParams{
+		driver:         driver,
 		dsnEnv:         dsnEnv,
 		catalog:        catalog,
 		ref:            ref,
@@ -92,7 +113,7 @@ func NewPostgresScanParams(lookupEnv func(string) (string, bool), dsnEnv, enviro
 }
 
 // Driver implements dbconnection.Params.
-func (*PostgresScanParams) Driver() string { return DriverPostgres }
+func (p *PostgresScanParams) Driver() string { return p.driver }
 
 // Mode implements dbconnection.Params: a scan only reads.
 func (*PostgresScanParams) Mode() dbconnection.Mode { return dbconnection.ModeReadOnly }
@@ -258,10 +279,15 @@ func OpenSchemaScanForTest() func(dbcopy.BackendRef, context.Context) (dbcopy.Sc
 	return openSchemaScan
 }
 
-// isConnectionReadError identifies a failed connection, timeout or cancellation in a reader error.
+// isConnectionReadError identifies a failed connection, timeout or cancellation in a reader error: the PostgreSQL
+// adapter's connection error, a connection the database/sql pool or a driver of MySQL or Oracle reports as lost (a
+// network error, a bad or invalid connection), or the end of a context.
 func isConnectionReadError(err error) bool {
 	var connectionErr *dalgo2postgres.ConnectionError
-	return errors.As(err, &connectionErr) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+	var netErr net.Error
+	return errors.As(err, &connectionErr) || errors.As(err, &netErr) ||
+		errors.Is(err, driver.ErrBadConn) || errors.Is(err, mysql.ErrInvalidConn) ||
+		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 // catalogReadFailure is the error the scan reports for err, the failure of its read of the catalog. A connection that
@@ -286,28 +312,28 @@ func (*catalogReadError) Error() string {
 
 func (e *catalogReadError) Unwrap() error { return e.cause }
 
-// scanPostgresCatalog scans a PostgreSQL database through DALgo's schema reader.
+// scanPostgresCatalog scans a PostgreSQL, MySQL or Oracle database (driver) through DALgo's schema reader.
 // It opens the source through dbcopy, so a driver error comes back classified
 // (see BackendRef.OpenFailure), never as the driver wrote it; what the scan
 // itself reads is reported the same way. It counts no records: no project file
 // holds a count, and a count would be a full read of every table of somebody's
 // database, so the provider is given no counter.
-func scanPostgresCatalog(ctx context.Context, connectionParams dbconnection.Params) (*datatug.DbCatalog, error) {
+func scanPostgresCatalog(ctx context.Context, driver string, connectionParams dbconnection.Params) (*datatug.DbCatalog, error) {
 	params, ok := connectionParams.(postgresScanSource)
 	if !ok {
-		return nil, errors.New("a PostgreSQL scan needs connection parameters built from an environment variable (--dsn-env NAME)")
+		return nil, fmt.Errorf("%s scan needs connection parameters built from an environment variable (--dsn-env NAME)", article(dbcopy.ServerTitle(driver)))
 	}
 	source := params.SourceRef()
 	scanDB, err := openSchemaScan(source, ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open PostgreSQL: %w", source.OpenFailure(err))
+		return nil, fmt.Errorf("failed to open %s: %w", dbcopy.ServerTitle(source.Scheme), source.OpenFailure(err))
 	}
 	defer func() { _ = scanDB.Close() }()
 
 	catalogID := connectionParams.Catalog()
 	var readMu sync.Mutex
 	var connectionReadError error
-	provider := dalgoschema.NewSchemaProviderWithErrorObserver(scanDB, nil, catalogID, dbcopy.PostgresDefaultSchema, func(readErr error) {
+	provider := dalgoschema.NewSchemaProviderWithErrorObserver(scanDB, nil, catalogID, DefaultSchemaForDriver(source.Scheme), func(readErr error) {
 		if !isConnectionReadError(readErr) {
 			return
 		}
@@ -327,6 +353,14 @@ func scanPostgresCatalog(ctx context.Context, connectionParams dbconnection.Para
 		return dbCatalog, fmt.Errorf("failed to get dbCatalog metadata: %w", catalogReadFailure(source, err))
 	}
 	dbCatalog.ID = catalogID
-	dbCatalog.Driver = DriverPostgres
+	dbCatalog.Driver = source.Scheme
 	return dbCatalog, nil
+}
+
+// article is title with the indefinite article that a sentence puts in front of it: "a PostgreSQL", "an Oracle".
+func article(title string) string {
+	if strings.ContainsRune("AEIOU", rune(title[0])) {
+		return "an " + title
+	}
+	return "a " + title
 }

@@ -148,7 +148,7 @@ func TestScanConnectionParams_DsnEnvIsForPostgresOnly(t *testing.T) {
 	} {
 		params, err := v.connectionParams()
 		assert.Nil(t, params, v.Driver)
-		assert.ErrorContains(t, err, "--dsn-env applies only to -D postgres", v.Driver)
+		assert.ErrorContains(t, err, "--dsn-env applies only to -D postgres, mysql or oracle", v.Driver)
 	}
 }
 
@@ -353,7 +353,7 @@ func TestScanCommand_HelpSaysWhatPostgresDoes(t *testing.T) {
 	assert.Contains(t, cmd.Flags().Lookup("driver").Usage, "postgres reads every schema")
 	assert.Contains(t, cmd.Long, "connections/<env>/<db>.json")
 	assert.Contains(t, cmd.Long, "never a host, a port, a user or a password")
-	assert.Contains(t, cmd.Flags().Lookup("driver").Usage, "sqlserver, sqlite3 or postgres")
+	assert.Contains(t, cmd.Flags().Lookup("driver").Usage, "sqlserver, sqlite3, postgres, mysql or oracle")
 	assert.Contains(t, cmd.Flags().Lookup("dsn-env").Usage, "postgres://user:password@host/database")
 	assert.Contains(t, cmd.Flags().Lookup("dsn-env").Usage, "never written to the project")
 }

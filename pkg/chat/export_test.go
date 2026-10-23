@@ -293,7 +293,7 @@ func TestRealChinookRecordSetExports(t *testing.T) {
 		t.Fatal(err)
 	}
 	executor := secureread.NewExecutor(secureread.Session{Unrestricted: true})
-	result, err := executor.RunDTQL(ctx, "sqlite://"+path, []byte("from: {name: Invoice}\ncolumns:\n  - field: InvoiceId\n  - field: CustomerId\n  - field: Total\norderBy:\n  - field: InvoiceId\n    desc: true\nlimit: 5\n"), nil)
+	result, err := executor.RunTugQL(ctx, "sqlite://"+path, []byte("from: {name: Invoice}\ncolumns:\n  - field: InvoiceId\n  - field: CustomerId\n  - field: Total\norderBy:\n  - field: InvoiceId\n    desc: true\nlimit: 5\n"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

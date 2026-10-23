@@ -7,9 +7,9 @@ real command tree. Live Google authentication and paid execution have **not been
 executed** for this change. Source rights/admission and both runtime live gates
 remain open.
 
-`--file` accepts typed JSON containing `profile` and scalar DTQL `query`.
+`--file` accepts typed JSON containing `profile` and scalar TugQL `query`.
 Alternatively, `--source-profile` accepts the reviewed profile JSON and `--file`
-accepts scalar DTQL JSON separately. Each source/query input is bounded to
+accepts scalar TugQL JSON separately. Each source/query input is bounded to
 256 KiB, with unknown fields, duplicate keys, invalid Unicode, unsafe query
 shapes and excessive depth rejected before policy substitution or authentication.
 Only explicit fields, bounded scalar conditions/order and a positive limit are

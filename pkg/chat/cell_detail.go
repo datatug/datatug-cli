@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
 
@@ -40,14 +40,14 @@ type cellDetail struct {
 
 func (d *cellDetail) copyValue() string { return FormatValue(d.value) }
 
-// serializePreviewQuery is dtql.Serialize by default; PreviewRelated always
+// serializePreviewQuery is tugql.Serialize by default; PreviewRelated always
 // builds a well-formed, valid dal.StructuredQuery from fixed components, so
 // this seam exists solely to let a test drive its otherwise-unreachable
 // serialize-error branch.
-var serializePreviewQuery = dtql.Serialize
+var serializePreviewQuery = tugql.Serialize
 
 // PreviewRelated resolves only an authoritative outgoing FK and reads up to
-// five matching records through the same DTQL/policy executor as chat queries.
+// five matching records through the same TugQL/policy executor as chat queries.
 func (a ForeignKeyJoinApplication) PreviewRelated(ctx context.Context, record RecordSet, selected string, row map[string]any) ([]relatedRecord, error) {
 	if !storedSourceNames(record.Source, a.Source) || a.Executor == nil {
 		return nil, nil
@@ -102,7 +102,7 @@ func (a ForeignKeyJoinApplication) PreviewRelated(ctx context.Context, record Re
 		if err != nil {
 			return nil, err
 		}
-		result, err := a.Executor.RunDTQL(ctx, a.Source, doc, nil)
+		result, err := a.Executor.RunTugQL(ctx, a.Source, doc, nil)
 		if err != nil {
 			return nil, err
 		}

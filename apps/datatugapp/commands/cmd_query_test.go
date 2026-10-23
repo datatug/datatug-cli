@@ -177,10 +177,10 @@ func TestQuery_FromCollectionWithoutPolicies(t *testing.T) {
 	}
 }
 
-func TestQuery_DTQLFromStdin(t *testing.T) {
+func TestQuery_TugQLFromStdin(t *testing.T) {
 	url := setupQueryDB(t)
-	dtql := "from:\n  name: products\ncolumns:\n  - field: name\nwhere:\n  op: '>='\n  left: { field: price }\n  right: { value: 10 }\n"
-	stdout, stderr, code := runQuery(t, dtql, "--db", url, "-f", "-", "--format", "json", "--no-policies")
+	tugql := "from:\n  name: products\ncolumns:\n  - field: name\nwhere:\n  op: '>='\n  left: { field: price }\n  right: { value: 10 }\n"
+	stdout, stderr, code := runQuery(t, tugql, "--db", url, "-f", "-", "--format", "json", "--no-policies")
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}

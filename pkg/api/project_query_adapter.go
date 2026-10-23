@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/dal-go/dalgo/access"
+	"github.com/datatug/datatug-cli/pkg/querybody"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
@@ -333,7 +334,7 @@ func (LocalProjectQueryAdapter) SaveQuery(ctx context.Context, scope dto.Operati
 	}
 	shouldPut := true
 	if pending {
-		if journal.QueryID != queryID || journal.Result.Revision == "" || journal.Result.BranchHead != state.head || journal.Result.Query.Type != request.Query.Type || len(journal.MetadataBytes) == 0 {
+		if journal.QueryID != queryID || journal.Result.Revision == "" || journal.Result.BranchHead != state.head || journal.Result.Query.Type != request.Query.Type || len(journal.MetadataBytes) == 0 || journal.PreviousRevision != "" && !journal.OldBodyAttested {
 			return nil, ErrProjectMutationOutcomeUncertain
 		}
 		previousUnchanged := request.IfNoneMatch && current == nil || request.IfMatch != "" && current != nil && string(current.Revision) == journal.PreviousRevision
@@ -355,6 +356,11 @@ func (LocalProjectQueryAdapter) SaveQuery(ctx context.Context, scope dto.Operati
 		}
 		if current != nil && !reflect.DeepEqual(current.Query.Capture, request.Query.Capture) {
 			return nil, clientCaptureRefusal("save_query cannot alter capture provenance")
+		}
+		if current != nil {
+			if err := attestLocalQueryBody(projectDir, queryID, &current.Query.QueryDef); err != nil {
+				return nil, err
+			}
 		}
 		// Freeze server metadata before previewing: the scratch store and the
 		// durable write must serialize the same creation instant.
@@ -380,8 +386,15 @@ func (LocalProjectQueryAdapter) SaveQuery(ctx context.Context, scope dto.Operati
 		if current != nil {
 			journal.PreviousRevision = string(current.Revision)
 			journal.OldType = current.Query.Type
+			journal.OldStructuredBody = current.Query.StructuredBody
+			journal.OldBodyAttested = true
 		}
 		if err := writeLocalQueryJournalSeam(receiptPath, journal); err != nil {
+			return nil, err
+		}
+	}
+	if pending && shouldPut && current != nil {
+		if err := attestLocalQueryBody(projectDir, queryID, &current.Query.QueryDef); err != nil {
 			return nil, err
 		}
 	}
@@ -414,7 +427,7 @@ func (LocalProjectQueryAdapter) SaveQuery(ctx context.Context, scope dto.Operati
 	if err != nil || beforeStage.branch != state.branch || beforeStage.head != state.head {
 		return nil, ErrProjectMutationOutcomeUncertain
 	}
-	if err := stageLocalQueryPair(ctx, state.root, projectDir, queryID, query.Type, journal.OldType, journal.MetadataBytes, journal.BodyBytes); err != nil {
+	if err := stageLocalQueryPair(ctx, state.root, projectDir, queryID, query.Type, journal.OldType, journal.MetadataBytes, journal.BodyBytes, query.StructuredBody, journal.OldStructuredBody); err != nil {
 		return nil, fmt.Errorf("query saved but staging failed: %w", ErrProjectMutationOutcomeUncertain)
 	}
 	// The index receives only the bytes frozen in the pending intent. An
@@ -438,12 +451,14 @@ func (LocalProjectQueryAdapter) SaveQuery(ctx context.Context, scope dto.Operati
 
 type localQueryJournal struct {
 	dto.OperationReceipt
-	Complete         bool              `json:"complete"`
-	QueryID          string            `json:"queryId"`
-	PreviousRevision string            `json:"previousRevision,omitempty"`
-	OldType          datatug.QueryType `json:"oldType,omitempty"`
-	MetadataBytes    []byte            `json:"metadataBytes"`
-	BodyBytes        []byte            `json:"bodyBytes"`
+	Complete          bool              `json:"complete"`
+	QueryID           string            `json:"queryId"`
+	PreviousRevision  string            `json:"previousRevision,omitempty"`
+	OldType           datatug.QueryType `json:"oldType,omitempty"`
+	OldStructuredBody bool              `json:"oldStructuredBody,omitempty"`
+	OldBodyAttested   bool              `json:"oldBodyAttested,omitempty"`
+	MetadataBytes     []byte            `json:"metadataBytes"`
+	BodyBytes         []byte            `json:"bodyBytes"`
 }
 
 // previewLocalQueryRevision runs the exact Core serializer in a private
@@ -472,7 +487,7 @@ func previewLocalQueryRevision(ctx context.Context, query datatug.QueryDefWithFo
 	if err != nil {
 		return localQueryPreview{}, err
 	}
-	body, err := osReadFile(base + "." + strings.ToLower(string(query.Type)))
+	body, err := osReadFile(base + "." + querybody.Extension(query.Type, query.StructuredBody))
 	if err != nil {
 		return localQueryPreview{}, err
 	}
@@ -580,7 +595,7 @@ func localGitInput(ctx context.Context, dir string, input []byte, args ...string
 	return strings.TrimSpace(string(output)), nil
 }
 
-func stageLocalQueryPair(ctx context.Context, root, projectDir, queryID string, newType, oldType datatug.QueryType, metadata, body []byte) error {
+func stageLocalQueryPair(ctx context.Context, root, projectDir, queryID string, newType, oldType datatug.QueryType, metadata, body []byte, newStructured, oldStructured bool) error {
 	// macOS may hand serve a /var/... path while Git canonicalizes it to
 	// /private/var/.... Resolve both before checking containment.
 	root, err := filepathEvalSymlinks(root)
@@ -596,7 +611,7 @@ func stageLocalQueryPair(ctx context.Context, root, projectDir, queryID string, 
 		return validation.NewBadRequestError(errors.New("project directory is outside its Git repository"))
 	}
 	base := filepath.ToSlash(filepath.Join(rel, "queries", queryID+".query"))
-	paths := []string{base + ".json", base + "." + strings.ToLower(string(newType))}
+	paths := []string{base + ".json", base + "." + querybody.Extension(newType, newStructured)}
 	var expectedOIDs [2]string
 	for i, content := range [][]byte{metadata, body} {
 		blobOID, err := localGitInputSeam(ctx, root, content, "hash-object", "-w", "--stdin")
@@ -608,8 +623,8 @@ func stageLocalQueryPair(ctx context.Context, root, projectDir, queryID string, 
 			return err
 		}
 	}
-	if oldType != "" && oldType != newType {
-		oldPath := base + "." + strings.ToLower(string(oldType))
+	if oldType != "" && querybody.Extension(oldType, oldStructured) != querybody.Extension(newType, newStructured) {
+		oldPath := base + "." + querybody.Extension(oldType, oldStructured)
 		if _, err := localGitOutputSeam(ctx, root, "ls-files", "--error-unmatch", "--", ":(literal)"+oldPath); err == nil {
 			if _, err := localGitOutputSeam(ctx, root, "update-index", "--force-remove", "--", oldPath); err != nil {
 				return err
@@ -624,6 +639,22 @@ func stageLocalQueryPair(ctx context.Context, root, projectDir, queryID string, 
 		if err != nil || stagedOID != expectedOIDs[i] {
 			return ErrProjectMutationOutcomeUncertain
 		}
+	}
+	return nil
+}
+
+// attestLocalQueryBody fails before mutation when Core's normalized read came
+// from a body that this writer cannot name exactly. Such bodies remain readable
+// through Core, but must be migrated before this Git-writing adapter edits them.
+func attestLocalQueryBody(projectDir, queryID string, query *datatug.QueryDef) error {
+	name := filepath.Join(projectDir, "queries", filepath.FromSlash(queryID)+".query."+querybody.Extension(query.Type, query.StructuredBody))
+	info, err := os.Lstat(name)
+	if err != nil || !info.Mode().IsRegular() {
+		return fmt.Errorf("%w: current query body needs a canonical filename before saving", dto.ErrUnsupportedCapability)
+	}
+	body, err := os.ReadFile(name)
+	if err != nil || string(body) != query.Text {
+		return fmt.Errorf("%w: current query body bytes cannot be attested", dto.ErrUnsupportedCapability)
 	}
 	return nil
 }

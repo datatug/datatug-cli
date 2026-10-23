@@ -22,7 +22,7 @@ columns:
   - {binary: {op: '/', left: {aggregate: {function: sum, args: [{field: amount, source: o}]}}, right: {field: population, source: c}}, as: salesPerCapita}
 `
 
-func TestRunFederatedDTQLTwoSQLiteDatabases(t *testing.T) {
+func TestRunFederatedTugQLTwoSQLiteDatabases(t *testing.T) {
 	root := t.TempDir()
 	makeDB := func(name, schema string) *sql.DB {
 		t.Helper()
@@ -61,7 +61,7 @@ func TestRunFederatedDTQLTwoSQLiteDatabases(t *testing.T) {
 		}
 	}
 	urls := map[string]string{"orders": "sqlite://" + filepath.Join(root, "orders.sqlite"), "countries": "sqlite://" + filepath.Join(root, "countries.sqlite")}
-	result, err := NewExecutor(Session{Unrestricted: true}).RunFederatedDTQL(context.Background(), []byte(federatedSalesQuery), urls, nil)
+	result, err := NewExecutor(Session{Unrestricted: true}).RunFederatedTugQL(context.Background(), []byte(federatedSalesQuery), urls, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestRunFederatedDTQLTwoSQLiteDatabases(t *testing.T) {
 		t.Fatalf("unexpected totals: %+v", got)
 	}
 	delete(urls, "countries")
-	if _, err := NewExecutor(Session{Unrestricted: true}).RunFederatedDTQL(context.Background(), []byte(federatedSalesQuery), urls, nil); err == nil {
+	if _, err := NewExecutor(Session{Unrestricted: true}).RunFederatedTugQL(context.Background(), []byte(federatedSalesQuery), urls, nil); err == nil {
 		t.Fatal("missing database was accepted")
 	}
 }

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dal-go/dalgo/dtql/authorization"
+	"github.com/dal-go/dalgo/tugql/authorization"
 )
 
 const (
@@ -49,10 +49,10 @@ type Response struct {
 	Type       string
 }
 
-func (c Client) Query(ctx context.Context, target Target, dtql []byte) (Response, error) {
+func (c Client) Query(ctx context.Context, target Target, tugql []byte) (Response, error) {
 	ctx, cancel := withMaxDeadline(ctx, 10*time.Second)
 	defer cancel()
-	return c.do(ctx, target, http.MethodPost, "/v1/databases/"+url.PathEscape(target.DatabaseID)+"/dtql", "application/yaml", dtql, 0)
+	return c.do(ctx, target, http.MethodPost, "/v1/databases/"+url.PathEscape(target.DatabaseID)+"/tugql", "application/yaml", tugql, 0)
 }
 
 func (c Client) Explain(ctx context.Context, target Target, body []byte) (Response, error) {
@@ -65,7 +65,7 @@ func (c Client) Update(ctx context.Context, target Target, table, row string, bo
 	path := "/v1/databases/" + url.PathEscape(target.DatabaseID) + "/records/" + url.PathEscape(table) + "/" + url.PathEscape(row)
 	ctx, cancel := withMaxDeadline(ctx, 10*time.Second)
 	defer cancel()
-	return c.do(ctx, target, http.MethodPatch, path, "application/vnd.dtql.operation+json", body, 2)
+	return c.do(ctx, target, http.MethodPatch, path, "application/vnd.tugql.operation+json", body, 2)
 }
 
 func (c Client) Evidence(ctx context.Context, target Target, body []byte) (Response, error) {

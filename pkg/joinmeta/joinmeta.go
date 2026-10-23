@@ -1,4 +1,4 @@
-// Package joinmeta reads the relations a DTQL query reads and the foreign keys
+// Package joinmeta reads the relations a TugQL query reads and the foreign keys
 // of a database, from the query's own tree and from DALgo's engine-neutral
 // schema calls (dbschema.ListCollections and DescribeCollection), never from
 // engine-specific SQL. The terminal chat and `query run --result-id` share it.
@@ -22,7 +22,7 @@ const MaxCollections = 500
 // than MaxCollections.
 var ErrTooManyCollections = errors.New("the database holds more collections than are described")
 
-// RelationInstanceID identifies a node in the DTQL source tree. It is stable
+// RelationInstanceID identifies a node in the TugQL source tree. It is stable
 // for a given document: root is "root" and child joins append their index.
 type RelationInstanceID string
 
@@ -205,7 +205,7 @@ func constraintID(sqlite bool, schema, table, name string, i int) string {
 	return schema + "." + table + ":" + name
 }
 
-// RelationInstances walks a DTQL FROM/JOIN tree into its source occurrences,
+// RelationInstances walks a TugQL FROM/JOIN tree into its source occurrences,
 // root first, each join's subtree in order.
 func RelationInstances(from dal.FromSource) []RelationInstance {
 	if from == nil {

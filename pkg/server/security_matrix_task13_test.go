@@ -19,7 +19,7 @@ import (
 // spec/research/2026-09-09-layered-acl-reconciliation.md for the port
 // context this stream also reconciled.
 
-// customerAliasedColumnDTQL is the "unsupported protected shape" case
+// customerAliasedColumnTugQL is the "unsupported protected shape" case
 // pkg/accesspolicies/run.go's own ErrInvalidQuery documents: an aliased
 // column under support's field-restricted policy. This looked, before
 // writing this test, like it might fall through to writeContractError's
@@ -35,7 +35,7 @@ import (
 // as regression coverage (Task 13 item (a): "test current and legacy
 // routes ... for unsupported protected shapes") — no production code
 // change was needed for exec/run_query's own contract-envelope half.
-const customerAliasedColumnDTQL = `from:
+const customerAliasedColumnTugQL = `from:
   name: Customer
 columns:
   - field: CustomerId
@@ -49,12 +49,12 @@ where:
     param: CustomerId
 `
 
-// customerInvoiceDTQL selects from a collection ("Invoice") that
+// customerInvoiceTugQL selects from a collection ("Invoice") that
 // securityMatrixPolicy's support ruleSet names no path for at all —
 // default: deny admits nothing here, distinct from
 // TestRunQuery_HiddenColumnExplicit_Refused's "one hidden field within an
 // otherwise-granted source" shape.
-const customerInvoiceDTQL = `from:
+const customerInvoiceTugQL = `from:
   name: Invoice
 where:
   op: "=="
@@ -78,7 +78,7 @@ func TestRunQuery_UnsupportedShape_ColumnAlias_InvalidRequest(t *testing.T) {
 	value, origin := intParam("CustomerId", 2)
 	request := apicontract.ExecutionRequest{
 		Project: projectID, Environment: securityMatrixEnv, SecurityContextID: info.SecurityContextID,
-		Source: securityMatrixSource, DTQL: customerAliasedColumnDTQL,
+		Source: securityMatrixSource, TugQL: customerAliasedColumnTugQL,
 		Parameters:     map[string]apicontract.TypedValueOrSet{"CustomerId": apicontract.ScalarValue(value)},
 		BindingOrigins: []apicontract.BindingOriginEntry{origin},
 		Mode:           apicontract.ProvenanceModeLive,
@@ -117,7 +117,7 @@ func TestRunQuery_ForbiddenSource_AccessDenied(t *testing.T) {
 	value, origin := intParam("CustomerId", 2)
 	request := apicontract.ExecutionRequest{
 		Project: projectID, Environment: securityMatrixEnv, SecurityContextID: info.SecurityContextID,
-		Source: securityMatrixSource, DTQL: customerInvoiceDTQL,
+		Source: securityMatrixSource, TugQL: customerInvoiceTugQL,
 		Parameters:     map[string]apicontract.TypedValueOrSet{"CustomerId": apicontract.ScalarValue(value)},
 		BindingOrigins: []apicontract.BindingOriginEntry{origin},
 		Mode:           apicontract.ProvenanceModeLive,
@@ -151,7 +151,7 @@ func TestRunQuery_ForgedSecurityContextID_StaleContext(t *testing.T) {
 	value, origin := intParam("CustomerId", 2)
 	request := apicontract.ExecutionRequest{
 		Project: projectID, Environment: securityMatrixEnv, SecurityContextID: "forged-does-not-exist",
-		Source: securityMatrixSource, DTQL: customerByIDDTQL,
+		Source: securityMatrixSource, TugQL: customerByIDTugQL,
 		Parameters:     map[string]apicontract.TypedValueOrSet{"CustomerId": apicontract.ScalarValue(value)},
 		BindingOrigins: []apicontract.BindingOriginEntry{origin},
 		Mode:           apicontract.ProvenanceModeLive,
@@ -189,7 +189,7 @@ func TestRunQuery_PrincipalFieldsInBody_RequestRejectedNotElevated(t *testing.T)
 	// Go's own struct could accidentally produce.
 	bodyMap := map[string]any{
 		"project": projectID, "environment": securityMatrixEnv, "securityContextId": info.SecurityContextID,
-		"source": securityMatrixSource, "dtql": customerByIDDTQL,
+		"source": securityMatrixSource, "tugql": customerByIDTugQL,
 		"parameters":     map[string]any{"CustomerId": map[string]any{"type": "integer", "value": "2"}},
 		"bindingOrigins": []map[string]any{{"parameterId": "CustomerId", "origin": "manual"}},
 		"mode":           "live",
@@ -226,7 +226,7 @@ func TestRunQuery_PrincipalFieldsInQueryStringAndHeader_Ignored(t *testing.T) {
 	value, origin := intParam("CustomerId", 2)
 	request := apicontract.ExecutionRequest{
 		Project: projectID, Environment: securityMatrixEnv, SecurityContextID: info.SecurityContextID,
-		Source: securityMatrixSource, DTQL: customerByIDDTQL,
+		Source: securityMatrixSource, TugQL: customerByIDTugQL,
 		Parameters:     map[string]apicontract.TypedValueOrSet{"CustomerId": apicontract.ScalarValue(value)},
 		BindingOrigins: []apicontract.BindingOriginEntry{origin},
 		Mode:           apicontract.ProvenanceModeLive,

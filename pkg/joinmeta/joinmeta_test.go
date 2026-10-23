@@ -9,7 +9,7 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/stretchr/testify/assert"
@@ -147,7 +147,7 @@ func TestConstraintID(t *testing.T) {
 
 func TestRelationInstances(t *testing.T) {
 	assert.Nil(t, RelationInstances(nil))
-	query, err := dtql.Deserialize([]byte(`from:
+	query, err := tugql.Deserialize([]byte(`from:
   database: orders
   schema: s
   name: Invoice

@@ -96,7 +96,7 @@ func TestRepositoryStoreRejectsInvalidRootsAndPaths(t *testing.T) {
 	accessDir := filepath.Join(securedRoot, ".ingitdb", "access")
 	require.NoError(t, os.MkdirAll(accessDir, 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(accessDir, "manifest.yaml"), []byte("enabled: true\ndatabase: incidents-test\npolicies: [deny.yaml]\n"), 0o600))
-	policy := "apiVersion: dtql.org/access/v1\nkind: AccessPolicy\nmetadata: {name: deny-all}\ntarget: {database: incidents-test}\ncomposition: dalgo-hierarchical-v1\ndefault: deny\nscopes: []\n"
+	policy := "apiVersion: tugql.org/access/v1\nkind: AccessPolicy\nmetadata: {name: deny-all}\ntarget: {database: incidents-test}\ncomposition: dalgo-hierarchical-v1\ndefault: deny\nscopes: []\n"
 	require.NoError(t, os.WriteFile(filepath.Join(accessDir, "deny.yaml"), []byte(policy), 0o600))
 	_, err = NewRepositoryStore(location, securedRoot)
 	require.ErrorContains(t, err, "open incident file capability")

@@ -39,7 +39,7 @@ func derivedFixture(t *testing.T) (*SessionChat, RecordSet) {
 	sessions.ConfigureQueryExecutor(executor)
 	document := "from: {schema: main, name: Item}\ncolumns: [{field: Id}, {field: Category}, {field: Value}]\nwhere: {op: '>', left: {field: Id}, right: {param: minimum}}\norderBy: [{field: Id}]\nlimit: 2\n"
 	parameters := map[string]any{"minimum": 0}
-	result, err := executor.RunDTQL(ctx, source, []byte(document), parameters)
+	result, err := executor.RunTugQL(ctx, source, []byte(document), parameters)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func derivedFixture(t *testing.T) (*SessionChat, RecordSet) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	query, err := store.AppendQuery(ctx, sessions.activeID, origin.ID, source, QueryResult{Title: "Item", SourceID: scope.Database, DTQL: document, Parameters: parameters, Result: result})
+	query, err := store.AppendQuery(ctx, sessions.activeID, origin.ID, source, QueryResult{Title: "Item", SourceID: scope.Database, TugQL: document, Parameters: parameters, Result: result})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,14 +67,14 @@ func TestUnifiedWorkspaceDerivedServerScopesExecuteExactPreviewAndLineage(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = sessions.executeDerivedResult(ctx, sessions.activeID, parent.ID, group, preview.DTQL+"\n"); err == nil {
+	if _, _, err = sessions.executeDerivedResult(ctx, sessions.activeID, parent.ID, group, preview.TugQL+"\n"); err == nil {
 		t.Fatal("unreviewed query ran")
 	}
-	snapshot, query, err := sessions.executeDerivedResult(ctx, sessions.activeID, parent.ID, group, preview.DTQL)
+	snapshot, query, err := sessions.executeDerivedResult(ctx, sessions.activeID, parent.ID, group, preview.TugQL)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(query.Result.Rows) != 2 || FormatValue(query.Result.Rows[0].Data["count"]) != "2" || FormatValue(query.Result.Rows[1].Data["count"]) != "4" || FormatValue(query.Parameters["minimum"]) != "0" || query.DTQL != preview.DTQL || query.Lineage == nil || query.Lineage.ParentRecordSetID != parent.ID || len(snapshot.RecordSets[parent.ID].Result.Rows) != 2 {
+	if len(query.Result.Rows) != 2 || FormatValue(query.Result.Rows[0].Data["count"]) != "2" || FormatValue(query.Result.Rows[1].Data["count"]) != "4" || FormatValue(query.Parameters["minimum"]) != "0" || query.TugQL != preview.TugQL || query.Lineage == nil || query.Lineage.ParentRecordSetID != parent.ID || len(snapshot.RecordSets[parent.ID].Result.Rows) != 2 {
 		t.Fatalf("matching scope: %+v", query)
 	}
 	// Two output groups count all six filtered source rows, while the local
@@ -84,7 +84,7 @@ func TestUnifiedWorkspaceDerivedServerScopesExecuteExactPreviewAndLineage(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, highest, err := sessions.executeDerivedResult(ctx, sessions.activeID, parent.ID, sortOp, preview.DTQL)
+	_, highest, err := sessions.executeDerivedResult(ctx, sessions.activeID, parent.ID, sortOp, preview.TugQL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestUnifiedWorkspaceDerivedServerScopesExecuteExactPreviewAndLineage(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, bounded, err := sessions.executeDerivedResult(ctx, sessions.activeID, parent.ID, sortOp, preview.DTQL)
+	_, bounded, err := sessions.executeDerivedResult(ctx, sessions.activeID, parent.ID, sortOp, preview.TugQL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestUnifiedWorkspaceDerivedServerScopesExecuteExactPreviewAndLineage(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, bounded, err = sessions.executeDerivedResult(ctx, sessions.activeID, parent.ID, group, preview.DTQL)
+	_, bounded, err = sessions.executeDerivedResult(ctx, sessions.activeID, parent.ID, group, preview.TugQL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestUnifiedWorkspaceDerivedServerScopesExecuteExactPreviewAndLineage(t *tes
 		t.Fatalf("original grouping escaped input: %+v", bounded.Result)
 	}
 	unsafe := parent
-	unsafe.DTQL = strings.Replace(parent.DTQL, "orderBy: [{field: Id}]\n", "", 1)
+	unsafe.TugQL = strings.Replace(parent.TugQL, "orderBy: [{field: Id}]\n", "", 1)
 	if _, err = deriveResultPreview(sessions.catalog, unsafe, sortOp); err == nil {
 		t.Fatal("nondeterministic limited OriginalOutput was enabled")
 	}
@@ -127,7 +127,7 @@ func TestUnifiedWorkspaceDerivedServerScopesExecuteExactPreviewAndLineage(t *tes
 		t.Fatal(err)
 	}
 	before, _ := sessions.Snapshot(ctx)
-	if _, _, err = sessions.executeDerivedResult(ctx, sessions.activeID, parent.ID, group, preview.DTQL); err == nil {
+	if _, _, err = sessions.executeDerivedResult(ctx, sessions.activeID, parent.ID, group, preview.TugQL); err == nil {
 		t.Fatal("unconfigured policy executor bypassed")
 	}
 	after, _ := sessions.Snapshot(ctx)
@@ -157,7 +157,7 @@ func TestUnifiedWorkspaceDerivedDialogReviewCancelAndExecuteThroughShell(t *test
 		drainCmd(t, u, cmd)
 	}
 	view := ansi.Strip(u.shell.View().Content)
-	if !strings.Contains(view, "Exact DTQL submitted") || !strings.Contains(view, "OFFSET") || len(u.snapshot.RecordSets) != 1 {
+	if !strings.Contains(view, "Exact TugQL submitted") || !strings.Contains(view, "OFFSET") || len(u.snapshot.RecordSets) != 1 {
 		t.Fatalf("review was skipped: %s", view)
 	}
 	_, cmd = u.shell.Update(uitest.Key("esc"))

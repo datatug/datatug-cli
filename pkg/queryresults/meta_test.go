@@ -14,7 +14,7 @@ func TestMetaEncode(t *testing.T) {
 	swap(t, &now, func() time.Time { return created })
 	data := Data{Bytes: []byte("12345"), Rows: Rows{Kept: 1, TruncatedBy: TruncatedNone}, Columns: []Column{{Name: KeyColumn, Type: "string"}}}
 	meta := NewMeta("t1", "v1.2.3", data)
-	meta.Query = Query{Kind: QueryKindFrom, DTQL: "from:\n  name: Invoice\n", From: "Invoice", Policy: PolicyNone,
+	meta.Query = Query{Kind: QueryKindFrom, TugQL: "from:\n  name: Invoice\n", From: "Invoice", Policy: PolicyNone,
 		Parameters: map[string]apicontract.TypedValueOrSet{"n": apicontract.ScalarValue(apicontract.NewIntegerValue("5"))}}
 	meta.DB = DB{Driver: "sqlite"}
 	var decoded map[string]any
@@ -33,15 +33,15 @@ func TestMetaEncode(t *testing.T) {
 	}
 
 	// query text and parameters past the bound are dropped together
-	meta.Query.DTQL = strings.Repeat("x", MaxQueryBytes)
+	meta.Query.TugQL = strings.Repeat("x", MaxQueryBytes)
 	_ = json.Unmarshal(meta.Encode(), &decoded)
 	query := decoded["query"].(map[string]any)
-	if query["dtql"] != nil || query["parameters"] != nil || decoded["unavailable"].(map[string]any)["query"] != UnavailableTooLarge {
+	if query["tugql"] != nil || query["parameters"] != nil || decoded["unavailable"].(map[string]any)["query"] != UnavailableTooLarge {
 		t.Fatalf("too-large %v %v", query, decoded["unavailable"])
 	}
 
 	// at most 400 columns are described
-	meta.Query.DTQL = ""
+	meta.Query.TugQL = ""
 	for i := 0; i < MaxMetaColumns+5; i++ {
 		meta.Columns = append(meta.Columns, Column{Name: "c", Type: "string"})
 	}
@@ -108,7 +108,7 @@ func TestMetaDescribeAndListBounds(t *testing.T) {
 	}
 	// a query text that grows when escaped is measured as written
 	meta.Participants, meta.Related = nil, nil
-	meta.Query.DTQL = strings.Repeat("<", MaxQueryBytes/3)
+	meta.Query.TugQL = strings.Repeat("<", MaxQueryBytes/3)
 	_ = json.Unmarshal(meta.Encode(), &decoded)
 	if decoded["unavailable"].(map[string]any)["query"] != UnavailableTooLarge {
 		t.Fatal("escaped query text is not measured")
@@ -117,13 +117,13 @@ func TestMetaDescribeAndListBounds(t *testing.T) {
 
 func TestSetEditor(t *testing.T) {
 	ref := "datatug://p/main?env=local"
-	meta := Meta{DB: DB{Ref: &ref}, Query: Query{Kind: QueryKindDTQL, Parameters: map[string]apicontract.TypedValueOrSet{
+	meta := Meta{DB: DB{Ref: &ref}, Query: Query{Kind: QueryKindTugQL, Parameters: map[string]apicontract.TypedValueOrSet{
 		"b": apicontract.ScalarValue(apicontract.NewIntegerValue("2")),
 		"a": apicontract.ScalarValue(apicontract.NewIntegerValue("1")),
 	}}}
-	meta.SetEditor("from:\n  name: T\n", LanguageDTQL)
+	meta.SetEditor("from:\n  name: T\n", LanguageTugQL)
 	q := meta.Query
-	if q.Text != "from:\n  name: T\n" || q.Language != "dtql" || q.DBRef != ref || len(q.Params) != 2 || q.Params[0].Name != "a" || q.Params[1].Name != "b" {
+	if q.Text != "from:\n  name: T\n" || q.Language != "tugql" || q.DBRef != ref || len(q.Params) != 2 || q.Params[0].Name != "a" || q.Params[1].Name != "b" {
 		t.Fatalf("editor fields %+v", q)
 	}
 	var decoded map[string]any
@@ -133,7 +133,7 @@ func TestSetEditor(t *testing.T) {
 	query := decoded["query"].(map[string]any)
 	params := query["params"].([]any)
 	first := params[0].(map[string]any)
-	if query["text"] == nil || query["language"] != "dtql" || query["dbRef"] != ref || first["name"] != "a" || first["value"].(map[string]any)["type"] != "integer" {
+	if query["text"] == nil || query["language"] != "tugql" || query["dbRef"] != ref || first["name"] != "a" || first["value"].(map[string]any)["type"] != "integer" {
 		t.Fatalf("encoded query %v", query)
 	}
 
@@ -149,10 +149,10 @@ func TestSetEditor(t *testing.T) {
 	// the editor members have a bound of their own: past it only they go
 	meta = Meta{}
 	meta.SetEditor(strings.Repeat("x", MaxQueryBytes), LanguageSQL)
-	meta.Query.DTQL = "from:\n  name: T\n"
+	meta.Query.TugQL = "from:\n  name: T\n"
 	_ = json.Unmarshal(meta.Encode(), &decoded)
 	query = decoded["query"].(map[string]any)
-	if query["text"] != nil || query["dtql"] == nil || decoded["unavailable"].(map[string]any)["query"] != nil || decoded["unavailable"].(map[string]any)["editor"] != UnavailableTooLarge {
+	if query["text"] != nil || query["tugql"] == nil || decoded["unavailable"].(map[string]any)["query"] != nil || decoded["unavailable"].(map[string]any)["editor"] != UnavailableTooLarge {
 		t.Fatalf("editor members over their bound %v %v", query, decoded["unavailable"])
 	}
 
@@ -168,7 +168,7 @@ func TestSetEditor(t *testing.T) {
 	}
 	meta.Query.Params = nil
 	meta.Query.Text = strings.Repeat("x", MaxQueryBytes)
-	meta.Query.DTQL = strings.Repeat("y", MaxQueryBytes)
+	meta.Query.TugQL = strings.Repeat("y", MaxQueryBytes)
 	_ = json.Unmarshal(meta.Encode(), &decoded)
 	unavailable = decoded["unavailable"].(map[string]any)
 	if unavailable["editor"] != UnavailableTooLarge || unavailable["query"] != UnavailableTooLarge {
@@ -183,25 +183,25 @@ func TestSetEditor(t *testing.T) {
 
 	// the legacy bound is not shared with them: 200 KiB of each is kept
 	meta = Meta{}
-	meta.SetEditor(strings.Repeat("x", 200<<10), LanguageDTQL)
-	meta.Query.DTQL = strings.Repeat("y", 200<<10)
+	meta.SetEditor(strings.Repeat("x", 200<<10), LanguageTugQL)
+	meta.Query.TugQL = strings.Repeat("y", 200<<10)
 	encoded := meta.Encode()
 	_ = json.Unmarshal(encoded, &decoded)
 	query = decoded["query"].(map[string]any)
-	if query["text"] == nil || query["dtql"] == nil || decoded["unavailable"].(map[string]any)["query"] != nil {
+	if query["text"] == nil || query["tugql"] == nil || decoded["unavailable"].(map[string]any)["query"] != nil {
 		t.Fatalf("both within their own bounds %v", decoded["unavailable"])
 	}
 
 	// the legacy members over theirs go alone, the editor members stay
-	meta.Query.DTQL = strings.Repeat("y", MaxQueryBytes)
+	meta.Query.TugQL = strings.Repeat("y", MaxQueryBytes)
 	_ = json.Unmarshal(meta.Encode(), &decoded)
 	query = decoded["query"].(map[string]any)
-	if query["dtql"] != nil || query["text"] == nil || decoded["unavailable"].(map[string]any)["query"] != UnavailableTooLarge {
+	if query["tugql"] != nil || query["text"] == nil || decoded["unavailable"].(map[string]any)["query"] != UnavailableTooLarge {
 		t.Fatalf("legacy over its bound %v %v", query, decoded["unavailable"])
 	}
 
 	// both at their maximum still leave room for the prompt in 1 MiB
-	meta.Query.DTQL = strings.Repeat("y", MaxQueryBytes-100)
+	meta.Query.TugQL = strings.Repeat("y", MaxQueryBytes-100)
 	meta.Query.Text = strings.Repeat("x", MaxQueryBytes-100)
 	for i := 0; i < MaxMetaColumns; i++ {
 		meta.Columns = append(meta.Columns, Column{Name: strings.Repeat("c", 1000), Type: "string"})

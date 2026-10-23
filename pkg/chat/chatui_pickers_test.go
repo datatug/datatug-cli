@@ -105,7 +105,7 @@ func TestChatUICtrlRRefreshesLastRecordSet(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc := "from: {name: Invoice}\nlimit: 20"
-	query, err := store.AppendQuery(ctx, sessions.activeID, origin.ID, "sqlite:///chinook.db", QueryResult{Title: "Invoices", DTQL: doc, SourceID: "chinook", Result: secureread.Result{Columns: []string{"InvoiceId"}}})
+	query, err := store.AppendQuery(ctx, sessions.activeID, origin.ID, "sqlite:///chinook.db", QueryResult{Title: "Invoices", TugQL: doc, SourceID: "chinook", Result: secureread.Result{Columns: []string{"InvoiceId"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestChatUICtrlRRefreshesLastRecordSet(t *testing.T) {
 	}
 	drainCmd(t, u, cmd)
 	if executor.calls != 1 {
-		t.Fatalf("expected the refresh to re-run the saved DTQL once, got %d calls", executor.calls)
+		t.Fatalf("expected the refresh to re-run the saved TugQL once, got %d calls", executor.calls)
 	}
 }
 

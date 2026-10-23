@@ -22,7 +22,7 @@ func (s *savedQueryStub) Run(_ context.Context, id string) (QueryResult, error) 
 	if s.runErr != nil {
 		return QueryResult{}, s.runErr
 	}
-	return QueryResult{Title: "Prague customers", Source: "sqlite:///chinook.db", DTQL: "from: {name: Customer}\nlimit: 1", Result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 5}}}}}, nil
+	return QueryResult{Title: "Prague customers", Source: "sqlite:///chinook.db", TugQL: "from: {name: Customer}\nlimit: 1", Result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 5}}}}}, nil
 }
 
 func (s *savedQueryStub) Save(_ context.Context, request SavedQuerySaveRequest) (SavedQuery, error) {
@@ -40,7 +40,7 @@ func (s *savedQueryStub) RunWithVariables(ctx context.Context, id string, variab
 	return s.Run(ctx, id)
 }
 
-func (s *savedQueryStub) RunDTQLWithVariables(ctx context.Context, id string, variables map[string]string) (QueryResult, error) {
+func (s *savedQueryStub) RunTugQLWithVariables(ctx context.Context, id string, variables map[string]string) (QueryResult, error) {
 	return s.RunWithVariables(ctx, id, variables)
 }
 

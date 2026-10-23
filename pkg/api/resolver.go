@@ -314,9 +314,9 @@ func httpQuerySources(projectDir string) ([]ResolvedSource, error) {
 // EligibleTargets returns the authorized ResolvedSource options a saved
 // query may run against within environment, per api-contract.md "Scope and
 // identity": an HTTP query's only eligible target is itself (its Targets
-// MUST be empty per datatug-core's own QueryDef.Validate); a SQL/DTQL query
+// MUST be empty per datatug-core's own QueryDef.Validate); a SQL/TugQL query
 // with declared Targets is filtered to catalogs whose (Driver, Catalog)
-// matches one of them; a SQL/DTQL query with NO declared Targets (every
+// matches one of them; a SQL/TugQL query with NO declared Targets (every
 // query in datatug-demo-projects/demo-project-1 today) is eligible against
 // every SQL/inGitDB catalog source in environment — a deliberate, documented
 // engineering default for Phase 1's single-catalog-per-environment demo,

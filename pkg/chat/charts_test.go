@@ -308,7 +308,7 @@ func TestChinookInvoiceChartsUseRealDALgoRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc := []byte("from: {name: Invoice}\ncolumns:\n  - field: InvoiceDate\n  - field: Total\norderBy:\n  - field: InvoiceId\n    desc: true\nlimit: 100\n")
-	result, err := secureread.NewExecutor(secureread.Session{Unrestricted: true}).RunDTQL(context.Background(), "sqlite://"+path, doc, nil)
+	result, err := secureread.NewExecutor(secureread.Session{Unrestricted: true}).RunTugQL(context.Background(), "sqlite://"+path, doc, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

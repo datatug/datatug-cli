@@ -27,7 +27,7 @@ type mockJoinExecutor struct {
 	err error
 }
 
-func (m *mockJoinExecutor) RunDTQL(ctx context.Context, source string, doc []byte, parameters map[string]any) (secureread.Result, error) {
+func (m *mockJoinExecutor) RunTugQL(ctx context.Context, source string, doc []byte, parameters map[string]any) (secureread.Result, error) {
 	if m.err != nil {
 		return secureread.Result{}, m.err
 	}
@@ -70,8 +70,8 @@ func TestRemaining_SessionChatBranches(t *testing.T) {
 	ctx := context.Background()
 	chat, _ := newTestSessionChat(t)
 
-	// RunSavedDTQLActive activeID mismatch
-	if err := chat.RunSavedDTQLActive(ctx, "wrong-id", "q1", nil); !errors.Is(err, ErrActiveSessionChanged) {
+	// RunSavedTugQLActive activeID mismatch
+	if err := chat.RunSavedTugQLActive(ctx, "wrong-id", "q1", nil); !errors.Is(err, ErrActiveSessionChanged) {
 		t.Fatalf("expected ErrActiveSessionChanged, got %v", err)
 	}
 
@@ -222,7 +222,7 @@ func TestRemaining_BrowserCellDetail(t *testing.T) {
 	query, _ := store.AppendQuery(ctx, chat.activeID, user.ID, chat.source, QueryResult{
 		Title:  "Invoices",
 		Source: chat.source,
-		DTQL:   "from: {schema: main, name: Invoice}\ncolumns: [{field: CustomerId}]\n",
+		TugQL:  "from: {schema: main, name: Invoice}\ncolumns: [{field: CustomerId}]\n",
 		Result: secureread.Result{
 			Columns: []string{"CustomerId"},
 			Rows:    []secureread.Row{{Data: map[string]any{"CustomerId": 7}}},

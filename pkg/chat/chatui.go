@@ -624,13 +624,13 @@ func (u *ChatUI) appendGridResult(query QueryResult) {
 	}
 	record := u.snapshot.RecordSets[query.RecordSetID]
 	if record.ID == "" {
-		record = RecordSet{ID: query.RecordSetID, Title: query.Title, DTQL: query.DTQL, Result: query.Result, Lineage: query.Lineage}
+		record = RecordSet{ID: query.RecordSetID, Title: query.Title, TugQL: query.TugQL, Result: query.Result, Lineage: query.Lineage}
 	}
 	u.rememberResult(record)
 	styled.bindQuery(record, u.snapshot)
 	u.resultScope(styled, record)
 	styled.SetKeyHandler(u.handleGridKey)
-	block := u.blockForGrid(styled.Model, query.RecordSetID, query.DTQL)
+	block := u.blockForGrid(styled.Model, query.RecordSetID, query.TugQL)
 	u.lastGridEntryID = u.appendBlockWithID("grid", block)
 	styled.entryID = u.lastGridEntryID
 }
@@ -650,7 +650,7 @@ func (u *ChatUI) blockForGrid(gridModel *grid.Model, recordSetID string, documen
 	// block: the durable snapshot may still describe the preceding result.
 	record := u.snapshot.RecordSets[recordSetID]
 	if len(documents) > 0 {
-		record = RecordSet{DTQL: documents[0]}
+		record = RecordSet{TugQL: documents[0]}
 	}
 	if groupedRecord(&record) {
 		delete(u.joinBlocksByRecordSetID, recordSetID)
@@ -1070,7 +1070,7 @@ func (u *ChatUI) loadSession(session ChatSession) {
 			u.gridsByRecordSetID[record.ID] = styled
 			u.resultScope(styled, record)
 			styled.SetKeyHandler(u.handleGridKey)
-			u.lastGridEntryID = u.appendBlockWithID("grid", u.blockForGrid(styled.Model, record.ID, record.DTQL))
+			u.lastGridEntryID = u.appendBlockWithID("grid", u.blockForGrid(styled.Model, record.ID, record.TugQL))
 			styled.entryID = u.lastGridEntryID
 			if note := formatLimitations(record.Result.Limitations); note != "" {
 				u.shell.AppendAssistant(note)
@@ -1605,7 +1605,7 @@ func (u *ChatUI) statusHintsRaw(width int) []string {
 		}
 		segments = []string{"type to search", "/ search", "Ctrl+P Actions", "Ctrl+S save query", "Ctrl+E export", enterHint, "Tab views", "Shift+↑↓ history", "Shift+→ Inspect", escHint}
 		if recordSetID != "" {
-			if record, ok := u.snapshot.RecordSets[recordSetID]; ok && (record.DTQL != "" || record.HTTPResponseID != "") {
+			if record, ok := u.snapshot.RecordSets[recordSetID]; ok && (record.TugQL != "" || record.HTTPResponseID != "") {
 				segments = append(segments, "Ctrl+R refresh")
 			}
 		}

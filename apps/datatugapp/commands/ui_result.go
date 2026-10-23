@@ -71,11 +71,11 @@ func loadResultForUI(ctx context.Context, id string) (resultOpen, error) {
 	if err != nil {
 		return resultOpen{}, Exit("query result: the project of this result is not registered on this machine", exitCodeNotFound)
 	}
-	query := chat.QueryResult{Title: "Query result", DTQL: meta.Query.DTQL, SourceID: *meta.DB.Source, Result: resultRows(loaded.Recordset), Parameters: nativeParameters(meta.Query.Parameters)}
+	query := chat.QueryResult{Title: "Query result", TugQL: meta.Query.TugQL, SourceID: *meta.DB.Source, Result: resultRows(loaded.Recordset), Parameters: nativeParameters(meta.Query.Parameters)}
 	if meta.Query.Kind == queryresults.QueryKindSaved {
 		query.QueryID = meta.Query.SavedQueryID
-		if definition, loadErr := projectStore.LoadQuery(ctx, meta.Query.SavedQueryID); loadErr == nil && meta.Query.SavedQueryType == queryresults.QueryKindDTQL {
-			query.DTQL = definition.Text
+		if definition, loadErr := projectStore.LoadQuery(ctx, meta.Query.SavedQueryID); loadErr == nil && meta.Query.SavedQueryType == queryresults.QueryKindTugQL {
+			query.TugQL = definition.Text
 		}
 	}
 	return resultOpen{projectDir: projectDir, env: *meta.DB.Env, database: *meta.DB.Source, query: query}, nil

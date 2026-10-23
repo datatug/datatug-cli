@@ -47,7 +47,7 @@ type storedBookmarkRecordSet struct {
 	QueryID         string          `json:"queryId"`
 	OriginMessageID string          `json:"originMessageId"`
 	Title           string          `json:"title"`
-	DTQL            string          `json:"dtql"`
+	TugQL           string          `json:"tugql"`
 	Source          string          `json:"source"`
 	Environment     string          `json:"environment"`
 	Database        string          `json:"database"`
@@ -383,7 +383,7 @@ func (s *SessionStore) bookmarkTarget(ctx context.Context, tx *sql.Tx, sessionID
 }
 
 func recordSetsForSession(ctx context.Context, q bookmarkSQL, sessionID string) (map[string]RecordSet, error) {
-	rows, err := q.QueryContext(ctx, `SELECT id, query_id, origin_message_id, title, dtql, source, environment, database_id, parameters_json, created_at, result_json FROM recordsets WHERE session_id = ? ORDER BY rowid`, sessionID)
+	rows, err := q.QueryContext(ctx, `SELECT id, query_id, origin_message_id, title, tugql, source, environment, database_id, parameters_json, created_at, result_json FROM recordsets WHERE session_id = ? ORDER BY rowid`, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -393,7 +393,7 @@ func recordSetsForSession(ctx context.Context, q bookmarkSQL, sessionID string) 
 		var record RecordSet
 		var params, created string
 		var payload []byte
-		if err := rows.Scan(&record.ID, &record.QueryID, &record.OriginMessageID, &record.Title, &record.DTQL, &record.Source, &record.Environment, &record.Database, &params, &created, &payload); err != nil {
+		if err := rows.Scan(&record.ID, &record.QueryID, &record.OriginMessageID, &record.Title, &record.TugQL, &record.Source, &record.Environment, &record.Database, &params, &created, &payload); err != nil {
 			return nil, err
 		}
 		record.SessionID = sessionID
@@ -441,7 +441,7 @@ func encodeBookmarkSnapshot(snapshot BookmarkSnapshot) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	stored := storedBookmarkSnapshot{SourceID: snapshot.SourceID, RecordSet: storedBookmarkRecordSet{ID: snapshot.RecordSet.ID, QueryID: snapshot.RecordSet.QueryID, OriginMessageID: snapshot.RecordSet.OriginMessageID, Title: snapshot.RecordSet.Title, DTQL: snapshot.RecordSet.DTQL, Source: snapshot.RecordSet.Source, Environment: snapshot.RecordSet.Environment, Database: snapshot.RecordSet.Database, Parameters: snapshot.RecordSet.Parameters, CreatedAt: snapshot.RecordSet.CreatedAt, Result: result, Lineage: snapshot.RecordSet.Lineage}, View: snapshot.View, Selection: snapshot.Selection}
+	stored := storedBookmarkSnapshot{SourceID: snapshot.SourceID, RecordSet: storedBookmarkRecordSet{ID: snapshot.RecordSet.ID, QueryID: snapshot.RecordSet.QueryID, OriginMessageID: snapshot.RecordSet.OriginMessageID, Title: snapshot.RecordSet.Title, TugQL: snapshot.RecordSet.TugQL, Source: snapshot.RecordSet.Source, Environment: snapshot.RecordSet.Environment, Database: snapshot.RecordSet.Database, Parameters: snapshot.RecordSet.Parameters, CreatedAt: snapshot.RecordSet.CreatedAt, Result: result, Lineage: snapshot.RecordSet.Lineage}, View: snapshot.View, Selection: snapshot.Selection}
 	return json.Marshal(stored)
 }
 
@@ -457,7 +457,7 @@ func decodeBookmarkSnapshot(targetKind string, payload []byte) (BookmarkSnapshot
 	if err != nil {
 		return BookmarkSnapshot{}, err
 	}
-	snapshot := BookmarkSnapshot{SourceID: stored.SourceID, RecordSet: RecordSet{ID: stored.RecordSet.ID, QueryID: stored.RecordSet.QueryID, OriginMessageID: stored.RecordSet.OriginMessageID, Title: stored.RecordSet.Title, DTQL: stored.RecordSet.DTQL, Source: stored.RecordSet.Source, Environment: stored.RecordSet.Environment, Database: stored.RecordSet.Database, Parameters: stored.RecordSet.Parameters, CreatedAt: stored.RecordSet.CreatedAt, Result: result, Lineage: stored.RecordSet.Lineage}, View: stored.View, Selection: stored.Selection}
+	snapshot := BookmarkSnapshot{SourceID: stored.SourceID, RecordSet: RecordSet{ID: stored.RecordSet.ID, QueryID: stored.RecordSet.QueryID, OriginMessageID: stored.RecordSet.OriginMessageID, Title: stored.RecordSet.Title, TugQL: stored.RecordSet.TugQL, Source: stored.RecordSet.Source, Environment: stored.RecordSet.Environment, Database: stored.RecordSet.Database, Parameters: stored.RecordSet.Parameters, CreatedAt: stored.RecordSet.CreatedAt, Result: result, Lineage: stored.RecordSet.Lineage}, View: stored.View, Selection: stored.Selection}
 	if err := validateBookmarkSnapshotFn(targetKind, snapshot); err != nil {
 		return BookmarkSnapshot{}, err
 	}

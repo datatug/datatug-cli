@@ -151,7 +151,7 @@ func TestChatUIBookmarkWorkspaceTabOpensStructuredGrid(t *testing.T) {
 	}
 	u.workspace.setTab(3)
 	view := u.workspace.View(80, 30, true)
-	if len(u.workspace.bookmarkItems) != 1 || !strings.Contains(view, "Saved customers") || !strings.Contains(view, "Source: chinook") || !strings.Contains(view, "snapshot:") || !strings.Contains(view, "DTQL:") {
+	if len(u.workspace.bookmarkItems) != 1 || !strings.Contains(view, "Saved customers") || !strings.Contains(view, "Source: chinook") || !strings.Contains(view, "snapshot:") || !strings.Contains(view, "TugQL:") {
 		t.Fatalf("bookmark tab did not render: %+v", u.workspace.bookmarkItems)
 	}
 	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -185,7 +185,7 @@ func TestChatUIEmptyBookmarkedGridNavigation(t *testing.T) {
 		t.Fatal(err)
 	}
 	turn, err := store.AppendTurn(ctx, session.ID, user.ID, scope.Sources[scope.Database], Turn{Queries: []QueryResult{{
-		Title: "Empty", DTQL: "from: {name: Customer}\nlimit: 1", SourceID: scope.Database,
+		Title: "Empty", TugQL: "from: {name: Customer}\nlimit: 1", SourceID: scope.Database,
 		Result: secureread.Result{Columns: []string{"CustomerId"}},
 	}}})
 	if err != nil {
@@ -703,11 +703,11 @@ func TestChatUIInspectorDoesNotAttributeDerivedOutputByDisplayName(t *testing.T)
 	t.Parallel()
 	u := NewChatUI(context.Background(), nil, "fake-model")
 	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "table", ObjectID: "main.Customer", SourceID: "chinook"}, Columns: []string{"CustomerId", "City"}, ColumnTypes: map[string]string{"CustomerId": "INTEGER", "City": "TEXT"}}}}
-	record := RecordSet{Database: "chinook", DTQL: "from: {name: Customer}\ncolumns:\n  - aggregate: {function: COUNT, args: [{star: true}]}\n    as: CustomerId\nlimit: 10\n"}
+	record := RecordSet{Database: "chinook", TugQL: "from: {name: Customer}\ncolumns:\n  - aggregate: {function: COUNT, args: [{star: true}]}\n    as: CustomerId\nlimit: 10\n"}
 	if got := u.columnMeta(&record, "CustomerId"); got.qualified != "" || got.dbType != "" {
 		t.Fatalf("aggregate was falsely attributed to a physical column: %+v", got)
 	}
-	record.DTQL = "from: {name: Customer}\ncolumns:\n  - field: City\n    as: CustomerId\nlimit: 10\n"
+	record.TugQL = "from: {name: Customer}\ncolumns:\n  - field: City\n    as: CustomerId\nlimit: 10\n"
 	if got := u.columnMeta(&record, "CustomerId"); got.qualified != "main.Customer.City" || got.dbType != "TEXT" {
 		t.Fatalf("aliased field provenance = %+v", got)
 	}

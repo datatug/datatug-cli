@@ -12,7 +12,7 @@ status: Implemented
 
 ## Summary
 
-Implement `datatug query run`: DTQL or `--from` input with query-parameter substitution, database opening by URL, policies discovered from the per-user directory with fail-closed defaults, principal and variables from flags, secured execution through `access.SecureReadSession` with the hidden-field reference check, rows to stdout in five formats, and the limitation report to stderr. All acceptance criteria are covered; none deferred.
+Implement `datatug query run`: TugQL or `--from` input with query-parameter substitution, database opening by URL, policies discovered from the per-user directory with fail-closed defaults, principal and variables from flags, secured execution through `access.SecureReadSession` with the hidden-field reference check, rows to stdout in five formats, and the limitation report to stderr. All acceptance criteria are covered; none deferred.
 
 ## Approach
 
@@ -45,7 +45,7 @@ The reusable core lives in `pkg/accesspolicies` (discovery, decoding, variable p
 **Depends-On:** 2
 **Status:** complete
 
-`cmd_query.go`: the `query` group and `run` verb, flags, DTQL/`--from`, `dbcopy` URL backend, exit codes 2/4/5/1, row normalisation and the five formats.
+`cmd_query.go`: the `query` group and `run` verb, flags, TugQL/`--from`, `dbcopy` URL backend, exit codes 2/4/5/1, row normalisation and the five formats.
 
 ### Task 4: Result files
 
@@ -65,7 +65,7 @@ The reusable core lives in `pkg/accesspolicies` (discovery, decoding, variable p
 **Depends-On:** 4
 **Status:** complete
 
-`pkg/joinmeta` (relation instances, and the foreign-key snapshot read through `dbschema` for every engine, shared with the chat, whose SQLite-only gate is gone), and the `meta.json` builder for ad-hoc, saved DTQL, federated, native SQL and HTTP results.
+`pkg/joinmeta` (relation instances, and the foreign-key snapshot read through `dbschema` for every engine, shared with the chat, whose SQLite-only gate is gone), and the `meta.json` builder for ad-hoc, saved TugQL, federated, native SQL and HTTP results.
 
 ## Open Questions
 

@@ -76,9 +76,9 @@ Environment local
 
 ```console
 $ datatug query run --db sqlite://./shop.db --from Customer --no-policies
-$key               CustomerId  FirstName  LastName
-__dalgo_record_id  1           Ada        Lovelace
-__dalgo_record_id  2           Alan       Turing
+$key  CustomerId  FirstName  LastName
+1     1           Ada        Lovelace
+2     2           Alan       Turing
 ```
 
 **4. Scan PostgreSQL the same way.** Put the connection URL in an environment variable whose name starts with

@@ -97,7 +97,7 @@ func TestCoverage100_CoreGaps(t *testing.T) {
 	t.Run("workspace_trail_gaps", func(t *testing.T) {
 		u, _ := newTestChatUI(t, nil, Turn{})
 		u.snapshot.RecordSets = map[string]RecordSet{
-			"rs1": {ID: "rs1", Title: "RS1", DTQL: "from: {schema: main, name: users}\nselect: [{field: id}]"},
+			"rs1": {ID: "rs1", Title: "RS1", TugQL: "from: {schema: main, name: users}\nselect: [{field: id}]"},
 		}
 		// showTrailNode with g.entryID == "" (lines 129-131)
 		g := newGridState(NewGridModel(secureread.Result{Columns: []string{"id"}}), "rs1", "Title", 80)
@@ -153,7 +153,7 @@ func TestCoverage100_CoreGaps(t *testing.T) {
 			record: RecordSet{
 				Database: "",
 				Source:   "sqlite",
-				DTQL:     "from: {schema: main, name: users}\nlimit: 5",
+				TugQL:    "from: {schema: main, name: users}\nlimit: 5",
 				Result:   secureread.Result{Columns: []string{"age"}},
 			},
 			capture: &loadedResultCapture{columnNames: []string{"age"}},
@@ -172,7 +172,7 @@ func TestCoverage100_CoreGaps(t *testing.T) {
 
 		// aggregateExplanation: loop over catalog.Objects, line 172 continue for other_db and prefix mismatch
 		overlay.record.Result = secureread.Result{Columns: []string{"id"}}
-		overlay.record.DTQL = "from: {schema: main, name: users}\nlimit: 5"
+		overlay.record.TugQL = "from: {schema: main, name: users}\nlimit: 5"
 		overlay.capture = &loadedResultCapture{columnNames: []string{"id"}}
 		reason := overlay.aggregateExplanation(0)
 		if !strings.Contains(reason, "primary key") {
@@ -295,7 +295,7 @@ func TestCoverage100_CoreGaps(t *testing.T) {
 	t.Run("workspace_actions_gaps", func(t *testing.T) {
 		u := focusedGridStoreBackedTestUI(t, QueryResult{
 			Title:  "T",
-			DTQL:   "from: {schema: main, name: widgets}\nselect: [{field: id}]",
+			TugQL:  "from: {schema: main, name: widgets}\nselect: [{field: id}]",
 			Result: secureread.Result{Columns: []string{"id"}, ColumnTypes: map[string]string{"id": "INTEGER"}, Rows: []secureread.Row{{Data: map[string]any{"id": int64(1)}}}},
 		})
 		u.shell.ShowTranscript()
@@ -334,7 +334,7 @@ func TestCoverage100_CoreGaps(t *testing.T) {
 		}
 		doc := "from: {schema: main, name: users}\nlimit: 10"
 
-		// 1. AppendUser error (line 67): wrap RunDTQL to close db before AppendUser runs
+		// 1. AppendUser error (line 67): wrap RunTugQL to close db before AppendUser runs
 		mockRunnerClose := &mockCloseExecutorRunner{
 			db:  sessions.store.db,
 			res: secureread.Result{Columns: []string{"id"}},
@@ -374,7 +374,7 @@ type mockCloseExecutorRunner struct {
 	res secureread.Result
 }
 
-func (m *mockCloseExecutorRunner) RunDTQL(ctx context.Context, source string, query []byte, parameters map[string]any) (secureread.Result, error) {
+func (m *mockCloseExecutorRunner) RunTugQL(ctx context.Context, source string, query []byte, parameters map[string]any) (secureread.Result, error) {
 	_ = m.db.Close()
 	return m.res, nil
 }

@@ -23,7 +23,7 @@ const (
 	pgSource   = "postgres://" + pgUser + ":" + pgPassword + "@db.example.com:5433/shop?application_name=" + pgQuery
 )
 
-const dtqlOverCustomers = "from: {name: customers}\n"
+const tugqlOverCustomers = "from: {name: customers}\n"
 
 // standInForPostgres replaces the constructor of a PostgreSQL database for the length of a test with one that
 // counts its calls and answers err (nil: a database that holds nothing).
@@ -59,9 +59,9 @@ func reads(executor *Executor) map[string]func() error {
 `
 	return map[string]func() error{
 		"RunStructured": func() error { _, err := executor.RunStructured(ctx, pgSource, customersQuery(), nil); return err },
-		"RunDTQL":       func() error { _, err := executor.RunDTQL(ctx, pgSource, []byte(dtqlOverCustomers), nil); return err },
-		"RunFederatedDTQL": func() error {
-			_, err := executor.RunFederatedDTQL(ctx, []byte(federated), map[string]string{"shop": pgSource}, nil)
+		"RunTugQL":      func() error { _, err := executor.RunTugQL(ctx, pgSource, []byte(tugqlOverCustomers), nil); return err },
+		"RunFederatedTugQL": func() error {
+			_, err := executor.RunFederatedTugQL(ctx, []byte(federated), map[string]string{"shop": pgSource}, nil)
 			return err
 		},
 	}

@@ -194,7 +194,7 @@ func (u *ChatUI) globalKeys(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	return nil, false
 }
 
-// refreshLastRecordSet is ui.go's refreshSelectedCard (both branches — DTQL
+// refreshLastRecordSet is ui.go's refreshSelectedCard (both branches — TugQL
 // RecordSet refresh and HTTP GET refresh), ported to chatshell: it targets
 // the true focused grid (activeGrid) when one is focused, falling back to
 // lastGridRecordSetID (the most recently appended grid) otherwise, matching
@@ -222,7 +222,7 @@ func (u *ChatUI) refreshLastRecordSet() tea.Cmd {
 	responseID := record.HTTPResponseID
 	sessionID, ctx, store := u.sessionID, u.ctx, u.sessions.store
 	if responseID == "" {
-		if record.DTQL == "" {
+		if record.TugQL == "" {
 			u.shell.AppendAssistant("Saved SQL and HTTP project results cannot be refreshed here. Run the project query again from /query.")
 			return nil
 		}

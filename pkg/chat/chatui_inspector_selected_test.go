@@ -21,10 +21,10 @@ import (
 // of u.updateWorkspaceKey/u.workspaceTab.
 func TestChatUISelectedTabInspectsFocusedGridRowColumnRecordSet(t *testing.T) {
 	t.Parallel()
-	dtql := "from: {schema: main, name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 5\n"
+	tugql := "from: {schema: main, name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 5\n"
 	turn := Turn{Queries: []QueryResult{{
 		Title:       "Invoices",
-		DTQL:        dtql,
+		TugQL:       tugql,
 		RecordSetID: "rs1",
 		Result: secureread.Result{
 			Columns: []string{"InvoiceId"},

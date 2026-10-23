@@ -19,7 +19,7 @@ func TestUnifiedWorkspaceRelationshipsIncomingCompositeAndPolicySlots(t *testing
 	snapshot := joinSnapshot()
 	executor := &joinExecutorStub{}
 	a := ForeignKeyJoinApplication{Source: snapshot.Source, Snapshot: snapshot, Executor: executor}
-	record := RecordSet{Source: a.Source, DTQL: "from: {schema: main, name: Location}\nlimit: 5\n"}
+	record := RecordSet{Source: a.Source, TugQL: "from: {schema: main, name: Location}\nlimit: 5\n"}
 	items, err := a.PreviewRelationships(context.Background(), record, map[string]any{"main.location.country": "NZ", "main.location.code": "AKL"})
 	if err != nil || len(items) != 1 || !items[0].incoming || items[0].target().Relation != "Order" || items[0].err != nil {
 		t.Fatalf("incoming preview: %+v, %v", items, err)
@@ -47,9 +47,9 @@ func TestUnifiedWorkspaceRelationshipsIncomingCompositeAndPolicySlots(t *testing
 
 func TestUnifiedWorkspaceInspectionUsesDeclaredCompositeIdentity(t *testing.T) {
 	t.Parallel()
-	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Widgets", DTQL: "from: {schema: main, name: Widgets}\nlimit: 5\n", Result: secureread.Result{Columns: []string{"Id", "Name"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 1, "Name": "Alpha"}}}}})
+	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Widgets", TugQL: "from: {schema: main, name: Widgets}\nlimit: 5\n", Result: secureread.Result{Columns: []string{"Id", "Name"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 1, "Name": "Alpha"}}}}})
 	g, record, _ := u.activeGrid()
-	record.DTQL = "from: {schema: main, name: Widgets}\nlimit: 5\n"
+	record.TugQL = "from: {schema: main, name: Widgets}\nlimit: 5\n"
 	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "table", ObjectID: "main.Widgets", SourceID: record.Database, Title: "Widgets"}, Columns: []string{"Id", "Name"}, PrimaryKey: []string{"Id", "Name"}}}}
 	if got := u.inspectionIdentity(g, record); got != "Widgets / Id=1 / Name=Alpha" {
 		t.Fatalf("identity=%q", got)
@@ -276,7 +276,7 @@ func TestUnifiedWorkspaceGoldTitleAndHelpFitActualWidth(t *testing.T) {
 
 func TestUnifiedWorkspaceLocalOperationsStableSelectionFilteringAndReset(t *testing.T) {
 	t.Parallel()
-	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Widgets", DTQL: "from: {schema: main, name: Widgets}\nlimit: 2\n", Result: secureread.Result{Columns: []string{"Id", "Name"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 2, "Name": "same"}}, {Data: map[string]any{"Id": 1, "Name": "same"}}}}})
+	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Widgets", TugQL: "from: {schema: main, name: Widgets}\nlimit: 2\n", Result: secureread.Result{Columns: []string{"Id", "Name"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 2, "Name": "same"}}, {Data: map[string]any{"Id": 1, "Name": "same"}}}}})
 	g, record, _ := u.activeGrid()
 	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "table", ObjectID: "main.Widgets", SourceID: record.Database}, Columns: []string{"Id", "Name"}, ColumnTypes: map[string]string{"Id": "INTEGER", "Name": "TEXT"}}}}
 	executor := &joinExecutorStub{}

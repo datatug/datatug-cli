@@ -56,9 +56,9 @@ func TestCov100iSavedQueryIDLongTitle(t *testing.T) {
 	assert.False(t, strings.HasSuffix(slug, "-"), slug)
 }
 
-func TestCov100iRunDTQLAndHTTPVariableParseErrors(t *testing.T) {
+func TestCov100iRunTugQLAndHTTPVariableParseErrors(t *testing.T) {
 	svc := chatSavedQueries{}
-	_, err := svc.RunDTQLWithVariables(context.Background(), "q", map[string]string{"=bad": "x"})
+	_, err := svc.RunTugQLWithVariables(context.Background(), "q", map[string]string{"=bad": "x"})
 	require.Error(t, err)
 	_, err = svc.RunHTTPWithVariables(context.Background(), "q", map[string]string{"=bad": "x"})
 	require.Error(t, err)

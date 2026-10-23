@@ -424,7 +424,7 @@ func TestProjectObjectDetailsQueryAndSourceAndDefaultKinds(t *testing.T) {
 	t.Parallel()
 	title, detail := projectObjectDetails(ProjectObject{
 		Reference: ContextReference{Kind: "query", Title: "Unbound query"},
-		QueryType: "DTQL",
+		QueryType: "TugQL",
 	}, 60)
 	if title != "Query: Unbound query" || !strings.Contains(detail, "Query text unavailable.") || strings.Contains(detail, "Database:") {
 		t.Fatalf("unexpected query-without-source details: %q / %q", title, detail)
@@ -553,7 +553,7 @@ func TestWorkspacePanelCurrentColumnDetailsRejectsUnprovenSourceTables(t *testin
 	t.Parallel()
 	turn := Turn{Queries: []QueryResult{{
 		Title:       "Ambiguous",
-		DTQL:        "from: {name: Widget}\ncolumns: [{field: Id}]\nlimit: 5\n",
+		TugQL:       "from: {name: Widget}\ncolumns: [{field: Id}]\nlimit: 5\n",
 		RecordSetID: "rs1",
 		Result: secureread.Result{
 			Columns: []string{"Id"},
@@ -607,7 +607,7 @@ func TestWorkspacePanelCurrentColumnDetailsRelatedJoinCandidate(t *testing.T) {
 		t.Fatal(err)
 	}
 	query, err := store.AppendQuery(ctx, sessions.activeID, user.ID, "sqlite:///fixture.db", QueryResult{
-		Title: "Invoices", DTQL: "from: {name: Invoice}\ncolumns: [{field: CustomerId}]\nlimit: 5\n",
+		Title: "Invoices", TugQL: "from: {name: Invoice}\ncolumns: [{field: CustomerId}]\nlimit: 5\n",
 		Result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 1}}}},
 	})
 	if err != nil {
@@ -787,7 +787,7 @@ func TestWorkspacePanelBookmarksViewShowsAttachedAndDockedFlags(t *testing.T) {
 // truncation when the rendered body produces more lines than the given
 // height: unlike projectExplorer (whose panelCard always pads/fills to
 // exactly the requested height itself), bookmarksView ignores height and
-// keeps emitting its full listing/tags/DTQL/help/grid content, so a small
+// keeps emitting its full listing/tags/TugQL/help/grid content, so a small
 // height here reliably overflows View's own line budget.
 func TestWorkspacePanelViewTruncatesOverflowLines(t *testing.T) {
 	t.Parallel()
@@ -873,7 +873,7 @@ func TestWorkspacePanelUpdateKeyDockGridFocusedGuards(t *testing.T) {
 func TestWorkspacePanelExplorerPgUpPgDownAdjustDetailOffset(t *testing.T) {
 	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
-	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "query", ObjectID: "q", Title: "Paged query"}, QueryType: "DTQL", QueryText: "first-query-line\n" + strings.Repeat("middle-query-line\n", 40) + "last-query-line"}}}
+	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "query", ObjectID: "q", Title: "Paged query"}, QueryType: "TugQL", QueryText: "first-query-line\n" + strings.Repeat("middle-query-line\n", 40) + "last-query-line"}}}
 	u.shell.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	u.shell.FocusLeftPanel()
 	for i, node := range u.explorer.explorerNodes() {

@@ -156,7 +156,7 @@ func TestCloudQuestionIDSurvivesScoreToolFollowupAndNextTurn(t *testing.T) {
 			w.Header().Set("Content-Type", cloudproto.ContentTypeSSE)
 			_ = cloudproto.WriteEvent(w, ai.Event{Type: ai.EventStarted})
 			if len(chatIDs) == 1 {
-				call := toolCall("tool-1", toolRunDTQL, map[string]any{"title": "Invoices", "dtql": "from: {name: Invoice}\nlimit: 1"})
+				call := toolCall("tool-1", toolRunTugQL, map[string]any{"title": "Invoices", "tugql": "from: {name: Invoice}\nlimit: 1"})
 				_ = cloudproto.WriteEvent(w, ai.Event{Type: ai.EventToolCall, ToolCall: &call})
 				_ = cloudproto.WriteEvent(w, ai.Event{Type: ai.EventCompleted, StopReason: ai.StopReasonToolCalls})
 			} else {

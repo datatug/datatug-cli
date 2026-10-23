@@ -35,7 +35,7 @@ func TestGroupAggregatesScopesAliasesAndImmutability(t *testing.T) {
 		if sum.FuncArgs()[0].String() != want {
 			t.Fatal(sum)
 		}
-		if !strings.Contains(p.DTQL, "param: Region") {
+		if !strings.Contains(p.TugQL, "param: Region") {
 			t.Fatal("lost bound param")
 		}
 	}
@@ -47,7 +47,7 @@ func TestGroupAggregatesScopesAliasesAndImmutability(t *testing.T) {
 		t.Fatal(err)
 	}
 	wrapped, _ := DeriveGroupAggregates(simpleQuery, []string{"category"}, true, nil, MatchingSource)
-	if old.DTQL != wrapped.DTQL {
+	if old.TugQL != wrapped.TugQL {
 		t.Fatal("wrapper changed")
 	}
 }
@@ -57,10 +57,10 @@ func TestGroupAggregatesRefusesAmbiguousOutputs(t *testing.T) {
 		t.Fatal("expected error for empty keys")
 	}
 	if _, err := DeriveGroupAggregates("invalid: [", []string{"category"}, true, nil, MatchingSource); err == nil {
-		t.Fatal("expected error for invalid DTQL")
+		t.Fatal("expected error for invalid TugQL")
 	}
-	caseCollideDTQL := "from: {name: T}\ncolumns: [{field: a, as: col}, {field: b, as: COL}]\n"
-	if _, err := DeriveGroupAggregates(caseCollideDTQL, []string{"col", "COL"}, false, nil, MatchingSource); err == nil {
+	caseCollideTugQL := "from: {name: T}\ncolumns: [{field: a, as: col}, {field: b, as: COL}]\n"
+	if _, err := DeriveGroupAggregates(caseCollideTugQL, []string{"col", "COL"}, false, nil, MatchingSource); err == nil {
 		t.Fatal("expected error for case-colliding group keys")
 	}
 	for _, terms := range [][]AggregateTerm{

@@ -571,7 +571,7 @@ func sessionPinCommand(isChat bool) *cobra.Command {
 			interpretation.Schema += "\nExplicit attachment snapshot " + pin.InputSnapshotID + ":\n" + string(attachments)
 		}
 		response, providerErr := sessionInterpretDetailed(cmd.Context(), interpretation)
-		report := sessioncontext.Command{OpID: uuid.NewString(), Action: "reportClientRun", Kind: "chat", SessionID: args[0], RunID: pin.RunID, ExpectedRunVersion: 1, RunState: "completed", Text: response.DTQL}
+		report := sessioncontext.Command{OpID: uuid.NewString(), Action: "reportClientRun", Kind: "chat", SessionID: args[0], RunID: pin.RunID, ExpectedRunVersion: 1, RunState: "completed", Text: response.TugQL}
 		if providerErr != nil {
 			report.RunState = "failed"
 			report.ErrorCode = "PROVIDER_UNAVAILABLE"

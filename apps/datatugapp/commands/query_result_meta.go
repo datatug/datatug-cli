@@ -9,7 +9,7 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/chat"
 	"github.com/datatug/datatug-cli/pkg/joinmeta"
@@ -33,11 +33,11 @@ type resultDescription struct {
 	order []string
 }
 
-// dtqlSources opens the database a participant of a DTQL query is in ("" is
+// tugqlSources opens the database a participant of a TugQL query is in ("" is
 // the query's own database; a federated query names others). ref is the
 // datatug:// reference of a named database, nil when it has none; a nil ref
 // gives no participant a reference.
-type dtqlSources struct {
+type tugqlSources struct {
 	open func(ctx context.Context, database string) (db dal.DB, driver string, release func(), err error)
 	ref  func(database string) *string
 	// scanned is the columns of a relation in the order the project's scanned
@@ -74,13 +74,13 @@ func schemaOr(schema, driver string) string {
 	return api.DefaultSchemaForDriver(driver)
 }
 
-// describeDTQL describes a DTQL result: the participants from the query's
+// describeTugQL describes a TugQL result: the participants from the query's
 // tree, the related tables from DiscoverJoinCandidates over each database's
 // foreign keys (never filtered by permission), and the declared facts of the
 // columns that read one source's field directly.
-func describeDTQL(ctx context.Context, text string, columns []string, sources dtqlSources) resultDescription {
+func describeTugQL(ctx context.Context, text string, columns []string, sources tugqlSources) resultDescription {
 	description := resultDescription{declared: map[string]string{}, facts: map[string]queryresults.ColumnFacts{}}
-	query, err := dtql.Deserialize([]byte(text))
+	query, err := tugql.Deserialize([]byte(text))
 	if err != nil {
 		description.unavailable = queryresults.Unavailable{Participants: queryresults.UnavailableUnreadable, Related: queryresults.UnavailableUnreadable, DeclaredTypes: queryresults.UnavailableUnreadable}
 		return description
@@ -133,14 +133,14 @@ func describeDTQL(ctx context.Context, text string, columns []string, sources dt
 // order (the project's scanned metadata when it holds the relation, else the
 // database's own description), and a query with no select list as all of its
 // relations' columns, the root's first.
-func sourceOrder(query dal.StructuredQuery, instances []joinmeta.RelationInstance, states map[string]*snapshotState, sources dtqlSources) []string {
+func sourceOrder(query dal.StructuredQuery, instances []joinmeta.RelationInstance, states map[string]*snapshotState, sources tugqlSources) []string {
 	columnsOf := func(instance joinmeta.RelationInstance) []string {
 		if sources.scanned != nil {
 			if names, ok := sources.scanned(instance.Database, instance.Schema, instance.Relation); ok {
 				return names
 			}
 		}
-		// describeDTQL loaded every instance's database before this runs.
+		// describeTugQL loaded every instance's database before this runs.
 		return states[instance.Database].snapshot.Columns[joinmeta.RelationKey(instance.Schema, instance.Relation)]
 	}
 	var order []string

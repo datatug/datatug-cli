@@ -13,7 +13,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/strongo/aichat/ai"
 )
@@ -21,15 +21,15 @@ import (
 func TestCoverageAgentRunQueryTugQLFallback(t *testing.T) {
 	t.Parallel()
 	conv := &AIConversation{
-		runDTQLOverride: func(ctx context.Context, exec DTQLExecutor, source string, args runDTQLArgs) (runDTQLResponse, error) {
-			if args.DTQL != "SELECT 42" {
-				t.Fatalf("expected DTQL to be 'SELECT 42', got %q", args.DTQL)
+		runTugQLOverride: func(ctx context.Context, exec TugQLExecutor, source string, args runTugQLArgs) (runTugQLResponse, error) {
+			if args.TugQL != "SELECT 42" {
+				t.Fatalf("expected TugQL to be 'SELECT 42', got %q", args.TugQL)
 			}
-			return runDTQLResponse{}, nil
+			return runTugQLResponse{}, nil
 		},
 	}
 	handlers := conv.handlers()
-	handler := handlers[toolRunDTQL]
+	handler := handlers[toolRunTugQL]
 	call := ai.ToolCall{
 		ID:        "call1",
 		Arguments: json.RawMessage(`{"tugql":"SELECT 42"}`),
@@ -387,17 +387,17 @@ func TestCoverageWorkspaceQueryBranches(t *testing.T) {
 		t.Fatalf("expected this source cannot execute queries, got %v", err)
 	}
 
-	// Invalid DTQL query or invalid limit
+	// Invalid TugQL query or invalid limit
 	fakeExec := &mockExecutorRunner{}
 	chat.queryExecutor = fakeExec
-	_, err = chat.executeWorkspaceQuery(ctx, s1.ID, ref, "INVALID DTQL")
-	if err == nil || !strings.Contains(err.Error(), "use a valid DTQL query") {
-		t.Fatalf("expected use a valid DTQL query, got %v", err)
+	_, err = chat.executeWorkspaceQuery(ctx, s1.ID, ref, "INVALID TugQL")
+	if err == nil || !strings.Contains(err.Error(), "use a valid TugQL query") {
+		t.Fatalf("expected use a valid TugQL query, got %v", err)
 	}
 
 	// Query execution failure
 	validQuery := dal.From(dal.NewQualifiedRootCollectionRef("main", "users", "")).NewQuery().Limit(5).SelectColumns()
-	validDoc, _ := dtql.Serialize(validQuery)
+	validDoc, _ := tugql.Serialize(validQuery)
 	fakeExec.err = errors.New("simulated execution error")
 	_, err = chat.executeWorkspaceQuery(ctx, s1.ID, ref, string(validDoc))
 	if err == nil || !strings.Contains(err.Error(), "query failed") {
@@ -410,7 +410,7 @@ type mockExecutorRunner struct {
 	res secureread.Result
 }
 
-func (m *mockExecutorRunner) RunDTQL(ctx context.Context, source string, query []byte, parameters map[string]any) (secureread.Result, error) {
+func (m *mockExecutorRunner) RunTugQL(ctx context.Context, source string, query []byte, parameters map[string]any) (secureread.Result, error) {
 	return m.res, m.err
 }
 

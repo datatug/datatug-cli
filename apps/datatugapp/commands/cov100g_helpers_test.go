@@ -222,10 +222,10 @@ func TestCov100gChatSavedQueryRunAndLookup(t *testing.T) {
 	proj := store.GetProjectStore(id)
 	writer := proj.(datatug.RevisionedQueriesStore)
 
-	dtqlText := "from: {name: Customer}\nlimit: 10\n"
+	tugqlText := "from: {name: Customer}\nlimit: 10\n"
 	_, err := writer.PutQuery(ctx, &datatug.QueryDefWithFolderPath{QueryDef: datatug.QueryDef{
 		ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "customers", Title: "Customers"}},
-		Type:        datatug.QueryTypeDTQL, Text: dtqlText,
+		Type:        datatug.QueryTypeTugQL, StructuredBody: true, Text: tugqlText,
 		Targets: []datatug.QueryDefTarget{{Catalog: "mini"}},
 		Parameters: datatug.Parameters{{
 			ID: "CustomerId", Type: "string", IsRequired: true,
@@ -261,10 +261,10 @@ func TestCov100gChatSavedQueryRunAndLookup(t *testing.T) {
 	_, err = svc.RunWithVariables(ctx, "customers", map[string]string{"CustomerId": "1"})
 	require.NoError(t, err)
 
-	_, err = svc.RunDTQLWithVariables(ctx, "customers", map[string]string{"CustomerId": "1"})
+	_, err = svc.RunTugQLWithVariables(ctx, "customers", map[string]string{"CustomerId": "1"})
 	require.NoError(t, err)
 
-	_, err = svc.RunDTQLWithVariables(ctx, "sql-q", nil)
+	_, err = svc.RunTugQLWithVariables(ctx, "sql-q", nil)
 	require.Error(t, err) // wrong type
 
 	// The real HTTP source needs a keyField config this fixture does not
@@ -290,7 +290,7 @@ func TestCov100gChatSavedQueryRunAndLookup(t *testing.T) {
 
 	lookup, err = svc.LookupParameter(ctx, "sql-q", "CustomerId")
 	require.NoError(t, err)
-	assert.Nil(t, lookup) // non-DTQL
+	assert.Nil(t, lookup) // non-TugQL
 
 	// encodeParameterDefault nil + marshal edge
 	s, err := encodeParameterDefault(nil)
@@ -333,7 +333,7 @@ func TestCov100gRunSQLAndHTTPSavedQueryDirect(t *testing.T) {
 		Type:        datatug.QueryTypeSQL, Text: "SELECT CustomerId FROM Customer",
 		Targets: []datatug.QueryDefTarget{{Catalog: "mini"}},
 	}
-	url, err := resolveSQLOrDTQLSourceURL(ctx, proj, projectDir, "local", q)
+	url, err := resolveSQLOrTugQLSourceURL(ctx, proj, projectDir, "local", q)
 	require.NoError(t, err)
 	assert.Contains(t, url, "sqlite://")
 

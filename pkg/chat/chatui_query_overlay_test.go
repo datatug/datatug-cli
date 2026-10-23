@@ -11,7 +11,7 @@ import (
 func TestChatUISlashQuerySingleMatchRunsDirectly(t *testing.T) {
 	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
-	service := &savedQueryStub{queries: []SavedQuery{{ID: "x", Title: "Prague customers", Type: "DTQL"}}}
+	service := &savedQueryStub{queries: []SavedQuery{{ID: "x", Title: "Prague customers", Type: "TugQL"}}}
 	if err := u.SetSavedQueryService(service); err != nil {
 		t.Fatal(err)
 	}

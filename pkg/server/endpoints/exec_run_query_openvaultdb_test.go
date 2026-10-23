@@ -24,13 +24,13 @@ func TestExecRunQuery_OpenVaultDBCatalog(t *testing.T) {
 	deny := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		if r.URL.Path != "/v1/databases/crm/dtql" || r.Header.Get("Authorization") != "Bearer fixture-token" {
+		if r.URL.Path != "/v1/databases/crm/tugql" || r.Header.Get("Authorization") != "Bearer fixture-token" {
 			t.Error("incorrect remote target or credential")
 		}
 		w.Header().Set("Content-Type", "application/json")
 		if deny {
 			w.WriteHeader(http.StatusForbidden)
-			_, _ = w.Write([]byte(`{"error":{"code":"access_denied","authorization":{"apiVersion":"dtql.org/authorization/v1","requestId":"remote-1","mode":"execution","scope":"request","result":"deny","allowed":false,"hypothetical":false,"operations":[{"id":"q1","requestOperationId":"q1","action":"query","resource":{"databaseId":"crm","path":"/Customer"},"result":"deny","restrictionIds":[],"allOf":[],"executionClass":"dtql"}],"layers":[{"layerId":"ovdb","source":{"ownerId":"ovdb","provider":"ovdb","databaseId":"crm","kind":"openvaultdb"},"aclState":"enabled","result":"deny","decisions":[{"operationId":"q1","result":"deny","scope":"operation","restrictionIds":[]}]}],"blockers":[{"operationId":"q1","code":"ACCESS_DENIED","scope":"operation","layerId":"ovdb"}],"coverage":{"evaluation":"complete","disclosure":"full","truncated":false,"unevaluated":[]},"restrictions":[]}}}`))
+			_, _ = w.Write([]byte(`{"error":{"code":"access_denied","authorization":{"apiVersion":"tugql.org/authorization/v1","requestId":"remote-1","mode":"execution","scope":"request","result":"deny","allowed":false,"hypothetical":false,"operations":[{"id":"q1","requestOperationId":"q1","action":"query","resource":{"databaseId":"crm","path":"/Customer"},"result":"deny","restrictionIds":[],"allOf":[],"executionClass":"tugql"}],"layers":[{"layerId":"ovdb","source":{"ownerId":"ovdb","provider":"ovdb","databaseId":"crm","kind":"openvaultdb"},"aclState":"enabled","result":"deny","decisions":[{"operationId":"q1","result":"deny","scope":"operation","restrictionIds":[]}]}],"blockers":[{"operationId":"q1","code":"ACCESS_DENIED","scope":"operation","layerId":"ovdb"}],"coverage":{"evaluation":"complete","disclosure":"full","truncated":false,"unevaluated":[]},"restrictions":[]}}}`))
 			return
 		}
 		_, _ = w.Write([]byte(`{"records":[{"key":"Customer/5","data":{"CustomerId":5,"FirstName":"Alice"}}]}`))

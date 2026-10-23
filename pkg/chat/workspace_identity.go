@@ -4,14 +4,14 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 )
 
 func groupedRecord(record *RecordSet) bool {
 	if record == nil {
 		return false
 	}
-	query, err := dtql.Deserialize([]byte(record.DTQL))
+	query, err := tugql.Deserialize([]byte(record.DTQL))
 	return err == nil && dal.HasAggregation(query)
 }
 
@@ -22,7 +22,7 @@ func (u *ChatUI) inspectionIdentity(g *gridState, record *RecordSet) string {
 	if record == nil || groupedRecord(record) {
 		return fallback
 	}
-	query, err := dtql.Deserialize([]byte(record.DTQL))
+	query, err := tugql.Deserialize([]byte(record.DTQL))
 	if err != nil {
 		return fallback
 	}

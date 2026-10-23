@@ -4,7 +4,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"fmt"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/strongo/aichat/tui/chatshell"
 	"slices"
 	"strings"
@@ -67,7 +67,7 @@ func (u *ChatUI) rememberResult(record RecordSet) {
 		}
 	}
 	if groupedRecord(&record) {
-		if q, err := dtql.Deserialize([]byte(record.DTQL)); err == nil {
+		if q, err := tugql.Deserialize([]byte(record.DTQL)); err == nil {
 			var names []string
 			for _, field := range q.GroupBy() {
 				names = append(names, field.String())

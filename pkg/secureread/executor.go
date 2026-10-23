@@ -6,7 +6,7 @@ import (
 	"io"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/dal-go/dalgo2http"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
@@ -84,10 +84,10 @@ func (e *Executor) runStructured(ctx context.Context, sourceURL string, query da
 	return result, nil
 }
 
-// RunDTQL deserializes a DTQL-YAML document (dal-go/dalgo/dtql.Deserialize)
+// RunDTQL deserializes a DTQL-YAML document (dal-go/dalgo/tugql.Deserialize)
 // and executes it exactly like RunStructured (REQ:dtql-query-type).
 func (e *Executor) RunDTQL(ctx context.Context, sourceURL string, dtqlDoc []byte, variables map[string]any) (Result, error) {
-	query, err := dtql.Deserialize(dtqlDoc)
+	query, err := tugql.Deserialize(dtqlDoc)
 	if err != nil {
 		return Result{}, fmt.Errorf("secureread: parse DTQL: %w", err)
 	}

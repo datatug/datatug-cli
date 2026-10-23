@@ -13,7 +13,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/queryops"
 	"github.com/datatug/datatug-cli/pkg/resultops"
 	"github.com/datatug/datatug-cli/pkg/secureread"
@@ -139,7 +139,7 @@ func TestCoverage100_FinalPush_ResultColumnsAndAgent(t *testing.T) {
 			dal.Column{Expression: dal.NewFieldRef("i", "CustomerId")},
 			dal.Column{Expression: dal.NewAggregate("SUM", false, dal.NewFieldRef("i", "CustomerId"))},
 		)
-	docSum, _ := dtql.Serialize(qSum)
+	docSum, _ := tugql.Serialize(qSum)
 	_, _, err = resultColumnQuery(RecordSet{DTQL: string(docSum)})
 	t.Logf("line 143 err: %v, doc: %s", err, string(docSum))
 	if err == nil {
@@ -154,7 +154,7 @@ func TestCoverage100_FinalPush_ResultColumnsAndAgent(t *testing.T) {
 			dal.Column{Expression: dal.NewFieldRef("i", "CustomerId")},
 			dal.Column{Expression: dal.NewAggregate(dal.COUNT, false)},
 		)
-	docCount0, _ := dtql.Serialize(qCount0)
+	docCount0, _ := tugql.Serialize(qCount0)
 	if _, _, err := resultColumnQuery(RecordSet{DTQL: string(docCount0)}); err == nil {
 		t.Fatal("expected unsupported COUNT expression error")
 	}
@@ -167,7 +167,7 @@ func TestCoverage100_FinalPush_ResultColumnsAndAgent(t *testing.T) {
 			dal.Column{Expression: dal.NewFieldRef("i", "CustomerId")},
 			dal.Column{Expression: dal.NewAggregate(dal.COUNT, false, dal.NewConstant("constant"))},
 		)
-	docCountConst, _ := dtql.Serialize(qCountConst)
+	docCountConst, _ := tugql.Serialize(qCountConst)
 	if _, _, err := resultColumnQuery(RecordSet{DTQL: string(docCountConst)}); err == nil {
 		t.Fatal("expected unsupported COUNT operand error")
 	}
@@ -180,7 +180,7 @@ func TestCoverage100_FinalPush_ResultColumnsAndAgent(t *testing.T) {
 			dal.Column{Expression: dal.NewFieldRef("i", "CustomerId")},
 			dal.Column{Expression: dal.NewAggregate(dal.COUNT, false, dal.NewFieldRef("i", "CustomerId"), dal.NewFieldRef("i", "InvoiceId"))},
 		)
-	docCountOrdered, _ := dtql.Serialize(qCountOrdered)
+	docCountOrdered, _ := tugql.Serialize(qCountOrdered)
 	if _, _, err := resultColumnQuery(RecordSet{DTQL: string(docCountOrdered)}); err == nil {
 		t.Fatal("expected ordered COUNT error")
 	}
@@ -192,7 +192,7 @@ func TestCoverage100_FinalPush_ResultColumnsAndAgent(t *testing.T) {
 		SelectColumns(
 			dal.Column{Expression: dal.NewConstant("computed")},
 		)
-	docConstCol, _ := dtql.Serialize(qConstCol)
+	docConstCol, _ := tugql.Serialize(qConstCol)
 	if _, _, err := resultColumnQuery(RecordSet{DTQL: string(docConstCol)}); err == nil {
 		t.Fatal("expected computed projection error")
 	}
@@ -204,7 +204,7 @@ func TestCoverage100_FinalPush_ResultColumnsAndAgent(t *testing.T) {
 		SelectColumns(
 			dal.Column{Expression: dal.NewFieldRef("i", "CustomerId")},
 		)
-	docConstGroup, _ := dtql.Serialize(qConstGroup)
+	docConstGroup, _ := tugql.Serialize(qConstGroup)
 	if _, _, err := resultColumnQuery(RecordSet{DTQL: string(docConstGroup)}); err == nil {
 		t.Fatal("expected ambiguous groupBy error")
 	}
@@ -249,7 +249,7 @@ func TestCoverage100_FinalPush_ResultColumnsAndAgent(t *testing.T) {
 			dal.Column{Expression: dal.NewFieldRef("i", "InvoiceId")},
 			dal.Column{Expression: dal.NewAggregate(dal.COUNT, false, dal.NewFieldRef("i", "InvoiceId")), Alias: "c"},
 		)
-	docNotGrouped, _ := dtql.Serialize(qNotGrouped)
+	docNotGrouped, _ := tugql.Serialize(qNotGrouped)
 	parentNotGrouped := parent
 	parentNotGrouped.DTQL = string(docNotGrouped)
 	rowsNotGrouped, _ := discoverResultColumns(parentNotGrouped, meta, admitted)
@@ -276,7 +276,7 @@ func TestCoverage100_FinalPush_ResultColumnsAndAgent(t *testing.T) {
 			dal.Column{Expression: dal.NewFieldRef("i", "CustomerId")},
 			dal.Column{Expression: dal.NewAggregate(dal.COUNT, false, dal.NewFieldRef("i", "CustomerId"))},
 		)
-	docNoAliasAgg, _ := dtql.Serialize(qNoAliasAgg)
+	docNoAliasAgg, _ := tugql.Serialize(qNoAliasAgg)
 	parentNoAlias := parent
 	parentNoAlias.DTQL = string(docNoAliasAgg)
 	rowsNoAlias, _ := discoverResultColumns(parentNoAlias, meta, admitted)
@@ -299,7 +299,7 @@ func TestCoverage100_FinalPush_ResultColumnsAndAgent(t *testing.T) {
 			dal.Column{Expression: dal.NewFieldRef("Customer", "CustomerId")},
 			dal.Column{Expression: dal.NewFieldRef("Customer", "CustomerId"), Alias: "Customer_FirstName"},
 		)
-	docCollision, _ := dtql.Serialize(qCollision)
+	docCollision, _ := tugql.Serialize(qCollision)
 	parentCollision := parent
 	parentCollision.DTQL = string(docCollision)
 	rowsCollision, _ := discoverResultColumns(parentCollision, meta, admitted)
@@ -423,7 +423,7 @@ func TestCoverage100_FinalPush_ResultOperationsAndDerived(t *testing.T) {
 	}
 
 	// line 88 & 103: deterministicOriginal
-	qTest, _ := dtql.Deserialize([]byte(rec.DTQL))
+	qTest, _ := tugql.Deserialize([]byte(rec.DTQL))
 	u.catalog.Objects = []ProjectObject{{
 		Reference:  ContextReference{SourceID: "other-db", ObjectID: "users"},
 		PrimaryKey: []string{"id"},

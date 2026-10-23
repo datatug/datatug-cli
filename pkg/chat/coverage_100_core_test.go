@@ -13,7 +13,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/strongo/aichat/ai"
 )
@@ -397,7 +397,7 @@ func TestCoverageWorkspaceQueryBranches(t *testing.T) {
 
 	// Query execution failure
 	validQuery := dal.From(dal.NewQualifiedRootCollectionRef("main", "users", "")).NewQuery().Limit(5).SelectColumns()
-	validDoc, _ := dtql.Serialize(validQuery)
+	validDoc, _ := tugql.Serialize(validQuery)
 	fakeExec.err = errors.New("simulated execution error")
 	_, err = chat.executeWorkspaceQuery(ctx, s1.ID, ref, string(validDoc))
 	if err == nil || !strings.Contains(err.Error(), "query failed") {

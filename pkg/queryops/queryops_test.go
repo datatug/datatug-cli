@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 )
 
 const simpleQuery = `from: {name: Sales, alias: s}
@@ -20,11 +20,11 @@ columns: [{field: category, source: s, as: category}, {field: total, source: s, 
 
 func parsePreview(t *testing.T, preview Preview) dal.StructuredQuery {
 	t.Helper()
-	query, err := dtql.Deserialize([]byte(preview.DTQL))
+	query, err := tugql.Deserialize([]byte(preview.DTQL))
 	if err != nil {
 		t.Fatalf("preview did not deserialize: %v\n%s", err, preview.DTQL)
 	}
-	encoded, err := dtql.Serialize(query)
+	encoded, err := tugql.Serialize(query)
 	if err != nil || !bytes.Equal(encoded, []byte(preview.DTQL)) {
 		t.Fatalf("preview not canonical/exact: %v\n%s\n%s", err, encoded, preview.DTQL)
 	}
@@ -56,7 +56,7 @@ func TestDeriveMatchingSourceGroupKeepsSourceFilterParametersAndBoundsOutput(t *
 	if len(query.Columns()) != 2 || query.Columns()[1].Alias != "count" || query.Limit() == 0 {
 		t.Fatalf("group/count projection or bound = %+v", query.Columns())
 	}
-	original, err := dtql.Deserialize([]byte(simpleQuery))
+	original, err := tugql.Deserialize([]byte(simpleQuery))
 	if err != nil {
 		t.Fatal(err)
 	}

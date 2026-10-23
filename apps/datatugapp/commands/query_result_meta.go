@@ -9,7 +9,7 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/chat"
 	"github.com/datatug/datatug-cli/pkg/joinmeta"
@@ -80,7 +80,7 @@ func schemaOr(schema, driver string) string {
 // columns that read one source's field directly.
 func describeDTQL(ctx context.Context, text string, columns []string, sources dtqlSources) resultDescription {
 	description := resultDescription{declared: map[string]string{}, facts: map[string]queryresults.ColumnFacts{}}
-	query, err := dtql.Deserialize([]byte(text))
+	query, err := tugql.Deserialize([]byte(text))
 	if err != nil {
 		description.unavailable = queryresults.Unavailable{Participants: queryresults.UnavailableUnreadable, Related: queryresults.UnavailableUnreadable, DeclaredTypes: queryresults.UnavailableUnreadable}
 		return description

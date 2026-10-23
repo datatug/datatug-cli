@@ -17,7 +17,7 @@ import (
 
 	godbf "github.com/LindsayBradford/go-dbf"
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -540,13 +540,13 @@ func TestFinalStretch_BookmarkAndJoin(t *testing.T) {
 	}
 
 	// prepareJoinProjection baseColumns empty
-	qSingle, _ := dtql.Deserialize([]byte("from: {name: users}\n"))
+	qSingle, _ := tugql.Deserialize([]byte("from: {name: users}\n"))
 	if _, err := prepareJoinProjection(qSingle, ForeignKeySnapshot{Columns: map[string][]string{}}, JoinCandidate{Target: RelationInstance{Relation: "orders"}}, "orders"); err == nil {
 		t.Fatal("expected error when baseColumns empty")
 	}
 
 	// queryHasAggregate binary right and order expression
-	qBase, _ := dtql.Deserialize([]byte("from: {name: t}\ncolumns: [{field: a}]\n"))
+	qBase, _ := tugql.Deserialize([]byte("from: {name: t}\ncolumns: [{field: a}]\n"))
 	qAggOrder := joinPreparedQuery{
 		StructuredQuery: qBase,
 		order: []dal.OrderExpression{

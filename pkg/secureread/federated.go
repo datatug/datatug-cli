@@ -7,8 +7,8 @@ import (
 	"sync"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
 	"github.com/dal-go/dalgo/recordset"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 )
 
@@ -70,7 +70,7 @@ func (s *FederatedStream) Limitations() []Limitation {
 
 // StreamFederatedDTQL exposes the secured DALgo reader without collecting rows.
 func (e *Executor) StreamFederatedDTQL(ctx context.Context, document []byte, sourceURLs map[string]string, variables map[string]any) (*FederatedStream, error) {
-	query, err := dtql.Deserialize(document)
+	query, err := tugql.Deserialize(document)
 	if err != nil {
 		return nil, fmt.Errorf("parse federated DTQL: %w", err)
 	}

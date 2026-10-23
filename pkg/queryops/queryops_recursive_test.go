@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/dal-go/dalgo2sql"
 	"github.com/dal-go/dalgo2sqlite"
 )
@@ -56,7 +56,7 @@ INSERT INTO Sales VALUES
 
 func executeRecursivePreview(t *testing.T, db *dalgo2sqlite.Database, preview Preview) []map[string]any {
 	t.Helper()
-	query, err := dtql.Deserialize([]byte(preview.DTQL))
+	query, err := tugql.Deserialize([]byte(preview.DTQL))
 	if err != nil {
 		t.Fatalf("deserialize preview: %v\n%s", err, preview.DTQL)
 	}

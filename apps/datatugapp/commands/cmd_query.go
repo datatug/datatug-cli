@@ -12,7 +12,7 @@ import (
 	"github.com/dal-go/dalgo/access"
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/dal-go/dalgo2http"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
@@ -397,7 +397,7 @@ func queryFailure(err error) error {
 func buildQuery(o queryOptions, stdin io.Reader) (dal.Query, string, error) {
 	if o.from != "" {
 		query := fromQuery(o, nil)
-		text, _ := dtql.Serialize(query.(dal.StructuredQuery))
+		text, _ := tugql.Serialize(query.(dal.StructuredQuery))
 		return query, string(text), nil
 	}
 	var (
@@ -415,7 +415,7 @@ func buildQuery(o queryOptions, stdin io.Reader) (dal.Query, string, error) {
 	if strings.TrimSpace(string(content)) == "" {
 		return nil, "", Exit(fmt.Sprintf("query %s is empty", o.file), exitCodeUsage)
 	}
-	query, err := dtql.Deserialize(content)
+	query, err := tugql.Deserialize(content)
 	if err != nil {
 		return nil, "", Exit(fmt.Sprintf("query %s: %v", o.file, err), exitCodeUsage)
 	}

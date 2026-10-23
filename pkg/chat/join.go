@@ -10,13 +10,13 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/joinmeta"
 )
 
 var (
-	dtqlSerialize      = dtql.Serialize
-	dtqlDeserialize    = dtql.Deserialize
+	dtqlSerialize      = tugql.Serialize
+	dtqlDeserialize    = tugql.Deserialize
 	sqliteQueryContext = func(db *sql.DB, ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 		return db.QueryContext(ctx, query, args...)
 	}

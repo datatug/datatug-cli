@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/dal-go/dalgo2http"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/api"
@@ -468,7 +468,7 @@ func savedQueryDB(ctx context.Context, store datatug.ProjectStore, projectDir, p
 // database of a federated DTQL query, else the one it is resolved to.
 func savedQueryDatabase(ctx context.Context, store datatug.ProjectStore, envID string, queryDef *datatug.QueryDef) (string, error) {
 	if queryDef.Type == datatug.QueryTypeDTQL {
-		if parsed, err := dtql.Deserialize([]byte(queryDef.Text)); err == nil {
+		if parsed, err := tugql.Deserialize([]byte(queryDef.Text)); err == nil {
 			if root, ok := parsed.From().Base().(dal.CollectionRef); ok && root.Database() != "" {
 				return root.Database(), nil
 			}

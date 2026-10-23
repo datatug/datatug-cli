@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 )
 
 var (
@@ -119,7 +119,7 @@ func parseOriginal(raw string) (dal.StructuredQuery, error) {
 	if strings.TrimSpace(raw) == "" {
 		return nil, fmt.Errorf("%w: empty DTQL", ErrUnsupported)
 	}
-	query, err := dtql.Deserialize([]byte(raw))
+	query, err := tugql.Deserialize([]byte(raw))
 	if err != nil || query.From() == nil || dal.ValidateJoinTree(query.From()) != nil {
 		return nil, fmt.Errorf("%w: invalid original DTQL: %v", ErrUnsupported, err)
 	}
@@ -127,14 +127,14 @@ func parseOriginal(raw string) (dal.StructuredQuery, error) {
 }
 
 func serializePreview(query dal.StructuredQuery, columns []string, scope Scope) (Preview, error) {
-	encoded, err := dtql.Serialize(query)
+	encoded, err := tugql.Serialize(query)
 	var parsed dal.StructuredQuery
 	if err == nil {
-		parsed, err = dtql.Deserialize(encoded)
+		parsed, err = tugql.Deserialize(encoded)
 	}
 	var roundTrip []byte
 	if err == nil {
-		roundTrip, err = dtql.Serialize(parsed)
+		roundTrip, err = tugql.Serialize(parsed)
 	}
 	if err != nil || !bytes.Equal(encoded, roundTrip) {
 		return Preview{}, fmt.Errorf("%w: derived query cannot be represented as DTQL: %v", ErrUnsupported, err)

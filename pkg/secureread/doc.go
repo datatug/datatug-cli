@@ -18,7 +18,7 @@
 //     AND-ed into the query, field allow-lists redact each row, and a query
 //     that explicitly references a field no policy allows is refused with
 //     ErrAccessDenied rather than silently emptied (AC hidden-column-refused).
-//   - RunDTQL deserializes a DTQL-YAML document (dal-go/dalgo/dtql) and runs
+//   - RunDTQL deserializes a DTQL-YAML document (dal-go/dalgo/tugql) and runs
 //     it exactly like RunStructured (REQ:dtql-query-type).
 //   - RunNativeSQL executes raw SQL text read-only. DALgo cannot rewrite text
 //     it does not parse, so per REQ:opaque-sql-limitation (assumption A2 in

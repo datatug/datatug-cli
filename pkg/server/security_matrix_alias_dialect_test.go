@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
 
@@ -129,9 +129,9 @@ func TestRunStructured_AliasedCustomerInvoices_RowRestrictionComposesWithAlias(t
 	}
 	executor := secureread.NewExecutor(session)
 
-	query, err := dtql.Deserialize([]byte(aliasDialectCustomerInvoicesDTQL))
+	query, err := tugql.Deserialize([]byte(aliasDialectCustomerInvoicesDTQL))
 	if err != nil {
-		t.Fatalf("dtql.Deserialize(customer-invoices): %v", err)
+		t.Fatalf("tugql.Deserialize(customer-invoices): %v", err)
 	}
 
 	sourceURL := "sqlite://" + dbPath

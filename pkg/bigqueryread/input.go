@@ -9,7 +9,7 @@ import (
 	"reflect"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	bigquery "github.com/dal-go/dalgo2bigquery"
 )
 
@@ -18,7 +18,7 @@ const MaxInputBytes = 256 << 10
 var (
 	ErrInput        = errors.New("invalid BigQuery input: expected bounded typed JSON")
 	jsonMarshal     = json.Marshal
-	dtqlDeserialize = dtql.Deserialize
+	dtqlDeserialize = tugql.Deserialize
 )
 
 // Input is an explicit scalar DTQL query and reviewed native source profile.

@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 )
 
 func (r relatedRecord) target() RelationInstance {
@@ -28,7 +28,7 @@ func (a ForeignKeyJoinApplication) PreviewRelationships(ctx context.Context, rec
 	if !storedSourceNames(record.Source, a.Source) || a.Executor == nil {
 		return nil, fmt.Errorf("related records are unavailable for this source")
 	}
-	query, err := dtql.Deserialize([]byte(record.DTQL))
+	query, err := tugql.Deserialize([]byte(record.DTQL))
 	if err != nil {
 		return nil, fmt.Errorf("this result has no authoritative relation provenance")
 	}

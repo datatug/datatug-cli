@@ -9,7 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/queryops"
 	"github.com/datatug/datatug-cli/pkg/resultops"
 	"github.com/datatug/datatug-cli/pkg/secureread"
@@ -104,7 +104,7 @@ func deterministicOriginal(catalog ProjectCatalog, record RecordSet, query dal.S
 }
 
 func deriveResultPreview(catalog ProjectCatalog, record RecordSet, operation derivedOperation) (queryops.Preview, error) {
-	query, err := dtql.Deserialize([]byte(record.DTQL))
+	query, err := tugql.Deserialize([]byte(record.DTQL))
 	if err != nil {
 		return queryops.Preview{}, fmt.Errorf("original DTQL is unavailable")
 	}
@@ -260,7 +260,7 @@ func (o *resultOperationOverlay) reviewServer() tea.Cmd {
 		o.err = sanitizeTerminalText(err.Error())
 		return nil
 	}
-	query, _ := dtql.Deserialize([]byte(o.record.DTQL))
+	query, _ := tugql.Deserialize([]byte(o.record.DTQL))
 	scope := "Matching source rows · input count unknown\nSource, joins, WHERE and parameters retained; original ordering replaced.\nOriginal LIMIT is the new output cap; OFFSET applies after this operation."
 	if o.originalOutput {
 		scope = "Original query output · input count unknown\nOriginal projection, LIMIT, OFFSET, GROUP BY, aggregates and HAVING remain inside the subquery.\nThis operation transforms those output rows, including aggregate rows."

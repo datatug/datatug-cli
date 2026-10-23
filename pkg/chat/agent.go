@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/chat/narrowing"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
@@ -653,7 +653,7 @@ func (c *AIConversation) runDTQL(ctx context.Context, executor DTQLExecutor, sou
 		c.capture(ctx, QueryResult{Title: title, Err: err})
 		return runDTQLResponse{Title: title, Error: "DTQL must not be empty"}, nil
 	}
-	query, err := dtql.Deserialize([]byte(doc))
+	query, err := tugql.Deserialize([]byte(doc))
 	if err != nil {
 		wrapped := fmt.Errorf("invalid DTQL: %w", err)
 		c.capture(ctx, QueryResult{Title: title, DTQL: doc, Err: wrapped})

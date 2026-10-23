@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 )
 
 type inspectorColumnMeta struct {
@@ -32,12 +32,12 @@ func columnMetaFor(catalog ProjectCatalog, record *RecordSet, name string) inspe
 		if record.DTQL == "" {
 			return meta
 		}
-		query, err := dtql.Deserialize([]byte(record.DTQL))
+		query, err := tugql.Deserialize([]byte(record.DTQL))
 		if err != nil {
 			return meta
 		}
 		// relationInstances' own walk always appends at least the root FROM
-		// relation (dtql.Deserialize requires a FROM clause to succeed at
+		// relation (tugql.Deserialize requires a FROM clause to succeed at
 		// all), so instances is never empty for any document that reached
 		// this point -- the r5 fix round (#289) removed that zero-instance
 		// guard as provably unreachable, and it stays removed.

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 )
 
 // joinAttachedQuery extends a fresh model-authored single-table query through
@@ -18,7 +18,7 @@ func (c *SessionChat) joinAttachedQuery(ctx context.Context, session ChatSession
 	if !ok || query.Source != c.source {
 		return query, false, nil
 	}
-	parsed, err := dtql.Deserialize([]byte(query.DTQL))
+	parsed, err := tugql.Deserialize([]byte(query.DTQL))
 	if err != nil {
 		return query, false, err
 	}

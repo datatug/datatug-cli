@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/pkg/queryops"
 	"github.com/datatug/datatug-cli/pkg/resultops"
@@ -246,7 +246,7 @@ func TestExactAggregateRefusesInnerArithmeticAndUnboundMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Check preview serialization never removes a parameter or changes originals.
-	if _, err := dtql.Deserialize([]byte(exactOriginal)); err != nil {
+	if _, err := tugql.Deserialize([]byte(exactOriginal)); err != nil {
 		t.Fatal(err)
 	}
 }

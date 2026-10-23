@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/dal-go/dalgo2http"
 	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
@@ -33,7 +33,7 @@ func TestCoverage100_Recursive_ErrorBranches(t *testing.T) {
 		t.Fatal("expected invalid variable error")
 	}
 
-	// 2. Invalid document (fails dtql.Deserialize)
+	// 2. Invalid document (fails tugql.Deserialize)
 	if _, err := e.RunRecursiveDTQL(ctx, "sqlite://file", []byte("::: invalid"), nil); err == nil {
 		t.Fatal("expected deserialize error")
 	}
@@ -64,7 +64,7 @@ func TestCoverage100_Recursive_ErrorBranches(t *testing.T) {
 
 	// 6. Derived source with outer joins
 	subqueryWithJoins := "from: {query: {from: {name: Item}, columns: [{field: Id}], as: sub}, joins: [{from: {name: Other}, on: [{left: {field: Id, source: sub}, op: '==', right: {field: OtherId, source: Other}}]}]}\ncolumns: [{field: Id}]\n"
-	if q, err := dtql.Deserialize([]byte(subqueryWithJoins)); err == nil {
+	if q, err := tugql.Deserialize([]byte(subqueryWithJoins)); err == nil {
 		if _, err := bindRecursiveParameters(q, nil); err == nil {
 			t.Fatal("expected outer joins unsupported error")
 		}
@@ -74,7 +74,7 @@ func TestCoverage100_Recursive_ErrorBranches(t *testing.T) {
 
 	// 7. Inner query parameter binding error
 	subqueryWithBadParam := "from: {query: {from: {name: Item}, columns: [{field: Id}], where: {op: '==', left: {param: p}, right: {field: Id}}, as: sub}}\ncolumns: [{field: Id}]\n"
-	if q, err := dtql.Deserialize([]byte(subqueryWithBadParam)); err == nil {
+	if q, err := tugql.Deserialize([]byte(subqueryWithBadParam)); err == nil {
 		if _, err := bindRecursiveParameters(q, map[string]any{"p": 1}); err == nil {
 			t.Fatal("expected inner bind error")
 		}
@@ -129,7 +129,7 @@ func TestCoverage100_Recursive_SuccessAndLeafReader(t *testing.T) {
 
 	// 3. Subquery execution and recursiveBoundQuery.From()
 	subDoc := "from: {query: {from: {name: Item}, columns: [{field: Id}, {field: Category}], as: sub}}\ncolumns: [{field: Id}]\n"
-	subQuery, err := dtql.Deserialize([]byte(subDoc))
+	subQuery, err := tugql.Deserialize([]byte(subDoc))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestCoverage100_Recursive_SuccessAndLeafReader(t *testing.T) {
 		t.Fatal("expected subQuery to not have recursive aggregation")
 	}
 	aggSubDoc := "from: {query: {from: {name: Item}, columns: [{field: Category}], groupBy: [{field: Category}], as: sub}}\ncolumns: [{field: Category}]\n"
-	aggSubQ, _ := dtql.Deserialize([]byte(aggSubDoc))
+	aggSubQ, _ := tugql.Deserialize([]byte(aggSubDoc))
 	if !recursiveAggregation(aggSubQ) {
 		t.Fatal("expected recursiveAggregation to be true for inner query with groupBy")
 	}
@@ -187,19 +187,19 @@ func TestCoverage100_Recursive_SuccessAndLeafReader(t *testing.T) {
 	}
 
 	// Join count != 0
-	joinedQ, _ := dtql.Deserialize([]byte("from: {name: Item, joins: [{from: {name: Other}}]}\ncolumns: [{field: Id}]\n"))
+	joinedQ, _ := tugql.Deserialize([]byte("from: {name: Item, joins: [{from: {name: Other}}]}\ncolumns: [{field: Id}]\n"))
 	if _, err := leaf.ExecuteQueryToRecordsReader(ctx, joinedQ); err == nil {
 		t.Fatal("expected error for join query")
 	}
 
 	// Base not collection ref
-	querySourceQ, _ := dtql.Deserialize([]byte(subDoc))
+	querySourceQ, _ := tugql.Deserialize([]byte(subDoc))
 	if _, err := leaf.ExecuteQueryToRecordsReader(ctx, querySourceQ); err == nil {
 		t.Fatal("expected error for non-collection ref base in leaf")
 	}
 
 	// Base collection ref with Database != ""
-	namedDbQ, _ := dtql.Deserialize([]byte("from: {database: db1, name: Item}\ncolumns: [{field: Id}]\n"))
+	namedDbQ, _ := tugql.Deserialize([]byte("from: {database: db1, name: Item}\ncolumns: [{field: Id}]\n"))
 	if _, err := leaf.ExecuteQueryToRecordsReader(ctx, namedDbQ); err == nil {
 		t.Fatal("expected error for named database")
 	}
@@ -269,11 +269,11 @@ func TestCoverage100_ValidateRecursiveQuery(t *testing.T) {
 	}
 
 	// SUM / AVERAGE aggregation function in columns
-	sumQ, _ := dtql.Deserialize([]byte("from: {name: Item}\ncolumns: [{expression: {function: SUM, args: [{field: Id}]}}]\n"))
+	sumQ, _ := tugql.Deserialize([]byte("from: {name: Item}\ncolumns: [{expression: {function: SUM, args: [{field: Id}]}}]\n"))
 	if err := ValidateRecursiveQuery(sumQ); err == nil {
 		t.Fatal("expected error for SUM in query")
 	}
-	avgQ, _ := dtql.Deserialize([]byte("from: {name: Item}\ncolumns: [{expression: {function: AVERAGE, args: [{field: Id}]}}]\n"))
+	avgQ, _ := tugql.Deserialize([]byte("from: {name: Item}\ncolumns: [{expression: {function: AVERAGE, args: [{field: Id}]}}]\n"))
 	if err := ValidateRecursiveQuery(avgQ); err == nil {
 		t.Fatal("expected error for AVERAGE in query")
 	}
@@ -294,7 +294,7 @@ func TestCoverage100_ValidateRecursiveQuery(t *testing.T) {
 	}
 
 	// Aggregate with arg error (SUM inside COUNT)
-	countSumQ, _ := dtql.Deserialize([]byte("from: {name: Item}\ncolumns: [{expression: {function: COUNT, args: [{expression: {function: SUM, args: [{field: Id}]}}]}}]\n"))
+	countSumQ, _ := tugql.Deserialize([]byte("from: {name: Item}\ncolumns: [{expression: {function: COUNT, args: [{expression: {function: SUM, args: [{field: Id}]}}]}}]\n"))
 	if err := ValidateRecursiveQuery(countSumQ); err == nil {
 		t.Fatal("expected error for nested SUM in COUNT")
 	}
@@ -359,13 +359,13 @@ func TestCoverage100_ValidateRecursiveQuery(t *testing.T) {
 	}
 
 	// Joins error
-	joinQ, _ := dtql.Deserialize([]byte("from: {name: Item, joins: [{from: {name: Other}}]}\ncolumns: [{field: Id}]\n"))
+	joinQ, _ := tugql.Deserialize([]byte("from: {name: Item, joins: [{from: {name: Other}}]}\ncolumns: [{field: Id}]\n"))
 	if err := ValidateRecursiveQuery(joinQ); err == nil {
 		t.Fatal("expected error for joins in ValidateRecursiveQuery")
 	}
 
 	// *dal.QuerySource
-	validInner, _ := dtql.Deserialize([]byte("from: {name: Item}\ncolumns: [{field: Id}]\n"))
+	validInner, _ := tugql.Deserialize([]byte("from: {name: Item}\ncolumns: [{field: Id}]\n"))
 	qs := dal.NewQuerySource(validInner, "sub")
 	ptrQsQ := dal.NewQueryBuilder(dal.From(&qs)).SelectColumns(dal.Column{Expression: dal.NewFieldRef("Id", "")})
 	if err := ValidateRecursiveQuery(ptrQsQ); err != nil {
@@ -875,7 +875,7 @@ func TestCoverage100_RemainingFinalBlocks(t *testing.T) {
 	e := NewExecutor(Session{Unrestricted: true})
 	source := exactSQLite(t)
 	validDoc := "from: {name: Item}\ncolumns: [{field: Id}]\n"
-	origDTQL, err := dtql.Deserialize([]byte(exactOriginal))
+	origDTQL, err := tugql.Deserialize([]byte(exactOriginal))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -947,7 +947,7 @@ func TestCoverage100_RemainingFinalBlocks(t *testing.T) {
 	}
 
 	// 8. recursive.go:237 (joins in ValidateRecursiveQuery)
-	qWithJoin, err := dtql.Deserialize([]byte("from: {name: Item, joins: [{from: {name: Other}, on: [{left: {field: a, source: Item}, op: '==', right: {field: b, source: Other}}]}]}\ncolumns: [{field: a, source: Item}]\n"))
+	qWithJoin, err := tugql.Deserialize([]byte("from: {name: Item, joins: [{from: {name: Other}, on: [{left: {field: a, source: Item}, op: '==', right: {field: b, source: Other}}]}]}\ncolumns: [{field: a, source: Item}]\n"))
 	if err != nil {
 		t.Fatalf("deserialize join query: %v", err)
 	}
@@ -1098,7 +1098,7 @@ func TestCoverage100_RemainingFinalBlocks(t *testing.T) {
 	dtqlSerialize = func(q dal.StructuredQuery) ([]byte, error) {
 		return []byte(prevBase.DTQL), nil
 	}
-	qOrderBad, err := dtql.Deserialize([]byte(prevBase.DTQL))
+	qOrderBad, err := tugql.Deserialize([]byte(prevBase.DTQL))
 	if err != nil {
 		t.Fatal(err)
 	}

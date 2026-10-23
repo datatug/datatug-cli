@@ -11,7 +11,7 @@ import (
 
 	"github.com/dal-go/dalgo/condeval"
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/dal-go/dalgo2http"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/api"
@@ -319,7 +319,7 @@ func federatedDTQLURLs(ctx context.Context, projStore datatug.ProjectStore, proj
 // parseFederatedDTQL parses the query once and resolves the source URL of each
 // named database it references, returning both so callers need not re-parse.
 func parseFederatedDTQL(ctx context.Context, projStore datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef) (dal.StructuredQuery, map[string]string, error) {
-	parsed, err := dtql.Deserialize([]byte(queryDef.Text))
+	parsed, err := tugql.Deserialize([]byte(queryDef.Text))
 	if err != nil {
 		return nil, nil, err
 	}

@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 )
 
 func httpResponseChanged(current, previous HTTPResponse) bool {
@@ -41,7 +41,7 @@ func (c *SessionChat) RefreshRecordSet(ctx context.Context, sessionID, recordSet
 		return ChatSession{}, fmt.Errorf("the saved data source is no longer available")
 	}
 	doc := strings.TrimSpace(record.DTQL)
-	query, err := dtql.Deserialize([]byte(doc))
+	query, err := tugql.Deserialize([]byte(doc))
 	if err != nil || query.Limit() < 1 || query.Limit() > maxRows {
 		return ChatSession{}, fmt.Errorf("the saved query is no longer valid")
 	}

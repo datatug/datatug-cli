@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/apicontract"
@@ -143,7 +143,7 @@ func proveNativeFactsBinding(ctx context.Context, queryID string, side apicontra
 	if err != nil {
 		return "", newSourceUnavailable("the saved structured query document is unavailable")
 	}
-	query, err := dtql.Deserialize([]byte(document))
+	query, err := tugql.Deserialize([]byte(document))
 	if err != nil {
 		return "", newSourceUnavailable("the saved structured query cannot prove native set binding")
 	}

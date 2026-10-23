@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dal-go/dalgo/dtql/authorization"
+	"github.com/dal-go/dalgo/tugql/authorization"
 )
 
 const (

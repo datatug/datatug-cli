@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/google/uuid"
 )
@@ -615,7 +615,7 @@ func TestFinalRound_JoinCompleteBranches(t *testing.T) {
 
 	// 5. prepareJoinProjection wildcard errors
 	dtqlDoc := []byte("from:\n  name: a\n  alias: a\n  joins:\n    - from: {name: b, alias: b}\n      on: [{left: {field: id, source: a}, op: '==', right: {field: a_id, source: b}}]\n")
-	qBase, err := dtql.Deserialize(dtqlDoc)
+	qBase, err := tugql.Deserialize(dtqlDoc)
 	if err != nil {
 		t.Fatal(err)
 	}

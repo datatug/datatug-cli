@@ -9,7 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
@@ -208,7 +208,7 @@ func validateCaptureDTQL(text string, params []capturedParameter) (string, error
 	if reason, found := querywrite.CredentialReason(text); found {
 		return "", newInvalidRequest(field, reason)
 	}
-	query, err := dtql.Deserialize([]byte(text))
+	query, err := tugql.Deserialize([]byte(text))
 	if err != nil {
 		return "", newInvalidRequest(field, "does not parse as DTQL: "+err.Error())
 	}

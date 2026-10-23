@@ -9,7 +9,7 @@ import (
 
 	"github.com/dal-go/dalgo/condeval"
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/dal-go/dalgo2sql"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/resultops"
@@ -42,7 +42,7 @@ var (
 		_, err := db.ExecContext(ctx, "PRAGMA query_only = ON")
 		return err
 	}
-	dtqlSerialize                = dtql.Serialize
+	dtqlSerialize                = tugql.Serialize
 	resultopsCapture             = resultops.Capture
 	accesspoliciesRun            = accesspolicies.Run
 	condevalSubstitute           = condeval.Substitute
@@ -50,5 +50,5 @@ var (
 	exactAggregateJSONMarshal    = json.Marshal
 	outputSort                   = func(s resultops.Snapshot, order []resultops.SortKey) ([]int, error) { return s.Sort(order) }
 	dalExecuteRecursiveQuery     = dal.ExecuteRecursiveQuery
-	dtqlDeserialize              = dtql.Deserialize
+	dtqlDeserialize              = tugql.Deserialize
 )

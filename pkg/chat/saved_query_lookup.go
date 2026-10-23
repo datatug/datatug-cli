@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"gopkg.in/yaml.v3"
 )
 
@@ -83,7 +83,7 @@ func DiscoverSavedQueryParameterLookupWithMode(doc []byte, snapshot ForeignKeySn
 	} else if query.Where.Op != "==" && query.Where.Op != "=" {
 		return nil
 	}
-	if _, err := dtql.Deserialize(doc); err != nil {
+	if _, err := tugql.Deserialize(doc); err != nil {
 		return nil
 	}
 	bound := query.Where.Left

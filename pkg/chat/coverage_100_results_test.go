@@ -15,7 +15,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/queryops"
 	"github.com/datatug/datatug-cli/pkg/resultops"
 	"github.com/datatug/datatug-cli/pkg/secureread"
@@ -919,13 +919,13 @@ func TestCoverage100_ResultColumns(t *testing.T) {
 	}
 
 	// columnGroupHas returning false (line 173)
-	qDummy, _ := dtql.Deserialize([]byte("from: {name: users}\ncolumns: [{field: id}]\ngroupBy: [{field: id}]\nlimit: 10\n"))
+	qDummy, _ := tugql.Deserialize([]byte("from: {name: users}\ncolumns: [{field: id}]\ngroupBy: [{field: id}]\nlimit: 10\n"))
 	if columnGroupHas(qDummy, "missing_column") {
 		t.Fatal("expected columnGroupHas to return false")
 	}
 
 	// returnedColumnKeyOutOfRange
-	qParsed, _ := dtql.Deserialize([]byte("from: {name: users}\ncolumns: [{field: id, as: id_alias}]\n"))
+	qParsed, _ := tugql.Deserialize([]byte("from: {name: users}\ncolumns: [{field: id, as: id_alias}]\n"))
 	recOutOfRange := RecordSet{
 		Result: secureread.Result{
 			Rows: []secureread.Row{
@@ -1739,17 +1739,17 @@ func TestCoverage100_ResultOperationsAndDerived(t *testing.T) {
 
 	// deterministicOriginal:
 	// GroupBy: one key not in OrderBy -> false (lines 71-72)
-	qGrpNotOrdered, _ := dtql.Deserialize([]byte("from: {name: users}\ncolumns: [{field: id}, {field: name}]\ngroupBy: [{field: id}, {field: name}]\norderBy: [{field: id}]\nlimit: 10\n"))
+	qGrpNotOrdered, _ := tugql.Deserialize([]byte("from: {name: users}\ncolumns: [{field: id}, {field: name}]\ngroupBy: [{field: id}, {field: name}]\norderBy: [{field: id}]\nlimit: 10\n"))
 	if deterministicOriginal(u.sessions.catalog, *rec, qGrpNotOrdered) {
 		t.Fatal("expected false when group by keys not all ordered")
 	}
 	// GroupBy: all keys ordered -> true (line 75)
-	qGrpOrdered, _ := dtql.Deserialize([]byte("from: {name: users}\ncolumns: [{field: id}, {field: name}]\ngroupBy: [{field: id}, {field: name}]\norderBy: [{field: id}, {field: name}]\nlimit: 10\n"))
+	qGrpOrdered, _ := tugql.Deserialize([]byte("from: {name: users}\ncolumns: [{field: id}, {field: name}]\ngroupBy: [{field: id}, {field: name}]\norderBy: [{field: id}, {field: name}]\nlimit: 10\n"))
 	if !deterministicOriginal(u.sessions.catalog, *rec, qGrpOrdered) {
 		t.Fatal("expected true when all group by keys ordered")
 	}
 	// len(instances) != 1 -> false (line 79)
-	qMultiInst, err := dtql.Deserialize([]byte("from:\n  name: orders\n  alias: orders\n  joins:\n    - from: {name: other, alias: other}\n      on: [{left: {field: user_id, source: orders}, op: '==', right: {field: id, source: other}}]\nlimit: 10\n"))
+	qMultiInst, err := tugql.Deserialize([]byte("from:\n  name: orders\n  alias: orders\n  joins:\n    - from: {name: other, alias: other}\n      on: [{left: {field: user_id, source: orders}, op: '==', right: {field: id, source: other}}]\nlimit: 10\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1764,11 +1764,11 @@ func TestCoverage100_ResultOperationsAndDerived(t *testing.T) {
 			PrimaryKey: []string{"id"},
 		},
 	}
-	qNoOrder, _ := dtql.Deserialize([]byte("from: {name: users}\ncolumns: [{field: id}]\nlimit: 10\n"))
+	qNoOrder, _ := tugql.Deserialize([]byte("from: {name: users}\ncolumns: [{field: id}]\nlimit: 10\n"))
 	if deterministicOriginal(catOnePart, *rec, qNoOrder) {
 		t.Fatal("expected false when PK not ordered")
 	}
-	qOrderPK, _ := dtql.Deserialize([]byte("from: {name: users}\ncolumns: [{field: id}]\norderBy: [{field: id}]\nlimit: 10\n"))
+	qOrderPK, _ := tugql.Deserialize([]byte("from: {name: users}\ncolumns: [{field: id}]\norderBy: [{field: id}]\nlimit: 10\n"))
 	if !deterministicOriginal(catOnePart, *rec, qOrderPK) {
 		t.Fatal("expected true when PK ordered")
 	}

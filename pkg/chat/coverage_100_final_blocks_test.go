@@ -15,7 +15,7 @@ import (
 
 	godbf "github.com/LindsayBradford/go-dbf"
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/xuri/excelize/v2"
@@ -760,7 +760,7 @@ func TestFinalBlocks_Join(t *testing.T) {
 			return nil
 		},
 	}
-	qFrom, _ := dtql.Deserialize([]byte("from: {name: orders}\n"))
+	qFrom, _ := tugql.Deserialize([]byte("from: {name: orders}\n"))
 	if !appExpandTrue.canExpandQuery(ctx, qFrom.From()) {
 		t.Fatal("expected canExpandQuery to return true when CanReadTarget allows all")
 	}
@@ -1123,7 +1123,7 @@ func TestFinalBlocks_Join(t *testing.T) {
 
 	// Multi-relation wildcard (!single) and alias collision loop
 	candMulti := candsValid[0]
-	qMultiJoin, err := dtql.Deserialize([]byte("from:\n  name: orders\n  alias: orders\n  joins:\n    - from: {name: other, alias: other}\n      on: [{left: {field: user_id, source: orders}, op: '==', right: {field: id, source: other}}]\n"))
+	qMultiJoin, err := tugql.Deserialize([]byte("from:\n  name: orders\n  alias: orders\n  joins:\n    - from: {name: other, alias: other}\n      on: [{left: {field: user_id, source: orders}, op: '==', right: {field: id, source: other}}]\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1222,7 +1222,7 @@ func TestFinalBlocks_Join(t *testing.T) {
 	appliedEdge := AppliedJoinEdge{
 		JoinPath: RelationInstanceID("root/0"),
 	}
-	qWithJoin, err := dtql.Deserialize([]byte("from:\n  name: orders\n  alias: orders\n  joins:\n    - from: {name: users, alias: users}\n      on: [{left: {field: user_id, source: orders}, op: '==', right: {field: id, source: users}}]\n"))
+	qWithJoin, err := tugql.Deserialize([]byte("from:\n  name: orders\n  alias: orders\n  joins:\n    - from: {name: users, alias: users}\n      on: [{left: {field: user_id, source: orders}, op: '==', right: {field: id, source: users}}]\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1336,6 +1336,6 @@ func (m *mockChangingFromSource) Base() dal.RecordsetSource {
 }
 
 func qOrdersBase() dal.StructuredQuery {
-	q, _ := dtql.Deserialize([]byte("from: {name: orders}\ncolumns: [{field: id}]\n"))
+	q, _ := tugql.Deserialize([]byte("from: {name: orders}\ncolumns: [{field: id}]\n"))
 	return q
 }

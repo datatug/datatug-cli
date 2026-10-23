@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 )
 
 func objectQueryDocument(object ProjectObject) (string, error) {
@@ -25,7 +25,7 @@ func objectQueryDocument(object ProjectObject) (string, error) {
 	for _, name := range object.Columns {
 		columns = append(columns, dal.Column{Expression: dal.NewFieldRef("", name)})
 	}
-	doc, err := dtql.Serialize(dal.From(collection).NewQuery().Limit(100).SelectColumns(columns...))
+	doc, err := tugql.Serialize(dal.From(collection).NewQuery().Limit(100).SelectColumns(columns...))
 	return string(doc), err
 }
 
@@ -51,7 +51,7 @@ func (c *SessionChat) executeWorkspaceQuery(ctx context.Context, sessionID strin
 	if !ok || c.queryExecutor == nil {
 		return ChatSession{}, fmt.Errorf("this source cannot execute queries")
 	}
-	query, err := dtql.Deserialize([]byte(document))
+	query, err := tugql.Deserialize([]byte(document))
 	if err != nil || query.Limit() < 1 || query.Limit() > maxRows {
 		return ChatSession{}, fmt.Errorf("use a valid DTQL query with a bounded limit (1–%d)", maxRows)
 	}

@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 )
@@ -19,7 +19,7 @@ func (e *Executor) RunRecursiveDTQL(ctx context.Context, sourceURL string, docum
 	if err != nil {
 		return Result{}, err
 	}
-	query, err := dtql.Deserialize(document)
+	query, err := tugql.Deserialize(document)
 	if err != nil {
 		return Result{}, fmt.Errorf("parse recursive DTQL: %w", err)
 	}

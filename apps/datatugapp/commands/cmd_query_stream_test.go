@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	_ "modernc.org/sqlite"
@@ -143,7 +143,7 @@ func TestStreamedSingleSourceJSONLWithHTTPLookup(t *testing.T) {
 		_, _ = io.WriteString(w, `{"data":{"region":"Europe"}}`)
 	}))
 	defer server.Close()
-	query, err := dtql.Deserialize([]byte(streamingLookupDTQL))
+	query, err := tugql.Deserialize([]byte(streamingLookupDTQL))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,21 +202,21 @@ func TestStreamedFederatedCancellationAndOutputError(t *testing.T) {
 }
 
 func TestStreamingShapeAndColumns(t *testing.T) {
-	query, err := dtql.Deserialize([]byte(streamingJoinDTQL))
+	query, err := tugql.Deserialize([]byte(streamingJoinDTQL))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !isBoundedFederatedRowShape(query) {
 		t.Fatal("flat join rejected")
 	}
-	withoutCap, err := dtql.Deserialize([]byte(strings.Replace(streamingJoinDTQL, ", scan: {orderBy: [{field: id}], limit: 10000}", "", 1)))
+	withoutCap, err := tugql.Deserialize([]byte(strings.Replace(streamingJoinDTQL, ", scan: {orderBy: [{field: id}], limit: 10000}", "", 1)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if isBoundedFederatedRowShape(withoutCap) {
 		t.Fatal("uncapped dimension accepted")
 	}
-	withoutStableOrder, err := dtql.Deserialize([]byte(strings.Replace(streamingJoinDTQL, "orderBy: [{field: id}]", "orderBy: [{field: name}]", 1)))
+	withoutStableOrder, err := tugql.Deserialize([]byte(strings.Replace(streamingJoinDTQL, "orderBy: [{field: id}]", "orderBy: [{field: name}]", 1)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ func TestStreamingShapeAndColumns(t *testing.T) {
 	if got := explicitStreamColumns(query); len(got) != 2 || got[0] != "invoiceId" || got[1] != "countryName" {
 		t.Fatalf("columns: %v", got)
 	}
-	ordered, err := dtql.Deserialize([]byte(streamingJoinDTQL + "orderBy: [{field: id, source: o}]\n"))
+	ordered, err := tugql.Deserialize([]byte(streamingJoinDTQL + "orderBy: [{field: id, source: o}]\n"))
 	if err != nil {
 		t.Fatal(err)
 	}

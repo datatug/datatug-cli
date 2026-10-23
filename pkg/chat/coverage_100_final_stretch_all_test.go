@@ -11,7 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/queryops"
 	"github.com/datatug/datatug-cli/pkg/resultops"
 	"github.com/datatug/datatug-cli/pkg/secureread"
@@ -398,7 +398,7 @@ func TestCoverage100_ResultColumns_Gaps(t *testing.T) {
 			dal.Column{Expression: dal.NewFieldRef("", "id")},
 			dal.Column{Expression: dal.NewAggregate("MAX", false, dal.NewFieldRef("", "id"))},
 		)
-	docMax, _ := dtql.Serialize(qMax)
+	docMax, _ := tugql.Serialize(qMax)
 	_, _, err = resultColumnQuery(RecordSet{DTQL: string(docMax)})
 	require.ErrorContains(t, err, "preserves COUNT only")
 

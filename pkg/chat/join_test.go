@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
 
@@ -40,7 +40,7 @@ func TestAttachedCustomerJoinsFreshInvoiceQueryWithoutAnIntermediateGrid(t *test
 	if err != nil || !applied || !strings.Contains(joined.DTQL, "joins:") || !strings.Contains(joined.DTQL, "Customer") || !strings.Contains(executor.doc, "limit: 5") {
 		t.Fatalf("attached JOIN = applied %v, err %v, result %+v, executed %q", applied, err, joined, executor.doc)
 	}
-	parsed, err := dtql.Deserialize([]byte(joined.DTQL))
+	parsed, err := tugql.Deserialize([]byte(joined.DTQL))
 	if err != nil || len(parsed.From().Joins()) != 1 || parsed.From().Joins()[0].JoinType() != dal.JoinLeft {
 		t.Fatalf("automatic attached JOIN must preserve nullable root rows: %q, %v", joined.DTQL, err)
 	}

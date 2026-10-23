@@ -568,7 +568,7 @@ func TestScopeIdentityQuotaRetryAndRetention(t *testing.T) {
 		t.Fatalf("shared account quota evaded %+v %v", next, err)
 	}
 	limited, _ := s.ListDeliveries(ctx, other, d.ID)
-	if first.Scope.Project == other.Scope.Project {
+	if first.Project == other.Scope.Project {
 		limited, _ = s.ListDeliveries(ctx, alice, d.ID)
 	}
 	if len(limited) != 1 || limited[0].State != "rate_limited" {
@@ -827,7 +827,7 @@ func TestPrivateStoragePermissionsAndTelegramExpiry(t *testing.T) {
 	}
 	defer func() { _ = opened.Close() }()
 	a := actor("alice")
-	bot, poll := registerTelegramFixture(t, opened, "provider", "123456", "OwnerWatchBot")
+	bot, _ := registerTelegramFixture(t, opened, "provider", "123456", "OwnerWatchBot")
 	hash := stable("expiring-link")
 	if err = opened.BeginTelegramLink(context.Background(), a, hash, c.now().Add(time.Minute)); err != nil {
 		t.Fatal(err)
@@ -837,7 +837,7 @@ func TestPrivateStoragePermissionsAndTelegramExpiry(t *testing.T) {
 	if err = opened.RegisterRunner(context.Background(), bot); err != nil {
 		t.Fatal(err)
 	}
-	poll, err = opened.ClaimTelegramPoll(context.Background(), bot)
+	poll, err := opened.ClaimTelegramPoll(context.Background(), bot)
 	if err != nil {
 		t.Fatal(err)
 	}

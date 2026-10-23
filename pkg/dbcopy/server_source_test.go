@@ -222,6 +222,7 @@ func TestServerOpenFailuresNameNoPartOfTheURL(t *testing.T) {
 
 	assert.Equal(t, "the Oracle connection string is read from the --db flag", BackendRef{Scheme: "oracle"}.WithFlag("--db").serverConnectionHint(oracleEngine))
 	assert.Equal(t, "the Oracle connection string is the one the source was given", BackendRef{Scheme: "oracle"}.serverConnectionHint(oracleEngine))
+	assert.Equal(t, "the MySQL connection string is read from the environment variable DATATUG_MY", ref.ConnectionHint(), "what a command logs names the engine")
 	assert.False(t, UnavailableSourceShowsSource(ref.OpenFailure(cause)), "a server's failure is not shown with its source")
 }
 

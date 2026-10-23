@@ -292,6 +292,14 @@ func (v *scanDbCommand) connectionParams() (dbconnection.Params, error) {
 	return connParams, nil
 }
 
+// scanArticle is driver with the article a sentence puts in front of it: "a postgres", "an oracle".
+func scanArticle(driver string) string {
+	if driver == api.DriverOracle {
+		return "an " + driver
+	}
+	return "a " + driver
+}
+
 // scanURLExamples is the shape of the connection URL of each driver a scan reads from --dsn-env.
 var scanURLExamples = map[string]string{
 	api.DriverPostgres: "postgres://user:password@host/database",
@@ -316,7 +324,7 @@ func (v *scanDbCommand) postgresConnectionParams() (dbconnection.Params, error) 
 		}
 	}
 	if len(refused) > 0 {
-		return nil, fmt.Errorf("%s not accepted for a %s scan: the host, port, user and password come from the connection URL in an environment variable, and --path is for sqlite3 files. Put the URL there and pass --dsn-env NAME, so a password never appears on a command line or in a project file", strings.Join(refused, ", "), v.Driver)
+		return nil, fmt.Errorf("%s not accepted for %s scan: the host, port, user and password come from the connection URL in an environment variable, and --path is for sqlite3 files. Put the URL there and pass --dsn-env NAME, so a password never appears on a command line or in a project file", strings.Join(refused, ", "), scanArticle(v.Driver))
 	}
 	if v.DSNEnv == "" {
 		return nil, fmt.Errorf("scanning a %s database requires --dsn-env NAME, the environment variable that holds the connection URL (%s)", v.Driver, scanURLExamples[v.Driver])

@@ -34,7 +34,6 @@ import (
 	"github.com/dal-go/dalgo2sql"
 	"github.com/dal-go/dalgo2sqlite"
 	"github.com/datatug/datatug-cli/pkg/httpsource"
-	"github.com/datatug/datatug-cli/pkg/openvaultdb"
 	"github.com/ingitdb/dalgo2ingitdb"
 	"github.com/ingitdb/ingitdb-go/ingitdb/validator"
 	"github.com/xo/dburl"
@@ -691,7 +690,7 @@ func (r BackendRef) CheckFile() error {
 func (r BackendRef) openSource(ctx context.Context, mode openMode) (dal.DB, error) {
 	switch r.Scheme {
 	case "openvaultdb":
-		return openvaultdb.OpenSource(r.Path)
+		return OpenOpenVaultDBSource(r.Path)
 	case "sqlite":
 		// A SQLite file that is written (the target of `db copy`) is created when it is missing;
 		// one that is read must exist.

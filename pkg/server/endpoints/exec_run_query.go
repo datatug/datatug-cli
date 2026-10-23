@@ -13,10 +13,10 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo2http"
+	"github.com/dal-go/dalgo2openvaultdb"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/httpsource"
-	"github.com/datatug/datatug-cli/pkg/openvaultdb"
 	"github.com/datatug/datatug-cli/pkg/querybody"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
@@ -275,7 +275,7 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 		}
 		if errors.Is(err, secureread.ErrAccessDenied) {
 			ce := contractErrAccessDenied(err.Error())
-			var remote *openvaultdb.AuthorizationError
+			var remote *dalgo2openvaultdb.AuthorizationError
 			if errors.As(err, &remote) {
 				ce.Details = map[string]any{"authorization": remote.Decision}
 			}

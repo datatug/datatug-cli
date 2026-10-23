@@ -25,11 +25,12 @@ require (
 	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/ultraviolet v0.0.0-20260812204455-68fa937c71be
 	github.com/charmbracelet/x/ansi v0.11.8
-	github.com/dal-go/dalgo v0.95.2
+	github.com/dal-go/dalgo v0.95.3
 	github.com/dal-go/dalgo2bigquery v0.3.2
 	github.com/dal-go/dalgo2http v0.4.0
 	github.com/dal-go/dalgo2mssql v0.0.1
 	github.com/dal-go/dalgo2mysql v0.2.2
+	github.com/dal-go/dalgo2openvaultdb v0.4.1
 	github.com/dal-go/dalgo2oracle v0.0.1
 	github.com/dal-go/dalgo2postgres v0.9.4
 	github.com/dal-go/dalgo2sql v0.30.0
@@ -68,7 +69,7 @@ require (
 	github.com/strongo/logus v0.4.3
 	github.com/strongo/random v0.0.3
 	github.com/strongo/slice v0.3.13
-	github.com/strongo/validation v0.0.16
+	github.com/strongo/validation v0.0.17
 	github.com/tuigoff/tuigoff v0.8.0
 	github.com/xo/dburl v0.24.2
 	github.com/xuri/excelize/v2 v2.11.0
@@ -94,7 +95,7 @@ require (
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProtonMail/go-crypto v1.4.1 // indirect
-	github.com/RoaringBitmap/roaring/v2 v2.29.0 // indirect
+	github.com/RoaringBitmap/roaring/v2 v2.30.0 // indirect
 	github.com/andybalholm/brotli v1.2.2 // indirect
 	github.com/axgle/mahonia v0.0.0-20180208002826-3358181d7394 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect

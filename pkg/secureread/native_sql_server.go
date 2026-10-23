@@ -178,6 +178,9 @@ func sqlWords(scheme, text string) (words []string, refusal string) {
 			if scheme == "oracle" && (word == "Q" || word == "NQ") && i < len(text) && text[i] == '\'' {
 				return nil, "an Oracle quoted literal (q'...')"
 			}
+			if scheme == "postgres" && word == "U" && i < len(text) && text[i] == '&' {
+				return nil, "a PostgreSQL Unicode-escaped name or string (U&)"
+			}
 			if word == "SET" && scheme == "mysql" && len(words) > 0 && words[len(words)-1] == "CHARACTER" {
 				continue // how MySQL names a character set: CAST(x AS CHAR CHARACTER SET utf8mb4)
 			}

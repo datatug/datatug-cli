@@ -97,6 +97,8 @@ func TestServerQueryText(t *testing.T) {
 		{"postgres", "SELECT é FROM t", "a character that is not ASCII outside a string"},
 		{"postgres", `SELECT "set_config"('default_transaction_read_only','off',false)`, "SET_CONFIG"},
 		{"postgres", `SELECT pg_catalog."SET_CONFIG"('default_transaction_read_only','off',false)`, "SET_CONFIG"},
+		{"postgres", `SELECT U&"!0073et_config"('default_transaction_read_only','off',false) UESCAPE '!'`, "a PostgreSQL Unicode-escaped name or string (U&)"},
+		{"postgres", `SELECT u&'\0041'`, "a PostgreSQL Unicode-escaped name or string (U&)"},
 		{"sqlserver", "SELECT * FROM [OPENROWSET]('SQLNCLI', 'x', 'SELECT 1')", "OPENROWSET"},
 		{"sqlserver", `SELECT "xp_cmdshell" FROM t`, "XP_CMDSHELL"},
 		{"mysql", "SELECT * FROM t INTO OUTFILE '/tmp/x'", "INTO"},

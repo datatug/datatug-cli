@@ -603,7 +603,8 @@ func TestExecuteCommand_DefaultDriver_PortOfAnUnregisteredDriver(t *testing.T) {
 		Env:  "dev",
 		Text: "SELECT 1",
 		ServerRef: datatug.ServerRef{
-			Driver: "sqlserver",
+			// Not sqlserver, mysql or oracle, whose drivers pkg/dbcopy links in; pgx registers itself as "pgx".
+			Driver: "postgres",
 			Host:   "myhost",
 			Port:   9999,
 		},

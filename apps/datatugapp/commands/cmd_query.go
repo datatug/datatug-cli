@@ -214,12 +214,12 @@ func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
 // able to request that itself — see cmd_query_http_provenance_test.go.
 // Production code always runs with this default. SQLite uses the validated
 // structured-query dialect so grouped TugQL is rendered as native SQL (and
-// literals remain bound parameters), and PostgreSQL opens as a protected read:
-// a read-only session, behind the preview switch; other sources keep their
+// literals remain bound parameters), and PostgreSQL, MySQL, Oracle and SQL Server open as a
+// protected read: a read-only session, behind each one's preview switch; other sources keep their
 // existing open behavior. Both paths retain the HTTPS-only HTTP-source
 // enforcement.
 var openBackend = func(ctx context.Context, backend dbcopy.BackendRef) (dal.DB, error) {
-	if backend.Scheme == "sqlite" || backend.Scheme == "postgres" {
+	if backend.Scheme == "sqlite" || dbcopy.IsServerScheme(backend.Scheme) {
 		return backend.OpenProtected(ctx)
 	}
 	return backend.Open(ctx)
@@ -263,7 +263,7 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	backend = backend.WithFlag("--db")
 	// A PostgreSQL source is a preview that is off unless the person turns it on: that is the first
 	// thing they are told, before anything about policies, which turning it on would not change.
-	if err = dbcopy.CheckPostgresRead(backend, 0); err != nil {
+	if err = dbcopy.CheckServerRead(backend, 0); err != nil {
 		return Exit(err.Error(), exitCodeDatabase)
 	}
 	loaded, err := accesspolicies.Load(accesspolicies.LoadOptions{Dir: o.policiesDir, Files: o.policies, None: o.noPolicies})
@@ -287,7 +287,7 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	}
 	// With the preview on, a read of a PostgreSQL source through policies is not available in it: that is
 	// answered before the source is opened.
-	if err = dbcopy.CheckPostgresRead(backend, len(loaded)); err != nil {
+	if err = dbcopy.CheckServerRead(backend, len(loaded)); err != nil {
 		return Exit(err.Error(), exitCodeUsage)
 	}
 	// This ad-hoc `datatug query run --db http://...` path predates

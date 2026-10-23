@@ -78,7 +78,7 @@ func catalogIdentity(projectDir string, catalog *datatug.DbCatalog) (sourceIdent
 			return sourceIdentity{}, false
 		}
 		return sourceIdentity{dbconnection.DriverSQLite3, canonicalFile(path)}, true
-	case catalog.Driver == DriverPostgres:
+	case IsServerDriver(catalog.Driver):
 		file, err := ResolveDescriptorPath(projectDir, catalog.Path)
 		if err != nil {
 			return sourceIdentity{}, false
@@ -87,7 +87,7 @@ func catalogIdentity(projectDir string, catalog *datatug.DbCatalog) (sourceIdent
 		if err != nil {
 			return sourceIdentity{}, false
 		}
-		return sourceIdentity{DriverPostgres, descriptor.DSNEnv}, true
+		return sourceIdentity{catalog.Driver, descriptor.DSNEnv}, true
 	}
 	return sourceIdentity{}, false
 }
@@ -230,7 +230,7 @@ func ResolveProjectSourceURL(ctx context.Context, store datatug.ProjectStore, pr
 		return "", LookupError("source %q of environment %q cannot be read", nil, sourceID, environment)
 	}
 	var source string
-	if catalog.Driver == DriverPostgres {
+	if IsServerDriver(catalog.Driver) {
 		source, err = postgresDescriptorSource(catalog, projectDir)
 	} else {
 		source, err = sourceURLFromCatalog(catalog, projectDir)
@@ -288,10 +288,10 @@ type SourceUnresolvedError struct {
 }
 
 func (e *SourceUnresolvedError) Error() string {
-	if isSQLiteDriver(e.Driver) || e.Driver == DriverPostgres {
+	if isSQLiteDriver(e.Driver) || IsServerDriver(e.Driver) {
 		return "its catalog path or connection descriptor cannot be resolved"
 	}
-	return "its driver is not one that can be opened (sqlite3 or postgres)"
+	return "its driver is not one that can be opened (sqlite3, postgres, mysql, oracle or sqlserver)"
 }
 
 func (e *SourceUnresolvedError) Unwrap() error { return e.cause }

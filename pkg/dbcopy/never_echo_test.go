@@ -138,12 +138,12 @@ func TestParse_RefusalWordingPerScheme(t *testing.T) {
 func TestParse_UnsupportedSchemeNamesOnlyTheScheme(t *testing.T) {
 	t.Parallel()
 	for _, input := range []string{
-		"mysql://alice:s3cret@db.example.com/shop",
-		"MySQL://alice:s3cret@db.example.com/shop?password=s3cret",
+		"db2://alice:s3cret@db.example.com/shop",
+		"DB2://alice:s3cret@db.example.com/shop?password=s3cret",
 	} {
 		_, err := Parse(input)
 		require.Error(t, err, input)
-		assert.Equal(t, `unsupported scheme "mysql": supported schemes are `+strings.Join(supportedSchemes, ", ")+", or env:NAME", err.Error())
+		assert.Equal(t, `unsupported scheme "db2": supported schemes are `+strings.Join(supportedSchemes, ", ")+", or env:NAME", err.Error())
 	}
 }
 

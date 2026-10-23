@@ -54,9 +54,18 @@ func ParseWithEnv(rawURL string, lookupEnv func(string) (string, bool)) (Backend
 // driver's own error stays reachable through errors.Is and errors.As, exactly as
 // it does for Open. The context is reserved for future use: this open is
 // synchronous and does not honor cancellation (Open's does, for a postgres source).
-func (r BackendRef) OpenSchemaScan(_ context.Context) (SchemaScanDB, error) {
+func (r BackendRef) OpenSchemaScan(ctx context.Context) (SchemaScanDB, error) {
+	if engine, ok := serverEngineOf(r.Scheme); ok {
+		// A MySQL or an Oracle scan is read only too, and not behind the preview switch: it reads
+		// the catalog.
+		db, err := r.openServerDatabase(ctx, engine)
+		if err != nil {
+			return nil, r.OpenFailure(err)
+		}
+		return db, nil
+	}
 	if r.Scheme != "postgres" {
-		return nil, fmt.Errorf("a schema scan through DALgo is available for postgres sources only, not %s", r.Scheme)
+		return nil, fmt.Errorf("a schema scan through DALgo is available for postgres, mysql, oracle and sqlserver sources only, not %s", r.Scheme)
 	}
 	if _, err := ParsePostgresTarget(r.Path); err != nil {
 		return nil, fmt.Errorf("source %s: %w", r, err)

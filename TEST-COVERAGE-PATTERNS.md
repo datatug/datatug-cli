@@ -115,15 +115,6 @@ is := InformationSchema{db: db}
 err = is.getColumns("testdb", schemer.SortedTables{Tables: tables})
 ```
 
-### Seam: `schemaProvider` literal for MSSQL sub-provider tests
-
-In `pkg/schemers/mssqlschema`, the internal `columnsProvider`, `constraintsProvider`, etc.
-embed the corresponding `sqlinfoschema.*Provider` structs. Instantiate them directly with
-the sqlmock `*sql.DB`:
-```go
-p := columnsProvider{ColumnsProvider: sqlinfoschema.ColumnsProvider{DB: db}}
-```
-
 ### Headless TUI pattern (Bubble Tea screens under `apps/datatugapp/datatugui/...`)
 
 Screens are Elm-style models hosted by the `tuigoff` shell, so no terminal or

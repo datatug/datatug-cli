@@ -18,7 +18,7 @@ var scanEvalSymlinks = filepath.EvalSymlinks
 // connection descriptor is not a file inside the project folder. It names the rule and
 // not the path: the path is whatever the project file says, which a message does not
 // repeat.
-var errDescriptorOutsideProject = errors.New("the connection descriptor of a PostgreSQL catalog must be a file inside the project folder, named by a path relative to it (such as connections/<env>/<db>.json), and not a file that a link leads out of the folder to")
+var errDescriptorOutsideProject = errors.New("the connection descriptor of a PostgreSQL, MySQL, Oracle or SQL Server catalog must be a file inside the project folder, named by a path relative to it (such as connections/<env>/<db>.json), and not a file that a link leads out of the folder to")
 
 // ResolveDescriptorPath is the file that the path of a PostgreSQL catalog names, which is
 // the connection descriptor of the catalog, below projectDir. The descriptor names the

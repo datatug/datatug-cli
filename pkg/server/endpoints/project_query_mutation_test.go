@@ -23,7 +23,7 @@ import (
 func saveLocalQueryRequest(projectID, branch, head string) dto.SaveQueryRequest {
 	var query datatug.QueryDefWithFolderPath
 	query.FolderPath = datatug.RootSharedFolderName
-	query.ID, query.Title, query.Type, query.Text = "customer", "Customers", datatug.QueryTypeDTQL, "SELECT CustomerId FROM Customer"
+	query.ID, query.Title, query.Type, query.Text = "customer", "Customers", datatug.QueryTypeTugQL, "SELECT CustomerId FROM Customer"
 	query.Federation = &datatug.QueryFederation{OVDBBaseURL: "https://demodb.dev/ovdb", Tables: []datatug.QueryFederationTable{{Database: "chinook", Name: "Customer", Fields: []string{"CustomerId"}}}}
 	return dto.SaveQueryRequest{ProjectRef: dto.ProjectRef{StoreID: "local", ProjectID: projectID}, Branch: branch, ExpectedBranchHead: head, OperationID: "save-customer-1", IfNoneMatch: true, Query: query}
 }
@@ -56,13 +56,13 @@ func TestLocalSaveQueryStagesPairAndRejectsStaleOrChangedReplay(t *testing.T) {
 	require.Equal(t, request.Query.Federation, created.Query.Federation)
 	staged := runGit(t, projectDir, "diff", "--cached", "--name-only")
 	require.Contains(t, staged, "queries/customer.query.json")
-	require.Contains(t, staged, "queries/customer.query.dtql")
+	require.Contains(t, staged, "queries/customer.query.tugql")
 	require.NotContains(t, staged, "unrelated.txt")
 	metadata, err := os.ReadFile(filepath.Join(projectDir, "queries", "customer.query.json"))
 	require.NoError(t, err)
 	require.Contains(t, string(metadata), `"ovdbBaseUrl"`)
 	require.NotContains(t, string(metadata), request.Query.Text)
-	body, err := os.ReadFile(filepath.Join(projectDir, "queries", "customer.query.dtql"))
+	body, err := os.ReadFile(filepath.Join(projectDir, "queries", "customer.query.tugql"))
 	require.NoError(t, err)
 	require.Equal(t, request.Query.Text, string(body))
 	// Same operation returns the original result, not a second write.
@@ -153,7 +153,7 @@ func TestLocalSaveQueryRejectsUnsupportedFederationMetadataWithoutWriting(t *tes
 	saveProjectQueryHandler(w, httptest.NewRequest(http.MethodPost, "/datatug/queries/save_query", bytes.NewReader(body)))
 	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 	require.NoFileExists(t, filepath.Join(projectDir, "queries", "customer.query.json"))
-	require.NoFileExists(t, filepath.Join(projectDir, "queries", "customer.query.dtql"))
+	require.NoFileExists(t, filepath.Join(projectDir, "queries", "customer.query.tugql"))
 }
 
 func TestLocalQueryRevisionReturnsPersistedSourceAndBody(t *testing.T) {
@@ -208,12 +208,12 @@ func TestLocalSaveQueryTypeChangeStagesOldSidecarRemoval(t *testing.T) {
 	update.Query.Type, update.Query.Text = datatug.QueryTypeSQL, "SELECT 1"
 	w, _ = postLocalSave(t, update)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	require.NoFileExists(t, filepath.Join(projectDir, "queries", "customer.query.dtql"))
+	require.NoFileExists(t, filepath.Join(projectDir, "queries", "customer.query.tugql"))
 	require.FileExists(t, filepath.Join(projectDir, "queries", "customer.query.sql"))
 	staged := runGit(t, projectDir, "diff", "--cached", "--name-only")
 	require.Contains(t, staged, "queries/customer.query.json")
 	require.Contains(t, staged, "queries/customer.query.sql")
-	require.NotContains(t, staged, "queries/customer.query.dtql")
+	require.NotContains(t, staged, "queries/customer.query.tugql")
 }
 
 func TestLocalSaveQueryRefusesForgedInternalActorScope(t *testing.T) {
@@ -264,13 +264,13 @@ func TestLocalSaveQueryRetryRecoversPairWrittenBeforeStaging(t *testing.T) {
 	require.Contains(t, w.Body.String(), "OUTCOME_UNCERTAIN")
 	// Core committed the exact pair; only Git staging was interrupted.
 	require.FileExists(t, filepath.Join(projectDir, "queries", "customer.query.json"))
-	require.FileExists(t, filepath.Join(projectDir, "queries", "customer.query.dtql"))
+	require.FileExists(t, filepath.Join(projectDir, "queries", "customer.query.tugql"))
 	require.NoError(t, os.Remove(indexLock))
 	w, recovered := postLocalSave(t, request)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.NotEmpty(t, recovered.Revision)
 	require.Equal(t, request.Query.Text, recovered.Query.Text)
-	require.Contains(t, runGit(t, projectDir, "diff", "--cached", "--name-only"), "queries/customer.query.dtql")
+	require.Contains(t, runGit(t, projectDir, "diff", "--cached", "--name-only"), "queries/customer.query.tugql")
 	w, replay := postLocalSave(t, request)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.Equal(t, recovered.Revision, replay.Revision)
@@ -286,7 +286,7 @@ func TestLocalSaveQueryRetryRefusesForeignBytesAfterInterruptedStaging(t *testin
 	w, _ := postLocalSave(t, request)
 	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
 	require.NoError(t, os.Remove(indexLock))
-	bodyPath := filepath.Join(projectDir, "queries", "customer.query.dtql")
+	bodyPath := filepath.Join(projectDir, "queries", "customer.query.tugql")
 	const foreign = "SELECT FirstName FROM Customer"
 	require.NoError(t, os.WriteFile(bodyPath, []byte(foreign), 0o600))
 	w, _ = postLocalSave(t, request)
@@ -355,14 +355,14 @@ func TestLocalSaveQueryNeverStagesForeignEditAfterPut(t *testing.T) {
 	storage.NewDatatugStore = func(id string) (storage.Store, error) {
 		base, err := original(id)
 		return editAfterPutStore{Store: base, afterPut: func() {
-			require.NoError(t, os.WriteFile(filepath.Join(projectDir, "queries", "customer.query.dtql"), []byte(foreign), 0o600))
+			require.NoError(t, os.WriteFile(filepath.Join(projectDir, "queries", "customer.query.tugql"), []byte(foreign), 0o600))
 		}}, err
 	}
 	w, _ := postLocalSave(t, request)
 	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), "OUTCOME_UNCERTAIN")
-	require.Equal(t, request.Query.Text, runGit(t, projectDir, "show", ":queries/customer.query.dtql"))
-	body, err := os.ReadFile(filepath.Join(projectDir, "queries", "customer.query.dtql"))
+	require.Equal(t, request.Query.Text, runGit(t, projectDir, "show", ":queries/customer.query.tugql"))
+	body, err := os.ReadFile(filepath.Join(projectDir, "queries", "customer.query.tugql"))
 	require.NoError(t, err)
 	require.Equal(t, foreign, string(body))
 	retry, _ := postLocalSave(t, request)

@@ -2,7 +2,7 @@ package chat
 
 // Ported from saved_query_lookup_test.go's 8 cases that built a legacy &UI{}
 // directly (the other 5 — pure DiscoverSavedQueryLookup/
-// DiscoverSavedQueryParameterLookup(WithMode)/direct DTQL execution tests —
+// DiscoverSavedQueryParameterLookup(WithMode)/direct TugQL execution tests —
 // never touched UI/ChatUI and stay in saved_query_lookup_test.go unchanged).
 //
 // Ported onto queryParametersOverlay/parameterLookupOverlay

@@ -46,8 +46,8 @@ func (s revisionedCaptureStore) PutQuery(ctx context.Context, record capturedRec
 	return storedCapture{Record: capturedRecordOf(stored.Query), Revision: string(stored.Revision)}, nil
 }
 
-// capturedQueryDef maps a capture onto the persisted query: a DTQL query
-// whose text becomes the "<id>.query.dtql" sidecar, bound to its source by
+// capturedQueryDef maps a capture onto the persisted query: a TugQL query
+// whose text becomes the "<id>.query.tugql.yaml" sidecar, bound to its source by
 // Targets [{catalog: source}] - the saved-query target resolution
 // api.EligibleTargets applies - with its purpose and QueryCapture
 // provenance. A capture holds no default value, fact ID or result row, so
@@ -69,12 +69,13 @@ func capturedQueryDef(record capturedRecord) datatug.QueryDefWithFolderPath {
 	return datatug.QueryDefWithFolderPath{
 		FolderPath: q.FolderPath,
 		QueryDef: datatug.QueryDef{
-			ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: q.ID, Title: q.Title}},
-			Type:        datatug.QueryTypeDTQL,
-			Text:        q.DTQL,
-			Purpose:     q.Purpose,
-			Parameters:  params,
-			Targets:     []datatug.QueryDefTarget{{Catalog: q.Source}},
+			ProjectItem:    datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: q.ID, Title: q.Title}},
+			Type:           datatug.QueryTypeTugQL,
+			Text:           q.TugQL,
+			StructuredBody: true,
+			Purpose:        q.Purpose,
+			Parameters:     params,
+			Targets:        []datatug.QueryDefTarget{{Catalog: q.Source}},
 			Capture: &datatug.QueryCapture{
 				Author:      record.Author,
 				Environment: record.Environment,
@@ -93,7 +94,7 @@ func capturedRecordOf(q datatug.QueryDefWithFolderPath) capturedRecord {
 		ID:             q.ID,
 		Title:          q.Title,
 		Purpose:        q.Purpose,
-		DTQL:           q.Text,
+		TugQL:          q.Text,
 		Parameters:     make([]capturedParameter, 0, len(q.Parameters)),
 		BindingOrigins: []captureBindingOrigin{},
 	}}

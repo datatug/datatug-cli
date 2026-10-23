@@ -157,7 +157,7 @@ func TestBridgeBrowserClearDeleteAndExport(t *testing.T) {
 		t.Fatal(err)
 	}
 	recordID := workspaceTestRecord(t, store, before.ID)
-	queryService := &savedQueryStub{queries: []SavedQuery{{ID: "customers", Title: "Customers", Type: "DTQL"}}}
+	queryService := &savedQueryStub{queries: []SavedQuery{{ID: "customers", Title: "Customers", Type: "TugQL"}}}
 	sessions.ConfigureSavedQueryService(queryService)
 	if _, err := sessions.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "bucket_add", RecordSetID: recordID}); err != nil {
 		t.Fatal(err)
@@ -218,10 +218,10 @@ func TestBridgeBrowserClearDeleteAndExport(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || len(queries) != 1 {
 		t.Fatalf("queries: %d %#v", resp.StatusCode, queries)
 	}
-	resp = request(http.MethodPost, "/v1/chat/queries", `{"sessionId":"`+before.ID+`","action":"run_dtql","queryId":"customers"}`, "")
+	resp = request(http.MethodPost, "/v1/chat/queries", `{"sessionId":"`+before.ID+`","action":"run_tugql","queryId":"customers"}`, "")
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusNoContent || queryService.ranID != "customers" {
-		t.Fatalf("run DTQL: %d %q", resp.StatusCode, queryService.ranID)
+		t.Fatalf("run TugQL: %d %q", resp.StatusCode, queryService.ranID)
 	}
 	queryService.queries = append(queryService.queries, SavedQuery{ID: "http-query", Type: "HTTP"})
 	resp = request(http.MethodPost, "/v1/chat/queries", `{"sessionId":"`+before.ID+`","action":"run_http","queryId":"http-query"}`, "")
@@ -229,12 +229,12 @@ func TestBridgeBrowserClearDeleteAndExport(t *testing.T) {
 	if resp.StatusCode != http.StatusNoContent || queryService.ranID != "http-query" {
 		t.Fatalf("run saved HTTP: %d %q", resp.StatusCode, queryService.ranID)
 	}
-	resp = request(http.MethodPost, "/v1/chat/queries", `{"sessionId":"`+before.ID+`","action":"run_dtql","queryId":"http-query"}`, "")
+	resp = request(http.MethodPost, "/v1/chat/queries", `{"sessionId":"`+before.ID+`","action":"run_tugql","queryId":"http-query"}`, "")
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest || queryService.ranID != "http-query" {
 		t.Fatalf("HTTP query execution was exposed: %d %q", resp.StatusCode, queryService.ranID)
 	}
-	resp = request(http.MethodPost, "/v1/chat/queries", `{"sessionId":"`+before.ID+`","action":"save","save":{"Title":"From browser","Type":"DTQL","Text":"from: customers"}}`, "")
+	resp = request(http.MethodPost, "/v1/chat/queries", `{"sessionId":"`+before.ID+`","action":"save","save":{"Title":"From browser","Type":"TugQL","Text":"from: customers"}}`, "")
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusNoContent || queryService.saved.Title != "From browser" {
 		t.Fatalf("save query: %d %#v", resp.StatusCode, queryService.saved)

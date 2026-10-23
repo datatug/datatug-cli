@@ -11,7 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/queryops"
 	"github.com/datatug/datatug-cli/pkg/resultops"
 	"github.com/datatug/datatug-cli/pkg/secureread"
@@ -24,7 +24,7 @@ import (
 func TestCoverage100_ChatUI_JoinFinishedError(t *testing.T) {
 	u := focusedGridStoreBackedTestUI(t, QueryResult{
 		Title:  "users",
-		DTQL:   "from: {name: users}\ncolumns: [{field: id}]\n",
+		TugQL:  "from: {name: users}\ncolumns: [{field: id}]\n",
 		Source: "sqlite:///fixture.db",
 		Result: secureread.Result{Columns: []string{"id"}, Rows: []secureread.Row{{Data: map[string]any{"id": int64(1)}}}},
 	})
@@ -44,7 +44,7 @@ func TestCoverage100_ChatUI_JoinFinishedError(t *testing.T) {
 func TestCoverage100_ChatUI_ReconcilePendingBridge_LoadSession(t *testing.T) {
 	u := focusedGridStoreBackedTestUI(t, QueryResult{
 		Title:  "users",
-		DTQL:   "from: {name: users}\ncolumns: [{field: id}]\n",
+		TugQL:  "from: {name: users}\ncolumns: [{field: id}]\n",
 		Source: "sqlite:///fixture.db",
 		Result: secureread.Result{Columns: []string{"id"}, Rows: []secureread.Row{{Data: map[string]any{"id": int64(1)}}}},
 	})
@@ -87,7 +87,7 @@ func TestCoverage100_ChatUI_ReconcilePendingBridge_LoadSession(t *testing.T) {
 func TestCoverage100_ChatUI_StatusHintsRaw(t *testing.T) {
 	u := focusedGridStoreBackedTestUI(t, QueryResult{
 		Title:  "users",
-		DTQL:   "from: {name: users}\ncolumns: [{field: id}]\n",
+		TugQL:  "from: {name: users}\ncolumns: [{field: id}]\n",
 		Source: "sqlite:///fixture.db",
 		Result: secureread.Result{Columns: []string{"id"}, Rows: []secureread.Row{{Data: map[string]any{"id": int64(1)}}}},
 	})
@@ -135,7 +135,7 @@ func TestCoverage100_ChatUI_StatusHintsRaw(t *testing.T) {
 func TestCoverage100_ChatUI_PanelContextAction(t *testing.T) {
 	u := focusedGridStoreBackedTestUI(t, QueryResult{
 		Title:  "users",
-		DTQL:   "from: {name: users}\ncolumns: [{field: id}]\n",
+		TugQL:  "from: {name: users}\ncolumns: [{field: id}]\n",
 		Source: "sqlite:///fixture.db",
 		Result: secureread.Result{Columns: []string{"id"}, Rows: []secureread.Row{{Data: map[string]any{"id": int64(1)}}}},
 	})
@@ -167,7 +167,7 @@ func TestCoverage100_ChatUI_PanelContextAction(t *testing.T) {
 func TestCoverage100_ChatUI_RefreshChatTabs(t *testing.T) {
 	u := focusedGridStoreBackedTestUI(t, QueryResult{
 		Title:  "users",
-		DTQL:   "from: {name: users}\ncolumns: [{field: id}]\n",
+		TugQL:  "from: {name: users}\ncolumns: [{field: id}]\n",
 		Source: "sqlite:///fixture.db",
 		Result: secureread.Result{Columns: []string{"id"}, Rows: []secureread.Row{{Data: map[string]any{"id": int64(1)}}}},
 	})
@@ -204,7 +204,7 @@ func TestCoverage100_ChatUI_RefreshChatTabs(t *testing.T) {
 func TestCoverage100_Sidepanel_Keys(t *testing.T) {
 	u := focusedGridStoreBackedTestUI(t, QueryResult{
 		Title:  "users",
-		DTQL:   "from: {name: users}\ncolumns: [{field: id}]\n",
+		TugQL:  "from: {name: users}\ncolumns: [{field: id}]\n",
 		Source: "sqlite:///fixture.db",
 		Result: secureread.Result{Columns: []string{"id"}, Rows: []secureread.Row{{Data: map[string]any{"id": int64(1)}}}},
 	})
@@ -274,7 +274,7 @@ func TestCoverage100_Sidepanel_Keys(t *testing.T) {
 func TestCoverage100_InspectorRelated_JoinPicker(t *testing.T) {
 	u := focusedGridStoreBackedTestUI(t, QueryResult{
 		Title:  "users",
-		DTQL:   "from: {name: users}\ncolumns: [{field: id}]\n",
+		TugQL:  "from: {name: users}\ncolumns: [{field: id}]\n",
 		Source: "sqlite:///fixture.db",
 		Result: secureread.Result{Columns: []string{"id"}, Rows: []secureread.Row{{Data: map[string]any{"id": int64(1)}}}},
 	})
@@ -321,7 +321,7 @@ func TestCoverage100_InspectorRelated_JoinPicker(t *testing.T) {
 func TestCoverage100_WorkspaceQueryEditor_ModEnter(t *testing.T) {
 	u := focusedGridStoreBackedTestUI(t, QueryResult{
 		Title:  "users",
-		DTQL:   "from: {name: users}\ncolumns: [{field: id}]\n",
+		TugQL:  "from: {name: users}\ncolumns: [{field: id}]\n",
 		Source: "sqlite:///fixture.db",
 		Result: secureread.Result{Columns: []string{"id"}, Rows: []secureread.Row{{Data: map[string]any{"id": int64(1)}}}},
 	})
@@ -338,7 +338,7 @@ func TestCoverage100_WorkspaceQueryEditor_ModEnter(t *testing.T) {
 func TestCoverage100_ResultOperations_Gaps(t *testing.T) {
 	u := focusedGridStoreBackedTestUI(t, QueryResult{
 		Title:  "users",
-		DTQL:   "from: {name: users}\ncolumns: [{field: id}]\n",
+		TugQL:  "from: {name: users}\ncolumns: [{field: id}]\n",
 		Source: "sqlite:///fixture.db",
 		Result: secureread.Result{Columns: []string{"id"}, Rows: []secureread.Row{{Data: map[string]any{"id": int64(1)}}}},
 	})
@@ -381,12 +381,12 @@ func (m mockOrderedAggregate) String() string { return m.str }
 
 // Not parallel: tests result_columns.go gap branches.
 func TestCoverage100_ResultColumns_Gaps(t *testing.T) {
-	recInvalidDTQL := RecordSet{
-		DTQL: "invalid: dtql: {{{",
+	recInvalidTugQL := RecordSet{
+		TugQL: "invalid: tugql: {{{",
 	}
 
-	// Line 338: planResultColumns with invalid DTQL
-	_, err := planResultColumns(recInvalidDTQL, resultColumnMetadata{}, map[string]bool{}, []string{"col1"})
+	// Line 338: planResultColumns with invalid TugQL
+	_, err := planResultColumns(recInvalidTugQL, resultColumnMetadata{}, map[string]bool{}, []string{"col1"})
 	require.Error(t, err)
 
 	// Lines 95, 98, 107, 110, 116 in resultColumnQuery
@@ -398,16 +398,16 @@ func TestCoverage100_ResultColumns_Gaps(t *testing.T) {
 			dal.Column{Expression: dal.NewFieldRef("", "id")},
 			dal.Column{Expression: dal.NewAggregate("MAX", false, dal.NewFieldRef("", "id"))},
 		)
-	docMax, _ := dtql.Serialize(qMax)
-	_, _, err = resultColumnQuery(RecordSet{DTQL: string(docMax)})
+	docMax, _ := tugql.Serialize(qMax)
+	_, _, err = resultColumnQuery(RecordSet{TugQL: string(docMax)})
 	require.ErrorContains(t, err, "preserves COUNT only")
 
-	// Lines 98, 107, 110, 116 using dtqlDeserialize seam:
-	origDes := dtqlDeserialize
-	defer func() { dtqlDeserialize = origDes }()
+	// Lines 98, 107, 110, 116 using tugqlDeserialize seam:
+	origDes := tugqlDeserialize
+	defer func() { tugqlDeserialize = origDes }()
 
 	// Line 98: COUNT with 0 args
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
 		return dal.From(dal.NewRootCollectionRef("users", "")).NewQuery().
 			GroupBy(dal.NewFieldRef("", "id")).
 			Limit(10).
@@ -416,11 +416,11 @@ func TestCoverage100_ResultColumns_Gaps(t *testing.T) {
 				dal.Column{Expression: dal.NewAggregate(dal.COUNT, false)},
 			), nil
 	}
-	_, _, err = resultColumnQuery(RecordSet{DTQL: "mock"})
+	_, _, err = resultColumnQuery(RecordSet{TugQL: "mock"})
 	require.ErrorContains(t, err, "unsupported COUNT expression")
 
 	// Line 107: ordered COUNT
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
 		return dal.From(dal.NewRootCollectionRef("users", "")).NewQuery().
 			GroupBy(dal.NewFieldRef("", "id")).
 			Limit(10).
@@ -432,11 +432,11 @@ func TestCoverage100_ResultColumns_Gaps(t *testing.T) {
 				}},
 			), nil
 	}
-	_, _, err = resultColumnQuery(RecordSet{DTQL: "mock"})
+	_, _, err = resultColumnQuery(RecordSet{TugQL: "mock"})
 	require.ErrorContains(t, err, "ordered COUNT enrichment is not supported")
 
 	// Line 110: computed constant projection
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
 		return dal.From(dal.NewRootCollectionRef("users", "")).NewQuery().
 			GroupBy(dal.NewFieldRef("", "id")).
 			Limit(10).
@@ -444,11 +444,11 @@ func TestCoverage100_ResultColumns_Gaps(t *testing.T) {
 				dal.Column{Expression: dal.NewConstant("computed")},
 			), nil
 	}
-	_, _, err = resultColumnQuery(RecordSet{DTQL: "mock"})
+	_, _, err = resultColumnQuery(RecordSet{TugQL: "mock"})
 	require.ErrorContains(t, err, "computed or nondeterministic projections")
 
 	// Line 116: GROUP BY with computed expression
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
 		return dal.From(dal.NewRootCollectionRef("users", "")).NewQuery().
 			GroupBy(dal.NewConstant(1)).
 			Limit(10).
@@ -456,18 +456,18 @@ func TestCoverage100_ResultColumns_Gaps(t *testing.T) {
 				dal.Column{Expression: dal.NewFieldRef("", "id")},
 			), nil
 	}
-	_, _, err = resultColumnQuery(RecordSet{DTQL: "mock"})
+	_, _, err = resultColumnQuery(RecordSet{TugQL: "mock"})
 	require.ErrorContains(t, err, "computed or ambiguous GROUP BY")
-	dtqlDeserialize = origDes
+	tugqlDeserialize = origDes
 
-	// Line 488: resultColumnEvidence with invalid DTQL
+	// Line 488: resultColumnEvidence with invalid TugQL
 	u := focusedGridStoreBackedTestUI(t, QueryResult{
 		Title:  "users",
-		DTQL:   "from: {name: users}\ncolumns: [{field: id}]\n",
+		TugQL:  "from: {name: users}\ncolumns: [{field: id}]\n",
 		Source: "sqlite:///fixture.db",
 		Result: secureread.Result{Columns: []string{"id"}, Rows: []secureread.Row{{Data: map[string]any{"id": int64(1)}}}},
 	})
-	_, _, err = u.sessions.resultColumnEvidence(context.Background(), recInvalidDTQL)
+	_, _, err = u.sessions.resultColumnEvidence(context.Background(), recInvalidTugQL)
 	require.Error(t, err)
 
 	// Lines 557, 561, 571 in executeResultColumns
@@ -482,23 +482,23 @@ func TestCoverage100_ResultColumns_Gaps(t *testing.T) {
 	require.Error(t, err)
 }
 
-type stubDTQLExecutor struct{}
+type stubTugQLExecutor struct{}
 
-func (stubDTQLExecutor) RunDTQL(context.Context, string, []byte, map[string]any) (secureread.Result, error) {
+func (stubTugQLExecutor) RunTugQL(context.Context, string, []byte, map[string]any) (secureread.Result, error) {
 	return secureread.Result{}, nil
 }
 
 type mockExactExec struct{}
 
-func (mockExactExec) RunDTQL(context.Context, string, []byte, map[string]any) (secureread.Result, error) {
+func (mockExactExec) RunTugQL(context.Context, string, []byte, map[string]any) (secureread.Result, error) {
 	return secureread.Result{}, nil
 }
 
-func (mockExactExec) RunExactAggregateDTQL(context.Context, string, []byte, []byte, map[string]any, []resultops.Column) (secureread.ExactAggregateResult, error) {
+func (mockExactExec) RunExactAggregateTugQL(context.Context, string, []byte, []byte, map[string]any, []resultops.Column) (secureread.ExactAggregateResult, error) {
 	return secureread.ExactAggregateResult{}, nil
 }
 
-func (mockExactExec) RunRecursiveDTQL(context.Context, string, []byte, map[string]any) (secureread.Result, error) {
+func (mockExactExec) RunRecursiveTugQL(context.Context, string, []byte, map[string]any) (secureread.Result, error) {
 	return secureread.Result{}, nil
 }
 
@@ -518,26 +518,26 @@ func (badAgg) String() string             { return "COUNT_DIFFERENT" }
 func TestCoverage100_DerivedExecution_Gaps(t *testing.T) {
 	u := focusedGridStoreBackedTestUI(t, QueryResult{
 		Title:  "users",
-		DTQL:   "from: {name: users}\ncolumns: [{field: id}]\n",
+		TugQL:  "from: {name: users}\ncolumns: [{field: id}]\n",
 		Source: "sqlite:///fixture.db",
 		Result: secureread.Result{Columns: []string{"id"}, Rows: []secureread.Row{{Data: map[string]any{"id": int64(1)}}}},
 	})
 
 	// Lines 43-44: exactAggregateColumns recursive query validation failure
 	recWhereBinary := RecordSet{
-		DTQL: "from: {name: users}\ncolumns: [{field: id}]\nwhere: {comparison: {left: {binary: {left: {field: id}, op: '+', right: 1}}, op: '=', right: 2}}\n",
+		TugQL: "from: {name: users}\ncolumns: [{field: id}]\nwhere: {comparison: {left: {binary: {left: {field: id}, op: '+', right: 1}}, op: '=', right: 2}}\n",
 	}
 	_, err := exactAggregateColumns(u.catalog, recWhereBinary)
 	require.Error(t, err)
 
 	// Lines 132-133: deriveResultPreview bounded execution budget error
-	origDes := dtqlDeserialize
-	defer func() { dtqlDeserialize = origDes }()
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
+	origDes := tugqlDeserialize
+	defer func() { tugqlDeserialize = origDes }()
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
 		return nil, errors.New("parse error")
 	}
 	recValid := RecordSet{
-		DTQL: "from: {name: users}\ncolumns: [{field: id}]\n",
+		TugQL: "from: {name: users}\ncolumns: [{field: id}]\n",
 	}
 	_, err = deriveResultPreview(u.catalog, recValid, derivedOperation{
 		Columns: []string{"id"},
@@ -545,11 +545,11 @@ func TestCoverage100_DerivedExecution_Gaps(t *testing.T) {
 		Scope:   queryops.MatchingSource,
 	})
 	require.ErrorContains(t, err, "bounded execution budget")
-	dtqlDeserialize = origDes
+	tugqlDeserialize = origDes
 
 	// Lines 160, 163, 169, 173, 181 in executeDerivedResult
 	sess := u.sessions
-	sess.ConfigureQueryExecutor(stubDTQLExecutor{})
+	sess.ConfigureQueryExecutor(stubTugQLExecutor{})
 	rec := u.snapshot.RecordSets[u.lastGridRecordSetID]
 
 	// Line 160: source not available
@@ -564,17 +564,17 @@ func TestCoverage100_DerivedExecution_Gaps(t *testing.T) {
 	origSources := sess.store.info.Sources
 	defer func() { sess.store.info.Sources = origSources }()
 	sess.store.info.Sources = map[string]string{} // Empty sources so lookup fails
-	_, _, err = sess.executeDerivedResult(context.Background(), sess.activeID, u.lastGridRecordSetID, validOp, prevForSource.DTQL)
+	_, _, err = sess.executeDerivedResult(context.Background(), sess.activeID, u.lastGridRecordSetID, validOp, prevForSource.TugQL)
 	require.ErrorContains(t, err, "origin source is no longer available")
 	sess.store.info.Sources = map[string]string{rec.Database: rec.Source}
 
 	// Line 163: context canceled with valid preview
 	cancCtx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, _, err = sess.executeDerivedResult(cancCtx, sess.activeID, u.lastGridRecordSetID, validOp, prevForSource.DTQL)
+	_, _, err = sess.executeDerivedResult(cancCtx, sess.activeID, u.lastGridRecordSetID, validOp, prevForSource.TugQL)
 	require.Error(t, err)
 
-	// Line 169: executor does not implement exactAggregateDTQLExecutor
+	// Line 169: executor does not implement exactAggregateTugQLExecutor
 	groupOp := derivedOperation{
 		Group:      true,
 		Columns:    []string{"id"},
@@ -583,10 +583,10 @@ func TestCoverage100_DerivedExecution_Gaps(t *testing.T) {
 	}
 	prev, err := deriveResultPreview(u.catalog, rec, groupOp)
 	require.NoError(t, err)
-	_, _, err = sess.executeDerivedResult(context.Background(), sess.activeID, u.lastGridRecordSetID, groupOp, prev.DTQL)
+	_, _, err = sess.executeDerivedResult(context.Background(), sess.activeID, u.lastGridRecordSetID, groupOp, prev.TugQL)
 	require.ErrorContains(t, err, "cannot run exact server aggregates")
 
-	// Line 181: OriginalOutput but executor does not implement recursiveDTQLExecutor
+	// Line 181: OriginalOutput but executor does not implement recursiveTugQLExecutor
 	origOp := derivedOperation{
 		Columns: []string{"id"},
 		Sort:    []queryops.SortTerm{{Column: "id"}},
@@ -594,11 +594,11 @@ func TestCoverage100_DerivedExecution_Gaps(t *testing.T) {
 	}
 	prevSort, err := deriveResultPreview(u.catalog, rec, origOp)
 	require.NoError(t, err)
-	_, _, err = sess.executeDerivedResult(context.Background(), sess.activeID, u.lastGridRecordSetID, origOp, prevSort.DTQL)
+	_, _, err = sess.executeDerivedResult(context.Background(), sess.activeID, u.lastGridRecordSetID, origOp, prevSort.TugQL)
 	require.ErrorContains(t, err, "cannot safely run Original query output")
 
 	// Lines 43-44: exactAggregateColumns recursive validation error
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
 		col := dal.NewQualifiedRootCollectionRef("main", "users", "")
 		q := dal.From(col).NewQuery().SelectColumns(dal.Column{
 			Expression: dal.Binary(dal.NewFieldRef("", "id"), dal.Add, dal.NewFieldRef("", "id")),
@@ -607,26 +607,26 @@ func TestCoverage100_DerivedExecution_Gaps(t *testing.T) {
 	}
 	_, err = exactAggregateColumns(u.catalog, rec)
 	require.Error(t, err)
-	dtqlDeserialize = origDes
+	tugqlDeserialize = origDes
 
 	// Lines 163-164: context error in executeDerivedResult
 	stepCtxDerived := &stepCancelCtx{Context: context.Background(), cancelAt: 1}
-	_, _, err = sess.executeDerivedResult(stepCtxDerived, sess.activeID, u.lastGridRecordSetID, origOp, prevSort.DTQL)
+	_, _, err = sess.executeDerivedResult(stepCtxDerived, sess.activeID, u.lastGridRecordSetID, origOp, prevSort.TugQL)
 	require.Error(t, err)
 
 	// Line 173: exactAggregateColumns error in executeDerivedResult
 	sess.ConfigureQueryExecutor(mockExactExec{})
 	callExact := 0
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
 		callExact++
 		if callExact > 1 {
 			return nil, errors.New("parse error in exactAggregateColumns")
 		}
 		return origDes(data)
 	}
-	_, _, err = sess.executeDerivedResult(context.Background(), sess.activeID, u.lastGridRecordSetID, groupOp, prev.DTQL)
+	_, _, err = sess.executeDerivedResult(context.Background(), sess.activeID, u.lastGridRecordSetID, groupOp, prev.TugQL)
 	require.Error(t, err)
-	dtqlDeserialize = origDes
+	tugqlDeserialize = origDes
 
 	// Line 199: AppendUser error
 	origInsert := insertMessageFn
@@ -634,7 +634,7 @@ func TestCoverage100_DerivedExecution_Gaps(t *testing.T) {
 	insertMessageFn = func(ctx context.Context, tx *sql.Tx, sessionID string, message ChatMessage) error {
 		return errors.New("insert failed")
 	}
-	_, _, err = sess.executeDerivedResult(context.Background(), sess.activeID, u.lastGridRecordSetID, origOp, prevSort.DTQL)
+	_, _, err = sess.executeDerivedResult(context.Background(), sess.activeID, u.lastGridRecordSetID, origOp, prevSort.TugQL)
 	require.Error(t, err)
 	insertMessageFn = origInsert
 
@@ -644,14 +644,14 @@ func TestCoverage100_DerivedExecution_Gaps(t *testing.T) {
 	appendQueryTxFn = func(s *SessionStore, ctx context.Context, tx *sql.Tx, sessionID, originID, source string, query *QueryResult, now time.Time) error {
 		return errors.New("append query failed")
 	}
-	_, _, err = sess.executeDerivedResult(context.Background(), sess.activeID, u.lastGridRecordSetID, origOp, prevSort.DTQL)
+	_, _, err = sess.executeDerivedResult(context.Background(), sess.activeID, u.lastGridRecordSetID, origOp, prevSort.TugQL)
 	require.Error(t, err)
 	appendQueryTxFn = origAppendQuery
 
 	// Lines 239-240: serverPreview with exactAggregateColumns failure
 	u2 := focusedGridStoreBackedTestUI(t, QueryResult{
 		Title:  "users2",
-		DTQL:   "from: {name: users}\ncolumns: [{field: id}, {field: name}]\n",
+		TugQL:  "from: {name: users}\ncolumns: [{field: id}, {field: name}]\n",
 		Source: "sqlite:///fixture.db",
 		Result: secureread.Result{Columns: []string{"id", "name"}, Rows: []secureread.Row{{Data: map[string]any{"id": int64(1), "name": "Alice"}}}},
 	})
@@ -661,12 +661,12 @@ func TestCoverage100_DerivedExecution_Gaps(t *testing.T) {
 	opGroup2.group = true
 	opGroup2.selected = []int{0}
 	opGroup2.aggregates = map[int]string{1: "sum"}
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
 		return nil, errors.New("cannot parse")
 	}
 	_, err = opGroup2.serverPreview()
 	require.Error(t, err)
-	dtqlDeserialize = origDes
+	tugqlDeserialize = origDes
 
 	// Lines 251-252: serverPreview originalOutput
 	opOrig, _ := u.newResultOperation(false)
@@ -674,16 +674,16 @@ func TestCoverage100_DerivedExecution_Gaps(t *testing.T) {
 	opOrig.group = false
 	opOrig.selected = []int{0}
 	callPrev := 0
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
 		callPrev++
 		if callPrev > 1 {
-			return nil, errors.New("cannot parse preview DTQL")
+			return nil, errors.New("cannot parse preview TugQL")
 		}
 		return origDes(data)
 	}
 	_, err = opOrig.serverPreview()
 	require.Error(t, err)
-	dtqlDeserialize = origDes
+	tugqlDeserialize = origDes
 	_, err = opOrig.serverPreview()
 	require.NoError(t, err)
 
@@ -704,7 +704,7 @@ func TestCoverage100_DerivedExecution_Gaps(t *testing.T) {
 func TestCoverage100_FinalStretch_OperationsAndInspector(t *testing.T) {
 	u := focusedGridStoreBackedTestUI(t, QueryResult{
 		Title:  "users",
-		DTQL:   "from: {name: users}\ncolumns: [{field: count}]\n",
+		TugQL:  "from: {name: users}\ncolumns: [{field: count}]\n",
 		Source: "sqlite:///fixture.db",
 		Result: secureread.Result{
 			Columns:     []string{"count"},
@@ -739,7 +739,7 @@ func TestCoverage100_FinalStretch_OperationsAndInspector(t *testing.T) {
 	// result_operations.go:136-137 (quickServerSort bounds on empty columns)
 	uEmpty := focusedGridStoreBackedTestUI(t, QueryResult{
 		Title:  "empty",
-		DTQL:   "from: {name: empty}\n",
+		TugQL:  "from: {name: empty}\n",
 		Source: "sqlite:///fixture.db",
 		Result: secureread.Result{Columns: []string{}},
 	})
@@ -784,7 +784,7 @@ type mockExecActiveSwitch struct {
 	sess *SessionChat
 }
 
-func (m *mockExecActiveSwitch) RunDTQL(ctx context.Context, source string, doc []byte, params map[string]any) (secureread.Result, error) {
+func (m *mockExecActiveSwitch) RunTugQL(ctx context.Context, source string, doc []byte, params map[string]any) (secureread.Result, error) {
 	if m.sess != nil {
 		m.sess.activeID = "switched-to-other-session"
 	}
@@ -828,7 +828,7 @@ func (m *mockCloseOnEvidence) CanReadWholeCollection(ctx context.Context, col st
 // Not parallel: tests result_columns.go gap branches.
 func TestCoverage100_FinalStretch_ResultColumns(t *testing.T) {
 	recValid := RecordSet{
-		DTQL: "from: {name: users}\ncolumns: [{field: id}]\n",
+		TugQL: "from: {name: users}\ncolumns: [{field: id}]\n",
 	}
 	metaValid := resultColumnMetadata{
 		tables: map[string]resultColumnTable{
@@ -839,12 +839,12 @@ func TestCoverage100_FinalStretch_ResultColumns(t *testing.T) {
 	candID := columnCandidateID(recValid, "main.users", "name", "")
 	ids := []string{candID}
 
-	origDes := dtqlDeserialize
-	defer func() { dtqlDeserialize = origDes }()
+	origDes := tugqlDeserialize
+	defer func() { tugqlDeserialize = origDes }()
 
 	// Line 337: resultColumnQuery error in planResultColumns (call 2 fails)
 	callCount := 0
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
 		callCount++
 		if callCount > 1 {
 			return nil, errors.New("second parse failed")
@@ -853,31 +853,31 @@ func TestCoverage100_FinalStretch_ResultColumns(t *testing.T) {
 	}
 	_, err := planResultColumns(recValid, metaValid, admitted, ids)
 	require.Error(t, err)
-	dtqlDeserialize = origDes
+	tugqlDeserialize = origDes
 
 	// Line 362: qualifyJoinCondition where error
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
 		col := dal.NewQualifiedRootCollectionRef("main", "users", "")
 		q := dal.From(col).NewQuery().Where(dal.NewComparison(badAgg{}, dal.Equal, dal.NewConstant(1))).SelectColumns(dal.Column{Expression: dal.NewFieldRef("", "id")})
 		return q, nil
 	}
 	_, err = planResultColumns(recValid, metaValid, admitted, ids)
 	require.Error(t, err)
-	dtqlDeserialize = origDes
+	tugqlDeserialize = origDes
 
 	// Line 366: qualifyColumnHaving having error
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
 		col := dal.NewQualifiedRootCollectionRef("main", "users", "")
 		q := dal.From(col).NewQuery().GroupBy(dal.NewFieldRef("", "id")).Having(fakeCondition{}).SelectColumns(dal.Column{Expression: dal.NewFieldRef("", "id")})
 		return q, nil
 	}
 	_, err = planResultColumns(recValid, metaValid, admitted, ids)
 	require.Error(t, err)
-	dtqlDeserialize = origDes
+	tugqlDeserialize = origDes
 
-	// Line 447: dtqlDeserialize(doc) error at end of planResultColumns
+	// Line 447: tugqlDeserialize(doc) error at end of planResultColumns
 	callIdx := 0
-	dtqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
+	tugqlDeserialize = func(data []byte) (dal.StructuredQuery, error) {
 		callIdx++
 		if callIdx >= 3 {
 			return nil, errors.New("final parse failed")
@@ -886,7 +886,7 @@ func TestCoverage100_FinalStretch_ResultColumns(t *testing.T) {
 	}
 	_, err = planResultColumns(recValid, metaValid, admitted, ids)
 	require.Error(t, err)
-	dtqlDeserialize = origDes
+	tugqlDeserialize = origDes
 
 	// Setup real SQLite database for executeResultColumns tests
 	tmpDir := t.TempDir()
@@ -910,7 +910,7 @@ func TestCoverage100_FinalStretch_ResultColumns(t *testing.T) {
 
 	uReal := focusedGridStoreBackedTestUI(t, QueryResult{
 		Title:  "users",
-		DTQL:   "from: {name: users}\ncolumns: [{field: id}]\n",
+		TugQL:  "from: {name: users}\ncolumns: [{field: id}]\n",
 		Source: "sqlite:///fixture.db",
 		Result: secureread.Result{Columns: []string{"id"}, Rows: []secureread.Row{{Data: map[string]any{"id": int64(1)}}}},
 	})
@@ -920,12 +920,12 @@ func TestCoverage100_FinalStretch_ResultColumns(t *testing.T) {
 	sessReal.ConfigureQueryExecutor(mockExactExec{})
 
 	// Line 481: resultColumnQuery error in resultColumnEvidence
-	recBadDTQL := RecordSet{
+	recBadTugQL := RecordSet{
 		Database: recReal.Database,
 		Source:   recReal.Source,
-		DTQL:     "invalid: dtql: {{{",
+		TugQL:    "invalid: tugql: {{{",
 	}
-	_, _, err = sessReal.resultColumnEvidence(context.Background(), recBadDTQL)
+	_, _, err = sessReal.resultColumnEvidence(context.Background(), recBadTugQL)
 	require.Error(t, err)
 
 	// Lines 550, 554, 564 in executeResultColumns
@@ -941,7 +941,7 @@ func TestCoverage100_FinalStretch_ResultColumns(t *testing.T) {
 	}
 	require.NotEmpty(t, colIDs)
 
-	// Line 564: Active session changed during RunDTQL
+	// Line 564: Active session changed during RunTugQL
 	mockExecWithCallback := &mockExecActiveSwitch{sess: sessReal}
 	sessReal.ConfigureQueryExecutor(mockExecWithCallback)
 	prevCol, err := sessReal.resultColumnsPreview(context.Background(), sessReal.activeID, recReal.ID, colIDs)
@@ -959,7 +959,7 @@ func TestCoverage100_FinalStretch_ResultColumns(t *testing.T) {
 	// Line 550: store.Load error when store DB is closed during preview
 	uClosed := focusedGridStoreBackedTestUI(t, QueryResult{
 		Title:  "users",
-		DTQL:   "from: {name: users}\ncolumns: [{field: id}]\n",
+		TugQL:  "from: {name: users}\ncolumns: [{field: id}]\n",
 		Source: "sqlite:///fixture.db",
 		Result: secureread.Result{Columns: []string{"id"}, Rows: []secureread.Row{{Data: map[string]any{"id": int64(1)}}}},
 	})

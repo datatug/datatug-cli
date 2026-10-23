@@ -16,7 +16,7 @@ import (
 
 	"github.com/dal-go/dalgo/access"
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 )
 
 type errReader struct{}
@@ -319,13 +319,13 @@ func TestSource_ExecuteQueryToRecordsReader_MoreErrors(t *testing.T) {
 	// Query network / client error (cancelled context)
 	cancCtx, cancel := context.WithCancel(ctx)
 	cancel()
-	q, _ := dtql.Deserialize([]byte("from: {name: customers}\n"))
+	q, _ := tugql.Deserialize([]byte("from: {name: customers}\n"))
 	if _, err := s.ExecuteQueryToRecordsReader(cancCtx, q); err == nil {
 		t.Fatal("expected network/client error")
 	}
 
 	// HTTP 403 with valid authorization denial
-	denyResult := `{"apiVersion":"dtql.org/authorization/v1","requestId":"req-1","mode":"execution","scope":"request","result":"deny","allowed":false,"hypothetical":false,"operations":[],"layers":[],"blockers":[],"coverage":{"evaluation":"complete","disclosure":"full","truncated":false,"unevaluated":[]},"restrictions":[]}`
+	denyResult := `{"apiVersion":"tugql.org/authorization/v1","requestId":"req-1","mode":"execution","scope":"request","result":"deny","allowed":false,"hypothetical":false,"operations":[],"layers":[],"blockers":[],"coverage":{"evaluation":"complete","disclosure":"full","truncated":false,"unevaluated":[]},"restrictions":[]}`
 	serverDeny := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)

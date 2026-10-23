@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/dal-go/dalgo2http"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/api"
@@ -104,7 +104,7 @@ func (s *resultSink) discardUnlessWritten() {
 
 // describeAdHoc records the database and the query of an ad-hoc run.
 func (s *resultSink) describeAdHoc(ctx context.Context, o queryOptions, backend dbcopy.BackendRef, db dal.DB, queryText string, variables map[string]any) {
-	sources := dtqlSources{
+	sources := tugqlSources{
 		open: func(context.Context, string) (dal.DB, string, func(), error) {
 			return db, backend.Scheme, func() {}, nil
 		},
@@ -113,17 +113,17 @@ func (s *resultSink) describeAdHoc(ctx context.Context, o queryOptions, backend 
 		sources.scanned = scannedColumns(projectDirOfRef(o.db), ref.Env, ref.DB)
 	}
 	s.describe = func(columns []string) resultDescription {
-		return describeDTQL(ctx, queryText, columns, sources)
+		return describeTugQL(ctx, queryText, columns, sources)
 	}
 	s.meta.DB = queryresults.DB{Driver: backend.Scheme}
 	if ref, ok := fullDatatugRef(ctx, o.db); ok {
 		s.meta.DB = projectDB(ref, backend.Scheme)
 	}
-	s.meta.Query = queryresults.Query{Kind: queryresults.QueryKindDTQL, DTQL: queryText, Parameters: typedParameters(variables), Policy: adHocPolicy(o)}
+	s.meta.Query = queryresults.Query{Kind: queryresults.QueryKindTugQL, TugQL: queryText, Parameters: typedParameters(variables), Policy: adHocPolicy(o)}
 	if o.from != "" {
 		s.meta.Query.Kind, s.meta.Query.From = queryresults.QueryKindFrom, o.from
 	}
-	s.meta.SetEditor(queryText, queryresults.LanguageDTQL)
+	s.meta.SetEditor(queryText, queryresults.LanguageTugQL)
 }
 
 // describeSaved records the database and the query of a saved-query run.
@@ -143,20 +143,20 @@ func (s *resultSink) describeSaved(ctx context.Context, store datatug.ProjectSto
 		s.meta.SetEditor("", queryresults.LanguageHTTP)
 		s.describe = func([]string) resultDescription { return describeHTTP(result.Collection) }
 	default:
-		s.meta.SetEditor(queryDef.Text, queryresults.LanguageDTQL)
-		sources := savedDTQLSources(ctx, store, projectDir, o.env, queryDef)
+		s.meta.SetEditor(queryDef.Text, queryresults.LanguageTugQL)
+		sources := savedTugQLSources(ctx, store, projectDir, o.env, queryDef)
 		s.describe = func(columns []string) resultDescription {
-			return describeDTQL(ctx, queryDef.Text, columns, sources)
+			return describeTugQL(ctx, queryDef.Text, columns, sources)
 		}
 	}
 }
 
-// savedDTQLSources opens the databases of a saved DTQL query: each named
+// savedTugQLSources opens the databases of a saved TugQL query: each named
 // database of a federated query, else the one it runs on.
-func savedDTQLSources(ctx context.Context, store datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef) dtqlSources {
+func savedTugQLSources(ctx context.Context, store datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef) tugqlSources {
 	envID, _ := resolveQueryEnvironment(ctx, store, envFlag)
 	projectID := registeredProjectID(projectDir)
-	return dtqlSources{
+	return tugqlSources{
 		scanned: func(database, schema, relation string) ([]string, bool) {
 			if database == "" {
 				var err error
@@ -170,7 +170,7 @@ func savedDTQLSources(ctx context.Context, store datatug.ProjectStore, projectDi
 			var source string
 			var err error
 			if database == "" {
-				source, err = resolveSQLOrDTQLSourceURL(ctx, store, projectDir, envFlag, queryDef)
+				source, err = resolveSQLOrTugQLSourceURL(ctx, store, projectDir, envFlag, queryDef)
 			} else {
 				source, err = resolveQuerySourceURL(ctx, store, projectDir, envID, database)
 			}
@@ -465,10 +465,10 @@ func savedQueryDB(ctx context.Context, store datatug.ProjectStore, projectDir, p
 }
 
 // savedQueryDatabase is the database a saved query reads: the root's named
-// database of a federated DTQL query, else the one it is resolved to.
+// database of a federated TugQL query, else the one it is resolved to.
 func savedQueryDatabase(ctx context.Context, store datatug.ProjectStore, envID string, queryDef *datatug.QueryDef) (string, error) {
-	if queryDef.Type == datatug.QueryTypeDTQL {
-		if parsed, err := dtql.Deserialize([]byte(queryDef.Text)); err == nil {
+	if queryDef.Type == datatug.QueryTypeTugQL {
+		if parsed, err := tugql.Deserialize([]byte(queryDef.Text)); err == nil {
 			if root, ok := parsed.From().Base().(dal.CollectionRef); ok && root.Database() != "" {
 				return root.Database(), nil
 			}

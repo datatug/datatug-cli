@@ -12,13 +12,13 @@ import (
 // Query kinds, policy modes and unavailable reasons of meta.json.
 const (
 	QueryKindFrom  = "from"
-	QueryKindDTQL  = "dtql"
+	QueryKindTugQL = "tugql"
 	QueryKindSaved = "saved"
 
 	// Languages of query.text: what the query editor reads it as.
-	LanguageDTQL = "dtql"
-	LanguageSQL  = "sql"
-	LanguageHTTP = "http"
+	LanguageTugQL = "tugql"
+	LanguageSQL   = "sql"
+	LanguageHTTP  = "http"
 
 	PolicyNone       = "none"
 	PolicyDiscovered = "discovered"
@@ -86,14 +86,14 @@ type DB struct {
 // Query is what ran: enough to run it again.
 type Query struct {
 	Kind           string                                 `json:"kind"`
-	DTQL           string                                 `json:"dtql,omitempty"`
+	TugQL          string                                 `json:"tugql,omitempty"`
 	From           string                                 `json:"from,omitempty"`
 	SavedQueryID   string                                 `json:"savedQueryId,omitempty"`
 	SavedQueryType string                                 `json:"savedQueryType,omitempty"`
 	Parameters     map[string]apicontract.TypedValueOrSet `json:"parameters,omitempty"`
 	Policy         string                                 `json:"policy"`
 	// Text, Language, DBRef and Params make the query openable in the query
-	// editor: the canonical text the editor accepts, its language ("dtql",
+	// editor: the canonical text the editor accepts, its language ("tugql",
 	// "sql" or "http"), the datatug:// reference of the database (absent when
 	// the run was not against a project source) and the run's parameters as
 	// name/value pairs. They are additive: readers that predate them ignore
@@ -273,7 +273,7 @@ type RelatedField struct {
 type Unavailable struct {
 	Query string `json:"query,omitempty"`
 	// Editor says query.text and query.params were dropped for size, so a
-	// consumer can tell dropped from absent; the legacy dtql and parameters
+	// consumer can tell dropped from absent; the legacy tugql and parameters
 	// are untouched by it.
 	Editor        string `json:"editor,omitempty"`
 	Columns       string `json:"columns,omitempty"`
@@ -316,19 +316,19 @@ func NewMeta(id, cliVersion string, data Data) Meta {
 	}
 }
 
-// Encode applies the bounds of meta.json and encodes it: query.dtql and
+// Encode applies the bounds of meta.json and encodes it: query.tugql and
 // query.parameters together within MaxQueryBytes (else both are dropped,
 // "too-large"), query.text and query.params together within their own
 // MaxQueryBytes (else just those two are dropped), at most MaxMetaColumns columns, and the whole within
 // MaxMetaBytes (else the column descriptions are dropped).
 func (m Meta) Encode() []byte {
 	// Both are measured as they are encoded, escapes included.
-	text, _ := json.Marshal(m.Query.DTQL)
+	text, _ := json.Marshal(m.Query.TugQL)
 	parameters, _ := json.Marshal(m.Query.Parameters)
 	editorText, _ := json.Marshal(m.Query.Text)
 	params, _ := json.Marshal(m.Query.Params)
 	if len(text)+len(parameters) > MaxQueryBytes {
-		m.Query.DTQL, m.Query.Parameters = "", nil
+		m.Query.TugQL, m.Query.Parameters = "", nil
 		m.Unavailable.Query = UnavailableTooLarge
 	}
 	// The editor-ready members have a bound of their own, so adding them did

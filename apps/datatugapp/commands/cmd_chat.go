@@ -54,8 +54,8 @@ func chatCommand() *cobra.Command {
 	options := chatOptions{}
 	cmd := &cobra.Command{
 		Use:   "chat",
-		Short: "Ask questions about project data using DTQL",
-		Long: `Ask questions about project data using DTQL.
+		Short: "Ask questions about project data using TugQL",
+		Long: `Ask questions about project data using TugQL.
 
 Table narrowing: before each AI turn the chat can decide which of the project's
 tables the model needs and show it only those definitions. The model is told
@@ -501,7 +501,7 @@ func projectSchemaContext(catalog chat.ProjectCatalog, urls map[string]string, s
 	var b strings.Builder
 	// selectedSource is what --database was given (see unavailableSchemaConversation)
 	// and this text goes to the model provider: only a plain name is sent.
-	fmt.Fprintf(&b, "Selected source %q has unavailable schema or connection. Do not query it. For another listed source, always set sourceId in run_dtql.\n", dbcopy.SourceIDDisplay(selectedSource))
+	fmt.Fprintf(&b, "Selected source %q has unavailable schema or connection. Do not query it. For another listed source, always set sourceId in run_tugql.\n", dbcopy.SourceIDDisplay(selectedSource))
 	for _, object := range catalog.Objects {
 		ref := object.Reference
 		if (ref.Kind != "table" && ref.Kind != "project_view") || object.Issue != "" || ref.SourceID == selectedSource {

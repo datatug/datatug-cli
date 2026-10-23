@@ -63,7 +63,7 @@ func TestClose100_QueryCapture_And_Semantic(t *testing.T) {
 			Title:   "Q1",
 			Purpose: "test purpose",
 			Source:  "s1",
-			DTQL:    "from: {name: orders}\n",
+			TugQL:   "from: {name: orders}\n",
 		},
 	})
 	t.Logf("computeCaptureQuery err: %v", err)
@@ -1057,24 +1057,24 @@ func TestClose100_CompareFacts_Deep(t *testing.T) {
 
 	qDir := filepath.Join(dir, "queries")
 	_ = os.MkdirAll(qDir, 0755)
-	dtqlDef := `{"createdAt":"2026-01-01T00:00:00Z","id":"dtql_q","type":"DTQL","parameters":[{"id":"p1","type":"integer","isMultiValue":true,"meta":{"entity":"Customer","field":"ID"}}]}`
-	_ = os.WriteFile(filepath.Join(qDir, "dtql_q.query.json"), []byte(dtqlDef), 0644)
-	_ = os.WriteFile(filepath.Join(qDir, "dtql_q.query.yaml"), []byte("from: {name: customers}\nwhere: {field: ID, operator: In, right: {parameter: p1}}\n"), 0644)
+	tugqlDef := `{"createdAt":"2026-01-01T00:00:00Z","id":"tugql_q","type":"TugQL","parameters":[{"id":"p1","type":"integer","isMultiValue":true,"meta":{"entity":"Customer","field":"ID"}}]}`
+	_ = os.WriteFile(filepath.Join(qDir, "tugql_q.query.json"), []byte(tugqlDef), 0644)
+	_ = os.WriteFile(filepath.Join(qDir, "tugql_q.query.yaml"), []byte("from: {name: customers}\nwhere: {field: ID, operator: In, right: {parameter: p1}}\n"), 0644)
 
-	dtqlSingleDef := `{"createdAt":"2026-01-01T00:00:00Z","id":"dtql_single","type":"DTQL","parameters":[{"id":"p2","type":"integer","meta":{"entity":"Customer","field":"ID"}}]}`
-	_ = os.WriteFile(filepath.Join(qDir, "dtql_single.query.json"), []byte(dtqlSingleDef), 0644)
-	_ = os.WriteFile(filepath.Join(qDir, "dtql_single.query.yaml"), []byte("from: {name: customers}\n"), 0644)
+	tugqlSingleDef := `{"createdAt":"2026-01-01T00:00:00Z","id":"tugql_single","type":"TugQL","parameters":[{"id":"p2","type":"integer","meta":{"entity":"Customer","field":"ID"}}]}`
+	_ = os.WriteFile(filepath.Join(qDir, "tugql_single.query.json"), []byte(tugqlSingleDef), 0644)
+	_ = os.WriteFile(filepath.Join(qDir, "tugql_single.query.yaml"), []byte("from: {name: customers}\n"), 0644)
 
 	resolvedStore, errStore := api.ResolveStoreID("", pID)
 	t.Logf("resolvedStore: %q, err: %v", resolvedStore, errStore)
 	sideP := apicontract.CompareSideSpec{Project: pID, Environment: scope.Environment, StoreID: resolvedStore}
 
 	// 4a. matchingCohortParameter error (line 118)
-	_, err = proveNativeFactsBinding(ctx, "dtql_q", sideP, "WrongEntity", "WrongField")
+	_, err = proveNativeFactsBinding(ctx, "tugql_q", sideP, "WrongEntity", "WrongField")
 	assert.Error(t, err)
 
 	// 4a1. matchingCohortParameter single value error (line 157)
-	_, err = proveNativeFactsBinding(ctx, "dtql_single", sideP, "Customer", "ID")
+	_, err = proveNativeFactsBinding(ctx, "tugql_single", sideP, "Customer", "ID")
 	assert.Error(t, err)
 
 	// 4b. resolveExecutionSourceHookCompare error (line 126)
@@ -1083,14 +1083,14 @@ func TestClose100_CompareFacts_Deep(t *testing.T) {
 		return api.ResolvedSource{}, errors.New("res err")
 	}
 	defer func() { resolveExecutionSourceHookCompare = origResolve }()
-	_, err = proveNativeFactsBinding(ctx, "dtql_q", sideP, "Customer", "ID")
+	_, err = proveNativeFactsBinding(ctx, "tugql_q", sideP, "Customer", "ID")
 	assert.Error(t, err)
 
 	// 4c. non-sqlite/ingitdb source (line 131)
 	resolveExecutionSourceHookCompare = func(c context.Context, p datatug.ProjectStore, pd string, r apicontract.ExecutionRequest, q *datatug.QueryDef) (api.ResolvedSource, error) {
 		return api.ResolvedSource{Kind: api.SourceKindHTTP, URL: "http://test.local"}, nil
 	}
-	_, err = proveNativeFactsBinding(ctx, "dtql_q", sideP, "Customer", "ID")
+	_, err = proveNativeFactsBinding(ctx, "tugql_q", sideP, "Customer", "ID")
 	assert.Error(t, err)
 
 	// 4d. executionQueryDocumentHookCompare error (line 135)
@@ -1102,14 +1102,14 @@ func TestClose100_CompareFacts_Deep(t *testing.T) {
 		return "", errors.New("doc err")
 	}
 	defer func() { executionQueryDocumentHookCompare = origDoc }()
-	_, err = proveNativeFactsBinding(ctx, "dtql_q", sideP, "Customer", "ID")
+	_, err = proveNativeFactsBinding(ctx, "tugql_q", sideP, "Customer", "ID")
 	assert.Error(t, err)
 
-	// 4e. dtql.Deserialize error (line 139)
+	// 4e. tugql.Deserialize error (line 139)
 	executionQueryDocumentHookCompare = func(projID, qID string, q *datatug.QueryDef, rev string) (string, error) {
 		return "invalid: [yaml", nil
 	}
-	_, err = proveNativeFactsBinding(ctx, "dtql_q", sideP, "Customer", "ID")
+	_, err = proveNativeFactsBinding(ctx, "tugql_q", sideP, "Customer", "ID")
 	assert.Error(t, err)
 }
 
@@ -1196,12 +1196,12 @@ func TestClose100_ExecRunQuery_Deep(t *testing.T) {
 	assert.Error(t, err)
 	recordQueryExecutionHook = origRecHook
 
-	// 5. req.DTQL != "" with resolveSource error
-	reqDTQL := apicontract.ExecutionRequest{
+	// 5. req.TugQL != "" with resolveSource error
+	reqTugQL := apicontract.ExecutionRequest{
 		Project: pID, Environment: "e", SecurityContextID: api.SecurityContextID(),
-		Source: "unknown_src", DTQL: "from: {name: t}\n", Mode: apicontract.ProvenanceModeLive,
+		Source: "unknown_src", TugQL: "from: {name: t}\n", Mode: apicontract.ProvenanceModeLive,
 	}
-	_, err = computeRunQuery(ctx, reqDTQL)
+	_, err = computeRunQuery(ctx, reqTugQL)
 	assert.Error(t, err)
 
 	// 6. candidateTargets multiple eligible targets -> TARGET_REQUIRED (line 475)
@@ -1785,24 +1785,24 @@ func TestClose100_ExecRunQuery_More(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "src1", src.ID)
 
-	// 5. runDTQLHook dbcopy.ErrSourceFileMissing (line 254) and dalgo2http.ErrSnapshotMiss (line 309)
-	origRunDTQL := runDTQLHook
-	defer func() { runDTQLHook = origRunDTQL }()
+	// 5. runTugQLHook dbcopy.ErrSourceFileMissing (line 254) and dalgo2http.ErrSnapshotMiss (line 309)
+	origRunTugQL := runTugQLHook
+	defer func() { runTugQLHook = origRunTugQL }()
 
-	runDTQLHook = func(e *secureread.Executor, c context.Context, sURL string, text []byte, v map[string]any) (secureread.Result, error) {
+	runTugQLHook = func(e *secureread.Executor, c context.Context, sURL string, text []byte, v map[string]any) (secureread.Result, error) {
 		return secureread.Result{}, dbcopy.ErrSourceFileMissing
 	}
 	_, err = computeRunQuery(ctx, apicontract.ExecutionRequest{
-		Project: pID, Environment: "env1", Source: "src1", DTQL: "SELECT 1",
+		Project: pID, Environment: "env1", Source: "src1", TugQL: "SELECT 1",
 		SecurityContextID: api.SecurityContextID(), Mode: apicontract.ProvenanceModeLive,
 	})
 	assert.Error(t, err)
 
-	runDTQLHook = func(e *secureread.Executor, c context.Context, sURL string, text []byte, v map[string]any) (secureread.Result, error) {
+	runTugQLHook = func(e *secureread.Executor, c context.Context, sURL string, text []byte, v map[string]any) (secureread.Result, error) {
 		return secureread.Result{}, dalgo2http.ErrSnapshotMiss
 	}
 	_, err = computeRunQuery(ctx, apicontract.ExecutionRequest{
-		Project: pID, Environment: "env1", Source: "src1", DTQL: "SELECT 1",
+		Project: pID, Environment: "env1", Source: "src1", TugQL: "SELECT 1",
 		SecurityContextID: api.SecurityContextID(), Mode: apicontract.ProvenanceModeLive,
 	})
 	assert.Error(t, err)
@@ -1813,11 +1813,11 @@ func TestClose100_ExecRunQuery_More(t *testing.T) {
 	toContractRecordsetHook = func(r secureread.Result) (apicontract.Recordset, error) {
 		return apicontract.Recordset{}, errors.New("contract recordset error")
 	}
-	runDTQLHook = func(e *secureread.Executor, c context.Context, sURL string, text []byte, v map[string]any) (secureread.Result, error) {
+	runTugQLHook = func(e *secureread.Executor, c context.Context, sURL string, text []byte, v map[string]any) (secureread.Result, error) {
 		return secureread.Result{Columns: []string{"c1"}, Rows: []secureread.Row{{Data: map[string]any{"c1": "v1"}}}}, nil
 	}
 	_, err = computeRunQuery(ctx, apicontract.ExecutionRequest{
-		Project: pID, Environment: "env1", Source: "src1", DTQL: "SELECT 1",
+		Project: pID, Environment: "env1", Source: "src1", TugQL: "SELECT 1",
 		SecurityContextID: api.SecurityContextID(), Mode: apicontract.ProvenanceModeLive,
 	})
 	assert.Error(t, err)
@@ -1830,7 +1830,7 @@ func TestClose100_ExecRunQuery_More(t *testing.T) {
 		return errors.New("run query resp val fail")
 	}
 	_, err = computeRunQuery(ctx, apicontract.ExecutionRequest{
-		Project: pID, Environment: "env1", Source: "src1", DTQL: "SELECT 1",
+		Project: pID, Environment: "env1", Source: "src1", TugQL: "SELECT 1",
 		SecurityContextID: api.SecurityContextID(), Mode: apicontract.ProvenanceModeLive,
 	})
 	assert.Error(t, err)
@@ -1841,7 +1841,7 @@ func TestClose100_ExecRunQuery_More(t *testing.T) {
 	defer func() { secureExecutorHook = origSec }()
 	secureExecutorHook = func() (*secureread.Executor, bool) { return nil, false }
 	_, err = computeRunQuery(ctx, apicontract.ExecutionRequest{
-		Project: pID, Environment: "env1", Source: "src1", DTQL: "SELECT 1",
+		Project: pID, Environment: "env1", Source: "src1", TugQL: "SELECT 1",
 		SecurityContextID: api.SecurityContextID(), Mode: apicontract.ProvenanceModeLive,
 	})
 	assert.Error(t, err)
@@ -1850,8 +1850,8 @@ func TestClose100_ExecRunQuery_More(t *testing.T) {
 	// 9. execRunProjectStoreFor wrappers for lines 135, 139, 147
 	queriesDir := filepath.Join(dir, "queries", "customers")
 	_ = os.MkdirAll(queriesDir, 0755)
-	_ = os.WriteFile(filepath.Join(queriesDir, "customer-invoices.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","id":"customer-invoices","type":"DTQL"}`), 0644)
-	_ = os.WriteFile(filepath.Join(queriesDir, "customer-invoices.query.dtql"), []byte("SELECT 1"), 0644)
+	_ = os.WriteFile(filepath.Join(queriesDir, "customer-invoices.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","id":"customer-invoices","type":"TugQL"}`), 0644)
+	_ = os.WriteFile(filepath.Join(queriesDir, "customer-invoices.query.tugql.yaml"), []byte("SELECT 1"), 0644)
 
 	realStore, _ := api.ProjectStoreFor(pID)
 	origProjStore := execRunProjectStoreFor
@@ -1894,16 +1894,16 @@ func TestClose100_ExecRunQuery_More(t *testing.T) {
 		return []api.ResolvedSource{{ID: "src1", Label: "Source 1"}}, nil
 	}
 
-	runDTQLHook = func(e *secureread.Executor, c context.Context, sURL string, text []byte, v map[string]any) (secureread.Result, error) {
+	runTugQLHook = func(e *secureread.Executor, c context.Context, sURL string, text []byte, v map[string]any) (secureread.Result, error) {
 		return secureread.Result{
 			Columns:    []string{"c1"},
 			Rows:       []secureread.Row{{Data: map[string]any{"c1": "v1"}}},
 			Collection: "",
 		}, nil
 	}
-	// line 339: req.DTQL has queryDef == nil, resolved.Collection == "" -> collection = req.Source
+	// line 339: req.TugQL has queryDef == nil, resolved.Collection == "" -> collection = req.Source
 	res339, err := computeRunQuery(ctx, apicontract.ExecutionRequest{
-		Project: pID, Environment: "env1", Source: "src1", DTQL: "SELECT 1", SecurityContextID: api.SecurityContextID(),
+		Project: pID, Environment: "env1", Source: "src1", TugQL: "SELECT 1", SecurityContextID: api.SecurityContextID(),
 		Mode: apicontract.ProvenanceModeLive,
 	})
 	assert.NoError(t, err)
@@ -1914,7 +1914,7 @@ func TestClose100_ExecRunQuery_More(t *testing.T) {
 		return dummyQueryDefStore{
 			ProjectStore: realStore,
 			qDef: &datatug.QueryDef{
-				ID: "customer-invoices", Type: datatug.QueryTypeDTQL, Text: "SELECT 1",
+				ID: "customer-invoices", Type: datatug.QueryTypeTugQL, Text: "SELECT 1",
 				Capture: &datatug.QueryCapture{Collection: "capture_coll"},
 			},
 		}, nil
@@ -1934,7 +1934,7 @@ func TestClose100_ExecRunQuery_More(t *testing.T) {
 		return dummyQueryDefStore{
 			ProjectStore: realStore,
 			qDef: &datatug.QueryDef{
-				ID: "customer-invoices", Type: datatug.QueryTypeDTQL, Text: "SELECT 1",
+				ID: "customer-invoices", Type: datatug.QueryTypeTugQL, Text: "SELECT 1",
 			},
 		}, nil
 	}
@@ -1946,7 +1946,7 @@ func TestClose100_ExecRunQuery_More(t *testing.T) {
 	assert.Equal(t, "resolved_coll", res336.Provenance.Collection)
 
 	execRunProjectStoreFor = origProjStore
-	runDTQLHook = origRunDTQL
+	runTugQLHook = origRunTugQL
 	eligibleTargetsHook = origEligible
 }
 

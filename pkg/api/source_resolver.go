@@ -223,7 +223,7 @@ func escapeSQLitePath(path string) string {
 // "<id>.query.json", the same convention filestore's saveQuery already
 // writes with (store_queries_saver.go). It exists because
 // fsQueriesStore.LoadQuery does not hydrate QueryDef.Text back from that
-// file (the read-back half of REQ:dtql-query-type's sidecar rule lands with
+// file (the read-back half of REQ:tugql-query-type's sidecar rule lands with
 // datatug-core PR #302 / the S1b module swap — see this stream's PR body).
 // LoadQueryDocument exports loadQueryDocument for pkg/server/endpoints'
 // exec/run_query rewrite (Task 12), which needs the same sidecar-text read
@@ -238,13 +238,29 @@ func loadQueryDocument(projectID, queryID string, queryType datatug.QueryType) (
 		return "", fmt.Errorf("no project directory configured for project %q", dbcopy.SourceIDDisplay(projectID))
 	}
 	folder, id := queryFolderAndID(queryID)
-	fileName := fmt.Sprintf("%s.%s.%s", id, storage.QueryFileSuffix, strings.ToLower(string(queryType)))
-	filePath := filepath.Join(dir, storage.QueriesFolder, folder, fileName)
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return "", fmt.Errorf("read query document %s: %w", filePath, err)
+	var firstErr error
+	for _, ext := range queryDocumentExtensions(queryType) {
+		filePath := filepath.Join(dir, storage.QueriesFolder, folder, fmt.Sprintf("%s.%s.%s", id, storage.QueryFileSuffix, ext))
+		content, err := os.ReadFile(filePath)
+		if err == nil {
+			return string(content), nil
+		}
+		if firstErr == nil {
+			firstErr = fmt.Errorf("read query document %s: %w", filePath, err)
+		}
 	}
-	return string(content), nil
+	return "", firstErr
+}
+
+// queryDocumentExtensions lists the body file extensions a saved query of
+// queryType may have, in lookup order. A TugQL query's structured YAML body
+// ("tugql.yaml", what DataTug writes) comes first, then its text body
+// ("tugql"); every other type has the one lowercase-type extension.
+func queryDocumentExtensions(queryType datatug.QueryType) []string {
+	if queryType == datatug.QueryTypeTugQL {
+		return []string{"tugql.yaml", "tugql"}
+	}
+	return []string{strings.ToLower(string(queryType))}
 }
 
 // queryFolderAndID splits a "folder/subfolder/id"-shaped query ID into its

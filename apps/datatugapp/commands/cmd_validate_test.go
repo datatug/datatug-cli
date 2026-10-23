@@ -11,7 +11,7 @@ import (
 
 // TestQueryDefTarget_Validate_RejectsEmbeddedCredentials proves datatug-core
 // v0.17.0 is actually live (not the pre-migration vendored model, which had
-// no QueryDefTarget.Validate() or QueryTypeDTQL at all): the project's
+// no QueryDefTarget.Validate() or QueryTypeTugQL at all): the project's
 // Validate() now runs the new query-target credential check, matching
 // `datatug validate`'s semantics (validateProject calls project.Validate()).
 func TestQueryDefTarget_Validate_RejectsEmbeddedCredentials(t *testing.T) {
@@ -27,7 +27,7 @@ func TestQueryDefTarget_Validate_RejectsEmbeddedCredentials(t *testing.T) {
 					ProjectItem: datatug.ProjectItem{
 						ProjItemBrief: datatug.ProjItemBrief{ID: "q1", Title: "Query 1"},
 					},
-					Type: datatug.QueryTypeDTQL,
+					Type: datatug.QueryTypeTugQL,
 					Targets: []datatug.QueryDefTarget{
 						{Driver: "postgres", Credentials: datatug.Credentials{Password: "hunter2"}},
 					},
@@ -45,10 +45,10 @@ func TestQueryDefTarget_Validate_RejectsEmbeddedCredentials(t *testing.T) {
 	}
 }
 
-// TestQueryDefTarget_Validate_AcceptsCredentialFreeDTQLQuery proves a
-// QueryTypeDTQL query (new in v0.17.0 - the pre-migration model had no DTQL
+// TestQueryDefTarget_Validate_AcceptsCredentialFreeTugQLQuery proves a
+// QueryTypeTugQL query (new in v0.17.0 - the pre-migration model had no TugQL
 // query type at all) with no embedded credentials passes validation.
-func TestQueryDefTarget_Validate_AcceptsCredentialFreeDTQLQuery(t *testing.T) {
+func TestQueryDefTarget_Validate_AcceptsCredentialFreeTugQLQuery(t *testing.T) {
 	project := &datatug.Project{
 		ProjectItem: datatug.ProjectItem{
 			ProjItemBrief: datatug.ProjItemBrief{ID: "proj1"},
@@ -61,7 +61,7 @@ func TestQueryDefTarget_Validate_AcceptsCredentialFreeDTQLQuery(t *testing.T) {
 					ProjectItem: datatug.ProjectItem{
 						ProjItemBrief: datatug.ProjItemBrief{ID: "q1", Title: "Query 1"},
 					},
-					Type:    datatug.QueryTypeDTQL,
+					Type:    datatug.QueryTypeTugQL,
 					Targets: []datatug.QueryDefTarget{{Driver: "postgres", Catalog: "mydb"}},
 				},
 			},
@@ -69,7 +69,7 @@ func TestQueryDefTarget_Validate_AcceptsCredentialFreeDTQLQuery(t *testing.T) {
 	}
 
 	if err := project.Validate(); err != nil {
-		t.Fatalf("expected a credential-free DTQL query to validate, got: %v", err)
+		t.Fatalf("expected a credential-free TugQL query to validate, got: %v", err)
 	}
 }
 

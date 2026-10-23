@@ -23,7 +23,7 @@ func CredentialReason(value string) (reason string, found bool) {
 
 // QueryCredentialReason applies CredentialReason to every field of q that
 // a query write persists as free text into git-tracked project files: its
-// title, purpose and text (the SQL, DTQL, GraphQL or HTTP body - on these
+// title, purpose and text (the SQL, TugQL, GraphQL or HTTP body - on these
 // write paths code is screened too, unlike datatug-core's own
 // QueryDef.Validate, which screens HTTP text only), each parameter's title
 // and default (defaultValueCredentialReason) and each target's

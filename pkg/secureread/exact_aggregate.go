@@ -45,13 +45,13 @@ type aggregateUnordered struct{ dal.StructuredQuery }
 
 func (q aggregateUnordered) OrderBy() []dal.OrderExpression { return nil }
 
-// RunExactAggregateDTQL executes a narrow canonical Group preview over a single
+// RunExactAggregateTugQL executes a narrow canonical Group preview over a single
 // source. OriginalDocument supplies projection/type provenance; document alone
 // determines the input scope. Every source row is acquired through the current
 // policy path. No native opaque SQL or generic float aggregation is used.
 // Input budgets are hard errors, never partial aggregates. Integer/decimal
 // results use exact JSON numeric lexemes; FLOAT follows resultops IEEE addition.
-func (e *Executor) RunExactAggregateDTQL(ctx context.Context, sourceURL string, originalDocument, document []byte, variables map[string]any, columns []resultops.Column) (ExactAggregateResult, error) {
+func (e *Executor) RunExactAggregateTugQL(ctx context.Context, sourceURL string, originalDocument, document []byte, variables map[string]any, columns []resultops.Column) (ExactAggregateResult, error) {
 	if err := ctx.Err(); err != nil {
 		return ExactAggregateResult{}, err
 	}
@@ -82,11 +82,11 @@ func prepareExactAggregate(originalDocument, document []byte, columns []resultop
 		return p, fmt.Errorf("aggregate plan exceeds metadata budget")
 	}
 	var err error
-	p.original, err = dtqlDeserialize(originalDocument)
+	p.original, err = tugqlDeserialize(originalDocument)
 	if err != nil {
 		return p, fmt.Errorf("original aggregate input: %w", err)
 	}
-	p.query, err = dtqlDeserialize(document)
+	p.query, err = tugqlDeserialize(document)
 	if err != nil {
 		return p, fmt.Errorf("aggregate preview: %w", err)
 	}
@@ -234,11 +234,11 @@ func prepareExactAggregate(originalDocument, document []byte, columns []resultop
 	if err != nil {
 		return p, err
 	}
-	actual, err := dtqlSerialize(aggregateUnordered{q})
+	actual, err := tugqlSerialize(aggregateUnordered{q})
 	if err != nil {
 		return p, err
 	}
-	if !bytes.Equal(actual, []byte(expected.DTQL)) {
+	if !bytes.Equal(actual, []byte(expected.TugQL)) {
 		return p, fmt.Errorf("aggregate preview does not preserve original scope/projection")
 	}
 	if len(p.outputs) > 1024 {

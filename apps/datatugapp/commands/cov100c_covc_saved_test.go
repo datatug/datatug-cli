@@ -131,7 +131,7 @@ func covCRunSaved(t *testing.T, o queryOptions) (stdout, stderr string, err erro
 	return out.String(), errOut.String(), err
 }
 
-const covCItemDTQL = "from: {name: Item}\n"
+const covCItemTugQL = "from: {name: Item}\n"
 
 // covCFullProject is a project with a sqlite catalog and one query of each type.
 func covCFullProject(t *testing.T) string {
@@ -143,7 +143,7 @@ func covCFullProject(t *testing.T) string {
 		covCEnvFiles(map[string]string{"main": db}),
 		covCQueryFiles("f", "sqlq", "SQL", "sql", "SELECT id, name FROM Item WHERE id = @Id",
 			`,"parameters":[{"id":"Id","type":"int","isRequired":true}]`),
-		covCQueryFiles("f", "dtqlq", "DTQL", "dtql", covCItemDTQL, ""),
+		covCQueryFiles("f", "tugqlq", "TugQL", "tugql", covCItemTugQL, ""),
 		covCQueryFiles("f", "other", "GraphQL", "", "", ""),
 	))
 }
@@ -168,11 +168,11 @@ func TestCovCSavedRunSQLNilContextUnrestricted(t *testing.T) {
 	}
 }
 
-func TestCovCSavedRunDTQLPlainAndStreamFallthrough(t *testing.T) {
+func TestCovCSavedRunTugQLPlainAndStreamFallthrough(t *testing.T) {
 	dir := covCFullProject(t)
-	// jsonl on a non-federated DTQL query falls through the streaming attempt
+	// jsonl on a non-federated TugQL query falls through the streaming attempt
 	// (no named databases) to the ordinary path.
-	stdout, stderr, err := covCRunSaved(t, queryOptions{project: dir, query: "f/dtqlq", env: "local", format: "jsonl", quiet: true})
+	stdout, stderr, err := covCRunSaved(t, queryOptions{project: dir, query: "f/tugqlq", env: "local", format: "jsonl", quiet: true})
 	if err != nil {
 		t.Fatalf("run: %v (%s)", err, stderr)
 	}
@@ -206,7 +206,7 @@ func TestCovCSavedRunErrors(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.SetOut(covCFailWriter{})
 	cmd.SetErr(io.Discard)
-	err = runSavedQueryCommand(cmd, queryOptions{project: dir, query: "f/dtqlq", env: "local", format: "json", quiet: true})
+	err = runSavedQueryCommand(cmd, queryOptions{project: dir, query: "f/tugqlq", env: "local", format: "json", quiet: true})
 	if covCExitCode(t, err) != 1 {
 		t.Fatalf("write failure: %v", err)
 	}
@@ -216,10 +216,10 @@ func TestCovCSavedRunInvalidPoliciesDir(t *testing.T) {
 	db := covCSQLiteFile(t, "main.sqlite", `CREATE TABLE Item(id INTEGER PRIMARY KEY, name TEXT)`)
 	dir := covCWriteProject(t, covCMerge(
 		covCEnvFiles(map[string]string{"main": db}),
-		covCQueryFiles("f", "dtqlq", "DTQL", "dtql", covCItemDTQL, ""),
+		covCQueryFiles("f", "tugqlq", "TugQL", "tugql", covCItemTugQL, ""),
 		map[string]string{"policies/broken.yaml": "ruleSets: [unclosed"},
 	))
-	_, _, err := covCRunSaved(t, queryOptions{project: dir, query: "f/dtqlq", env: "local", format: "json", as: "x"})
+	_, _, err := covCRunSaved(t, queryOptions{project: dir, query: "f/tugqlq", env: "local", format: "json", as: "x"})
 	if covCExitCode(t, err) != exitCodeUsage || !strings.Contains(err.Error(), "load access policies") {
 		t.Fatalf("policies dir: %v", err)
 	}
@@ -325,7 +325,7 @@ func TestCovCResolveQuerySourceURL(t *testing.T) {
 	}
 }
 
-func TestCovCSQLAndDTQLRunnersFailEarly(t *testing.T) {
+func TestCovCSQLAndTugQLRunnersFailEarly(t *testing.T) {
 	ctx := context.Background()
 	executor := secureread.NewExecutor(secureread.Session{Unrestricted: true})
 	boom := errors.New("covC boom")
@@ -333,24 +333,24 @@ func TestCovCSQLAndDTQLRunnersFailEarly(t *testing.T) {
 	if _, err := runSQLSavedQuery(ctx, executor, broken, "", "", &datatug.QueryDef{}, nil); !errors.Is(err, boom) {
 		t.Fatalf("sql source error: %v", err)
 	}
-	if _, err := runDTQLSavedQuery(ctx, executor, broken, "", "", &datatug.QueryDef{Text: covCItemDTQL}, nil); !errors.Is(err, boom) {
-		t.Fatalf("dtql source error: %v", err)
+	if _, err := runTugQLSavedQuery(ctx, executor, broken, "", "", &datatug.QueryDef{Text: covCItemTugQL}, nil); !errors.Is(err, boom) {
+		t.Fatalf("tugql source error: %v", err)
 	}
-	if _, err := runDTQLSavedQuery(ctx, executor, broken, "", "", &datatug.QueryDef{Text: "from: [unclosed"}, nil); err == nil {
-		t.Fatal("bad dtql text accepted")
+	if _, err := runTugQLSavedQuery(ctx, executor, broken, "", "", &datatug.QueryDef{Text: "from: [unclosed"}, nil); err == nil {
+		t.Fatal("bad tugql text accepted")
 	}
 	federated := &datatug.QueryDef{Text: "from: {database: orders, name: Invoice}\n"}
-	if _, err := federatedDTQLURLs(ctx, broken, "", "", federated); !errors.Is(err, boom) {
+	if _, err := federatedTugQLURLs(ctx, broken, "", "", federated); !errors.Is(err, boom) {
 		t.Fatalf("federated env error: %v", err)
 	}
 	missingDB := &covCStore{envs: datatug.Environments{}, env: &datatug.Environment{DbServers: datatug.EnvDbServers{nil}}}
-	if _, err := federatedDTQLURLs(ctx, missingDB, "", "local", federated); err == nil {
+	if _, err := federatedTugQLURLs(ctx, missingDB, "", "local", federated); err == nil {
 		t.Fatal("unresolvable database accepted")
 	}
-	if _, err := resolveSQLOrDTQLSourceURL(ctx, &covCStore{catalogsErr: boom}, "", "local", &datatug.QueryDef{}); !errors.Is(err, boom) {
+	if _, err := resolveSQLOrTugQLSourceURL(ctx, &covCStore{catalogsErr: boom}, "", "local", &datatug.QueryDef{}); !errors.Is(err, boom) {
 		t.Fatalf("database error: %v", err)
 	}
-	if got, _, err := parseFederatedDTQL(ctx, broken, "", "", &datatug.QueryDef{Text: covCItemDTQL}); err != nil || got == nil {
+	if got, _, err := parseFederatedTugQL(ctx, broken, "", "", &datatug.QueryDef{Text: covCItemTugQL}); err != nil || got == nil {
 		t.Fatalf("non-federated parse: %v %v", got, err)
 	}
 	collected := map[string]bool{}

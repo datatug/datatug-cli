@@ -26,7 +26,7 @@ func TestCoverage100_InspectorRelatedWorkspace(t *testing.T) {
 
 	u := focusedGridStoreBackedTestUI(t, QueryResult{
 		Title:  "users",
-		DTQL:   "from: {name: users}\ncolumns: [{field: id}]\n",
+		TugQL:  "from: {name: users}\ncolumns: [{field: id}]\n",
 		Source: "sqlite:///fixture.db",
 		Result: secureread.Result{Columns: []string{"id"}, Rows: []secureread.Row{{Data: map[string]any{"id": int64(1)}}}},
 	})
@@ -80,7 +80,7 @@ func TestCoverage100_InspectorRelatedWorkspace(t *testing.T) {
 	// 2. groupedRecord
 	uGrouped := focusedGridStoreBackedTestUI(t, QueryResult{
 		Title:  "grouped",
-		DTQL:   "from: {name: users}\ngroupBy: [{field: id}]\n",
+		TugQL:  "from: {name: users}\ngroupBy: [{field: id}]\n",
 		Source: "sqlite:///fixture.db",
 		Result: secureread.Result{Columns: []string{"id"}, Rows: []secureread.Row{{Data: map[string]any{"id": int64(1)}}}},
 	})

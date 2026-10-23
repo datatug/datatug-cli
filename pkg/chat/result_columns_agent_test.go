@@ -37,7 +37,7 @@ func (p *columnJourneyProvider) Stream(_ context.Context, req ai.ChatRequest) it
 			p.t.Fatal("actual request lost column tools")
 		}
 		var response resultColumnsResponse
-		var run runDTQLResponse
+		var run runTugQLResponse
 		for _, message := range req.Messages {
 			for _, r := range message.ToolResults {
 				_ = json.Unmarshal([]byte(r.Content), &response)
@@ -47,7 +47,7 @@ func (p *columnJourneyProvider) Stream(_ context.Context, req ai.ChatRequest) it
 		var call ai.ToolCall
 		switch p.step {
 		case 0:
-			call = toolCall("base", toolRunDTQL, map[string]any{"title": "Invoice counts", "dtql": resultColumnsDocument})
+			call = toolCall("base", toolRunTugQL, map[string]any{"title": "Invoice counts", "tugql": resultColumnsDocument})
 		case 1:
 			p.parent = run.RecordSetID
 			if p.parent == "" {
@@ -128,7 +128,7 @@ func TestResultColumnsActualTerminalAgentJourneyAndExplicitProjection(t *testing
 			}
 			if !explicit {
 				last := turn.Queries[len(turn.Queries)-1]
-				if last.Lineage == nil || last.Lineage.ParentRecordSetID != provider.parent || !strings.Contains(last.DTQL, "Customer_LastName") {
+				if last.Lineage == nil || last.Lineage.ParentRecordSetID != provider.parent || !strings.Contains(last.TugQL, "Customer_LastName") {
 					t.Fatal("not an immutable enriched query", last)
 				}
 			}

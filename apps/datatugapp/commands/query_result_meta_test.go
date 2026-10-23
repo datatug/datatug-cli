@@ -69,7 +69,7 @@ func columnOf(doc describedDoc, name string) queryresults.Column {
 	return queryresults.Column{}
 }
 
-const invoiceCustomerDTQL = `from:
+const invoiceCustomerTugQL = `from:
   name: Invoice
   joins:
     - type: inner
@@ -119,7 +119,7 @@ func TestQueryRunResultMetaFromInvoice(t *testing.T) {
 
 func TestQueryRunResultMetaForAJoin(t *testing.T) {
 	root := resultsHome(t)
-	_, stderr, code := runQuery(t, invoiceCustomerDTQL, "--db", "sqlite://"+chinookFixture(t), "-f", "-", "--no-policies", "--result-id", "t4")
+	_, stderr, code := runQuery(t, invoiceCustomerTugQL, "--db", "sqlite://"+chinookFixture(t), "-f", "-", "--no-policies", "--result-id", "t4")
 	require.Equal(t, 0, code, stderr)
 	doc, _ := readDescribed(t, root, "t4")
 	require.Len(t, doc.Participants, 2)
@@ -217,14 +217,14 @@ func TestQueryRunSavedResultMeta(t *testing.T) {
 	federated := "from:\n  database: main\n  name: Item\n  alias: i\n  joins:\n    - from: {database: other, name: Owner, alias: o}\n      on: [{left: {field: owner_id, source: i}, op: '==', right: {field: id, source: o}}]\ncolumns:\n  - {field: name, source: i}\n  - {field: name, source: o, as: owner}\n"
 	dir := covCWriteProject(t, covCMerge(
 		covCEnvFiles(map[string]string{"main": db, "other": other}),
-		covCQueryFiles("f", "dtqlq", "DTQL", "dtql", "from: {name: Item}\n", `,"targets":[{"catalog":"main"}]`),
+		covCQueryFiles("f", "tugqlq", "TugQL", "tugql", "from: {name: Item}\n", `,"targets":[{"catalog":"main"}]`),
 		covCQueryFiles("f", "sqlq", "SQL", "sql", "SELECT id, name FROM Item", `,"targets":[{"catalog":"main"}]`),
-		covCQueryFiles("f", "fed", "DTQL", "dtql", federated, ""),
+		covCQueryFiles("f", "fed", "TugQL", "tugql", federated, ""),
 	))
 	root := resultsHome(t)
 	require.NoError(t, os.WriteFile(filepath.Join(os.Getenv("HOME"), ".datatug.yaml"), []byte("projects:\n  - id: covc\n    path: "+dir+"\n"), 0o600))
 
-	_, stderr, code := runQuery(t, "", "--project", dir, "--query", "f/dtqlq", "--env", "local", "--result-id", "d1")
+	_, stderr, code := runQuery(t, "", "--project", dir, "--query", "f/tugqlq", "--env", "local", "--result-id", "d1")
 	require.Equal(t, 0, code, stderr)
 	doc, _ := readDescribed(t, root, "d1")
 	assert.Equal(t, "Item", doc.Participants[0].Relation)
@@ -251,10 +251,10 @@ func TestQueryRunSavedResultMeta(t *testing.T) {
 	assert.Equal(t, "Owner", columnOf(doc, "owner").Source.Relation)
 }
 
-func TestSavedDTQLSources(t *testing.T) {
+func TestSavedTugQLSources(t *testing.T) {
 	dir := covCWriteProject(t, covCEnvFiles(map[string]string{"main": filepath.Join(t.TempDir(), "absent.sqlite")}))
 	tempDatatugHome(t)
-	sources := savedDTQLSources(context.Background(), covCFileStore(dir), dir, "local", &datatug.QueryDef{ID: "q", Targets: []datatug.QueryDefTarget{{Catalog: "nope"}}})
+	sources := savedTugQLSources(context.Background(), covCFileStore(dir), dir, "local", &datatug.QueryDef{ID: "q", Targets: []datatug.QueryDefTarget{{Catalog: "nope"}}})
 	_, _, _, err := sources.open(context.Background(), "")
 	assert.Error(t, err, "the query's own database cannot be resolved")
 	origParse := chatParseSource
@@ -291,29 +291,29 @@ func TestDescribeHelpers(t *testing.T) {
 	assert.Equal(t, map[string]string{"n": "integer"}, native.declared)
 	assert.Empty(t, native.unavailable.DeclaredTypes)
 
-	failed := describeDTQL(context.Background(), ":", nil, dtqlSources{})
+	failed := describeTugQL(context.Background(), ":", nil, tugqlSources{})
 	assert.Equal(t, "schema-unreadable", failed.unavailable.Participants)
 
 	// a database that cannot be opened, and columns that are not plain fields
 	open := func(context.Context, string) (dal.DB, string, func(), error) {
 		return nil, "sqlite", nil, errors.New("closed")
 	}
-	description := describeDTQL(context.Background(), "from: {name: T, alias: t}\ncolumns:\n  - {field: a, source: t}\n  - {wildcard: {source: t, exclude: [z]}}\n  - {field: b, source: nope}\n  - {value: 1, as: one}\n", []string{"a", "c", "b", "one"}, dtqlSources{open: open, ref: func(string) *string { return nil }})
+	description := describeTugQL(context.Background(), "from: {name: T, alias: t}\ncolumns:\n  - {field: a, source: t}\n  - {wildcard: {source: t, exclude: [z]}}\n  - {field: b, source: nope}\n  - {value: 1, as: one}\n", []string{"a", "c", "b", "one"}, tugqlSources{open: open, ref: func(string) *string { return nil }})
 	assert.Equal(t, "schema-unreadable", description.unavailable.Related)
 	assert.Equal(t, "schema-unreadable", description.unavailable.DeclaredTypes)
 	assert.Empty(t, description.facts)
 }
 
-func TestDescribeDTQLWithOneSnapshot(t *testing.T) {
+func TestDescribeTugQLWithOneSnapshot(t *testing.T) {
 	ctx := context.Background()
 	db := chinookDB(t)
-	sources := dtqlSources{open: func(context.Context, string) (dal.DB, string, func(), error) { return db, "sqlite", func() {}, nil }, ref: func(string) *string { return nil }}
+	sources := tugqlSources{open: func(context.Context, string) (dal.DB, string, func(), error) { return db, "sqlite", func() {}, nil }, ref: func(string) *string { return nil }}
 	// a wildcard of one source, a column that is not in it, and a column of no source
-	description := describeDTQL(ctx, "from: {name: Genre, alias: g}\ncolumns:\n  - {wildcard: {source: g, exclude: [Name]}}\n", []string{"GenreId", "Nope"}, sources)
+	description := describeTugQL(ctx, "from: {name: Genre, alias: g}\ncolumns:\n  - {wildcard: {source: g, exclude: [Name]}}\n", []string{"GenreId", "Nope"}, sources)
 	assert.Equal(t, "Genre", description.facts["GenreId"].Source.Relation)
 	assert.NotContains(t, description.facts, "Nope")
 	// a direct column that is not a field of its relation
-	description = describeDTQL(ctx, "from: {name: Genre}\ncolumns:\n  - {field: Missing}\n", []string{"Missing"}, sources)
+	description = describeTugQL(ctx, "from: {name: Genre}\ncolumns:\n  - {field: Missing}\n", []string{"Missing"}, sources)
 	assert.Empty(t, description.facts)
 	// a related list whose discovery cannot run
 	states := map[string]*snapshotState{"": {snapshot: joinmeta.ForeignKeySnapshot{Keys: []joinmeta.ForeignKey{{ConstraintID: "x", FromRelation: "A", FromFields: []string{"a"}, ToRelation: "B", ToFields: []string{"b"}}}}}}
@@ -364,11 +364,11 @@ func TestDescribeColumnsOfAView(t *testing.T) {
 	require.NoError(t, err)
 	db, err := backend.OpenProtected(context.Background())
 	require.NoError(t, err)
-	sources := dtqlSources{open: func(context.Context, string) (dal.DB, string, func(), error) { return db, "sqlite", func() {}, nil }}
-	description := describeDTQL(context.Background(), "from: {name: PetNames, alias: p}\ncolumns:\n  - {wildcard: {source: p, exclude: [z]}}\n", []string{"name"}, sources)
+	sources := tugqlSources{open: func(context.Context, string) (dal.DB, string, func(), error) { return db, "sqlite", func() {}, nil }}
+	description := describeTugQL(context.Background(), "from: {name: PetNames, alias: p}\ncolumns:\n  - {wildcard: {source: p, exclude: [z]}}\n", []string{"name"}, sources)
 	assert.Equal(t, "schema-unreadable", description.unavailable.DeclaredTypes)
 	assert.Empty(t, description.facts)
-	description = describeDTQL(context.Background(), "from: {name: PetNames, alias: p}\ncolumns:\n  - {field: name, source: p}\n", []string{"name"}, sources)
+	description = describeTugQL(context.Background(), "from: {name: PetNames, alias: p}\ncolumns:\n  - {field: name, source: p}\n", []string{"name"}, sources)
 	assert.Equal(t, "schema-unreadable", description.unavailable.DeclaredTypes)
 }
 

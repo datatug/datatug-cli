@@ -114,7 +114,7 @@ func executionShowCommand() *cobra.Command {
 			}
 			identity := record.QueryID
 			if identity == "" {
-				identity = "ad-hoc DTQL " + record.DTQLHash
+				identity = "ad-hoc TugQL " + record.TugQLHash
 			}
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "execution %s\n%s\n%s / %s\nrows: %d\nfingerprint: %s\n", record.Ref.ExecutionID, identity, record.Scope.Project, record.Scope.Environment, record.RowCount, record.ResultFingerprint)
 			return nil

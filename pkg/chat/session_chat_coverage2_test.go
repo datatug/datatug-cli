@@ -13,7 +13,7 @@ import (
 // that needs applyJoinCandidate to reach its post-Apply store calls.
 func joinCandidateQueryResult() QueryResult {
 	return QueryResult{
-		Title: "Joined", DTQL: "from: {name: Invoice}\nlimit: 1",
+		Title: "Joined", TugQL: "from: {name: Invoice}\nlimit: 1",
 		Result: secureread.Result{Columns: []string{"InvoiceId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 1}}}},
 	}
 }

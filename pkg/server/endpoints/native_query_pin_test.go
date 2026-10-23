@@ -31,7 +31,7 @@ func TestNativeAcceptedSavedQueryExecutesExactBodyAfterDefinitionDeletion(t *tes
 		t.Fatal(err)
 	}
 	accepted := saved.Query
-	for _, name := range []string{"customer-invoices.query.json", "customer-invoices.query.dtql"} {
+	for _, name := range []string{"customer-invoices.query.json", "customer-invoices.query.tugql.yaml"} {
 		if err = os.Remove(filepath.Join(projectDir, "queries", "customers", name)); err != nil {
 			t.Fatal(err)
 		}

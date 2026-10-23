@@ -115,7 +115,7 @@ func tempDatatugHome(t *testing.T) string {
 
 // writeChinookFixtureDB creates a minimal SQLite file at path with just
 // enough Chinook-shaped schema and data for the three demo-project-1 saved
-// queries this test file exercises (customer-invoices: DTQL over Invoice;
+// queries this test file exercises (customer-invoices: TugQL over Invoice;
 // invoice-lines: SQL over InvoiceLine/Track).
 func writeChinookFixtureDB(t *testing.T, path string) {
 	t.Helper()
@@ -180,7 +180,7 @@ func grantAdminOpaqueSQL(t *testing.T, projectDir string) {
 // endpoint (see breakHTTPQueryNetwork), provisions a temp $HOME with a
 // Chinook-shaped SQLite fixture at ~/datatug/dbs/chinook-local.sqlite, and
 // grants admin opaque-SQL access (see grantAdminOpaqueSQL) — everything the
-// SQL/DTQL/HTTP saved-query tests below need.
+// SQL/TugQL/HTTP saved-query tests below need.
 func setupSavedQueryProject(t *testing.T) (projectDir string) {
 	t.Helper()
 	tempDatatugHome(t)
@@ -195,9 +195,9 @@ func setupSavedQueryProject(t *testing.T) (projectDir string) {
 	return projectDir
 }
 
-// TestQueryRunSaved_DTQL runs the demo's customer-invoices DTQL query for a
+// TestQueryRunSaved_TugQL runs the demo's customer-invoices TugQL query for a
 // Canadian customer (5) as admin and asserts real Invoice rows come back.
-func TestQueryRunSaved_DTQL(t *testing.T) {
+func TestQueryRunSaved_TugQL(t *testing.T) {
 	projectDir := setupSavedQueryProject(t)
 
 	stdout, stderr, code := runQuery(t, "",
@@ -367,7 +367,7 @@ func TestQueryRunSaved_UnknownProject(t *testing.T) {
 // TestQueryRunSaved_BareQueryID_ResolvesTheSameAsFolderQualified covers
 // S97's "bare id unique -> resolves" case for the CLI path: --query
 // "customer-invoices" (bare) must run the identical query
-// TestQueryRunSaved_DTQL's own "customers/customer-invoices" runs, not fail
+// TestQueryRunSaved_TugQL's own "customers/customer-invoices" runs, not fail
 // with the store's raw "no such file or directory".
 func TestQueryRunSaved_BareQueryID_ResolvesTheSameAsFolderQualified(t *testing.T) {
 	projectDir := setupSavedQueryProject(t)
@@ -417,7 +417,7 @@ func TestQueryRunSaved_AmbiguousQueryID_ClearUsageError(t *testing.T) {
 		if err := os.MkdirAll(queriesDir, 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", queriesDir, err)
 		}
-		if err := os.WriteFile(filepath.Join(queriesDir, "q.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","id":"q","type":"DTQL"}`), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(queriesDir, "q.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","id":"q","type":"TugQL"}`), 0o644); err != nil {
 			t.Fatalf("write query file: %v", err)
 		}
 	}

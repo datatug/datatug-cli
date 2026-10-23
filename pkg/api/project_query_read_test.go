@@ -35,7 +35,7 @@ func TestLocalGetQueryRefusesBranchSwitchDuringStoreRead(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "datatug-project.json"),
 		[]byte(`{"id":"branch-read-test","title":"Branch read test","access":"private","created":{"at":"2026-01-01T00:00:00Z"}}`), 0o600))
 	query := datatug.QueryDefWithFolderPath{}
-	query.ID, query.Title, query.Type, query.Text = "customer", "Customers", datatug.QueryTypeDTQL, "SELECT CustomerId FROM Customer"
+	query.ID, query.Title, query.Type, query.Text = "customer", "Customers", datatug.QueryTypeTugQL, "SELECT CustomerId FROM Customer"
 	data, err := os.ReadFile("testdata/query_semantic_model.json")
 	require.NoError(t, err)
 	var semantic datatug.QuerySemanticModel

@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 )
 
 type inspectorColumnMeta struct {
@@ -29,24 +29,24 @@ func columnMetaFor(catalog ProjectCatalog, record *RecordSet, name string) inspe
 		shortName = name[last+1:]
 	}
 	if record != nil {
-		if record.DTQL == "" {
+		if record.TugQL == "" {
 			return meta
 		}
-		query, err := dtql.Deserialize([]byte(record.DTQL))
+		query, err := tugql.Deserialize([]byte(record.TugQL))
 		if err != nil {
 			return meta
 		}
 		// relationInstances' own walk always appends at least the root FROM
-		// relation (dtql.Deserialize requires a FROM clause to succeed at
+		// relation (tugql.Deserialize requires a FROM clause to succeed at
 		// all), so instances is never empty for any document that reached
 		// this point -- the r5 fix round (#289) removed that zero-instance
 		// guard as provably unreachable, and it stays removed.
 		//
 		// The r5 round ALSO removed an "unqualified source with more than
-		// one relation" guard on the (wrong) belief that DTQL has no
+		// one relation" guard on the (wrong) belief that TugQL has no
 		// multi-relation FROM at all. That's false: DiscoverJoinCandidates/
-		// deriveJoinDTQL (join.go) and the #291 attached-join widening
-		// produce real joined DTQL documents with a `joins:` clause, and
+		// deriveJoinTugQL (join.go) and the #291 attached-join widening
+		// produce real joined TugQL documents with a `joins:` clause, and
 		// relationInstances walks every one of them, so len(instances) > 1
 		// is a real, reachable case for a query.Columns() field or wildcard
 		// left unqualified (empty Source()) -- e.g. an unqualified

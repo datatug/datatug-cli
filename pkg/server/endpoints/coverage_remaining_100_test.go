@@ -461,7 +461,7 @@ func TestRemaining100_SemanticProject(t *testing.T) {
 	// query file with empty ID sets ID from filename
 	queriesDir := filepath.Join(tempDir, "queries")
 	require.NoError(t, os.MkdirAll(queriesDir, 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(queriesDir, "auto_q.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","type":"DTQL"}`), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(queriesDir, "auto_q.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z","type":"TugQL"}`), 0644))
 	queries, canonicalIDs, err := loadModuleQueries(tempDir)
 	assert.NoError(t, err)
 	assert.Len(t, queries, 1)
@@ -641,29 +641,29 @@ func TestRemaining100_QueryCapture_And_Validate(t *testing.T) {
 	_, err := validateCaptureParameters(params)
 	assert.Error(t, err)
 
-	// validateCaptureDTQL > maxCaptureDTQLBytes
-	huge := strings.Repeat("x", maxCaptureDTQLBytes+10)
-	_, err = validateCaptureDTQL(huge, nil)
+	// validateCaptureTugQL > maxCaptureTugQLBytes
+	huge := strings.Repeat("x", maxCaptureTugQLBytes+10)
+	_, err = validateCaptureTugQL(huge, nil)
 	assert.Error(t, err)
 
-	// dtqlCollection cases
+	// tugqlCollection cases
 	qNoFrom := testStructuredQuery{from: nil}
-	assert.Equal(t, "", dtqlCollection(qNoFrom))
+	assert.Equal(t, "", tugqlCollection(qNoFrom))
 
 	cRefVal := dal.NewRootCollectionRef("items", "")
 	qCollVal := testStructuredQuery{from: testFromSource{base: cRefVal}}
-	assert.Equal(t, "items", dtqlCollection(qCollVal))
+	assert.Equal(t, "items", tugqlCollection(qCollVal))
 
 	cRef := dal.NewRootCollectionRef("items_ptr", "")
 	qColl := testStructuredQuery{from: testFromSource{base: &cRef}}
-	assert.Equal(t, "items_ptr", dtqlCollection(qColl))
+	assert.Equal(t, "items_ptr", tugqlCollection(qColl))
 
 	var nilCRef *dal.CollectionRef
 	qNilColl := testStructuredQuery{from: testFromSource{base: nilCRef}}
-	assert.Equal(t, "", dtqlCollection(qNilColl))
+	assert.Equal(t, "", tugqlCollection(qNilColl))
 
 	qOtherBase := testStructuredQuery{from: testFromSource{base: dal.QuerySource{}}}
-	assert.Equal(t, "", dtqlCollection(qOtherBase))
+	assert.Equal(t, "", tugqlCollection(qOtherBase))
 
 	// checkCaptureSource with captureProjectStoreFor error
 	origStore := captureProjectStoreFor
@@ -692,7 +692,7 @@ func TestRemaining100_QueryCapture_And_Validate(t *testing.T) {
 		Query: capturedQuery{
 			ID:     "q1",
 			Source: "s",
-			DTQL:   "SELECT * FROM coll",
+			TugQL:  "SELECT * FROM coll",
 		},
 	}
 	_, _, err = computeCaptureQuery(context.Background(), req)
@@ -1224,7 +1224,7 @@ func TestRemaining100_CompareFacts(t *testing.T) {
 	assert.Error(t, err)
 	compareFactsProjectStoreFor = origStore
 
-	// queryDef.Type != QueryTypeDTQL
+	// queryDef.Type != QueryTypeTugQL
 	qSQL := datatug.QueryDef{CreatedAt: "2026-01-01T00:00:00Z", ID: "facts_q", Type: datatug.QueryTypeSQL}
 	data, _ := json.Marshal(qSQL)
 	require.NoError(t, os.WriteFile(filepath.Join(qDir, "facts_q.query.json"), data, 0644))
@@ -1233,12 +1233,12 @@ func TestRemaining100_CompareFacts(t *testing.T) {
 
 	// matchingCohortParameter cases
 	// no matching parameter
-	qDTQL := &datatug.QueryDef{
+	qTugQL := &datatug.QueryDef{
 		ID:         "facts_q",
-		Type:       datatug.QueryTypeDTQL,
+		Type:       datatug.QueryTypeTugQL,
 		Parameters: []datatug.ParameterDef{{ID: "p1", Meta: &datatug.EntityFieldRef{Entity: "Other", Field: "F"}}},
 	}
-	_, err = matchingCohortParameter(qDTQL, "E", "F")
+	_, err = matchingCohortParameter(qTugQL, "E", "F")
 	assert.Error(t, err)
 
 	// not multi-value

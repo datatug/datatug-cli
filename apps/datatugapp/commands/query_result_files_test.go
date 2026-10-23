@@ -75,7 +75,7 @@ type metaDoc struct {
 	} `json:"db"`
 	Query struct {
 		Kind           string                     `json:"kind"`
-		DTQL           string                     `json:"dtql"`
+		TugQL          string                     `json:"tugql"`
 		From           string                     `json:"from"`
 		SavedQueryID   string                     `json:"savedQueryId"`
 		SavedQueryType string                     `json:"savedQueryType"`
@@ -127,12 +127,12 @@ func TestQueryRunResultFilesFromChinook(t *testing.T) {
 	assert.Equal(t, queryresults.Rows{Kept: 412, TruncatedBy: "none"}, meta.Rows)
 	assert.Equal(t, "from", meta.Query.Kind)
 	assert.Equal(t, "Invoice", meta.Query.From)
-	assert.Equal(t, "from:\n  name: Invoice\n", meta.Query.DTQL)
+	assert.Equal(t, "from:\n  name: Invoice\n", meta.Query.TugQL)
 	assert.Equal(t, "none", meta.Query.Policy)
 	assert.Nil(t, meta.DB.Ref)
 	assert.Equal(t, "sqlite", meta.DB.Driver)
 	assert.Equal(t, "from:\n  name: Invoice\n", meta.Query.Text)
-	assert.Equal(t, "dtql", meta.Query.Language)
+	assert.Equal(t, "tugql", meta.Query.Language)
 	assert.Empty(t, meta.Query.DBRef, "not a project source: no dbRef")
 	assert.Empty(t, meta.Query.Params)
 	assert.Equal(t, "$key", recordset.Columns[0].Name)
@@ -291,25 +291,25 @@ func TestCollectResultRowsReadsAtMostKeptPlusOne(t *testing.T) {
 	assert.Equal(t, 2, missing.Build("m", nil, nil).Rows.Kept)
 }
 
-func TestQueryRunResultFromDTQLFileWithVariablesAndPolicies(t *testing.T) {
+func TestQueryRunResultFromTugQLFileWithVariablesAndPolicies(t *testing.T) {
 	root := resultsHome(t)
 	url := setupQueryDB(t)
-	dtqlText := "from:\n  name: products\nwhere:\n  op: '>='\n  left: { field: price }\n  right: { param: minPrice }\n"
+	tugqlText := "from:\n  name: products\nwhere:\n  op: '>='\n  left: { field: price }\n  right: { param: minPrice }\n"
 	file := filepath.Join(t.TempDir(), "q.yaml")
-	require.NoError(t, os.WriteFile(file, []byte(dtqlText), 0o600))
+	require.NoError(t, os.WriteFile(file, []byte(tugqlText), 0o600))
 	dir := policiesDir(t, map[string]string{"pricing.yaml": minPricePolicy})
 
 	stdout, stderr, code := runQuery(t, "", "--db", url, "-f", file, "--policies-dir", dir, "--var", "minPrice=10", "--var", "ids=[1,2]", "--result-id", "q1")
 	require.Equal(t, 0, code, stderr)
 	assert.Contains(t, stdout, `"rowsKept":2`)
 	meta, _, _ := readResult(t, root, "q1")
-	assert.Equal(t, "dtql", meta.Query.Kind)
-	assert.Equal(t, dtqlText, meta.Query.DTQL)
+	assert.Equal(t, "tugql", meta.Query.Kind)
+	assert.Equal(t, tugqlText, meta.Query.TugQL)
 	assert.Equal(t, "dir", meta.Query.Policy)
 	assert.JSONEq(t, `{"type":"integer","value":"10"}`, string(meta.Query.Parameters["minPrice"]))
 	assert.JSONEq(t, `{"type":"set","values":[{"type":"integer","value":"1"},{"type":"integer","value":"2"}]}`, string(meta.Query.Parameters["ids"]))
 	assert.Equal(t, "ingitdb", meta.DB.Driver)
-	assert.Equal(t, dtqlText, meta.Query.Text)
+	assert.Equal(t, tugqlText, meta.Query.Text)
 	require.Len(t, meta.Query.Params, 2)
 	assert.Equal(t, "ids", meta.Query.Params[0].Name, "params are sorted by name")
 	assert.Equal(t, "minPrice", meta.Query.Params[1].Name)
@@ -415,7 +415,7 @@ func TestQueryRunSavedResultFiles(t *testing.T) {
 		id, query, kind string
 		vars            []string
 	}{
-		{"s1", "f/dtqlq", "dtql", nil},
+		{"s1", "f/tugqlq", "tugql", nil},
 		{"s2", "f/sqlq", "sql", []string{"Id=2"}},
 	} {
 		stdout, stderr, code := runQuery(t, "", append([]string{"--project", dir, "--query", tc.query, "--env", "local", "--result-id", tc.id}, varsArgs(tc.vars)...)...)
@@ -426,7 +426,7 @@ func TestQueryRunSavedResultFiles(t *testing.T) {
 		assert.Equal(t, tc.query, meta.Query.SavedQueryID)
 		assert.Equal(t, tc.kind, meta.Query.SavedQueryType)
 		assert.Equal(t, "project", meta.Query.Policy)
-		assert.Empty(t, meta.Query.DTQL, "the legacy dtql member stays empty for a saved query; the person's own saved text is copied as query.text")
+		assert.Empty(t, meta.Query.TugQL, "the legacy tugql member stays empty for a saved query; the person's own saved text is copied as query.text")
 		assert.Equal(t, tc.kind, meta.Query.Language)
 		assert.NotEmpty(t, meta.Query.Text)
 		assert.Empty(t, meta.Query.DBRef)
@@ -438,7 +438,7 @@ func TestQueryRunSavedResultFiles(t *testing.T) {
 
 	// a registered project gets its reference
 	require.NoError(t, os.WriteFile(filepath.Join(os.Getenv("HOME"), ".datatug.yaml"), []byte("projects:\n  - id: covc\n    path: "+dir+"\n"), 0o600))
-	_, stderr, code := runQuery(t, "", "--project", dir, "--query", "f/dtqlq", "--env", "local", "--result-id", "s3", "--result-rows", "1")
+	_, stderr, code := runQuery(t, "", "--project", dir, "--query", "f/tugqlq", "--env", "local", "--result-id", "s3", "--result-rows", "1")
 	require.Equal(t, 0, code, stderr)
 	meta, _, _ := readResult(t, root, "s3")
 	require.NotNil(t, meta.DB.Ref)
@@ -503,12 +503,12 @@ func TestSavedQueryDB(t *testing.T) {
 	unsupported := &covCStore{catalogs: datatug.DbCatalogs{{}}, env: env, catalog: datatug.DbCatalog{Driver: "mysql"}}
 	assert.Equal(t, queryresults.DB{}, savedQueryDB(ctx, unsupported, t.TempDir(), "", "local", sqlDef))
 
-	// a federated DTQL query is described by its root's database
-	federated := &datatug.QueryDef{Type: datatug.QueryTypeDTQL, Text: "from: {name: Item, database: main}\n"}
+	// a federated TugQL query is described by its root's database
+	federated := &datatug.QueryDef{Type: datatug.QueryTypeTugQL, Text: "from: {name: Item, database: main}\n"}
 	database, err := savedQueryDatabase(ctx, &covCStore{catalogsErr: boom}, "local", federated)
 	require.NoError(t, err)
 	assert.Equal(t, "main", database)
-	_, err = savedQueryDatabase(ctx, &covCStore{catalogsErr: boom}, "local", &datatug.QueryDef{Type: datatug.QueryTypeDTQL, Text: ":"})
+	_, err = savedQueryDatabase(ctx, &covCStore{catalogsErr: boom}, "local", &datatug.QueryDef{Type: datatug.QueryTypeTugQL, Text: ":"})
 	assert.ErrorIs(t, err, boom)
 }
 

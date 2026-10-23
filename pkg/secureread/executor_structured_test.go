@@ -121,7 +121,7 @@ func TestRunStructured_HiddenColumnExplicit_Refused(t *testing.T) {
 }
 
 // TestRunStructured_HiddenColumn_WildcardRedactedAndLimitation covers
-// "hidden column absent from structured/DTQL results": an implicit
+// "hidden column absent from structured/TugQL results": an implicit
 // (wildcard) select silently drops the hidden fields per row (DALgo's own
 // redaction) and the Result reports which columns were hidden, rather than
 // pretending nothing was limited.
@@ -228,30 +228,30 @@ func TestRunStructured_RestrictedButNoFieldOrRowRule_NoLimitations(t *testing.T)
 	}
 }
 
-// TestRunDTQL_RunsThroughPolicyPath covers REQ:dtql-query-type / AC
-// dtql-query-runs: a DTQL-YAML document runs through the exact same policy
+// TestRunTUGQL_RunsThroughPolicyPath covers REQ:tugql-query-type / AC
+// tugql-query-runs: a TugQL-YAML document runs through the exact same policy
 // path as a structured query.
-func TestRunDTQL_RunsThroughPolicyPath(t *testing.T) {
+func TestRunTUGQL_RunsThroughPolicyPath(t *testing.T) {
 	runOnBothBackends(t, func(t *testing.T, sourceURL string) {
 		session := aliceSession(t, ownerScopedPolicy)
 		executor := NewExecutor(session)
 		doc := []byte("from:\n  name: customers\n")
-		result, err := executor.RunDTQL(context.Background(), sourceURL, doc, nil)
+		result, err := executor.RunTugQL(context.Background(), sourceURL, doc, nil)
 		if err != nil {
-			t.Fatalf("RunDTQL: %v", err)
+			t.Fatalf("RunTugQL: %v", err)
 		}
 		assertOnlyAliceRows(t, result)
 	})
 }
 
-// TestRunDTQL_InvalidDocument_Errors confirms a malformed DTQL document
+// TestRunTUGQL_InvalidDocument_Errors confirms a malformed TugQL document
 // fails before ever touching the source or the policies.
-func TestRunDTQL_InvalidDocument_Errors(t *testing.T) {
+func TestRunTUGQL_InvalidDocument_Errors(t *testing.T) {
 	session := aliceSession(t, ownerScopedPolicy)
 	executor := NewExecutor(session)
-	_, err := executor.RunDTQL(context.Background(), newSQLiteFixture(t), []byte("not: [valid, dtql"), nil)
+	_, err := executor.RunTugQL(context.Background(), newSQLiteFixture(t), []byte("not: [valid, tugql"), nil)
 	if err == nil {
-		t.Fatal("RunDTQL(invalid document) = nil error")
+		t.Fatal("RunTugQL(invalid document) = nil error")
 	}
 }
 

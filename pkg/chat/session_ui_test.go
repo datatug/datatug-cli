@@ -19,7 +19,7 @@ func TestChatUISessionRestoresGridAndManagesSessions(t *testing.T) {
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
-	agent := &contextualStub{turns: []Turn{{Queries: []QueryResult{{Title: "Prague customers", DTQL: "from: {name: Customer}\nlimit: 1", Result: secureread.Result{
+	agent := &contextualStub{turns: []Turn{{Queries: []QueryResult{{Title: "Prague customers", TugQL: "from: {name: Customer}\nlimit: 1", Result: secureread.Result{
 		Columns: []string{"CustomerId", "City"},
 		Rows:    []secureread.Row{{Data: map[string]any{"CustomerId": 5, "City": "Prague"}}},
 	}}}}}}
@@ -93,7 +93,7 @@ func TestChatUISessionSubmissionPersistsThenRendersFromSnapshot(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
-	agent := &contextualStub{turns: []Turn{{Queries: []QueryResult{{Title: "Invoices", DTQL: "from: {name: Invoice}\nlimit: 1", Result: secureread.Result{Columns: []string{"InvoiceId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 412}}}}}}}}}
+	agent := &contextualStub{turns: []Turn{{Queries: []QueryResult{{Title: "Invoices", TugQL: "from: {name: Invoice}\nlimit: 1", Result: secureread.Result{Columns: []string{"InvoiceId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 412}}}}}}}}}
 	sessions, err := NewSessionChat(ctx, store, agent, "sqlite:///chinook.db")
 	if err != nil {
 		t.Fatal(err)

@@ -53,7 +53,7 @@ func realPgServerMajor(t *testing.T, rawURL string) int {
 	return version / 10000
 }
 
-// realPgIDs runs `datatug query run` for query (a DTQL document) against the fixture database, as the person
+// realPgIDs runs `datatug query run` for query (a TugQL document) against the fixture database, as the person
 // who set the switch and no policies, and returns the "id" of each row in the order they came.
 func realPgIDs(t *testing.T, query string) []int {
 	t.Helper()

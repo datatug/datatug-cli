@@ -26,7 +26,7 @@ type fakeExecutor struct {
 	params map[string]any
 }
 
-func (f *fakeExecutor) RunDTQL(_ context.Context, source string, doc []byte, params map[string]any) (secureread.Result, error) {
+func (f *fakeExecutor) RunTugQL(_ context.Context, source string, doc []byte, params map[string]any) (secureread.Result, error) {
 	f.calls++
 	f.doc = string(doc)
 	f.source = source
@@ -34,7 +34,7 @@ func (f *fakeExecutor) RunDTQL(_ context.Context, source string, doc []byte, par
 	return f.result, f.err
 }
 
-func TestRunDTQLBindsAttachedSelectionLocally(t *testing.T) {
+func TestRunTugQLBindsAttachedSelectionLocally(t *testing.T) {
 	t.Parallel()
 	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"InvoiceId"}}}
 	conversation := &AIConversation{sources: map[string]string{"chinook-local": "sqlite:///chinook.db"}}
@@ -42,9 +42,9 @@ func TestRunDTQLBindsAttachedSelectionLocally(t *testing.T) {
 		return map[string]any{"selection_1_c1": []any{int64(5), int64(6)}, "selection_2_c1": []any{"unrelated private value"}}
 	})
 	doc := "from: {name: Invoice}\nwhere:\n  op: In\n  left: {field: CustomerId}\n  right: {param: selection_1_c1}\nlimit: 20"
-	response, err := conversation.runDTQL(ctx, executor, "sqlite:///other.db", runDTQLArgs{SourceID: "chinook-local", DTQL: doc})
+	response, err := conversation.runTugQL(ctx, executor, "sqlite:///other.db", runTugQLArgs{SourceID: "chinook-local", TugQL: doc})
 	if err != nil || !response.OK {
-		t.Fatalf("runDTQL = %+v, %v", response, err)
+		t.Fatalf("runTugQL = %+v, %v", response, err)
 	}
 	if executor.source != "sqlite:///chinook.db" || !reflect.DeepEqual(executor.params["selection_1_c1"], []any{int64(5), int64(6)}) {
 		t.Fatalf("local binding = source %q params %#v", executor.source, executor.params)
@@ -55,13 +55,13 @@ func TestRunDTQLBindsAttachedSelectionLocally(t *testing.T) {
 	if !reflect.DeepEqual(conversation.takePending()[0].Parameters, executor.params) {
 		t.Fatal("query lineage lost locally bound parameters")
 	}
-	response, err = conversation.runDTQL(context.Background(), executor, "sqlite:///other.db", runDTQLArgs{SourceID: "unregistered", DTQL: doc})
+	response, err = conversation.runTugQL(context.Background(), executor, "sqlite:///other.db", runTugQLArgs{SourceID: "unregistered", TugQL: doc})
 	if err != nil || response.Error == "" || executor.calls != 1 {
 		t.Fatalf("unknown source was executed: %+v, %v, calls=%d", response, err, executor.calls)
 	}
 }
 
-func TestRunDTQLReturnsPersistedRecordSetReference(t *testing.T) {
+func TestRunTugQLReturnsPersistedRecordSetReference(t *testing.T) {
 	t.Parallel()
 	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"CustomerId"}}}
 	conversation := &AIConversation{}
@@ -69,7 +69,7 @@ func TestRunDTQLReturnsPersistedRecordSetReference(t *testing.T) {
 		query.RecordSetID = "saved-recordset"
 		return query, nil
 	})
-	response, err := conversation.runDTQL(ctx, executor, "sqlite:///chinook.db", runDTQLArgs{DTQL: "from: {name: Customer}\nlimit: 5"})
+	response, err := conversation.runTugQL(ctx, executor, "sqlite:///chinook.db", runTugQLArgs{TugQL: "from: {name: Customer}\nlimit: 5"})
 	if err != nil || !response.OK || response.RecordSetID != "saved-recordset" {
 		t.Fatalf("query tool did not return its saved RecordSet reference: %+v, %v", response, err)
 	}
@@ -79,18 +79,18 @@ func TestJoinedQueryDoesNotReportSuccessWhenPersistenceFails(t *testing.T) {
 	t.Parallel()
 	conversation := &AIConversation{}
 	ctx := withAttachedJoin(context.Background(), func(_ context.Context, base QueryResult) (QueryResult, bool, error) {
-		base.DTQL = "from: {name: Invoice, joins: [{from: {name: Customer}, type: LEFT, on: [{left: {field: CustomerId, source: Invoice}, op: '==', right: {field: CustomerId, source: Customer}}]}]}\nlimit: 5"
+		base.TugQL = "from: {name: Invoice, joins: [{from: {name: Customer}, type: LEFT, on: [{left: {field: CustomerId, source: Invoice}, op: '==', right: {field: CustomerId, source: Customer}}]}]}\nlimit: 5"
 		base.Result = secureread.Result{Columns: []string{"InvoiceId"}}
 		return base, true, nil
 	})
 	ctx = withQueryObserver(ctx, func(QueryResult) (QueryResult, error) { return QueryResult{}, errors.New("storage unavailable") })
-	response, err := conversation.runDTQL(ctx, &fakeExecutor{}, "sqlite:///chinook.db", runDTQLArgs{DTQL: "from: {name: Invoice}\nlimit: 5"})
+	response, err := conversation.runTugQL(ctx, &fakeExecutor{}, "sqlite:///chinook.db", runTugQLArgs{TugQL: "from: {name: Invoice}\nlimit: 5"})
 	if err != nil || response.OK || response.Error == "" {
 		t.Fatalf("joined result falsely reported as saved: %+v, %v", response, err)
 	}
 }
 
-func TestRunDTQLRefusesModelAuthoredJoin(t *testing.T) {
+func TestRunTugQLRefusesModelAuthoredJoin(t *testing.T) {
 	t.Parallel()
 	executor := &fakeExecutor{}
 	conversation := &AIConversation{}
@@ -102,7 +102,7 @@ func TestRunDTQLRefusesModelAuthoredJoin(t *testing.T) {
       on: [{left: {field: CustomerId, source: i}, op: '==', right: {field: CustomerId, source: c}}]
 limit: 5
 `
-	response, err := conversation.runDTQL(context.Background(), executor, "sqlite:///chinook.db", runDTQLArgs{DTQL: doc})
+	response, err := conversation.runTugQL(context.Background(), executor, "sqlite:///chinook.db", runTugQLArgs{TugQL: doc})
 	if err != nil || response.OK || !strings.Contains(response.Error, "foreign-key candidate") || executor.calls != 0 {
 		t.Fatalf("model-authored JOIN was not refused before execution: %+v, %v, calls=%d", response, err, executor.calls)
 	}
@@ -128,7 +128,7 @@ func TestAgentJoinToolUsesSameApplicationOperation(t *testing.T) {
 		t.Fatal(err)
 	}
 	base, err := store.AppendQuery(ctx, chat.activeID, user.ID, "sqlite:///fixture.db", QueryResult{
-		Title: "Invoices", DTQL: "from: {name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 5\n",
+		Title: "Invoices", TugQL: "from: {name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 5\n",
 		Result: secureread.Result{Columns: []string{"InvoiceId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": "private-row-value"}}}},
 	})
 	if err != nil {
@@ -142,7 +142,7 @@ func TestAgentJoinToolUsesSameApplicationOperation(t *testing.T) {
 	}
 	llm.steps = []scriptedStep{
 		{toolCalls: []ai.ToolCall{toolCall("1", toolApplyJoinCandidate, map[string]any{"recordSetId": base.RecordSetID, "candidateId": string(candidates[0].ID)})}},
-		{toolCalls: []ai.ToolCall{toolCall("2", toolRunDTQL, map[string]any{"title": "Placeholder", "dtql": "from: {name: Invoice}\nlimit: 1"})}},
+		{toolCalls: []ai.ToolCall{toolCall("2", toolRunTugQL, map[string]any{"title": "Placeholder", "tugql": "from: {name: Invoice}\nlimit: 1"})}},
 		{text: "Joined."},
 	}
 	turn, err := chat.Ask(ctx, "Join customers")
@@ -165,7 +165,7 @@ func TestAgentJoinToolUsesSameApplicationOperation(t *testing.T) {
 		t.Fatal(err)
 	}
 	agentResult := snapshot.RecordSets[agentResultID]
-	if agentResult.DTQL != uiResult.DTQL || agentResult.Lineage == nil || uiResult.Lineage == nil {
+	if agentResult.TugQL != uiResult.TugQL || agentResult.Lineage == nil || uiResult.Lineage == nil {
 		t.Fatalf("agent/UI JOIN paths diverged: %#v / %#v", agentResult, uiResult)
 	}
 	if len(llm.requests) == 0 || len(llm.requests[0].Messages) == 0 {
@@ -196,7 +196,7 @@ func TestAgentJoinTargetAmbiguityCannotBeGuessed(t *testing.T) {
 		t.Fatal(err)
 	}
 	base, err := store.AppendQuery(ctx, chat.activeID, user.ID, "sqlite:///fixture.db", QueryResult{
-		Title: "Orders", DTQL: "from: {name: Order}\ncolumns: [{field: OrderId}]\nlimit: 5\n",
+		Title: "Orders", TugQL: "from: {name: Order}\ncolumns: [{field: OrderId}]\nlimit: 5\n",
 		Result: secureread.Result{Columns: []string{"OrderId"}, Rows: []secureread.Row{{Data: map[string]any{"OrderId": 1}}}},
 	})
 	if err != nil {
@@ -249,7 +249,7 @@ func TestQueryToolDoesNotReturnLocallyBoundValuesInErrors(t *testing.T) {
 		return map[string]any{"selection_1_c1": []any{secret}}
 	})
 	doc := "from: {name: Customer}\nwhere:\n  op: In\n  left: {field: City}\n  right: {param: selection_1_c1}\nlimit: 5"
-	response, err := conversation.runDTQL(ctx, executor, "sqlite:///chinook.db", runDTQLArgs{DTQL: doc})
+	response, err := conversation.runTugQL(ctx, executor, "sqlite:///chinook.db", runTugQLArgs{TugQL: doc})
 	if err != nil || response.OK || strings.Contains(response.Error, secret) {
 		t.Fatalf("private parameter leaked through query tool: %+v, %v", response, err)
 	}
@@ -322,7 +322,7 @@ func TestAgentQueryAutomaticallyJoinsAttachedCustomerIntoOneRecordSet(t *testing
 	catalog := workspaceTestCatalog()
 	catalog.Objects[2].Reference.SourceID = "chinook"
 	llm := &scriptedProvider{steps: []scriptedStep{
-		{toolCalls: []ai.ToolCall{toolCall("1", toolRunDTQL, map[string]any{"title": "Invoices", "dtql": "from: {schema: main, name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 5"})}},
+		{toolCalls: []ai.ToolCall{toolCall("1", toolRunTugQL, map[string]any{"title": "Invoices", "tugql": "from: {schema: main, name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 5"})}},
 		{text: "Done."},
 	}}
 	baseExecutor := &fakeExecutor{}
@@ -346,7 +346,7 @@ func TestAgentQueryAutomaticallyJoinsAttachedCustomerIntoOneRecordSet(t *testing
 		t.Fatalf("attached query did not use one joined result: turn=%+v err=%v base calls=%d", turn, err, baseExecutor.calls)
 	}
 	saved, err := chat.Snapshot(ctx)
-	if err != nil || len(saved.RecordSets) != 1 || !strings.Contains(turn.Queries[0].DTQL, "Customer") || !strings.Contains(joinExecutor.doc, "joins:") {
+	if err != nil || len(saved.RecordSets) != 1 || !strings.Contains(turn.Queries[0].TugQL, "Customer") || !strings.Contains(joinExecutor.doc, "joins:") {
 		t.Fatalf("joined RecordSet not persisted: records=%d query=%+v doc=%q err=%v", len(saved.RecordSets), turn.Queries[0], joinExecutor.doc, err)
 	}
 }
@@ -355,13 +355,13 @@ func TestAgentQueryAutomaticallyJoinsAttachedCustomerIntoOneRecordSet(t *testing
 // ADK-era test (datatug-cli#291) onto the aichat scriptedProvider fake: an
 // outright empty first model turn (no text, no tool call) gets exactly one
 // retry with the nudge prompt before the loop gives up, and that retry
-// succeeds into a structured run_dtql query.
+// succeeds into a structured run_tugql query.
 func TestAgentRetriesEmptyModelTurnBeforeGivingUpOnQuery(t *testing.T) {
 	t.Parallel()
 	llm := &scriptedProvider{steps: []scriptedStep{
 		{},
-		{toolCalls: []ai.ToolCall{toolCall("1", toolRunDTQL, map[string]any{
-			"title": "Latest invoices", "dtql": "from: {name: Invoice}\norderBy: [{field: InvoiceId, desc: true}]\nlimit: 100",
+		{toolCalls: []ai.ToolCall{toolCall("1", toolRunTugQL, map[string]any{
+			"title": "Latest invoices", "tugql": "from: {name: Invoice}\norderBy: [{field: InvoiceId, desc: true}]\nlimit: 100",
 		})}},
 		{text: "Done."},
 	}}
@@ -375,7 +375,7 @@ func TestAgentRetriesEmptyModelTurnBeforeGivingUpOnQuery(t *testing.T) {
 		t.Fatalf("empty model turn was not retried into a structured query: turn=%+v err=%v calls=%d", turn, err, executor.calls)
 	}
 	if got := len(llm.requests); got != 3 {
-		t.Fatalf("expected 3 model calls (empty, retried run_dtql, final text), got %d", got)
+		t.Fatalf("expected 3 model calls (empty, retried run_tugql, final text), got %d", got)
 	}
 	if text := llm.requests[1].Messages[len(llm.requests[1].Messages)-1].Text; text != emptyTurnRetryPrompt {
 		t.Fatalf("retry did not send the nudge prompt as a fresh user turn: %q", text)
@@ -451,7 +451,7 @@ func TestAIConversation_PreservesToolResultWhenFinalModelCallFails(t *testing.T)
 	t.Parallel()
 	doc := "from: {name: Customer}\nlimit: 1\n"
 	llm := &scriptedProvider{steps: []scriptedStep{
-		{toolCalls: []ai.ToolCall{toolCall("1", toolRunDTQL, map[string]any{"dtql": doc})}, usage: &ai.Usage{InputTokens: 10, OutputTokens: 5}},
+		{toolCalls: []ai.ToolCall{toolCall("1", toolRunTugQL, map[string]any{"tugql": doc})}, usage: &ai.Usage{InputTokens: 10, OutputTokens: 5}},
 		{err: &ai.Error{Code: ai.ErrCodeUpstream, Message: "provider unavailable"}},
 	}}
 	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 1}}}}}
@@ -479,7 +479,7 @@ func TestAIConversation_AggregatesMixedUsageTotals(t *testing.T) {
 	t.Parallel()
 	doc := "from: {name: Customer}\nlimit: 1\n"
 	llm := &scriptedProvider{steps: []scriptedStep{
-		{toolCalls: []ai.ToolCall{toolCall("1", toolRunDTQL, map[string]any{"dtql": doc})}, usage: &ai.Usage{InputTokens: 10, OutputTokens: 5}},
+		{toolCalls: []ai.ToolCall{toolCall("1", toolRunTugQL, map[string]any{"tugql": doc})}, usage: &ai.Usage{InputTokens: 10, OutputTokens: 5}},
 		{text: "Done", usage: &ai.Usage{InputTokens: 7, OutputTokens: 3}},
 	}}
 	conversation, err := NewAIConversation(llm, &fakeExecutor{}, "sqlite:///fixture.db", "- Customer")
@@ -499,7 +499,7 @@ func TestAIConversation_BoundsRepeatedToolCalls(t *testing.T) {
 	t.Parallel()
 	doc := "from: {name: Customer}\nlimit: 1\n"
 	step := func(id string) scriptedStep {
-		return scriptedStep{toolCalls: []ai.ToolCall{toolCall(id, toolRunDTQL, map[string]any{"dtql": doc})}}
+		return scriptedStep{toolCalls: []ai.ToolCall{toolCall(id, toolRunTugQL, map[string]any{"tugql": doc})}}
 	}
 	llm := &scriptedProvider{steps: []scriptedStep{step("1"), step("2"), step("3"), step("4")}}
 	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"CustomerId"}}}
@@ -582,11 +582,11 @@ func TestAIConversationRebuildsEachTurnFromExplicitContext(t *testing.T) {
 	}
 }
 
-func TestAIConversation_ModelToolResponseRunsDTQL(t *testing.T) {
+func TestAIConversation_ModelToolResponseRunsTugQL(t *testing.T) {
 	t.Parallel()
 	doc := "from:\n  name: Customer\nlimit: 2\n"
 	llm := &scriptedProvider{steps: []scriptedStep{
-		{toolCalls: []ai.ToolCall{toolCall("1", toolRunDTQL, map[string]any{"title": "Customers", "dtql": doc})}},
+		{toolCalls: []ai.ToolCall{toolCall("1", toolRunTugQL, map[string]any{"title": "Customers", "tugql": doc})}},
 		{text: "Here are the customers."},
 	}}
 	executor := &fakeExecutor{result: secureread.Result{
@@ -720,12 +720,12 @@ func TestThinkTagStreamFilterHidesReasoningAcrossChunkBoundaries(t *testing.T) {
 	})
 }
 
-func TestRunDTQLTool_EmptyAndExecutionErrorsStayStructured(t *testing.T) {
+func TestRunTugQLTool_EmptyAndExecutionErrorsStayStructured(t *testing.T) {
 	t.Parallel()
 	conversation := &AIConversation{}
 	executor := &fakeExecutor{err: errors.New("column foo does not exist")}
 
-	empty, err := conversation.runDTQL(context.Background(), executor, "sqlite:///fixture.db", runDTQLArgs{})
+	empty, err := conversation.runTugQL(context.Background(), executor, "sqlite:///fixture.db", runTugQLArgs{})
 	if err != nil {
 		t.Fatalf("empty tool call: %v", err)
 	}
@@ -733,7 +733,7 @@ func TestRunDTQLTool_EmptyAndExecutionErrorsStayStructured(t *testing.T) {
 		t.Fatalf("empty response = %+v, calls = %d", empty, executor.calls)
 	}
 
-	failed, err := conversation.runDTQL(context.Background(), executor, "sqlite:///fixture.db", runDTQLArgs{DTQL: "from: {name: customers}\nlimit: 10"})
+	failed, err := conversation.runTugQL(context.Background(), executor, "sqlite:///fixture.db", runTugQLArgs{TugQL: "from: {name: customers}\nlimit: 10"})
 	if err != nil {
 		t.Fatalf("failed tool call: %v", err)
 	}
@@ -746,7 +746,7 @@ func TestRunDTQLTool_EmptyAndExecutionErrorsStayStructured(t *testing.T) {
 	}
 }
 
-func TestRunDTQLTool_RealValidationExecutionAndEmptyResult(t *testing.T) {
+func TestRunTugQLTool_RealValidationExecutionAndEmptyResult(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "chat.db")
 	db, err := sql.Open("sqlite", path)
@@ -773,15 +773,15 @@ where:
   left: {field: City}
   right: {value: Prague}
 limit: 50`
-	response, err := conversation.runDTQL(context.Background(), executor, source, runDTQLArgs{DTQL: valid})
+	response, err := conversation.runTugQL(context.Background(), executor, source, runTugQLArgs{TugQL: valid})
 	if err != nil || !response.OK || response.Rows != 1 {
-		t.Fatalf("real DTQL response = %+v, err = %v", response, err)
+		t.Fatalf("real TugQL response = %+v, err = %v", response, err)
 	}
 
 	empty := strings.Replace(valid, "Prague", "Nowhere", 1)
-	response, err = conversation.runDTQL(context.Background(), executor, source, runDTQLArgs{DTQL: empty})
+	response, err = conversation.runTugQL(context.Background(), executor, source, runTugQLArgs{TugQL: empty})
 	if err != nil || !response.OK || response.Rows != 0 {
-		t.Fatalf("empty DTQL response = %+v, err = %v", response, err)
+		t.Fatalf("empty TugQL response = %+v, err = %v", response, err)
 	}
 
 	conversation.resetTurn()
@@ -789,9 +789,9 @@ limit: 50`
 		return map[string]any{"selection_1_c1": []any{int64(1), int64(2)}}
 	})
 	bound := "from: {name: Customer}\nwhere:\n  op: In\n  left: {field: CustomerId}\n  right: {param: selection_1_c1}\nlimit: 50"
-	response, err = conversation.runDTQL(withLocalIDs, executor, source, runDTQLArgs{DTQL: bound})
+	response, err = conversation.runTugQL(withLocalIDs, executor, source, runTugQLArgs{TugQL: bound})
 	if err != nil || !response.OK || response.Rows != 2 {
-		t.Fatalf("locally bound DTQL response = %+v, err = %v", response, err)
+		t.Fatalf("locally bound TugQL response = %+v, err = %v", response, err)
 	}
 
 	conversation.resetTurn()
@@ -808,26 +808,26 @@ columns:
     as: OrderCount
   - aggregate: {function: SUM, args: [{field: Total}]}
     as: TotalAmount`
-	response, err = conversation.runDTQL(context.Background(), executor, source, runDTQLArgs{DTQL: aggregated})
+	response, err = conversation.runTugQL(context.Background(), executor, source, runTugQLArgs{TugQL: aggregated})
 	if err != nil || !response.OK || response.Rows != 2 {
-		t.Fatalf("aggregated DTQL response = %+v, err = %v", response, err)
+		t.Fatalf("aggregated TugQL response = %+v, err = %v", response, err)
 	}
 
 	conversation.resetTurn()
-	response, err = conversation.runDTQL(context.Background(), executor, source, runDTQLArgs{DTQL: "limit: broken"})
-	if err != nil || response.OK || !strings.Contains(response.Error, "invalid DTQL") {
-		t.Fatalf("malformed DTQL response = %+v, err = %v", response, err)
+	response, err = conversation.runTugQL(context.Background(), executor, source, runTugQLArgs{TugQL: "limit: broken"})
+	if err != nil || response.OK || !strings.Contains(response.Error, "invalid TugQL") {
+		t.Fatalf("malformed TugQL response = %+v, err = %v", response, err)
 	}
 
 	conversation.resetTurn()
-	response, err = conversation.runDTQL(context.Background(), executor, source, runDTQLArgs{DTQL: "from: {name: Customer}"})
+	response, err = conversation.runTugQL(context.Background(), executor, source, runTugQLArgs{TugQL: "from: {name: Customer}"})
 	if err != nil || response.OK || !strings.Contains(response.Error, "limit must be") {
-		t.Fatalf("unbounded DTQL response = %+v, err = %v", response, err)
+		t.Fatalf("unbounded TugQL response = %+v, err = %v", response, err)
 	}
 
 	conversation.resetTurn()
 	badColumn := strings.Replace(valid, "CustomerId", "MissingColumn", 1)
-	response, err = conversation.runDTQL(context.Background(), executor, source, runDTQLArgs{DTQL: badColumn})
+	response, err = conversation.runTugQL(context.Background(), executor, source, runTugQLArgs{TugQL: badColumn})
 	if err != nil || response.OK || !strings.Contains(response.Error, "MissingColumn") {
 		t.Fatalf("execution error response = %+v, err = %v", response, err)
 	}
@@ -902,7 +902,7 @@ func TestAgentHandlersRejectMalformedToolArguments(t *testing.T) {
 		t.Fatal(err)
 	}
 	handlers := conversation.handlers()
-	for _, name := range []string{toolRunDTQL, toolWorkspaceAction, toolFindBookmarks, toolApplyJoinCandidate} {
+	for _, name := range []string{toolRunTugQL, toolWorkspaceAction, toolFindBookmarks, toolApplyJoinCandidate} {
 		t.Run(name, func(t *testing.T) {
 			result, err := handlers[name](context.Background(), ai.ToolCall{ID: "1", Name: name, Arguments: []byte("not json")})
 			if err != nil {
@@ -915,22 +915,22 @@ func TestAgentHandlersRejectMalformedToolArguments(t *testing.T) {
 	}
 }
 
-// TestAgentRunDTQLHandlerInfrastructureErrorReported covers the run_dtql
-// handler's own "infrastructure-level error" guard (agent.go): runDTQL's
+// TestAgentRunTugQLHandlerInfrastructureErrorReported covers the run_tugql
+// handler's own "infrastructure-level error" guard (agent.go): runTugQL's
 // real code paths always return a nil error, so this branch is exercised
-// through the runDTQLOverride test seam instead.
-func TestAgentRunDTQLHandlerInfrastructureErrorReported(t *testing.T) {
+// through the runTugQLOverride test seam instead.
+func TestAgentRunTugQLHandlerInfrastructureErrorReported(t *testing.T) {
 	t.Parallel()
 	conversation, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///x", "schema")
 	if err != nil {
 		t.Fatal(err)
 	}
 	injected := errors.New("infrastructure failure")
-	conversation.runDTQLOverride = func(ctx context.Context, executor DTQLExecutor, sourceURL string, args runDTQLArgs) (runDTQLResponse, error) {
-		return runDTQLResponse{}, injected
+	conversation.runTugQLOverride = func(ctx context.Context, executor TugQLExecutor, sourceURL string, args runTugQLArgs) (runTugQLResponse, error) {
+		return runTugQLResponse{}, injected
 	}
-	handler := conversation.handlers()[toolRunDTQL]
-	result, err := handler(context.Background(), ai.ToolCall{ID: "1", Name: toolRunDTQL, Arguments: mustJSON(runDTQLArgs{DTQL: "from: {name: t}"})})
+	handler := conversation.handlers()[toolRunTugQL]
+	result, err := handler(context.Background(), ai.ToolCall{ID: "1", Name: toolRunTugQL, Arguments: mustJSON(runTugQLArgs{TugQL: "from: {name: t}"})})
 	if err != nil {
 		t.Fatalf("handler returned an error instead of an error ToolResult: %v", err)
 	}
@@ -990,15 +990,15 @@ func TestJSONResultEncodeErrorReturnsErrorToolResult(t *testing.T) {
 	}
 }
 
-// TestRunDTQLSourceUnavailablePrefix covers runDTQL's own "unavailable://"
+// TestRunTugQLSourceUnavailablePrefix covers runTugQL's own "unavailable://"
 // sourceURL guard directly.
-func TestRunDTQLSourceUnavailablePrefix(t *testing.T) {
+func TestRunTugQLSourceUnavailablePrefix(t *testing.T) {
 	t.Parallel()
 	conversation, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///x", "schema")
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := conversation.runDTQL(context.Background(), &fakeExecutor{}, "unavailable://broken-source", runDTQLArgs{DTQL: "from: {name: Invoice}\nlimit: 5"})
+	resp, err := conversation.runTugQL(context.Background(), &fakeExecutor{}, "unavailable://broken-source", runTugQLArgs{TugQL: "from: {name: Invoice}\nlimit: 5"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1007,10 +1007,10 @@ func TestRunDTQLSourceUnavailablePrefix(t *testing.T) {
 	}
 }
 
-// TestRunDTQLAttachedJoinObserverError covers runDTQL's attachedJoinKey
+// TestRunTugQLAttachedJoinObserverError covers runTugQL's attachedJoinKey
 // branch's own joinErr path -- TestAgentQueryAutomaticallyJoinsAttachedCustomerIntoOneRecordSet
 // only exercises the "applied" success path.
-func TestRunDTQLAttachedJoinObserverError(t *testing.T) {
+func TestRunTugQLAttachedJoinObserverError(t *testing.T) {
 	t.Parallel()
 	conversation, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///x", "schema")
 	if err != nil {
@@ -1019,7 +1019,7 @@ func TestRunDTQLAttachedJoinObserverError(t *testing.T) {
 	ctx := context.WithValue(context.Background(), attachedJoinKey{}, func(context.Context, QueryResult) (QueryResult, bool, error) {
 		return QueryResult{}, false, errors.New("join lookup failed")
 	})
-	resp, err := conversation.runDTQL(ctx, &fakeExecutor{}, "sqlite:///x", runDTQLArgs{DTQL: "from: {name: Invoice}\nlimit: 5"})
+	resp, err := conversation.runTugQL(ctx, &fakeExecutor{}, "sqlite:///x", runTugQLArgs{TugQL: "from: {name: Invoice}\nlimit: 5"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1102,8 +1102,8 @@ func TestPublicJoinError(t *testing.T) {
 }
 
 // TestReferencedSelectionParameters covers referencedSelectionParameters'
-// branches directly: no available selections, invalid DTQL (defensive --
-// runDTQL always validates first), an alias node, and a param reference
+// branches directly: no available selections, invalid TugQL (defensive --
+// runTugQL always validates first), an alias node, and a param reference
 // nested inside a sequence.
 func TestReferencedSelectionParameters(t *testing.T) {
 	t.Parallel()
@@ -1111,7 +1111,7 @@ func TestReferencedSelectionParameters(t *testing.T) {
 		t.Fatalf("no available selections: got %v, want nil", got)
 	}
 	if got := referencedSelectionParameters("not: [valid, yaml", map[string]any{"sel1": 1}); got != nil {
-		t.Fatalf("invalid DTQL: got %v, want nil", got)
+		t.Fatalf("invalid TugQL: got %v, want nil", got)
 	}
 	doc := "from: {name: Invoice}\nwhere: {op: In, left: {field: CustomerId}, right: {param: sel1}}\nlimit: 5\n"
 	got := referencedSelectionParameters(doc, map[string]any{"sel1": []int{1, 2}, "unused": true})
@@ -1274,19 +1274,19 @@ func TestStreamAskWithContextStopsWhenConsumerBreaksEarly(t *testing.T) {
 // StreamAskWithContext's browserInterpretation-and-hasSuccessfulPending
 // early break: a scripted second step would fail the test (via
 // scriptedProvider's own "script exhausted" error) if the loop didn't stop
-// ranging over loop.Run right after the first successful run_dtql.
+// ranging over loop.Run right after the first successful run_tugql.
 func TestInterpretBreaksLoopAfterFirstSuccessfulQuery(t *testing.T) {
 	t.Parallel()
 	doc := "from: {name: Invoice}\nlimit: 5\n"
 	llm := &scriptedProvider{steps: []scriptedStep{
-		{toolCalls: []ai.ToolCall{toolCall("1", toolRunDTQL, map[string]any{"dtql": doc})}},
+		{toolCalls: []ai.ToolCall{toolCall("1", toolRunTugQL, map[string]any{"tugql": doc})}},
 	}}
 	result, err := interpretWithProviderDetailed(context.Background(), InterpretRequest{Question: "Invoices", Schema: "main.Invoice: InvoiceId"}, llm)
 	if err != nil {
 		t.Fatalf("interpretWithProviderDetailed() error = %v", err)
 	}
-	if result.DTQL != strings.TrimSpace(doc) {
-		t.Fatalf("result.DTQL = %q", result.DTQL)
+	if result.TugQL != strings.TrimSpace(doc) {
+		t.Fatalf("result.TugQL = %q", result.TugQL)
 	}
 	if llm.calls != 1 {
 		t.Fatalf("model calls = %d, want exactly 1 (the loop should break right after the successful query)", llm.calls)

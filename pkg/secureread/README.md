@@ -1,7 +1,7 @@
 # pkg/secureread
 
 Policy-enforced read executor for `datatug serve` (Phase 1 plan task 6,
-executor half). Runs structured, DTQL and native-SQL queries against any
+executor half). Runs structured, TugQL and native-SQL queries against any
 `pkg/dbcopy`-supported source through one fixed [`Session`](session.go)'s
 DALgo access policies, so every read the web UI can trigger goes through the
 same access-control path regardless of query shape
@@ -21,7 +21,7 @@ session, err := secureread.NewSession(secureread.SessionOptions{
 executor := secureread.NewExecutor(session) // build ONCE, for the server's whole life
 
 result, err := executor.RunStructured(ctx, sourceURL, query, variables)
-result, err := executor.RunDTQL(ctx, sourceURL, dtqlYAMLBytes, variables)
+result, err := executor.RunTugQL(ctx, sourceURL, tugqlYAMLBytes, variables)
 result, err := executor.RunNativeSQL(ctx, sourceURL, sqlText)
 ```
 
@@ -69,13 +69,13 @@ Not yet a separate handler; the nearest existing sibling is
 `pkg/server/endpoints/query_endpoints.go`'s `getQueryHandler`, which loads a
 project's `QueryDef` by ID from storage but does not execute it. Wiring this
 means: load the `QueryDef`, branch on `QueryDef.Type`
-(REQ:dtql-query-type — `DTQL` reads the `<id>.dtql.yaml` sidecar and calls
-`Executor.RunDTQL`; the existing `SQL` type reads its query text and calls
+(REQ:tugql-query-type — `TugQL` reads the `<id>.tugql.yaml` sidecar and calls
+`Executor.RunTugQL`; the existing `SQL` type reads its query text and calls
 `Executor.RunNativeSQL`), with the caller's bound parameter values as
 `variables`.
 
 ### 3. `POST /datatug/exec/run_query` (new — named by AC
-`restricted-rows-and-columns-server` and `dtql-query-runs`)
+`restricted-rows-and-columns-server` and `tugql-query-runs`)
 
 The HTTP surface for #2: request body names a `queryID` (or project-relative
 query path) plus bound parameter values; the handler resolves the `QueryDef`

@@ -11,7 +11,7 @@ import (
 // CanReadWholeCollection is a no-row-read policy preflight for a prospective
 // JOIN target. A JOIN must not turn a target's row predicate or field mask
 // into an unprotected read through its parent relation. The actual JOIN still
-// goes through RunDTQL and its normal secure-read authorization.
+// goes through RunTugQL and its normal secure-read authorization.
 func (e *Executor) CanReadWholeCollection(ctx context.Context, collection string) error {
 	if e == nil || collection == "" {
 		return fmt.Errorf("JOIN target is unavailable")

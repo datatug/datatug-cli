@@ -79,7 +79,7 @@ func TestAddColumnsActionLoadsMetadataThroughShell(t *testing.T) {
 
 func TestInspectFollowsExplorerThenReturnsToFocusedResult(t *testing.T) {
 	t.Parallel()
-	turn := Turn{Queries: []QueryResult{{Title: "Invoices", RecordSetID: "rs-invoices", DTQL: "from: {name: Invoice}\nlimit: 5", Result: secureread.Result{Columns: []string{"InvoiceId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 7}}}}}}}
+	turn := Turn{Queries: []QueryResult{{Title: "Invoices", RecordSetID: "rs-invoices", TugQL: "from: {name: Invoice}\nlimit: 5", Result: secureread.Result{Columns: []string{"InvoiceId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 7}}}}}}}
 	u, _ := newTestChatUI(t, nil, turn)
 	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "table", SourceID: "main", ObjectID: "main.Invoice", Title: "Invoice"}, Columns: []string{"InvoiceId"}, ColumnTypes: map[string]string{"InvoiceId": "INTEGER"}}}}
 	drainCmd(t, u, u.Submit("Show invoices"))
@@ -177,7 +177,7 @@ func TestChatSwitchRetainsHTTPFocusAndViewMode(t *testing.T) {
 
 func TestChatSwitchRetainsComposerFocusOverRememberedGrid(t *testing.T) {
 	t.Parallel()
-	turn := Turn{Queries: []QueryResult{{Title: "Customers", DTQL: "from: {name: Customer}\nlimit: 5", Result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 1}}}}}}}
+	turn := Turn{Queries: []QueryResult{{Title: "Customers", TugQL: "from: {name: Customer}\nlimit: 5", Result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 1}}}}}}}
 	u, _ := newTestChatUI(t, nil, turn)
 	first := u.sessionID
 	drainCmd(t, u, u.Submit("customers"))
@@ -290,7 +290,7 @@ func TestResultQueryTabKeepsExactResultProvenance(t *testing.T) {
 	result := secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 7}}}}
 	g := newGridState(NewGridModel(result), "first", "First", 90)
 	g.SetFocused(true)
-	first := RecordSet{ID: "first", QueryID: "execution-one", DTQL: "from: {name: Customer}\nlimit: 7", Parameters: map[string]any{"secret": "must-not-render"}}
+	first := RecordSet{ID: "first", QueryID: "execution-one", TugQL: "from: {name: Customer}\nlimit: 7", Parameters: map[string]any{"secret": "must-not-render"}}
 	g.bindQuery(first, ChatSession{})
 	if len(g.ExtraViews()) != 3 || g.ExtraViews()[2].Label != "Query" {
 		t.Fatalf("result tabs = %+v, want Table/Charts/Current row/Query", g.ExtraViews())
@@ -305,7 +305,7 @@ func TestResultQueryTabKeepsExactResultProvenance(t *testing.T) {
 	if strings.Contains(view, "must-not-render") {
 		t.Fatalf("Query tab exposed a bound value:\n%s", view)
 	}
-	second := RecordSet{ID: "second", DTQL: "from: {name: Invoice}\nlimit: 2"}
+	second := RecordSet{ID: "second", TugQL: "from: {name: Invoice}\nlimit: 2"}
 	other := newGridState(NewGridModel(result), "second", "Second", 90)
 	other.bindQuery(second, ChatSession{})
 	other.ShowView(gridViewQuery)

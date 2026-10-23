@@ -24,12 +24,12 @@ func TestChatSavedQuerySaveIsCreateOnlyAndListed(t *testing.T) {
 	}
 	store, id := filestore.NewSingleProjectStore(projectDir, "saved-query-test")
 	service := chatSavedQueries{projectDir: projectDir, store: store.GetProjectStore(id), projectID: id, session: secureread.Session{Unrestricted: true}}
-	created, err := service.Save(ctx, chat.SavedQuerySaveRequest{Title: "Prague customers", Type: "DTQL", Text: "from: {name: Customer}\nlimit: 50\n", Database: "chinook", Tags: []string{"customers", "Prague"}})
+	created, err := service.Save(ctx, chat.SavedQuerySaveRequest{Title: "Prague customers", Type: "TugQL", Text: "from: {name: Customer}\nlimit: 50\n", Database: "chinook", Tags: []string{"customers", "Prague"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	listed, err := service.List(ctx)
-	if err != nil || len(listed) != 1 || listed[0].ID != created.ID || listed[0].Type != "DTQL" {
+	if err != nil || len(listed) != 1 || listed[0].ID != created.ID || listed[0].Type != "TugQL" {
 		t.Fatalf("saved query not listed: %+v, %v", listed, err)
 	}
 	loaded, err := service.store.LoadQuery(ctx, created.ID)
@@ -45,7 +45,7 @@ func TestChatSavedQuerySaveIsCreateOnlyAndListed(t *testing.T) {
 	writer := service.store.(datatug.RevisionedQueriesStore)
 	_, err = writer.PutQuery(ctx, &datatug.QueryDefWithFolderPath{QueryDef: datatug.QueryDef{
 		ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "customer-invoices", Title: "Customer invoices"}},
-		Type:        datatug.QueryTypeDTQL, Text: "from: {name: Invoice}\n",
+		Type:        datatug.QueryTypeTugQL, Text: "from: {name: Invoice}\n",
 		Parameters: datatug.Parameters{{ID: "CustomerId", Type: "string", IsRequired: true, DefaultValue: "001"}, {ID: "Enabled", Type: "boolean", DefaultValue: true}},
 	}}, datatug.QueryWriteCondition{IfNoneMatch: true})
 	if err != nil {
@@ -89,7 +89,7 @@ func TestChatSavedQueryRejectsUndeclaredCapturedParameters(t *testing.T) {
 	}
 	store, id := filestore.NewSingleProjectStore(projectDir, "parameter-capture-test")
 	service := chatSavedQueries{projectDir: projectDir, store: store.GetProjectStore(id), projectID: id, session: secureread.Session{Unrestricted: true}}
-	_, err := service.Save(ctx, chat.SavedQuerySaveRequest{Title: "Customer invoices", Type: "DTQL", Text: "from: {name: Invoice}\nwhere: {op: '==', left: {field: CustomerId}, right: {param: CustomerId}}\nlimit: 10\n"})
+	_, err := service.Save(ctx, chat.SavedQuerySaveRequest{Title: "Customer invoices", Type: "TugQL", Text: "from: {name: Invoice}\nwhere: {op: '==', left: {field: CustomerId}, right: {param: CustomerId}}\nlimit: 10\n"})
 	if err == nil || !strings.Contains(err.Error(), "parameter declarations") {
 		t.Fatalf("parameterized query was silently saved: %v", err)
 	}

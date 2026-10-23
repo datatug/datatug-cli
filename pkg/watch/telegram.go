@@ -15,6 +15,7 @@ const (
 )
 
 type telegramLink struct {
+	DeliveryCapability string `json:"deliveryCapability,omitempty"`
 	Scope
 	UserID string    `json:"userId"`
 	ChatID string    `json:"chatId"`
@@ -54,6 +55,17 @@ func (s *Store) BeginTelegramLink(ctx context.Context, a Actor, nonceHash string
 // CompleteTelegramLink is called only after the daemon verifies DataTugBot's
 // webhook secret. A browser-supplied chat ID is never accepted as identity proof.
 func (s *Store) CompleteTelegramLink(ctx context.Context, nonceHash, chatID string) error {
+	return s.completeTelegramLink(ctx, nonceHash, chatID, "")
+}
+
+func (s *Store) CompleteTelegramLinkWithCapability(ctx context.Context, nonceHash, chatID, capability string) error {
+	if capability == "" || len(capability) > 2048 {
+		return ErrInvalid
+	}
+	return s.completeTelegramLink(ctx, nonceHash, chatID, capability)
+}
+
+func (s *Store) completeTelegramLink(ctx context.Context, nonceHash, chatID, capability string) error {
 	if len(nonceHash) != 64 || len(chatID) == 0 || len(chatID) > 20 {
 		return ErrInvalid
 	}
@@ -83,7 +95,7 @@ func (s *Store) CompleteTelegramLink(ctx context.Context, nonceHash, chatID stri
 					return ErrConflict
 				}
 			}
-			link := telegramLink{Scope: item.Scope, UserID: item.UserID, ChatID: chatID, At: s.now()}
+			link := telegramLink{Scope: item.Scope, UserID: item.UserID, ChatID: chatID, DeliveryCapability: capability, At: s.now()}
 			if err = s.save(ctx, tx, telegramLinks, item.Scope, item.UserID, "", item.UserID, "", link); err != nil {
 				return err
 			}

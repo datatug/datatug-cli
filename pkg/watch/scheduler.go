@@ -324,7 +324,7 @@ func (s *Store) FinishRun(ctx context.Context, identity RunnerIdentity, c Comple
 				if value == "false" && target {
 					event = "failure"
 				}
-				if value == "true" && previous == "false" && d.NotificationPolicy.Recovery {
+				if value == "true" && previous == "false" && d.NotificationPolicy.Recovery && d.Mode == "continuous" {
 					event = "recovery"
 				}
 			}
@@ -341,7 +341,7 @@ func (s *Store) FinishRun(ctx context.Context, identity RunnerIdentity, c Comple
 				}
 				if recorded {
 					obs.LastNotifiedAt = now
-					if d.Mode == "one_shot" {
+					if d.Mode == "one_shot" && target {
 						d.Lifecycle = "completed"
 						d.Enabled = false
 						d.UpdatedAt = now

@@ -52,6 +52,7 @@ func (s *Store) notify(ctx context.Context, tx dal.ReadwriteTransaction, d Defin
 					return false, err
 				}
 				delivery.TelegramChatID = link.ChatID
+				delivery.TelegramDeliveryCapability = link.DeliveryCapability
 			}
 			if err = s.save(ctx, tx, outbox, d.Scope, id, d.ID, sub.UserID, "", delivery); err != nil {
 				return false, err
@@ -90,6 +91,7 @@ func (s *Store) ListDeliveries(ctx context.Context, a Actor, watchID string) ([]
 			item.Email = ""
 			item.Phone = ""
 			item.TelegramChatID = ""
+			item.TelegramDeliveryCapability = ""
 			out = append(out, item)
 		}
 	}
@@ -186,11 +188,19 @@ func (s *Store) ClaimNotifications(ctx context.Context) (*Delivery, error) {
 				if e != nil && !errors.Is(e, ErrNotFound) {
 					return e
 				}
-				valid = valid && e == nil && link.ChatID == item.TelegramChatID
+				valid = valid && e == nil && link.ChatID == item.TelegramChatID && link.DeliveryCapability == item.TelegramDeliveryCapability
 			}
 			if !valid {
 				item.State = "cancelled"
 				item.FailureCode = "SUBSCRIPTION_REVOKED"
+				if err = s.save(ctx, tx, outbox, item.Scope, item.ID, item.WatchID, item.UserID, "", item); err != nil {
+					return err
+				}
+				continue
+			}
+			if item.Attempts >= s.config.MaxAttempts {
+				item.State = "failed"
+				item.FailureCode = "ATTEMPTS_EXHAUSTED"
 				if err = s.save(ctx, tx, outbox, item.Scope, item.ID, item.WatchID, item.UserID, "", item); err != nil {
 					return err
 				}

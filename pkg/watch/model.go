@@ -161,10 +161,11 @@ type Notification struct {
 	ReadAt    time.Time `json:"readAt,omitempty"`
 }
 type Delivery struct {
-	TelegramChatID string `json:"telegramChatId,omitempty"`
-	AccountID      string `json:"accountId,omitempty"`
-	Phone          string `json:"phone,omitempty"`
-	QuotaReserved  bool   `json:"quotaReserved"`
+	TelegramDeliveryCapability string `json:"telegramDeliveryCapability,omitempty"`
+	TelegramChatID             string `json:"telegramChatId,omitempty"`
+	AccountID                  string `json:"accountId,omitempty"`
+	Phone                      string `json:"phone,omitempty"`
+	QuotaReserved              bool   `json:"quotaReserved"`
 	Notification
 	Channel     string    `json:"channel"`
 	Email       string    `json:"email,omitempty"`

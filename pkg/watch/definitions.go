@@ -104,6 +104,7 @@ func (s *Store) PutDefinition(ctx context.Context, a Actor, d Definition, operat
 	if err := validateDefinition(d); err != nil {
 		return Definition{}, err
 	}
+	startPaused := d.Lifecycle == "paused"
 	request, _ := json.Marshal(d)
 	digest := stable(string(request), fmt.Sprint(expectedVersion))
 	var result Definition
@@ -133,6 +134,9 @@ func (s *Store) PutDefinition(ctx context.Context, a Actor, d Definition, operat
 			return err
 		}
 		if created {
+			if d.Lifecycle != "" && d.Lifecycle != "enabled" && d.Lifecycle != "paused" {
+				return ErrInvalid
+			}
 			if expectedVersion != 0 {
 				return ErrConflict
 			}
@@ -185,6 +189,10 @@ func (s *Store) PutDefinition(ctx context.Context, a Actor, d Definition, operat
 		d.SourceFingerprint = ""
 		d.Lifecycle = "enabled"
 		d.Enabled = true
+		if created && startPaused {
+			d.Lifecycle = "paused"
+			d.Enabled = false
+		}
 		if !created {
 			d.Lifecycle = existing.Lifecycle
 			d.Enabled = existing.Enabled

@@ -740,3 +740,67 @@ func TestExplicitSourceBaselineReset(t *testing.T) {
 		t.Fatal("reset replay failed", err)
 	}
 }
+func TestPausedCreationAndOneShotInverseRecovery(t *testing.T) {
+	ctx := context.Background()
+	s, c, _ := fixture(t)
+	a := actor("alice")
+	d := definition("watch")
+	d.Lifecycle = "paused"
+	d.Mode = "one_shot"
+	d.Trigger = "becomes_false"
+	d = create(t, s, a, d)
+	r := register(t, s, "runner")
+	if err := s.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if active, err := s.ClaimDue(ctx, r); err != nil || active != nil {
+		t.Fatalf("paused create scheduled early %+v %v", active, err)
+	}
+	subscribe(t, s, a, d.ID, "in_app")
+	d, err := s.SetLifecycle(ctx, a, d.ID, "enabled", "enable", d.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evaluate(t, s, r, "fail")
+	c.advance(5 * time.Second)
+	evaluate(t, s, r, "pass")
+	d, err = s.GetDefinition(ctx, a, d.ID)
+	if err != nil || d.Lifecycle != "enabled" {
+		t.Fatalf("inverse recovery completed one-shot %+v %v", d, err)
+	}
+	entries, _ := s.Inbox(ctx, a)
+	if len(entries) != 0 {
+		t.Fatalf("inverse recovery notified one-shot %+v", entries)
+	}
+	c.advance(5 * time.Second)
+	evaluate(t, s, r, "fail")
+	d, _ = s.GetDefinition(ctx, a, d.ID)
+	if d.Lifecycle != "completed" {
+		t.Fatal("target transition did not complete one-shot")
+	}
+}
+func TestAbandonedDeliveryLeaseAttemptsBounded(t *testing.T) {
+	ctx := context.Background()
+	s, c, _ := fixture(t)
+	a := actor("alice")
+	d := definition("watch")
+	d.InitialObservation = "notify"
+	create(t, s, a, d)
+	subscribe(t, s, a, d.ID, "email")
+	r := register(t, s, "runner")
+	evaluate(t, s, r, "pass")
+	for i := 0; i < s.config.MaxAttempts; i++ {
+		delivery, err := s.ClaimNotifications(ctx)
+		if err != nil || delivery == nil {
+			t.Fatalf("claim attempt %d %+v %v", i, delivery, err)
+		}
+		c.advance(2 * time.Second)
+	}
+	if delivery, err := s.ClaimNotifications(ctx); err != nil || delivery != nil {
+		t.Fatalf("unbounded crash retry %+v %v", delivery, err)
+	}
+	deliveries, _ := s.ListDeliveries(ctx, a, d.ID)
+	if len(deliveries) != 1 || deliveries[0].State != "failed" || deliveries[0].Attempts != s.config.MaxAttempts {
+		t.Fatalf("bounded outcome %+v", deliveries)
+	}
+}

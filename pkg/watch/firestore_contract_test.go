@@ -232,6 +232,9 @@ func contractCondition(data map[string]any, c dal.Condition) bool {
 		switch v.Operator {
 		case dal.Equal:
 			return data[field] == expected
+		case dal.LessThen:
+			value, ok := data[field].(string)
+			return ok && value < expected.(string)
 		case dal.LessOrEqual:
 			value, ok := data[field].(int64)
 			return ok && value <= expected.(int64)

@@ -143,6 +143,9 @@ func TestFirestoreStoreConcurrentClaimRollbackReplayAndRestart(t *testing.T) {
 		t.Fatal("rollback", err)
 	}
 	owner.beforeCommit = nil
+	if got := eventList(t, s, a, d.ID); len(got) != 0 {
+		t.Fatal("partial canonical event before commit", got)
+	}
 	wakeup := owner.cloud.options.WorkReady
 	owner.cloud.options.WorkReady = func(ctx context.Context, tx dal.ReadwriteTransaction, event WorkEvent) error {
 		if e := wakeup(ctx, tx, event); e != nil {
@@ -154,6 +157,9 @@ func TestFirestoreStoreConcurrentClaimRollbackReplayAndRestart(t *testing.T) {
 		t.Fatal("producer rollback", err)
 	}
 	owner.cloud.options.WorkReady = wakeup
+	if got := eventList(t, s, a, d.ID); len(got) != 0 {
+		t.Fatal("producer rollback retained canonical event", got)
+	}
 	if deliveries, err := s.ListDeliveries(context.Background(), a, d.ID); err != nil || len(deliveries) != 0 {
 		t.Fatal("partial outbox", deliveries, err)
 	}
@@ -162,6 +168,10 @@ func TestFirestoreStoreConcurrentClaimRollbackReplayAndRestart(t *testing.T) {
 	}
 	if _, err = owner.FinishRun(context.Background(), runners[accepted.owner], cloudDone(accepted.claim, "pass")); err != nil {
 		t.Fatal("completion replay", err)
+	}
+	acceptedEvents := eventList(t, s, a, d.ID)
+	if len(acceptedEvents) != 1 || acceptedEvents[0].RunID != accepted.claim.RunID {
+		t.Fatal("canonical event replay", acceptedEvents)
 	}
 	if next, ok, e := s.NextWakeup(context.Background()); e != nil || !ok || next.After(c.now()) {
 		t.Fatal("long interval delivery wakeup", next, ok, e)

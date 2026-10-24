@@ -22,6 +22,8 @@ func cloudInstant(t time.Time) int64 {
 func (s *Store) cloudMetadata(m map[string]any, value any) {
 	active, ready, resource, lane, live := "no", int64(0), "", "", "no"
 	switch v := value.(type) {
+	case Event:
+		m["eventOrder"] = cloudEventOrder(v)
 	case Definition:
 		if v.Lifecycle != "deleted" {
 			live = "yes"

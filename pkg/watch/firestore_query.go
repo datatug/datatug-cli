@@ -34,8 +34,15 @@ func cloudConditions(condition dal.Condition) (map[string]dal.Comparison, error)
 				return dal.ErrNotSupported
 			}
 			switch field.Name() {
-			case "namespace", "project", "environment", "watch", "owner", "active", "resource", "lane", "live":
+			case "namespace", "project", "environment", "watch", "owner", "active", "resource", "lane", "live", "visibility":
 				if value.Operator != dal.Equal {
+					return dal.ErrNotSupported
+				}
+				if _, ok := constant.Value.(string); !ok {
+					return dal.ErrNotSupported
+				}
+			case "eventOrder":
+				if value.Operator != dal.Equal && value.Operator != dal.LessThen {
 					return dal.ErrNotSupported
 				}
 				if _, ok := constant.Value.(string); !ok {
@@ -71,6 +78,11 @@ func cloudMatches(data map[string]any, fields map[string]dal.Comparison) bool {
 		switch c.Operator {
 		case dal.Equal:
 			if data[name] != constant {
+				return false
+			}
+		case dal.LessThen:
+			n, ok := data[name].(string)
+			if !ok || n >= constant.(string) {
 				return false
 			}
 		case dal.LessOrEqual:
@@ -124,7 +136,7 @@ func (t *firestoreSession) ExecuteQueryToRecordsReader(ctx context.Context, quer
 	}
 	for _, order := range q.OrderBy() {
 		field, ok := order.Expression().(dal.FieldRef)
-		if !ok || (!field.IsID() && field.Name() != "ready" && field.Name() != "updated") {
+		if !ok || (!field.IsID() && field.Name() != "ready" && field.Name() != "updated" && field.Name() != "eventOrder") {
 			return nil, dal.ErrNotSupported
 		}
 	}

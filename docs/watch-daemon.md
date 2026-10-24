@@ -260,7 +260,7 @@ wb run -- go build -o /absolute/private/datatug ./main.go
 
 Focused transport tests use real HTTP, DALGO SQLite handles and a local SMTP
 receiver, plus fake Twilio/Telegram provider transports. They cover competing
-claims, stale results, per-user scope, cancellation, durable inbox/sinks, readiness,
+claims, stale results, per-user scope, cancellation, durable inbox/sinks/events, readiness,
 manifest credential pinning, Telegram nonce replay and daemon compatibility.
 
 ```sh
@@ -270,3 +270,34 @@ wb run -- go test -race ./pkg/watch ./pkg/watchdaemon -count=1
 
 The complete Northwind process/browser journey is a separate integration receipt;
 passing transport tests alone does not establish that demo acceptance.
+
+
+## Work integration event API and upgrade
+
+`GET /v1/watch/events?watchId=<id>&limit=100` returns
+`{"events":[...],"nextCursor":"<event-id-or-empty>"}` newest first. Follow with
+`before=<nextCursor>` for another page; limit must be 1–1000 for SQLite or 1–100 for the scoped Firestore provider. Ties have stable
+ID ordering. `GET /v1/watch/event?id=<id>` returns `{"event":{...}}`. Both require
+the existing user bearer credential and enforce its exact namespace, project,
+environment and current Watch visibility. Runners cannot read these routes.
+Paused/completed history remains readable; deleted Watch history fails closed.
+A personal event snapshot remains owner-only after its Watch becomes shared.
+
+An event has `id`, `namespace`, `project`, `environment`, `watchId`, `runId`,
+`definitionVersion`, `title`, `kind` (`trigger` or `recovery`), `previous`
+(`true`, `false`, `never`), `outcome` (`pass` or `fail`), `occurredAt`, `checkId`,
+`checkVersion`, `sourceFingerprint`, optional `checkRunRef`, optional typed
+`inputs`, `owner` and `visibility`. Events are evidence, not Work items.
+New notifications reference `eventId`; acknowledgement only marks the current
+subscriber's read state. It creates neither events nor Work.
+
+Upgrade adds `dt_watch_events` and its history index automatically. Existing
+Watch IDs and delivery receipts are preserved; old notifications have no invented
+source snapshot. Events outlive runtime-history pruning: include them in backup
+and disk capacity planning. There is no automatic event purge in v1.
+One-shot behavior deliberately changes: a qualifying durable event completes it
+even without subscribers. Create paused and subscribe before enabling to receive
+that first event. Reset/resume stays explicit; Work closure does not change
+monitoring. Capture is independent of cooldown and recovery notification settings.
+The Work backend's trusted runtime bridge authorizes hosted identity mappings;
+the coordinator never infers them or accepts a request-supplied bridge endpoint.

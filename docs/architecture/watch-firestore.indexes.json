@@ -319,6 +319,54 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "dt_watch_events",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "environment",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "watch",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "visibility",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "eventOrder",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "dt_watch_events",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "environment",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "watch",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "visibility",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "owner",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "eventOrder",
+          "order": "DESCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": []

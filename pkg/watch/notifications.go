@@ -67,8 +67,8 @@ func (s *Store) notify(ctx context.Context, tx dal.ReadwriteTransaction, d Defin
 			}
 		}
 		for _, channel := range sub.Channels {
-			id := stable(d.Namespace, d.Project, d.Environment, r.ID, sub.UserID, channel, event)
-			n := Notification{Scope: d.Scope, ID: id, WatchID: d.ID, RunID: r.ID, UserID: sub.UserID, Title: d.Title, Event: event, Link: "/watch?" + url.Values{"project": {d.Project}, "environment": {d.Environment}, "watch": {d.ID}, "check": {d.CheckID}}.Encode(), CreatedAt: s.now()}
+			id := stable(d.Namespace, d.Project, d.Environment, r.EventID, sub.UserID, channel, event)
+			n := Notification{EventID: r.EventID, Scope: d.Scope, ID: id, WatchID: d.ID, RunID: r.ID, UserID: sub.UserID, Title: d.Title, Event: event, Link: "/watch?" + url.Values{"project": {d.Project}, "environment": {d.Environment}, "watch": {d.ID}, "check": {d.CheckID}}.Encode(), CreatedAt: s.now()}
 			delivery := Delivery{Notification: n, Channel: channel, Email: sub.Email, Phone: sub.Phone, AccountID: sub.AccountID, State: "pending"}
 			if channel == "telegram" {
 				link, err := read[telegramLink](ctx, tx, telegramLinks, d.Scope, sub.UserID)

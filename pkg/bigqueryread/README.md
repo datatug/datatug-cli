@@ -3,9 +3,16 @@
 This package connects the released `github.com/dal-go/dalgo2bigquery v0.3.0`
 protocol to the actual `datatug query bigquery` Cobra commands. Fixture tests
 exercise protected preview, approval, one submission and two pages through the
-real command tree. Live Google authentication and paid execution have **not been
-executed** for this change. Source rights/admission and both runtime live gates
-remain open.
+real command tree. A live run was executed on 2026-10-24 with Google-user ADC
+(scopes `openid`, `userinfo.email`, `cloud-platform`, `bigquery.readonly`):
+`preview` then `run` of `country_code, short_name` from
+`bigquery-public-data.world_bank_wdi.country_summary` ordered by `country_code`,
+limit 2, execution project `demodb-dev`, a 10485760-byte cap. The preview
+estimated 5000 bytes, and the run returned the two rows (ABW Aruba, AFE Africa
+Eastern and Southern) and billed 0 bytes. The source profile's `schema` must list
+every column of the table, without descriptions, exactly as BigQuery reports it,
+or the preview fails with `source_changed`. Source rights/admission and both
+runtime live gates remain open.
 
 `--file` accepts typed JSON containing `profile` and scalar TugQL `query`.
 Alternatively, `--source-profile` accepts the reviewed profile JSON and `--file`

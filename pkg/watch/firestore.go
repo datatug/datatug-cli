@@ -172,6 +172,7 @@ func (f *firestoreDatabase) RunReadwriteTransaction(ctx context.Context, fn dal.
 		// project state. It also protects empty query/capacity decisions.
 		gate := map[string]any{}
 		err := tx.Get(ctx, record.NewRecordWithData(f.root, gate))
+		missingGate := record.IsNotFound(err)
 		if err != nil && !record.IsNotFound(err) {
 			return err
 		}
@@ -199,6 +200,7 @@ func (f *firestoreDatabase) RunReadwriteTransaction(ctx context.Context, fn dal.
 				return ErrInvalid
 			}
 		}
+		originalSweep := session.sweepCursor
 		if err := fn(context.WithValue(ctx, firestoreReadContext{}, session), session); err != nil {
 			return err
 		}
@@ -214,6 +216,9 @@ func (f *firestoreDatabase) RunReadwriteTransaction(ctx context.Context, fn dal.
 			if err := f.options.WorkReady(ctx, tx, event); err != nil {
 				return err
 			}
+		}
+		if !missingGate && !session.needsProjectFence(originalSweep) {
+			return nil
 		}
 		return tx.Set(ctx, record.NewRecordWithData(f.root, map[string]any{"revision": revision + 1, "pendingOutbox": session.backlog(), "sweepCursor": session.sweepCursor}))
 	}, dal.TxWithAttempts(5))

@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -12,15 +11,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/datatug/datatug-cli/pkg/schemers/sqliteschema"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dbconnection"
 	"github.com/datatug/datatug-core/pkg/dto"
 	"github.com/datatug/datatug-core/pkg/parallel"
-	"github.com/datatug/datatug-core/pkg/schemer"
 	"github.com/strongo/slice"
 	"github.com/strongo/validation"
-	_ "modernc.org/sqlite" // registers the pure-Go "sqlite" driver sqliteScanDriver names
 )
 
 // ProjectLoader defines an interface to load project info
@@ -335,12 +331,6 @@ func newProjectWithDatabase(projectID, environment string, dbServer datatug.Serv
 	return project, err
 }
 
-// sqliteScanDriver is the database/sql driver a SQLite scan opens: modernc.org/sqlite,
-// which is pure Go and is the driver the rest of the CLI opens SQLite files with. A
-// release is built with cgo off, where the cgo driver registered as "sqlite3" is a
-// stub that fails on its first use.
-const sqliteScanDriver = "sqlite"
-
 // existingSQLiteFile is the path of the SQLite file connectionParams name, which
 // must be an existing file. A scan must not open a path that is not one: SQLite
 // creates an empty database there, and the scan of a mistyped path would succeed
@@ -440,50 +430,17 @@ func scanDbCatalog(server datatug.ServerRef, connectionParams dbconnection.Param
 
 // scanCatalog reads the catalog connectionParams name. What it leaves out of a
 // SQLite catalog, and why, is named on the warnings of ctx (see WithScanWarnings).
-func scanCatalog(ctx context.Context, server datatug.ServerRef, connectionParams dbconnection.Params) (dbCatalog *datatug.DbCatalog, err error) {
+func scanCatalog(ctx context.Context, server datatug.ServerRef, connectionParams dbconnection.Params) (*datatug.DbCatalog, error) {
 	if IsServerDriver(server.Driver) {
 		// PostgreSQL is read through DALgo's schema reader, and opened from an
 		// environment variable: there is no connection string to give database/sql.
 		return scanPostgresCatalog(ctx, server.Driver, connectionParams)
 	}
-	var db *sql.DB
-
-	driverName := server.Driver
-	dsn := connectionParams.ConnectionString()
 	if server.Driver == dbconnection.DriverSQLite3 {
-		var path string
-		if path, err = existingSQLiteFile(connectionParams); err != nil {
-			return nil, err
-		}
-		driverName = sqliteScanDriver
-		dsn = sqliteReadOnlyDSN(path)
+		// SQLite is read through DALgo's schema reader too (dalgo2sqlite).
+		return scanSQLiteCatalog(ctx, connectionParams)
 	}
-	if db, err = sql.Open(driverName, dsn); err != nil {
-		return nil, fmt.Errorf("failed to open SQL db: %w", err)
-	}
-
-	// Close the database connection pool after command executes
-	defer func() { _ = db.Close() }()
-
-	//informationSchema := schemer.NewInformationSchema(server, db)
-
-	var scanner schemer.Scanner
-	switch server.Driver {
-	case dbconnection.DriverSQLite3:
-		scanner = schemer.NewScanner(sqliteschema.NewSchemaProviderWithWarnings(func() (*sql.DB, error) { return db, nil }, scanWarningsFrom(ctx)))
-	default:
-		return nil, fmt.Errorf("unsupported DB driver: %v", server.Driver)
-	}
-
-	dbCatalog, err = scanner.ScanCatalog(ctx, connectionParams.Catalog())
-	if err != nil {
-		return dbCatalog, fmt.Errorf("failed to get dbCatalog metadata: %w", err)
-	}
-	dbCatalog.ID = connectionParams.Catalog()
-	//if database, err = informationSchema.GetDatabase(connectionParams.Database()); err != nil {
-	//	return nil, fmt.Errorf("failed to get database metadata: %w", err)
-	//}
-	return
+	return nil, fmt.Errorf("unsupported DB driver: %v", server.Driver)
 }
 
 func updateDbModelWithDbCatalog(envID string, dbModel *datatug.DbModel, dbCatalog *datatug.DbCatalog) (err error) {

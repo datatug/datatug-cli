@@ -139,11 +139,13 @@ func TestScanJourneyWritesNothingThroughALink(t *testing.T) {
 // is kept in the project, in data/), by driver and path. Main is
 // 515632d (fix: name PostgreSQL scan open failures; run the scan against a real server in CI), with
 // datatug-core v0.42.3. The project file, whose content holds the time it was made, is checked
-// beside them.
+// beside them. One file differs from main on purpose: since SQLite is scanned through
+// dalgo2sqlite's schema reader, Customer.CustomerId, an INTEGER PRIMARY KEY, is not nullable
+// (it is the table's rowid, which cannot be NULL).
 var mainScanHashes = map[string]map[string]string{
 	"sqlite3": {
 		"README.md": "b96bb0e7ff7dda4db9b73e959a75b0414c8f0874fe555a547781c7ea843e4c49",
-		"dbmodels/shop/main/tables/Customer/main.Customer.columns.json":            "4712fef74daf8d6a393bd9f4d52ccae4d9252067bcc75266f8f4dad763aa7106",
+		"dbmodels/shop/main/tables/Customer/main.Customer.columns.json":            "aebfb953e4a427eee63346dc9d80a9504f3cb2fc9ae372ef4681b461ba11490c",
 		"dbmodels/shop/main/tables/order_line/main.order_line.columns.json":        "38d435bd3da08216b0a49c7eadd3866b53046c0cb0bb2b54e43d337192bfd9f4",
 		"dbmodels/shop/main/views/customer_names/main.customer_names.columns.json": "6a9ac638498a970ff4d46d260771869391f525dafdcce3042334bc580521d49f",
 		"dbmodels/shop/shop.dbmodel.json":                                          "18394265b4cab95e1e196eaff2a2ff8cd32794c7f4b2267eac6c5519b9a16990",

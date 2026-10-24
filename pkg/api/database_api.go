@@ -91,17 +91,23 @@ func GetServerDatabases(ctx context.Context, request dto.GetServerDatabasesReque
 // the route: the executor is given it, so the query ends with it (QueryContext), and the call
 // returns the context's error as soon as it ends even when the driver does not end its own
 // attempt to connect, which a driver is not made to do on every platform.
+//
+// A goroutine that the deadline leaves behind keeps running after the call has returned, so it
+// is given everything it needs before it is started: the executor to call is read here, once,
+// and never again from a package variable that a test may reassign in the meantime. What the
+// goroutine answers goes to a channel of its own, which nobody else reads after the call.
 func executeWithin(ctx context.Context, executor sqlexecute.Executor, command sqlexecute.RequestCommand) (sqlexecute.Response, error) {
 	if err := ctx.Err(); err != nil {
 		return sqlexecute.Response{}, err
 	}
+	execute := executeSingleSeam
 	type executed struct {
 		response sqlexecute.Response
 		err      error
 	}
 	done := make(chan executed, 1)
 	go func() {
-		response, err := executeSingleSeam(ctx, executor, command)
+		response, err := execute(ctx, executor, command)
 		done <- executed{response, err}
 	}()
 	select {

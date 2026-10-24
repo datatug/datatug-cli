@@ -104,7 +104,7 @@ func TestReadPutDefinitionOperationRejectsInvalidRequests(t *testing.T) {
 	if _, _, err := s.ReadPutDefinitionOperationInTransaction(context.Background(), &contractFirestoreTX{}, wrong, d, "op", 0); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("foreign actor scope admitted: %v", err)
 	}
-	for _, change := range []func(*Definition){func(d *Definition) { d.Scope.Project = "foreign" }, func(d *Definition) { d.Title = "" }, func(d *Definition) { d.Schedule.IntervalSeconds = 0 }, func(d *Definition) { d.CreatedAt = time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC) }} {
+	for _, change := range []func(*Definition){func(d *Definition) { d.Project = "foreign" }, func(d *Definition) { d.Title = "" }, func(d *Definition) { d.Schedule.IntervalSeconds = 0 }, func(d *Definition) { d.CreatedAt = time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC) }} {
 		bad := d
 		change(&bad)
 		if got, found, err := s.ReadPutDefinitionOperationInTransaction(context.Background(), &contractFirestoreTX{}, a, bad, "op", 0); !errors.Is(err, ErrInvalid) || found || got.ID != "" {

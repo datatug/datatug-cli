@@ -496,6 +496,9 @@ func (s *Store) MarkRead(ctx context.Context, a Actor, id string) error {
 	if err := s.actor(a); err != nil {
 		return err
 	}
+	if s.cloud != nil {
+		return s.markReadFirestore(ctx, a, id)
+	}
 	return s.transaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
 		n, err := read[Notification](ctx, tx, inbox, a.Scope, id)
 		if err != nil {

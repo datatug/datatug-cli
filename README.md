@@ -431,6 +431,8 @@ the web app talks to (see [spec/features/cli/serve](spec/features/cli/serve/READ
 | Oracle | supported: the tables and views of the session's schema, columns, primary keys, foreign keys and indexes; the connection URL stays in an environment variable | supported, read-only: `--db env:NAME` with TugQL (`-f`, `--from`) or SQL (`--sql`, one `SELECT` or `WITH` query), and saved TugQL and SQL queries |
 | SQL Server | supported: the tables and views of the login's default schema, columns, primary keys, foreign keys and indexes; the connection URL stays in an environment variable | supported, read-only: `--db env:NAME` with TugQL (`-f`, `--from`) or SQL (`--sql`, one `SELECT` or `WITH` query), and saved TugQL and SQL queries |
 | inGitDB | not supported yet | supported: `--db ingitdb://./path-to-the-database` |
+| BigQuery | not supported yet | supported, read-only, through its own command, `datatug query bigquery` (`preview`, then `run` with the approved digest): one table described by a source profile, chosen columns, simple conditions and order, a limit, and a `--maximum-bytes-billed` cap; you sign in with your Google account (`--auth adc` or `--auth google`). See [pkg/bigqueryread](pkg/bigqueryread/README.md) |
+| REST APIs | not applicable | supported, read-only: `--db http://<project-dir>` reads the project's HTTP queries (`queries/**/*.query.json` of type `HTTP` with a `.query.http` URL template) as collections, calling the API live; a parameter of the URL is set by a `where` condition on its column |
 | OpenVaultDB | not supported yet | not tested in this release |
 | Firestore | not supported yet | not supported yet |
 

@@ -24,6 +24,12 @@ import (
 // Core evaluator and accepted-query runner. Local source bindings are explicit
 // operator grants and remain subject to the ordinary secured execution path.
 func ExecuteCloudWatchCheck(ctx context.Context, localProject, operationID string, claim watch.Claim, bundle watchdaemon.CloudExecutionBundle, bindings map[string]string) (core.CheckRun, string, error) {
+	return executeCloudWatchCheck(ctx, localProject, operationID, claim, bundle, bindings, json.Marshal)
+}
+
+// A private per-operation codec keeps encoding failure handling testable without
+// mutable global hooks or any caller-configurable execution authority.
+func executeCloudWatchCheck(ctx context.Context, localProject, operationID string, claim watch.Claim, bundle watchdaemon.CloudExecutionBundle, bindings map[string]string, encode func(any) ([]byte, error)) (core.CheckRun, string, error) {
 	if api.ValidateIdentifier("environment", claim.Definition.Environment) != nil {
 		return core.CheckRun{}, "", watch.ErrInvalid
 	}
@@ -55,6 +61,7 @@ func ExecuteCloudWatchCheck(ctx context.Context, localProject, operationID strin
 	}()
 	for id, pin := range bundle.Queries {
 		var q datatug.QueryDefWithFolderPath
+		var e error
 		if json.Unmarshal(pin.JSON, &q) != nil || q.QueryDef.Validate() != nil || len(q.Targets) != 0 {
 			return core.CheckRun{}, "", watch.ErrInvalid
 		}
@@ -83,10 +90,6 @@ func ExecuteCloudWatchCheck(ctx context.Context, localProject, operationID strin
 			if q.Type != datatug.QueryTypeSQL || pin.SourceIdentity == nil || pin.SourceIdentity.SourceID != q.ConnectionID {
 				return core.CheckRun{}, "", watch.ErrForbidden
 			}
-			data, e := bundle.ShippingArtifact(pin)
-			if e != nil {
-				return core.CheckRun{}, "", e
-			}
 			if tempDir == "" {
 				tempDir, e = os.MkdirTemp("", "datatug-watch-artifact-")
 				if e != nil {
@@ -94,13 +97,13 @@ func ExecuteCloudWatchCheck(ctx context.Context, localProject, operationID strin
 				}
 			}
 			artifactPath := filepath.Join(tempDir, "shipping.sqlite")
-			if e = prepareWatchArtifact(ctx, artifactPath, data); e != nil {
+			if e = prepareCloudWatchArtifact(ctx, artifactPath, bundle, pin); e != nil {
 				return core.CheckRun{}, "", e
 			}
 			overrides[id] = watchCloudSource{localConnection, (&url.URL{Scheme: "sqlite", Path: artifactPath}).String()}
 			q.ConnectionID = localConnection
 		}
-		body, e := json.Marshal(q)
+		body, e := encode(q)
 		if e != nil {
 			return core.CheckRun{}, "", watch.ErrInvalid
 		}
@@ -115,6 +118,14 @@ func ExecuteCloudWatchCheck(ctx context.Context, localProject, operationID strin
 	ctx = context.WithValue(detective.WithWatchAcceptedQueries(ctx, accepted), watchCloudSourcesKey{}, overrides)
 	run, err := core.EvaluateCheck(ctx, core.RunRequest{ID: operationID, CheckID: bundle.CheckID, Environment: claim.Definition.Environment, Actor: api.SecurePrincipalID(), Inputs: claim.Definition.Inputs}, catalog, detectiveQueryRunner(localProject, api.SecurityContextID()), detectiveExecutionMetadata(localProject))
 	return run, fingerprint, err
+}
+
+func prepareCloudWatchArtifact(ctx context.Context, path string, bundle watchdaemon.CloudExecutionBundle, query watchdaemon.CloudBundleQuery) error {
+	data, err := bundle.ShippingArtifact(query)
+	if err != nil {
+		return err
+	}
+	return prepareWatchArtifact(ctx, path, data)
 }
 
 // This package-private key is never populated from an HTTP request. Ordinary
@@ -155,6 +166,10 @@ func resolveWatchExecutionSource(ctx context.Context, store datatug.ProjectStore
 }
 
 func prepareWatchArtifact(ctx context.Context, path string, data []byte) error {
+	return prepareWatchArtifactWithOpen(ctx, path, data, sql.Open)
+}
+
+func prepareWatchArtifactWithOpen(ctx context.Context, path string, data []byte, open func(string, string) (*sql.DB, error)) error {
 	if !bytes.HasPrefix(data, []byte("SQLite format 3\x00")) {
 		return watch.ErrInvalid
 	}
@@ -162,7 +177,7 @@ func prepareWatchArtifact(ctx context.Context, path string, data []byte) error {
 		return err
 	}
 	// Validate the downloaded image before the Check engine can run a query.
-	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro&immutable=1")
+	db, err := open("sqlite", "file:"+path+"?mode=ro&immutable=1")
 	if err != nil {
 		return watch.ErrInvalid
 	}

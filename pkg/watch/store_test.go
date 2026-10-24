@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -471,27 +472,31 @@ func TestClaimProcessHelper(t *testing.T) {
 	if path == "" {
 		t.Skip("child process helper")
 	}
-	s, err := NewSQLiteStore(path, Config{Namespace: "northwind"})
+	instant, err := time.Parse(time.RFC3339Nano, os.Getenv("WATCH_GATE_NOW"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("read coordinator clock: %v", err)
+	}
+	s, err := NewSQLiteStore(path, Config{Namespace: "northwind", Now: func() time.Time { return instant }})
+	if err != nil {
+		t.Fatalf("open coordinator: %v", err)
 	}
 	defer func() { _ = s.Close() }()
 	r := RunnerIdentity{ID: os.Getenv("WATCH_GATE_RUNNER"), Scope: testScope}
 	if err = s.RegisterRunner(context.Background(), r); err != nil {
-		t.Fatal(err)
+		t.Fatalf("register runner: %v", err)
 	}
 	c, err := s.ClaimDue(context.Background(), r)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("claim due execution: %v", err)
 	}
 	if c != nil {
 		if err = os.WriteFile(os.Getenv("WATCH_GATE_RECEIPT"), []byte(c.ClaimID), 0600); err != nil {
-			t.Fatal(err)
+			t.Fatalf("write claim receipt: %v", err)
 		}
 	}
 }
 func TestCrossProcessAtomicClaim(t *testing.T) {
-	s, _, path := fixture(t)
+	s, clock, path := fixture(t)
 	a := actor("alice")
 	create(t, s, a, definition("watch"))
 	if err := s.Reconcile(context.Background()); err != nil {
@@ -499,16 +504,25 @@ func TestCrossProcessAtomicClaim(t *testing.T) {
 	}
 	dir := t.TempDir()
 	cmds := make([]*exec.Cmd, 3)
+	outputs := make([]bytes.Buffer, len(cmds))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	for i := range cmds {
-		cmds[i] = exec.Command(os.Args[0], "-test.run=^TestClaimProcessHelper$")
-		cmds[i].Env = append(os.Environ(), "WATCH_GATE_DB="+path, "WATCH_GATE_RUNNER="+fmt.Sprint(i), "WATCH_GATE_RECEIPT="+filepath.Join(dir, fmt.Sprint(i)))
+		cmds[i] = exec.CommandContext(ctx, os.Args[0], "-test.run=^TestClaimProcessHelper$")
+		cmds[i].Env = append(os.Environ(), "WATCH_GATE_DB="+path, "WATCH_GATE_RUNNER="+fmt.Sprint(i), "WATCH_GATE_RECEIPT="+filepath.Join(dir, fmt.Sprint(i)), "WATCH_GATE_NOW="+clock.now().Format(time.RFC3339Nano))
+		cmds[i].Stdout = &outputs[i]
+		cmds[i].Stderr = &outputs[i]
 		if err := cmds[i].Start(); err != nil {
+			cancel()
+			for _, started := range cmds[:i] {
+				_ = started.Wait()
+			}
 			t.Fatal(err)
 		}
 	}
-	for _, cmd := range cmds {
+	for i, cmd := range cmds {
 		if err := cmd.Wait(); err != nil {
-			t.Fatal(err)
+			t.Errorf("claim child %d: %v\n%s", i, err, outputs[i].String())
 		}
 	}
 	files, err := os.ReadDir(dir)

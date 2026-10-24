@@ -139,19 +139,25 @@ func NewSQLiteStore(connection string, c Config) (*Store, error) {
 		opts.Recordsets[table] = dalgo2sql.NewRecordset(table, dalgo2sql.Table, []dal.FieldRef{dal.Field("id")})
 	}
 	dsn := (&url.URL{Scheme: "file", Path: path}).String() + "?_txlock=immediate&_pragma=busy_timeout(50)&_pragma=journal_mode(DELETE)&_pragma=synchronous(FULL)"
-	db, e := dalgo2sqlite.NewDatabaseWithOptions(dsn, dal.NewSchema(nil, nil), opts)
-	if e != nil {
-		return nil, e
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	var db *dalgo2sqlite.Database
 	fields := []dbschema.FieldDef{{Name: "id", Type: dbschema.String}, {Name: "namespace", Type: dbschema.String}, {Name: "project", Type: dbschema.String}, {Name: "environment", Type: dbschema.String}, {Name: "watch", Type: dbschema.String}, {Name: "owner", Type: dbschema.String}, {Name: "visibility", Type: dbschema.String}, {Name: "updated", Type: dbschema.Int}, {Name: "payload", Type: dbschema.String}}
-	for _, table := range tables {
-		e = db.CreateCollection(ctx, dbschema.CollectionDef{Name: table, Fields: fields, PrimaryKey: []dal.FieldName{"id"}, Indexes: []dbschema.IndexDef{{Name: table + "_scope", Fields: []dal.FieldName{"namespace", "project", "environment", "watch"}}}}, ddl.IfNotExists())
-		if e != nil {
-			_ = db.Close()
-			return nil, e
+	if e = retrySQLiteBusy(ctx, func() error {
+		var openErr error
+		db, openErr = dalgo2sqlite.NewDatabaseWithOptions(dsn, dal.NewSchema(nil, nil), opts)
+		if openErr != nil {
+			return openErr
 		}
+		for _, table := range tables {
+			if err := db.CreateCollection(ctx, dbschema.CollectionDef{Name: table, Fields: fields, PrimaryKey: []dal.FieldName{"id"}, Indexes: []dbschema.IndexDef{{Name: table + "_scope", Fields: []dal.FieldName{"namespace", "project", "environment", "watch"}}}}, ddl.IfNotExists()); err != nil {
+				_ = db.Close()
+				return err
+			}
+		}
+		return nil
+	}); e != nil {
+		return nil, e
 	}
 	return &Store{db: db, config: c}, nil
 }
@@ -177,8 +183,8 @@ func (s *Store) actor(a Actor) error {
 func (s *Store) transaction(ctx context.Context, fn dal.RWTxWorker) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	for {
-		err := s.db.RunReadwriteTransaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
+	return retrySQLiteBusy(ctx, func() error {
+		return s.db.RunReadwriteTransaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
 			if err := fn(ctx, tx); err != nil {
 				return err
 			}
@@ -187,6 +193,17 @@ func (s *Store) transaction(ctx context.Context, fn dal.RWTxWorker) error {
 			}
 			return nil
 		})
+	})
+}
+
+// SQLite schema setup contends with live writers too. Retry only BUSY/LOCKED,
+// using the caller's bound for the whole bootstrap or transaction operation.
+func retrySQLiteBusy(ctx context.Context, operation func() error) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err := operation()
 		var code interface{ Code() int }
 		if !errors.As(err, &code) || (code.Code()&255 != 5 && code.Code()&255 != 6) {
 			return err

@@ -380,6 +380,14 @@ can cause up to forty writer transactions per second (four bounded candidates
 per poll), before scheduling and delivery work. This is an MVP cost and contention
 limit, not a measured throughput or availability guarantee. Queue wakeups reduce
 coordinator idle work; runner polling still needs deployment capacity planning.
+Current hosted runners poll every five seconds; the local runner default remains
+two seconds. Verified no-op transactions and existing runner heartbeat/fair-cursor
+maintenance retain the current authorization and gate read set, but skip updating
+the shared revision row. Registration, claims, renewals, results and domain writes
+still update the gate. Unknown runner fields or missing gate metadata conservatively
+retain serialization. These exclusions reduce idle contention; they do not establish
+a measured capacity or high-availability guarantee.
+
 The ordinary CI suite uses a test-only DALGO contract fixture for deterministic
 state and error-path coverage. It rejects physical reads after writes and rolls
 back failed callbacks. Only the separately required, pinned emulator job provides

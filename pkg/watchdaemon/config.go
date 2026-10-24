@@ -23,6 +23,7 @@ type Config struct {
 		DALGOConnectionEnv string `json:"dalgoConnectionEnv"`
 	} `json:"storage"`
 	Runner struct {
+		Cloud               *CloudRunnerConfig `json:"cloud,omitempty"`
 		TokenEnv            string             `json:"tokenEnv"`
 		CoordinatorEndpoint string             `json:"coordinatorEndpoint"`
 		ProjectDir          string             `json:"projectDir"`

@@ -106,8 +106,7 @@ func (s *Store) PutDefinition(ctx context.Context, a Actor, d Definition, operat
 	}
 	d.SourceRevision = "" // The server admission hook, never request JSON, pins cloud source.
 	startPaused := d.Lifecycle == "paused"
-	request, _ := json.Marshal(d)
-	digest := stable(string(request), fmt.Sprint(expectedVersion))
+	digest, _ := putDefinitionOperationDigest(d, expectedVersion)
 	var result Definition
 	err := s.transaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
 		opID := stable(a.ID, operationID)

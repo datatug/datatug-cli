@@ -259,7 +259,7 @@ func TestWatchOwnBotScopedRunnerLinksAndDelivers(t *testing.T) {
 		t.Fatal("delivery missing or duplicated", delivered.Load())
 	}
 	cancel()
-	<-done
+	_ = <-done
 	code, _ = f.request(t, "bob", "GET", "telegram/status", nil)
 	if code != 200 {
 		t.Fatal(code)

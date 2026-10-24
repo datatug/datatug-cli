@@ -220,7 +220,7 @@ func (b *telegramBot) runLease(ctx context.Context, c Client, lease watch.Telegr
 			}
 		}
 	}()
-	defer func() { cancel(); <-renewed }()
+	defer func() { cancel(); _ = <-renewed }()
 	for leaseCtx.Err() == nil {
 		current, e := c.telegramPoll(leaseCtx, "renew", lease.Fence)
 		if e != nil {

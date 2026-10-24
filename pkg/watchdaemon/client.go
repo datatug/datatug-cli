@@ -157,7 +157,7 @@ func (r Runner) Run(ctx context.Context) error {
 	defer func() {
 		workerCancel()
 		if botStarted {
-			<-botDone
+			_ = <-botDone // Join the cancelled worker; the primary result is already selected.
 		}
 	}()
 	poll := r.PollInterval

@@ -14,19 +14,22 @@ import (
 // Credential is deployment-owned authority. Tokens are resolved from the
 // environment at startup, never accepted from a project or a request body.
 type Credential struct {
-	TelegramBotID string   `json:"telegramBotId,omitempty"`
-	TokenEnv      string   `json:"tokenEnv"`
-	Kind          string   `json:"kind"` // user or runner
-	ID            string   `json:"id"`
-	AccountID     string   `json:"accountId,omitempty"`
-	Namespace     string   `json:"namespace"`
-	Project       string   `json:"project"`
-	Environment   string   `json:"environment"`
-	SharedEditor  bool     `json:"sharedEditor,omitempty"`
-	Capabilities  []string `json:"capabilities,omitempty"`
-	Email         string   `json:"email,omitempty"`
-	Tier          string   `json:"tier,omitempty"`
-	Phone         string   `json:"phone,omitempty"`
+	Hosted           bool     `json:"hosted,omitempty"`
+	SpaceID          string   `json:"spaceID,omitempty"`
+	CanManageRunners bool     `json:"canManageRunners,omitempty"`
+	TelegramBotID    string   `json:"telegramBotId,omitempty"`
+	TokenEnv         string   `json:"tokenEnv"`
+	Kind             string   `json:"kind"` // user or runner
+	ID               string   `json:"id"`
+	AccountID        string   `json:"accountId,omitempty"`
+	Namespace        string   `json:"namespace"`
+	Project          string   `json:"project"`
+	Environment      string   `json:"environment"`
+	SharedEditor     bool     `json:"sharedEditor,omitempty"`
+	Capabilities     []string `json:"capabilities,omitempty"`
+	Email            string   `json:"email,omitempty"`
+	Tier             string   `json:"tier,omitempty"`
+	Phone            string   `json:"phone,omitempty"`
 }
 
 type credentialEntry struct {

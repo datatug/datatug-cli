@@ -3,6 +3,7 @@ package watch
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/dal-go/dalgo/dal"
 	"regexp"
 	"strconv"
@@ -50,7 +51,7 @@ func (s *Store) BeginTelegramLink(ctx context.Context, a Actor, nonceHash string
 		if err != nil {
 			return err
 		}
-		requests, err := list[telegramRequest](ctx, tx, telegramRequests, a.Scope, "")
+		requests, err := s.telegramRequestsFor(ctx, tx, a)
 		if err != nil {
 			return err
 		}
@@ -97,13 +98,23 @@ func (s *Store) CompleteTelegramLinkByRunner(ctx context.Context, id RunnerIdent
 		if !request.ExpiresAt.After(s.now()) {
 			return ErrForbidden
 		}
-		links, err := list[telegramLink](ctx, tx, telegramLinks, Scope{Namespace: s.config.Namespace}, "")
-		if err != nil {
-			return err
-		}
-		for _, link := range links {
-			if link.BotID == id.TelegramBotID && link.ChatID == chatID && (link.Scope != request.Scope || link.UserID != request.UserID) {
+		if s.cloud != nil {
+			binding, e := read[telegramLink](ctx, tx, telegramBots, Scope{Namespace: s.config.Namespace}, stable("chat", id.TelegramBotID, chatID))
+			if e != nil && !errors.Is(e, ErrNotFound) {
+				return e
+			}
+			if e == nil && (binding.Scope != request.Scope || binding.UserID != request.UserID) {
 				return ErrForbidden
+			}
+		} else {
+			links, err := list[telegramLink](ctx, tx, telegramLinks, Scope{Namespace: s.config.Namespace}, "")
+			if err != nil {
+				return err
+			}
+			for _, link := range links {
+				if link.BotID == id.TelegramBotID && link.ChatID == chatID && (link.Scope != request.Scope || link.UserID != request.UserID) {
+					return ErrForbidden
+				}
 			}
 		}
 		previous, err := read[telegramLink](ctx, tx, telegramLinks, request.Scope, request.UserID)
@@ -113,6 +124,11 @@ func (s *Store) CompleteTelegramLinkByRunner(ctx context.Context, id RunnerIdent
 		link := telegramLink{Scope: request.Scope, BotID: id.TelegramBotID, UserID: request.UserID, ChatID: chatID, At: s.now(), Generation: previous.Generation + 1}
 		if err = s.save(ctx, tx, telegramLinks, link.Scope, link.UserID, "", link.UserID, "", link); err != nil {
 			return err
+		}
+		if s.cloud != nil {
+			if err = s.save(ctx, tx, telegramBots, Scope{Namespace: s.config.Namespace}, stable("chat", id.TelegramBotID, chatID), "", request.UserID, "", link); err != nil {
+				return err
+			}
 		}
 		request.ConsumedChatID = chatID
 		return s.save(ctx, tx, telegramRequests, request.Scope, request.Hash, "", request.UserID, "", request)
@@ -128,10 +144,30 @@ func (s *Store) DisconnectTelegram(ctx context.Context, a Actor) error {
 		return err
 	}
 	return s.transaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
-		if err := tx.Delete(ctx, key(telegramLinks, a.Scope, a.ID)); err != nil {
-			return err
+		if s.cloud != nil {
+			link, e := read[telegramLink](ctx, tx, telegramLinks, a.Scope, a.ID)
+			if e != nil && !errors.Is(e, ErrNotFound) {
+				return e
+			}
+			if e == nil {
+				if link.FailureCode != "TELEGRAM_DISCONNECTED" {
+					s.workReady(tx, WorkEvent{Scope: a.Scope, ID: stable("telegram-disconnect", a.Scope.Namespace, a.Scope.Project, a.Scope.Environment, a.ID, fmt.Sprint(link.Generation)), Kind: "WatchConsentChanged"})
+				}
+				link.FailureCode = "TELEGRAM_DISCONNECTED"
+				if e = s.save(ctx, tx, telegramLinks, a.Scope, a.ID, "", a.ID, "", link); e != nil {
+					return e
+				}
+				if e = tx.Delete(ctx, key(telegramBots, Scope{Namespace: s.config.Namespace}, stable("chat", link.BotID, link.ChatID))); e != nil {
+					return e
+				}
+			}
 		}
-		requests, err := list[telegramRequest](ctx, tx, telegramRequests, a.Scope, "")
+		if s.cloud == nil {
+			if err := tx.Delete(ctx, key(telegramLinks, a.Scope, a.ID)); err != nil {
+				return err
+			}
+		}
+		requests, err := s.telegramRequestsFor(ctx, tx, a)
 		if err != nil {
 			return err
 		}
@@ -142,6 +178,9 @@ func (s *Store) DisconnectTelegram(ctx context.Context, a Actor) error {
 				}
 			}
 		}
+		if s.cloud != nil {
+			return s.log(ctx, tx, a.Scope, a.ID, "telegram.disconnect", a.ID)
+		} // Delivery-time link check revokes pending sends.
 		items, err := list[Delivery](ctx, tx, outbox, a.Scope, "")
 		if err != nil {
 			return err
@@ -158,4 +197,11 @@ func (s *Store) DisconnectTelegram(ctx context.Context, a Actor) error {
 		}
 		return s.log(ctx, tx, a.Scope, a.ID, "telegram.disconnect", a.ID)
 	})
+}
+
+func (s *Store) telegramRequestsFor(ctx context.Context, tx dal.ReadwriteTransaction, a Actor) ([]telegramRequest, error) {
+	if s.cloud == nil {
+		return list[telegramRequest](ctx, tx, telegramRequests, a.Scope, "")
+	}
+	return cloudItems[telegramRequest](ctx, tx, cloudQuery(telegramRequests, a.Scope, "", []dal.Condition{dal.WhereField("owner", dal.Equal, a.ID)}, 16))
 }

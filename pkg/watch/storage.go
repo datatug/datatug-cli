@@ -52,6 +52,7 @@ type Store struct {
 	db           stateDatabase
 	config       Config
 	beforeCommit func() error
+	cloud        *firestoreDatabase
 }
 
 var _ DefinitionRepository = (*Store)(nil)
@@ -86,53 +87,9 @@ func NewSQLiteStore(connection string, c Config) (*Store, error) {
 	if e = watchCloseStorageFile(f); e != nil {
 		return nil, e
 	}
-	if c.MaxWatchesPerUser <= 0 {
-		c.MaxWatchesPerUser = 100
-	}
-	if c.MinIntervalSeconds <= 0 {
-		c.MinIntervalSeconds = 5
-	}
-	if c.MaxWatchesPerUser > 1000 || c.MinIntervalSeconds < 5 || c.MinIntervalSeconds > 3600 {
-		return nil, ErrInvalid
-	}
-	if c.EmailDailyLimit <= 0 {
-		c.EmailDailyLimit = 50
-	}
-	if c.SMSDailyLimit <= 0 {
-		c.SMSDailyLimit = 10
-	}
-	if c.EmailMinuteLimit <= 0 {
-		c.EmailMinuteLimit = 5
-	}
-	if c.SMSMinuteLimit <= 0 {
-		c.SMSMinuteLimit = 2
-	}
-	if c.TelegramDailyLimit <= 0 {
-		c.TelegramDailyLimit = 100
-	}
-	if c.TelegramMinuteLimit <= 0 {
-		c.TelegramMinuteLimit = 5
-	}
-	if c.Now == nil {
-		c.Now = time.Now
-	}
-	if c.LeaseDuration <= 0 {
-		c.LeaseDuration = 30 * time.Second
-	}
-	if c.RunnerTTL <= 0 {
-		c.RunnerTTL = 90 * time.Second
-	}
-	if c.ExecutionTimeout <= 0 {
-		c.ExecutionTimeout = 2 * time.Minute
-	}
-	if c.MaxAttempts <= 0 {
-		c.MaxAttempts = 3
-	}
-	if c.HistoryLimit <= 0 {
-		c.HistoryLimit = 1000
-	}
-	if c.LeaseDuration > time.Minute || c.ExecutionTimeout > 15*time.Minute || c.HistoryLimit > 10000 || c.MaxAttempts > 10 {
-		return nil, ErrInvalid
+	c, e = normalizeConfig(c)
+	if e != nil {
+		return nil, e
 	}
 	opts := dalgo2sql.DbOptions{StructuredQueryDialect: "sqlite", Recordsets: map[string]*dalgo2sql.Recordset{}}
 	for _, table := range tables {
@@ -172,7 +129,7 @@ func key(table string, scope Scope, id string) *record.Key {
 	return record.NewKeyWithID(table, stable(scope.Namespace, scope.Project, scope.Environment, id))
 }
 func (s *Store) validScope(scope Scope) bool {
-	return scope.Namespace == s.config.Namespace && scope.Project != "" && scope.Environment != "" && len(scope.Project) <= 200 && len(scope.Environment) <= 100
+	return scope.Namespace == s.config.Namespace && (s.cloud == nil || scope.Project == s.cloud.options.ProjectID) && scope.Project != "" && scope.Environment != "" && len(scope.Project) <= 200 && len(scope.Environment) <= 100
 }
 func (s *Store) actor(a Actor) error {
 	if a.ID == "" || !s.validScope(a.Scope) {
@@ -243,6 +200,9 @@ func (s *Store) save(ctx context.Context, tx dal.ReadwriteTransaction, table str
 		return fmt.Errorf("%w: record exceeds 128 KiB", ErrInvalid)
 	}
 	m := map[string]any{"namespace": scope.Namespace, "project": scope.Project, "environment": scope.Environment, "watch": watchID, "owner": owner, "visibility": visibility, "updated": s.now().UnixNano(), "payload": string(payload)}
+	if s.cloud != nil {
+		s.cloudMetadata(m, value)
+	}
 	k := key(table, scope, id)
 	exists, err := tx.Exists(ctx, k)
 	if err != nil {
@@ -302,6 +262,17 @@ func list[T any](ctx context.Context, r dal.QueryExecutor, table string, scope S
 func (s *Store) log(ctx context.Context, tx dal.ReadwriteTransaction, scope Scope, actor, action, id string) error {
 	now := s.now()
 	e := AuditEvent{ID: stable(actor, action, id, now.String()), Scope: scope, Actor: actor, Action: action, ResourceID: id, At: now}
+	if s.cloud != nil && strings.HasPrefix(action, "definition.") {
+		d, err := read[Definition](ctx, tx, definitions, scope, id)
+		if err != nil {
+			return err
+		}
+		session, ok := tx.(*firestoreSession)
+		if !ok {
+			return ErrForbidden
+		}
+		session.changed[d.ID] = d
+	}
 	return s.save(ctx, tx, audit, scope, e.ID, id, actor, "", e)
 }
 func visible(a Actor, d Definition) bool {
@@ -309,4 +280,56 @@ func visible(a Actor, d Definition) bool {
 }
 func editable(a Actor, d Definition) bool {
 	return visible(a, d) && (d.Owner == a.ID || d.Visibility == "shared" && a.SharedEditor)
+}
+
+func normalizeConfig(c Config) (Config, error) {
+	if c.MaxWatchesPerUser <= 0 {
+		c.MaxWatchesPerUser = 100
+	}
+	if c.MinIntervalSeconds <= 0 {
+		c.MinIntervalSeconds = 5
+	}
+	if c.MaxWatchesPerUser > 1000 || c.MinIntervalSeconds < 5 || c.MinIntervalSeconds > 3600 {
+		return c, ErrInvalid
+	}
+	if c.EmailDailyLimit <= 0 {
+		c.EmailDailyLimit = 50
+	}
+	if c.SMSDailyLimit <= 0 {
+		c.SMSDailyLimit = 10
+	}
+	if c.EmailMinuteLimit <= 0 {
+		c.EmailMinuteLimit = 5
+	}
+	if c.SMSMinuteLimit <= 0 {
+		c.SMSMinuteLimit = 2
+	}
+	if c.TelegramDailyLimit <= 0 {
+		c.TelegramDailyLimit = 100
+	}
+	if c.TelegramMinuteLimit <= 0 {
+		c.TelegramMinuteLimit = 5
+	}
+	if c.Now == nil {
+		c.Now = time.Now
+	}
+	if c.LeaseDuration <= 0 {
+		c.LeaseDuration = 30 * time.Second
+	}
+	if c.RunnerTTL <= 0 {
+		c.RunnerTTL = 90 * time.Second
+	}
+	if c.ExecutionTimeout <= 0 {
+		c.ExecutionTimeout = 2 * time.Minute
+	}
+	if c.MaxAttempts <= 0 {
+		c.MaxAttempts = 3
+	}
+	if c.HistoryLimit <= 0 {
+		c.HistoryLimit = 1000
+	}
+	if c.LeaseDuration > time.Minute || c.ExecutionTimeout > 15*time.Minute || c.HistoryLimit > 10000 || c.MaxAttempts > 10 {
+		return c, ErrInvalid
+	}
+	return c, nil
 }

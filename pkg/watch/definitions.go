@@ -23,7 +23,7 @@ func (s *Store) ListDefinitions(ctx context.Context, a Actor) ([]Definition, err
 	if err := s.actor(a); err != nil {
 		return nil, err
 	}
-	items, err := list[Definition](ctx, s.db, definitions, a.Scope, "")
+	items, err := s.liveDefinitions(ctx, s.db, a.Scope)
 	if err != nil {
 		return nil, err
 	}
@@ -104,6 +104,7 @@ func (s *Store) PutDefinition(ctx context.Context, a Actor, d Definition, operat
 	if err := validateDefinition(d); err != nil {
 		return Definition{}, err
 	}
+	d.SourceRevision = "" // The server admission hook, never request JSON, pins cloud source.
 	startPaused := d.Lifecycle == "paused"
 	request, _ := json.Marshal(d)
 	digest := stable(string(request), fmt.Sprint(expectedVersion))
@@ -146,7 +147,7 @@ func (s *Store) PutDefinition(ctx context.Context, a Actor, d Definition, operat
 			if d.Visibility == "shared" && !a.SharedEditor {
 				return ErrForbidden
 			}
-			items, e := list[Definition](ctx, tx, definitions, Scope{Namespace: s.config.Namespace}, "")
+			items, e := s.liveDefinitions(ctx, tx, Scope{Namespace: s.config.Namespace})
 			if e != nil {
 				return e
 			}
@@ -157,7 +158,13 @@ func (s *Store) PutDefinition(ctx context.Context, a Actor, d Definition, operat
 				}
 			}
 			if owned >= s.config.MaxWatchesPerUser {
+				if s.cloud != nil {
+					return ErrCapacity
+				}
 				return ErrInvalid
+			}
+			if s.cloud != nil && len(items) >= 100 {
+				return ErrCapacity
 			}
 			if len(items) >= 1000 {
 				return ErrInvalid
@@ -185,6 +192,13 @@ func (s *Store) PutDefinition(ctx context.Context, a Actor, d Definition, operat
 			d.CreatedAt = existing.CreatedAt
 			d.Version = existing.Version + 1
 		}
+		if s.cloud != nil {
+			revision, e := s.sourceAdmission(ctx, tx, d, "save")
+			if e != nil {
+				return e
+			}
+			d.SourceRevision = revision
+		}
 		d.UpdatedAt = s.now()
 		d.SourceFingerprint = ""
 		d.Lifecycle = "enabled"
@@ -207,7 +221,7 @@ func (s *Store) PutDefinition(ctx context.Context, a Actor, d Definition, operat
 		if !created {
 			before, _ := json.Marshal(existing.Inputs)
 			after, _ := json.Marshal(d.Inputs)
-			if existing.CheckID == d.CheckID && existing.CheckVersion == d.CheckVersion && string(before) == string(after) {
+			if existing.CheckID == d.CheckID && existing.CheckVersion == d.CheckVersion && existing.SourceRevision == d.SourceRevision && string(before) == string(after) {
 				old, e := read[Observation](ctx, tx, observations, d.Scope, d.ID)
 				if e != nil {
 					return e
@@ -227,7 +241,7 @@ func (s *Store) PutDefinition(ctx context.Context, a Actor, d Definition, operat
 	return result, err
 }
 func (s *Store) cancelRuns(ctx context.Context, tx dal.ReadwriteTransaction, scope Scope, id string) error {
-	items, err := list[Run](ctx, tx, runs, scope, id)
+	items, err := s.activeRuns(ctx, tx, scope, id)
 	if err != nil {
 		return err
 	}
@@ -281,6 +295,11 @@ func (s *Store) SetLifecycle(ctx context.Context, a Actor, id, lifecycle, operat
 		}
 		if d.Version != expectedVersion {
 			return ErrConflict
+		}
+		if s.cloud != nil && lifecycle == "enabled" {
+			if _, e := s.sourceAdmission(ctx, tx, d, "resume"); e != nil {
+				return e
+			}
 		}
 		d.Version++
 		d.Lifecycle = lifecycle
@@ -384,6 +403,26 @@ func (s *Store) Subscribe(ctx context.Context, a Actor, sub Subscription) error 
 		if !visible(a, d) {
 			return ErrNotFound
 		}
+		if s.cloud != nil {
+			authority, e := s.recipientAdmission(ctx, tx, d, a.ID)
+			if e != nil {
+				return e
+			}
+			if sub.AccountID != authority.AccountID || seen["email"] && sub.Email != authority.Email || seen["sms"] && (!authority.Paid || sub.Phone != authority.Phone) {
+				return ErrForbidden
+			}
+			all, e := list[Subscription](ctx, tx, subscriptions, d.Scope, d.ID)
+			if e != nil {
+				return e
+			}
+			found := false
+			for _, item := range all {
+				found = found || item.UserID == a.ID
+			}
+			if !found && len(all) >= 50 {
+				return ErrCapacity
+			}
+		}
 		sub.TelegramBotID = ""
 		if seen["telegram"] && !sub.Unsubscribed {
 			provider, err := s.telegramProvider(ctx, tx, a.Scope)
@@ -403,18 +442,38 @@ func (s *Store) Subscribe(ctx context.Context, a Actor, sub Subscription) error 
 	})
 }
 func (s *Store) ListRuns(ctx context.Context, a Actor, watchID string) ([]Run, error) {
+	if s.cloud != nil && !s.inReadView(ctx) {
+		var result []Run
+		err := s.readView(ctx, func(ctx context.Context) error { var e error; result, e = s.ListRuns(ctx, a, watchID); return e })
+		if err != nil {
+			var zero []Run
+			return zero, err
+		}
+		return result, nil
+	}
+
 	if _, err := s.GetDefinition(ctx, a, watchID); err != nil {
 		return nil, err
 	}
-	items, err := list[Run](ctx, s.db, runs, a.Scope, watchID)
+	items, err := viewItems[Run](ctx, s, runs, a.Scope, watchID, "")
 	sort.Slice(items, func(i, j int) bool { return items[i].DueAt.After(items[j].DueAt) })
 	return items, err
 }
 func (s *Store) Inbox(ctx context.Context, a Actor) ([]Notification, error) {
+	if s.cloud != nil && !s.inReadView(ctx) {
+		var result []Notification
+		err := s.readView(ctx, func(ctx context.Context) error { var e error; result, e = s.Inbox(ctx, a); return e })
+		if err != nil {
+			var zero []Notification
+			return zero, err
+		}
+		return result, nil
+	}
+
 	if err := s.actor(a); err != nil {
 		return nil, err
 	}
-	items, err := list[Notification](ctx, s.db, inbox, a.Scope, "")
+	items, err := viewItems[Notification](ctx, s, inbox, a.Scope, "", a.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -459,12 +518,22 @@ func (s *Store) MarkRead(ctx context.Context, a Actor, id string) error {
 	})
 }
 func (s *Store) Status(ctx context.Context, a Actor) (Status, error) {
+	if s.cloud != nil && !s.inReadView(ctx) {
+		var result Status
+		err := s.readView(ctx, func(ctx context.Context) error { var e error; result, e = s.Status(ctx, a); return e })
+		if err != nil {
+			var zero Status
+			return zero, err
+		}
+		return result, nil
+	}
+
 	defs, err := s.ListDefinitions(ctx, a)
 	if err != nil {
 		return Status{}, err
 	}
 	result := Status{Coordinator: "available", Runners: []Runner{}, Observations: []Observation{}}
-	registered, err := list[Runner](ctx, s.db, runners, a.Scope, "")
+	registered, err := viewItems[Runner](ctx, s, runners, a.Scope, "", "")
 	if err != nil {
 		return result, err
 	}
@@ -480,6 +549,8 @@ func (s *Store) Status(ctx context.Context, a Actor) (Status, error) {
 		}
 		if d.Lifecycle != "enabled" {
 			obs.Availability = d.Lifecycle
+		} else if obs.Availability == "source_changed" || obs.Availability == "source_unavailable" {
+			// Preserve the explicit review-required status.
 		} else if !hasEligible(result.Runners, d) {
 			obs.Availability = "no_runner"
 		} else if obs.NextEvaluation.Before(s.now().Add(-time.Duration(d.Schedule.IntervalSeconds) * time.Second)) {
@@ -498,10 +569,20 @@ func hasEligible(items []Runner, d Definition) bool {
 	return false
 }
 func (s *Store) Audit(ctx context.Context, a Actor, watchID string) ([]AuditEvent, error) {
+	if s.cloud != nil && !s.inReadView(ctx) {
+		var result []AuditEvent
+		err := s.readView(ctx, func(ctx context.Context) error { var e error; result, e = s.Audit(ctx, a, watchID); return e })
+		if err != nil {
+			var zero []AuditEvent
+			return zero, err
+		}
+		return result, nil
+	}
+
 	if _, err := s.GetDefinition(ctx, a, watchID); err != nil {
 		return nil, err
 	}
-	return list[AuditEvent](ctx, s.db, audit, a.Scope, watchID)
+	return viewItems[AuditEvent](ctx, s, audit, a.Scope, watchID, "")
 }
 
 // ResetBaseline explicitly acknowledges a reviewed source revision. Cosmetic
@@ -544,6 +625,13 @@ func (s *Store) ResetBaseline(ctx context.Context, a Actor, id, operationID stri
 		}
 		if d.Version != expectedVersion {
 			return ErrConflict
+		}
+		if s.cloud != nil {
+			revision, e := s.sourceAdmission(ctx, tx, d, "reset")
+			if e != nil {
+				return e
+			}
+			d.SourceRevision = revision
 		}
 		d.Version++
 		d.UpdatedAt = s.now()

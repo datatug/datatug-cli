@@ -61,7 +61,9 @@ func configureCloudWatchRunner(cfg *watchdaemon.Config, override, namespace stri
 		return nil, nil, errors.New("cloud Watch enrollment credential is unavailable")
 	}
 	client := watchdaemon.Client{Endpoint: strings.TrimRight(endpoint, "/"), Token: token}
-	runner := &watchdaemon.Runner{Client: client, Telegram: cfg.Runner.Telegram}
+	// Hosted claims perform current transactional authority/source admission.
+	// Bound idle polling cost independently from the local coordinator default.
+	runner := &watchdaemon.Runner{Client: client, Telegram: cfg.Runner.Telegram, PollInterval: 5 * time.Second}
 	runner.Executor = watchdaemon.ExecutorFunc(func(ctx context.Context, claim watch.Claim) (watch.Completion, error) {
 		d := claim.Definition
 		if d.Namespace != cloud.SpaceID || d.Project != cloud.ProjectID || d.Environment != cfg.Runner.Environment {

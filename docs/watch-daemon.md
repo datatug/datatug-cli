@@ -270,3 +270,75 @@ wb run -- go test -race ./pkg/watch ./pkg/watchdaemon -count=1
 
 The complete Northwind process/browser journey is a separate integration receipt;
 passing transport tests alone does not establish that demo acceptance.
+
+## Shared cloud runner
+
+Hosted projects use the trusted DataTug API's default coordinator. Their endpoint
+is the API base followed by `/v0/datatug/watch/<space>/<project>/<environment>`;
+the enrollment screen exposes this exact scope and endpoint. Hosted projects do
+not persist an arbitrary coordinator override. Firebase user tokens are never
+sent to a manifest URL. Self-hosted project coordination remains configured by
+its existing manifest descriptor.
+
+An enrolled runner keeps its one-time credential in the operator's secret store
+or process environment. The project manifest contains no credential. A cloud
+runner configuration has this shape (replace every placeholder):
+
+```json
+{
+  "namespace": "<spaceID>",
+  "runner": {
+    "coordinatorEndpoint": "https://<trusted-api>/v0/datatug/watch/<spaceID>/<projectID>/<environment>",
+    "tokenEnv": "DATATUG_WATCH_RUNNER_TOKEN",
+    "projectDir": "/private/operator/source-project",
+    "environment": "<environment>",
+    "principal": "operator-local-owner",
+    "evidenceDir": "/private/operator/watch-evidence",
+    "allowOpaqueSQL": true,
+    "cloud": {
+      "spaceID": "<spaceID>",
+      "projectID": "<projectID>",
+      "sourceBindings": {"<admitted-source-ID>": "<local-SQLite-catalog-alias>"}
+    }
+  }
+}
+```
+
+Run `datatug daemon --run --watch-config /private/operator/watch.json` with
+`DATATUG_WATCH_RUNNER_TOKEN` supplied through the private environment. The token
+already identifies the enrollment; there is no separate runner-ID setting.
+`principal` names the local operator, not a Firebase user impersonation.
+
+The supported native mode requires an explicitly configured local owner project
+with an admitted SQLite catalog. Secured local Check-asset grants remain
+unsupported and fail closed. `allowOpaqueSQL` is an explicit operator grant for
+the existing readonly SQL executor; it does not promise row/column policy
+filtering. A native source binding names the local catalog alias. An OVDB binding
+must equal the exact server-admitted origin. Embedded cloud demo URIs have no
+local runner mapping and are rejected.
+
+For the bounded shipping source, the coordinator supplies the exact immutable
+SQLite image admitted with the claim. The runner verifies its size, SHA and
+bundle digest, validates the image in an owned private temporary directory, and
+uses the existing readonly query and Core Check engine. It never falls back to a
+local Check, query, or mutable database after a bundle/artifact failure. Local
+aliases, filesystem paths and unrelated extra bindings do not change a Watch's
+semantic baseline.
+
+Source semantics retain Check/query/validator versions, publication binding,
+schema, fixture provenance and shipping generation. Same-generation business
+correction/replay changes the evaluation artifact without resetting the Watch;
+a generation reset or source-definition change requires explicit review/reset.
+Missing artifacts produce unknown/retry. Personal Watches are evaluated only by
+owner-issued runner grants; shared Watches can use other currently authorized
+source grants. Another project manager can revoke a runner, but cannot reissue
+its owner's credential.
+
+The initial cloud fixture executed three independent owner-enrolled OS runners,
+actual Firebase token verification/current native ownership, real Firestore,
+the existing governed Northwind order 11045 carrier-assignment data and a local
+SMTP sink. Its fixture authored a Check/query over that existing data; this is
+not a physical-shipment signal. Production cloud activation and broader
+restart/crash/browser acceptance have separate receipts; a focused execution
+receipt is not a hosted deployment claim. External SMTP/Telegram delivery remains
+at-least-once after ambiguous provider acceptance despite stable message IDs.

@@ -3,7 +3,9 @@ package api
 import (
 	"context"
 	"fmt"
+	"strings"
 
+	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
 	"github.com/dal-go/dalgo2sqlite"
 	"github.com/datatug/datatug-cli/pkg/schemers/dalgoschema"
@@ -34,6 +36,32 @@ type lenientSQLite struct {
 }
 
 func (db lenientSQLite) Close() error { return db.owner.Close() }
+
+// DescribeCollection describes the table or view ref names, its foreign keys named as
+// DataTug names a SQLite foreign key (see sqliteForeignKeyName).
+func (db lenientSQLite) DescribeCollection(ctx context.Context, ref *dal.CollectionRef) (*dbschema.CollectionDef, error) {
+	def, err := db.Database.DescribeCollection(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	for i := range def.ForeignKeys {
+		def.ForeignKeys[i].Name = sqliteForeignKeyName(def.Name, def.ForeignKeys[i].Name)
+	}
+	return def, nil
+}
+
+// sqliteForeignKeyName is the name a project gives the foreign key dalgo2sqlite names
+// name on table. SQLite does not name a foreign key: dalgo2sqlite names it
+// <table>_fk_<id>, and a project, since its scans first saved foreign keys,
+// FK_<table>_<id>, with the id SQLite numbers the table's keys by. Another name is
+// kept as it is.
+func sqliteForeignKeyName(table, name string) string {
+	id, found := strings.CutPrefix(name, table+"_fk_")
+	if !found || id == "" || strings.Trim(id, "0123456789") != "" {
+		return name
+	}
+	return "FK_" + table + "_" + id
+}
 
 // sqliteScanDB is the dalgo2sqlite database a scan reads: its schema reader, which
 // also lists views (dalgoschema.ViewLister) and the tables and views it leaves out

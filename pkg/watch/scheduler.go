@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -157,6 +158,9 @@ func (s *Store) claimDueAttempt(ctx context.Context, identity RunnerIdentity, pr
 		}
 		registered, err := read[Runner](ctx, tx, runners, identity.Scope, identity.ID)
 		if err != nil {
+			if s.cloud != nil && !errors.Is(err, ErrNotFound) {
+				return err
+			}
 			return ErrForbidden
 		}
 		now := s.now()
@@ -284,6 +288,9 @@ func (s *Store) leased(ctx context.Context, tx dal.ReadwriteTransaction, identit
 	}
 	r, err := read[Run](ctx, tx, runs, identity.Scope, id)
 	if err != nil {
+		if s.cloud != nil && !errors.Is(err, ErrNotFound) {
+			return r, Definition{}, err
+		}
 		return r, Definition{}, ErrStaleLease
 	}
 	d, err := read[Definition](ctx, tx, definitions, identity.Scope, r.WatchID)

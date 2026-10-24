@@ -136,8 +136,8 @@ github.com/danieljoos/wincred v1.2.3 h1:v7dZC2x32Ut3nEfRH+vhoZGvN72+dQ/snVXo/vMF
 github.com/danieljoos/wincred v1.2.3/go.mod h1:6qqX0WNrS4RzPZ1tnroDzq9kY3fu1KwE7MRLQK4X0bs=
 github.com/datatug/cliformat v0.0.3 h1:d9p5vo7r8BH6qSKyTHQ9Al2sT6QHsQTK9KRlihaJdIU=
 github.com/datatug/cliformat v0.0.3/go.mod h1:DwX9tWHiyH+vZtbVEVOyHOEOw1Km9AzhgHoqI0PowAc=
-github.com/datatug/datatug-core v0.78.0 h1:x0fxz6aEt+jl9vYMNEo9FoTtMKg6OIDFK72VLMFxy1o=
-github.com/datatug/datatug-core v0.78.0/go.mod h1:V92o0v0gXOAvqr+1WXXErnfKbvabksEkkwxVCVoF/kY=
+github.com/datatug/datatug-core v0.79.0 h1:1e8jMXl5d/5Nh1aX3jj4lP40c0CZCgmbSjoigDBH3Z0=
+github.com/datatug/datatug-core v0.79.0/go.mod h1:V92o0v0gXOAvqr+1WXXErnfKbvabksEkkwxVCVoF/kY=
 github.com/datatug/sql2csv v0.0.1 h1:mmQI9gWAqVKtnwwNKPEPamplV0g1+KaTovME7/7+SIY=
 github.com/datatug/sql2csv v0.0.1/go.mod h1:nZwHW70TWPF2PTXyCa4hysB+nVgY/AcF6m/KclO3fvs=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
@@ -379,6 +379,8 @@ github.com/strongo/decimal v0.1.2 h1:/LHdX9zJTUPpEM2cuQhnwCWNWLCUwG0BJMyOetpryY8
 github.com/strongo/decimal v0.1.2/go.mod h1:uKFgetJbR2uT026stdbK54ELXTH9h0vZOPPOp7DAODk=
 github.com/strongo/deviceauth v0.1.0 h1:wl+VrsRkDGQqYrqnm0IiCmPGldnBLdzzA1nfNwgDdis=
 github.com/strongo/deviceauth v0.1.0/go.mod h1:bPTivN2eqTgfphYuyB+WKvlBmRNfbyrpMOEGz5T172o=
+github.com/strongo/gotwilio v0.0.0-20160123000810-f024bbefe80f h1:nLD1340Ys0nXjVurNp5O/7CoDuZTo++7qydiikwxKho=
+github.com/strongo/gotwilio v0.0.0-20160123000810-f024bbefe80f/go.mod h1:AOBNKIosqbvHdXh8+u8QBWz7xeHz9sjDS0zVJjspzN8=
 github.com/strongo/logus v0.4.3 h1:hAT2VNAj41SXta7A2bRPmk/RgWXAO930faHga5Fc58w=
 github.com/strongo/logus v0.4.3/go.mod h1:seJ+rxoeqfq1mS8LHlVfmS3ZfO+aTzeX0eW+zvpkH8U=
 github.com/strongo/random v0.0.3 h1:R4XNjyBvlqL5Mln0meQO9d/Wy1SSN8CpCJ8sKSkIifw=

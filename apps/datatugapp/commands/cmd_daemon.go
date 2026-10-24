@@ -37,13 +37,17 @@ var newDaemonManager = daemon.NewManager
 func daemonCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "daemon",
-		Short: "Own the local read-only API server that AI-agent mods link their cards to",
-		Long: "datatug daemon owns one `datatug serve` process bound to 127.0.0.1, started read-only\n" +
+		Short: "Run DataTug Watch Coordinator/Runner roles or manage the local UI helper",
+		Long: "Run independent foreground DataTug Watch roles with --coordinate, --run, or both.\n" +
+			"Watch configuration and role credentials belong to the daemon deployment (--watch-config).\n" +
+			"The legacy start/status/stop/url commands manage one `datatug serve` process\n" +
+			"bound to 127.0.0.1, started read-only\n" +
 			"(no --allow-writes, --allow-live-connections or --allow-opaque-sql) and exiting after " + daemon.IdleTimeout.String() + " with no request.\n" +
 			"State (pidfile, record, log) lives in ~/datatug/daemon; `datatug daemon stop` stops it.\n" +
 			"Any command run with --client claude-mod (or DATATUG_CLIENT) ensures it is running afterwards.",
 	}
 	cmd.AddCommand(daemonStatusCommand(), daemonStartCommand(), daemonStopCommand(), daemonURLCommand())
+	addWatchDaemonFlags(cmd)
 	return cmd
 }
 

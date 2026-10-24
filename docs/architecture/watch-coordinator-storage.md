@@ -46,8 +46,15 @@ DALGO's `RunReadwriteTransaction` takes the SQLite writer reservation before
 calling the worker. Every decision reads current state and writes within that
 same transaction using DALGO `Get`, `Exists`, `Update`, `Insert` and `Delete`.
 Schema bootstrap uses the SQLite DALGO adapter's DDL API. No application runtime
-mutation bypasses DALGO. A busy or locked driver result retries the entire
-transaction with context cancellation and a ten-second upper bound. External
+mutation bypasses DALGO. Startup retries the complete open-and-schema operation
+on SQLite BUSY/LOCKED codes, closing an opened database after every failed schema
+attempt. `IfNotExists` keeps the retried bootstrap idempotent. All startup attempts
+share one ten-second deadline, checked before each attempt. The pinned adapter's
+initial Ping uses a background context; its configured 50 ms busy timeout leaves
+at most that in-flight driver wait beyond the deadline. Validation, permissions,
+malformed databases and other non-lock errors fail immediately. Runtime contention
+retries the entire read/write transaction under its own ten-second bound and
+caller cancellation. External
 queries and provider calls run outside those transactions.
 
 The database must reside on a local filesystem with working SQLite file locks

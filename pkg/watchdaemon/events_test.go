@@ -82,3 +82,43 @@ func TestWatchEventHTTPUsesCurrentActorScope(t *testing.T) {
 		t.Fatalf("deleted event %d %s", code, body)
 	}
 }
+
+func TestWatchEventHTTPWithoutEventStoreCapabilityFailsClosed(t *testing.T) {
+	f := protocolFixture(t)
+	f.create(t, "alice", "existing-watch", "personal")
+	// A CoordinatorStore may implement scheduling and definitions without the
+	// optional event read ports. Those routes must remain unavailable, with
+	// authentication and scope checks enforced before capability discovery.
+	f.server.Store = opaqueCoordinatorStore{CoordinatorStore: f.store}
+	for _, path := range []string{"event?id=existing-event", "events?watchId=existing-watch"} {
+		for _, tc := range []struct {
+			name, actor, suffix, errorCode string
+			want                           int
+		}{
+			{"authenticated", "alice", "", "NOT_FOUND", http.StatusNotFound},
+			{"missing-credential", "unknown", "", "UNAUTHENTICATED", http.StatusUnauthorized},
+			{"runner-credential", "runner-a", "", "UNAUTHENTICATED", http.StatusUnauthorized},
+			{"wrong-environment", "alice", "&environment=prod", "FORBIDDEN", http.StatusForbidden},
+		} {
+			t.Run(path+"/"+tc.name, func(t *testing.T) {
+				code, body := f.request(t, tc.actor, http.MethodGet, path+tc.suffix, nil)
+				if code != tc.want {
+					t.Fatalf("response %d want %d: %s", code, tc.want, body)
+				}
+				var response struct {
+					Error apiError `json:"error"`
+				}
+				if err := json.Unmarshal(body, &response); err != nil || response.Error.Code != tc.errorCode {
+					t.Fatalf("error response=%s want code=%s: %v", body, tc.errorCode, err)
+				}
+				if strings.Contains(string(body), "existing-watch") || strings.Contains(string(body), "existing-event") {
+					t.Fatalf("unavailable event route exposed resource identity: %s", body)
+				}
+			})
+		}
+	}
+	code, body := f.request(t, "alice", http.MethodGet, "definitions", nil)
+	if code != http.StatusOK || !strings.Contains(string(body), "existing-watch") {
+		t.Fatalf("base CoordinatorStore definitions unavailable: %d %s", code, body)
+	}
+}

@@ -1,0 +1,612 @@
+{
+  "status": "PASS",
+  "observedAt": "2026-10-23T23:26:23.356903+00:00",
+  "websiteMergeCommit": "f5fc8b1b7ea5a1b97c6f0b889a92c183e8809bc5",
+  "publicCLI": "v0.112.0",
+  "candidateCI": {
+    "id": 40036858478,
+    "head_sha": "14690083ad0d100d315ce8d0761ff7a5eb483563",
+    "conclusion": "success",
+    "html_url": "https://github.com/datatug/websites/actions/runs/40036858478"
+  },
+  "postMergeCI": {
+    "id": 40039403748,
+    "head_sha": "f5fc8b1b7ea5a1b97c6f0b889a92c183e8809bc5",
+    "status": "in_progress",
+    "conclusion": null,
+    "html_url": "https://github.com/datatug/websites/actions/runs/40039403748"
+  },
+  "postMergeCIPending": true,
+  "runs": [
+    {
+      "id": 40039404549,
+      "name": "Deploy datatug.io (Cloudflare)",
+      "path": ".github/workflows/deploy-io.yml",
+      "head_sha": "f5fc8b1b7ea5a1b97c6f0b889a92c183e8809bc5",
+      "conclusion": "success",
+      "html_url": "https://github.com/datatug/websites/actions/runs/40039404549",
+      "jobs": [
+        {
+          "name": "check \u00b7 build \u00b7 test",
+          "conclusion": "success",
+          "steps": [
+            {
+              "name": "Set up job",
+              "conclusion": "success"
+            },
+            {
+              "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+              "conclusion": "success"
+            },
+            {
+              "name": "Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+              "conclusion": "success"
+            },
+            {
+              "name": "Run corepack enable",
+              "conclusion": "success"
+            },
+            {
+              "name": "Run pnpm install --frozen-lockfile",
+              "conclusion": "success"
+            },
+            {
+              "name": "Run pnpm --filter datatug-io check",
+              "conclusion": "success"
+            },
+            {
+              "name": "Run PUBLIC_VISUAL_SHOWCASE_LIVE=1 pnpm --filter datatug-io build",
+              "conclusion": "success"
+            },
+            {
+              "name": "Run pnpm --filter datatug-io test",
+              "conclusion": "success"
+            },
+            {
+              "name": "Post Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+              "conclusion": "success"
+            },
+            {
+              "name": "Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+              "conclusion": "success"
+            },
+            {
+              "name": "Complete job",
+              "conclusion": "success"
+            }
+          ]
+        },
+        {
+          "name": "the landing's pricing page is live",
+          "conclusion": "success",
+          "steps": [
+            {
+              "name": "Set up job",
+              "conclusion": "success"
+            },
+            {
+              "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+              "conclusion": "success"
+            },
+            {
+              "name": "Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+              "conclusion": "success"
+            },
+            {
+              "name": "Wait for https://datatug.app/en/pricing/ to be the landing's pricing page in the expected checkout state",
+              "conclusion": "success"
+            },
+            {
+              "name": "Post Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+              "conclusion": "success"
+            },
+            {
+              "name": "Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+              "conclusion": "success"
+            },
+            {
+              "name": "Complete job",
+              "conclusion": "success"
+            }
+          ]
+        },
+        {
+          "name": "deploy / build \u00b7 deploy",
+          "conclusion": "success",
+          "steps": [
+            {
+              "name": "Set up job",
+              "conclusion": "success"
+            },
+            {
+              "name": "Checkout repository",
+              "conclusion": "success"
+            },
+            {
+              "name": "Setup pnpm + Node (build workspace)",
+              "conclusion": "success"
+            },
+            {
+              "name": "Setup pnpm + Node (extra workspace)",
+              "conclusion": "skipped"
+            },
+            {
+              "name": "Install TinyGo",
+              "conclusion": "skipped"
+            },
+            {
+              "name": "Configure git credentials for private Go modules",
+              "conclusion": "skipped"
+            },
+            {
+              "name": "Build",
+              "conclusion": "success"
+            },
+            {
+              "name": "Deploy to Cloudflare",
+              "conclusion": "success"
+            },
+            {
+              "name": "Post-deploy smoke test",
+              "conclusion": "success"
+            },
+            {
+              "name": "Post Setup pnpm + Node (build workspace)",
+              "conclusion": "success"
+            },
+            {
+              "name": "Post Checkout repository",
+              "conclusion": "success"
+            },
+            {
+              "name": "Complete job",
+              "conclusion": "success"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 40039404538,
+      "name": "Deploy datatug.ai (Cloudflare)",
+      "path": ".github/workflows/deploy-ai.yml",
+      "head_sha": "f5fc8b1b7ea5a1b97c6f0b889a92c183e8809bc5",
+      "conclusion": "success",
+      "html_url": "https://github.com/datatug/websites/actions/runs/40039404538",
+      "jobs": [
+        {
+          "name": "check \u00b7 build \u00b7 test",
+          "conclusion": "success",
+          "steps": [
+            {
+              "name": "Set up job",
+              "conclusion": "success"
+            },
+            {
+              "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+              "conclusion": "success"
+            },
+            {
+              "name": "Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+              "conclusion": "success"
+            },
+            {
+              "name": "Run corepack enable",
+              "conclusion": "success"
+            },
+            {
+              "name": "Run pnpm install --frozen-lockfile",
+              "conclusion": "success"
+            },
+            {
+              "name": "Run pnpm --filter @datatug/site-kit check",
+              "conclusion": "success"
+            },
+            {
+              "name": "Run pnpm --filter datatug-ai check",
+              "conclusion": "success"
+            },
+            {
+              "name": "Run pnpm --filter datatug-ai build",
+              "conclusion": "success"
+            },
+            {
+              "name": "Run pnpm --filter datatug-ai expect-build fallback noindex",
+              "conclusion": "success"
+            },
+            {
+              "name": "Run pnpm --filter datatug-ai test",
+              "conclusion": "success"
+            },
+            {
+              "name": "Post Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+              "conclusion": "success"
+            },
+            {
+              "name": "Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+              "conclusion": "success"
+            },
+            {
+              "name": "Complete job",
+              "conclusion": "success"
+            }
+          ]
+        },
+        {
+          "name": "live demo confirmed",
+          "conclusion": "success",
+          "steps": [
+            {
+              "name": "Set up job",
+              "conclusion": "success"
+            },
+            {
+              "name": "Refuse to publish claims nobody has confirmed",
+              "conclusion": "success"
+            },
+            {
+              "name": "Complete job",
+              "conclusion": "success"
+            }
+          ]
+        },
+        {
+          "name": "deploy / build \u00b7 deploy",
+          "conclusion": "success",
+          "steps": [
+            {
+              "name": "Set up job",
+              "conclusion": "success"
+            },
+            {
+              "name": "Checkout repository",
+              "conclusion": "success"
+            },
+            {
+              "name": "Setup pnpm + Node (build workspace)",
+              "conclusion": "success"
+            },
+            {
+              "name": "Setup pnpm + Node (extra workspace)",
+              "conclusion": "skipped"
+            },
+            {
+              "name": "Install TinyGo",
+              "conclusion": "skipped"
+            },
+            {
+              "name": "Configure git credentials for private Go modules",
+              "conclusion": "skipped"
+            },
+            {
+              "name": "Build",
+              "conclusion": "success"
+            },
+            {
+              "name": "Deploy to Cloudflare",
+              "conclusion": "success"
+            },
+            {
+              "name": "Post-deploy smoke test",
+              "conclusion": "success"
+            },
+            {
+              "name": "Post Setup pnpm + Node (build workspace)",
+              "conclusion": "success"
+            },
+            {
+              "name": "Post Checkout repository",
+              "conclusion": "success"
+            },
+            {
+              "name": "Complete job",
+              "conclusion": "success"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 40039404583,
+      "name": "Deploy datatug.app landing (Cloudflare)",
+      "path": ".github/workflows/deploy-app.yml",
+      "head_sha": "f5fc8b1b7ea5a1b97c6f0b889a92c183e8809bc5",
+      "conclusion": "success",
+      "html_url": "https://github.com/datatug/websites/actions/runs/40039404583",
+      "jobs": [
+        {
+          "name": "check \u00b7 build \u00b7 test",
+          "conclusion": "success",
+          "steps": [
+            {
+              "name": "Set up job",
+              "conclusion": "success"
+            },
+            {
+              "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+              "conclusion": "success"
+            },
+            {
+              "name": "Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+              "conclusion": "success"
+            },
+            {
+              "name": "DATATUG_PRO_CHECKOUT_ENABLED must be exactly 0 or 1",
+              "conclusion": "success"
+            },
+            {
+              "name": "Run corepack enable",
+              "conclusion": "success"
+            },
+            {
+              "name": "Run pnpm install --frozen-lockfile",
+              "conclusion": "success"
+            },
+            {
+              "name": "Run pnpm --filter @datatug/site-kit check",
+              "conclusion": "success"
+            },
+            {
+              "name": "Run pnpm --filter datatug-app-landing check",
+              "conclusion": "success"
+            },
+            {
+              "name": "Run pnpm --filter datatug-app-landing build",
+              "conclusion": "success"
+            },
+            {
+              "name": "Run pnpm --filter datatug-app-landing expect-build fallback indexable",
+              "conclusion": "success"
+            },
+            {
+              "name": "The built pricing page has Pro checkout in the state the variable asks for",
+              "conclusion": "success"
+            },
+            {
+              "name": "Run pnpm --filter datatug-app-landing test",
+              "conclusion": "success"
+            },
+            {
+              "name": "Post Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+              "conclusion": "success"
+            },
+            {
+              "name": "Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+              "conclusion": "success"
+            },
+            {
+              "name": "Complete job",
+              "conclusion": "success"
+            }
+          ]
+        },
+        {
+          "name": "deploy / build \u00b7 deploy",
+          "conclusion": "success",
+          "steps": [
+            {
+              "name": "Set up job",
+              "conclusion": "success"
+            },
+            {
+              "name": "Checkout repository",
+              "conclusion": "success"
+            },
+            {
+              "name": "Setup pnpm + Node (build workspace)",
+              "conclusion": "success"
+            },
+            {
+              "name": "Setup pnpm + Node (extra workspace)",
+              "conclusion": "skipped"
+            },
+            {
+              "name": "Install TinyGo",
+              "conclusion": "skipped"
+            },
+            {
+              "name": "Configure git credentials for private Go modules",
+              "conclusion": "skipped"
+            },
+            {
+              "name": "Build",
+              "conclusion": "success"
+            },
+            {
+              "name": "Deploy to Cloudflare",
+              "conclusion": "success"
+            },
+            {
+              "name": "Post-deploy smoke test",
+              "conclusion": "success"
+            },
+            {
+              "name": "Post Setup pnpm + Node (build workspace)",
+              "conclusion": "success"
+            },
+            {
+              "name": "Post Checkout repository",
+              "conclusion": "success"
+            },
+            {
+              "name": "Complete job",
+              "conclusion": "success"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "livePages": [
+    {
+      "url": "https://datatug.io/en/docs/integrations/mcp/",
+      "finalURL": "https://datatug.io/en/docs/integrations/mcp/",
+      "status": 200,
+      "htmlSHA256": "dedc397dec1596a787770e54e850a855c1ca6049cd0fe276b818d361ac232c7e",
+      "headers": {
+        "date": "Fri, 23 Oct 2026 23:26:22 GMT",
+        "cf-cache-status": "HIT",
+        "etag": null,
+        "last-modified": null
+      },
+      "checks": {
+        "acceptedIdentitiesAndRecipe": true
+      }
+    },
+    {
+      "url": "https://datatug.io/ru/docs/integrations/mcp/",
+      "finalURL": "https://datatug.io/ru/docs/integrations/mcp/",
+      "status": 200,
+      "htmlSHA256": "3607cf23350261d9fcf6ebba65941d698ccbaea039879ff0a375090746911a25",
+      "headers": {
+        "date": "Fri, 23 Oct 2026 23:26:22 GMT",
+        "cf-cache-status": "HIT",
+        "etag": null,
+        "last-modified": null
+      },
+      "checks": {
+        "acceptedIdentitiesAndRecipe": true
+      }
+    },
+    {
+      "url": "https://datatug.io/en/",
+      "finalURL": "https://datatug.io/",
+      "status": 200,
+      "htmlSHA256": "578cc65011d6ac86074351b892936a073d6e53d708eca675b929bb36cf09fbf5",
+      "headers": {
+        "date": "Fri, 23 Oct 2026 23:26:22 GMT",
+        "cf-cache-status": "HIT",
+        "etag": null,
+        "last-modified": null
+      },
+      "checks": {
+        "appsExplorerPreview": true
+      }
+    },
+    {
+      "url": "https://datatug.io/ru/",
+      "finalURL": "https://datatug.io/ru/",
+      "status": 200,
+      "htmlSHA256": "c420b0f45b3208b032c3e0e49ea5787054c0be6647da6a41e18e747f32622e8c",
+      "headers": {
+        "date": "Fri, 23 Oct 2026 23:26:22 GMT",
+        "cf-cache-status": "HIT",
+        "etag": null,
+        "last-modified": null
+      },
+      "checks": {
+        "appsExplorerPreview": true
+      }
+    },
+    {
+      "url": "https://datatug.io/en/ai/",
+      "finalURL": "https://datatug.io/en/ai/",
+      "status": 200,
+      "htmlSHA256": "35ae7b93e91a57d1767d0a744604aa65cd805de2f3dece1ca2e4a7848b16c3e6",
+      "headers": {
+        "date": "Fri, 23 Oct 2026 23:26:22 GMT",
+        "cf-cache-status": "HIT",
+        "etag": null,
+        "last-modified": null
+      },
+      "checks": {
+        "appsExplorerPreview": true
+      }
+    },
+    {
+      "url": "https://datatug.io/ru/ai/",
+      "finalURL": "https://datatug.io/ru/ai/",
+      "status": 200,
+      "htmlSHA256": "79db8d444b3fc0f3ebc5d79db2ff88595dadb786c2dfcbc3916b825ed68a5be9",
+      "headers": {
+        "date": "Fri, 23 Oct 2026 23:26:22 GMT",
+        "cf-cache-status": "HIT",
+        "etag": null,
+        "last-modified": null
+      },
+      "checks": {
+        "appsExplorerPreview": true
+      }
+    },
+    {
+      "url": "https://datatug.ai/",
+      "finalURL": "https://datatug.ai/",
+      "status": 200,
+      "htmlSHA256": "b0441a66acde4059caa04c03f0e6d59ed78b609701e6f88845b3dbd065fee6d0",
+      "headers": {
+        "date": "Fri, 23 Oct 2026 23:26:22 GMT",
+        "cf-cache-status": "HIT",
+        "etag": "\"682604ac4368a0f0ceba06dab76b22ad\"",
+        "last-modified": null
+      },
+      "checks": {
+        "appsExplorerPreview": true,
+        "uibubblesStillPlanned": true
+      }
+    },
+    {
+      "url": "https://datatug.ai/ru/",
+      "finalURL": "https://datatug.ai/ru/",
+      "status": 200,
+      "htmlSHA256": "7abedcc601ea3fbf6d38a58c593b54344b142012b7d086d8d437e1b82947cf74",
+      "headers": {
+        "date": "Fri, 23 Oct 2026 23:26:22 GMT",
+        "cf-cache-status": "HIT",
+        "etag": "\"0573bb3b4ca1f42003223a1c07bc4b30\"",
+        "last-modified": null
+      },
+      "checks": {
+        "appsExplorerPreview": true,
+        "uibubblesStillPlanned": true
+      }
+    },
+    {
+      "url": "https://datatug.app/en/",
+      "finalURL": "https://datatug.app/en/",
+      "status": 200,
+      "htmlSHA256": "7d6d30408c7d8d923a7e13bd2aea482f710789558f0538bb9a3a15d6a97611a9",
+      "headers": {
+        "date": "Fri, 23 Oct 2026 23:26:23 GMT",
+        "cf-cache-status": "HIT",
+        "etag": "\"cc0ac2a52ca82ca8cfd265a1c704f968\"",
+        "last-modified": null
+      },
+      "checks": {
+        "appsExplorerPreview": true
+      }
+    },
+    {
+      "url": "https://datatug.app/ru/",
+      "finalURL": "https://datatug.app/ru/",
+      "status": 200,
+      "htmlSHA256": "6a195ba32bf2f3dbf00383551285e529598f21f221564bc8af00f44d64c20eec",
+      "headers": {
+        "date": "Fri, 23 Oct 2026 23:26:23 GMT",
+        "cf-cache-status": "HIT",
+        "etag": "\"bf7212d49fb15125a165d31f6744329b\"",
+        "last-modified": null
+      },
+      "checks": {
+        "appsExplorerPreview": true
+      }
+    },
+    {
+      "url": "https://datatug.app/en/ways-to-use/",
+      "finalURL": "https://datatug.app/en/ways-to-use/",
+      "status": 200,
+      "htmlSHA256": "1f24a36d92d2577b4d2c52842290fefd7637ccbc720ed427225cb2b341dfac3f",
+      "headers": {
+        "date": "Fri, 23 Oct 2026 23:26:23 GMT",
+        "cf-cache-status": "HIT",
+        "etag": "\"28d534e4199dd4e7130ba321360ccc05\"",
+        "last-modified": null
+      },
+      "checks": {
+        "appsExplorerPreview": true
+      }
+    }
+  ],
+  "existingProCheckoutState": "open",
+  "configurationChanged": false,
+  "scope": "Deployed build and existing workflow smoke jobs plus direct live localized identities and feature statuses; no named desktop host claim."
+}

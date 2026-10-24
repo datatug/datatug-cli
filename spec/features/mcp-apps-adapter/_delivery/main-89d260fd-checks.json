@@ -1,0 +1,199 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-10-23T22:50:19.271901Z",
+  "status": "passed",
+  "repository": "datatug/datatug-cli",
+  "target": "main",
+  "head": "89d260fdfe00f3b0345adae451258443d2cd00a7",
+  "observed_head": "89d260fdfe00f3b0345adae451258443d2cd00a7",
+  "observed_target_head": "89d260fdfe00f3b0345adae451258443d2cd00a7",
+  "candidate_contains_target": true,
+  "target_contains_head": true,
+  "checks": [
+    {
+      "name": "check-run:Hermetic tests",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/datatug-cli/actions/runs/40034686825/job/120691151668",
+      "app_id": 15368,
+      "check_run_id": 120691151668
+    },
+    {
+      "name": "check-run:Journey (PostgreSQL 17)",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/datatug-cli/actions/runs/40034686825/job/120691151966",
+      "app_id": 15368,
+      "check_run_id": 120691151966
+    },
+    {
+      "name": "check-run:Journey (PostgreSQL 18)",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/datatug-cli/actions/runs/40034686825/job/120691152120",
+      "app_id": 15368,
+      "check_run_id": 120691152120
+    },
+    {
+      "name": "check-run:MCP Apps browser",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/datatug-cli/actions/runs/40034686825/job/120691151890",
+      "app_id": 15368,
+      "check_run_id": 120691151890
+    },
+    {
+      "name": "check-run:Publish release to datatug/datatug",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/datatug-cli/actions/runs/40034686763/job/120695421228",
+      "app_id": 15368,
+      "check_run_id": 120695421228
+    },
+    {
+      "name": "check-run:Scan without cgo",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/datatug-cli/actions/runs/40034686825/job/120691151967",
+      "app_id": 15368,
+      "check_run_id": 120691151967
+    },
+    {
+      "name": "check-run:Warn when the Homebrew cask is behind",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/datatug-cli/actions/runs/40034686763/job/120695520601",
+      "app_id": 15368,
+      "check_run_id": 120695520601
+    },
+    {
+      "name": "check-run:go.mod is tidy",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/datatug-cli/actions/runs/40034686825/job/120691152131",
+      "app_id": 15368,
+      "check_run_id": 120691152131
+    },
+    {
+      "name": "check-run:release / Build and upload release artifacts",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/datatug-cli/actions/runs/40034686763/job/120691259487",
+      "app_id": 15368,
+      "check_run_id": 120691259487
+    },
+    {
+      "name": "check-run:release / Finalize public release tag",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/datatug-cli/actions/runs/40034686763/job/120695354900",
+      "app_id": 15368,
+      "check_run_id": 120695354900
+    },
+    {
+      "name": "check-run:release / Resolve release test configuration",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/datatug-cli/actions/runs/40034686763/job/120691259742",
+      "app_id": 15368,
+      "check_run_id": 120691259742
+    },
+    {
+      "name": "check-run:release / Smoke test Homebrew cask install (darwin/arm64)",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/datatug-cli/actions/runs/40034686763/job/120695355008",
+      "app_id": 15368,
+      "check_run_id": 120695355008
+    },
+    {
+      "name": "check-run:release / Smoke test published artifact (darwin/arm64)",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/datatug-cli/actions/runs/40034686763/job/120695355019",
+      "app_id": 15368,
+      "check_run_id": 120695355019
+    },
+    {
+      "name": "check-run:release / Smoke test published artifact (linux/amd64)",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/datatug-cli/actions/runs/40034686763/job/120695354972",
+      "app_id": 15368,
+      "check_run_id": 120695354972
+    },
+    {
+      "name": "check-run:release / Verify signed macOS artifact and promote draft release",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/datatug-cli/actions/runs/40034686763/job/120695276433",
+      "app_id": 15368,
+      "check_run_id": 120695276433
+    },
+    {
+      "name": "check-run:request-fix",
+      "bucket": "skipping",
+      "conclusion": "skipped",
+      "link": "https://github.com/datatug/datatug-cli/actions/runs/40036048808/job/120695657117",
+      "app_id": 15368,
+      "check_run_id": 120695657117
+    },
+    {
+      "name": "check-run:strongo_workflow / Build \u0026 test",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/datatug-cli/actions/runs/40034686825/job/120691152184",
+      "app_id": 15368,
+      "check_run_id": 120691152184
+    },
+    {
+      "name": "check-run:strongo_workflow / Bump version",
+      "bucket": "skipping",
+      "conclusion": "skipped",
+      "link": "https://github.com/datatug/datatug-cli/actions/runs/40034686825/job/120693016445",
+      "app_id": 15368,
+      "check_run_id": 120693016445
+    },
+    {
+      "name": "check-run:strongo_workflow / Lint",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/datatug-cli/actions/runs/40034686825/job/120691152198",
+      "app_id": 15368,
+      "check_run_id": 120691152198
+    },
+    {
+      "name": "check-run:strongo_workflow / Publish exact-tree validation receipt",
+      "bucket": "skipping",
+      "conclusion": "skipped",
+      "link": "https://github.com/datatug/datatug-cli/actions/runs/40034686825/job/120693015608",
+      "app_id": 15368,
+      "check_run_id": 120693015608
+    },
+    {
+      "name": "check-run:strongo_workflow / Resolve reusable pull-request validation",
+      "bucket": "skipping",
+      "conclusion": "skipped",
+      "link": "https://github.com/datatug/datatug-cli/actions/runs/40034686825/job/120691153160",
+      "app_id": 15368,
+      "check_run_id": 120691153160
+    }
+  ],
+  "required_checks": [
+    {
+      "name": "go.mod is tidy",
+      "integration_id": 15368
+    },
+    {
+      "name": "strongo_workflow / Build \u0026 test",
+      "integration_id": 15368
+    },
+    {
+      "name": "strongo_workflow / Lint",
+      "integration_id": 15368
+    }
+  ],
+  "required_checks_authority": "github-branch-protection+active-branch-rules",
+  "stable_observations": 2,
+  "reason": "GitHub's required-check policy was enumerated (possibly empty), every required check was present, and the exact remote target's observed check set stayed terminal across a bounded stable reread"
+}

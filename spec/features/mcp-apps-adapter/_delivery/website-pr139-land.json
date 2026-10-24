@@ -1,0 +1,276 @@
+{
+  "v": 1,
+  "verb": "pr land",
+  "outcome": "success",
+  "repository": "datatug/websites",
+  "pull_request": 139,
+  "url": "https://github.com/datatug/websites/pull/139",
+  "title": "docs(mcp): publish the Apps developer preview",
+  "head_ref": "integration/mcp-apps-adapter",
+  "head_sha": "14690083ad0d100d315ce8d0761ff7a5eb483563",
+  "base_ref": "main",
+  "merge_sha": "f5fc8b1b7ea5a1b97c6f0b889a92c183e8809bc5",
+  "subject": "docs(mcp): publish the Apps developer preview (#139)",
+  "mechanical": false,
+  "changed_files": [
+    "apps/ai/src/data/structure.ts",
+    "apps/ai/src/i18n/locales/en.ts",
+    "apps/ai/src/i18n/locales/ru.ts",
+    "apps/ai/tests/e2e/platform.spec.ts",
+    "apps/ai/tests/e2e/ways.spec.ts",
+    "apps/ai/tests/unit/dist.test.mjs",
+    "apps/ai/tests/unit/i18n.test.mjs",
+    "apps/io/src/components/home/PlatformHome.astro",
+    "apps/io/src/components/pages/AIPage.astro",
+    "apps/io/src/content/docs/en/docs/integrations/mcp.mdx",
+    "apps/io/src/content/docs/en/docs/reference/cli.mdx",
+    "apps/io/src/content/docs/ru/docs/integrations/mcp.mdx",
+    "apps/io/src/content/docs/ru/docs/reference/cli.mdx",
+    "apps/io/src/i18n/ai.ts",
+    "apps/io/src/i18n/platform-home.ts",
+    "apps/io/test/dist.test.mjs",
+    "apps/io/test/mcp-apps.test.mjs",
+    "apps/io/tests/e2e/ai-page.spec.ts",
+    "apps/io/tests/e2e/home.spec.ts",
+    "apps/io/tests/e2e/mcp-apps.spec.ts",
+    "packages/site-kit/src/components/pages/WaysToUseBody.astro",
+    "packages/site-kit/src/features.ts",
+    "packages/site-kit/src/platform.ts",
+    "packages/site-kit/src/strings.ts",
+    "packages/site-kit/test/kit.test.mjs"
+  ],
+  "non_manifest_files": [
+    "apps/ai/src/data/structure.ts",
+    "apps/ai/src/i18n/locales/en.ts",
+    "apps/ai/src/i18n/locales/ru.ts",
+    "apps/ai/tests/e2e/platform.spec.ts",
+    "apps/ai/tests/e2e/ways.spec.ts",
+    "apps/ai/tests/unit/dist.test.mjs",
+    "apps/ai/tests/unit/i18n.test.mjs",
+    "apps/io/src/components/home/PlatformHome.astro",
+    "apps/io/src/components/pages/AIPage.astro",
+    "apps/io/src/content/docs/en/docs/integrations/mcp.mdx",
+    "apps/io/src/content/docs/en/docs/reference/cli.mdx",
+    "apps/io/src/content/docs/ru/docs/integrations/mcp.mdx",
+    "apps/io/src/content/docs/ru/docs/reference/cli.mdx",
+    "apps/io/src/i18n/ai.ts",
+    "apps/io/src/i18n/platform-home.ts",
+    "apps/io/test/dist.test.mjs",
+    "apps/io/test/mcp-apps.test.mjs",
+    "apps/io/tests/e2e/ai-page.spec.ts",
+    "apps/io/tests/e2e/home.spec.ts",
+    "apps/io/tests/e2e/mcp-apps.spec.ts",
+    "packages/site-kit/src/components/pages/WaysToUseBody.astro",
+    "packages/site-kit/src/features.ts",
+    "packages/site-kit/src/platform.ts",
+    "packages/site-kit/src/strings.ts",
+    "packages/site-kit/test/kit.test.mjs"
+  ],
+  "approved_by": "/private/tmp/mcp-apps-review-web-head-14690083.md",
+  "reviewed_head": "14690083ad0d100d315ce8d0761ff7a5eb483563",
+  "review_bound": true,
+  "checks": {
+    "status": "passed",
+    "repository": "datatug/websites",
+    "pull_request": "139",
+    "target": "main",
+    "head": "14690083ad0d100d315ce8d0761ff7a5eb483563",
+    "observed_head": "14690083ad0d100d315ce8d0761ff7a5eb483563",
+    "observed_target_head": "ffdc3ae9198a533e734cb606d7490d4a00eee840",
+    "candidate_contains_target": true,
+    "checks": [
+      {
+        "name": "check-run:check · build · unit tests",
+        "bucket": "pass",
+        "conclusion": "success",
+        "link": "https://github.com/datatug/websites/actions/runs/40036858478/job/120698730721",
+        "app_id": 15368,
+        "check_run_id": 120698730721
+      },
+      {
+        "name": "check-run:e2e (component examples)",
+        "bucket": "pass",
+        "conclusion": "success",
+        "link": "https://github.com/datatug/websites/actions/runs/40036858478/job/120698730810",
+        "app_id": 15368,
+        "check_run_id": 120698730810
+      },
+      {
+        "name": "check-run:e2e (fallback)",
+        "bucket": "pass",
+        "conclusion": "success",
+        "link": "https://github.com/datatug/websites/actions/runs/40036858478/job/120698730881",
+        "app_id": 15368,
+        "check_run_id": 120698730881
+      },
+      {
+        "name": "check-run:e2e (launch (live, indexable))",
+        "bucket": "pass",
+        "conclusion": "success",
+        "link": "https://github.com/datatug/websites/actions/runs/40036858478/job/120698730894",
+        "app_id": 15368,
+        "check_run_id": 120698730894
+      },
+      {
+        "name": "check-run:e2e (live demo)",
+        "bucket": "pass",
+        "conclusion": "success",
+        "link": "https://github.com/datatug/websites/actions/runs/40036858478/job/120698730790",
+        "app_id": 15368,
+        "check_run_id": 120698730790
+      },
+      {
+        "name": "check-run:e2e (live demo, project chat)",
+        "bucket": "pass",
+        "conclusion": "success",
+        "link": "https://github.com/datatug/websites/actions/runs/40036858478/job/120698730730",
+        "app_id": 15368,
+        "check_run_id": 120698730730
+      },
+      {
+        "name": "check-run:e2e datatug.app landing (fallback)",
+        "bucket": "pass",
+        "conclusion": "success",
+        "link": "https://github.com/datatug/websites/actions/runs/40036858478/job/120698730864",
+        "app_id": 15368,
+        "check_run_id": 120698730864
+      },
+      {
+        "name": "check-run:e2e datatug.app landing (indexable)",
+        "bucket": "pass",
+        "conclusion": "success",
+        "link": "https://github.com/datatug/websites/actions/runs/40036858478/job/120698730780",
+        "app_id": 15368,
+        "check_run_id": 120698730780
+      },
+      {
+        "name": "check-run:e2e datatug.app landing (live demo)",
+        "bucket": "pass",
+        "conclusion": "success",
+        "link": "https://github.com/datatug/websites/actions/runs/40036858478/job/120698730691",
+        "app_id": 15368,
+        "check_run_id": 120698730691
+      },
+      {
+        "name": "check-run:e2e datatug.app landing (live demo, project chat)",
+        "bucket": "pass",
+        "conclusion": "success",
+        "link": "https://github.com/datatug/websites/actions/runs/40036858478/job/120698730950",
+        "app_id": 15368,
+        "check_run_id": 120698730950
+      },
+      {
+        "name": "check-run:e2e datatug.app landing (pricing states)",
+        "bucket": "pass",
+        "conclusion": "success",
+        "link": "https://github.com/datatug/websites/actions/runs/40036858478/job/120698730776",
+        "app_id": 15368,
+        "check_run_id": 120698730776
+      },
+      {
+        "name": "check-run:e2e datatug.app landing (pro checkout armed)",
+        "bucket": "pass",
+        "conclusion": "success",
+        "link": "https://github.com/datatug/websites/actions/runs/40036858478/job/120698731120",
+        "app_id": 15368,
+        "check_run_id": 120698731120
+      },
+      {
+        "name": "check-run:e2e datatug.io (fallback)",
+        "bucket": "pass",
+        "conclusion": "success",
+        "link": "https://github.com/datatug/websites/actions/runs/40036858478/job/120698730719",
+        "app_id": 15368,
+        "check_run_id": 120698730719
+      },
+      {
+        "name": "check-run:e2e datatug.io (live demo)",
+        "bucket": "pass",
+        "conclusion": "success",
+        "link": "https://github.com/datatug/websites/actions/runs/40036858478/job/120698730990",
+        "app_id": 15368,
+        "check_run_id": 120698730990
+      },
+      {
+        "name": "check-run:e2e datatug.io (live demo, project chat)",
+        "bucket": "pass",
+        "conclusion": "success",
+        "link": "https://github.com/datatug/websites/actions/runs/40036858478/job/120698730785",
+        "app_id": 15368,
+        "check_run_id": 120698730785
+      },
+      {
+        "name": "check-run:hand-off to the project chat (variable set)",
+        "bucket": "pass",
+        "conclusion": "success",
+        "link": "https://github.com/datatug/websites/actions/runs/40036858478/job/120698730821",
+        "app_id": 15368,
+        "check_run_id": 120698730821
+      },
+      {
+        "name": "check-run:hand-off unchanged (variable unset)",
+        "bucket": "pass",
+        "conclusion": "success",
+        "link": "https://github.com/datatug/websites/actions/runs/40036858478/job/120698730774",
+        "app_id": 15368,
+        "check_run_id": 120698730774
+      },
+      {
+        "name": "check-run:workflows (actionlint)",
+        "bucket": "pass",
+        "conclusion": "success",
+        "link": "https://github.com/datatug/websites/actions/runs/40036858478/job/120698730640",
+        "app_id": 15368,
+        "check_run_id": 120698730640
+      }
+    ],
+    "required_checks_authority": "github-branch-protection+active-branch-rules+pr-base-verified",
+    "unfenced_validation": true,
+    "stable_observations": 2,
+    "reason": "GitHub's required-check policy was enumerated, every required check was present, the candidate contained the exact target, and the observed GitHub check set stayed terminal across a bounded stable reread for validation-only publication; server-side target freshness was intentionally not required because this path does not merge"
+  },
+  "branch_deleted": true,
+  "landing_on_base": true,
+  "canonical_sync": "fast_forwarded",
+  "kept": true,
+  "manual_equivalent": [
+    "gh pr view 139 --repo datatug/websites",
+    "gh api repos/datatug/websites/pulls/139/files",
+    "gh pr checks 139 --repo datatug/websites  (repeated until settled)",
+    "gh pr merge 139 --repo datatug/websites --merge",
+    "gh api repos/datatug/websites/pulls/139  (verify merged)",
+    "gh api repos/datatug/websites/compare/…  (verify the merge is on the base)",
+    "gh api --method DELETE repos/datatug/websites/git/refs/heads/…",
+    "wb worktree cleanup \u003ctask\u003e --apply"
+  ],
+  "saved_tool_calls": 7,
+  "saved_tokens_est": 3578,
+  "absorbed_polls": 2,
+  "evidence": {
+    "allow_unfenced": "true",
+    "base": "main",
+    "classification": "from-diff-content",
+    "closes": "no linked issue",
+    "fence": "none; landed on observed checks under --allow-unfenced",
+    "head": "14690083ad0d",
+    "merge_commit": "f5fc8b1b7ea5",
+    "mergeable_state": "unstable",
+    "not_mechanical_because": "apps/ai/src/data/structure.ts is not a dependency manifest; apps/ai/src/i18n/locales/en.ts is not a dependency manifest; apps/ai/src/i18n/locales/ru.ts is not a dependency manifest; apps/ai/tests/e2e/platform.spec.ts is not a dependency manifest; apps/ai/tests/e2e/ways.spec.ts is not a dependency manifest; and 20 more"
+  },
+  "lane_owner": {
+    "schema_version": 1,
+    "lane": "lane-datatug-websites-main-4da4d1489a39",
+    "repository": "datatug/websites",
+    "target": "main",
+    "owner": {
+      "wb_session_id": "wbs-8b789eab720416e8af7de952b48937b0",
+      "pid": 8959,
+      "operation_pid": 48296,
+      "runtime": "codex",
+      "model": "gpt-6.1-sol",
+      "command": "wb pr land",
+      "acquired_at": "2026-10-23T23:00:27.093753Z",
+      "heartbeat_at": "2026-10-23T23:00:27.093753Z"
+    }
+  }
+}

@@ -11,6 +11,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/dalgo2postgres"
+	"github.com/dal-go/dalgo2sql"
 	"github.com/datatug/datatug-cli/internal/sourcecases"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
@@ -45,6 +48,19 @@ func TestProperty_ServeNeverEchoesASourceSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 	logged := captureAgentLog(t)
+	// Every server source opens through a stand-in whose failure quotes the whole DSN it was given, as a driver does.
+	t.Cleanup(dbcopy.SetPostgresOpenerForTest(func(dsn string, _ dal.Schema, _ dalgo2sql.DbOptions, _ ...dalgo2postgres.Option) (*dalgo2postgres.Database, error) {
+		return nil, errors.New(`failed to connect to "` + dsn + `": refused (password=` + endpointSecret + `)`)
+	}))
+	t.Cleanup(dbcopy.SetServerOpenersForTest(dbcopy.ServerOpeners{
+		MySQL: func(dsn string) (dbcopy.SchemaScanDB, error) { return nil, errors.New("dial " + dsn) },
+		Oracle: func(_ context.Context, dsn string) (dbcopy.SchemaScanDB, error) {
+			return nil, errors.New("dial " + dsn)
+		},
+		SQLServer: func(_ context.Context, dsn string) (dbcopy.SchemaScanDB, error) {
+			return nil, errors.New("dial " + dsn)
+		},
+	}))
 
 	// A saved query with two eligible targets: a source that is neither is "not an
 	// authorized target". A capture store with no catalogs: nothing is a catalog source.

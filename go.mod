@@ -37,7 +37,7 @@ require (
 	github.com/dal-go/dalgo2sqlite v0.4.8
 	github.com/dal-go/record v0.1.5
 	github.com/datatug/cliformat v0.0.3
-	github.com/datatug/datatug-core v0.77.0
+	github.com/datatug/datatug-core v0.79.0
 	github.com/datatug/sql2csv v0.0.1
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/go-sql-driver/mysql v1.10.0
@@ -180,6 +180,7 @@ require (
 	github.com/skeema/knownhosts v1.3.2 // indirect
 	github.com/strongo/analytics v0.2.8 // indirect
 	github.com/strongo/decimal v0.1.2 // indirect
+	github.com/strongo/gotwilio v0.0.0-20160123000810-f024bbefe80f // indirect
 	github.com/strongo/strongoapp v0.31.55 // indirect
 	github.com/tiendc/go-deepcopy v1.7.2 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect

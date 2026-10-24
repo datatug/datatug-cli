@@ -215,9 +215,41 @@ func TestScanJourneySQLite(t *testing.T) {
 				"dbmodels/shop/main/tables/order_line/main.order_line.columns.json",
 				"dbmodels/shop/main/views/customer_names/main.customer_names.columns.json",
 				"dbmodels/shop/shop.dbmodel.json",
+				"dbmodels/shop/shop.indexes.json",
+				"dbmodels/shop/shop.refs.json",
 				"environments/local/catalogs/shop/shop.db.json",
 				"environments/local/local.env.json",
 			}, projectFiles(t, projectDir, "data/"), "the files of the scan")
+
+			// The scan also saves the foreign keys and the indexes of the database, in the
+			// model's files beside the model file. An expression index and SQLite's automatic
+			// primary-key index are left out; the index of a UNIQUE constraint stays.
+			assert.Equal(t, map[string]any{
+				"version": float64(1),
+				"foreignKeys": []any{map[string]any{
+					"name":       "FK_order_line_0",
+					"table":      map[string]any{"schema": "main", "name": "order_line"},
+					"columns":    []any{"customer_id"},
+					"refTable":   map[string]any{"schema": "main", "name": "Customer"},
+					"refColumns": []any{"CustomerId"},
+				}},
+			}, readJSONMap(t, filepath.Join(projectDir, "dbmodels", "shop", "shop.refs.json")), "the foreign keys of the database")
+			assert.Equal(t, map[string]any{
+				"version": float64(1),
+				"indexes": []any{
+					map[string]any{
+						"name":    "order_line_qty",
+						"table":   map[string]any{"schema": "main", "name": "order_line"},
+						"columns": []any{map[string]any{"name": "qty"}},
+					},
+					map[string]any{
+						"name":    "sqlite_autoindex_order_line_1",
+						"table":   map[string]any{"schema": "main", "name": "order_line"},
+						"columns": []any{map[string]any{"name": "sku"}},
+						"unique":  true,
+					},
+				},
+			}, readJSONMap(t, filepath.Join(projectDir, "dbmodels", "shop", "shop.indexes.json")), "the indexes of the database")
 
 			catalogFile := readJSONMap(t, filepath.Join(projectDir, "environments", "local", "catalogs", "shop", "shop.db.json"))
 			assert.Equal(t, "sqlite3", catalogFile["driver"])
@@ -317,7 +349,7 @@ func TestScanJourneySQLite(t *testing.T) {
 			// folder: every file is as it was, by content.
 			first := treeHashes(t, projectDir, "data/")
 			assertScanEnvironmentOwnership(t, projectDir)
-			require.Len(t, first, 10)
+			require.Len(t, first, 12)
 			stderr, err = runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", dbPath, "--db", "shop", "--env", "local")
 			require.NoError(t, err)
 			assert.Empty(t, stderr, "a rescan with nothing to leave out says nothing on stderr")
@@ -335,7 +367,10 @@ func TestScanJourneySQLite(t *testing.T) {
 			added, removed, changed := diffTrees(first, second)
 			assert.Equal(t, []string{"dbmodels/shop/main/tables/Invoice/main.Invoice.columns.json"}, added)
 			assert.Equal(t, []string{"dbmodels/shop/main/tables/order_line/main.order_line.columns.json"}, removed)
-			assert.Empty(t, changed, "every other file is as the first scan wrote it")
+			assert.Equal(t, []string{"dbmodels/shop/shop.indexes.json", "dbmodels/shop/shop.refs.json"}, changed,
+				"the dropped table held the only foreign key and the only indexes: the files that listed them are rewritten, now empty, and nothing else changed")
+			assert.Equal(t, "d41470f2588557674a3336837e129abfb5b47835139a998fbfb123d14b9d5e67", second["dbmodels/shop/shop.indexes.json"], "no index is left")
+			assert.Equal(t, "b1fe91af60710f2cecc79bfde2f35977d022c6e82b7543e1b3fb9d43fcdf1c36", second["dbmodels/shop/shop.refs.json"], "no foreign key is left")
 			assert.NoDirExists(t, filepath.Join(projectDir, "dbmodels", "shop", "main", "tables", "order_line"), "the folder of the dropped table is removed, not left empty")
 			assert.DirExists(t, filepath.Join(projectDir, "dbmodels", "shop", "main", "views", "customer_names"), "the view is still in the database")
 

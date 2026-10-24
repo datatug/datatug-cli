@@ -12,6 +12,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/dalgo2postgres"
+	"github.com/dal-go/dalgo2sql"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 )
@@ -53,20 +56,23 @@ func TestUnclassifiedErrorLogsRedactSourceURLs(t *testing.T) {
 }
 
 func TestResolveSQLSourceURLNeverEchoesAPassword(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "") // the preview is off: nothing is dialled
+	// The opener of the source is a stand-in whose failure quotes the whole URL, as pgx does: nothing is dialled.
+	t.Cleanup(dbcopy.SetPostgresOpenerForTest(func(string, dal.Schema, dalgo2sql.DbOptions, ...dalgo2postgres.Option) (*dalgo2postgres.Database, error) {
+		return nil, quotingFailure()
+	}))
 	_, err := resolveSQLSourceURL(context.Background(), "src", "postgres://alice:"+endpointSecret+"@127.0.0.1:1/shop", "customers")
 	if err == nil {
-		t.Fatal("PostgreSQL sources are a preview and are switched off; the open must fail")
+		t.Fatal("the opener failed; the open must fail")
 	}
 	if strings.Contains(err.Error(), endpointSecret) {
 		t.Fatalf("error leaks the password: %v", err)
 	}
 	// Open's error says which source failed and why, in a fixed sentence built from
-	// no part of the URL: a PostgreSQL source while the preview is off is answered by the
-	// sentence about the preview, which names nothing typed, as a source that is unavailable.
+	// no part of the URL: a PostgreSQL source whose open failed is answered by a
+	// sentence that names nothing typed, as a source that is unavailable.
 	var unavailable *contractError
-	if !errors.As(err, &unavailable) || unavailable.Code != apicontract.ErrCodeSourceUnavailable || unavailable.Message != dbcopy.ErrPostgresPreview.Error() {
-		t.Fatalf("error = %v, want SOURCE_UNAVAILABLE with the sentence of the preview", err)
+	if !errors.As(err, &unavailable) || unavailable.Code != apicontract.ErrCodeSourceUnavailable || strings.Contains(unavailable.Message, endpointSecret) {
+		t.Fatalf("error = %v, want SOURCE_UNAVAILABLE with a sentence that holds no secret", err)
 	}
 	for _, shown := range []string{"alice", "127.0.0.1", "shop"} {
 		if strings.Contains(err.Error(), shown) {

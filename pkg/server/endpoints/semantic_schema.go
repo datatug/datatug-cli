@@ -146,8 +146,7 @@ func resolveSQLSourceURL(ctx context.Context, sourceID, sourceURL, collection st
 		// display form of the source (the path of a file), and goes to the log. A PostgreSQL source
 		// names no source in its text: the adapter's sentence for the failure and where its
 		// connection string is read from (the variable), no host, port or database; so do its fixed
-		// refusals (dbcopy.ErrPostgresPreview while the preview is off, and the refusal of a URL that
-		// turns the read-only session off). They are answered, and logged, as they are.
+		// refusal (of a URL that turns the read-only session off). They are answered, and logged, as they are.
 		return resolvedSource{}, unavailableOr(sourceID, err, err)
 	}
 	reader, ok := dalAsSchemaReader(db)

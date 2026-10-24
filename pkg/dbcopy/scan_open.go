@@ -34,9 +34,8 @@ func ParseWithEnv(rawURL string, lookupEnv func(string) (string, bool)) (Backend
 }
 
 // OpenSchemaScan opens a postgres source for reading its schema and nothing
-// else. It is not Open: Open is behind the preview switch (PostgresPreviewEnv)
-// and keeps one handle for the process, and the handle returned here is for the
-// scan only, which is not behind the switch (it reads the catalog). DataTug opens
+// else. It is not Open: Open keeps one handle for the process, and the handle
+// returned here is for the scan only. DataTug opens
 // it with exact identifiers, so a table is looked up under the name PostgreSQL
 // reports (the driver's default folds every name to lower case).
 //
@@ -56,8 +55,7 @@ func ParseWithEnv(rawURL string, lookupEnv func(string) (string, bool)) (Backend
 // synchronous and does not honor cancellation (Open's does, for a postgres source).
 func (r BackendRef) OpenSchemaScan(ctx context.Context) (SchemaScanDB, error) {
 	if engine, ok := serverEngineOf(r.Scheme); ok {
-		// A MySQL or an Oracle scan is read only too, and not behind the preview switch: it reads
-		// the catalog.
+		// A MySQL, Oracle or SQL Server scan is read only too: it reads the catalog.
 		db, err := r.openServerDatabase(ctx, engine)
 		if err != nil {
 			return nil, r.OpenFailure(err)

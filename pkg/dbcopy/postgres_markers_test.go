@@ -3,7 +3,6 @@ package dbcopy
 import (
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 
@@ -76,9 +75,6 @@ func TestErrorForms_ReadsTheWholeChain(t *testing.T) {
 
 // resetPostgresHandles forgets every handle the process cache holds, so a test starts from none.
 func resetPostgresHandles() { postgresHandles = &handleCache{} }
-
-// osUnsetenv removes a variable for the rest of the test; the test restores it with t.Setenv first.
-func osUnsetenv(name string) error { return os.Unsetenv(name) }
 
 // stubPostgresOpener replaces the constructor of a PostgreSQL database for the test.
 func stubPostgresOpener(t *testing.T, stub postgresOpener) {

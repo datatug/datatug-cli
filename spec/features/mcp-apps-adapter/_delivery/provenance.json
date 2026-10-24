@@ -1,0 +1,371 @@
+{
+  "copies": "Exact original bytes; historical statuses unchanged. Machine paths are provenance, not dependencies for reading this archive.",
+  "files": [
+    {
+      "file": "review-design-r1.md",
+      "originalPath": "/private/tmp/mcp-apps-review-design-r1-20261023.md",
+      "bytes": 2244,
+      "sha256": "0498eb57d34a844703c4079ea85f3523d87d44b24d03a9fbd84e8f719149a9f3"
+    },
+    {
+      "file": "review-design-r2.md",
+      "originalPath": "/private/tmp/mcp-apps-review-design-r2-20261023.md",
+      "bytes": 1250,
+      "sha256": "16800d50f3f866c3a1c00d4178f186e74a62dff0ca185de9cecda50041ef06e4"
+    },
+    {
+      "file": "review-spec-r1.md",
+      "originalPath": "/private/tmp/mcp-apps-review-spec-r1-20261023.md",
+      "bytes": 3009,
+      "sha256": "4e12d254a81a4fb190abad2b3a7cb72404387146046be82a0870a0260dd8886c"
+    },
+    {
+      "file": "review-spec-r2.md",
+      "originalPath": "/private/tmp/mcp-apps-review-spec-r2-20261023.md",
+      "bytes": 1046,
+      "sha256": "22b6f333b52545ec1771e7a152ae076d58e53d96867eff068258d300fc2bef78"
+    },
+    {
+      "file": "review-spec-r3.md",
+      "originalPath": "/private/tmp/mcp-apps-review-spec-r3-20261023.md",
+      "bytes": 1519,
+      "sha256": "d32025364bd4f2f50e0d724bac677efcc98312074367e349b41d1edacb8d677d"
+    },
+    {
+      "file": "review-spec-r4.md",
+      "originalPath": "/private/tmp/mcp-apps-review-spec-r4-20261023.md",
+      "bytes": 1381,
+      "sha256": "9a26c6580e0b4c27b08dbba76f2713cfc363bfbeebd93fe7489c13f65595f3bc"
+    },
+    {
+      "file": "review-task2-r1.md",
+      "originalPath": "/private/tmp/mcp-apps-review-task2-r1-20261023.md",
+      "bytes": 2290,
+      "sha256": "c99f4a34d41bc0bc8edd6b69b8da11abdf6017a01f382df7b888f338de702e3a"
+    },
+    {
+      "file": "review-task3-r1.md",
+      "originalPath": "/private/tmp/mcp-apps-review-task3-r1-20261023.md",
+      "bytes": 2437,
+      "sha256": "a9968ba9323ba035306e6cb4d43f886c41752e5bfb25ea472c608e67b5844f8e"
+    },
+    {
+      "file": "review-task3-r2.md",
+      "originalPath": "/private/tmp/mcp-apps-review-task3-r2-20261023.md",
+      "bytes": 1780,
+      "sha256": "3b221d0973a4850ef0ec3c3f4675ded7859a43b22966e37cd6d729dde93cdc1b"
+    },
+    {
+      "file": "review-task4-r1.md",
+      "originalPath": "/private/tmp/mcp-apps-review-task4-r1-20261023.md",
+      "bytes": 2846,
+      "sha256": "6430bdb50c8312d5e5cafd9ffd85ddf5ffe15897af9331dece48b9aef740fafa"
+    },
+    {
+      "file": "review-task4-r2.md",
+      "originalPath": "/private/tmp/mcp-apps-review-task4-r2-20261023.md",
+      "bytes": 1616,
+      "sha256": "6a9d1cacbdf1ac3ee3fbd6ae603d35054f1a28f0524019868d6e4d5c09972109"
+    },
+    {
+      "file": "review-task5-design-r1.md",
+      "originalPath": "/private/tmp/mcp-apps-review-task5-design-r1-20261023.md",
+      "bytes": 2103,
+      "sha256": "0130ee1e5983eb8acac5719997e6e8e8d676e36e789a800ebee8dd3549d6a6a3"
+    },
+    {
+      "file": "review-default-design-r1.md",
+      "originalPath": "/private/tmp/mcp-apps-review-default-design-r1-20261023.md",
+      "bytes": 2907,
+      "sha256": "5ca67af37d4331a6649f8fe565175b77a4e4f7208b228744cf1f80aeeb2bc7c2"
+    },
+    {
+      "file": "review-default-design-r2.md",
+      "originalPath": "/private/tmp/mcp-apps-review-default-design-r2-20261023.md",
+      "bytes": 2012,
+      "sha256": "b1883df6176d6830d3bd2e90ce1ef847d3af6f68a1e7592220711732341e71cd"
+    },
+    {
+      "file": "review-task5-source-r1.md",
+      "originalPath": "/private/tmp/mcp-apps-review-task5-source-r1-20261023.md",
+      "bytes": 2847,
+      "sha256": "055d2f3748530a177096d906829ac62dd84ea9c535db08697f62c907b5a46ee2"
+    },
+    {
+      "file": "review-task5-source-r2.md",
+      "originalPath": "/private/tmp/mcp-apps-review-task5-source-r2-20261023.md",
+      "bytes": 3802,
+      "sha256": "4aa31f2c1d155c8f565c717728f323ab4920fd2b58974512f5398d24ef3625a0"
+    },
+    {
+      "file": "review-lint-repair-r1.md",
+      "originalPath": "/private/tmp/mcp-apps-review-lint-repair-r1-20261023.md",
+      "bytes": 1069,
+      "sha256": "575dbad99ea6ad05e11a3c4860eca7e203545248f7eb3f69b08dbaacad4d6411"
+    },
+    {
+      "file": "review-ci-repair-r1.md",
+      "originalPath": "/private/tmp/mcp-apps-review-ci-repair-r1-20261023.md",
+      "bytes": 1607,
+      "sha256": "b895fabdb6ce2a6da5a14584e3d3404e9799d1204758d54047518e16ec9475ff"
+    },
+    {
+      "file": "review-precision-r1.md",
+      "originalPath": "/private/tmp/mcp-apps-review-precision-r1-20261023.md",
+      "bytes": 1618,
+      "sha256": "a8eb9e37d1a64c004aea705416c7f87c2ea620032684b1246cb55070b81a561e"
+    },
+    {
+      "file": "review-precision-r2.md",
+      "originalPath": "/private/tmp/mcp-apps-review-precision-r2-20261023.md",
+      "bytes": 1018,
+      "sha256": "87ba499a5317e466c3a3bff1f4f845b2165319c6378eae179eac57e24febf236"
+    },
+    {
+      "file": "review-public-release-r1.md",
+      "originalPath": "/private/tmp/mcp-apps-review-public-release-r1-20261023.md",
+      "bytes": 2083,
+      "sha256": "c421749f2fce9be2382157f0298686d81fb09961d86969252d424b1699c8b14f"
+    },
+    {
+      "file": "review-public-release-r2.md",
+      "originalPath": "/private/tmp/mcp-apps-review-public-release-r2-20261023.md",
+      "bytes": 2401,
+      "sha256": "a41f0440943ec1f66d77487113f2290e215d5bcf6ab15e7fb1663fc36002d9cb"
+    },
+    {
+      "file": "review-website-design-r1.md",
+      "originalPath": "/private/tmp/mcp-apps-review-website-design-r1-20261023.md",
+      "bytes": 2149,
+      "sha256": "2aae4a3e0792d6248a9f6bf9799da92d5940e31d4f2e0e950de4e5fc3ecf636b"
+    },
+    {
+      "file": "review-website-design-r2.md",
+      "originalPath": "/private/tmp/mcp-apps-review-website-design-r2-20261023.md",
+      "bytes": 1766,
+      "sha256": "7088b2ad4b6af097284c0210f439dcd21a8b938cd9c9f82cb3ef10c2d2762b2f"
+    },
+    {
+      "file": "review-web-recipe-r2.md",
+      "originalPath": "/private/tmp/mcp-apps-review-web-recipe-r2-20261023.md",
+      "bytes": 1514,
+      "sha256": "892fdf8b3e08c9ea6882f2035fba489e8f5b3458670863143d49f5c57298d417"
+    },
+    {
+      "file": "review-web-copy-r4.md",
+      "originalPath": "/private/tmp/mcp-apps-review-web-copy-r4-20261023.md",
+      "bytes": 1550,
+      "sha256": "e28dd7c1b79cf4120e8c10ee8cc2b8ce7fcd4c6b4e54b629a0abc7c965e8815b"
+    },
+    {
+      "file": "review-backend-head-80991c18.md",
+      "originalPath": "/private/tmp/mcp-apps-review-backend-head-80991c18.md",
+      "bytes": 1522,
+      "sha256": "c4e2fb6fd0fb25cf8a7a6435e00f27ebf06a870f03283101bcfa42cc36dcfce6"
+    },
+    {
+      "file": "review-ui-head-15c202cf.md",
+      "originalPath": "/private/tmp/mcp-apps-review-ui-head-15c202cf.md",
+      "bytes": 997,
+      "sha256": "88127e2dc48b3854af8247a3345a361c17622a07755b917800f83c7ecd0fba3f"
+    },
+    {
+      "file": "review-task5-head-2757b033.md",
+      "originalPath": "/private/tmp/mcp-apps-review-task5-head-2757b033.md",
+      "bytes": 1341,
+      "sha256": "0e1877bd6e2ba1329669a555e3daa3ed28b1fa37e85739ba92ae0009331a98f4"
+    },
+    {
+      "file": "review-task5-head-29b72f3.md",
+      "originalPath": "/private/tmp/mcp-apps-review-task5-head-29b72f3.md",
+      "bytes": 2598,
+      "sha256": "5f5fe9ba8955c6a343782fea94aca1aa805f097fa8f4846eec0153fb0a61e519"
+    },
+    {
+      "file": "review-task5-head-1d28aed0.md",
+      "originalPath": "/private/tmp/mcp-apps-review-task5-head-1d28aed0.md",
+      "bytes": 1248,
+      "sha256": "a00db7d3f27fd5903cfdba77b1f8866827432d3ace68b2d778229d4f12756f2b"
+    },
+    {
+      "file": "source-reviewed-54-files.json",
+      "originalPath": "/private/tmp/mcp-apps-final-reviewed-source-manifest.json",
+      "bytes": 10210,
+      "sha256": "de28c833767030f5849f03cc31a646c255d5d29b0b792010f3622d9ebc067c8e"
+    },
+    {
+      "file": "source-backend-manifest.json",
+      "originalPath": "/private/tmp/mcp-apps-backend-manifest.json",
+      "bytes": 1323,
+      "sha256": "fc160cb423bcc256e1956463974f7e65ce8a4cde57670b4c6b57193dce3c3410"
+    },
+    {
+      "file": "source-ui-r2-manifest.json",
+      "originalPath": "/private/tmp/mcp-apps-task4-r2-manifest.json",
+      "bytes": 5697,
+      "sha256": "500995f95d533c1cdd9f66d05eccaa4908d36fb889f7b6746fb78de3ff4d4b01"
+    },
+    {
+      "file": "source-task5-final-manifest.json",
+      "originalPath": "/private/tmp/mcp-apps-task5-final-manifest.json",
+      "bytes": 11484,
+      "sha256": "0cfab602698050e6f53f8a37e1737dbe208ccce60cbc3c82e2fe5e8c2a80eb3b"
+    },
+    {
+      "file": "integration-29b72f3-receipts.json",
+      "originalPath": "/private/tmp/mcp-apps-integrated-29b72f3-receipts.json",
+      "bytes": 7019,
+      "sha256": "ece9f9481dd80523f43a2a947d109231f7b1afca503e44ca39c50285daec36da"
+    },
+    {
+      "file": "source-ci-1d28aed0.json",
+      "originalPath": "/private/tmp/mcp-apps-source-ci-1d28aed0.json",
+      "bytes": 177,
+      "sha256": "7b07f42bc89ca547337e5e84a56e76582022e76b913de6317460fd1c5b0ae77d"
+    },
+    {
+      "file": "main-89d260fd-checks.json",
+      "originalPath": "/private/tmp/mcp-apps-main-89d260fd-checks-3.json",
+      "bytes": 7082,
+      "sha256": "5c20ef730e1778c1cdc927c81117caed95dd1f42ea1ba41818d49ef080ea8001"
+    },
+    {
+      "file": "release-v0.112.0-complete-acceptance.json",
+      "originalPath": "/private/tmp/datatug-mcp-apps-release-v0.112.0/complete-acceptance.json",
+      "bytes": 3708,
+      "sha256": "60067197686c56dba95f7f69d61d015bc01e2429f2591ffd3348b58a98b64f90"
+    },
+    {
+      "file": "release-v0.112.0-browser-receipt.json",
+      "originalPath": "/Users/alex/.codex/visualizations/2026/10/23/01a16885-2371-7fb1-bc8d-fdbeb55e9dbc/mcp-apps-release-v0-112-0-browser-receipt.json",
+      "bytes": 3761,
+      "sha256": "4261d67ee5e9fd92410090ea665815a04a739ae2f9869adac5dea6d28d8660ad"
+    },
+    {
+      "file": "contributor-acceptance-recipe.sh",
+      "originalPath": "/private/tmp/mcp-apps-public-literal-recipe.sh",
+      "bytes": 1750,
+      "sha256": "a4f91f9ba88a7098acdd7ff765ea42fcab145af1d048200f54c4e88117537315"
+    },
+    {
+      "file": "website-pr139-land.json",
+      "originalPath": "/private/tmp/mcp-apps-web-pr139-land.json",
+      "bytes": 11038,
+      "sha256": "b996ae6369be3a08bac8c9791fbc5815cdb030ad347ba41d51b96c53ea0bc56f"
+    },
+    {
+      "file": "website-final-r5-manifest.json",
+      "originalPath": "/private/tmp/mcp-apps-web-final-r5-manifest-20261023.json",
+      "bytes": 6147,
+      "sha256": "2954aecca923983d69f788904514407a95234b3f3683e0d16ab60f15a770fadc"
+    },
+    {
+      "file": "review-website-final-r5.md",
+      "originalPath": "/private/tmp/mcp-apps-review-web-final-r5-20261023.md",
+      "bytes": 1899,
+      "sha256": "15e3db28306a0557e3bc75f539d213018cdc9a5c10cdbddb657a037411d03f1b"
+    },
+    {
+      "file": "review-website-head-14690083.md",
+      "originalPath": "/private/tmp/mcp-apps-review-web-head-14690083.md",
+      "bytes": 1338,
+      "sha256": "95e6338e03ab4a4dc60091eb6948e03ac07d4370a19e0f9e1c692f3d61f823a4"
+    },
+    {
+      "file": "review-cli-incoming-4e30fd76.md",
+      "originalPath": "/private/tmp/mcp-apps-review-cli-incoming-4e30fd76.md",
+      "bytes": 2770,
+      "sha256": "8d2ee2efe955acc85c78d17c13487c176f3317f9034494bb3875c37e85a24f45"
+    },
+    {
+      "file": "review-delivery-evidence-r1.md",
+      "originalPath": "/private/tmp/mcp-apps-review-delivery-evidence-r1-20261023.md",
+      "bytes": 2649,
+      "sha256": "f04b906882aa4ae4e420bd2ed11bdec95ba4d54fe523141d78ebdcd048347be3"
+    },
+    {
+      "file": "website-live-acceptance.json",
+      "originalPath": "/private/tmp/mcp-apps-website-live-acceptance.json",
+      "bytes": 19045,
+      "sha256": "819b4fc4a4df1ae6e21d2e09dc8f415d88a3776c1c8613ec2978b8095848b210"
+    },
+    {
+      "file": "review-website-live-r1.md",
+      "originalPath": "/private/tmp/mcp-apps-review-website-live-r1-20261023.md",
+      "bytes": 2052,
+      "sha256": "0423166183c1c3e1655a4fd8a77b853601634a6115f24213b48fc1f79df905ea"
+    },
+    {
+      "file": "integration-4e30fd76-ci.json",
+      "originalPath": "/private/tmp/mcp-apps-cli-main-4e30fd76-ci.json",
+      "bytes": 209,
+      "sha256": "41739ade87718ea7c113c058c538807c2735edfc7779dc45e800b9fe06c9286b"
+    },
+    {
+      "file": "release-v0.113.0-complete-acceptance.json",
+      "originalPath": "/private/tmp/datatug-mcp-apps-release-v0.113.0/complete-acceptance.json",
+      "bytes": 3543,
+      "sha256": "56488205fcbd87cb0210e5bc3e469bbc8a03536a6633d48b63b44edde1ee0286"
+    },
+    {
+      "file": "release-v0.113.0-browser-receipt.json",
+      "originalPath": "/Users/alex/.codex/visualizations/2026/10/23/01a16885-2371-7fb1-bc8d-fdbeb55e9dbc/mcp-apps-release-v0-113-0-browser-receipt.json",
+      "bytes": 3761,
+      "sha256": "4411489f8b95cededa11738a4812e4b0def127d7668ce3214aa7342d0a16dcb1"
+    },
+    {
+      "file": "review-public-integration-v0.113.0.md",
+      "originalPath": "/private/tmp/mcp-apps-review-public-integration-v0.113.0.md",
+      "bytes": 2026,
+      "sha256": "81f65f5f0dcaacc972455a3c0e802256c0a7f61dbeac0ce8bf80c0fc205c353c"
+    },
+    {
+      "file": "review-batch4-r2.md",
+      "originalPath": "/private/tmp/mcp-apps-review-batch4-r2-20261023.md",
+      "bytes": 886,
+      "sha256": "bd2a92f5e0991947c5fd1f40e42c6a61ecf4bd5cb0c5d684dbac7a55afa6940f"
+    },
+    {
+      "file": "website-main-f5fc8b1-checks.json",
+      "originalPath": "/private/tmp/mcp-apps-web-main-f5fc8b1-checks-4.json",
+      "bytes": 7975,
+      "sha256": "534ce821fe4ace13cec21af29060786dc4fde47bb6ce136cbf729c08a955208f"
+    },
+    {
+      "file": "review-verify-checkpoint.md",
+      "originalPath": "/private/tmp/mcp-apps-review-verify-checkpoint.md",
+      "bytes": 1511,
+      "sha256": "f11f10655f96074bdc1e397fe20c5c732cfdfbc8700140ae3fa29cfa14ef3dc1"
+    },
+    {
+      "file": "review-recap-checkpoint-r1.md",
+      "originalPath": "/private/tmp/mcp-apps-review-recap-checkpoint.md",
+      "bytes": 1365,
+      "sha256": "60cd58c9ccc8d57dac9be723bf5f01e3f7ddfc7b8397828827dd59421fb45dbb"
+    },
+    {
+      "file": "review-recap-checkpoint-r2.md",
+      "originalPath": "/private/tmp/mcp-apps-review-recap-checkpoint-r2.md",
+      "bytes": 966,
+      "sha256": "fdbaa7457409e131b3296805e6bd42bf42f9415afbc615e78ff346d458cb8fb7"
+    },
+    {
+      "file": "review-final-stage.md",
+      "originalPath": "/private/tmp/mcp-apps-review-final-stage.md",
+      "bytes": 3464,
+      "sha256": "b5dfe3e653be983555651178a8551c3af93c2c3ab3d3006342866d1bfeb47c7b"
+    },
+    {
+      "file": "release-delegate-confirmation.md",
+      "originalPath": "/private/tmp/mcp-apps-release-delegate-confirmation.md",
+      "bytes": 3338,
+      "sha256": "3ebe30d316d073b73c65be2ac76a28f037d6dd79525fefdf53b7cebd3e7883d1"
+    },
+    {
+      "file": "ship-preflight.json",
+      "originalPath": "/private/tmp/mcp-apps-ship-preflight.json",
+      "bytes": 780,
+      "sha256": "546f10613869bb0aabdcc8492dc0ca13fb1b114980405996fceae7bc4c1ca98b"
+    }
+  ]
+}

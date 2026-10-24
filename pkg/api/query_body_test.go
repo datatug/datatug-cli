@@ -103,7 +103,7 @@ func TestAttestLocalQueryBodyRequiresOwnedCanonicalBytes(t *testing.T) {
 // These cases exercise the adapter's mutation boundary, including an external
 // edit between Core's revision read and the retry's canonical-body attestation.
 func TestLocalQueryBodyAttestationBeforeNewIntentAndPendingPut(t *testing.T) {
-	for _, mode := range []string{"legacy-read-only", "pending-unchanged", "pending-external-edit"} {
+	for _, mode := range []string{"edited-before-new-intent", "pending-unchanged", "pending-external-edit"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Setenv("DATATUG_OPERATION_RECEIPTS_DIR", t.TempDir())
 			const project = "body-attestation"
@@ -134,17 +134,16 @@ func TestLocalQueryBodyAttestationBeforeNewIntentAndPendingPut(t *testing.T) {
 			projectStore := filestore.NewProjectStore(project, dir)
 			revisioned := projectStore.(datatug.RevisionedQueriesStore)
 			name := filepath.Join(dir, "queries", "q.query.tugql.yaml")
-			if mode == "legacy-read-only" {
-				// Controlled pre-cutover fixture accepted only by Core's temporary reader.
-				git("mv", "queries/q.query.tugql.yaml", "queries/q.query.dtql")
-				loaded, err := revisioned.LoadQueryRevision(context.Background(), "q")
-				require.NoError(t, err)
-				request.IfMatch = string(loaded.Revision)
+			if mode == "edited-before-new-intent" {
+				// The body is edited by someone else after Core read the revision: the bytes on disk are not
+				// the ones the revision says, so the update is refused before anything is written.
+				storage.NewDatatugStore = func(string) (storage.Store, error) {
+					return mockWrappedStore{Store: base, ps: bodyEditedAfterRevisionRead{ProjectStore: projectStore, RevisionedQueriesStore: revisioned, afterRead: func() { require.NoError(t, os.WriteFile(name, []byte("foreign editor bytes"), 0600)) }}}, nil
+				}
 				index := git("write-tree")
 				_, err = adapter.SaveQuery(context.Background(), scope, request)
 				require.ErrorIs(t, err, dto.ErrUnsupportedCapability)
 				require.Equal(t, index, git("write-tree"))
-				require.NoFileExists(t, name)
 				return
 			}
 			storage.NewDatatugStore = func(string) (storage.Store, error) {

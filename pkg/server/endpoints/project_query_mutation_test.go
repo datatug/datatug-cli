@@ -406,53 +406,6 @@ func TestLocalSaveQueryRepresentationChangeStagesExactBody(t *testing.T) {
 	require.NotContains(t, strings.Split(runGit(t, dir, "diff", "--cached", "--name-only"), "\n"), "queries/customer.query.tugql")
 }
 
-// The only legacy suffix in this CLI test is a Core-supported pre-cutover
-// fixture. It is not a writer alias: updating it must refuse before mutation.
-func TestLocalSaveQueryLegacyBodyIsReadOnlyUntilMigration(t *testing.T) {
-	receipts := t.TempDir()
-	t.Setenv("DATATUG_OPERATION_RECEIPTS_DIR", receipts)
-	scope, dir := realCaptureSetup(t, "admin", []string{"admin"})
-	branch, head := runGit(t, dir, "symbolic-ref", "--short", "HEAD"), runGit(t, dir, "rev-parse", "HEAD")
-	create := saveLocalQueryRequest(scope.Project, branch, head)
-	w, _ := postLocalSave(t, create)
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	runGit(t, dir, "mv", "queries/customer.query.tugql.yaml", "queries/customer.query.dtql")
-	runGit(t, dir, "commit", "-m", "test fixture: pre-cutover query body")
-	head = runGit(t, dir, "rev-parse", "HEAD")
-	store := filestore.NewProjectStore(scope.Project, dir).(datatug.RevisionedQueriesStore)
-	current, err := store.LoadQueryRevision(context.Background(), "customer")
-	require.NoError(t, err)
-	require.True(t, current.Query.StructuredBody)
-	beforeStatus := runGit(t, dir, "status", "--porcelain")
-	beforeIndex := runGit(t, dir, "write-tree")
-	metadata, err := os.ReadFile(filepath.Join(dir, "queries", "customer.query.json"))
-	require.NoError(t, err)
-	body, err := os.ReadFile(filepath.Join(dir, "queries", "customer.query.dtql"))
-	require.NoError(t, err)
-	existingReceipts, err := filepath.Glob(filepath.Join(receipts, "*", "*.json"))
-	require.NoError(t, err)
-	update := create
-	update.OperationID = "save-legacy-customer"
-	update.ExpectedBranchHead = head
-	update.IfNoneMatch, update.IfMatch = false, string(current.Revision)
-	update.Query.Text = "from: {name: Customer}\nlimit: 1\n"
-	w, _ = postLocalSave(t, update)
-	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
-	require.Contains(t, w.Body.String(), "UNSUPPORTED_CAPABILITY")
-	require.Equal(t, beforeStatus, runGit(t, dir, "status", "--porcelain"))
-	require.Equal(t, beforeIndex, runGit(t, dir, "write-tree"))
-	afterMetadata, err := os.ReadFile(filepath.Join(dir, "queries", "customer.query.json"))
-	require.NoError(t, err)
-	require.Equal(t, metadata, afterMetadata)
-	afterBody, err := os.ReadFile(filepath.Join(dir, "queries", "customer.query.dtql"))
-	require.NoError(t, err)
-	require.Equal(t, body, afterBody)
-	afterReceipts, err := filepath.Glob(filepath.Join(receipts, "*", "*.json"))
-	require.NoError(t, err)
-	require.Equal(t, existingReceipts, afterReceipts)
-	require.NoFileExists(t, filepath.Join(dir, "queries", "customer.query.tugql.yaml"))
-}
-
 func TestLocalSaveQueryOldPendingReceiptCannotStageWithoutBodyProof(t *testing.T) {
 	receipts := t.TempDir()
 	t.Setenv("DATATUG_OPERATION_RECEIPTS_DIR", receipts)

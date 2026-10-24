@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/datatug/ai-plugin",
+  "commit": "d4ff0c5beac346eb8ead527144630978c5052ff5",
+  "license": "MIT",
+  "files": [
+    {"path": "lib/rows.js", "destination": "rows.js", "sha256": "380bf4d2f986e1faf451a0e0051dfa4d84dcba16ed057752fb7ae56231fd19b6"}
+  ]
+}

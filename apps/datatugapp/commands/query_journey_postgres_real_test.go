@@ -16,7 +16,7 @@ import (
 )
 
 // The query journey of the real PostgreSQL server of the CI job "Journey (PostgreSQL <major>)", which runs on
-// every major version in realPgMajorVar's matrix: `datatug query run` (behind the preview switch)
+// every major version in realPgMajorVar's matrix: `datatug query run`
 // reads a table, with the real command, the real opener and the real DALgo adapter.
 //
 // What is covered of the fixes of dalgo2sql v0.26.7 that the CLI can reach:
@@ -53,8 +53,7 @@ func realPgServerMajor(t *testing.T, rawURL string) int {
 	return version / 10000
 }
 
-// realPgIDs runs `datatug query run` for query (a TugQL document) against the fixture database, as the person
-// who set the switch and no policies, and returns the "id" of each row in the order they came.
+// realPgIDs runs `datatug query run` for query (a TugQL document) against the fixture database, with no policies, and returns the "id" of each row in the order they came.
 func realPgIDs(t *testing.T, query string) []int {
 	t.Helper()
 	stdout, stderr, code := runQuery(t, query, "--db", "env:"+realPgScanVar, "-f", "-", "--format", "json", "--no-policies")
@@ -70,7 +69,6 @@ func realPgIDs(t *testing.T, query string) []int {
 
 func TestPostgresQueryJourneyOrdersNullsByDALgosRule(t *testing.T) {
 	server := newRealPgServer(t)
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 
 	major := realPgServerMajor(t, server.scanURL)
 	if want := os.Getenv(realPgMajorVar); want != "" {
@@ -105,7 +103,6 @@ func TestPostgresQueryJourneyOrdersNullsByDALgosRule(t *testing.T) {
 
 func TestPostgresDatabaseCompareJourneyPreservesExactValuesAndChanges(t *testing.T) {
 	server := newRealPgServer(t)
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	execAll(t, server.scanURL,
 		`CREATE SCHEMA compare_probe`,
 		`CREATE TABLE compare_probe.items (id bigint PRIMARY KEY, amount numeric(38,0), note text, payload bytea, occurred timestamp, active boolean)`,

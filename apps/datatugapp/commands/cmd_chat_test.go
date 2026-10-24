@@ -14,8 +14,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dal-go/dalgo2postgres"
 	"github.com/datatug/datatug-cli/pkg/chat"
-	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
@@ -316,10 +316,13 @@ func TestLoadChatJoinApplicationSkipsUnavailableAndReadsOtherEngines(t *testing.
 	if app.Snapshot.Columns["main.products"] == nil {
 		t.Fatalf("inGitDB snapshot: %+v", app.Snapshot)
 	}
-	// a PostgreSQL source is not read while its preview is off
-	t.Setenv(dbcopy.PostgresPreviewEnv, "")
+	// a PostgreSQL source is opened like any other, and the failure of its open is the answer
+	opens := standInForPostgres(t, &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork})
 	if _, _, err = loadChatJoinApplication(ctx, "postgres://u@h/d", nil, true); err == nil {
-		t.Fatal("a PostgreSQL source was read with its preview off")
+		t.Fatal("a PostgreSQL source that cannot be opened was read")
+	}
+	if opens.calls.Load() == 0 {
+		t.Fatal("the PostgreSQL source never reached the opener")
 	}
 }
 

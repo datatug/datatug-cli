@@ -289,11 +289,13 @@ func TestOpen_HTTPFailureIsClassifiedAndNeverQuotesTheDirectory(t *testing.T) {
 }
 
 func TestOpen_PostgresKeepsItsOwnSentinelText(t *testing.T) {
-	t.Parallel()
+	// not parallel: it swaps a package seam
+	fake := &fakeOpener{err: errors.New("dial postgres://alice:s3cret@127.0.0.1:1/shop: refused")}
+	stubPostgresOpener(t, fake.open)
 	ref, err := Parse("postgres://alice:s3cret@127.0.0.1:1/shop")
 	require.NoError(t, err)
-	_, err = ref.Open(context.Background()) // the preview switch is off: nothing is dialled
-	require.ErrorIs(t, err, ErrPostgresPreview)
+	_, err = ref.Open(context.Background())
+	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "s3cret")
 	assert.NotContains(t, err.Error(), "alice")
 }
@@ -378,7 +380,7 @@ func TestOpenFailure_ReasonsAreFixedSentences(t *testing.T) {
 	assert.Same(t, own, ref.OpenFailure(own))
 	classified := ref.OpenFailure(errors.New("driver says s3cret"))
 	assert.Same(t, classified, ref.OpenFailure(classified), "classifying twice changes nothing")
-	assert.Equal(t, ErrPostgresPreview, ref.OpenFailure(ErrPostgresPreview))
+	assert.Equal(t, errPostgresReadOnlyOff, ref.OpenFailure(errPostgresReadOnlyOff))
 	assert.Equal(t, errUnsupportedBackend, ref.OpenFailure(errUnsupportedBackend))
 	// A driver that wraps one of this package's sentinels around its own text does
 	// not get its text through.

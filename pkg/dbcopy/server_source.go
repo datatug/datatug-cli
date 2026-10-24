@@ -7,7 +7,6 @@ import (
 	"maps"
 	"net"
 	"net/url"
-	"os"
 	"regexp"
 	"slices"
 	"strconv"
@@ -31,28 +30,12 @@ import (
 // share). DataTug only reads one: a MySQL session is opened with transaction_read_only on, a records read
 // of an Oracle source runs in a READ ONLY transaction, and one of a SQL Server source, which has no
 // read-only session, in a transaction that is always rolled back (see transactionReads).
-// Opening one for a read is behind a preview switch of its own (MySQLPreviewEnv, OraclePreviewEnv,
-// SQLServerPreviewEnv), as PostgreSQL's is; a schema scan is not.
-
-const (
-	// MySQLPreviewEnv is the environment variable that turns MySQL sources on: a mysql:// source is
-	// opened for a read only while it is "1".
-	MySQLPreviewEnv = "DATATUG_PREVIEW_MYSQL"
-
-	// OraclePreviewEnv is the environment variable that turns Oracle sources on: an oracle:// source
-	// is opened for a read only while it is "1".
-	OraclePreviewEnv = "DATATUG_PREVIEW_ORACLE"
-
-	// SQLServerPreviewEnv is the environment variable that turns SQL Server sources on: a sqlserver://
-	// source is opened for a read only while it is "1".
-	SQLServerPreviewEnv = "DATATUG_PREVIEW_SQLSERVER"
-)
+// A schema scan opens one the same way.
 
 // serverEngine is what differs between the database servers a source URL of this file names.
 type serverEngine struct {
 	scheme      string
 	title       string
-	previewEnv  string
 	defaultPort int
 	// pathNames is what the one segment of the path of the URL names, for the sentence that
 	// refuses a URL without it.
@@ -61,25 +44,20 @@ type serverEngine struct {
 	// case. Any other key is refused: a key the driver reads can turn the read-only session off, or
 	// send the connection somewhere the rest of the URL does not name.
 	queryKeys map[string]bool
-	// preview is the refusal of an open while the preview switch is off.
-	preview error
 }
 
 var (
 	mysqlEngine = serverEngine{
-		scheme: "mysql", title: "MySQL", previewEnv: MySQLPreviewEnv, defaultPort: 3306, pathNames: "database",
+		scheme: "mysql", title: "MySQL", defaultPort: 3306, pathNames: "database",
 		queryKeys: map[string]bool{"tls": true, "timeout": true},
-		preview:   &refusedError{"MySQL sources are a preview and are switched off: set " + MySQLPreviewEnv + "=1 to use them"},
 	}
 	oracleEngine = serverEngine{
-		scheme: "oracle", title: "Oracle", previewEnv: OraclePreviewEnv, defaultPort: 1521, pathNames: "service name",
+		scheme: "oracle", title: "Oracle", defaultPort: 1521, pathNames: "service name",
 		queryKeys: map[string]bool{"ssl": true, "ssl verify": true, "timeout": true, "connection timeout": true, "wallet": true},
-		preview:   &refusedError{"Oracle sources are a preview and are switched off: set " + OraclePreviewEnv + "=1 to use them"},
 	}
 	sqlServerEngine = serverEngine{
-		scheme: "sqlserver", title: "SQL Server", previewEnv: SQLServerPreviewEnv, defaultPort: 1433, pathNames: "database",
+		scheme: "sqlserver", title: "SQL Server", defaultPort: 1433, pathNames: "database",
 		queryKeys: map[string]bool{"encrypt": true, "trustservercertificate": true, "connection timeout": true},
-		preview:   &refusedError{"SQL Server sources are a preview and are switched off: set " + SQLServerPreviewEnv + "=1 to use them"},
 	}
 )
 
@@ -116,39 +94,14 @@ func ServerTitle(scheme string) string {
 	return scheme
 }
 
-// CheckServerPreview is nil when a source of scheme may be opened for a read, and the refusal of its
-// preview switch when it may not. A scheme that is not a server's has no switch.
-func CheckServerPreview(scheme string) error {
-	if scheme == "postgres" {
-		return CheckPostgresPreview()
-	}
-	engine, ok := serverEngineOf(scheme)
-	if !ok || os.Getenv(engine.previewEnv) == "1" {
-		return nil
-	}
-	return engine.preview
-}
-
-// errServerPolicyReads is what a read of a MySQL or an Oracle source through one or more access
-// policies answers, before the source is opened.
-func errServerPolicyReads(engine serverEngine) error {
-	return &refusedError{"policy-enforced reads on " + engine.title + " sources are not available in this preview"}
-}
-
-// CheckServerRead is CheckPostgresRead for every server scheme: it says why a read of ref through
-// policies access policies cannot run in this preview, or nil when it can. The preview switch is asked
-// first, then a read through one or more policies is refused. A source that is not a server's is not
-// its business.
+// CheckServerRead says why a read of ref through policies access policies cannot run, or nil when it can.
+// Reads through access policies of a PostgreSQL, MySQL, Oracle or SQL Server source are not served yet: their
+// row and column rules have been reviewed for SQLite and inGitDB sources only. A read with no policy, and a
+// source that is not a server's, are not its business. It is called before the source is opened, by every path
+// that reads through policies.
 func CheckServerRead(ref BackendRef, policies int) error {
-	engine, ok := serverEngineOf(ref.Scheme)
-	if !ok {
-		return CheckPostgresRead(ref, policies)
-	}
-	if err := CheckServerPreview(ref.Scheme); err != nil {
-		return err
-	}
-	if policies > 0 {
-		return errServerPolicyReads(engine)
+	if policies > 0 && IsServerScheme(ref.Scheme) {
+		return &refusedError{"policy-enforced reads on " + ServerTitle(ref.Scheme) + " sources are not available yet: run with --no-policies"}
 	}
 	return nil
 }
@@ -419,12 +372,9 @@ func (r BackendRef) openServerDatabase(ctx context.Context, engine serverEngine)
 	return transactionReads{SchemaScanDB: db, rollBack: true}, nil
 }
 
-// openServer is openSource's case for a MySQL or an Oracle source: the preview switch first, then a
-// refusal of a write, then the open.
+// openServer is openSource's case for a MySQL, Oracle or SQL Server source: a refusal of a write, then the
+// open.
 func (r BackendRef) openServer(ctx context.Context, engine serverEngine, mode openMode) (dal.DB, error) {
-	if err := CheckServerPreview(engine.scheme); err != nil {
-		return nil, err
-	}
 	if mode.forWrite {
 		return nil, errServerReadOnly(engine)
 	}

@@ -1,0 +1,31 @@
+{
+  "head": "01adea1557e2b0fc5445c835fda5908bd8dd53e6",
+  "featureStatus": "Implementing",
+  "recapStatus": "enforced",
+  "reports": {
+    "verify": {
+      "path": "spec/features/mcp-apps-adapter/_verify/2bd815ec.md",
+      "revision": "2bd815ec",
+      "counts": {
+        "pass": 10
+      }
+    },
+    "recap": {
+      "path": "spec/features/mcp-apps-adapter/_recap/16e8215a.md",
+      "revision": "16e8215a",
+      "counts": {
+        "no-drift": 10
+      }
+    }
+  },
+  "delegate": {
+    "skill": "datatug-release",
+    "args": "minor"
+  },
+  "configuredReviewers": [
+    {
+      "type": "human"
+    }
+  ],
+  "authority": "User explicit autonomous task instruction; independent final review required before dispatch; no human artifact inspection claimed; config unchanged"
+}

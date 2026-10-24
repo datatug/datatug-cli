@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/chat"
-	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -32,7 +31,6 @@ var chinookKeysDDL = []string{
 // dalgo schema calls; and the chat offers its joins there too.
 func TestPostgresResultMetaMatchesSQLite(t *testing.T) {
 	server := newRealPgServer(t)
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	execAll(t, server.scanURL, chinookKeysDDL...)
 	root := resultsHome(t)
 	sqlite := "sqlite://" + chinookFixture(t)

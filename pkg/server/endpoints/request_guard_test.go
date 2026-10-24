@@ -280,12 +280,22 @@ func TestRoutes_EveryRouteServesARequestThatIsItsOwnAsBefore(t *testing.T) {
 		require.Equal(t, reference[i].method+" "+reference[i].path, route.method+" "+route.path)
 		for name, build := range allowed {
 			t.Run(route.method+" "+route.path+" / "+name, func(t *testing.T) {
-				want := serveRecorded(reference[i].handler, build(route.method, route.path))
+				// As before, plus the CORS headers that the guard gives every answer it lets through.
+				want := serveRecorded(withCORSOrigin(reference[i].handler), build(route.method, route.path))
 				got := serveRecorded(route.handler, build(route.method, route.path))
 				assert.Equal(t, want, got)
 				assert.NotContains(t, got, requestRefusedMessage)
 			})
 		}
+	}
+}
+
+// withCORSOrigin is handler with the CORS headers of writeCORSOrigin set first, as the guard
+// sets them for every request it lets through.
+func withCORSOrigin(handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		writeCORSOrigin(w, r)
+		handler(w, r)
 	}
 }
 

@@ -93,7 +93,31 @@ type Subscription struct {
 	Email         string   `json:"email,omitempty"`
 	Unsubscribed  bool     `json:"unsubscribed,omitempty"`
 }
+
+// Event is the immutable accepted business transition, independent of notification
+// subscriptions and cooldown. Inputs are definition snapshots, never runner rows.
+type Event struct {
+	Scope
+	ID                string                          `json:"id"`
+	WatchID           string                          `json:"watchId"`
+	RunID             string                          `json:"runId"`
+	DefinitionVersion int64                           `json:"definitionVersion"`
+	Title             string                          `json:"title"`
+	Kind              string                          `json:"kind"`     // trigger or recovery
+	Previous          string                          `json:"previous"` // true, false, never
+	Outcome           string                          `json:"outcome"`  // pass or fail
+	OccurredAt        time.Time                       `json:"occurredAt"`
+	CheckID           string                          `json:"checkId"`
+	CheckVersion      string                          `json:"checkVersion"`
+	SourceFingerprint string                          `json:"sourceFingerprint"`
+	CheckRunRef       string                          `json:"checkRunRef,omitempty"`
+	Inputs            map[string]detective.InputValue `json:"inputs,omitempty"`
+	Owner             string                          `json:"owner"`
+	Visibility        string                          `json:"visibility"`
+}
+
 type Observation struct {
+	LastEventID       string    `json:"lastEventId,omitempty"`
 	SourceFingerprint string    `json:"sourceFingerprint,omitempty"`
 	WatchID           string    `json:"watchId"`
 	Value             string    `json:"value"` // true, false, unknown, never
@@ -105,6 +129,7 @@ type Observation struct {
 	Availability      string    `json:"availability"`
 }
 type Run struct {
+	EventID string `json:"eventId,omitempty"`
 	Scope
 	ID                string    `json:"id"`
 	WatchID           string    `json:"watchId"`
@@ -154,6 +179,7 @@ type Runner struct {
 	LastSeen     time.Time `json:"lastSeen"`
 }
 type Notification struct {
+	EventID string `json:"eventId,omitempty"`
 	Scope
 	ID        string    `json:"id"`
 	WatchID   string    `json:"watchId"`

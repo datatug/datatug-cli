@@ -109,8 +109,9 @@ operation. A reviewed source change is acknowledged through the explicit
 Environments are separate definition scopes. There is no implicit
 cross-environment mutation.
 
-One-shot Watches complete only after a trigger's notification is durably recorded.
-A qualifying condition without a subscribed channel remains enabled. Cooldown
+One-shot Watches complete atomically with their first qualifying durable event,
+including when there are no subscribed delivery channels. Delivery preferences do
+not cause repeated occurrences from the same condition. Cooldown
 suppresses event storms; unchanged conditions are quiet. Continuous Watches can
 notify failure, change and optional recovery. Subscriber preferences do not
 change the Watch's execution state.
@@ -214,3 +215,48 @@ allows test wrappers to inject adapter failures while delegating successful call
 to the actual SQLite DALGO database; the production constructor remains fixed.
 These storage tests do not claim that a
 browser, remote runner, SMTP/SMS/Telegram provider or public deployment passed.
+
+
+## Work integration events (v1)
+
+Accepted known results record immutable `dt_watch_events` evidence in the same
+DALGO transaction as the fenced run, observation and delivery outbox. Event IDs
+are derived from scope, logical run and transition kind. The source snapshot
+contains the Watch definition version, Check ID/version, source fingerprint,
+runner-local Check receipt reference, owner/visibility and typed definition
+inputs. It contains no runner credentials or query rows. Existing definition
+validation and the 128 KiB DALGO record bound apply to snapshots.
+
+Canonical evidence and recipient delivery are separate:
+
+| Previous → accepted value | Canonical event |
+| --- | --- |
+| never → matching target, initial `notify` | trigger |
+| never → any, initial `baseline` | none |
+| unchanged known value | none |
+| false → true | recovery, irrespective of delivery preference |
+| true → false, matching target | trigger |
+| rejected stale result, infrastructure error, unknown | none |
+
+A reset clears the observation baseline, preserving earlier immutable events;
+it does not fabricate a recovery. Notification trigger labels, subscription
+consent, cooldown and recovery delivery preferences keep their existing meaning.
+New runs, observations and notifications expose optional `eventId`/`lastEventId`.
+Legacy notifications without event IDs remain readable and are not backfilled.
+
+`GetEvent` and `ListEventPage` read current definition visibility and evidence
+inside one transaction. Paused/completed history remains readable; deleted
+Watch definitions and another owner's personal definitions cannot expose events.
+An event captured while personal remains owner-only after its Watch becomes
+shared; pagination filters snapshot visibility before applying page limits.
+A consumer separately authorizes shared Work creation and requires explicit
+consent to share personal source evidence. Runners cannot read these APIs.
+
+Events are excluded from automatic runtime-history pruning so old notification
+links and Work handoff retries retain source authority. Back up the SQLite file
+with the deployment's backup procedure. Operator archival/deletion policy is a
+follow-up; growth is proportional to meaningful transitions, not polling. Work
+keeps its committed source snapshot after a deliberate future source archive.
+History reads have a database limit (default 100, maximum 1000), an index over
+scope/Watch/occurrence instant/ID and a cursor. Consumers follow `nextCursor`
+until empty for complete reconciliation.

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -276,6 +277,37 @@ func (s *Server) userRequest(w http.ResponseWriter, r *http.Request, path string
 			err = s.Store.RetryNotification(r.Context(), a, b.ID)
 		}
 		result = map[string]bool{"ok": err == nil}
+	case path == "event" && r.Method == "GET":
+		store, ok := s.Store.(interface {
+			GetEvent(context.Context, watch.Actor, string) (watch.Event, error)
+		})
+		if !ok {
+			err = watch.ErrNotFound
+			break
+		}
+		var event watch.Event
+		event, err = store.GetEvent(r.Context(), a, r.URL.Query().Get("id"))
+		result = map[string]any{"event": event}
+	case path == "events" && r.Method == "GET":
+		store, ok := s.Store.(interface {
+			ListEventPage(context.Context, watch.Actor, string, string, int) ([]watch.Event, string, error)
+		})
+		if !ok {
+			err = watch.ErrNotFound
+			break
+		}
+		limit := 100
+		if raw := r.URL.Query().Get("limit"); raw != "" {
+			limit, err = strconv.Atoi(raw)
+			if err != nil {
+				err = watch.ErrInvalid
+				break
+			}
+		}
+		var events []watch.Event
+		var next string
+		events, next, err = store.ListEventPage(r.Context(), a, r.URL.Query().Get("watchId"), r.URL.Query().Get("before"), limit)
+		result = map[string]any{"events": events, "nextCursor": next}
 	case path == "runs" && r.Method == "GET":
 		var runs []watch.Run
 		runs, err = s.Store.ListRuns(r.Context(), a, r.URL.Query().Get("watchId"))

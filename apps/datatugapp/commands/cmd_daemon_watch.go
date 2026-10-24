@@ -97,7 +97,17 @@ func watchDaemonAction(cmd *cobra.Command, _ []string) error {
 	defer cancel()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(cmd.ErrOrStderr(), nil)))
 	var runner *watchdaemon.Runner
-	if run {
+	if run && cfg.Runner.Cloud != nil {
+		if coordinate {
+			return errors.New("cloud Watch coordinator is hosted; use --run for this enrolled runner")
+		}
+		var cleanup func()
+		runner, cleanup, err = configureCloudWatchRunner(&cfg, endpoint, namespace)
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+	} else if run {
 		projectID, manifestEndpoint, manifestNamespace, err := watchProjectCoordination(cfg.Runner.ProjectDir)
 		if err != nil {
 			return err

@@ -157,7 +157,9 @@ func (r Runner) Run(ctx context.Context) error {
 	defer func() {
 		workerCancel()
 		if botStarted {
-			<-botDone
+			// Join the cancelled worker after selecting the primary result.
+			joinResult := <-botDone
+			_ = joinResult
 		}
 	}()
 	poll := r.PollInterval

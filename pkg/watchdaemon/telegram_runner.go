@@ -220,7 +220,12 @@ func (b *telegramBot) runLease(ctx context.Context, c Client, lease watch.Telegr
 			}
 		}
 	}()
-	defer func() { cancel(); <-renewed }()
+	defer func() {
+		cancel()
+		// Cancellation joins the renewal worker; the caller retains its result.
+		joinResult := <-renewed
+		_ = joinResult
+	}()
 	for leaseCtx.Err() == nil {
 		current, e := c.telegramPoll(leaseCtx, "renew", lease.Fence)
 		if e != nil {

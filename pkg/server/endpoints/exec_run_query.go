@@ -181,7 +181,7 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 		}
 	}
 
-	resolved, targetErr := resolveExecutionSource(ctx, projStore, projDir, req, queryDef)
+	resolved, targetErr := resolveWatchExecutionSource(ctx, projStore, projDir, req, queryDef, options.acceptedQuery != nil)
 	if targetErr != nil {
 		return apicontract.Result{}, targetErr
 	}

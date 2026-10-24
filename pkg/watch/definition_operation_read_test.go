@@ -169,7 +169,7 @@ func TestReadPutDefinitionOperationRechecksCurrentVisibilityAndCorruptReceipts(t
 					case "wrong-id":
 						receipt.Definition.ID = "foreign"
 					case "wrong-scope":
-						receipt.Definition.Scope.Project = "foreign"
+						receipt.Definition.Project = "foreign"
 					case "zero-version":
 						receipt.Definition.Version = 0
 					case "invalid-definition":

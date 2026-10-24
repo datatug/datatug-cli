@@ -23,6 +23,7 @@ import (
 )
 
 const (
+	events        = "dt_watch_events"
 	definitions   = "dt_watch_definitions"
 	observations  = "dt_watch_observations"
 	runs          = "dt_watch_runs"
@@ -34,7 +35,7 @@ const (
 	operations    = "dt_watch_operations"
 )
 
-var tables = []string{definitions, observations, runs, runners, subscriptions, inbox, outbox, audit, operations, telegramLinks, telegramRequests, quotas, telegramProviders, telegramBots, telegramPolls}
+var tables = []string{events, definitions, observations, runs, runners, subscriptions, inbox, outbox, audit, operations, telegramLinks, telegramRequests, quotas, telegramProviders, telegramBots, telegramPolls}
 
 var watchCloseStorageFile = (*os.File).Close
 
@@ -107,7 +108,11 @@ func NewSQLiteStore(connection string, c Config) (*Store, error) {
 			return openErr
 		}
 		for _, table := range tables {
-			if err := db.CreateCollection(ctx, dbschema.CollectionDef{Name: table, Fields: fields, PrimaryKey: []dal.FieldName{"id"}, Indexes: []dbschema.IndexDef{{Name: table + "_scope", Fields: []dal.FieldName{"namespace", "project", "environment", "watch"}}}}, ddl.IfNotExists()); err != nil {
+			indexes := []dbschema.IndexDef{{Name: table + "_scope", Fields: []dal.FieldName{"namespace", "project", "environment", "watch"}}}
+			if table == events {
+				indexes = append(indexes, dbschema.IndexDef{Name: table + "_history", Fields: []dal.FieldName{"namespace", "project", "environment", "watch", "updated", "id"}})
+			}
+			if err := db.CreateCollection(ctx, dbschema.CollectionDef{Name: table, Fields: fields, PrimaryKey: []dal.FieldName{"id"}, Indexes: indexes}, ddl.IfNotExists()); err != nil {
 				_ = db.Close()
 				return err
 			}
@@ -199,10 +204,17 @@ func (s *Store) save(ctx context.Context, tx dal.ReadwriteTransaction, table str
 	if len(payload) > 128*1024 {
 		return fmt.Errorf("%w: record exceeds 128 KiB", ErrInvalid)
 	}
-	m := map[string]any{"namespace": scope.Namespace, "project": scope.Project, "environment": scope.Environment, "watch": watchID, "owner": owner, "visibility": visibility, "updated": s.now().UnixNano(), "payload": string(payload)}
+	updated := s.now().UnixNano()
+	// Immutable events use their occurrence instant for indexed cursor ordering;
+	// a later wall-clock read here would make pagination skip live-clock rows.
+	if event, ok := value.(Event); table == events && ok {
+		updated = event.OccurredAt.UnixNano()
+	}
+	m := map[string]any{"namespace": scope.Namespace, "project": scope.Project, "environment": scope.Environment, "watch": watchID, "owner": owner, "visibility": visibility, "updated": updated, "payload": string(payload)}
 	if s.cloud != nil {
 		s.cloudMetadata(m, value)
 	}
+
 	k := key(table, scope, id)
 	exists, err := tx.Exists(ctx, k)
 	if err != nil {

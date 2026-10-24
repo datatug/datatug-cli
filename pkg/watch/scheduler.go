@@ -244,6 +244,7 @@ func (s *Store) claimDueAttempt(ctx context.Context, identity RunnerIdentity, pr
 				}
 				continue
 			}
+			r.EventID = ""
 			r.CompletionHash = ""
 			r.ExecutionStatus = ""
 			r.Outcome = ""
@@ -440,6 +441,19 @@ func (s *Store) FinishRun(ctx context.Context, identity RunnerIdentity, c Comple
 				value = "true"
 			}
 			previous := obs.LastKnown
+			if previous == "" {
+				previous = "never"
+			}
+			eventDefinition := d
+			eventDefinition.SourceFingerprint = obs.SourceFingerprint
+			canonical, err := s.recordEvent(ctx, tx, eventDefinition, r, previous, value)
+			if err != nil {
+				return err
+			}
+			if canonical != nil {
+				r.EventID = canonical.ID
+				obs.LastEventID = canonical.ID
+			}
 			obs.Value = value
 			obs.LastKnown = value
 			obs.Availability = "available"
@@ -463,12 +477,6 @@ func (s *Store) FinishRun(ctx context.Context, identity RunnerIdentity, c Comple
 					event = "recovery"
 				}
 			}
-			if d.Mode == "one_shot" && target && d.InitialObservation == "notify" && obs.LastNotifiedAt.IsZero() {
-				event = "change"
-				if value == "false" {
-					event = "failure"
-				}
-			}
 			if event != "" && (obs.LastNotifiedAt.IsZero() || !now.Before(obs.LastNotifiedAt.Add(time.Duration(d.NotificationPolicy.CooldownSeconds)*time.Second))) {
 				recorded, err := s.notify(ctx, tx, d, r, event)
 				if err != nil {
@@ -476,14 +484,14 @@ func (s *Store) FinishRun(ctx context.Context, identity RunnerIdentity, c Comple
 				}
 				if recorded {
 					obs.LastNotifiedAt = now
-					if d.Mode == "one_shot" && target {
-						d.Lifecycle = "completed"
-						d.Enabled = false
-						d.UpdatedAt = now
-						if err = s.save(ctx, tx, definitions, d.Scope, d.ID, d.ID, d.Owner, d.Visibility, d); err != nil {
-							return err
-						}
-					}
+				}
+			}
+			if canonical != nil && d.Mode == "one_shot" && target {
+				d.Lifecycle = "completed"
+				d.Enabled = false
+				d.UpdatedAt = now
+				if err = s.save(ctx, tx, definitions, d.Scope, d.ID, d.ID, d.Owner, d.Visibility, d); err != nil {
+					return err
 				}
 			}
 		}

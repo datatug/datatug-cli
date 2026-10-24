@@ -54,12 +54,14 @@ if [ "$watch_ready" != 1 ]; then
   exit 1
 fi
 # The required marker makes missing emulator configuration fatal, never SKIP.
-go test -race ./pkg/watch -run '^TestFirestoreStore' -count=1 -timeout=180s -json > "$watch_artifacts/tests.jsonl"
+go test -race ./pkg/watch -run '^TestFirestore(Store|Events)' -count=1 -timeout=180s -json > "$watch_artifacts/tests.jsonl"
 python3 - "$watch_artifacts/tests.jsonl" <<'PY'
 import json, pathlib, sys
 rows = [json.loads(line) for line in pathlib.Path(sys.argv[1]).read_text().splitlines()]
-tests = [row for row in rows if row.get('Test', '').startswith('TestFirestoreStore')]
+tests = [row for row in rows if row.get('Test', '').startswith(('TestFirestoreStore', 'TestFirestoreEvents'))]
 assert tests and not any(row['Action'] == 'skip' for row in tests), 'Firestore gate did not execute'
-assert len({row['Test'] for row in tests if row['Action'] == 'pass'}) >= 5, 'Missing Firestore acceptance cases'
+passed = {row['Test'] for row in tests if row['Action'] == 'pass'}
+assert len(passed) >= 7, 'Missing Firestore acceptance cases'
+assert {'TestFirestoreEventsTypedAtomicPrivacyPaginationAndAuthority', 'TestFirestoreEventsSameInstantLanesAndDurableRetention'} <= passed, 'Missing Work event acceptance cases'
 PY
 printf 'Firestore Watch storage gate passed; emulator teardown owned by this command.\n'

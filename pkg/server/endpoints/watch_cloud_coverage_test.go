@@ -3,11 +3,13 @@ package endpoints
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/api"
@@ -208,5 +210,65 @@ func TestCloudWatchArtifactOverrideRetainsOrdinaryLocalAuthorization(t *testing.
 				t.Fatal("artifact bypassed operator authorization", mode, got, err)
 			}
 		})
+	}
+}
+
+func TestCloudWatchArtifactAndOperationCodecFailuresRemainClosed(t *testing.T) {
+	project := cloudCoverageLocalSession(t)
+	bundle, claim := endpointCloudBundle(t)
+	scratch := t.TempDir()
+	t.Setenv("TMPDIR", scratch)
+	encodingFailure := errors.New("query encoding unavailable")
+	encoded := 0
+	run, fingerprint, err := executeCloudWatchCheck(context.Background(), project, "encoding-failed", claim, bundle, map[string]string{"source-grant": "chinook"}, func(value any) ([]byte, error) {
+		encoded++
+		q, ok := value.(datatug.QueryDefWithFolderPath)
+		if !ok || q.ConnectionID != "chinook" {
+			t.Fatal("encoding was attempted before source authorization", value)
+		}
+		return nil, encodingFailure
+	})
+	if !errors.Is(err, watch.ErrInvalid) || encoded != 1 || run.ExecutionStatus != "" || fingerprint != "" {
+		t.Fatal("encoding failure became an evaluation", run, fingerprint, encoded, err)
+	}
+	entries, err := os.ReadDir(scratch)
+	if err != nil || len(entries) != 0 {
+		t.Fatal("encoding failure retained a temporary source image", entries, err)
+	}
+	query := bundle.Queries["shipping/assignment"]
+	query.SourcePin = json.RawMessage(`!`)
+	path := filepath.Join(scratch, "denied.sqlite")
+	if err = prepareCloudWatchArtifact(context.Background(), path, bundle, query); !errors.Is(err, watch.ErrInvalid) {
+		t.Fatal("malformed artifact pin was accepted", err)
+	}
+	if _, err = os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("unverified artifact was written", err)
+	}
+	data := bundle.Artifacts["shipping-working-copy"]
+	opened := 0
+	if err = prepareWatchArtifactWithOpen(context.Background(), path, data, func(driver, dsn string) (*sql.DB, error) {
+		opened++
+		if driver != "sqlite" || !strings.HasSuffix(dsn, "?mode=ro&immutable=1") {
+			t.Fatal("artifact was opened with mutable options", driver, dsn)
+		}
+		return nil, errors.New("driver unavailable")
+	}); !errors.Is(err, watch.ErrInvalid) || opened != 1 {
+		t.Fatal("artifact opener failure was ignored", opened, err)
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatal("artifact permissions are not private", info, err)
+	}
+	var database *sql.DB
+	err = prepareWatchArtifactWithOpen(context.Background(), path, data, func(driver, dsn string) (*sql.DB, error) {
+		var e error
+		database, e = sql.Open(driver, dsn)
+		return database, e
+	})
+	if err != nil || database == nil {
+		t.Fatal("valid immutable artifact rejected", err)
+	}
+	if err = database.PingContext(context.Background()); err == nil {
+		t.Fatal("artifact validation leaked its open database")
 	}
 }

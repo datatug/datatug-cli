@@ -23,13 +23,20 @@ func TestWatchRunnerCoordinatorFailuresAndRegistrationRefresh(t *testing.T) {
 	if err := (Runner{Executor: executor}).Run(cancelled); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
-	for _, mode := range []string{"registration-down", "registration-recover", "claim-forbidden", "claim-down", "refresh", "stale-result"} {
+	for _, mode := range []string{"registration-down", "registration-recover", "registration-wait-cancel", "claim-forbidden", "claim-down", "refresh", "stale-result"} {
 		t.Run(mode, func(t *testing.T) {
 			var register, claims atomic.Int32
+			ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+			defer cancel()
 			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
 				case "/v1/watch/runner/register":
 					n := register.Add(1)
+					if mode == "registration-wait-cancel" {
+						cancel()
+						w.WriteHeader(503)
+						return
+					}
 					if mode == "registration-down" || mode == "registration-recover" && n == 1 {
 						w.WriteHeader(503)
 						return
@@ -57,12 +64,14 @@ func TestWatchRunnerCoordinatorFailuresAndRegistrationRefresh(t *testing.T) {
 				}
 			}))
 			defer provider.Close()
-			ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
-			defer cancel()
 			r := Runner{Client: Client{Endpoint: provider.URL, Token: strings.Repeat("token", 9)}, Executor: executor, PollInterval: 5 * time.Millisecond, RegistrationInterval: 2 * time.Millisecond}
 			err := r.Run(ctx)
 			if mode == "claim-forbidden" {
 				if !errors.Is(err, watch.ErrForbidden) {
+					t.Fatal(err)
+				}
+			} else if mode == "registration-wait-cancel" {
+				if !errors.Is(err, context.Canceled) {
 					t.Fatal(err)
 				}
 			} else if !errors.Is(err, context.DeadlineExceeded) {

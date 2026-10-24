@@ -356,7 +356,8 @@ func (s *Store) cloudAvailability(ctx context.Context, d Definition, obs Observa
 	if e != nil {
 		return "", e
 	}
-	for _, job := range jobs {
+	if len(jobs) > 0 {
+		job := jobs[0]
 		if job.State == "running" && job.LeaseUntil.After(s.now()) {
 			return "running", nil
 		}

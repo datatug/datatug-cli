@@ -259,7 +259,8 @@ func TestWatchOwnBotScopedRunnerLinksAndDelivers(t *testing.T) {
 		t.Fatal("delivery missing or duplicated", delivered.Load())
 	}
 	cancel()
-	_ = <-done
+	joinResult := <-done
+	_ = joinResult
 	code, _ = f.request(t, "bob", "GET", "telegram/status", nil)
 	if code != 200 {
 		t.Fatal(code)
@@ -419,7 +420,8 @@ func TestWatchOwnBotMultipleSubscribersAndBlockedRecipientIsolation(t *testing.T
 		time.Sleep(10 * time.Millisecond)
 	}
 	cancel()
-	<-done
+	joinResult := <-done
+	_ = joinResult
 	if !acknowledged {
 		t.Fatal("recipient status and delivery were not durably acknowledged")
 	}

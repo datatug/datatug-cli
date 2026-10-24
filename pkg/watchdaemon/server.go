@@ -39,7 +39,15 @@ type CoordinatorStore interface {
 	FinishNotification(context.Context, string, int64, string) error
 }
 
+type CoordinatorReference struct {
+	Endpoint  string `json:"endpoint"`
+	Namespace string `json:"namespace"`
+}
+
 type Server struct {
+	// Display/discovery metadata supplied by the trusted hosted facade. It never
+	// selects authentication destinations or grants transport authority.
+	Coordination *CoordinatorReference
 	// ResolveCredential is exclusive when configured. A cloud resolver failure
 	// must never fall back to deployment tokens in Auth.
 	ResolveCredential func(*http.Request, string) (Credential, error)
@@ -199,7 +207,7 @@ func (s *Server) userRequest(w http.ResponseWriter, r *http.Request, path string
 		if limitsErr != nil {
 			err = limitsErr
 		}
-		result = map[string]any{"id": c.ID, "hosted": c.Hosted, "spaceID": c.SpaceID, "canManageRunners": c.CanManageRunners, "namespace": c.Namespace, "project": c.Project, "environment": c.Environment, "sharedEditor": c.SharedEditor, "tier": c.Tier, "telegramConnected": provider.Connected, "channels": map[string]bool{"in_app": true, "email": c.Email != "" && s.Email != nil, "sms": c.Tier == "paid" && c.Phone != "" && s.SMS != nil, "telegram": provider.BotID != ""}, "limits": limits}
+		result = map[string]any{"id": c.ID, "hosted": c.Hosted, "spaceID": c.SpaceID, "canManageRunners": c.CanManageRunners, "coordination": s.Coordination, "namespace": c.Namespace, "project": c.Project, "environment": c.Environment, "sharedEditor": c.SharedEditor, "tier": c.Tier, "telegramConnected": provider.Connected, "providers": map[string]bool{"email": s.Email != nil, "sms": s.SMS != nil}, "channels": map[string]bool{"in_app": true, "email": c.Email != "" && s.Email != nil, "sms": c.Tier == "paid" && c.Phone != "" && s.SMS != nil, "telegram": provider.BotID != ""}, "limits": limits}
 	case path == "definitions" && r.Method == "GET":
 		var list []watch.Definition
 		list, err = s.Store.ListDefinitions(r.Context(), a)

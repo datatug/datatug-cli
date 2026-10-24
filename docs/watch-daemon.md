@@ -280,6 +280,12 @@ not persist an arbitrary coordinator override. Firebase user tokens are never
 sent to a manifest URL. Self-hosted project coordination remains configured by
 its existing manifest descriptor.
 
+The identity response separates configured transport availability in
+`providers.email` and `providers.sms` from the current user's permitted `channels`.
+SMS still requires a paid account and verified phone number when its provider is
+configured. Optional `coordination` metadata identifies the trusted project
+coordinator; it never selects a Firebase token destination or grants permission.
+
 An enrolled runner keeps its one-time credential in the operator's secret store
 or process environment. The project manifest contains no credential. A cloud
 runner configuration has this shape (replace every placeholder):

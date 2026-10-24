@@ -3,6 +3,7 @@ package watch
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"time"
 
@@ -20,6 +21,7 @@ var botUsernamePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{4,31}$`)
 
 type telegramProvider struct {
 	Scope
+	Generation  int64  `json:"generation,omitempty"`
 	BotID       string `json:"botId"`
 	BotUsername string `json:"botUsername"`
 }
@@ -61,7 +63,7 @@ func (s *Store) registerTelegramProvider(ctx context.Context, tx dal.ReadwriteTr
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return err
 	}
-	if err == nil && previous.BotID != id.TelegramBotID {
+	if err == nil && previous.BotID != id.TelegramBotID && s.cloud == nil {
 		deliveries, err := list[Delivery](ctx, tx, outbox, id.Scope, "")
 		if err != nil {
 			return err
@@ -77,7 +79,14 @@ func (s *Store) registerTelegramProvider(ctx context.Context, tx dal.ReadwriteTr
 			}
 		}
 	}
-	provider := telegramProvider{Scope: id.Scope, BotID: id.TelegramBotID, BotUsername: id.TelegramBotUsername}
+	generation := previous.Generation
+	if previous.BotID != id.TelegramBotID {
+		generation++
+	}
+	if s.cloud != nil && err == nil && previous.BotID != id.TelegramBotID {
+		s.workReady(tx, WorkEvent{Scope: id.Scope, ID: stable("telegram-provider", id.Scope.Namespace, id.Scope.Project, id.Scope.Environment, fmt.Sprint(generation)), Kind: "WatchConsentChanged"})
+	}
+	provider := telegramProvider{Scope: id.Scope, BotID: id.TelegramBotID, BotUsername: id.TelegramBotUsername, Generation: generation}
 	if err = s.save(ctx, tx, telegramBots, global, id.TelegramBotID, "", "", "", provider); err != nil {
 		return err
 	}

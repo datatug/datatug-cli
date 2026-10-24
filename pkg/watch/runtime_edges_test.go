@@ -189,7 +189,7 @@ func TestNotificationBacklogRejectsAcceptanceWithoutPartialState(t *testing.T) {
 	runner := register(t, s, "query")
 	claimed := claim(t, s, runner)
 	before := watchRuntimeSnapshot(t, s)
-	if _, err := s.FinishRun(ctx, runner, done(claimed, "pass")); !errors.Is(err, ErrInvalid) {
+	if _, err := s.FinishRun(ctx, runner, done(claimed, "pass")); !errors.Is(err, ErrCapacity) {
 		t.Fatalf("backlog accepted: %v", err)
 	}
 	after := watchRuntimeSnapshot(t, s)

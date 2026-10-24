@@ -21,34 +21,11 @@ func firestoreFixture(t *testing.T) ([]*Store, *clock, FirestoreOptions) {
 		if os.Getenv("WATCH_FIRESTORE_GATE_REQUIRED") == "1" {
 			t.Fatal("Firestore emulator is required")
 		}
-		t.Skip("real Firestore emulator is not configured")
+		return firestoreContractFixture(t)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	t.Cleanup(cancel)
-	c := &clock{}
-	c.n.Store(time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC).UnixNano())
-	space := record.NewKeyWithID("spaces", fmt.Sprintf("gate-%d", time.Now().UnixNano()))
-	project := record.NewKeyWithParentAndID(space, "projects", testScope.Project)
-	options := FirestoreOptions{ProjectKey: project, ProjectID: testScope.Project,
-		StorageRoot: record.NewKeyWithParentAndID(space, "detectiveProjects", testScope.Project),
-		AccountRoot: record.NewKeyWithParentAndID(space, "detectiveProjects", "_watchAccounts"),
-		Config:      Config{Namespace: testScope.Namespace, Now: c.now, LeaseDuration: time.Second, ExecutionTimeout: 5 * time.Second, RunnerTTL: time.Hour, HistoryLimit: 20}}
-	options.Authorize = func(ctx context.Context, tx dal.ReadTransaction) error {
-		return tx.Get(ctx, record.NewRecordWithData(project, map[string]any{}))
-	}
-	options.AdmitRunner = func(context.Context, dal.ReadTransaction, Definition, RunnerIdentity) (bool, error) { return true, nil }
-	options.AdmitDefinition = func(context.Context, dal.ReadTransaction, Definition, string) (string, error) {
-		return "revision-1", nil
-	}
-	options.AdmitRecipient = func(_ context.Context, _ dal.ReadTransaction, _ Definition, user string) (RecipientAuthority, error) {
-		return RecipientAuthority{AccountID: user, Email: user + "@example.test"}, nil
-	}
-	options.DefinitionChanged = func(ctx context.Context, tx dal.ReadwriteTransaction, d Definition) error {
-		return tx.Insert(ctx, record.NewRecordWithData(record.NewKeyWithParentAndID(options.StorageRoot, "changes", stable(d.ID, fmt.Sprint(d.Version))), map[string]any{"kind": "WatchDefinitionChanged", "watch": d.ID, "version": d.Version}))
-	}
-	options.WorkReady = func(ctx context.Context, tx dal.ReadwriteTransaction, event WorkEvent) error {
-		return tx.Insert(ctx, record.NewRecordWithData(record.NewKeyWithParentAndID(options.StorageRoot, "changes", event.ID), map[string]any{"kind": event.Kind, "run": event.RunID, "watch": event.WatchID}))
-	}
+	c, options := firestoreFixtureOptions()
 	stores := []*Store{}
 	for i := 0; i < 2; i++ {
 		projectID := os.Getenv("WATCH_FIRESTORE_TEST_PROJECT")
@@ -66,7 +43,7 @@ func firestoreFixture(t *testing.T) ([]*Store, *clock, FirestoreOptions) {
 		db := dalgo2firestore.NewDatabase("watch", client)
 		if i == 0 {
 			if err = db.RunReadwriteTransaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
-				return tx.Set(ctx, record.NewRecordWithData(project, map[string]any{"title": "trusted project"}))
+				return tx.Set(ctx, record.NewRecordWithData(options.ProjectKey, map[string]any{"title": "trusted project"}))
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -251,7 +228,14 @@ func TestFirestoreStoreBoundedSchedulingMakesProgress(t *testing.T) {
 		return d.ID == "later-04", nil
 	}
 	r := register(t, s, "runner")
-	got, e := s.ClaimDue(ctx, r)
+	var got *Claim
+	var e error
+	for i := 0; i < 8 && got == nil; i++ {
+		got, e = s.ClaimDue(ctx, r)
+		if e != nil {
+			t.Fatal(e)
+		}
+	}
 	if e != nil || got == nil || got.Definition.ID != "later-04" {
 		t.Fatal("eligible job behind blocked candidates", got, e)
 	}
@@ -478,4 +462,33 @@ func TestFirestoreStoreSourceRevalidationCursorAndTransientFailure(t *testing.T)
 	if _, ok, e := s.NextWakeup(ctx); e != nil || ok {
 		t.Fatal("blocked sources scheduled", ok, e)
 	}
+}
+
+func firestoreFixtureOptions() (*clock, FirestoreOptions) {
+	c := &clock{}
+	c.n.Store(time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC).UnixNano())
+	space := record.NewKeyWithID("spaces", fmt.Sprintf("gate-%d", time.Now().UnixNano()))
+	project := record.NewKeyWithParentAndID(space, "projects", testScope.Project)
+	options := FirestoreOptions{ProjectKey: project, ProjectID: testScope.Project,
+		StorageRoot: record.NewKeyWithParentAndID(space, "detectiveProjects", testScope.Project),
+		AccountRoot: record.NewKeyWithParentAndID(space, "detectiveProjects", "_watchAccounts"),
+		Config:      Config{Namespace: testScope.Namespace, Now: c.now, LeaseDuration: time.Second, ExecutionTimeout: 5 * time.Second, RunnerTTL: time.Hour, HistoryLimit: 20}}
+	options.Authorize = func(ctx context.Context, tx dal.ReadTransaction) error {
+		return tx.Get(ctx, record.NewRecordWithData(project, map[string]any{}))
+	}
+	options.AdmitRunner = func(context.Context, dal.ReadTransaction, Definition, RunnerIdentity) (bool, error) { return true, nil }
+	options.AdmitDefinition = func(context.Context, dal.ReadTransaction, Definition, string) (string, error) {
+		return "revision-1", nil
+	}
+	options.AdmitRecipient = func(_ context.Context, _ dal.ReadTransaction, _ Definition, user string) (RecipientAuthority, error) {
+		return RecipientAuthority{AccountID: user, Email: user + "@example.test"}, nil
+	}
+	options.DefinitionChanged = func(ctx context.Context, tx dal.ReadwriteTransaction, d Definition) error {
+		return tx.Insert(ctx, record.NewRecordWithData(record.NewKeyWithParentAndID(options.StorageRoot, "changes", stable(d.ID, fmt.Sprint(d.Version))), map[string]any{"kind": "WatchDefinitionChanged", "watch": d.ID, "version": d.Version}))
+	}
+	options.WorkReady = func(ctx context.Context, tx dal.ReadwriteTransaction, event WorkEvent) error {
+		return tx.Insert(ctx, record.NewRecordWithData(record.NewKeyWithParentAndID(options.StorageRoot, "changes", event.ID), map[string]any{"kind": event.Kind, "run": event.RunID, "watch": event.WatchID}))
+	}
+
+	return c, options
 }

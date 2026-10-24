@@ -551,6 +551,11 @@ func (s *Store) Status(ctx context.Context, a Actor) (Status, error) {
 			obs.Availability = d.Lifecycle
 		} else if obs.Availability == "source_changed" || obs.Availability == "source_unavailable" {
 			// Preserve the explicit review-required status.
+		} else if s.cloud != nil {
+			obs.Availability, e = s.cloudAvailability(ctx, d, obs, result.Runners)
+			if e != nil {
+				return Status{}, e
+			}
 		} else if !hasEligible(result.Runners, d) {
 			obs.Availability = "no_runner"
 		} else if obs.NextEvaluation.Before(s.now().Add(-time.Duration(d.Schedule.IntervalSeconds) * time.Second)) {

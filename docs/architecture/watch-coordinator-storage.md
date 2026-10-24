@@ -279,9 +279,11 @@ Watch, four channels per subscriber, 100 runner status records, 10,000 pending
 outbox records and the transaction budgets above. ReconcileScope inspects at
 most20 due observations, each in a separate transaction. An active execution
 advances only scheduling eligibility, preserving its logical execution ID and
-allowing later Watches to progress. ClaimDue considers at most100 active jobs,
-the admitted project maximum, so ineligible earlier jobs cannot starve a later
-eligible job. Delivery queries first constrain lane and scope, then select at
+allowing later Watches to progress. ClaimDue admits one candidate per transaction, committing a durable per-runner
+document-ID cursor even when the candidate lacks grants or exceeds its admission
+budget. At most four such transactions share one call deadline, so an expensive
+or unauthorized earlier candidate cannot starve a later eligible Watch. Cursor
+metadata survives registration refresh and Store restarts. Delivery queries first constrain lane and scope, then select at
 most16 due candidates. Telegram is a runner-owned lane; coordinator tasks do
 not claim its messages. A single transition for50 subscribers ×4 channels
 commits200 outbox records and50 inbox records with its baseline/result.
@@ -326,3 +328,14 @@ emulator directory. The always-present Watch Firestore conformance Go CI job run
 this script and fails on missing/skipped cases. The ordinary strict100% statement
 coverage gate remains required separately; a manual emulator pass is insufficient
 for release. No local module replacement is part of this contract.
+
+The initial cloud polling contract serializes writes through a small project
+revision row. At twenty runners polling every two seconds, an unclaimable queue
+can cause up to forty writer transactions per second (four bounded candidates
+per poll), before scheduling and delivery work. This is an MVP cost and contention
+limit, not a measured throughput or availability guarantee. Queue wakeups reduce
+coordinator idle work; runner polling still needs deployment capacity planning.
+The ordinary CI suite uses a test-only DALGO contract fixture for deterministic
+state and error-path coverage. It rejects physical reads after writes and rolls
+back failed callbacks. Only the separately required, pinned emulator job provides
+Firestore adapter concurrency evidence; the fixture is not a provider substitute.

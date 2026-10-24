@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -92,11 +93,9 @@ func (s *Store) reconcileDefinition(ctx context.Context, tx dal.ReadwriteTransac
 		return err
 	}
 	if d.Lifecycle != "enabled" {
-		if s.cloud != nil {
-			obs.Availability = d.Lifecycle
-			return s.save(ctx, tx, observations, d.Scope, d.ID, d.ID, d.Owner, d.Visibility, obs)
-		}
-		return nil
+		// Standalone inactive definitions returned before the observation read.
+		obs.Availability = d.Lifecycle
+		return s.save(ctx, tx, observations, d.Scope, d.ID, d.ID, d.Owner, d.Visibility, obs)
 	}
 	if s.cloud != nil {
 		if obs.Availability == "source_changed" || obs.Availability == "source_unavailable" {
@@ -140,14 +139,26 @@ func (s *Store) reconcileDefinition(ctx context.Context, tx dal.ReadwriteTransac
 	return s.save(ctx, tx, observations, d.Scope, d.ID, d.ID, d.Owner, d.Visibility, obs)
 }
 func (s *Store) ClaimDue(ctx context.Context, identity RunnerIdentity) (*Claim, error) {
+	if s.cloud != nil {
+		return s.claimCloudDue(ctx, identity)
+	}
+	return s.claimDueAttempt(ctx, identity, nil)
+}
+func (s *Store) claimDueAttempt(ctx context.Context, identity RunnerIdentity, progress *cloudClaimProgress) (*Claim, error) {
 	if identity.ID == "" || !s.validScope(identity.Scope) {
 		return nil, ErrForbidden
 	}
 	var result *Claim
 	err := s.transaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
 		result = nil
+		if progress != nil {
+			*progress = cloudClaimProgress{}
+		}
 		registered, err := read[Runner](ctx, tx, runners, identity.Scope, identity.ID)
 		if err != nil {
+			if s.cloud != nil && !errors.Is(err, ErrNotFound) {
+				return err
+			}
 			return ErrForbidden
 		}
 		now := s.now()
@@ -161,7 +172,7 @@ func (s *Store) ClaimDue(ctx context.Context, identity RunnerIdentity) (*Claim, 
 		}
 		var jobs []Run
 		if s.cloud != nil {
-			jobs, err = cloudItems[Run](ctx, tx, cloudQuery(runs, identity.Scope, "", []dal.Condition{dal.WhereField("active", dal.Equal, "yes"), dal.WhereField("ready", dal.LessOrEqual, s.now().UnixNano())}, 100, dal.Ascending(dal.Field("ready"))))
+			jobs, err = s.cloudClaimJobs(ctx, tx, identity, progress)
 		} else {
 			jobs, err = list[Run](ctx, tx, runs, identity.Scope, "")
 		}
@@ -194,7 +205,8 @@ func (s *Store) ClaimDue(ctx context.Context, identity RunnerIdentity) (*Claim, 
 			if s.cloud != nil {
 				if _, e := s.sourceAdmission(ctx, tx, d, "claim"); e != nil {
 					if !sourceBlocked(e) {
-						return e
+						progress.admissionError = e
+						return nil
 					}
 					if e = s.blockSource(ctx, tx, d, e); e != nil {
 						return e
@@ -205,7 +217,8 @@ func (s *Store) ClaimDue(ctx context.Context, identity RunnerIdentity) (*Claim, 
 			if s.cloud != nil {
 				allowed, e := s.runnerAdmission(ctx, tx, d, identity)
 				if e != nil {
-					return e
+					progress.admissionError = e
+					return nil
 				}
 				if !allowed {
 					continue
@@ -262,7 +275,10 @@ func (s *Store) ClaimDue(ctx context.Context, identity RunnerIdentity) (*Claim, 
 		}
 		return nil
 	})
-	return result, err
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 func (s *Store) leased(ctx context.Context, tx dal.ReadwriteTransaction, identity RunnerIdentity, id string, fence int64) (Run, Definition, error) {
 	if identity.ID == "" || !s.validScope(identity.Scope) {
@@ -270,6 +286,9 @@ func (s *Store) leased(ctx context.Context, tx dal.ReadwriteTransaction, identit
 	}
 	r, err := read[Run](ctx, tx, runs, identity.Scope, id)
 	if err != nil {
+		if s.cloud != nil && !errors.Is(err, ErrNotFound) {
+			return r, Definition{}, err
+		}
 		return r, Definition{}, ErrStaleLease
 	}
 	d, err := read[Definition](ctx, tx, definitions, identity.Scope, r.WatchID)

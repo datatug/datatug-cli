@@ -125,6 +125,9 @@ func TestFirestoreStoreDeletedWatchReleasesLiveCapacityAndPreservesFence(t *test
 	if _, e := s.PutDefinition(ctx, a, definition("over-cap"), "over-cap", 0); e != ErrCapacity {
 		t.Fatal("live project cap", e)
 	}
+	if _, e := s.PutDefinition(ctx, actor("bob"), definition("other-owner"), "other-owner", 0); e != ErrCapacity {
+		t.Fatal("project cap cannot be evaded by owner", e)
+	}
 	r := register(t, s, "runner")
 	cl := claim(t, s, r)
 	target, e := s.GetDefinition(ctx, a, cl.Definition.ID)

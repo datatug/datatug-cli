@@ -328,3 +328,14 @@ emulator directory. The always-present Watch Firestore conformance Go CI job run
 this script and fails on missing/skipped cases. The ordinary strict100% statement
 coverage gate remains required separately; a manual emulator pass is insufficient
 for release. No local module replacement is part of this contract.
+
+The initial cloud polling contract serializes writes through a small project
+revision row. At twenty runners polling every two seconds, an unclaimable queue
+can cause up to forty writer transactions per second (four bounded candidates
+per poll), before scheduling and delivery work. This is an MVP cost and contention
+limit, not a measured throughput or availability guarantee. Queue wakeups reduce
+coordinator idle work; runner polling still needs deployment capacity planning.
+The ordinary CI suite uses a test-only DALGO contract fixture for deterministic
+state and error-path coverage. It rejects physical reads after writes and rolls
+back failed callbacks. Only the separately required, pinned emulator job provides
+Firestore adapter concurrency evidence; the fixture is not a provider substitute.

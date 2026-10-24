@@ -233,21 +233,8 @@ func (t *firestoreSession) ExecuteQueryToRecordsReader(ctx context.Context, quer
 			if left == right {
 				continue
 			}
-			less := false
-			switch a := left.(type) {
-			case int64:
-				b, ok := right.(int64)
-				if !ok {
-					return ids[i] < ids[j]
-				}
-				less = a < b
-			case string:
-				b, ok := right.(string)
-				if !ok {
-					return ids[i] < ids[j]
-				}
-				less = a < b
-			default:
+			less, comparable := cloudScalarLess(left, right)
+			if !comparable {
 				return ids[i] < ids[j]
 			}
 			if order.Descending() {
@@ -266,4 +253,24 @@ func (t *firestoreSession) ExecuteQueryToRecordsReader(ctx context.Context, quer
 		result = append(result, record.NewRecordWithData(record.NewKeyWithID(from.Name(), row.key.ID), copyCloudMap(row.data)))
 	}
 	return dal.NewRecordsReader(result), nil
+}
+
+// Legacy metadata with unlike types uses the stable document-ID fallback.
+func cloudScalarLess(left, right any) (bool, bool) {
+	switch a := left.(type) {
+	case int64:
+		b, ok := right.(int64)
+		if !ok {
+			return false, false
+		}
+		return a < b, true
+	case string:
+		b, ok := right.(string)
+		if !ok {
+			return false, false
+		}
+		return a < b, true
+	default:
+		return false, false
+	}
 }

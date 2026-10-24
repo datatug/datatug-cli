@@ -161,6 +161,9 @@ func (tx *contractFirestoreTX) ExecuteQueryToRecordsReader(ctx context.Context, 
 		return nil, errors.New("contract: query after physical write")
 	}
 	q := query.(dal.StructuredQuery)
+	if prototype := q.IntoRecord(); prototype == nil || prototype.Key().Parent() == nil {
+		return nil, errors.New("contract: private map record factory required")
+	}
 	from := q.From().Base().(dal.CollectionRef)
 	parent := from.Parent()
 	path := record.NewKeyWithParentAndID(parent, from.Name(), "prototype").CollectionPath()

@@ -93,11 +93,9 @@ func (s *Store) reconcileDefinition(ctx context.Context, tx dal.ReadwriteTransac
 		return err
 	}
 	if d.Lifecycle != "enabled" {
-		if s.cloud != nil {
-			obs.Availability = d.Lifecycle
-			return s.save(ctx, tx, observations, d.Scope, d.ID, d.ID, d.Owner, d.Visibility, obs)
-		}
-		return nil
+		// Standalone inactive definitions returned before the observation read.
+		obs.Availability = d.Lifecycle
+		return s.save(ctx, tx, observations, d.Scope, d.ID, d.ID, d.Owner, d.Visibility, obs)
 	}
 	if s.cloud != nil {
 		if obs.Availability == "source_changed" || obs.Availability == "source_unavailable" {

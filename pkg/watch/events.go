@@ -48,7 +48,7 @@ func (s *Store) GetEvent(ctx context.Context, a Actor, id string) (Event, error)
 		return Event{}, ErrInvalid
 	}
 	var result Event
-	err := s.transaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
+	err := s.eventRead(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
 		e, err := read[Event](ctx, tx, events, a.Scope, id)
 		if err != nil {
 			return err
@@ -59,6 +59,9 @@ func (s *Store) GetEvent(ctx context.Context, a Actor, id string) (Event, error)
 		}
 		if !visible(a, d) || !visibleEvent(a, e) {
 			return ErrNotFound
+		}
+		if _, err = s.sourceAdmission(ctx, tx, d, "event"); err != nil {
+			return err
 		}
 		result = e
 		return nil
@@ -75,6 +78,9 @@ func (s *Store) ListEventPage(ctx context.Context, a Actor, watchID, before stri
 	}
 	if watchID == "" || len(watchID) > 128 || len(before) > 128 || limit < 1 || limit > MaxEventPageSize {
 		return nil, "", ErrInvalid
+	}
+	if s.cloud != nil {
+		return s.listCloudEventPage(ctx, a, watchID, before, limit)
 	}
 	result := []Event{}
 	next := ""
@@ -140,7 +146,11 @@ func (s *Store) ListEventPage(ctx context.Context, a Actor, watchID, before stri
 }
 
 func (s *Store) ListEvents(ctx context.Context, a Actor, watchID string) ([]Event, error) {
-	events, _, err := s.ListEventPage(ctx, a, watchID, "", MaxEventPageSize)
+	limit := MaxEventPageSize
+	if s.cloud != nil {
+		limit = 100
+	}
+	events, _, err := s.ListEventPage(ctx, a, watchID, "", limit)
 	return events, err
 }
 
@@ -148,4 +158,13 @@ func (s *Store) ListEvents(ctx context.Context, a Actor, watchID string) ([]Even
 // snapshots. Both snapshot policy and current definition access must allow reads.
 func visibleEvent(a Actor, e Event) bool {
 	return e.Scope == a.Scope && (e.Visibility == "shared" || e.Owner == a.ID)
+}
+
+// Cloud evidence views keep current authority and immutable inputs in one read
+// snapshot, without consuming a coordinator writer gate merely to read history.
+func (s *Store) eventRead(ctx context.Context, fn func(context.Context, dal.ReadwriteTransaction) error) error {
+	if s.cloud != nil {
+		return s.cloud.withRead(ctx, func(ctx context.Context, tx *firestoreSession) error { return fn(ctx, tx) })
+	}
+	return s.transaction(ctx, fn)
 }

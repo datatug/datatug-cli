@@ -29,3 +29,35 @@ retention intentionally grows with meaningful transitions and requires backup;
 operator archival/purge tooling remains a follow-up. Physical execution can
 repeat after lease loss; accepted completion and associated event/outbox writes
 remain fenced and atomic. SQLite coordinator HA remains unsupported.
+
+## Upstream Firestore provider reconciliation (2026-10-24)
+
+Before landing, current main `3e4a9015` added a scoped transactional Firestore
+provider. Source merge preserves its normalization, admission, buffered writes,
+producer hooks, quotas and maintenance together with durable Work integration
+Events. Event timestamps remain immutable; cloud metadata is added afterwards.
+Both storage ADR sections are retained.
+
+Independent review found the existing Event OR/tuple query did not fit the new
+provider's narrow query contract. A scoped Event read now uses two disjoint ACL
+lanes and a signed-sortable timestamp/physical-ID scalar cursor. Current source
+admission and project authorization run in the same read snapshot; historical
+personal inputs remain owner-only. Cloud pages cap at 100 and declare exact
+production index shapes. SQLite retains its existing 1000-entry page limit.
+
+Verified combined-source results: normal Watch, Watchdaemon and daemon suites
+passed; all 44 Firestore top-level tests passed against the existing emulator
+using an isolated demo project, including typed inputs, same-instant cursors,
+private-history filtering, current source revocation/reset, retention and atomic
+producer-hook rollback. No test was skipped. An independent reviewer separately
+ran ten focused Event/privacy/fencing and provider-join tests and checked the
+exact two index declarations. The required CI emulator script now explicitly
+includes and requires both new Event cases; its separately owned emulator is not
+needed for the local shared-emulator run. Production index deployment and cloud
+runtime activation remain separate from this local conformance evidence.
+
+The final combined-source race run against the isolated existing emulator also
+passed (`go test -race ./pkg/watch -run '^TestFirestore(Store|Events)'`;
+17.972 seconds package time, no skips). The shared accepted browser runtime was
+not restarted or mutated for provider conformance. Its earlier pinned binary
+receipt remains distinct from this newer merged source.

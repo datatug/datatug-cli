@@ -304,3 +304,33 @@ jobs:
           name: mcp-apps-browser
           path: ${{ runner.temp }}/mcp-apps-browser-artifacts
           if-no-files-found: error
+
+  watch-firestore:
+    name: Watch Firestore conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Authenticate private Core dependency
+        uses: ./.github/actions/private-core
+        with:
+          private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: '1.27.3'
+          cache: true
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Run pinned emulator with owned teardown
+        env:
+          WATCH_FIRESTORE_ARTIFACTS: ${{ runner.temp }}/watch-firestore
+        run: ./scripts/check-watch-firestore.sh
+      - name: Upload transaction evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: watch-firestore
+          path: ${{ runner.temp }}/watch-firestore
+          if-no-files-found: error

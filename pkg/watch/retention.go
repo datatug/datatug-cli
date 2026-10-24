@@ -37,7 +37,7 @@ func (s *Store) prune(ctx context.Context, tx dal.ReadwriteTransaction) error {
 				return e
 			}
 			m := r.Data().(map[string]any)
-			candidate := row{id: m["id"].(string), updated: m["updated"].(int64), payload: m["payload"].(string)}
+			candidate := row{id: r.Key().ID.(string), updated: m["updated"].(int64), payload: m["payload"].(string)}
 			switch table {
 			case runs:
 				var run Run

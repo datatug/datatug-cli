@@ -276,7 +276,7 @@ passing transport tests alone does not establish that demo acceptance.
 
 `GET /v1/watch/events?watchId=<id>&limit=100` returns
 `{"events":[...],"nextCursor":"<event-id-or-empty>"}` newest first. Follow with
-`before=<nextCursor>` for another page; limit must be 1–1000. Ties have stable
+`before=<nextCursor>` for another page; limit must be 1–1000 for SQLite or 1–100 for the scoped Firestore provider. Ties have stable
 ID ordering. `GET /v1/watch/event?id=<id>` returns `{"event":{...}}`. Both require
 the existing user bearer credential and enforce its exact namespace, project,
 environment and current Watch visibility. Runners cannot read these routes.

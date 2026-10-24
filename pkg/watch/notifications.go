@@ -16,17 +16,44 @@ func (s *Store) notify(ctx context.Context, tx dal.ReadwriteTransaction, d Defin
 	if err != nil {
 		return false, err
 	}
-	existing, e := list[Delivery](ctx, tx, outbox, Scope{Namespace: s.config.Namespace}, "")
-	if e != nil {
-		return false, e
+	backlog := 0
+	if s.cloud != nil {
+		backlog = int(tx.(*firestoreSession).backlog())
+	} else {
+		existing, e := list[Delivery](ctx, tx, outbox, Scope{Namespace: s.config.Namespace}, "")
+		if e != nil {
+			return false, e
+		}
+		backlog = len(existing)
 	}
-	if len(existing)+len(subs)*4 > 10000 {
-		return false, fmt.Errorf("%w: notification backlog capacity reached", ErrInvalid)
+	if backlog+len(subs)*4 > 10000 {
+		return false, fmt.Errorf("%w: notification backlog capacity reached", ErrCapacity)
 	}
 	recorded := false
 	for _, sub := range subs {
 		if sub.Unsubscribed || d.Visibility == "personal" && sub.UserID != d.Owner {
 			continue
+		}
+		if s.cloud != nil {
+			authority, e := s.recipientAdmission(ctx, tx, d, sub.UserID)
+			if errors.Is(e, ErrForbidden) || errors.Is(e, ErrNotFound) {
+				continue
+			}
+			if e != nil {
+				return false, e
+			}
+			if authority.AccountID != sub.AccountID {
+				continue
+			}
+			// Existing consent is address-bound; a changed address requires new consent.
+			filtered := make([]string, 0, len(sub.Channels))
+			for _, channel := range sub.Channels {
+				if channel == "email" && authority.Email != sub.Email || channel == "sms" && (!authority.Paid || authority.Phone != sub.Phone) {
+					continue
+				}
+				filtered = append(filtered, channel)
+			}
+			sub.Channels = filtered
 		}
 		if len(sub.NotifyOn) > 0 {
 			allowed := false
@@ -79,19 +106,42 @@ func (s *Store) notify(ctx context.Context, tx dal.ReadwriteTransaction, d Defin
 			recorded = true
 		}
 	}
+	if recorded && s.cloud != nil {
+		s.workReady(tx, WorkEvent{Scope: d.Scope, ID: stable("outbox", d.Namespace, d.Project, d.Environment, r.ID), Kind: "WatchOutboxReady", WatchID: d.ID, RunID: r.ID})
+	}
 	return recorded, nil
 }
 func (s *Store) GetSubscription(ctx context.Context, a Actor, watchID string) (Subscription, error) {
+	if s.cloud != nil && !s.inReadView(ctx) {
+		var result Subscription
+		err := s.readView(ctx, func(ctx context.Context) error { var e error; result, e = s.GetSubscription(ctx, a, watchID); return e })
+		if err != nil {
+			var zero Subscription
+			return zero, err
+		}
+		return result, nil
+	}
+
 	if _, err := s.GetDefinition(ctx, a, watchID); err != nil {
 		return Subscription{}, err
 	}
 	return read[Subscription](ctx, s.db, subscriptions, a.Scope, stable(watchID, a.ID))
 }
 func (s *Store) ListDeliveries(ctx context.Context, a Actor, watchID string) ([]Delivery, error) {
+	if s.cloud != nil && !s.inReadView(ctx) {
+		var result []Delivery
+		err := s.readView(ctx, func(ctx context.Context) error { var e error; result, e = s.ListDeliveries(ctx, a, watchID); return e })
+		if err != nil {
+			var zero []Delivery
+			return zero, err
+		}
+		return result, nil
+	}
+
 	if _, err := s.GetDefinition(ctx, a, watchID); err != nil {
 		return nil, err
 	}
-	items, err := list[Delivery](ctx, s.db, outbox, a.Scope, watchID)
+	items, err := viewItems[Delivery](ctx, s, outbox, a.Scope, watchID, a.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -125,6 +175,9 @@ func (s *Store) reserveQuota(ctx context.Context, tx dal.ReadwriteTransaction, d
 	}
 	now := s.now()
 	scope := Scope{Namespace: s.config.Namespace, Project: "_accounts", Environment: "_quota"}
+	if s.cloud != nil {
+		scope.Namespace = s.cloud.options.AccountNamespace
+	}
 	ids := []string{stable(d.AccountID, d.Channel, now.Format("2006-01-02")), stable(d.AccountID, d.Channel, now.Format("2006-01-02T15:04"))}
 	limits := []int{daily, minute}
 	counters := make([]quota, 2)
@@ -171,7 +224,7 @@ func (s *Store) claimNotifications(ctx context.Context, identity *RunnerIdentity
 				return err
 			}
 		}
-		items, err := list[Delivery](ctx, tx, outbox, Scope{Namespace: s.config.Namespace}, "")
+		items, err := s.deliveryCandidates(ctx, tx, "", identity)
 		if err != nil {
 			return err
 		}
@@ -204,7 +257,10 @@ func (s *Store) claimNotifications(ctx context.Context, identity *RunnerIdentity
 			}
 			valid = valid && channelEnabled
 			if item.Channel == "sms" {
-				valid = valid && s.config.IsPaidAccount != nil && s.config.IsPaidAccount(item.AccountID) && sub.Phone == item.Phone
+				valid = valid && sub.Phone == item.Phone
+				if s.cloud == nil {
+					valid = valid && s.config.IsPaidAccount != nil && s.config.IsPaidAccount(item.AccountID)
+				}
 			}
 			if item.Channel == "email" {
 				valid = valid && sub.Email == item.Email
@@ -215,6 +271,27 @@ func (s *Store) claimNotifications(ctx context.Context, identity *RunnerIdentity
 					return e
 				}
 				valid = valid && e == nil && link.FailureCode == "" && link.Generation == item.TelegramLinkGeneration && link.ChatID == item.TelegramChatID && link.BotID == item.TelegramBotID && sub.TelegramBotID == item.TelegramBotID && (link.ExpiresAt.IsZero() || link.ExpiresAt.After(now))
+			}
+			if s.cloud != nil && valid {
+				_, e := s.sourceAdmission(ctx, tx, d, "notification")
+				if errors.Is(e, ErrForbidden) || errors.Is(e, ErrNotFound) || errors.Is(e, ErrConflict) {
+					valid = false
+				} else if e != nil {
+					return e
+				}
+				authority, e := s.recipientAdmission(ctx, tx, d, item.UserID)
+				if errors.Is(e, ErrForbidden) || errors.Is(e, ErrNotFound) {
+					valid = false
+				} else if e != nil {
+					return e
+				}
+				valid = valid && authority.AccountID == item.AccountID
+				if item.Channel == "sms" {
+					valid = valid && authority.Paid && authority.Phone == item.Phone
+				}
+				if item.Channel == "email" {
+					valid = valid && authority.Email == item.Email
+				}
 			}
 			if !valid {
 				item.State = "cancelled"
@@ -287,7 +364,7 @@ func (s *Store) finishNotification(ctx context.Context, identity *RunnerIdentity
 				return err
 			}
 		}
-		items, err := list[Delivery](ctx, tx, outbox, Scope{Namespace: s.config.Namespace}, "")
+		items, err := s.deliveryCandidates(ctx, tx, id, identity)
 		if err != nil {
 			return err
 		}
@@ -372,6 +449,9 @@ func (s *Store) RetryNotification(ctx context.Context, a Actor, id string) error
 		if err = s.save(ctx, tx, outbox, item.Scope, id, item.WatchID, a.ID, "", item); err != nil {
 			return err
 		}
+		if s.cloud != nil {
+			s.workReady(tx, WorkEvent{Scope: item.Scope, ID: stable("retry", item.Namespace, item.Project, item.Environment, item.ID, fmt.Sprint(item.Fence)), Kind: "WatchDeliveryRetried", WatchID: item.WatchID, RunID: item.RunID})
+		}
 		return s.log(ctx, tx, a.Scope, a.ID, "notification.retry", id)
 	})
 }
@@ -396,6 +476,9 @@ func (s *Store) invalidateTelegramRecipient(ctx context.Context, tx dal.Readwrit
 			return err
 		}
 	}
+	if s.cloud != nil {
+		return nil
+	} // Other pending deliveries are revoked by the generation check at claim.
 	deliveries, err := list[Delivery](ctx, tx, outbox, failed.Scope, "")
 	if err != nil {
 		return err

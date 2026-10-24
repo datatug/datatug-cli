@@ -214,3 +214,128 @@ allows test wrappers to inject adapter failures while delegating successful call
 to the actual SQLite DALGO database; the production constructor remains fixed.
 These storage tests do not claim that a
 browser, remote runner, SMTP/SMS/Telegram provider or public deployment passed.
+
+## Cloud Firestore storage gate (2026-10-24)
+
+`NewFirestoreStore` reuses the same Watch state machine with the released
+`dalgo2firestore v0.10.40` (`66001941a2ef64bd7f08a0b7cac25ed30bee455d`).
+The old v0.10.3 exposed database-bound queries inside its transaction wrapper;
+the selected release binds queries to the actual Firestore transaction. A real
+emulator conformance gate proves independent-client contention, rollback,
+completion replay, restart, bounded scheduling and maximum transition fanout.
+This establishes storage behavior; it does not claim production deployment,
+provider delivery, billing integration or availability guarantees.
+
+The service owns the DALGO database/client. Store.Close leaves it open.
+ProjectKey is the canonical authorization/source-metadata anchor, while
+StorageRoot is a separately protected server-only project container. The
+constructor refuses private roots beneath ProjectKey. In Sneat deployment,
+use the rules-excluded detectiveProjects subtree, never the recursively
+member-readable projects subtree. Namespace is a server-derived Space/store
+identity; ProjectID and both keys are trusted server configuration.
+
+AccountRoot and optional AccountNamespace anchor account/channel quota counters.
+Use the same private root and fixed deployment AccountNamespace across projects
+and Spaces when one billing account has access to several Spaces. Empty
+AccountNamespace preserves namespace/account limits. Telegram bot bindings and
+poll leases remain separately partitioned by the project authorization namespace;
+the global quota namespace never broadens bot routing. Recipient account ID,
+verified addresses and current paid status come from AdmitRecipient inside the
+transaction. SMS requires its fresh paid proof at consent, generation and claim.
+
+Every Firestore transaction authorizes in its own snapshot. Mandatory callbacks
+recheck definition owner/current source, runner source grants and each recipient.
+The definition admission callback returns a canonical immutable SourceRevision;
+request hashes cannot grant access. Save/Reset can admit a new revision, while
+claim/lease/reconcile/revalidate/notification compare the current canonical pin.
+The backend builds its immutable execution bundle with WithClaim in the same
+read transaction as current lease, owner, source and runner admission. A separate
+GetClaim followed by an unrelated source read is insufficient for disclosure.
+
+A private transaction-local overlay provides read-your-writes for the narrow
+CRUD/equality/range query shapes used by Watch. It retains separate queryable
+rows, performs every physical read before flush, and queues only DALGO writes.
+Each SDK retry allocates a fresh overlay; callbacks may repeat and must not
+publish or perform other external effects. The project revision row serializes
+empty-query/capacity decisions without storing project state in one document.
+Callbacks receive the raw transaction and must independently bound source graph
+and authority reads. The 2,000-read overlay budget does not count those callbacks.
+The overlay reserves 400 writes and 4 MiB including the gate and bounded producer
+records. These conservative budgets are not claimed Firestore API maxima.
+
+DefinitionChanged stages one deterministic metadata producer event per changed
+Watch version. WorkReady stages one deterministic wakeup per newly accepted
+notification-generating run. Both callbacks may only insert one record of at most
+1 KiB, may not read or publish, and share the result/definition transaction.
+A callback error rolls back state and event together. Completion/operation replay
+does not create another logical event. Explicit delivery retries and consent/provider
+revocations also stage WorkReady metadata with their own mutation fence. Backend CloudTasks/PubSub wakeups consume
+that durable producer outbox; Firestore remains authoritative even if messages
+are delayed, duplicated or lost before catchup.
+
+Cloud limits are 100 nondeleted definitions per project, 100 retained terminal
+records per table (default100, configurable downward), 50 subscriptions per
+Watch, four channels per subscriber, 100 runner status records, 10,000 pending
+outbox records and the transaction budgets above. ReconcileScope inspects at
+most20 due observations, each in a separate transaction. An active execution
+advances only scheduling eligibility, preserving its logical execution ID and
+allowing later Watches to progress. ClaimDue admits one candidate per transaction, committing a durable per-runner
+document-ID cursor even when the candidate lacks grants or exceeds its admission
+budget. At most four such transactions share one call deadline, so an expensive
+or unauthorized earlier candidate cannot starve a later eligible Watch. Cursor
+metadata survives registration refresh and Store restarts. Delivery queries first constrain lane and scope, then select at
+most16 due candidates. Telegram is a runner-owned lane; coordinator tasks do
+not claim its messages. A single transition for50 subscribers ×4 channels
+commits200 outbox records and50 inbox records with its baseline/result.
+
+Cloud history views return the newest configured history limit; inbox, delivery,
+subscription, history and status reads recheck current Watch visibility in one
+snapshot. Prune deletes a bounded batch of terminal history/expired helpers;
+pending work is not selected. Explicit capacity refusal maps to the sanitized
+CAPACITY_REACHED response; failed acceptance leaves its baseline/outbox unchanged.
+Deleted definitions release the live cap immediately. After24h, bounded maintenance
+removes their consent/observation payloads and retains a compact ID/owner/version
+tombstone; a deleted identifier cannot be recreated with a reset version.
+No query silently treats an unbounded collection truncated at256 rows as complete.
+
+Definitive missing/forbidden sources or a changed revision fence active jobs,
+preserve the last known boolean, and expose source_unavailable/source_changed.
+Scheduling stops until an explicit Save/Reset admits the reviewed source. Network,
+storage and timeout errors abort and retry without permanently blocking the Watch.
+RevalidateSources checks at most20 definitions after an opaque document-ID cursor;
+a source-change consumer persists its continuation before acknowledging the event.
+An empty routing environment covers all project environments. NextWakeup derives
+the nearest scheduling/coordinator-delivery time; no enabled/pending work means
+no further coordinator task. WorkReady avoids waiting a long Watch interval for
+an accepted notification to wake delivery.
+
+The physical query plan is collection-scoped beneath its private parent. Validated
+namespace/project predicates are already encoded in that path and omitted from
+physical filters; every returned row still validates its stored scope. Required
+composites are enumerated in [watch-firestore.indexes.json](watch-firestore.indexes.json).
+This is an integration artifact: the deployed source of truth is
+`sneat-co/sneat-firebase/firebase/firestore.indexes.json`. Single-field resource,
+ready, environment and document-ID queries also require their default indexes.
+The emulator does not enforce production missing-index errors. Deploy indexes and
+verify the actual production query shapes before enabling cloud routing.
+
+Run `./scripts/check-watch-firestore.sh` to own an isolated loopback emulator,
+verify the pinned v1.22.0 jar digest, execute the real race tests in a demo-* project
+and tear down the child process. Java21, Python3, curl and Go are required.
+WATCH_FIRESTORE_EMULATOR_JAR can select the already downloaded pinned jar;
+WATCH_FIRESTORE_ARTIFACTS retains lifecycle/test evidence outside the temporary
+emulator directory. The always-present Watch Firestore conformance Go CI job runs
+this script and fails on missing/skipped cases. The ordinary strict100% statement
+coverage gate remains required separately; a manual emulator pass is insufficient
+for release. No local module replacement is part of this contract.
+
+The initial cloud polling contract serializes writes through a small project
+revision row. At twenty runners polling every two seconds, an unclaimable queue
+can cause up to forty writer transactions per second (four bounded candidates
+per poll), before scheduling and delivery work. This is an MVP cost and contention
+limit, not a measured throughput or availability guarantee. Queue wakeups reduce
+coordinator idle work; runner polling still needs deployment capacity planning.
+The ordinary CI suite uses a test-only DALGO contract fixture for deterministic
+state and error-path coverage. It rejects physical reads after writes and rolls
+back failed callbacks. Only the separately required, pinned emulator job provides
+Firestore adapter concurrency evidence; the fixture is not a provider substitute.

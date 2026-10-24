@@ -33,6 +33,38 @@ func (s *Server) RunCoordinator(ctx context.Context, interval time.Duration) err
 	}
 }
 
+// RunCoordinatorTick performs one bounded wakeup for a request-owned cloud
+// instance. Durable jobs, claims and delivery acknowledgements stay in Store;
+// retries or duplicate queue messages do not create another evaluation engine.
+func (s *Server) RunCoordinatorTick(ctx context.Context, maxDeliveries int) error {
+	if s.Store == nil || maxDeliveries < 1 || maxDeliveries > 50 {
+		return watch.ErrInvalid
+	}
+	if err := s.Store.Reconcile(ctx); err != nil {
+		return err
+	}
+	for count := 0; count < maxDeliveries; count++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		delivery, err := s.Store.ClaimNotifications(ctx)
+		if err != nil {
+			return err
+		}
+		if delivery == nil {
+			return nil
+		}
+		failure := ""
+		if err := s.deliver(ctx, *delivery); err != nil {
+			failure = "DELIVERY_FAILED"
+		}
+		if err := s.Store.FinishNotification(ctx, delivery.ID, delivery.Fence, failure); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Server) runDeliveries(ctx context.Context, interval time.Duration) {
 	for ctx.Err() == nil {
 		for count := 0; count < 50 && ctx.Err() == nil; count++ {
@@ -61,7 +93,7 @@ func (s *Server) runDeliveries(ctx context.Context, interval time.Duration) {
 func (s *Server) notificationText(n watch.Notification) string {
 	text := "A DataTug Watch condition changed. Open DataTug to view the Watch and its execution history."
 	configured := s.ProjectUIURLs[n.Project]
-	if configured == "" && s.Auth != nil {
+	if configured == "" && s.Auth != nil && s.ResolveCredential == nil {
 		projects := map[string]bool{}
 		for _, entry := range s.Auth.entries {
 			projects[entry.credential.Project] = true
@@ -81,6 +113,9 @@ func (s *Server) notificationText(n watch.Notification) string {
 	// child route ourselves; never forward a URL, title or raw error from data.
 	projectPath := strings.TrimRight(base.Path, "/")
 	base.Path = projectPath + "/watch/" + n.WatchID
+	query := base.Query()
+	query.Set("env", n.Environment)
+	base.RawQuery = query.Encode()
 	text += "\n\n" + base.String()
 	// Extract only a validated Check identifier from the state-generated relative
 	// locator. Construct the URL from deployment authority; never forward raw URLs.

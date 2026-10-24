@@ -51,6 +51,8 @@ type NotificationPolicy struct {
 	Recovery        bool `json:"recovery"`
 }
 type Definition struct {
+	// SourceRevision is a canonical cloud admission pin, not a client grant.
+	SourceRevision    string `json:"sourceRevision,omitempty"`
 	SourceFingerprint string `json:"sourceFingerprint,omitempty"`
 	Scope
 	ID                 string                          `json:"id"`
@@ -134,6 +136,7 @@ type Claim struct {
 	Definition Definition `json:"definition"`
 }
 type Completion struct {
+	SourceRevision    string `json:"sourceRevision,omitempty"`
 	SourceFingerprint string `json:"sourceFingerprint,omitempty"`
 	ClaimID           string `json:"claimId"`
 	RunID             string `json:"runId"`

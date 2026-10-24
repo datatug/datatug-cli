@@ -40,14 +40,17 @@ type CoordinatorStore interface {
 }
 
 type Server struct {
-	Store          CoordinatorStore
-	Auth           *Authenticator
-	AllowedOrigins []string
-	Email          EmailSender
-	SMS            SMSSender
-	PublicUIURL    string
-	ProjectUIURLs  map[string]string
-	Limits         Limits
+	// ResolveCredential is exclusive when configured. A cloud resolver failure
+	// must never fall back to deployment tokens in Auth.
+	ResolveCredential func(*http.Request, string) (Credential, error)
+	Store             CoordinatorStore
+	Auth              *Authenticator
+	AllowedOrigins    []string
+	Email             EmailSender
+	SMS               SMSSender
+	PublicUIURL       string
+	ProjectUIURLs     map[string]string
+	Limits            Limits
 }
 
 type apiError struct {
@@ -70,6 +73,8 @@ func fail(w http.ResponseWriter, err error) {
 		status, code, message = 404, "NOT_FOUND", "Watch resource unavailable"
 	case errors.Is(err, watch.ErrConflict), errors.Is(err, watch.ErrStaleLease):
 		status, code, message = 409, "CONFLICT", "Watch changed or lease expired"
+	case errors.Is(err, watch.ErrCapacity):
+		status, code, message = 429, "CAPACITY_REACHED", "Watch storage or subscription limit reached"
 	case errors.Is(err, watch.ErrInvalid):
 		status, code, message = 400, "INVALID_REQUEST", "Invalid Watch request"
 	}
@@ -141,7 +146,23 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(path, "runner/") {
 		kind = "runner"
 	}
-	credential, ok := s.Auth.Authenticate(r, kind)
+	var credential Credential
+	var ok bool
+	if s.ResolveCredential != nil {
+		var err error
+		credential, err = s.ResolveCredential(r, kind)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		if credential.Kind != kind || credential.ID == "" || credential.Namespace == "" || credential.Project == "" || credential.Environment == "" {
+			fail(w, watch.ErrForbidden)
+			return
+		}
+		ok = true
+	} else {
+		credential, ok = s.Auth.Authenticate(r, kind)
+	}
 	if !ok {
 		reply(w, 401, map[string]any{"error": apiError{"UNAUTHENTICATED", "Watch authentication required"}})
 		return
@@ -178,7 +199,7 @@ func (s *Server) userRequest(w http.ResponseWriter, r *http.Request, path string
 		if limitsErr != nil {
 			err = limitsErr
 		}
-		result = map[string]any{"id": c.ID, "namespace": c.Namespace, "project": c.Project, "environment": c.Environment, "sharedEditor": c.SharedEditor, "tier": c.Tier, "telegramConnected": provider.Connected, "channels": map[string]bool{"in_app": true, "email": c.Email != "" && s.Email != nil, "sms": c.Tier == "paid" && c.Phone != "" && s.SMS != nil, "telegram": provider.BotID != ""}, "limits": limits}
+		result = map[string]any{"id": c.ID, "hosted": c.Hosted, "spaceID": c.SpaceID, "canManageRunners": c.CanManageRunners, "namespace": c.Namespace, "project": c.Project, "environment": c.Environment, "sharedEditor": c.SharedEditor, "tier": c.Tier, "telegramConnected": provider.Connected, "channels": map[string]bool{"in_app": true, "email": c.Email != "" && s.Email != nil, "sms": c.Tier == "paid" && c.Phone != "" && s.SMS != nil, "telegram": provider.BotID != ""}, "limits": limits}
 	case path == "definitions" && r.Method == "GET":
 		var list []watch.Definition
 		list, err = s.Store.ListDefinitions(r.Context(), a)

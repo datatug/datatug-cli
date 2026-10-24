@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -14,6 +15,21 @@ func (s *Store) RegisterRunner(ctx context.Context, identity RunnerIdentity) err
 		return ErrForbidden
 	}
 	return s.transaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
+		if s.cloud != nil {
+			rows, e := cloudRecords(ctx, tx, cloudQuery(runners, Scope{Namespace: s.config.Namespace}, "", nil, 101))
+			if e != nil {
+				return e
+			}
+			if len(rows) >= 100 {
+				exists, e := tx.Exists(ctx, key(runners, identity.Scope, identity.ID))
+				if e != nil {
+					return e
+				}
+				if !exists {
+					return ErrCapacity
+				}
+			}
+		}
 		if err := s.registerTelegramProvider(ctx, tx, identity); err != nil {
 			return err
 		}
@@ -47,6 +63,13 @@ func eligible(r RunnerIdentity, d Definition) bool {
 // Missed intervals coalesce to the first evaluation after service resumes; a job
 // keeps its stable ID over retries and restarts. Claiming is a separate operation.
 func (s *Store) Reconcile(ctx context.Context) error {
+	if s.cloud != nil {
+		_, err := s.ReconcileScope(ctx, Scope{Namespace: s.config.Namespace, Project: s.cloud.options.ProjectID}, 20)
+		if err != nil {
+			return err
+		}
+		return s.Prune(ctx, 10)
+	}
 	return s.transaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
 		defs, err := list[Definition](ctx, tx, definitions, Scope{Namespace: s.config.Namespace}, "")
 		if err != nil {
@@ -54,50 +77,88 @@ func (s *Store) Reconcile(ctx context.Context) error {
 		}
 		now := s.now()
 		for _, d := range defs {
-			if d.Lifecycle != "enabled" {
-				continue
-			}
-			obs, err := read[Observation](ctx, tx, observations, d.Scope, d.ID)
-			if err != nil {
-				return err
-			}
-			jobs, err := list[Run](ctx, tx, runs, d.Scope, d.ID)
-			if err != nil {
-				return err
-			}
-			active := false
-			for _, r := range jobs {
-				if r.State == "due" || r.State == "retry" || r.State == "running" {
-					active = true
-					break
-				}
-			}
-			if active || obs.NextEvaluation.After(now) {
-				continue
-			}
-			id := stable(d.Namespace, d.Project, d.Environment, d.ID, fmt.Sprint(d.Version), obs.NextEvaluation.Format(time.RFC3339Nano))
-			r := Run{Scope: d.Scope, ID: id, WatchID: d.ID, DefinitionVersion: d.Version, DueAt: obs.NextEvaluation, State: "due"}
-			if err = s.save(ctx, tx, runs, r.Scope, r.ID, r.WatchID, "", "", r); err != nil {
-				return err
-			}
-			obs.NextEvaluation = now.Add(time.Duration(d.Schedule.IntervalSeconds) * time.Second)
-			obs.Availability = "waiting"
-			if err = s.save(ctx, tx, observations, d.Scope, d.ID, d.ID, d.Owner, d.Visibility, obs); err != nil {
+			if err := s.reconcileDefinition(ctx, tx, d, now); err != nil {
 				return err
 			}
 		}
 		return s.prune(ctx, tx)
 	})
 }
+func (s *Store) reconcileDefinition(ctx context.Context, tx dal.ReadwriteTransaction, d Definition, now time.Time) error {
+	if s.cloud == nil && d.Lifecycle != "enabled" {
+		return nil
+	}
+	obs, err := read[Observation](ctx, tx, observations, d.Scope, d.ID)
+	if err != nil {
+		return err
+	}
+	if d.Lifecycle != "enabled" {
+		// Standalone inactive definitions returned before the observation read.
+		obs.Availability = d.Lifecycle
+		return s.save(ctx, tx, observations, d.Scope, d.ID, d.ID, d.Owner, d.Visibility, obs)
+	}
+	if s.cloud != nil {
+		if obs.Availability == "source_changed" || obs.Availability == "source_unavailable" {
+			return nil
+		}
+		if _, e := s.sourceAdmission(ctx, tx, d, "reconcile"); e != nil {
+			if sourceBlocked(e) {
+				return s.blockSource(ctx, tx, d, e)
+			}
+			return e
+		}
+	}
+	jobs, err := s.activeRuns(ctx, tx, d.Scope, d.ID)
+	if err != nil {
+		return err
+	}
+	active := false
+	for _, r := range jobs {
+		if r.State == "due" || r.State == "retry" || r.State == "running" {
+			active = true
+			break
+		}
+	}
+	if obs.NextEvaluation.After(now) {
+		return nil
+	}
+	if active {
+		if s.cloud != nil {
+			obs.NextEvaluation = now.Add(time.Duration(d.Schedule.IntervalSeconds) * time.Second)
+			return s.save(ctx, tx, observations, d.Scope, d.ID, d.ID, d.Owner, d.Visibility, obs)
+		}
+		return nil
+	}
+	id := stable(d.Namespace, d.Project, d.Environment, d.ID, fmt.Sprint(d.Version), obs.NextEvaluation.Format(time.RFC3339Nano))
+	r := Run{Scope: d.Scope, ID: id, WatchID: d.ID, DefinitionVersion: d.Version, DueAt: obs.NextEvaluation, State: "due"}
+	if err := s.save(ctx, tx, runs, r.Scope, r.ID, r.WatchID, "", "", r); err != nil {
+		return err
+	}
+	obs.NextEvaluation = now.Add(time.Duration(d.Schedule.IntervalSeconds) * time.Second)
+	obs.Availability = "waiting"
+	return s.save(ctx, tx, observations, d.Scope, d.ID, d.ID, d.Owner, d.Visibility, obs)
+}
 func (s *Store) ClaimDue(ctx context.Context, identity RunnerIdentity) (*Claim, error) {
+	if s.cloud != nil {
+		return s.claimCloudDue(ctx, identity)
+	}
+	return s.claimDueAttempt(ctx, identity, nil)
+}
+func (s *Store) claimDueAttempt(ctx context.Context, identity RunnerIdentity, progress *cloudClaimProgress) (*Claim, error) {
 	if identity.ID == "" || !s.validScope(identity.Scope) {
 		return nil, ErrForbidden
 	}
 	var result *Claim
 	err := s.transaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
 		result = nil
+		if progress != nil {
+			*progress = cloudClaimProgress{}
+		}
 		registered, err := read[Runner](ctx, tx, runners, identity.Scope, identity.ID)
 		if err != nil {
+			if s.cloud != nil && !errors.Is(err, ErrNotFound) {
+				return err
+			}
 			return ErrForbidden
 		}
 		now := s.now()
@@ -109,7 +170,12 @@ func (s *Store) ClaimDue(ctx context.Context, identity RunnerIdentity) (*Claim, 
 		if err = s.save(ctx, tx, runners, identity.Scope, identity.ID, "", identity.ID, "", registered); err != nil {
 			return err
 		}
-		jobs, err := list[Run](ctx, tx, runs, identity.Scope, "")
+		var jobs []Run
+		if s.cloud != nil {
+			jobs, err = s.cloudClaimJobs(ctx, tx, identity, progress)
+		} else {
+			jobs, err = list[Run](ctx, tx, runs, identity.Scope, "")
+		}
 		if err != nil {
 			return err
 		}
@@ -135,6 +201,28 @@ func (s *Store) ClaimDue(ctx context.Context, identity RunnerIdentity) (*Claim, 
 			}
 			if !eligible(identity, d) {
 				continue
+			}
+			if s.cloud != nil {
+				if _, e := s.sourceAdmission(ctx, tx, d, "claim"); e != nil {
+					if !sourceBlocked(e) {
+						progress.admissionError = e
+						return nil
+					}
+					if e = s.blockSource(ctx, tx, d, e); e != nil {
+						return e
+					}
+					continue
+				}
+			}
+			if s.cloud != nil {
+				allowed, e := s.runnerAdmission(ctx, tx, d, identity)
+				if e != nil {
+					progress.admissionError = e
+					return nil
+				}
+				if !allowed {
+					continue
+				}
 			}
 			if r.Attempts >= s.config.MaxAttempts {
 				r.State = "failed"
@@ -187,7 +275,10 @@ func (s *Store) ClaimDue(ctx context.Context, identity RunnerIdentity) (*Claim, 
 		}
 		return nil
 	})
-	return result, err
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 func (s *Store) leased(ctx context.Context, tx dal.ReadwriteTransaction, identity RunnerIdentity, id string, fence int64) (Run, Definition, error) {
 	if identity.ID == "" || !s.validScope(identity.Scope) {
@@ -195,6 +286,9 @@ func (s *Store) leased(ctx context.Context, tx dal.ReadwriteTransaction, identit
 	}
 	r, err := read[Run](ctx, tx, runs, identity.Scope, id)
 	if err != nil {
+		if s.cloud != nil && !errors.Is(err, ErrNotFound) {
+			return r, Definition{}, err
+		}
 		return r, Definition{}, ErrStaleLease
 	}
 	d, err := read[Definition](ctx, tx, definitions, identity.Scope, r.WatchID)
@@ -204,6 +298,18 @@ func (s *Store) leased(ctx context.Context, tx dal.ReadwriteTransaction, identit
 	now := s.now()
 	if d.Lifecycle != "enabled" || d.Version != r.DefinitionVersion || !eligible(identity, d) || r.State != "running" || r.RunnerID != identity.ID || r.Fence != fence || !r.LeaseUntil.After(now) || !r.Deadline.After(now) {
 		return r, d, ErrStaleLease
+	}
+	if s.cloud != nil {
+		allowed, e := s.runnerAdmission(ctx, tx, d, identity)
+		if e != nil {
+			return r, d, e
+		}
+		if !allowed {
+			return r, d, ErrForbidden
+		}
+	}
+	if _, err := s.sourceAdmission(ctx, tx, d, "lease"); err != nil {
+		return r, d, err
 	}
 	return r, d, nil
 }
@@ -229,7 +335,10 @@ func (s *Store) Heartbeat(ctx context.Context, identity RunnerIdentity, id strin
 	})
 }
 func completionDigest(c Completion) string {
-	return stable(c.ClaimID, c.RunID, fmt.Sprint(c.Fence), c.ExecutionStatus, c.Outcome, c.Severity, fmt.Sprint(c.DurationMS), c.CheckRunRef, c.FailureCode, c.SourceFingerprint)
+	if c.SourceRevision == "" {
+		return stable(c.ClaimID, c.RunID, fmt.Sprint(c.Fence), c.ExecutionStatus, c.Outcome, c.Severity, fmt.Sprint(c.DurationMS), c.CheckRunRef, c.FailureCode, c.SourceFingerprint)
+	}
+	return stable(c.ClaimID, c.RunID, fmt.Sprint(c.Fence), c.ExecutionStatus, c.Outcome, c.Severity, fmt.Sprint(c.DurationMS), c.CheckRunRef, c.FailureCode, c.SourceFingerprint, c.SourceRevision)
 }
 func (s *Store) FinishRun(ctx context.Context, identity RunnerIdentity, c Completion) (Run, error) {
 	if identity.ID == "" || !s.validScope(identity.Scope) {
@@ -260,6 +369,26 @@ func (s *Store) FinishRun(ctx context.Context, identity RunnerIdentity, c Comple
 			return err
 		}
 		if existing.CompletionHash != "" && existing.Fence == c.Fence && existing.RunnerID == identity.ID {
+			if s.cloud != nil {
+				d, e := read[Definition](ctx, tx, definitions, existing.Scope, existing.WatchID)
+				if e != nil {
+					return e
+				}
+				if existing.DefinitionVersion != d.Version || c.SourceRevision != d.SourceRevision {
+					return ErrConflict
+				}
+				if _, e = s.sourceAdmission(ctx, tx, d, "lease"); e != nil {
+					return e
+				}
+				allowed, e := s.runnerAdmission(ctx, tx, d, identity)
+				if e != nil {
+					return e
+				}
+				if !allowed {
+					return ErrForbidden
+				}
+			}
+
 			if existing.CompletionHash != completionDigest(c) {
 				return ErrConflict
 			}
@@ -269,6 +398,9 @@ func (s *Store) FinishRun(ctx context.Context, identity RunnerIdentity, c Comple
 		r, d, err := s.leased(ctx, tx, identity, c.ClaimID, c.Fence)
 		if err != nil {
 			return err
+		}
+		if s.cloud != nil && c.SourceRevision != d.SourceRevision {
+			return ErrConflict
 		}
 		obs, err := read[Observation](ctx, tx, observations, d.Scope, d.ID)
 		if err != nil {
@@ -372,6 +504,6 @@ func (s *Store) FinishRun(ctx context.Context, identity RunnerIdentity, c Comple
 
 // Health reads persisted storage, so an unavailable file is not reported healthy.
 func (s *Store) Health(ctx context.Context) error {
-	_, err := list[Runner](ctx, s.db, runners, Scope{Namespace: s.config.Namespace}, "")
+	_, err := viewItems[Runner](ctx, s, runners, Scope{Namespace: s.config.Namespace}, "", "")
 	return err
 }

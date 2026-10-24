@@ -1,0 +1,15 @@
+{
+  ".specscore/events.jsonl": "e38732fb2974fbb1380b25ac02bebf4805fc97f76f29b13e5b945ab66fee4214",
+  "pkg/mcpserver/app/index.html": "fb1e2830dd34393e4641e61b034b4386fa18bcf3307e1a9d9d91df0dfdf065e2",
+  "pkg/mcpserver/apps.go": "74c3fe033aa7abcb2927133a00548fd4c2006bb59aa1799b3f00552ef2aadb17",
+  "pkg/mcpserver/apps_registry.go": "32604945e8cdc129ec5bf10eb66d9c0bf59537beac5e88b3d186a05c58de8d95",
+  "pkg/mcpserver/apps_registry_test.go": "1f03edb7d57bea94e77607922109b1721102fe5fc4bd2ee205c4361c7172e7cf",
+  "pkg/mcpserver/apps_test.go": "a69ed244fd1aafdd41acb241d90f36797bf0a0f12d3a2436d1d23059d0c64fb6",
+  "pkg/mcpserver/server.go": "f28f7c4d08112ed46f5cbbf22e9e734b51585ae1f2f7282a0f96cc380f76a7f6",
+  "pkg/mcpserver/tools.go": "edfae9841d9cf3810f76a8d083f410e586f49cedf137d2d80110e9a674ffe0b9",
+  "spec/features/README.md": "e6fc28a8feef63aa41d278f5234b130780324b9d846beba16fc486277c629315",
+  "spec/features/mcp-apps-adapter/README.md": "e64ff4f47924e17a7499d2a5975108da4ced3cb93d83a2aacbdb04b940808c71",
+  "spec/ideas/README.md": "eed6ab1e0f789e17dda2832dbba30b56155a2259afab563dc378e145fed88afd",
+  "spec/ideas/mcp-apps-adapter.md": "a12e519876f0289f5aef847ccd75265fbad934f575c0255450bee71a9ca0427b",
+  "spec/plans/mcp-apps-adapter/README.md": "c4716ddd62939d6f97aa139935d3e86ce303acb1b26935ca466af3f229bd34de"
+}

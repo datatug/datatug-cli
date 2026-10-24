@@ -1,0 +1,124 @@
+{
+  "artifactLabel": "release-v0-113-0",
+  "binaryVersion": {
+    "commit": "4e30fd76afdc9c51bb14242e0ab17b804dd212b9",
+    "date": "2026-10-23T23:27:48Z",
+    "date_source": "build",
+    "name": "datatug",
+    "version": "0.113.0"
+  },
+  "fixture": {
+    "repository": "https://github.com/datatug/datatug-demo-project",
+    "commit": "08cc4d367e33cca82269bff54dc8a35b242e9937",
+    "projectPath": "demo-project-1",
+    "databasePath": "pkg/dbcopy/testdata/chinook.db",
+    "databaseSHA256": "f82efedb6c5c40734609e168bc5be5616a2eca6b90ed0048451a8674625e03a3"
+  },
+  "runtime": "headless Chromium via pinned Playwright; local test host",
+  "browserVersion": "156.0.8078.4",
+  "darkErrorContrast": 8.112135641864532,
+  "broker": {
+    "activeCalls": 0,
+    "cancelledCalls": 2,
+    "capturedContinuations": 21,
+    "childClosedCleanly": true,
+    "modelProjectionPrivateLeak": false,
+    "probeRequests": 0,
+    "stderrPrivateLeak": false,
+    "totalCalls": 24
+  },
+  "binarySHA256": "28fff92c9d54a5aa43bc05b42695657774ebdcb4579b34055b49a534e1ff8e00",
+  "appHTMLSHA256": "8a9b9d77b710e2c4430436c5784627083c07a1bc1f83dd7b37b6ee0821f541ab",
+  "sdk": {
+    "name": "@modelcontextprotocol/ext-apps",
+    "version": "2.0.3",
+    "integrity": "sha512-Tn+4+cyhO4f4cQSDxNyLiIfEE+qlTTuIbWBJB8JTinEXOhDYgCT4wDTQplxD9MBYZH5pCYGC59GaxiwIT4bu8w==",
+    "gitHead": "82221c0c8ce7661efa6771c9d461511b1650495f"
+  },
+  "cliChildPATHContainsNode": false,
+  "consolePrivateLeak": false,
+  "modelProjectionPrivateLeak": false,
+  "stderrPrivateLeak": false,
+  "consoleCallsRemoved": true,
+  "clipboardPositive": true,
+  "clipboardDeniedFallback": true,
+  "brokerCancellationObservedBeforeBarrierRelease": true,
+  "nativeSiblingSourceRejected": true,
+  "syntheticOriginGuardRejected": true,
+  "cspNetworkRejected": true,
+  "actualChinookRockCounts": [
+    14,
+    17
+  ],
+  "typedPrecisionScenario": "separate core-valid renderer fixture",
+  "steps": [
+    {
+      "name": "actual CLI automatic Chinook result",
+      "passed": true
+    },
+    {
+      "name": "keyboard parameter rerun changes real SQL result",
+      "passed": true
+    },
+    {
+      "name": "actual empty SQL result is explicit and recoverable",
+      "passed": true
+    },
+    {
+      "name": "five views and accessible keyboard controls",
+      "passed": true
+    },
+    {
+      "name": "320px light single toolbar and wide dark host theme",
+      "passed": true
+    },
+    {
+      "name": "dark required-parameter validation has readable error and keyboard focus",
+      "passed": true
+    },
+    {
+      "name": "real reruns bound selectable history to ten results",
+      "passed": true
+    },
+    {
+      "name": "real private cell and UI-only parameter absent from model transcript",
+      "passed": true
+    },
+    {
+      "name": "optional integer override and clearing applies authoritative saved default",
+      "passed": true
+    },
+    {
+      "name": "real unavailable response retains explicitly previous rows",
+      "passed": true
+    },
+    {
+      "name": "official SDK UI timeout keeps previous data and allows retry",
+      "passed": true
+    },
+    {
+      "name": "typed fixture exact sort record and JSON CSV copy",
+      "passed": true
+    },
+    {
+      "name": "captured local paging and displayed record target",
+      "passed": true
+    },
+    {
+      "name": "mixed cell JSON types and actual-type display",
+      "passed": true
+    },
+    {
+      "name": "native clipboard denial exposes selected manual fallback",
+      "passed": true
+    },
+    {
+      "name": "official sandbox native source isolation and CSP network denial",
+      "passed": true
+    },
+    {
+      "name": "official teardown aborts pending request and child closes independently",
+      "passed": true
+    }
+  ]
+}

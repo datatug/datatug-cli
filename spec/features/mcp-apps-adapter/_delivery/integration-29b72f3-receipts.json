@@ -1,0 +1,194 @@
+{
+  "head": "29b72f3abf5bc90d6462a4242be9442e209ac50b",
+  "goVersion": "go version go1.27.1 darwin/arm64",
+  "coreVersion": "v0.78.0",
+  "CGO_ENABLED": "0",
+  "binary": "/private/tmp/mcp-apps-integrated-29b72f3-datatug",
+  "binarySHA256": "8ca9f0955371b7fc3fa28073a507e7196eafb040eda9c87a6a7904c4f2dd5a14",
+  "appHTMLSHA256": "8a9b9d77b710e2c4430436c5784627083c07a1bc1f83dd7b37b6ee0821f541ab",
+  "sourceEdits": false,
+  "status": "PASS",
+  "raceCoverageLog": "wb run: admitted (queue empty)\nok  \tgithub.com/datatug/datatug-cli/pkg/queryparams\t1.295s\tcoverage: 100.0% of statements\nok  \tgithub.com/datatug/datatug-cli/pkg/mcpserver\t5.906s\tcoverage: 100.0% of statements\nok  \tgithub.com/datatug/datatug-cli/pkg/server/endpoints\t90.211s\tcoverage: 100.0% of statements\nwb run: done in 1m43s (exit 0)\n",
+  "coreContracts": [
+    {
+      "path": "pkg/datatug/parameters.go",
+      "identical": true,
+      "v078SHA256": "cac55270fdcf56701b2a5adfaaa6e039755465971766434d7c0b36761ecef5a4"
+    },
+    {
+      "path": "pkg/datatug/query.go",
+      "identical": true,
+      "v078SHA256": "946692c46edad3232172d33f56cbb698b1053e8f5e363e55f8b1b5107cca9ee8"
+    },
+    {
+      "path": "pkg/apicontract/typed_value_set.go",
+      "identical": true,
+      "v078SHA256": "a59093ca717089032257a2f9dac1669cef50032551dedfc571902df9866cece1"
+    },
+    {
+      "path": "pkg/apicontract/typed_value.go",
+      "identical": true,
+      "v078SHA256": "cc31e3c1073b6bb14c06d46de73b1147b668aab748318c3ab8fe3fa28dc749b6"
+    },
+    {
+      "path": "pkg/investigation/typed_value.go",
+      "identical": true,
+      "v078SHA256": "472b7573c023d93873ab28b5d4d3ef40ec792754a73eda198b57ed675a0a4695"
+    },
+    {
+      "path": "pkg/datatug/comparison_mapping_codec.go",
+      "identical": true,
+      "v078SHA256": "a191b799bd1f0fca90fd1ad6f3d120114a90c4ec4cc82dd7b21a83564f45ae7c"
+    }
+  ],
+  "browserReceipt": {
+    "artifactLabel": "integrated-source",
+    "binaryVersion": {
+      "commit": "29b72f3abf5bc90d6462a4242be9442e209ac50b",
+      "date": "2026-10-23T22:12:45Z",
+      "date_source": "commit",
+      "name": "datatug",
+      "version": "0.110.2-0.20261023221245-29b72f3abf5b"
+    },
+    "fixture": {
+      "repository": "https://github.com/datatug/datatug-demo-project",
+      "commit": "08cc4d367e33cca82269bff54dc8a35b242e9937",
+      "projectPath": "demo-project-1",
+      "databasePath": "pkg/dbcopy/testdata/chinook.db",
+      "databaseSHA256": "f82efedb6c5c40734609e168bc5be5616a2eca6b90ed0048451a8674625e03a3"
+    },
+    "runtime": "headless Chromium via pinned Playwright; local test host",
+    "browserVersion": "156.0.8078.4",
+    "darkErrorContrast": 8.112135641864532,
+    "broker": {
+      "activeCalls": 0,
+      "cancelledCalls": 2,
+      "capturedContinuations": 21,
+      "childClosedCleanly": true,
+      "modelProjectionPrivateLeak": false,
+      "probeRequests": 0,
+      "stderrPrivateLeak": false,
+      "totalCalls": 24
+    },
+    "binarySHA256": "8ca9f0955371b7fc3fa28073a507e7196eafb040eda9c87a6a7904c4f2dd5a14",
+    "appHTMLSHA256": "8a9b9d77b710e2c4430436c5784627083c07a1bc1f83dd7b37b6ee0821f541ab",
+    "sdk": {
+      "name": "@modelcontextprotocol/ext-apps",
+      "version": "2.0.3",
+      "integrity": "sha512-Tn+4+cyhO4f4cQSDxNyLiIfEE+qlTTuIbWBJB8JTinEXOhDYgCT4wDTQplxD9MBYZH5pCYGC59GaxiwIT4bu8w==",
+      "gitHead": "82221c0c8ce7661efa6771c9d461511b1650495f"
+    },
+    "cliChildPATHContainsNode": false,
+    "consolePrivateLeak": false,
+    "modelProjectionPrivateLeak": false,
+    "stderrPrivateLeak": false,
+    "consoleCallsRemoved": true,
+    "clipboardPositive": true,
+    "clipboardDeniedFallback": true,
+    "brokerCancellationObservedBeforeBarrierRelease": true,
+    "nativeSiblingSourceRejected": true,
+    "syntheticOriginGuardRejected": true,
+    "cspNetworkRejected": true,
+    "actualChinookRockCounts": [
+      14,
+      17
+    ],
+    "typedPrecisionScenario": "separate core-valid renderer fixture",
+    "steps": [
+      {
+        "name": "actual CLI automatic Chinook result",
+        "passed": true
+      },
+      {
+        "name": "keyboard parameter rerun changes real SQL result",
+        "passed": true
+      },
+      {
+        "name": "actual empty SQL result is explicit and recoverable",
+        "passed": true
+      },
+      {
+        "name": "five views and accessible keyboard controls",
+        "passed": true
+      },
+      {
+        "name": "320px light single toolbar and wide dark host theme",
+        "passed": true
+      },
+      {
+        "name": "dark required-parameter validation has readable error and keyboard focus",
+        "passed": true
+      },
+      {
+        "name": "real reruns bound selectable history to ten results",
+        "passed": true
+      },
+      {
+        "name": "real private cell and UI-only parameter absent from model transcript",
+        "passed": true
+      },
+      {
+        "name": "optional integer override and clearing applies authoritative saved default",
+        "passed": true
+      },
+      {
+        "name": "real unavailable response retains explicitly previous rows",
+        "passed": true
+      },
+      {
+        "name": "official SDK UI timeout keeps previous data and allows retry",
+        "passed": true
+      },
+      {
+        "name": "typed fixture exact sort record and JSON CSV copy",
+        "passed": true
+      },
+      {
+        "name": "captured local paging and displayed record target",
+        "passed": true
+      },
+      {
+        "name": "mixed cell JSON types and actual-type display",
+        "passed": true
+      },
+      {
+        "name": "native clipboard denial exposes selected manual fallback",
+        "passed": true
+      },
+      {
+        "name": "official sandbox native source isolation and CSP network denial",
+        "passed": true
+      },
+      {
+        "name": "official teardown aborts pending request and child closes independently",
+        "passed": true
+      }
+    ]
+  },
+  "receipts": [
+    {
+      "path": "/private/tmp/mcp-apps-integrated-29b72f3-build.log",
+      "sha256": "d4f63e07acbdd7ba3f9d89a575fd6ceec092274006337b57463f68296f571592"
+    },
+    {
+      "path": "/private/tmp/mcp-apps-integrated-29b72f3-race.log",
+      "sha256": "29fa3ff3d220caef7f981da4e5bd6cf09e92aec31dc8544d2a577db28de44516"
+    },
+    {
+      "path": "/private/tmp/mcp-apps-integrated-29b72f3-browser.log",
+      "sha256": "d72fde8eede849f1f29aed1122d5bb246a435a971f3cc816843598d9830e7fc4"
+    },
+    {
+      "path": "/private/tmp/mcp-apps-integrated-29b72f3.cover",
+      "sha256": "2f5c8cf9b8a3f37020ba9a9ad9098461dadfc6c2c4362f58d7fcbdf7b01c85a8"
+    },
+    {
+      "path": "/private/tmp/mcp-apps-integrated-core-contracts.json",
+      "sha256": "f8b2213582e22853f80b7b43d058c57a65f30588b7b817ab859656a6c4071592"
+    },
+    {
+      "path": "/Users/alex/.codex/visualizations/2026/10/23/01a16885-2371-7fb1-bc8d-fdbeb55e9dbc/mcp-apps-integrated-source-browser-receipt.json",
+      "sha256": "48933e6ccc5a223ec4a0e9fdd3764f6e823d1747e2efed0b3faea22987817389"
+    }
+  ]
+}

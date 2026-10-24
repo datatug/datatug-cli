@@ -1,11 +1,11 @@
 ---
 format: https://specscore.md/plan-specification
-status: Executing
+status: Implemented
 ---
 
 # Plan: Mcp Apps Adapter
 
-**Status:** Executing
+**Status:** Implemented
 **Source Feature:** mcp-apps-adapter
 **Date:** 2026-10-23
 **Owner:** alex
@@ -72,8 +72,9 @@ Use official App+AppBridge/reference sandbox with explicit capability and privac
 
 **Verifies:** mcp-apps-adapter#ac:delivery, mcp-apps-adapter#ac:sdk-offline
 **Id:** task-6
-**Status:** in_progress
-**Note:** Root owns exact-head CI, WB landing, public-artifact and documented-recipe acceptance, website publication and final lifecycle evidence; these remain pending.
+**Status:** complete
+**Evidence:** spec/features/mcp-apps-adapter/_delivery/README.md
+**Note:** Public v0.112.0 passed exact-head CI, WB landing, signed/notarized downloaded-binary acceptance, the literal documented recipe and all17 official-host browser scenarios plus plain MCP. Website PR139 passed candidate CI, landed and deployed to all three origins; eleven live pages passed acceptance. Later main CI observations and required lifecycle/evidence publication remain explicitly separate. Root retains only the worktrees needed for final lifecycle records and will retire them through WB after final checks.
 
 Parent drives independent implementation review, exact-head CI and WB landing using the repository datatug-release delegate/automatic release convention, never manual tags. Verify the exact downloaded public binary offline/no Node with the same child and official-host browser acceptance, update accurate tested-host/setup/privacy/SQLite website docs and clean task worktrees after receipts.
 

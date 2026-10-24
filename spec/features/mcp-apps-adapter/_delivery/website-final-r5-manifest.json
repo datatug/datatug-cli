@@ -1,0 +1,142 @@
+{
+  "base": "6eaa432830f2950d3d5f06257b06edb92a0a5de7",
+  "status": "Final identity draft; unpublished; independent exact-byte review and root WB latest-base integration pending",
+  "files": [
+    {
+      "path": "apps/ai/src/data/structure.ts",
+      "sha256": "774c00277f64442ece43d5239331b00f73ff7baf2fae420b988c489f0dbaf2d7"
+    },
+    {
+      "path": "apps/ai/src/i18n/locales/en.ts",
+      "sha256": "7dc234e59ed45d27288c8613aa85847a0508b48e22c657e30a7bcd3e3c8764dc"
+    },
+    {
+      "path": "apps/ai/src/i18n/locales/ru.ts",
+      "sha256": "2602477c813a6e66ba70a834b8ed771e76c9d23ddfcf6e547dd60359bd631f40"
+    },
+    {
+      "path": "apps/ai/tests/e2e/platform.spec.ts",
+      "sha256": "55ae4444c31a585f886b5ad2c44e0a050ab4d12b1d75cd42501997786d6187a2"
+    },
+    {
+      "path": "apps/ai/tests/e2e/ways.spec.ts",
+      "sha256": "6a4956984668571971e1872d2e7c61c9ffa074bb51d303b66ef15db62731e4f3"
+    },
+    {
+      "path": "apps/ai/tests/unit/dist.test.mjs",
+      "sha256": "6ad60e4281a5a5efd088291902cb4e4ef26e9f239057b9f285838c0785810c32"
+    },
+    {
+      "path": "apps/ai/tests/unit/i18n.test.mjs",
+      "sha256": "aa04bce126ef9e41036f1f3384b506507e1ff803e2c3b44949f597c6f51a402e"
+    },
+    {
+      "path": "apps/io/src/components/home/PlatformHome.astro",
+      "sha256": "f4ccca95d0476c67746a0da1cd8bc39dcc4500f019c2d6640ea56455fca92dbf"
+    },
+    {
+      "path": "apps/io/src/components/pages/AIPage.astro",
+      "sha256": "a9eb2b5df22ec65e41970f91cc7d33506784635d676601903f824b6d784505ff"
+    },
+    {
+      "path": "apps/io/src/content/docs/en/docs/integrations/mcp.mdx",
+      "sha256": "4e4e9af7ef29980be45fa7ee1126fe06625059dab394c16e6d51d05e87be93a3"
+    },
+    {
+      "path": "apps/io/src/content/docs/en/docs/reference/cli.mdx",
+      "sha256": "55a02a60a7b8d5f3c3877c2859feecebd321b98ce6fe4095ed602b04f53044bb"
+    },
+    {
+      "path": "apps/io/src/content/docs/ru/docs/integrations/mcp.mdx",
+      "sha256": "f1ad47454bc60e3847ac0d5eb881bfcb246d284c0635ebe24be400995ae97060"
+    },
+    {
+      "path": "apps/io/src/content/docs/ru/docs/reference/cli.mdx",
+      "sha256": "baa5f18e7f6ab0e7ce73035cfe8713994f44ba1ae06a12db40f02135fa60549e"
+    },
+    {
+      "path": "apps/io/src/i18n/ai.ts",
+      "sha256": "2a72de03a1598cd367b0c135d75acbae952960f830b2f1d70d0e3d2bfc1813f4"
+    },
+    {
+      "path": "apps/io/src/i18n/platform-home.ts",
+      "sha256": "8fbe5b57ce9999bb4171e6b95d32058fb647ee586b60d6735843fd97703d84a1"
+    },
+    {
+      "path": "apps/io/test/dist.test.mjs",
+      "sha256": "ba7be35751ed5bc6218e428c634ceb0c210d99b161fa57a154cc8afae52d3a92"
+    },
+    {
+      "path": "apps/io/test/mcp-apps.test.mjs",
+      "sha256": "02fca0e49d0200dfc852b2759b83a56dbe2d189b310509649c01c0ed28959a1c"
+    },
+    {
+      "path": "apps/io/tests/e2e/ai-page.spec.ts",
+      "sha256": "d9347347782386356fc427fdc1e5d3d9cd168856d3ecc677e0bb387e0ab9a205"
+    },
+    {
+      "path": "apps/io/tests/e2e/home.spec.ts",
+      "sha256": "aeba988f1bb5e7864706ed83b913e051c63218ebf8062bf168596d4de8bc3f1d"
+    },
+    {
+      "path": "apps/io/tests/e2e/mcp-apps.spec.ts",
+      "sha256": "173bcd21c1de508b0cb99e8c04ed0a0874fe39538f499fcb5b2bcb371ee96f19"
+    },
+    {
+      "path": "packages/site-kit/src/components/pages/WaysToUseBody.astro",
+      "sha256": "a9d45db14e58c737fab16b36b93e0564ec5718f499b82feeaf76b847c458a002"
+    },
+    {
+      "path": "packages/site-kit/src/features.ts",
+      "sha256": "83572a0c93ba6bea5fec0a2ea6914bb032dfc7ae6f0e001cbd8f091943933c03"
+    },
+    {
+      "path": "packages/site-kit/src/platform.ts",
+      "sha256": "3f4d087a63ba4d0e6534c3ca98a35cfb43a531be86bd8825eeadcadd052ca403"
+    },
+    {
+      "path": "packages/site-kit/src/strings.ts",
+      "sha256": "e2493a1638918a556cec9b64b65059da23e83180b3cdebba59cbdf5645506149"
+    },
+    {
+      "path": "packages/site-kit/test/kit.test.mjs",
+      "sha256": "fe378b909ff3defc9ef657782cff18b72395ca9be3306ff325e2290d18c46c20"
+    }
+  ],
+  "publication_hold": "/private/tmp/mcp-apps-website-publication-hold-20261023.txt",
+  "receipts": [
+    "/private/tmp/mcp-apps-website-kit-check.log",
+    "/private/tmp/mcp-apps-website-kit-test.log",
+    "/private/tmp/mcp-apps-website-io-check.log",
+    "/private/tmp/mcp-apps-website-io-build.log",
+    "/private/tmp/mcp-apps-website-io-test.log",
+    "/private/tmp/mcp-apps-website-ai-check.log",
+    "/private/tmp/mcp-apps-website-ai-build.log",
+    "/private/tmp/mcp-apps-website-ai-test.log",
+    "/private/tmp/mcp-apps-website-app-check.log",
+    "/private/tmp/mcp-apps-website-app-build.log",
+    "/private/tmp/mcp-apps-website-app-test.log",
+    "/private/tmp/mcp-apps-website-mode.log",
+    "/private/tmp/mcp-apps-website-browser.log",
+    "/private/tmp/mcp-apps-web-recipe-test.log",
+    "/private/tmp/mcp-apps-web-recipe-build.log",
+    "/private/tmp/mcp-apps-web-copy-r3-test.log"
+  ],
+  "browser_ownership": "apps_design, both127.0.0.1 port0 listeners closed in finally; headless only",
+  "revision": "r4 private CLI + Core contributor-access prerequisite alignment only; public identity hold unchanged",
+  "source_identity_note": "Final release/download links must use public datatug/datatug releases. Private datatug-cli source/harness functional SHA is recorded separately from public hub tag commitish. Root will verify public binary buildinfo against private CLI source tag SHA; no identity predicted.",
+  "delta_paths_from_r2": [
+    "apps/io/src/content/docs/en/docs/integrations/mcp.mdx",
+    "apps/io/src/content/docs/ru/docs/integrations/mcp.mdx"
+  ],
+  "delta_paths_from_r3": [
+    "apps/io/src/content/docs/en/docs/integrations/mcp.mdx",
+    "apps/io/src/content/docs/ru/docs/integrations/mcp.mdx"
+  ],
+  "validation_note": "Two prereq paragraph-only edits per root; no new broad tests run. Final identity tests/review remain required.",
+  "publicRelease": "https://github.com/datatug/datatug/releases/tag/v0.112.0",
+  "binarySourceCommit": "89d260fdfe00f3b0345adae451258443d2cd00a7",
+  "harnessSourceCommit": "1d28aed057ee4a5000c1d5d9ad3ec835304baf45",
+  "recipeBytes": 1750,
+  "recipeSha256": "a4f91f9ba88a7098acdd7ff765ea42fcab145af1d048200f54c4e88117537315"
+}

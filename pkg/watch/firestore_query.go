@@ -114,7 +114,7 @@ func (t *firestoreSession) ExecuteQueryToRecordsReader(ctx context.Context, quer
 	if cloudField(fields, "namespace") != expectedNamespace {
 		return nil, ErrForbidden
 	}
-	if project := cloudField(fields, "project"); project != nil && project != t.database.options.ProjectID && !(from.Name() == quotas && project == "_accounts") {
+	if project := cloudField(fields, "project"); project != nil && project != t.database.options.ProjectID && (from.Name() != quotas || project != "_accounts") {
 		return nil, ErrForbidden
 	}
 	prototype := key(from.Name(), Scope{}, "prototype")

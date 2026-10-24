@@ -279,9 +279,11 @@ Watch, four channels per subscriber, 100 runner status records, 10,000 pending
 outbox records and the transaction budgets above. ReconcileScope inspects at
 most20 due observations, each in a separate transaction. An active execution
 advances only scheduling eligibility, preserving its logical execution ID and
-allowing later Watches to progress. ClaimDue considers at most100 active jobs,
-the admitted project maximum, so ineligible earlier jobs cannot starve a later
-eligible job. Delivery queries first constrain lane and scope, then select at
+allowing later Watches to progress. ClaimDue admits one candidate per transaction, committing a durable per-runner
+document-ID cursor even when the candidate lacks grants or exceeds its admission
+budget. At most four such transactions share one call deadline, so an expensive
+or unauthorized earlier candidate cannot starve a later eligible Watch. Cursor
+metadata survives registration refresh and Store restarts. Delivery queries first constrain lane and scope, then select at
 most16 due candidates. Telegram is a runner-owned lane; coordinator tasks do
 not claim its messages. A single transition for50 subscribers ×4 channels
 commits200 outbox records and50 inbox records with its baseline/result.

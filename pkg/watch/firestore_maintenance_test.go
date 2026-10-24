@@ -149,3 +149,37 @@ func TestFirestoreStoreDeletedWatchReleasesLiveCapacityAndPreservesFence(t *test
 		t.Fatal("compacted identity resurrected completion", e)
 	}
 }
+
+func TestFirestoreStorePendingJobAgeIsVisibleWithWrongSourceRunner(t *testing.T) {
+	stores, c, _ := firestoreFixture(t)
+	s := stores[0]
+	ctx := context.Background()
+	a := actor("alice")
+	create(t, s, a, definition("waiting-source"))
+	r := register(t, s, "online")
+	cl := claim(t, s, r)
+	if _, e := s.FinishRun(ctx, r, cloudDone(cl, "pass")); e != nil {
+		t.Fatal(e)
+	}
+	c.advance(6 * 1e9)
+	if e := s.Reconcile(ctx); e != nil {
+		t.Fatal(e)
+	}
+	s.cloud.options.AdmitRunner = func(context.Context, dal.ReadTransaction, Definition, RunnerIdentity) (bool, error) {
+		return false, nil
+	}
+	if cl, e := s.ClaimDue(ctx, r); e != nil || cl != nil {
+		t.Fatal("wrong source runner claimed", cl, e)
+	}
+	c.advance(6 * 1e9)
+	if e := s.RegisterRunner(ctx, r); e != nil {
+		t.Fatal(e)
+	}
+	if e := s.Reconcile(ctx); e != nil {
+		t.Fatal(e)
+	}
+	status, e := s.Status(ctx, a)
+	if e != nil || len(status.Runners) != 1 || len(status.Observations) != 1 || status.Observations[0].Availability != "delayed" || status.Observations[0].LastKnown != "true" {
+		t.Fatal("fresh registration hid delayed job or changed truth", status, e)
+	}
+}

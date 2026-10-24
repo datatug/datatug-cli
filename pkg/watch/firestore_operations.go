@@ -347,3 +347,29 @@ func (s *Store) blockSource(ctx context.Context, tx dal.ReadwriteTransaction, d 
 func sourceBlocked(err error) bool {
 	return errors.Is(err, ErrConflict) || errors.Is(err, ErrNotFound) || errors.Is(err, ErrForbidden)
 }
+
+// Registered status proves online scope/capabilities, not current source grants.
+// Stable job age exposes unmet execution demand even while scheduling metadata
+// advances to let other Watches progress through the bounded due window.
+func (s *Store) cloudAvailability(ctx context.Context, d Definition, obs Observation, registered []Runner) (string, error) {
+	jobs, e := cloudItems[Run](ctx, s.db, cloudQuery(runs, d.Scope, d.ID, []dal.Condition{dal.WhereField("active", dal.Equal, "yes")}, 2))
+	if e != nil {
+		return "", e
+	}
+	for _, job := range jobs {
+		if job.State == "running" && job.LeaseUntil.After(s.now()) {
+			return "running", nil
+		}
+		if job.State == "retry" && job.RetryAt.After(s.now()) {
+			return "retrying", nil
+		}
+		if job.State == "running" && !job.LeaseUntil.After(s.now()) || !job.DueAt.After(s.now().Add(-time.Duration(d.Schedule.IntervalSeconds)*time.Second)) {
+			return "delayed", nil
+		}
+		return "waiting_runner", nil
+	}
+	if len(registered) == 0 {
+		return "no_runner", nil
+	}
+	return obs.Availability, nil
+}

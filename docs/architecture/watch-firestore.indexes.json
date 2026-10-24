@@ -29,10 +29,6 @@
         {
           "fieldPath": "environment",
           "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "ready",
-          "order": "ASCENDING"
         }
       ]
     },

@@ -228,7 +228,14 @@ func TestFirestoreStoreBoundedSchedulingMakesProgress(t *testing.T) {
 		return d.ID == "later-04", nil
 	}
 	r := register(t, s, "runner")
-	got, e := s.ClaimDue(ctx, r)
+	var got *Claim
+	var e error
+	for i := 0; i < 8 && got == nil; i++ {
+		got, e = s.ClaimDue(ctx, r)
+		if e != nil {
+			t.Fatal(e)
+		}
+	}
 	if e != nil || got == nil || got.Definition.ID != "later-04" {
 		t.Fatal("eligible job behind blocked candidates", got, e)
 	}

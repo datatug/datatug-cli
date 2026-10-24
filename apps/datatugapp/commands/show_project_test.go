@@ -124,7 +124,7 @@ func TestShowFormatJSON(t *testing.T) {
 					"name": "main",
 					"tables": []any{
 						map[string]any{"name": "Customer", "columns": []any{
-							map[string]any{"name": "CustomerId", "type": "INTEGER", "primaryKeyPosition": float64(1), "nullable": true},
+							map[string]any{"name": "CustomerId", "type": "INTEGER", "primaryKeyPosition": float64(1), "nullable": false},
 							map[string]any{"name": "FirstName", "type": "TEXT", "nullable": false},
 							map[string]any{"name": "LastName", "type": "TEXT", "nullable": true},
 						}},

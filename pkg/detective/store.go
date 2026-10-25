@@ -16,6 +16,7 @@ import (
 
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/privateadmission"
+	"github.com/datatug/datatug-core/pkg/datatug"
 	core "github.com/datatug/datatug-core/pkg/detective"
 	"github.com/datatug/datatug-core/pkg/sessioncontext"
 	"github.com/gofrs/flock"
@@ -515,6 +516,19 @@ func readRunPage(dir, cursor string) ([]CheckRun, bool, string, error) {
 	return runs, hasMore, next, nil
 }
 
+// stampCreatedAt applies the card rule to checks and scenarios: a stored
+// creation date always wins (so a backdated overwrite cannot change it), else
+// the caller's, else now. The caller's value was validated by Core already.
+func stampCreatedAt(caller, stored string, now time.Time) string {
+	if stored != "" {
+		return stored
+	}
+	if caller != "" {
+		return caller
+	}
+	return datatug.NewCreatedAt(now)
+}
+
 func (s *LocalStore) getCheck(id string) (Check, error) {
 	if !validSlug(id) {
 		return Check{}, ErrInvalid
@@ -562,11 +576,13 @@ func (s *LocalStore) SaveCheck(ctx context.Context, check Check, actor string) (
 				return ErrConflict
 			}
 			check.Version++
+			check.CreatedAt = stampCreatedAt(check.CreatedAt, old.CreatedAt, time.Now())
 		} else if errors.Is(err, ErrNotFound) {
 			if check.Version != 0 {
 				return ErrConflict
 			}
 			check.Version = 1
+			check.CreatedAt = stampCreatedAt(check.CreatedAt, "", time.Now())
 		} else {
 			return err
 		}
@@ -794,6 +810,7 @@ func (s *LocalStore) SaveScenario(ctx context.Context, scenario Scenario, actor 
 				return ErrConflict
 			}
 			scenario.Version++
+			scenario.CreatedAt = stampCreatedAt(scenario.CreatedAt, old.CreatedAt, time.Now())
 		} else if errors.Is(err, os.ErrNotExist) {
 			if scenario.Version != 0 {
 				return ErrConflict
@@ -806,6 +823,7 @@ func (s *LocalStore) SaveScenario(ctx context.Context, scenario Scenario, actor 
 				return ErrCapacity
 			}
 			scenario.Version = 1
+			scenario.CreatedAt = stampCreatedAt(scenario.CreatedAt, "", time.Now())
 		} else {
 			return err
 		}

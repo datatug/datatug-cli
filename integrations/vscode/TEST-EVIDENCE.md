@@ -47,7 +47,7 @@ not used or certified by this candidate.
 `wb run -- npm run audit:vsix` → exit 0:
 
 ```json
-{"files":9,"runtimeDependencies":0,"restrictedAssets":0,"sha256":"ef87509b8f384e2bf28a77cba8f9c0c6a10bb8ae5fff9ffbeeeaca8807e3f8f3"}
+{"files":9,"runtimeDependencies":0,"restrictedAssets":0,"sha256":"3e22b87f20743337b644f8c2f4f0842f8e0d6cd50feb522f9bc286b1e5755f0e"}
 ```
 
 Candidate output: `dist/datatug-everywhere-0.1.0.vsix` (ignored local build
@@ -82,12 +82,74 @@ The aborted launch's owned temporary profile was also removed.
 This is actual-host activation evidence, not a fake API assertion. It does not
 prove trusted-project UI execution, credentials or remote acceptance.
 
+## Actual trusted-project native UI acceptance — follow-up
+
+Command:
+`DATATUG_TEST_CLI=/private/tmp/datatug-everywhere-candidate-final-01a17328 wb run -- node scripts/host-journey.js`
+→ final owned host **exit 0**. VS Code Insiders `1.142.0-insider`, host Node
+`v24.21.0`, Darwin arm64. The CLI SHA-256 was
+`2cf6b53549f1a27431dbcc83b2a80fc83d76f55b2bd8212d816234c1366bceef`.
+
+The launcher copied only the synthetic `testdata/checks-demo` into an owned
+temporary folder, wrote the CLI path only to the isolated profile's User
+settings, used separate temporary user-data/extensions directories, labelled
+its ownership, and imposed a 600-second hard timeout. No normal settings or
+extensions were changed. CUA discovery initially opened an empty ordinary
+Insiders instance; that owned empty discovery instance was closed through its
+native Quit menu before CUA bound to the isolated acceptance host. No user's
+open project/editor was used for acceptance.
+
+The first attempt used the official extension-test mechanism, which reached
+trust/project/environment selection but refused the modal owner dialog.
+Installed VS Code source confirms `DialogService.skipDialogs()` rejects modal
+prompts under `--extensionTestsPath`. That attempt was closed and cleaned up;
+it is not counted as query/Check acceptance. The final attempt used a disposable
+companion driver extension with the actual VS Code API and no test-mode flag.
+It did not replace UI APIs, consent responses, trust checks or CLI execution.
+
+CUA performed the actual native actions: explicitly trust only the synthetic
+workspace; select its folder and `local` environment; browse saved queries and
+Check definitions; select existing host configuration (SQLite needed no
+credentials); grant separate modal owner consent for each of three executions;
+and explicitly open each native untitled JSON result. The saved query returned
+one synthetic row. Check `pass` displayed `status: pass`, `exitCode: 0`; Check
+`fail` displayed `status: fail`, `exitCode: 1`. Both Check documents excluded
+evidence rows. These are real-host results, not fake API assertions.
+
+After the query, closing its editor caused a driver focus transition to cancel
+the next QuickPick. The driver stopped its automated assertions at that point.
+Both Checks were then run through actual CUA native tree actions; their native
+JSON was read through accessibility, and the bounded receipt explicitly records
+`driverFocusTransitionCancelled` and `checksCompletedByManualNativeTreeActions`.
+The helper now leaves result tabs open to avoid that transition; a fully
+unattended end-to-end driver run is not claimed.
+
+`dist/trusted-project-acceptance/receipt.json` records the real observed journey,
+three separate owner-consent actions, unchanged synthetic project digest, two
+private evidence directories with mode 0700, host exit 0 and removal of the
+owned temporary profile, project and evidence. The companion was only in that
+temporary extensions directory. No credentials, hosted upload or Marketplace
+publication occurred. Twelve genuine PNG captures are retained locally there;
+the final run's useful listing captures are:
+
+- `05-final-run-explicit-trust.png`, `06-final-native-tree.png`
+- `07-query-explicit-owner-consent.png`, `08-saved-query-native-json.png`
+- `09-pass-check-owner-consent.png`, `10-pass-check-native-json.png`
+- `11-fail-check-owner-consent.png`, `12-fail-check-native-json.png`
+
+These ignored local artifacts and test drivers are excluded by the strict VSIX
+allowlist. Runtime `src/` was not modified in this acceptance follow-up.
+After the acceptance documentation/helper changes, build passed; all 21
+unit/process/fake-API/real-CLI integration tests passed with the current candidate
+CLI (zero skipped); packaging and the nine-file archive audit passed again. The
+VSIX hash above is that rebuilt candidate.
+
 ## Evidence limits and open gates
 
-- Actual no-project activation/native-view smoke is verified above. Trusted
-  project/environment/owner-consent/query/Check UI acceptance, genuine
-  screenshots and full end-user acceptance remain pending. Fake API tests cover
-  those boundaries only at unit level.
+- Actual no-project smoke and the macOS synthetic trusted-project native UI
+  journey/screenshots are verified above. Cancellation in the actual UI,
+  provider credentials and the broader platform matrix remain pending; fake
+  API/process tests do not close those real-host/provider gates.
 - macOS real CLI/process tests do not establish Linux/Windows/SSH/dev-container/
   Codespaces acceptance. Windows evidence permission/ACL and cancellation
   behavior require actual testing. README has the matrix.

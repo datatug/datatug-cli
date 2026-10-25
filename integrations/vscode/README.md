@@ -10,7 +10,7 @@ the extension; CLI telemetry is disabled for its invocations.
 This is an **unpublished implementation candidate**. It requires the candidate
 CLI containing `checks run` documented in `docs/checks-run.md` in the parent
 repository. A public CLI release with that contract, Stage 1 publication gates,
-independent security review, trusted-project VS Code journey acceptance, listing assets,
+independent security review, remaining platform/provider acceptance, listing validation,
 publisher ownership verification and explicit release approval remain pending.
 The `datatug` publisher identifier is proposed metadata, not proof of account
 access or an existing Marketplace listing. No pricing or paid-plan entitlement
@@ -119,7 +119,7 @@ permission-isolation acceptance remain pending that supported contract.
 
 | Host | Execution / credentials | Evidence |
 | --- | --- | --- |
-| macOS local | CLI and workspace on Mac; VS Code SecretStorage | Node 22 process/unit + real CLI SQLite tests passed; actual VS Code Insiders 1.142.0 no-project activation, eight commands, empty native tree and view focus passed; trusted-project query/Check UI acceptance pending |
+| macOS local | CLI and workspace on Mac; VS Code SecretStorage | Node 22 process/unit + real CLI SQLite tests passed; actual VS Code Insiders 1.142.0 activation/native view and CUA trusted-project selection, local environment, saved query, Check pass/fail, three separate owner consents and native JSON results passed on copied synthetic SQLite data |
 | Linux local | Native CLI on Linux; host credential service | Unit-test design only; actual host pending |
 | Windows local | Native `.exe`; host credential service | Pending, including force termination and private evidence ACL/mode compatibility |
 | Remote SSH | Workspace extension + CLI on remote host; secret explicitly transmitted to remote child environment | Pending real-host transport, secret-store and cancellation tests |
@@ -132,8 +132,19 @@ The actual macOS host smoke uses the installed editor's official
 temporary user-data and extension directories. It opens no workspace and does
 not disable Workspace Trust. The owned host exits and its profile is removed;
 the normal user profile is untouched. Its receipt is `dist/host-smoke.json`.
-This acceptance is distinct from fake-API unit tests and does not establish
-trusted-project execution or remote-host acceptance.
+This no-project acceptance is distinct from fake-API unit tests. A second actual
+host acceptance uses a copied synthetic project and a disposable companion
+driver extension, without `--extensionTestsPath`: VS Code intentionally refuses
+modal consent dialogs in test mode. CUA explicitly trusted only that temporary
+project, selected its environment, granted three separate local-owner consents,
+and opened the real saved-query and Check pass/fail JSON. A driver focus
+transition cancelled one QuickPick after the query; both Checks were completed
+through genuine native tree actions, with their JSON read through native
+accessibility. The receipt records that manual continuation. The owned host
+exited 0; the copied project was unchanged, and its two mode-0700 private
+evidence directories and temporary profile were removed. Genuine screenshots
+and the bounded receipt are in `dist/trusted-project-acceptance/`. This establishes
+the macOS synthetic journey, not remote-host or real-provider acceptance.
 Credential-provider, auth expiry and offline negative tests currently
 cover simulated responses/process failures; real-provider acceptance is pending.
 
@@ -165,10 +176,11 @@ candidate. Rollback is to uninstall this preview and reinstall the previously
 reviewed VSIX, retaining private evidence only as needed. The CLI is independently
 installed and versioned.
 
-Before submission capture genuine screenshots on an accepted host showing the
-native DataTug tree, explicit environment/owner consent, synthetic result JSON
-and cancellation. Screenshots and Marketplace account validation are pending;
-do not substitute mock screenshots for host acceptance. Publication requires
+Genuine macOS screenshots now cover restricted/explicit trust, native project
+and query/Check tree, environment choice, three owner consents and query/Check
+pass/fail JSON. Before submission validate listing assets and capture remaining
+cancellation/provider/platform evidence. Marketplace account validation is
+pending; do not substitute mock screenshots for host acceptance. Publication requires
 the initiative's separate Stage 1, licensing, security and owner approval gates.
 
 ## Support and privacy

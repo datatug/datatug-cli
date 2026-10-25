@@ -29,6 +29,15 @@ rmdir "$context"
 python3 distribution/build_context.py --output "$context"
 ```
 
+The helper defaults to binary version `0.0.0-candidate`. For a future release,
+pass the approved version explicitly with `--version "$release_version"`;
+the value must be strict SemVer without a `v` prefix. A stable version requires
+a clean source working tree, checked before dependency resolution or compilation.
+The context inventory records the selected binary version, source commit and
+working-tree state. Candidate and prerelease builds may include working-copy
+changes and record that dirty provenance; selecting a version does not publish
+an image or satisfy the remaining release gates.
+
 The generated `CONTEXT-INVENTORY.md` lists every included file and its digest;
 `licenses/DEPENDENCY-LICENSE-INVENTORY.md` records each module and included
 notice. The helper requires `github.com/datatug/datatug-core v0.79.0` and

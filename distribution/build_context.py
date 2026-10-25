@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,13 @@ CORE_MODULE = "github.com/datatug/datatug-core"
 CORE_VERSION = "v0.79.0"
 ARCHITECTURES = ("amd64", "arm64")
 GO_TOOLCHAIN = "go1.27.3"
+DEFAULT_VERSION = "0.0.0-candidate"
+SEMVER = re.compile(
+    r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+    r"(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
+    r"(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+)
 LICENSE_NAMES = {
     "license",
     "license.md",
@@ -163,9 +171,21 @@ def source_provenance(env: dict[str, str]) -> tuple[str, str, str]:
 	return revision, state, status_digest
 
 
-def build_context(output: Path, env: dict[str, str]) -> tuple[list[str], int]:
-    modules = module_inventory(env)
+def validate_version(value: str) -> str:
+    """Accept only SemVer characters safe in the Go linker argument grammar."""
+    if SEMVER.fullmatch(value) is None:
+        raise ValueError("version must be strict SemVer without a v prefix (for example 1.2.3 or 1.2.3-rc.1)")
+    return value
+
+
+def build_context(output: Path, env: dict[str, str], version: str = DEFAULT_VERSION) -> tuple[list[str], int]:
+    version = validate_version(version)
     revision, working_tree_state, working_tree_status_sha = source_provenance(env)
+    # A stable release must not identify uncommitted content as a release commit.
+    # Check before dependency resolution or either architecture's compilation.
+    if SEMVER.fullmatch(version).group(4) is None and working_tree_status_sha != "none":
+        raise RuntimeError("stable release version requires a clean source working tree")
+    modules = module_inventory(env)
     source_date = run(["git", "show", "-s", "--format=%cI", "HEAD"], cwd=ROOT, env=env).strip()
     core = modules.get(CORE_MODULE)
     if core is None or core["version"] != CORE_VERSION:
@@ -180,7 +200,7 @@ def build_context(output: Path, env: dict[str, str]) -> tuple[list[str], int]:
             bin_dir.mkdir(parents=True)
             target_env = {**env, "GOOS": "linux", "GOARCH": arch, "CGO_ENABLED": "0"}
             ldflags = ("-s -w -buildid= "
-                       "-X github.com/strongo/buildinfo.version=0.0.0-candidate "
+                       f"-X github.com/strongo/buildinfo.version={version} "
                        f"-X github.com/strongo/buildinfo.commit={revision} "
                        f"-X github.com/strongo/buildinfo.date={source_date}")
             common = ["go", "build", "-mod=readonly", "-trimpath", "-tags=netgo,osusergo", "-buildvcs=false", "-ldflags="+ldflags, "-o"]
@@ -203,6 +223,7 @@ def build_context(output: Path, env: dict[str, str]) -> tuple[list[str], int]:
             "",
             "This context contains only the pinned Dockerfile, static linux/amd64 and linux/arm64 executables, private state-directory markers, and license/notice texts.",
             "Go source, module caches, project fixtures, credentials and local configuration are excluded.",
+            f"Binary version: `{version}`",
             f"Source commit: `{revision}`",
             f"Source working tree: **{working_tree_state}**",
             f"Source working-tree status digest (paths omitted): `{working_tree_status_sha}`",
@@ -222,6 +243,8 @@ def build_context(output: Path, env: dict[str, str]) -> tuple[list[str], int]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, type=Path, help="new context directory outside this repository")
+    parser.add_argument("--version", type=validate_version, default=DEFAULT_VERSION,
+                        help="binary SemVer (default: %(default)s); stable versions require a clean source tree")
     parser.add_argument("--fail-on-missing-licenses", action="store_true", help="return nonzero if any used module has no recognized top-level notice file")
     args = parser.parse_args()
     output = args.output.expanduser().resolve()
@@ -233,7 +256,7 @@ def main() -> int:
     env = os.environ.copy()
     env.update({"GOTOOLCHAIN": GO_TOOLCHAIN, "GOWORK": "off", "GOFLAGS": "", "DATATUG_TELEMETRY": "0"})
     try:
-        missing, module_count = build_context(output, env)
+        missing, module_count = build_context(output, env, args.version)
     except (OSError, RuntimeError) as exc:
         print(f"Docker context generation failed: {exc}", file=sys.stderr)
         return 1

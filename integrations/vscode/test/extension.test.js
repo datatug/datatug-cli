@@ -5,6 +5,7 @@ const { createExtension } = require('../src/extension');
 
 function fake(options = {}) {
   const commands = new Map(), messages = [], documents = [], secrets = new Map(), state = new Map(), calls = [];
+  let workspaceChanged;
   class EventEmitter { constructor() { this.event = () => ({ dispose() {} }); } fire() {} dispose() {} }
   class CancellationTokenSource { constructor() { this.token = { isCancellationRequested: false, onCancellationRequested: () => ({ dispose() {} }) }; } cancel() { this.token.isCancellationRequested = true; } dispose() {} }
   const vscode = {
@@ -16,7 +17,7 @@ function fake(options = {}) {
       workspaceFolders: [{ uri: { scheme: 'file', fsPath: '/workspace' } }],
       getConfiguration: () => ({ inspect: () => ({ globalValue: '/trusted/datatug' }) }),
       openTextDocument: async document => { documents.push(document); return document; },
-      onDidChangeWorkspaceFolders: () => ({ dispose() {} })
+      onDidChangeWorkspaceFolders: handler => { workspaceChanged = handler; return { dispose() {} }; }
     },
     commands: { registerCommand: (name, handler) => { commands.set(name, handler); return { dispose() {} }; } },
     window: {
@@ -46,7 +47,7 @@ function fake(options = {}) {
     ...options.dependencies
   };
   const extension = createExtension(vscode, context, dependencies);
-  return { vscode, context, extension, commands, messages, documents, secrets, state, calls };
+  return { vscode, context, extension, commands, messages, documents, secrets, state, calls, workspaceChanged: () => workspaceChanged() };
 }
 test('activation registers native commands; empty/trust-denied workspace never reads or spawns', async () => {
   let reads = 0;
@@ -172,4 +173,103 @@ test('published summary never opens without explicit action; command manifest ma
   assert.deepEqual([...f.commands.keys()].sort(), require('../package.json').contributes.commands.map(c => c.command).sort());
   await summarySetup(f); await f.commands.get('datatug.runCheckWithSummary')('pass');
   assert.equal(f.calls.filter(c => c[0] === 'url').length, 0); assert.equal(f.documents.length, 0);
+});
+
+function awaitBarrier() {
+  let enter, release;
+  const reached = new Promise(resolve => { enter = resolve; });
+  const pending = new Promise(resolve => { release = resolve; });
+  return { reached, release, wait: async () => { enter(); return pending; } };
+}
+async function workspaceFixture(t) {
+  const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path');
+  const temporary = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'datatug-workspace-race-')));
+  t.after(() => fs.rm(temporary, { recursive: true, force: true }));
+  const project = path.join(temporary, 'original', 'project');
+  await fs.mkdir(project, { recursive: true });
+  await fs.writeFile(path.join(project, 'datatug-project.json'), '{"id":"project"}');
+  for (const name of ['remaining', 'replacement']) await fs.mkdir(path.join(temporary, name));
+  const folder = name => ({ uri: { scheme: 'file', fsPath: path.join(temporary, name) } });
+  const f = fake({ inputs: ['space', 'PRIVATE_TOKEN'], dependencies: { projectPath: require('../src/boundary').projectPath } });
+  f.vscode.workspace.workspaceFolders = [folder('original'), folder('remaining')];
+  f.vscode.window.showOpenDialog = async () => [{ scheme: 'file', fsPath: project }];
+  await summarySetup(f);
+  return { f, folder, project };
+}
+function assertNoInvalidatedRun(f) {
+  assert.equal(f.vscode.workspace.isTrusted, true, 'A trusted remaining workspace must not authorize the old selection.');
+  assert.ok(f.vscode.workspace.workspaceFolders.length > 0);
+  assert.equal(f.calls.filter(c => c[0] === 'run').length, 0, 'No child can receive database credentials or the hosted token.');
+  assert.ok(f.messages.includes('Workspace folders changed. Select the project and environment again before running DataTug.'));
+  assert.ok(f.messages.every(message => !message.includes('PRIVATE_TOKEN')));
+}
+test('workspace removal/replacement during summary consent or SecretStorage await invalidates the pending run', async t => {
+  for (const stage of ['summary-consent', 'hosted-token']) for (const change of ['remove', 'replace']) {
+    await t.test(`${stage}: ${change} selected root while another trusted root remains`, async t => {
+      const { f, folder } = await workspaceFixture(t), gate = awaitBarrier();
+      let hostedReads = 0;
+      if (stage === 'summary-consent') f.vscode.window.showWarningMessage = async (_message, _options, action) => {
+        if (action === 'Run and publish summary') await gate.wait();
+        return action;
+      };
+      f.context.secrets.get = async key => {
+        assert.equal(key, 'hosted.summaryToken'); hostedReads++;
+        if (stage === 'hosted-token') await gate.wait();
+        return 'PRIVATE_TOKEN';
+      };
+      const pending = f.commands.get('datatug.runCheckWithSummary')('pass');
+      await gate.reached;
+      f.vscode.workspace.workspaceFolders = change === 'remove' ? [folder('remaining')] : [folder('replacement'), folder('remaining')];
+      f.workspaceChanged(); gate.release(); await pending;
+      assertNoInvalidatedRun(f);
+      assert.equal(hostedReads, stage === 'summary-consent' ? 0 : 1);
+      assert.deepEqual(await f.extension.tree.getChildren(), []);
+    });
+  }
+});
+test('workspace epoch invalidates pending query/default Check consent even when the original root returns', async t => {
+  for (const command of ['runQuery', 'runCheck']) await t.test(command, async t => {
+    const { f, folder } = await workspaceFixture(t), gate = awaitBarrier();
+    f.vscode.window.showWarningMessage = async (_message, _options, action) => { await gate.wait(); return action; };
+    const pending = f.commands.get(`datatug.${command}`)(command === 'runQuery' ? 'items' : 'pass');
+    await gate.reached;
+    f.vscode.workspace.workspaceFolders = [folder('remaining')]; f.workspaceChanged();
+    f.vscode.workspace.workspaceFolders = [folder('original'), folder('remaining')]; f.workspaceChanged();
+    gate.release(); await pending;
+    assertNoInvalidatedRun(f);
+  });
+});
+test('every execution revalidates its captured project after async setup and guards delayed progress before spawn', async t => {
+  for (const command of ['runQuery', 'runCheck', 'runCheckWithSummary']) await t.test(command, async t => {
+    const { f, folder, project } = await workspaceFixture(t), gate = awaitBarrier(), stages = [];
+    const realPath = require('../src/boundary').projectPath;
+    // Dependencies are fixed at activation, so use a second instance to observe
+    // the real filesystem boundary after executable/evidence setup completes.
+    const g = fake({ inputs: ['space', 'PRIVATE_TOKEN'], dependencies: {
+      projectPath: async (...args) => { stages.push('project'); return realPath(...args); },
+      executable: async () => { stages.push('executable'); return '/trusted/datatug'; },
+      evidenceDirectory: async () => { stages.push('evidence'); return '/private/storage/check-abc'; }
+    } });
+    g.vscode.workspace.workspaceFolders = [...f.vscode.workspace.workspaceFolders];
+    g.vscode.window.showOpenDialog = async () => [{ scheme: 'file', fsPath: project }];
+    await summarySetup(g); stages.length = 0;
+    g.vscode.window.withProgress = async (_options, action) => { await gate.wait(); return action({}, { isCancellationRequested: false, onCancellationRequested: () => ({ dispose() {} }) }); };
+    const pending = g.commands.get(`datatug.${command}`)(command === 'runQuery' ? 'items' : 'pass');
+    await gate.reached;
+    assert.equal(stages.at(-1), 'project');
+    assert.ok(stages.lastIndexOf('project') > stages.lastIndexOf(command === 'runQuery' ? 'executable' : 'evidence'));
+    g.vscode.workspace.workspaceFolders = [folder('remaining')]; g.workspaceChanged();
+    gate.release(); await pending;
+    assertNoInvalidatedRun(g);
+  });
+});
+test('workspace changes still cancel an already registered running child', async () => {
+  const gate = awaitBarrier(); let executionToken;
+  const f = fake({ dependencies: { runCLI: async (_file, _args, options) => { executionToken = options.token; await gate.wait(); return checkResult(); } } });
+  await f.commands.get('datatug.selectProject')();
+  const pending = f.commands.get('datatug.runCheck')('pass');
+  await gate.reached;
+  f.vscode.workspace.workspaceFolders = [{ uri: { scheme: 'file', fsPath: '/remaining' } }]; f.workspaceChanged();
+  assert.equal(executionToken.isCancellationRequested, true);
+  gate.release(); await pending;
 });

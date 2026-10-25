@@ -37,7 +37,9 @@ is asserted.
 
 **DataTug: Refresh Project** reloads the bounded metadata listing. Selecting a
 different project clears the environment selection. Workspace folder changes
-clear the project and cancel active work. Only one execution runs at a time.
+clear the project, invalidate every pending execution and cancel active work.
+A remaining trusted folder does not preserve a removed project selection; select
+the project and environment again. Only one execution runs at a time.
 There are no automatic retries. Changes to project files are trusted local
 inputs; execution uses current CLI files rather than a snapshot.
 

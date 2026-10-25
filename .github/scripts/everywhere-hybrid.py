@@ -18,6 +18,26 @@ import urllib.request
 import uuid
 
 
+
+def wait_for_completed_run(request, watch_id, timeout=40, sleep=time.sleep, monotonic=time.monotonic):
+    """Poll read-only run state; a temporary 503 is never a Check result."""
+    deadline = monotonic()+timeout
+    unavailable_reads = 0
+    while monotonic() < deadline:
+        try:
+            runs = request('/v1/watch/runs?watchId='+watch_id).get('runs', [])
+        except urllib.error.HTTPError as error:
+            if error.code != 503:
+                raise
+            unavailable_reads += 1
+        else:
+            completed = next((run for run in runs if run.get('executionStatus') == 'completed'), None)
+            if completed:
+                return completed, unavailable_reads
+        sleep(1)
+    raise AssertionError('Runner did not complete a real Check before the polling deadline')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--image', required=True)
@@ -86,14 +106,7 @@ def main():
                 initialObservation='baseline',mode='one_shot',lifecycle='enabled',enabled=True,
                 notificationPolicy={'cooldownSeconds':0,'recovery':False})
             request('/v1/watch/definition',{'definition':definition,'operationId':'create-synthetic','expectedVersion':0})
-            completed = None
-            deadline = time.monotonic()+40
-            while time.monotonic()<deadline:
-                runs = request('/v1/watch/runs?watchId=demo-once').get('runs',[])
-                completed = next((run for run in runs if run.get('executionStatus')=='completed'),None)
-                if completed:
-                    break
-                time.sleep(1)
+            completed, unavailable_reads = wait_for_completed_run(request, 'demo-once')
             assert completed and completed.get('outcome')=='pass', 'Runner did not complete real Check'
             assert completed.get('id'), 'Coordinator omitted the immutable run identity'
             subprocess.run(compose+['restart','coordinator'],check=True,capture_output=True,timeout=20)
@@ -116,9 +129,19 @@ def main():
             assert not any(item.startswith('DATATUG_WATCH_ALICE_TOKEN=') for item in environment)
             args.output.parent.mkdir(parents=True,exist_ok=True)
             args.output.write_text(json.dumps({'schemaVersion':1,'tlsVerified':True,'invalidCredentialsDenied':True,
-                'outboundRealCheck':'pass','coordinatorStateSurvivedRestart':True,'runnerCredentialsScoped':True,
+                'outboundRealCheck':'pass','temporaryReadFailures':unavailable_reads,'coordinatorStateSurvivedRestart':True,'runnerCredentialsScoped':True,
                 'publicDatabasePorts':0},indent=2)+'\n')
             print('TLS hybrid acceptance passed')
+        except Exception:
+            # Keep failure diagnostics private and remove synthetic credentials;
+            # the artifact allowlist never uploads this file.
+            logs = subprocess.run(compose+['logs','--no-color','--tail','120'],capture_output=True,text=True,timeout=10)
+            safe = (logs.stdout+logs.stderr).replace(user_token,'[redacted-user-token]').replace(runner_token,'[redacted-runner-token]').replace(str(root),'[owned-fixture]')
+            diagnostic = args.output.with_suffix('.private.log')
+            diagnostic.parent.mkdir(parents=True,exist_ok=True)
+            diagnostic.write_text(safe)
+            diagnostic.chmod(0o600)
+            raise
         finally:
             cleanup = subprocess.run(compose+['down','--volumes','--remove-orphans'],capture_output=True,timeout=30)
             if cleanup.returncode:

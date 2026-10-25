@@ -1,7 +1,13 @@
 # Security boundary
 
 Only trusted filesystem projects may be selected; trust is rechecked before
-execution. A separate modal grants unrestricted local-owner consent for each
+execution. Every workspace-folder change invalidates pending executions through
+an epoch, including consent and SecretStorage waits, and cancels registered
+running children. The captured project is physically revalidated after all
+asynchronous setup; the epoch and trust are checked synchronously immediately
+before child launch inside the progress callback. A remaining trusted workspace
+folder cannot preserve an earlier selection. A separate modal grants
+unrestricted local-owner consent for each
 query/Check. The CLI retains policy/source admission; secured Check profiles
 fail closed. The extension never removes policies, edits source descriptors,
 starts listeners or supplies arbitrary workspace commands.

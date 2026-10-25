@@ -210,3 +210,31 @@ sign-in and current grant, a successful summary page, and hosted denial/isolatio
 acceptance using owner-controlled fixtures. Earlier macOS native query/Check
 journey receipts remain historical evidence for their earlier candidate. No new
 summary screenshot, hosted entitlement or public release is claimed here.
+
+## Workspace invalidation fix — Astra review r4 follow-up, 2026-10-25
+
+A workspace-folder change now increments an invalidation epoch before clearing
+selection and cancelling registered children. Every execution captures that
+epoch before its first asynchronous selection step. Pending selections and
+refreshes cannot restore stale state after a folder change. Execution checks
+the epoch after async consent, credential and setup steps, physically revalidates
+the captured project after final setup, then checks epoch/trust inside the
+progress callback immediately before calling `runCLI`, with no intervening
+await. The fixed failure text contains no project/credential values.
+
+Regression tests use controlled promise barriers and real temporary filesystem
+containment validation. They remove or replace the selected root while a
+separate trusted root remains during summary consent and hosted SecretStorage
+retrieval, and assert no spawn or token delivery. Further tests cover pending
+query/default Check consent even when the original root is re-added, delayed
+progress callbacks for all three execution commands, the post-setup containment
+check order, and cancellation of an already registered running child.
+
+`wb run -- npm run build` passed. The full suite with the actual candidate CLI
+passed 43 tests, zero skipped, including all earlier actual CLI integration
+cases. `wb run -- npm run package` and `wb run -- npm run audit:vsix` passed:
+nine files, zero runtime dependencies and zero restricted-asset matches.
+The rebuilt unpublished 0.1.0 VSIX SHA-256 is
+`f56c92dd3a44e63ef6a8d1c679520b0fa44373b3995a34b93342e7e74fe8737a`.
+Independent Astra review r5 is owned by the parent lane and remains pending;
+this fix does not close the actual summary UI/hosted acceptance gate above.

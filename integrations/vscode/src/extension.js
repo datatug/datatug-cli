@@ -6,13 +6,17 @@ const boundary = require('./boundary');
 
 function createExtension(vscode, context, dependencies = {}) {
   const api = { ...boundary, ...dependencies };
-  let selected, environment, listing, busy = false;
+  let selected, environment, listing, busy = false, workspaceEpoch = 0;
   const running = new Set();
   const changed = new vscode.EventEmitter();
   const roots = () => (vscode.workspace.workspaceFolders || []).filter(f => f.uri.scheme === 'file').map(f => f.uri.fsPath);
   function trust() {
     if (!vscode.workspace.isTrusted) throw new api.SafeError('Trust this workspace before reading project files or running DataTug.');
     if (!roots().length) throw new api.SafeError('Open a local or remote filesystem workspace folder first.');
+  }
+  function workspaceUnchanged(epoch) {
+    if (epoch !== workspaceEpoch) throw new api.SafeError('Workspace folders changed. Select the project and environment again before running DataTug.');
+    trust();
   }
   const tree = {
     onDidChangeTreeData: changed.event,
@@ -29,28 +33,38 @@ function createExtension(vscode, context, dependencies = {}) {
   };
   async function refresh() {
     trust();
-    if (!selected) return;
-    selected = await api.projectPath(selected, roots());
-    listing = await api.catalog(selected);
+    const epoch = workspaceEpoch, current = selected;
+    if (!current) return;
+    const project = await api.projectPath(current, roots());
+    workspaceUnchanged(epoch);
+    const next = await api.catalog(project);
+    workspaceUnchanged(epoch);
+    selected = project; listing = next;
     if (!listing.environments.includes(environment)) environment = undefined;
     changed.fire();
   }
   async function selectProject() {
     trust();
+    const epoch = workspaceEpoch;
     const choice = await vscode.window.showOpenDialog({ canSelectFolders: true, canSelectFiles: false, canSelectMany: false, openLabel: 'Select DataTug project', defaultUri: vscode.workspace.workspaceFolders[0].uri });
+    workspaceUnchanged(epoch);
     if (!choice?.length) return;
-    trust();
     if (choice[0].scheme !== 'file') throw new api.SafeError('Select a project on this extension host filesystem.');
     const candidate = await api.projectPath(choice[0].fsPath, roots());
+    workspaceUnchanged(epoch);
     const next = await api.catalog(candidate);
+    workspaceUnchanged(epoch);
     selected = candidate; listing = next; environment = undefined; changed.fire();
     await selectEnvironment();
   }
   async function selectEnvironment() {
     trust();
+    const epoch = workspaceEpoch;
     if (!selected) return selectProject();
     await refresh();
+    workspaceUnchanged(epoch);
     const value = await vscode.window.showQuickPick(listing.environments, { title: 'Select the execution environment', placeHolder: 'An explicit selection is required, including for a single environment' });
+    workspaceUnchanged(epoch);
     if (value) { environment = value; changed.fire(); }
   }
   function profiles() {
@@ -114,50 +128,67 @@ function createExtension(vscode, context, dependencies = {}) {
     trust();
     if (busy) throw new api.SafeError('Another DataTug execution is active. Cancel or finish it first.');
     busy = true;
+    const executionEpoch = workspaceEpoch;
     try {
       if (!selected) await selectProject();
+      workspaceUnchanged(executionEpoch);
       if (!selected) return;
       await refresh();
+      workspaceUnchanged(executionEpoch);
       if (!environment) await selectEnvironment();
+      workspaceUnchanged(executionEpoch);
       if (!environment) return;
       const entries = listing[kind === 'query' ? 'queries' : 'checks'];
       const chosen = requestedID ? entries.find(q => q.id === requestedID) : (await vscode.window.showQuickPick(entries.map(entry => ({ label: entry.title, description: entry.id, entry })), { title: `Select ${kind === 'query' ? 'saved query' : 'Check'}` }))?.entry;
+      workspaceUnchanged(executionEpoch);
       if (!chosen) return;
       if (kind === 'check' && chosen.hasInputs) throw new api.SafeError('This preview supports Checks without input declarations only.');
       const runProject = selected, runEnvironment = environment;
       const secret = await chooseSecret();
+      workspaceUnchanged(executionEpoch);
       if (secret.cancelled) return;
       const admitted = await vscode.window.showWarningMessage(
         `Run the selected ${kind} in environment ${api.label(runEnvironment)}? You authorize local-owner execution if access policies are absent. Workspace trust alone does not authorize this. Existing policies are preserved and enforced; secured Check profiles are refused. Source data and private evidence stay on the execution host.`,
         { modal: true }, 'Run with local-owner consent');
+      workspaceUnchanged(executionEpoch);
       if (admitted !== 'Run with local-owner consent') return;
-      trust();
       await api.projectPath(runProject, roots());
+      workspaceUnchanged(executionEpoch);
       let summaryScope, hostedToken;
       if (publishSummary) {
         const spaceID = context.globalState.get('summarySpace');
         const manifest = await api.readJSON(runProject, 'datatug-project.json');
+        workspaceUnchanged(executionEpoch);
         if (!api.summaryIdentifier(spaceID) || !api.summaryIdentifier(manifest.id) || !api.summaryIdentifier(runEnvironment) || !api.summaryIdentifier(chosen.id)) throw new api.SafeError('Bind an explicit hosted Space and use compatible project, environment and Check identifiers before publishing a summary.');
         summaryScope = { spaceID, projectID: manifest.id, environment: runEnvironment };
         const consent = await vscode.window.showWarningMessage(
           `Publish a minimal Check summary to Space ${spaceID}, project ${manifest.id}, environment ${runEnvironment} for this run? Uploads project, Space, environment and Check identifiers/version, execution status, outcome, severity, duration and execution time for seven days. SQL, rows, inputs, error text and private evidence are excluded. Hosted sign-in, Space access and the current hosted grant are checked independently in DataTug.app. No automatic retries.`,
           { modal: true }, 'Run and publish summary');
+        workspaceUnchanged(executionEpoch);
         if (consent !== 'Run and publish summary') return;
-        trust();
         hostedToken = await context.secrets.get(hostedTokenKey);
+        workspaceUnchanged(executionEpoch);
         if (!api.summaryToken(hostedToken)) throw new api.SafeError('Store a current hosted summary token in VS Code SecretStorage before this run.');
       }
-      trust();
+      workspaceUnchanged(executionEpoch);
       const file = await api.executable(vscode.workspace.getConfiguration('datatug'), roots());
+      workspaceUnchanged(executionEpoch);
       const evidence = kind === 'check' ? await api.evidenceDirectory(context.globalStorageUri.fsPath, roots()) : undefined;
+      workspaceUnchanged(executionEpoch);
+      // Revalidate the captured project after all asynchronous setup. The epoch
+      // is checked again inside the progress callback immediately before spawn.
+      await api.projectPath(runProject, roots());
+      workspaceUnchanged(executionEpoch);
       const args = api.argumentsFor(kind, runProject, runEnvironment, chosen.id, evidence, summaryScope);
       const parsed = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `DataTug ${kind}`, cancellable: true }, async (_progress, token) => {
         const cancellation = new vscode.CancellationTokenSource();
         running.add(cancellation);
         const link = token.onCancellationRequested(() => cancellation.cancel());
         if (token.isCancellationRequested) cancellation.cancel();
-        try { return api.parseResult(kind, await api.runCLI(file, args, { cwd: runProject, token: cancellation.token, secret: secret.secret, ...(publishSummary ? { summaryToken: hostedToken, timeoutMs: 31000 } : {}) }), summaryScope); }
-        finally { link.dispose(); running.delete(cancellation); cancellation.dispose(); }
+        try {
+          workspaceUnchanged(executionEpoch);
+          return api.parseResult(kind, await api.runCLI(file, args, { cwd: runProject, token: cancellation.token, secret: secret.secret, ...(publishSummary ? { summaryToken: hostedToken, timeoutMs: 31000 } : {}) }), summaryScope);
+        } finally { link.dispose(); running.delete(cancellation); cancellation.dispose(); }
       });
       // No raw subprocess text, project titles, argv, rows or errors enter notifications/logs.
       const summaryNotice = parsed.summary?.url ? ' Minimal summary published for seven days. Opening it requires independent hosted sign-in and the current hosted grant.' : parsed.summary?.reason ? ` ${parsed.summary.reason} Local Check status is preserved.` : '';
@@ -186,6 +217,7 @@ function createExtension(vscode, context, dependencies = {}) {
   }));
   context.subscriptions.push(changed, vscode.window.registerTreeDataProvider('datatug.projects', tree), { dispose() { for (const cancellation of running) cancellation.cancel(); } });
   context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => {
+    workspaceEpoch++;
     for (const cancellation of running) cancellation.cancel();
     selected = undefined; listing = undefined; environment = undefined; changed.fire();
   }));

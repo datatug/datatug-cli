@@ -11,7 +11,7 @@ async function run() {
   assert.ok(extension, 'VS Code must discover the candidate extension.');
   const api = await extension.activate();
   assert.equal(extension.isActive, true);
-  const names = ['selectProject', 'selectEnvironment', 'refresh', 'runQuery', 'runCheck', 'addProfile', 'deleteProfile', 'openHosted'].map(name => `datatug.${name}`);
+  const names = ['selectProject', 'selectEnvironment', 'refresh', 'runQuery', 'runCheck', 'runCheckWithSummary', 'setSummarySpace', 'storeHostedToken', 'deleteHostedToken', 'addProfile', 'deleteProfile', 'openHosted'].map(name => `datatug.${name}`);
   const registered = await vscode.commands.getCommands(true);
   for (const name of names) assert.ok(registered.includes(name), `Missing command ${name}`);
   assert.ok(api.tree, 'The real host must receive the native tree provider.');

@@ -13,3 +13,9 @@
 - Public community support URL and hosted homepage metadata.
 - Marketplace publication, trusted-project UI acceptance, remote/platform matrix,
   provider authentication, screenshots and authorised hosted-context links pending.
+
+- Added a separate one-run minimal Check summary publication command, explicit
+  Space binding, hosted SecretStorage token storage/deletion, and scoped native
+  summary handoff. Default Check execution remains local. Optional upload errors
+  preserve Check status and native JSON. Actual summary UI/hosted acceptance is
+  pending; this remains an unpublished 0.1.0 candidate.

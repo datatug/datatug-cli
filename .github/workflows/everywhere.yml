@@ -109,7 +109,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: datatug/datatug-action
-          ref: 2a53cb0e36c22004ff198441fa8535eac4d0aa9c
+          ref: 11434d63d87f9988446cd2db3fa4f3d8a0495f3c
           path: .action-candidate
           persist-credentials: false
       - name: Test Check admission, private store cancellation and execution
@@ -168,7 +168,7 @@ jobs:
           records.extend([{'case':'held-lock-timeout','exitCode':124}, {'case':'SIGTERM','exitCode':130}])
           (root/'runner.json').write_text(json.dumps({'schemaVersion':1, 'runner':os.environ['RUNNER_OS'],
               'architecture':os.environ['RUNNER_ARCH'], 'sourceRevision':os.environ['GITHUB_SHA'],
-              'actionRevision':'2a53cb0e36c22004ff198441fa8535eac4d0aa9c', 'results':records}, indent=2)+'\n')
+              'actionRevision':'11434d63d87f9988446cd2db3fa4f3d8a0495f3c', 'results':records}, indent=2)+'\n')
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
               summary.write('Candidate CLI + Action: real SQLite outcome matrix, timeout and SIGTERM passed.\n')
           PY

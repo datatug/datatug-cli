@@ -21,6 +21,9 @@ import (
 
 const cliPath = "/usr/local/bin/datatug"
 
+var newHealthRequest = http.NewRequestWithContext
+var execProcess = syscall.Exec
+
 func invocation(args []string, localOwner string) ([]string, error) {
 	if len(args) == 0 {
 		return []string{"--help"}, nil
@@ -87,7 +90,7 @@ func healthcheckWithClient(ctx context.Context, rawURL string, client *http.Clie
 
 	checkCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	request, err := http.NewRequestWithContext(checkCtx, http.MethodGet, u.String(), nil)
+	request, err := newHealthRequest(checkCtx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return errors.New("could not create health request")
 	}
@@ -121,10 +124,7 @@ func run(args []string, getenv func(string) string) error {
 		return err
 	}
 	argv = append([]string{cliPath}, argv...)
-	if err := syscall.Exec(cliPath, argv, os.Environ()); err != nil {
-		return fmt.Errorf("exec DataTug CLI: %w", err)
-	}
-	return errors.New("exec returned unexpectedly")
+	return execProcess(cliPath, argv, os.Environ())
 }
 
 func main() {

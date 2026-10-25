@@ -23,13 +23,26 @@ import (
 	"github.com/datatug/datatug-cli/pkg/incidentstore"
 	"github.com/datatug/datatug-cli/pkg/privateadmission"
 	"github.com/datatug/datatug-cli/pkg/secureread"
-	"github.com/datatug/datatug-cli/pkg/server/endpoints"
 	"github.com/datatug/datatug-cli/pkg/watchdaemon"
+	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/incidents"
 	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
+)
+
+// Host operations retain their production defaults; tests can stop an actual
+// operation at a deterministic boundary or force an otherwise rare I/O error.
+var (
+	checksNewLocalStore   = detective.NewLocalStoreContext
+	checksLoadEnvironment = func(ctx context.Context, projectID, projectDir, environment string) (*datatug.Environment, error) {
+		return filestore.NewProjectStore(projectID, projectDir).LoadEnvironment(ctx, environment)
+	}
+	checksConfigurePrivateEvidence = configurePrivateExecutionEvidence
+	checksPrivateLstat             = os.Lstat
+	checksPrivateWalkDir           = fs.WalkDir
+	checksPrivateRootLstat         = (*os.Root).Lstat
 )
 
 // This public envelope is deliberately independent of CheckRun: the latter
@@ -55,6 +68,8 @@ type checksRunOptions struct {
 	checks                                           []string
 	owner                                            bool
 	timeout                                          time.Duration
+	publishSummary                                   bool
+	summarySpace, summaryTokenEnv, summaryAPIURL     string
 }
 
 func checksRunCommand() *cobra.Command {
@@ -79,6 +94,10 @@ func checksRunCommand() *cobra.Command {
 	f.DurationVar(&o.timeout, "timeout", 30*time.Second, "Deadline for the entire invocation (maximum 1 hour)")
 	f.StringVar(&o.warnings, "warnings", "fail", "Business warning handling: fail or ignore")
 	f.StringVar(&o.format, "format", "json", "Summary format (json)")
+	f.BoolVar(&o.publishSummary, "publish-summary", false, "Explicitly upload a minimal seven-day Check summary")
+	f.StringVar(&o.summarySpace, "summary-space", "", "Explicit hosted Space ID for the summary")
+	f.StringVar(&o.summaryTokenEnv, "summary-token-env", "", "Environment variable holding the hosted bearer token (never the token itself)")
+	f.StringVar(&o.summaryAPIURL, "summary-api-url", checksSummaryAPIURL, "Summary API /v0/ base (production or literal loopback IP with explicit port)")
 	return cmd
 }
 func newChecksRunSummary(status string, code int) checksRunSummary {
@@ -110,9 +129,15 @@ func runChecksCommand(cmd *cobra.Command, o checksRunOptions) error {
 	ctx, cancel := context.WithTimeout(ctx, o.timeout)
 	defer cancel()
 	summary := newChecksRunSummary("pass", 0)
+	var summaryProject string
+	var summaryVersions []string
+	var summaryExecutedAt time.Time
 	finish := func(status string, code int) error {
 		summary.Status = status
 		summary.ExitCode = code
+		if o.publishSummary {
+			summary.DeepLink, summary.DeepLinkReason = publishChecksSummary(ctx, o, summaryProject, summaryVersions, summaryExecutedAt, summary.Checks)
+		}
 		return writeChecksRunSummary(cmd, summary)
 	}
 	if !o.owner {
@@ -147,7 +172,7 @@ func runChecksCommand(cmd *cobra.Command, o checksRunOptions) error {
 		return finish("configuration_error", 2)
 	}
 	// Existing LocalStore verifies physical path disjointness, including aliases.
-	store, err := detective.NewLocalStoreContext(ctx, project.ID, o.project, o.evidence)
+	store, err := checksNewLocalStore(ctx, project.ID, o.project, o.evidence)
 	if err != nil {
 		if ctx.Err() != nil {
 			status, code := checksRunFailure(ctx, err)
@@ -159,7 +184,7 @@ func runChecksCommand(cmd *cobra.Command, o checksRunOptions) error {
 		status, code := checksRunFailure(ctx, ctx.Err())
 		return finish(status, code)
 	}
-	env, err := filestore.NewProjectStore(project.ID, o.project).LoadEnvironment(ctx, o.environment)
+	env, err := checksLoadEnvironment(ctx, project.ID, o.project, o.environment)
 	if err != nil || env == nil {
 		if ctx.Err() != nil {
 			status, code := checksRunFailure(ctx, err)
@@ -183,6 +208,7 @@ func runChecksCommand(cmd *cobra.Command, o checksRunOptions) error {
 		}
 		versions[i] = strconv.FormatInt(check.Version, 10)
 	}
+	summaryProject, summaryVersions = project.ID, versions
 	previousStore := storage.NewDatatugStore
 	defer func() {
 		storage.NewDatatugStore = previousStore
@@ -194,7 +220,7 @@ func runChecksCommand(cmd *cobra.Command, o checksRunOptions) error {
 	cfg.Runner.Principal = "local-owner"
 	cfg.Runner.EvidenceDir = o.evidence
 	// Consent above is independent of no-policies fallback or principal name.
-	cleanup, err := configureWatchExecution(cfg, project.ID)
+	cleanup, err := watchConfigureExecution(cfg, project.ID)
 	if err != nil {
 		_ = api.CloseExecutionEvidence()
 		return finish("configuration_error", 2)
@@ -203,17 +229,18 @@ func runChecksCommand(cmd *cobra.Command, o checksRunOptions) error {
 	// Watch defaults place immutable execution metadata in the project. Local
 	// automation must also route that metadata privately so a read-only project
 	// remains unchanged; Record:true and the existing receipt engine are retained.
-	repository, err := configurePrivateExecutionEvidence(project.ID, o.project, o.evidence)
+	repository, err := checksConfigurePrivateEvidence(project.ID, o.project, o.evidence)
 	if err != nil {
 		return finish("configuration_error", 2)
 	}
+	summaryExecutedAt = time.Now().UTC()
 	for i, id := range o.checks {
 		if ctx.Err() != nil {
 			status, code := checksRunFailure(ctx, ctx.Err())
 			return finish(status, code)
 		}
 		start := time.Now()
-		run, _, runErr := endpoints.ExecuteWatchCheck(ctx, project.ID, o.environment, id, versions[i], "", "checks-"+uuid.NewString(), nil)
+		run, _, runErr := watchExecuteCheck(ctx, project.ID, o.environment, id, versions[i], "", "checks-"+uuid.NewString(), nil)
 		// Repository records normally use Git-friendly modes. The inaccessible
 		// private ancestor protects publication; tighten all completed metadata
 		// before exposing an outcome, including failed/cancelled runs.
@@ -235,11 +262,9 @@ func runChecksCommand(cmd *cobra.Command, o checksRunOptions) error {
 		}
 		if code > summary.ExitCode || checksStatusPriority(status) > checksStatusPriority(summary.Status) {
 			summary.Status, summary.ExitCode = status, code
-		} else if status == "warning" && summary.Status == "pass" {
-			summary.Status = status
 		}
 	}
-	return writeChecksRunSummary(cmd, summary)
+	return finish(summary.Status, summary.ExitCode)
 }
 func checksEnum(value string, allowed ...string) string {
 	for _, item := range allowed {
@@ -318,7 +343,7 @@ func configurePrivateExecutionEvidence(projectID, projectDir, privateDir string)
 		if err = os.Mkdir(dir, 0700); err != nil && !errors.Is(err, os.ErrExist) {
 			return "", err
 		}
-		info, e := os.Lstat(dir)
+		info, e := checksPrivateLstat(dir)
 		if e != nil {
 			return "", e
 		}
@@ -337,11 +362,11 @@ func securePrivateExecutionTree(repository string) (result error) {
 		return err
 	}
 	defer func() { result = errors.Join(result, root.Close()) }()
-	return fs.WalkDir(root.FS(), ".", func(path string, entry fs.DirEntry, err error) error {
+	return checksPrivateWalkDir(root.FS(), ".", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		info, err := root.Lstat(path)
+		info, err := checksPrivateRootLstat(root, path)
 		if err != nil {
 			return err
 		}

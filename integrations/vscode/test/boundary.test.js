@@ -117,3 +117,42 @@ test('deep links never accept project/CLI URLs, credentials, query strings, or u
     assert.match(b.hostedLink(input).reason, /unavailable/);
   }
 });
+const summaryScope = { spaceID: 'space', projectID: 'project', environment: 'local' };
+const summaryURL = fragment => 'https://datatug.app/space/space/store/firestore/project/project/overview#check-summary=' + Buffer.from(JSON.stringify(fragment)).toString('base64url');
+const summaryFragment = { v: 1, environment: 'local', summaryId: 'A'.repeat(43) };
+test('hosted auth is separately validated and scrubbed from default child env', async () => {
+  assert.equal(b.secretVariable(b.SUMMARY_TOKEN_ENV), false);
+  assert.equal(b.childEnvironment({ DATATUG_SUMMARY_TOKEN: 'ambient-private' }).DATATUG_SUMMARY_TOKEN, undefined);
+  assert.equal(b.childEnvironment({}, undefined, 'PRIVATE').DATATUG_SUMMARY_TOKEN, 'PRIVATE');
+  for (const token of ['', 'a b', 'a\n', 'x'.repeat(8193)]) assert.throws(() => b.childEnvironment({}, undefined, token), b.SafeError);
+  const result = await b.runCLI(process.execPath, ['-e', 'process.stdout.write(JSON.stringify({present:Object.hasOwn(process.env,"DATATUG_SUMMARY_TOKEN")}))'], { env: { DATATUG_SUMMARY_TOKEN: 'ambient-private' } });
+  assert.deepEqual(JSON.parse(result.stdout), { present: false });
+  const injected = await b.runCLI(process.execPath, ['-e', 'process.stdout.write(JSON.stringify({matches:process.env.DATATUG_SUMMARY_TOKEN === "PRIVATE"}))'], { summaryToken: 'PRIVATE' });
+  assert.deepEqual(JSON.parse(injected.stdout), { matches: true });
+});
+test('summary link needs canonical closed fragment and exact manifest/Space/environment scope', () => {
+  const good = summaryURL(summaryFragment); assert.equal(b.safeDeepLink(good, summaryScope), good);
+  const malformed = [good.replace('datatug.app/', 'evil/'), good.replace('https:', 'http:'), good.replace('datatug.app/', 'datatug.app:443/'),
+    good.replace('datatug.app/', 'datatug.app@evil/'), good.replace('/space/space/', '/space/other/'), good.replace('/project/project/', '/project/other/'),
+    good.replace('/overview#', '/overview?token=PRIVATE#'), good.replace('/space/space/', '/space/%73pace/'), good + '=', good + '&token=PRIVATE',
+    summaryURL({ ...summaryFragment, environment: 'other' }), summaryURL({ ...summaryFragment, rows: 'PRIVATE' }),
+    summaryURL({ ...summaryFragment, summaryId: 'A'.repeat(42) + 'B' }), summaryURL({ ...summaryFragment, v: 2 }),
+    summaryURL({ environment: 'local', v: 1, summaryId: 'A'.repeat(43) }), summaryURL({ ...summaryFragment, environment: '[click](command:evil)' })];
+  for (const raw of malformed) assert.equal(b.safeDeepLink(raw, summaryScope), undefined, raw);
+  assert.equal(b.safeDeepLink(good, { ...summaryScope, projectID: 'other' }), undefined);
+  assert.equal(b.safeDeepLink(good, { ...summaryScope, spaceID: '../space' }), undefined);
+});
+test('summary parsing never changes local status/exit or exposes unsafe CLI fields', () => {
+  for (const status of ['pass', 'fail']) {
+    const code = status === 'pass' ? 0 : 1;
+    const data = { schemaVersion: 'datatug.checks.run/v1', status, exitCode: code, checks: [], deepLink: summaryURL(summaryFragment), deepLinkReason: 'hosted_summary_published', rows: 'PRIVATE' };
+    const parsed = b.parseResult('check', { code, stdout: JSON.stringify(data) }, summaryScope);
+    assert.equal(parsed.status, status); assert.equal(parsed.summary.url, data.deepLink); assert.ok(!parsed.content.includes('PRIVATE'));
+    assert.equal(b.parseResult('check', { code, stdout: JSON.stringify(data) }).summary, undefined);
+    for (const reason of ['summary_publish_denied', 'PRIVATE [click](command:evil)']) {
+      data.deepLinkReason = reason;
+      const denied = b.parseResult('check', { code, stdout: JSON.stringify(data) }, summaryScope);
+      assert.equal(denied.status, status); assert.equal(denied.summary.url, undefined); assert.ok(!denied.summary.reason.includes('PRIVATE'));
+    }
+  }
+});

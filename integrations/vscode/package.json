@@ -26,6 +26,10 @@
       { "command": "datatug.refresh", "title": "DataTug: Refresh Project" },
       { "command": "datatug.runQuery", "title": "DataTug: Run Saved Query" },
       { "command": "datatug.runCheck", "title": "DataTug: Run Check" },
+      { "command": "datatug.runCheckWithSummary", "title": "DataTug: Run Check and Publish Minimal Summary" },
+      { "command": "datatug.setSummarySpace", "title": "DataTug: Bind Hosted Summary Space" },
+      { "command": "datatug.storeHostedToken", "title": "DataTug: Store Hosted Summary Token" },
+      { "command": "datatug.deleteHostedToken", "title": "DataTug: Delete Hosted Summary Token" },
       { "command": "datatug.addProfile", "title": "DataTug: Store Connection Profile Secret" },
       { "command": "datatug.deleteProfile", "title": "DataTug: Delete Connection Profile Secret" },
       { "command": "datatug.openHosted", "title": "DataTug: Open Hosted Home" }

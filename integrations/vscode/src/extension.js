@@ -87,7 +87,30 @@ function createExtension(vscode, context, dependencies = {}) {
     if (!value) throw new api.SafeError('Connection profile secret is missing. Store a new profile on this extension host.');
     return { secret: { variable: chosen.profile.variable, value } };
   }
-  async function execute(kind, requestedID) {
+  const hostedTokenKey = 'hosted.summaryToken';
+  async function setSummarySpace() {
+    trust();
+    const value = await vscode.window.showInputBox({ title: 'Bind hosted summary Space', prompt: 'Enter the explicit hosted Space ID. This local binding does not grant hosted access.', validateInput: v => api.summaryIdentifier(v) ? undefined : 'Use 1–128 letters, numbers, underscores or hyphens.' });
+    if (!value) return;
+    trust();
+    if (!api.summaryIdentifier(value)) throw new api.SafeError('Invalid hosted Space ID.');
+    await context.globalState.update('summarySpace', value);
+  }
+  async function storeHostedToken() {
+    trust();
+    const value = await vscode.window.showInputBox({ title: 'Store hosted summary token in SecretStorage', prompt: 'Use a current hosted bearer token. Hosted sign-in and the current grant remain independent in DataTug.app. The token is supplied only for an explicitly consented summary run.', password: true, ignoreFocusOut: true, validateInput: v => api.summaryToken(v) ? undefined : 'Enter a bearer token without spaces or control characters (maximum 8192 characters).' });
+    if (!value) return;
+    trust();
+    if (!api.summaryToken(value)) throw new api.SafeError('Invalid hosted token.');
+    await context.secrets.store(hostedTokenKey, value);
+    await vscode.window.showInformationMessage('Hosted token stored in VS Code SecretStorage. Each summary run requires separate consent.');
+  }
+  async function deleteHostedToken() {
+    trust();
+    await context.secrets.delete(hostedTokenKey);
+    await vscode.window.showInformationMessage('Hosted summary token deleted from VS Code SecretStorage on this execution host.');
+  }
+  async function execute(kind, requestedID, publishSummary = false) {
     trust();
     if (busy) throw new api.SafeError('Another DataTug execution is active. Cancel or finish it first.');
     busy = true;
@@ -105,24 +128,42 @@ function createExtension(vscode, context, dependencies = {}) {
       const secret = await chooseSecret();
       if (secret.cancelled) return;
       const admitted = await vscode.window.showWarningMessage(
-        `Run the selected ${kind} in environment ${api.label(runEnvironment)}? You authorize local-owner execution if access policies are absent. Workspace trust alone does not authorize this. Existing policies are preserved and enforced; secured Check profiles are refused. Customer data stays on the execution host.`,
+        `Run the selected ${kind} in environment ${api.label(runEnvironment)}? You authorize local-owner execution if access policies are absent. Workspace trust alone does not authorize this. Existing policies are preserved and enforced; secured Check profiles are refused. Source data and private evidence stay on the execution host.`,
         { modal: true }, 'Run with local-owner consent');
       if (admitted !== 'Run with local-owner consent') return;
       trust();
       await api.projectPath(runProject, roots());
+      let summaryScope, hostedToken;
+      if (publishSummary) {
+        const spaceID = context.globalState.get('summarySpace');
+        const manifest = await api.readJSON(runProject, 'datatug-project.json');
+        if (!api.summaryIdentifier(spaceID) || !api.summaryIdentifier(manifest.id) || !api.summaryIdentifier(runEnvironment) || !api.summaryIdentifier(chosen.id)) throw new api.SafeError('Bind an explicit hosted Space and use compatible project, environment and Check identifiers before publishing a summary.');
+        summaryScope = { spaceID, projectID: manifest.id, environment: runEnvironment };
+        const consent = await vscode.window.showWarningMessage(
+          `Publish a minimal Check summary to Space ${spaceID}, project ${manifest.id}, environment ${runEnvironment} for this run? Uploads project, Space, environment and Check identifiers/version, execution status, outcome, severity, duration and execution time for seven days. SQL, rows, inputs, error text and private evidence are excluded. Hosted sign-in, Space access and the current hosted grant are checked independently in DataTug.app. No automatic retries.`,
+          { modal: true }, 'Run and publish summary');
+        if (consent !== 'Run and publish summary') return;
+        trust();
+        hostedToken = await context.secrets.get(hostedTokenKey);
+        if (!api.summaryToken(hostedToken)) throw new api.SafeError('Store a current hosted summary token in VS Code SecretStorage before this run.');
+      }
+      trust();
       const file = await api.executable(vscode.workspace.getConfiguration('datatug'), roots());
       const evidence = kind === 'check' ? await api.evidenceDirectory(context.globalStorageUri.fsPath, roots()) : undefined;
-      const args = api.argumentsFor(kind, runProject, runEnvironment, chosen.id, evidence);
+      const args = api.argumentsFor(kind, runProject, runEnvironment, chosen.id, evidence, summaryScope);
       const parsed = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `DataTug ${kind}`, cancellable: true }, async (_progress, token) => {
         const cancellation = new vscode.CancellationTokenSource();
         running.add(cancellation);
         const link = token.onCancellationRequested(() => cancellation.cancel());
         if (token.isCancellationRequested) cancellation.cancel();
-        try { return api.parseResult(kind, await api.runCLI(file, args, { cwd: runProject, token: cancellation.token, secret: secret.secret })); }
+        try { return api.parseResult(kind, await api.runCLI(file, args, { cwd: runProject, token: cancellation.token, secret: secret.secret, ...(publishSummary ? { summaryToken: hostedToken, timeoutMs: 31000 } : {}) }), summaryScope); }
         finally { link.dispose(); running.delete(cancellation); cancellation.dispose(); }
       });
       // No raw subprocess text, project titles, argv, rows or errors enter notifications/logs.
-      const open = await vscode.window.showInformationMessage(`DataTug ${kind}: ${parsed.status}. Results may contain private data.`, 'Open JSON results');
+      const summaryNotice = parsed.summary?.url ? ' Minimal summary published for seven days. Opening it requires independent hosted sign-in and the current hosted grant.' : parsed.summary?.reason ? ` ${parsed.summary.reason} Local Check status is preserved.` : '';
+      const actions = ['Open JSON results', ...(parsed.summary?.url ? ['Open summary in DataTug.app'] : [])];
+      const open = await vscode.window.showInformationMessage(`DataTug ${kind}: ${parsed.status}. Results may contain private data.${summaryNotice}`, ...actions);
+      if (open === 'Open summary in DataTug.app' && parsed.summary?.url) await vscode.env.openExternal(vscode.Uri.parse(parsed.summary.url));
       if (open === 'Open JSON results') {
         const document = await vscode.workspace.openTextDocument({ language: 'json', content: parsed.content });
         await vscode.window.showTextDocument(document, { preview: true });
@@ -135,7 +176,8 @@ function createExtension(vscode, context, dependencies = {}) {
   }
   const commands = {
     selectProject, selectEnvironment, refresh,
-    runQuery: id => execute('query', id), runCheck: id => execute('check', id),
+    runQuery: id => execute('query', id), runCheck: id => execute('check', id), runCheckWithSummary: id => execute('check', id, true),
+    setSummarySpace, storeHostedToken, deleteHostedToken,
     addProfile, deleteProfile, openHosted
   };
   for (const [name, action] of Object.entries(commands)) context.subscriptions.push(vscode.commands.registerCommand(`datatug.${name}`, async (...args) => {

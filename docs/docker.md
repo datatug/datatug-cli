@@ -83,8 +83,13 @@ docker compose --env-file .env -f compose.local.yaml down -v
 The sample demonstrates the `pass` Check. Other fixture IDs and their expected
 outcomes are documented in [checks-run.md](checks-run.md). `checks run` does
 not start a listener. It needs no connection to `datatug.app` to execute a
-local Check; the output's hosted home link is not a result page or evidence
-synchronization claim.
+local Check. The default hosted home link is not a result page or evidence
+synchronization claim. One-shot `checks run` also accepts the explicit opt-in
+summary flags documented in [checks-run.md](checks-run.md), using a selected
+secret environment variable and an already admitted matching hosted scope.
+Upload failure preserves the local result; the production hosted service must
+be separately enabled before its summary panel can satisfy the release gate.
+The outbound Runner does not automatically publish summaries.
 
 ## Optional hybrid Coordinator and outbound Runner
 

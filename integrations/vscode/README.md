@@ -90,7 +90,9 @@ process can inspect its environment. Never share that host with untrusted users.
   remain refused by the CLI; policies are never deleted or bypassed. Bare
   interactive `checks` is never invoked.
 - The process uses fixed arguments with `shell: false`, ignored stdin, at most
-  30 seconds and 1 MiB of combined stdout/stderr. Output above the limit is
+  30 seconds and 1 MiB of combined stdout/stderr. An explicitly opted-in summary
+  run allows one additional second for the CLI to flush its bounded JSON after
+  its own 30-second execution/publication deadline. Output above the limit is
   discarded and execution terminated. Cancellation sends termination then a
   bounded force kill. Results are JSON text, without executable links or HTML.
   Check output is allowlisted and excludes raw evidence, SQL, definitions, IDs,
@@ -106,14 +108,42 @@ process can inspect its environment. Never share that host with untrusted users.
 
 ## Hosted handoff
 
-**DataTug: Open Hosted Home** explains the missing local-to-hosted context before
-opening only `https://datatug.app`. No project-supplied or CLI-supplied URL is
-opened. No SQL, rows, environment values, credentials or evidence references are
-sent. The current local project/Check result has no verified hosted tenant and
-environment mapping or authorised result-reference contract. Task 17 owns that
-gap. This honest home fallback is not a project/query/Check/result deep link and
-does not satisfy the corresponding public-release gate. Hosted context and
-permission-isolation acceptance remain pending that supported contract.
+Ordinary **DataTug: Run Check** stays local. Publishing requires the distinct
+**DataTug: Run Check and Publish Minimal Summary** command for each invocation.
+First use **DataTug: Bind Hosted Summary Space** to enter an explicit Space ID,
+then **DataTug: Store Hosted Summary Token** to place a current hosted bearer
+token in VS Code SecretStorage. The Space binding is nonsecret local extension
+state; it grants no hosted authority. **DataTug: Delete Hosted Summary Token**
+deletes the token on this execution host while retaining the Space binding.
+Connection profiles and hosted tokens have separate storage keys and validators.
+No token is stored in settings, the workspace, arguments, results or logs.
+
+After local-owner consent, the summary command asks for separate one-run upload
+consent naming the Space, actual manifest project ID and selected environment.
+It sends only identifiers/version, execution status, outcome, severity, duration
+and execution time, with seven-day retention. SQL, rows, input values, error text
+and private evidence remain on the execution host. It invokes the tested CLI
+flags `--publish-summary --summary-space SPACE --summary-token-env
+DATATUG_SUMMARY_TOKEN`; the token enters only that child's named environment
+variable. Inherited `DATATUG_SUMMARY_TOKEN` is removed from every invocation.
+The extension exposes no API URL override and uses the CLI's fixed trusted
+production default. It performs no refresh or automatic retry.
+
+A denied, offline or incompatible optional publication preserves the local
+Check status and JSON and shows a fixed bounded explanation. A successful
+publication offers **Open summary in DataTug.app** as a separate explicit action.
+Only the exact supported route scoped to the chosen Space, actual project ID
+and selected environment is accepted, with a closed canonical fragment holding
+version 1, environment and a canonical 32-byte summary ID. Other URLs, fragment
+fields and scopes are refused. Hosted sign-in, Space access and the current
+hosted grant remain independent in DataTug.app; the local token or link grants
+no authority to the reader.
+
+**DataTug: Open Hosted Home** retains its accurate local-context fallback and
+opens only `https://datatug.app` after explaining the limitation. It does not
+upload or claim to open a project/query/Check/result. The new summary adapter's
+actual VS Code-to-hosted success/denial journey and hosted permission-isolation
+acceptance remain release gates; unit and CLI process tests are separate evidence.
 
 ## Host compatibility and evidence
 

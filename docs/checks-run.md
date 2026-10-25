@@ -71,11 +71,33 @@ or `running`; `outcome` is `pass`, `fail` or `unknown`; `severity` is `critical`
 The invocation status gives unknown precedence over fail, and fail precedence
 over warning, so an ignored warning cannot hide a later unresolved result.
 
-The only hosted link is `https://datatug.app`, with
-`deepLinkReason: "hosted_result_reference_unsupported"`. This opens the hosted
-home experience. It does not point to a CI result page, expose private evidence,
-or claim hosted result synchronization. A permission-checked hosted result
-reference remains a release blocker for integrations that require it.
+Without upload consent the link is the hosted home, with
+`deepLinkReason: "hosted_result_reference_unsupported"`; it is not result evidence.
+
+Optional `--publish-summary --summary-space <hosted-space>` reports only the
+existing project/environment/Check identifiers and versions, execution time,
+closed status/severity values and duration. The same native hosted project,
+environment and Check versions must already be admitted. SQL, rows, inputs,
+definitions, credentials and raw errors are excluded. The hosted service computes
+expiry at creation plus seven days and rechecks current permissions on every read.
+Reports are labelled client-reported, without identifying the reporter.
+
+Use the existing DataTug saved login, or explicitly select a bearer-token
+environment variable with `--summary-token-env <variable-name>`; the token itself
+never belongs in argv. Saved credentials go only to the fixed
+`https://api.sneat.cloud/v0/` origin. The explicit `--summary-api-url` test override
+accepts only a literal loopback IP with an explicit port and requires an explicit
+environment token; it cannot send saved credentials elsewhere. Redirects are
+refused and request/response sizes and time are bounded.
+
+A successful upload returns `deepLinkReason: "hosted_summary_published"` and a
+reconstructed DataTug.app project overview link containing only the environment
+and an opaque summary reference. Sign-in and current permissions are required to
+open its summary panel. A failed upload returns an empty link and a closed
+`summary_publish_*` reason while preserving the actual local status and exit code.
+There are no automatic upload retries. Upload defaults off; production enablement
+is separately gated on approved private storage rules and cleanup/TTL configuration.
+The candidate is not a claim that the deployed hosted API is already enabled.
 
 Focused verification:
 

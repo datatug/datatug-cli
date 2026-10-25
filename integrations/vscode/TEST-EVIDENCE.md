@@ -157,10 +157,56 @@ VSIX hash above is that rebuilt candidate.
   PostgreSQL/cloud/provider credentials and remote SecretStorage transport were
   not exercised. Existing CLI descriptor/env credential mechanisms were verified
   in source, including `dsnEnv`, `env:NAME`, and pgx `PGPASSWORD` handling.
-- The only hosted handoff is an explicitly explained constant home fallback.
-  Task 17's authorised tenant/project/environment/result handoff, its permission
-  negatives, and corresponding publication gate remain pending. No invented URL
-  or assertion of hosted result synchronisation is present.
+- The earlier candidate's constant home fallback remains available. The summary
+  adapter now has a separate explicitly consented, scoped summary handoff, with
+  unit and actual CLI-process evidence recorded below. Actual VS Code summary
+  consent/SecretStorage-to-hosted success and denial, independent hosted sign-in
+  and current-grant isolation remain acceptance gates. No public readiness or
+  hosted-authority claim follows from the process tests.
 - Screenshots, publisher entitlement, listing validation, independent review,
   Stage 1 gates, legal interpretation and explicit publication approval remain
   separate prerequisites. No publication claim is made.
+
+## Minimal summary adapter follow-up — 2026-10-25
+
+The separate `datatug.runCheckWithSummary` command now requires the existing
+local-owner consent plus one-run minimal publication consent. Space binding and
+hosted token storage/deletion are separate native commands. Ordinary Check runs
+load no hosted SecretStorage token and add no upload flags; the child environment
+removes an inherited `DATATUG_SUMMARY_TOKEN`. Summary runs use the fixed token
+variable, never token argv, and expose no API URL setting or input. Their CLI
+invocation retains the 30-second execution/publication deadline with one second
+of supervisor flush allowance and no retries.
+
+Current verification:
+
+- `wb run -- npm run build` passed syntax and manifest/runtime boundary checks.
+- `DATATUG_TEST_CLI=/private/tmp/datatug-everywhere-summary-01a17328/datatug
+  wb run -- npm test` passed all 30 tests, zero skipped. These include actual
+  built-CLI SQLite query and Check pass/fail/error processes, no-upload default,
+  scrubbed inherited token and missing-auth opt-in, plus a test-owned loopback
+  403 endpoint proving uploaded minimal field allowlists and unchanged local
+  pass/fail/exit codes. The extension-generated args contain no API override;
+  only the integration fixture appends the CLI's explicit loopback test option.
+  The sandbox refused the first listener bind (`EPERM`); the focused and final
+  suites passed under approved escalation. Every listener and temporary private
+  evidence directory was closed/removed by test teardown.
+- Native API tests cover separate Space/SecretStorage boundaries, token deletion,
+  owner/trust/upload cancellation before spawn/auth, exact command registration,
+  safe explicit opening only, and bounded denial diagnostics. Link tests reject
+  wrong hosts, credentials, ports, paths/scopes, query strings, noncanonical
+  base64url/32-byte IDs, unknown/extra fragment fields and Markdown-like input.
+- `wb run -- npm run package` and `wb run -- npm run audit:vsix` passed. The
+  unpublished 0.1.0 candidate has nine archive files, zero runtime dependencies,
+  and zero restricted-asset matches. No dependency or lockfile change was made.
+  SHA-256: `f19d6bbedafe6f8aaaadaa890e1828e8e50a26e51188a9356fe8c9cf68302c62`.
+- Independent native Codex Sol (6.1) review r1 found one minor stale acceptance
+  statement; fix r1 corrected the scope. Review r2 returned
+  `VERDICT: blockers=0 majors=0 minors=0 land=yes`.
+
+This does not establish the actual new VS Code summary UI/SecretStorage-to-hosted
+journey. That gate still requires real per-run user consent, independent hosted
+sign-in and current grant, a successful summary page, and hosted denial/isolation
+acceptance using owner-controlled fixtures. Earlier macOS native query/Check
+journey receipts remain historical evidence for their earlier candidate. No new
+summary screenshot, hosted entitlement or public release is claimed here.

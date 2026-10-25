@@ -22,7 +22,8 @@ The CLI inherits existing host authentication and configuration. Same-user
 process inspection and VS Code's own credential transport/storage are host
 security boundaries. Verify those boundaries for each remote environment.
 
-The process is bounded to 30 seconds and 1 MiB combined output. Cancellation
+The CLI execution/publication deadline is 30 seconds, with 1 MiB combined output.
+An explicitly opted-in summary run allows one additional second for JSON flush. Cancellation
 terminates it then force-kills after 1.5 seconds; an unconfirmed shutdown is
 reported after another second. No retries follow uncertain execution. Check
 evidence remains private outside the workspace in extension storage with mode
@@ -30,14 +31,32 @@ evidence remains private outside the workspace in extension storage with mode
 save/backup editor text. It is never rendered as HTML, Markdown or a webview.
 Raw CLI stderr/errors never appear in user-facing diagnostics.
 
-Only the constant hosted home URL can be opened, after explaining context is
-unavailable. There is no upload, opaque reference exchange, token in a URL,
-tenant assertion or invented hosted-result route. Reauthorised context links
-and real remote/provider testing are independent release gates.
+The default query/Check commands never opt into hosted summary publication.
+A separate command requires an explicit Space binding, a separately stored hosted
+SecretStorage token, local-owner consent and one-run publication consent. It
+passes only the fixed CLI publication flags and the named token environment
+variable. The inherited hosted token is scrubbed on every child invocation;
+the database credential validator cannot select this variable. There is no
+extension API URL override. Hosted credentials never enter arguments or state.
+The only uploaded fields are minimal identifiers/version, execution status,
+outcome, severity, duration and execution time, retained for seven days. SQL,
+rows, inputs, errors and private evidence remain excluded. Upload failure keeps
+the local Check status and native JSON results, with allowlisted diagnostics.
+
+The constant hosted home fallback remains available. A successful explicitly
+requested summary may offer its exact scoped DataTug.app route only after the
+closed canonical fragment, manifest project ID, explicit Space ID and selected
+environment match. Arbitrary CLI/project URLs, extra fragment members, encoded
+path substitutions, credentials and query strings are refused. External opening
+requires the user to select its action. Hosted sign-in and current Space/grant
+authorization remain independent. Actual summary host-to-hosted acceptance,
+remote/provider tests and independent security review remain release gates.
 
 No runtime dependency is bundled. The archive allowlist and restricted-asset
 scan are mandatory for each VSIX. The actual macOS no-project extension-host
 activation smoke passes with isolated profile/extension directories and no
-Workspace Trust override; its owned host/profile are closed/removed. Independent
-security review, trusted-project UI execution, remote/platform credential and
-provider tests, and publication approval remain pending.
+Workspace Trust override; its owned host/profile are closed/removed. The earlier
+synthetic trusted-project query/Check UI journey also passed. Actual summary
+consent and hosted handoff in VS Code, remote/platform credentials, provider
+tests, independent release security review and publication approval remain
+pending. These gates are distinct from the adapter's independent code review.

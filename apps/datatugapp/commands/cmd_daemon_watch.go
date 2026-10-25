@@ -33,6 +33,8 @@ import (
 // persistent machine services or weakening the actual Coordinator/Runner ports.
 var (
 	watchUserHomeDir           = os.UserHomeDir
+	watchPrivateEvidencePaths  = privateExecutionEvidencePaths
+	watchPrivateMkdirAll       = os.MkdirAll
 	watchResolveCoordinator    = resolveWatchCoordinator
 	watchConfigureExecution    = configureWatchExecution
 	watchExecuteCheck          = endpoints.ExecuteWatchCheck
@@ -132,7 +134,7 @@ func watchDaemonAction(cmd *cobra.Command, _ []string) error {
 			if err != nil {
 				return err
 			}
-			privateRepository, _, err = privateExecutionEvidencePaths(cfg.Runner.ProjectDir, cfg.Runner.EvidenceDir)
+			privateRepository, _, err = watchPrivateEvidencePaths(cfg.Runner.ProjectDir, cfg.Runner.EvidenceDir)
 			if err != nil {
 				return errors.New("watch private execution evidence unavailable")
 			}
@@ -343,7 +345,7 @@ func configureWatchExecution(cfg watchdaemon.Config, projectID string) (func(), 
 	if cfg.Runner.PrivateExecutionEvidence {
 		// The existing manager validation above checks project/Git disjointness
 		// before creating any deployment-private directories.
-		if err = os.MkdirAll(evidence, 0700); err != nil {
+		if err = watchPrivateMkdirAll(evidence, 0700); err != nil {
 			_ = api.CloseExecutionEvidence()
 			return nil, errors.New("watch private execution evidence unavailable")
 		}

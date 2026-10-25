@@ -6,6 +6,9 @@ const { spawn } = require('node:child_process');
 
 const MAX_OUTPUT = 1024 * 1024;
 const HOME = 'https://datatug.app';
+const SUMMARY_TOKEN_ENV = 'DATATUG_SUMMARY_TOKEN';
+function summaryIdentifier(value) { return typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value); }
+function summaryToken(value) { return typeof value === 'string' && /^[\x21-\x7e]{1,8192}$/.test(value); }
 class SafeError extends Error {}
 function inside(root, target) {
   const relative = path.relative(root, target);
@@ -99,9 +102,14 @@ async function executable(config, roots) {
 function secretVariable(name) {
   return name === 'PGPASSWORD' || (typeof name === 'string' && /^[A-Z][A-Z0-9_]{0,59}_URL$/.test(name) && !/^(DATATUG|NODE|LD_|DYLD_|VSCODE|ELECTRON|GIT|SSH)/.test(name));
 }
-function childEnvironment(base, secret) {
+function childEnvironment(base, secret, hostedToken) {
   const env = { ...base };
   for (const key of Object.keys(env)) if (/^(NODE_OPTIONS|LD_PRELOAD|LD_LIBRARY_PATH|DYLD_.*)$/i.test(key)) delete env[key];
+  delete env[SUMMARY_TOKEN_ENV];
+  if (hostedToken !== undefined) {
+    if (!summaryToken(hostedToken)) throw new SafeError('Invalid hosted token. Store a current hosted bearer token in SecretStorage.');
+    env[SUMMARY_TOKEN_ENV] = hostedToken;
+  }
   if (secret) {
     if (!secretVariable(secret.variable) || typeof secret.value !== 'string' || secret.value.includes('\0')) throw new SafeError('Invalid connection profile.');
     env[secret.variable] = secret.value;
@@ -110,11 +118,16 @@ function childEnvironment(base, secret) {
   env.DATATUG_TELEMETRY = '0';
   return env;
 }
-function argumentsFor(kind, project, environment, id, evidence) {
+function argumentsFor(kind, project, environment, id, evidence, summary) {
   if (!path.isAbsolute(project) || !identifier(environment) || !identifier(id)) throw new SafeError('Invalid project, environment or selection.');
   if (kind === 'query') return ['query', 'run', '--project', project, '--query', id, '--env', environment, '--format', 'json', '--quiet'];
   if (kind !== 'check' || !path.isAbsolute(evidence || '') || inside(project, evidence)) throw new SafeError('Invalid private evidence location.');
-  return ['checks', 'run', '--project', project, '--env', environment, '--check', id, '--local-owner', '--evidence-dir', evidence, '--timeout', '30s', '--warnings', 'fail', '--format', 'json'];
+  const args = ['checks', 'run', '--project', project, '--env', environment, '--check', id, '--local-owner', '--evidence-dir', evidence, '--timeout', '30s', '--warnings', 'fail', '--format', 'json'];
+  if (summary) {
+    if (!summaryIdentifier(summary.spaceID)) throw new SafeError('Select an explicit valid hosted Space ID.');
+    args.push('--publish-summary', '--summary-space', summary.spaceID, '--summary-token-env', SUMMARY_TOKEN_ENV);
+  }
+  return args;
 }
 async function evidenceDirectory(storage, roots) {
   await fs.mkdir(storage, { recursive: true, mode: 0o700 });
@@ -128,7 +141,7 @@ async function evidenceDirectory(storage, roots) {
 function runCLI(file, args, options = {}) {
   return new Promise((resolve, reject) => {
     let child;
-    try { child = (options.spawn || spawn)(file, args, { shell: false, cwd: options.cwd, env: childEnvironment(options.env || process.env, options.secret), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); }
+    try { child = (options.spawn || spawn)(file, args, { shell: false, cwd: options.cwd, env: childEnvironment(options.env || process.env, options.secret, options.summaryToken), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); }
     catch { reject(new SafeError('Could not start the configured DataTug CLI. Verify its installation on the execution host.')); return; }
     let bytes = 0, stdout = [], reason, finished = false, killTimer, finalTimer;
     const cancel = options.token?.onCancellationRequested(() => stop('cancelled'));
@@ -158,7 +171,7 @@ function runCLI(file, args, options = {}) {
   });
 }
 const statuses = { pass: 0, fail: 1, warning: 1, unknown: 1, configuration_error: 2, not_found: 3, error: 4, access_denied: 5, timeout: 124, cancelled: 130 };
-function parseResult(kind, result) {
+function parseResult(kind, result, summaryScope) {
   if (result.reason) throw new SafeError(({ cancelled: 'Execution cancelled. Private Check evidence may remain; no retry was started.', timeout: 'Execution timed out after 30 seconds. Check connectivity and credentials before retrying.', size_limit: 'Output exceeded 1 MiB. Narrow the saved query or Check before retrying.' })[result.reason]);
   let data;
   try { data = JSON.parse(result.stdout); } catch { throw new SafeError('The CLI returned no supported JSON result. Verify the candidate CLI version, credentials and project configuration.'); }
@@ -171,10 +184,43 @@ function parseResult(kind, result) {
     if (!Number.isSafeInteger(check.index) || check.index < 1 || !Object.hasOwn(statuses, check.status) || !['completed', 'error', 'skipped', 'pending', 'running'].includes(check.executionStatus) || !['pass', 'fail', 'unknown'].includes(check.outcome) || !['', 'critical', 'error', 'warning', 'info'].includes(check.severity) || !Number.isFinite(check.durationMs) || check.durationMs < 0) throw new SafeError('The CLI returned an unsupported Check response.');
     return { index: check.index, status: check.status, executionStatus: check.executionStatus, outcome: check.outcome, severity: check.severity, durationMs: check.durationMs };
   });
-  return { status: data.status, content: JSON.stringify({ schemaVersion: data.schemaVersion, status: data.status, exitCode: data.exitCode, checks }, null, 2) };
+  return { status: data.status, content: JSON.stringify({ schemaVersion: data.schemaVersion, status: data.status, exitCode: data.exitCode, checks }, null, 2), ...(summaryScope ? { summary: summaryResult(data, summaryScope) } : {}) };
 }
-// No supported hosted context contract exists for this local candidate yet.
-// Never accept a CLI/project-provided URL, even one with the correct hostname.
+const summaryReasons = Object.freeze({
+  summary_publish_configuration_error: 'Summary publication configuration was refused.',
+  summary_publish_incompatible_result: 'This Check result cannot be published as a minimal summary.',
+  summary_publish_auth_required: 'Summary publication requires a current hosted token.',
+  summary_publish_denied: 'Summary publication was denied. Check independent hosted sign-in, Space access and the current hosted grant in DataTug.app.',
+  summary_publish_unavailable: 'Summary publication is unavailable.',
+  summary_publish_cancelled: 'Summary publication was cancelled.',
+  summary_publish_timeout: 'Summary publication timed out.',
+  summary_publish_invalid_response: 'Summary publication returned an unsupported response.'
+});
+function safeDeepLink(raw, scope) {
+  if (!scope || !summaryIdentifier(scope.spaceID) || !summaryIdentifier(scope.projectID) || !summaryIdentifier(scope.environment) || typeof raw !== 'string' || raw.length > 2048) return undefined;
+  const prefix = `${HOME}/space/${scope.spaceID}/store/firestore/project/${scope.projectID}/overview#check-summary=`;
+  if (!raw.startsWith(prefix)) return undefined;
+  const encoded = raw.slice(prefix.length);
+  if (!/^[A-Za-z0-9_-]+$/.test(encoded)) return undefined;
+  const bytes = Buffer.from(encoded, 'base64url');
+  if (bytes.toString('base64url') !== encoded) return undefined;
+  let data;
+  try { data = JSON.parse(bytes.toString('utf8')); } catch { return undefined; }
+  if (!data || Object.keys(data).sort().join(',') !== 'environment,summaryId,v' || data.v !== 1 || data.environment !== scope.environment || typeof data.summaryId !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(data.summaryId)) return undefined;
+  const id = Buffer.from(data.summaryId, 'base64url');
+  if (id.length !== 32 || id.toString('base64url') !== data.summaryId) return undefined;
+  const canonical = Buffer.from(JSON.stringify({ v: 1, environment: scope.environment, summaryId: data.summaryId })).toString('base64url');
+  return encoded === canonical ? prefix + canonical : undefined;
+}
+function summaryResult(data, scope) {
+  if (data.deepLinkReason === 'hosted_summary_published') {
+    const url = safeDeepLink(data.deepLink, scope);
+    return url ? { url } : { reason: 'Summary publication returned an unsupported context link.' };
+  }
+  return { reason: Object.hasOwn(summaryReasons, data.deepLinkReason) ? summaryReasons[data.deepLinkReason] : 'Summary publication returned an unsupported response.' };
+}
+// The hosted-home command remains a constant fallback. Summary context links
+// are admitted only by the separate explicitly opted-in parser above.
 function hostedLink() { return { url: HOME, reason: 'Hosted project/query/Check/result context is unavailable for this local project. Only the hosted home will open; private evidence is not uploaded.' }; }
 
-module.exports = { SafeError, MAX_OUTPUT, inside, identifier, label, projectPath, readJSON, catalog, executable, secretVariable, childEnvironment, argumentsFor, evidenceDirectory, runCLI, parseResult, hostedLink };
+module.exports = { SafeError, MAX_OUTPUT, SUMMARY_TOKEN_ENV, summaryIdentifier, summaryToken, safeDeepLink, inside, identifier, label, projectPath, readJSON, catalog, executable, secretVariable, childEnvironment, argumentsFor, evidenceDirectory, runCLI, parseResult, hostedLink };

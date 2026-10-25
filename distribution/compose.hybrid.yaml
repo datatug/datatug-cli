@@ -1,0 +1,112 @@
+services:
+  coordinator:
+    image: ${DATATUG_IMAGE:?set DATATUG_IMAGE to the locally built DataTug image}
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 96
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,mode=1777
+    environment:
+      DATATUG_WATCH_ALICE_TOKEN: ${DATATUG_WATCH_ALICE_TOKEN:?provide the scoped user token}
+      DATATUG_WATCH_RUNNER_TOKEN: ${DATATUG_WATCH_RUNNER_TOKEN:?provide the scoped Runner token}
+      DATATUG_DAEMON_ROLE: coordinator
+      DATATUG_HEALTH_URL: https://127.0.0.1:8990/health
+      SSL_CERT_FILE: /run/tls/ca.crt
+      DATATUG_COORDINATOR_DB_URL: sqlite:///var/lib/datatug/coordinator/watch.sqlite
+      DATATUG_TELEMETRY: "0"
+    volumes:
+      - type: bind
+        source: ./private/coordinator.json
+        target: /run/config/coordinator.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: volume
+        source: coordinator-state
+        target: /var/lib/datatug
+      - type: bind
+        source: ./private/tls/coordinator.crt
+        target: /run/tls/coordinator.crt
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./private/tls/coordinator.key
+        target: /run/tls/coordinator.key
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./private/tls/ca.crt
+        target: /run/tls/ca.crt
+        read_only: true
+        bind:
+          create_host_path: false
+    command: ["daemon", "--coordinate", "--watch-config", "/run/config/coordinator.json"]
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/datatug-entrypoint", "healthcheck"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  runner:
+    image: ${DATATUG_IMAGE:?set DATATUG_IMAGE to the locally built DataTug image}
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 96
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,mode=1777
+    environment:
+      DATATUG_WATCH_RUNNER_TOKEN: ${DATATUG_WATCH_RUNNER_TOKEN:?provide the scoped Runner token}
+      DATATUG_LOCAL_OWNER: ${DATATUG_LOCAL_OWNER:?set DATATUG_LOCAL_OWNER explicitly to true}
+      DATATUG_TELEMETRY: "0"
+      SSL_CERT_FILE: /run/tls/ca.crt
+    volumes:
+      - type: bind
+        source: ./private/runner.json
+        target: /run/config/runner.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./private/project
+        target: /project
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: volume
+        source: runner-state
+        target: /var/lib/datatug
+      - type: bind
+        source: ./private/tls/ca.crt
+        target: /run/tls/ca.crt
+        read_only: true
+        bind:
+          create_host_path: false
+    command: ["daemon", "--run", "--watch-config", "/run/config/runner.json"]
+    depends_on:
+      coordinator:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  coordinator-state:
+  runner-state:

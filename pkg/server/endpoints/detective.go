@@ -56,6 +56,10 @@ func detectiveCaseEventsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func detectiveStore(project, securityContextID string) (*detective.LocalStore, string, error) {
+	return detectiveStoreContext(context.Background(), project, securityContextID)
+}
+
+func detectiveStoreContext(ctx context.Context, project, securityContextID string) (*detective.LocalStore, string, error) {
 	if project == "" || api.ValidateProjectIdentifier("project", project) != nil {
 		return nil, "", newInvalidRequest("project", "invalid project")
 	}
@@ -81,7 +85,7 @@ func detectiveStore(project, securityContextID string) (*detective.LocalStore, s
 	if err != nil {
 		return nil, "", err
 	}
-	store, err := detective.NewLocalStore(project, projectDir, base)
+	store, err := detective.NewLocalStoreContext(ctx, project, projectDir, base)
 	if err == nil && api.GetCapabilities().NativeSessionDetective {
 		store, _, _, _, _, err = sessionDetectiveNativeStore(context.Background(), project, "local")
 	}

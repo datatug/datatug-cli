@@ -23,7 +23,7 @@ import (
 var detectiveJSONMarshal = json.Marshal
 
 // These commands open native Bubble Tea workspaces. They use the same agent
-// session and action endpoint as the web UI; they never execute Checks locally.
+// session and action endpoint as the web UI. checks run adds an explicit local adapter.
 func detectiveUICommand(name string) *cobra.Command {
 	cmd := &cobra.Command{Use: name, Short: map[string]string{"checks": "Open interactive Checks and Validators", "detective": "Open interactive Detective Cases and Scenarios"}[name], Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		storage, _ := cmd.Flags().GetString("storage")
@@ -81,6 +81,9 @@ func detectiveUICommand(name string) *cobra.Command {
 	cmd.Flags().String("space", "", "Space ID for a hosted cloud project")
 	cmd.Flags().String("base-url", "", "hosted API /v0/ base URL (cloud; default DataTug API)")
 	cmd.Flags().Bool("insecure-storage", false, "use the DataTug login stored with auth login --insecure-storage")
+	if name == "checks" {
+		cmd.AddCommand(checksRunCommand())
+	}
 	return cmd
 }
 

@@ -1,0 +1,186 @@
+# DataTug Everywhere — VS Code preview
+
+Browse saved queries and Check definitions in the native Explorer, choose an
+environment explicitly, run the existing DataTug CLI, and open bounded JSON in
+an untitled editor when requested. The full visual experience lives at
+[DataTug.app](https://datatug.app). This extension supplies no webview, database
+engine, background daemon or runtime dependency. No telemetry is collected by
+the extension; CLI telemetry is disabled for its invocations.
+
+This is an **unpublished implementation candidate**. It requires the candidate
+CLI containing `checks run` documented in `docs/checks-run.md` in the parent
+repository. A public CLI release with that contract, Stage 1 publication gates,
+independent security review, trusted-project VS Code journey acceptance, listing assets,
+publisher ownership verification and explicit release approval remain pending.
+The `datatug` publisher identifier is proposed metadata, not proof of account
+access or an existing Marketplace listing. No pricing or paid-plan entitlement
+is asserted.
+
+## First run
+
+1. Install a reviewed native CLI on the **extension execution host**, outside
+   every workspace folder. Set **DataTug: Cli Path** in **User** settings to its
+   absolute path. The extension ignores workspace settings and PATH discovery,
+   rejects script wrappers and binaries physically inside the workspace, and
+   never downloads or updates a binary.
+2. Open and trust a filesystem workspace. Run **DataTug: Select Project** and
+   select a directory inside that workspace containing `datatug-project.json`.
+   Choose an environment, even if only one exists.
+3. Expand **DataTug → Saved queries / Checks** or use the matching command.
+   Choose the credential profile for this invocation, or explicitly use existing
+   host configuration. Grant the separate modal local-owner consent. Workspace
+   trust does not grant that execution authority.
+4. See progress and cancel if necessary. A Check's pass, fail, warning, unknown,
+   access-denied or infrastructure status remains distinct. Choose **Open JSON
+   results** to view output. Query results may contain customer data. The editor
+   can be saved or backed up by VS Code; follow your normal data-handling policy.
+
+**DataTug: Refresh Project** reloads the bounded metadata listing. Selecting a
+different project clears the environment selection. Workspace folder changes
+clear the project and cancel active work. Only one execution runs at a time.
+There are no automatic retries. Changes to project files are trusted local
+inputs; execution uses current CLI files rather than a snapshot.
+
+## Credentials and connection profiles
+
+Use **DataTug: Store Connection Profile Secret** to store a named credential in
+VS Code `SecretStorage`. Only the profile UUID, display name and environment
+variable name enter extension global state, without Settings Sync registration.
+Values never enter settings, arguments, output channels or notifications.
+**DataTug: Delete Connection Profile Secret** removes the value and profile.
+Rotate an expired credential by deleting the old profile and storing a new one.
+
+The verified existing CLI path resolves saved SQL/TugQL catalog connections
+through connection descriptors and `env:NAME`; PostgreSQL descriptors name
+`dsnEnv`. A profile can provide a whole connection URL via an uppercase variable
+ending `_URL` (for example `SHOP_PG_URL`), matching that **existing descriptor**.
+The extension does not generate or edit source configuration. It also permits
+`PGPASSWORD` for the PostgreSQL driver's default credential mechanism; an
+explicit password in a full source URL can take precedence. Driver authentication
+is delegated to the installed CLI. This preview does not add device login,
+cloud token refresh, arbitrary environment injection, principal/role selection,
+multi-secret profiles, input parameters or HTTP secret headers. Existing host
+credential configuration remains available to the child process. Profiles are
+selected for each invocation, not automatically trusted from workspace content.
+
+`SecretStorage` uses VS Code's credential service. Its backing store and remote
+transport belong to VS Code, not this extension. Verify them on the actual host
+before using production credentials. The secret is passed to the CLI environment
+on the selected local/remote extension host; users with authority to inspect that
+process can inspect its environment. Never share that host with untrusted users.
+
+## Limits and supported contracts
+
+- A native Node extension host is required (`extensionKind: workspace`); browser
+  only VS Code and virtual workspaces are unsupported.
+- Listings use the existing `queries/**/*.query.json`, `checks/**/*.json` and
+  `environments/*/environment-summary.json` layouts. Metadata files are limited
+  to 256 KiB, listing depth to eight folders and entries to 3,000. Symbolic links
+  in these listings are refused. Preview identifiers use letters, numbers,
+  underscores and hyphens, with `/` for query folders. Other identifiers need a
+  future compatibility extension.
+- Queries invoke `query run --project PATH --query ID --env ENV --format json
+  --quiet`. The CLI retains its existing policy enforcement. The modal consent
+  explicitly covers its no-policy local-owner fallback. This preview does not
+  supply a named policy principal; projects requiring one must use a supported
+  existing client until that interface is added.
+- Checks invoke `checks run --project PATH --env ENV --check ID --local-owner
+  --evidence-dir PRIVATE --timeout 30s --warnings fail --format json`. Only
+  definitions without input declarations are supported. Secured Check profiles
+  remain refused by the CLI; policies are never deleted or bypassed. Bare
+  interactive `checks` is never invoked.
+- The process uses fixed arguments with `shell: false`, ignored stdin, at most
+  30 seconds and 1 MiB of combined stdout/stderr. Output above the limit is
+  discarded and execution terminated. Cancellation sends termination then a
+  bounded force kill. Results are JSON text, without executable links or HTML.
+  Check output is allowlisted and excludes raw evidence, SQL, definitions, IDs,
+  source values and errors. Query rows appear only after an explicit editor-open
+  action. Raw errors and stderr are withheld; check credentials, connectivity,
+  access policies and project configuration on the execution host when a run
+  fails. No OutputChannel is created.
+- Private Check evidence is retained in new mode-0700 directories below VS Code
+  `globalStorageUri`, physically outside all workspace roots. It is never placed
+  in source control or automatically uploaded. Preserve evidence after an
+  uncertain execution; remove it privately when no longer needed. The extension
+  deliberately does not delete that evidence automatically.
+
+## Hosted handoff
+
+**DataTug: Open Hosted Home** explains the missing local-to-hosted context before
+opening only `https://datatug.app`. No project-supplied or CLI-supplied URL is
+opened. No SQL, rows, environment values, credentials or evidence references are
+sent. The current local project/Check result has no verified hosted tenant and
+environment mapping or authorised result-reference contract. Task 17 owns that
+gap. This honest home fallback is not a project/query/Check/result deep link and
+does not satisfy the corresponding public-release gate. Hosted context and
+permission-isolation acceptance remain pending that supported contract.
+
+## Host compatibility and evidence
+
+| Host | Execution / credentials | Evidence |
+| --- | --- | --- |
+| macOS local | CLI and workspace on Mac; VS Code SecretStorage | Node 22 process/unit + real CLI SQLite tests passed; actual VS Code Insiders 1.142.0 no-project activation, eight commands, empty native tree and view focus passed; trusted-project query/Check UI acceptance pending |
+| Linux local | Native CLI on Linux; host credential service | Unit-test design only; actual host pending |
+| Windows local | Native `.exe`; host credential service | Pending, including force termination and private evidence ACL/mode compatibility |
+| Remote SSH | Workspace extension + CLI on remote host; secret explicitly transmitted to remote child environment | Pending real-host transport, secret-store and cancellation tests |
+| Dev container | Extension and CLI inside container; private persistent storage outside workspace | Pending container lifecycle/storage tests |
+| Codespaces | Extension and CLI on Codespace host, not browser | Pending actual Codespaces activation, trust and secret-store tests |
+| Browser-only/virtual workspace | No supported native execution host | Unsupported |
+
+The actual macOS host smoke uses the installed editor's official
+`--extensionDevelopmentPath` / `--extensionTestsPath` mechanism with isolated
+temporary user-data and extension directories. It opens no workspace and does
+not disable Workspace Trust. The owned host exits and its profile is removed;
+the normal user profile is untouched. Its receipt is `dist/host-smoke.json`.
+This acceptance is distinct from fake-API unit tests and does not establish
+trusted-project execution or remote-host acceptance.
+Credential-provider, auth expiry and offline negative tests currently
+cover simulated responses/process failures; real-provider acceptance is pending.
+
+## Build, test, package and inspect
+
+No runtime dependencies or compilation are required. Node 20+ is needed for the
+development scripts. The lockfile pins the packaging tool and its dependencies.
+
+```sh
+npm ci --ignore-scripts
+npm run build
+npm test
+DATATUG_TEST_CLI=/absolute/path/to/reviewed/candidate/datatug npm test
+npm run test:host
+npm run package
+npm run audit:vsix
+```
+
+`dist/datatug-everywhere-0.1.0.vsix` is an unpublished candidate; install only
+after review. Packaging uses the pinned `@vscode/vsce` and `--no-dependencies`.
+`test:host` defaults to the installed macOS VS Code Insiders; set
+`DATATUG_VSCODE_TEST_EXECUTABLE` to an explicit installed executable on another
+host. It downloads no editor. The archive audit requires the `unzip` utility.
+The strict archive audit accepts only extension JS, manifest, README, security,
+changelog and licence. It rejects unexpected payloads and restricted UI asset
+references; no CLI binaries/source, hosted-app output, development dependencies
+or customer metadata belong in the VSIX. Review the package hash with each
+candidate. Rollback is to uninstall this preview and reinstall the previously
+reviewed VSIX, retaining private evidence only as needed. The CLI is independently
+installed and versioned.
+
+Before submission capture genuine screenshots on an accepted host showing the
+native DataTug tree, explicit environment/owner consent, synthetic result JSON
+and cancellation. Screenshots and Marketplace account validation are pending;
+do not substitute mock screenshots for host acceptance. Publication requires
+the initiative's separate Stage 1, licensing, security and owner approval gates.
+
+## Support and privacy
+
+Report reproducible issues through [the public DataTug community issue tracker](https://github.com/datatug/datatug/issues).
+Do not attach credentials, source URLs, private results, project files or Check
+evidence. For a security report follow the repository's private GitHub security
+reporting channel where available; avoid public disclosure of customer data.
+The extension collects no install/activation/query/Check analytics. Marketplace
+install counts and provider analytics are not available to this unpublished
+candidate. The available local outcome/progress feedback is user-facing only.
+
+Implementation references: [VS Code manifest](https://code.visualstudio.com/api/references/extension-manifest),
+[Workspace Trust](https://code.visualstudio.com/api/extension-guides/workspace-trust),
+[packaging](https://code.visualstudio.com/api/working-with-extensions/publishing-extension).

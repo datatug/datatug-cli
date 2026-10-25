@@ -1,0 +1,27 @@
+{
+  "id": "pass",
+  "title": "Trusted demo Check",
+  "version": 1,
+  "inputs": [],
+  "steps": [
+    {
+      "id": "rows",
+      "kind": "query",
+      "queryId": "items",
+      "validators": [
+        {
+          "id": "count",
+          "scope": "set",
+          "kind": "row-count",
+          "severity": "error",
+          "expected": {
+            "type": "integer",
+            "value": "1"
+          }
+        }
+      ]
+    }
+  ],
+  "updatedAt": "2026-10-25T00:00:00Z",
+  "updatedBy": "demo"
+}

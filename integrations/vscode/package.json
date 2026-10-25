@@ -1,0 +1,51 @@
+{
+  "name": "datatug-everywhere",
+  "displayName": "DataTug Everywhere (Preview)",
+  "description": "Run saved DataTug queries and Checks with bounded native JSON results.",
+  "version": "0.1.0",
+  "publisher": "datatug",
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": { "type": "git", "url": "https://github.com/datatug/datatug-cli.git", "directory": "integrations/vscode" },
+  "bugs": { "url": "https://github.com/datatug/datatug/issues" },
+  "homepage": "https://datatug.app",
+  "engines": { "vscode": "^1.95.0", "node": ">=20" },
+  "categories": ["Other"],
+  "keywords": ["datatug", "database", "checks", "query"],
+  "preview": true,
+  "extensionKind": ["workspace"],
+  "main": "./src/extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": { "supported": "limited", "description": "Only the hosted home command is available until the workspace is trusted." },
+    "virtualWorkspaces": { "supported": false, "description": "Requires a filesystem and a CLI on the extension host." }
+  },
+  "activationEvents": ["onView:datatug.projects"],
+  "contributes": {
+    "commands": [
+      { "command": "datatug.selectProject", "title": "DataTug: Select Project" },
+      { "command": "datatug.selectEnvironment", "title": "DataTug: Select Environment" },
+      { "command": "datatug.refresh", "title": "DataTug: Refresh Project" },
+      { "command": "datatug.runQuery", "title": "DataTug: Run Saved Query" },
+      { "command": "datatug.runCheck", "title": "DataTug: Run Check" },
+      { "command": "datatug.addProfile", "title": "DataTug: Store Connection Profile Secret" },
+      { "command": "datatug.deleteProfile", "title": "DataTug: Delete Connection Profile Secret" },
+      { "command": "datatug.openHosted", "title": "DataTug: Open Hosted Home" }
+    ],
+    "views": { "explorer": [{ "id": "datatug.projects", "name": "DataTug" }] },
+    "viewsWelcome": [{ "view": "datatug.projects", "contents": "[Select a trusted workspace project](command:datatug.selectProject)\nSelect an environment before running a query or Check." }],
+    "configuration": {
+      "title": "DataTug",
+      "properties": {
+        "datatug.cliPath": { "type": "string", "default": "", "scope": "machine", "description": "Explicit absolute path to a trusted DataTug native executable on this extension host. Workspace settings and PATH discovery are ignored." }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node scripts/verify-source.js",
+    "test": "node --test test/*.test.js",
+    "test:host": "node scripts/host-smoke.js",
+    "package": "node scripts/package.js",
+    "audit:vsix": "node scripts/audit-vsix.js"
+  },
+  "devDependencies": { "@vscode/vsce": "3.7.1" },
+  "overrides": { "@azure/identity": "4.13.0", "@azure/msal-node": { "uuid": "11.1.1" } }
+}

@@ -1,0 +1,289 @@
+name: Everywhere candidate acceptance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: everywhere-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOPRIVATE: github.com/datatug/datatug-core
+  DATATUG_TELEMETRY: '0'
+  DO_NOT_TRACK: '1'
+
+jobs:
+  cloud-contract:
+    name: Offline cloud deployment contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Fetch and verify the pinned Helm tool without cloud credentials
+        run: |
+          mkdir -p "$RUNNER_TEMP/helm-tool"
+          curl --fail --silent --show-error --location \
+            https://get.helm.sh/helm-v4.3.1-linux-amd64.tar.gz \
+            --output "$RUNNER_TEMP/helm-tool/helm.tar.gz"
+          echo '0403a88ae20913d11b10a2467b50087721fea7581736da6b9d3992f5357fe54b  helm.tar.gz' > "$RUNNER_TEMP/helm-tool/checksum"
+          (cd "$RUNNER_TEMP/helm-tool" && sha256sum --check checksum)
+          tar -xzf "$RUNNER_TEMP/helm-tool/helm.tar.gz" -C "$RUNNER_TEMP/helm-tool" linux-amd64/helm
+      - name: Render, reject unsafe values, lint and package the candidate chart
+        env:
+          HELM: ${{ runner.temp }}/helm-tool/linux-amd64/helm
+        run: python3 -m unittest discover -s distribution/cloud/tests -p 'test_*.py' -v
+
+  vscode:
+    name: VS Code candidate package
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Authenticate the pinned private Core dependency
+        uses: ./.github/actions/private-core
+        with:
+          private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: '1.27.3'
+          cache: true
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '22.23.1'
+          cache: npm
+          cache-dependency-path: integrations/vscode/package-lock.json
+      - name: Build the actual candidate CLI for extension process tests
+        run: go build -trimpath -o "$RUNNER_TEMP/datatug-candidate" .
+      - name: Validate the thin client and emitted VSIX
+        working-directory: integrations/vscode
+        env:
+          DATATUG_TEST_CLI: ${{ runner.temp }}/datatug-candidate
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run build
+          npm test
+          npm audit --audit-level=low
+          npm run package
+          npm run audit:vsix
+      - name: Keep the unpublished candidate VSIX
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: vscode-candidate
+          path: integrations/vscode/dist/*.vsix
+          if-no-files-found: error
+          retention-days: 7
+
+  checks-action:
+    name: Real Checks and Action (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Authenticate the pinned private Core dependency
+        uses: ./.github/actions/private-core
+        with:
+          private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: '1.27.3'
+          cache: true
+      - name: Check out the immutable Action candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: datatug/datatug-action
+          ref: 2a53cb0e36c22004ff198441fa8535eac4d0aa9c
+          path: .action-candidate
+          persist-credentials: false
+      - name: Test Check admission, private store cancellation and execution
+        run: go test ./apps/datatugapp/commands ./pkg/detective ./pkg/server/endpoints -run '^(TestChecksRun|TestNewLocalStoreContext|TestWatchExecutor)' -count=1
+      - name: Build this candidate without release or publication
+        run: go build -trimpath -o "$RUNNER_TEMP/datatug-candidate" .
+      - name: Run actual SQLite Checks through the Action adapter
+        env:
+          CANDIDATE_CLI: ${{ runner.temp }}/datatug-candidate
+          ACTION_CANDIDATE_DIR: .action-candidate
+          EVIDENCE_DIR: ${{ runner.temp }}/everywhere-evidence
+        run: |
+          python3 - <<'PY'
+          import fcntl, json, os, pathlib, signal, subprocess, tempfile, time
+          workspace = pathlib.Path.cwd()
+          action = pathlib.Path(os.environ['ACTION_CANDIDATE_DIR'])
+          root = pathlib.Path(os.environ['EVIDENCE_DIR'])
+          root.mkdir(mode=0o700)
+          records = []
+          expected = [('pass', 0, 'pass'), ('fail', 1, 'fail'),
+                      ('warning', 1, 'warning'), ('unknown', 1, 'unknown'),
+                      ('source-error', 4, 'error'), ('absent', 3, 'not_found')]
+          for index, (check, code, status) in enumerate(expected):
+              output, summary = root/f'case-{index}.out', root/f'case-{index}.md'
+              environment = dict(os.environ, DATATUG_CLI=os.environ['CANDIDATE_CLI'],
+                  DATATUG_PROJECT_DIR='testdata/checks-demo', DATATUG_ENVIRONMENT='local',
+                  DATATUG_CHECKS=check, DATATUG_LOCAL_OWNER='true', DATATUG_TIMEOUT='30s',
+                  DATATUG_WARNINGS='fail', DATATUG_ENDPOINT='', GITHUB_OUTPUT=str(output),
+                  GITHUB_STEP_SUMMARY=str(summary), DATATUG_CLIENT='claude-mod')
+              result = subprocess.run(['bash', str(action/'scripts/datatug-cli.sh'), 'checks'],
+                  env=environment, capture_output=True, text=True, timeout=45)
+              assert result.returncode == code, (check, result.returncode)
+              values = dict(line.split('=', 1) for line in output.read_text().splitlines())
+              envelope = json.loads(values['result-json'])
+              assert envelope['status'] == status and envelope['exitCode'] == code
+              assert values['status'] == status
+              assert envelope['deepLinkReason'] == 'hosted_result_reference_unsupported'
+              visible = result.stdout + result.stderr + output.read_text() + summary.read_text()
+              for secret in ['synthetic-private-row-sentinel', 'MissingTable', str(workspace), 'Trusted demo Check']:
+                  assert secret not in visible
+              records.append({'case': check, 'status': status, 'exitCode': code})
+          private = pathlib.Path(tempfile.mkdtemp(prefix='held-check-lock-', dir=os.environ['RUNNER_TEMP']))
+          args = [os.environ['CANDIDATE_CLI'], 'checks', 'run', '--project', str(workspace/'testdata/checks-demo'),
+                  '--env', 'local', '--check', 'pass', '--local-owner', '--evidence-dir', str(private)]
+          subprocess.run(args, capture_output=True, check=True, timeout=30)
+          lock = next(private.glob('detective/*/store.lock'))
+          with lock.open('r+') as handle:
+              fcntl.flock(handle, fcntl.LOCK_EX)
+              result = subprocess.run(args+['--timeout', '50ms'], capture_output=True, text=True, timeout=5)
+              assert result.returncode == 124 and json.loads(result.stdout)['status'] == 'timeout'
+              process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+              time.sleep(0.3)
+              process.send_signal(signal.SIGTERM)
+              stdout, stderr = process.communicate(timeout=5)
+              assert process.returncode == 130 and json.loads(stdout)['status'] == 'cancelled'
+          records.extend([{'case':'held-lock-timeout','exitCode':124}, {'case':'SIGTERM','exitCode':130}])
+          (root/'runner.json').write_text(json.dumps({'schemaVersion':1, 'runner':os.environ['RUNNER_OS'],
+              'architecture':os.environ['RUNNER_ARCH'], 'sourceRevision':os.environ['GITHUB_SHA'],
+              'actionRevision':'2a53cb0e36c22004ff198441fa8535eac4d0aa9c', 'results':records}, indent=2)+'\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write('Candidate CLI + Action: real SQLite outcome matrix, timeout and SIGTERM passed.\n')
+          PY
+      - name: Keep only safe acceptance receipts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: everywhere-${{ matrix.runner }}
+          path: ${{ runner.temp }}/everywhere-evidence/runner.json
+          if-no-files-found: error
+
+  container:
+    name: Execution image (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Authenticate the pinned private Core dependency
+        uses: ./.github/actions/private-core
+        with:
+          private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: '1.27.3'
+          cache: true
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - name: Test container owner admission and role health
+        run: go test ./distribution/entrypoint -count=1
+      - name: Build binaries and dependency notices without source in the context
+        run: python3 distribution/build_context.py --output "$RUNNER_TEMP/execution-context" --fail-on-missing-licenses
+      - name: Build a local image for actual execution
+        env:
+          IMAGE_ARCH: ${{ matrix.arch }}
+        run: |
+          docker buildx build --platform "linux/$IMAGE_ARCH" --provenance=false --load \
+            --tag datatug-everywhere:candidate "$RUNNER_TEMP/execution-context"
+          mkdir -p "$RUNNER_TEMP/image-evidence" "$RUNNER_TEMP/trivy-cache"
+      - name: Run real SQLite outcome and private-state tests
+        run: python3 .github/scripts/everywhere-container.py --image datatug-everywhere:candidate --output "$RUNNER_TEMP/image-evidence/container.json"
+      - name: Exercise verified TLS, scoped Runner credentials and restart
+        run: python3 .github/scripts/everywhere-hybrid.py --image datatug-everywhere:candidate --output "$RUNNER_TEMP/image-evidence/hybrid.json"
+      - name: Preserve build provenance without registry publication
+        env:
+          IMAGE_ARCH: ${{ matrix.arch }}
+        run: |
+          docker buildx build --platform "linux/$IMAGE_ARCH" --provenance=mode=max \
+            --output "type=oci,dest=$RUNNER_TEMP/image-evidence/candidate.oci.tar" \
+            --metadata-file "$RUNNER_TEMP/image-evidence/build.json" "$RUNNER_TEMP/execution-context"
+          docker save --output "$RUNNER_TEMP/image-evidence/candidate.tar" datatug-everywhere:candidate
+      - name: Inspect every image layer for restricted AG payloads
+        run: python3 distribution/audit_archive.py "$RUNNER_TEMP/image-evidence/candidate.tar" > "$RUNNER_TEMP/image-evidence/restricted-assets.json"
+      - name: Generate an offline SPDX SBOM
+        run: |
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --tmpfs /tmp -e SYFT_CHECK_FOR_APP_UPDATE=false -e XDG_CACHE_HOME=/tmp \
+            -v "$RUNNER_TEMP/image-evidence:/scan" \
+            anchore/syft:v1.55.0@sha256:4cc92b64ca74ffca4c94d4c8fcc01f217731375300be14d0b6eeb2e82eaa110a \
+            docker-archive:/scan/candidate.tar -o spdx-json=/scan/sbom.spdx.json
+      - name: Enforce vulnerability and secret gates
+        run: |
+          set +e
+          docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp \
+            -v "$RUNNER_TEMP/image-evidence:/scan" -v "$RUNNER_TEMP/trivy-cache:/cache" \
+            aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c \
+            image --cache-dir /cache --input /scan/candidate.tar --scanners vuln \
+            --severity HIGH,CRITICAL --format json --output /scan/trivy.private.json --exit-code 1 --no-progress
+          scan_status=$?
+          docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp \
+            -v "$RUNNER_TEMP/image-evidence:/scan" -v "$RUNNER_TEMP/trivy-cache:/cache" \
+            aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c \
+            image --cache-dir /cache --input /scan/candidate.tar --scanners secret \
+            --format json --output /scan/secrets.private.json --exit-code 1 --no-progress
+          secret_status=$?
+          set -e
+          python3 - <<'PY'
+          import json, os, pathlib
+          root = pathlib.Path(os.environ['RUNNER_TEMP'])/'image-evidence'
+          report = json.loads((root/'trivy.private.json').read_text())
+          findings, secrets = [], []
+          secret_report = json.loads((root/'secrets.private.json').read_text())
+          for item in report.get('Results', []):
+              findings.extend({key:v.get(key) for key in ['VulnerabilityID','PkgName','InstalledVersion','FixedVersion','Severity']} for v in item.get('Vulnerabilities', []))
+          for item in secret_report.get('Results', []):
+              secrets.extend({'target':item.get('Target'),'ruleId':secret.get('RuleID'),'severity':secret.get('Severity')} for secret in item.get('Secrets', []))
+          (root/'trivy-summary.json').write_text(json.dumps({'vulnerabilities':findings,'secretFindings':secrets},indent=2)+'\n')
+          (root/'trivy.private.json').chmod(0o600)
+          (root/'secrets.private.json').chmod(0o600)
+          PY
+          if [ "$secret_status" -ne 0 ]; then exit "$secret_status"; fi
+          exit "$scan_status"
+      - name: Retain private candidate audit evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: execution-image-${{ matrix.arch }}
+          path: |
+            ${{ runner.temp }}/image-evidence/build.json
+            ${{ runner.temp }}/image-evidence/container.json
+            ${{ runner.temp }}/image-evidence/hybrid.json
+            ${{ runner.temp }}/image-evidence/restricted-assets.json
+            ${{ runner.temp }}/image-evidence/sbom.spdx.json
+            ${{ runner.temp }}/image-evidence/trivy-summary.json
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Retain the private candidate only after all audit gates pass
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: execution-oci-${{ matrix.arch }}
+          path: ${{ runner.temp }}/image-evidence/candidate.oci.tar
+          if-no-files-found: error
+          retention-days: 7

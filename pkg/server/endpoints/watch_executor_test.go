@@ -103,7 +103,11 @@ func TestWatchExecutorHeldPrivateLockHonorsContext(t *testing.T) {
 	if err = lock.Lock(); err != nil {
 		t.Fatal(err)
 	}
-	defer lock.Unlock()
+	defer func() {
+		if err := lock.Unlock(); err != nil {
+			t.Error(err)
+		}
+	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
 	start := time.Now()

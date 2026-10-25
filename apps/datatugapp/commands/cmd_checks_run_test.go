@@ -292,7 +292,11 @@ func TestChecksRunHeldPrivateLockHonorsDeadlineAndCancellation(t *testing.T) {
 			if err = lock.Lock(); err != nil {
 				t.Fatal(err)
 			}
-			defer lock.Unlock()
+			defer func() {
+				if err := lock.Unlock(); err != nil {
+					t.Error(err)
+				}
+			}()
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			flags := []string{"--check", "pass", "--timeout", "40ms"}
@@ -395,15 +399,19 @@ func TestChecksRunReadOnlyProjectTreeRemainsUnchanged(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	defer filepath.WalkDir(project, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+	defer func() {
+		if err := filepath.WalkDir(project, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() {
+				return os.Chmod(path, 0755)
+			}
+			return nil
+		}); err != nil {
+			t.Error(err)
 		}
-		if entry.IsDir() {
-			return os.Chmod(path, 0755)
-		}
-		return nil
-	})
+	}()
 	before := checksProjectTree(t, project)
 	summary, _, _ := executeChecks(t, context.Background(), project, private, "--check", "pass")
 	if summary.Status != "pass" || summary.ExitCode != 0 {
@@ -421,7 +429,11 @@ func TestChecksRunExecutionEvidenceScopesAndUnsafeRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer api.CloseExecutionEvidence()
+	defer func() {
+		if err := api.CloseExecutionEvidence(); err != nil {
+			t.Error(err)
+		}
+	}()
 	b, err := configurePrivateExecutionEvidence("same-project", second, private)
 	if err != nil || a == b {
 		t.Fatalf("physical projects shared execution repository: %s %s %v", a, b, err)

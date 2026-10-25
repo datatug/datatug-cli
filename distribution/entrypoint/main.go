@@ -70,7 +70,7 @@ func healthcheck(ctx context.Context, rawURL string) error {
 	return healthcheckWithClient(ctx, rawURL, client)
 }
 
-func healthcheckWithClient(ctx context.Context, rawURL string, client *http.Client) error {
+func healthcheckWithClient(ctx context.Context, rawURL string, client *http.Client) (result error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return fmt.Errorf("invalid health URL")
@@ -93,11 +93,15 @@ func healthcheckWithClient(ctx context.Context, rawURL string, client *http.Clie
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return errors.New("Coordinator health request failed")
+		return errors.New("coordinator health request failed")
 	}
-	defer response.Body.Close()
+	defer func() {
+		if err := response.Body.Close(); err != nil && result == nil {
+			result = errors.New("could not close coordinator health response")
+		}
+	}()
 	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("Coordinator health returned HTTP %d", response.StatusCode)
+		return fmt.Errorf("coordinator health returned HTTP %d", response.StatusCode)
 	}
 	return nil
 }

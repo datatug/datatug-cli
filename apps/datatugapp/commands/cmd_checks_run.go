@@ -331,12 +331,12 @@ func configurePrivateExecutionEvidence(projectID, projectDir, privateDir string)
 	return repository, err
 }
 
-func securePrivateExecutionTree(repository string) error {
+func securePrivateExecutionTree(repository string) (result error) {
 	root, err := os.OpenRoot(repository)
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() { result = errors.Join(result, root.Close()) }()
 	return fs.WalkDir(root.FS(), ".", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err

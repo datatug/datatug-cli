@@ -37,15 +37,19 @@ func TestWatchPrivateExecutionEvidenceReadOnlyRealCheck(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	defer filepath.WalkDir(project, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+	defer func() {
+		if err := filepath.WalkDir(project, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() {
+				return os.Chmod(path, 0755)
+			}
+			return nil
+		}); err != nil {
+			t.Error(err)
 		}
-		if entry.IsDir() {
-			return os.Chmod(path, 0755)
-		}
-		return nil
-	})
+	}()
 	before := checksProjectTree(t, project)
 	previous := storage.NewDatatugStore
 	defer func() {

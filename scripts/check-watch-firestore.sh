@@ -54,7 +54,7 @@ if [ "$watch_ready" != 1 ]; then
   exit 1
 fi
 # The required marker makes missing emulator configuration fatal, never SKIP.
-go test -race ./pkg/watch -run '^TestFirestore(Store|Events)' -count=1 -timeout=180s -json > "$watch_artifacts/tests.jsonl"
+go test -race ./pkg/watch -run '^TestFirestore(Store|Events|Registration)' -count=1 -timeout=180s -json > "$watch_artifacts/tests.jsonl"
 python3 - "$watch_artifacts/tests.jsonl" <<'PY'
 import json, pathlib, sys
 rows = [json.loads(line) for line in pathlib.Path(sys.argv[1]).read_text().splitlines()]
@@ -63,5 +63,17 @@ assert tests and not any(row['Action'] == 'skip' for row in tests), 'Firestore g
 passed = {row['Test'] for row in tests if row['Action'] == 'pass'}
 assert len(passed) >= 7, 'Missing Firestore acceptance cases'
 assert {'TestFirestoreEventsTypedAtomicPrivacyPaginationAndAuthority', 'TestFirestoreEventsSameInstantLanesAndDurableRetention'} <= passed, 'Missing Work event acceptance cases'
+# Keep the original Store/Events minimum independent of the registration cases.
+registration = [row for row in rows if row.get('Test', '').startswith('TestFirestoreRegistration')]
+assert registration and not any(row['Action'] == 'skip' for row in registration), 'Registration gate did not execute'
+registration_passed = {row['Test'] for row in registration if row['Action'] == 'pass'}
+assert {
+    'TestFirestoreRegistrationExistingRunnerDoesNotScanQuota',
+    'TestFirestoreRegistrationNewScopeAndProviderFailuresRemainAtomic',
+    'TestFirestoreRegistrationRetryRechecksCurrentAuthority',
+    'TestFirestoreRegistrationThreeExistingRunnersConcurrent',
+    'TestFirestoreRegistrationConcurrentHundredRunnerCapacity',
+} <= registration_passed, 'Missing Watch registration acceptance cases'
+
 PY
 printf 'Firestore Watch storage gate passed; emulator teardown owned by this command.\n'

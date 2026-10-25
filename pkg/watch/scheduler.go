@@ -16,16 +16,18 @@ func (s *Store) RegisterRunner(ctx context.Context, identity RunnerIdentity) err
 	}
 	return s.transaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
 		if s.cloud != nil {
-			rows, e := cloudRecords(ctx, tx, cloudQuery(runners, Scope{Namespace: s.config.Namespace}, "", nil, 101))
+			// A heartbeat updates one existing scoped runner. Counting unrelated
+			// runners would put every heartbeat in the same transaction read set.
+			exists, e := tx.Exists(ctx, key(runners, identity.Scope, identity.ID))
 			if e != nil {
 				return e
 			}
-			if len(rows) >= 100 {
-				exists, e := tx.Exists(ctx, key(runners, identity.Scope, identity.ID))
+			if !exists {
+				rows, e := cloudRecords(ctx, tx, cloudQuery(runners, Scope{Namespace: s.config.Namespace}, "", nil, 101))
 				if e != nil {
 					return e
 				}
-				if !exists {
+				if len(rows) >= 100 {
 					return ErrCapacity
 				}
 			}

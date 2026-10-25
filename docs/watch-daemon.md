@@ -243,8 +243,8 @@ result; transactional outbox keys deduplicate logical notification creation.
 
 ## Build and integration dependencies
 
-The CLI pins published `datatug-core v0.79.0` (Coordination manifest support,
-release target `d3579d7c6a1d2280f3fd9b3a7a618857fd3070fc`). No local module
+The CLI pins published `datatug-core v0.80.0` (Coordination manifest support,
+release target `fe47b5e2e0ed0d56b39d25b594f8b5fbad3d9cc8`). No local module
 replacement or `datatug-go-models` change is required. Watch adds no general OVDB
 write API. The storage ADR documents why transactional DALGO is required.
 SMTP uses Go's existing TLS-capable SMTP client; SMS reuses Sneat's Twilio kernel.

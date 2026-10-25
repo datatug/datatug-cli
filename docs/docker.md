@@ -40,7 +40,7 @@ an image or satisfy the remaining release gates.
 
 The generated `CONTEXT-INVENTORY.md` lists every included file and its digest;
 `licenses/DEPENDENCY-LICENSE-INVENTORY.md` records each module and included
-notice. The helper requires `github.com/datatug/datatug-core v0.79.0` and
+notice. The helper requires `github.com/datatug/datatug-core v0.80.0` and
 retains its MIT license notice. If a dependency has no recognized top-level
 license/notice file, the helper prints it and records a **publication gate**;
 development builds can still be inspected. A release build must use

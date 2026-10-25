@@ -1,0 +1,37 @@
+{
+  "checkedAt": "2026-10-25",
+  "status": "primary requirements checked; seller accounts and installation unverified",
+  "aws": [
+    "https://docs.aws.amazon.com/marketplace/latest/userguide/container-product-policies.html",
+    "https://docs.aws.amazon.com/marketplace/latest/userguide/container-add-version.html",
+    "https://docs.aws.amazon.com/marketplace/latest/userguide/container-based-products.html",
+    "https://docs.aws.amazon.com/marketplace/latest/userguide/seller-eligibility.html",
+    "https://docs.aws.amazon.com/eks/latest/userguide/ebs-csi.html"
+  ],
+  "azure": [
+    "https://learn.microsoft.com/en-us/partner-center/marketplace-offers/azure-container-technical-assets-kubernetes",
+    "https://learn.microsoft.com/en-us/azure/templates/microsoft.kubernetesconfiguration/2024-11-01/extensions",
+    "https://github.com/Azure-Samples/kubernetes-offer-samples/tree/main/samples/k8s-existing-cluster-only-sample",
+    "https://github.com/Azure-Samples/kubernetes-offer-samples/tree/main/samples/datatype-sample",
+    "https://learn.microsoft.com/en-us/azure/aks/csi-storage-drivers"
+  ],
+  "gcp": [
+    "https://docs.cloud.google.com/marketplace/docs/partners/kubernetes/create-app-package",
+    "https://github.com/GoogleCloudPlatform/marketplace-k8s-app-tools/blob/e6008fba2e5e5da014ce43782c64481b775475fd/docs/schema.md",
+    "https://github.com/GoogleCloudPlatform/marketplace-k8s-app-tools/blob/e6008fba2e5e5da014ce43782c64481b775475fd/docs/building-deployer-helm.md",
+    "https://github.com/GoogleCloudPlatform/marketplace-k8s-app-tools/blob/e6008fba2e5e5da014ce43782c64481b775475fd/docs/verification-integration.md",
+    "https://docs.cloud.google.com/kubernetes-engine/docs/concepts/persistent-volumes"
+  ],
+  "gcpOfflineValidator": {
+    "repository": "GoogleCloudPlatform/marketplace-k8s-app-tools",
+    "revision": "e6008fba2e5e5da014ce43782c64481b775475fd",
+    "entrypoint": "marketplace/deployer_util/validate_schema.py",
+    "dependencies": ["Python 3", "PyYAML"],
+    "scope": "official deployer schema validation only; no image, GKE or mpdev verification"
+  },
+  "costCalculators": [
+    "https://calculator.aws/",
+    "https://azure.microsoft.com/pricing/calculator/",
+    "https://cloud.google.com/products/calculator"
+  ]
+}

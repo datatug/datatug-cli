@@ -1,0 +1,44 @@
+{
+  "offlineFixture": true,
+  "releaseName": "runner",
+  "packageVersion": "0.1.0",
+  "providerMetadata": {
+    "applicationName": "io.datatug.runner",
+    "publisher": "UNVERIFIED-OFFLINE-FIXTURE",
+    "registryServer": "fixture.azurecr.io",
+    "partnerId": "offline-partner",
+    "solutionId": "offline-runner",
+    "partnerName": "UNVERIFIED OFFLINE FIXTURE",
+    "deployerBase": "gcr.io/cloud-marketplace-tools/k8s/deployer_helm/onbuild@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "bootstrapBase": "gcr.io/cloud-marketplace-tools/k8s/dev@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "values": {
+    "image": {
+      "repository": "registry.example.test/datatug/cli",
+      "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "trustedLocalOwner": true,
+    "scope": {"namespace": "datatug", "environment": "staging"},
+    "coordinator": {
+      "endpoint": "https://coord.example.test/v0/datatug/watch",
+      "port": 443,
+      "caConfigMap": ""
+    },
+    "projectClaim": "existing-project",
+    "stateClaim": "private-state",
+    "stateFilesystem": "node-local-block",
+    "runnerSecret": {"name": "scoped-runner-token", "key": "token"},
+    "serviceAccount": "existing-runner",
+    "podAnnotations": {},
+    "sourceCredentials": [{"envName": "PGPASSWORD", "secretName": "existing-db-creds", "key": "password"}],
+    "resources": {
+      "requests": {"cpu": "100m", "memory": "256Mi"},
+      "limits": {"cpu": "1", "memory": "768Mi"}
+    },
+    "networkPolicy": {
+      "enabled": true,
+      "dnsNamespace": "kube-system",
+      "databaseEgress": [{"cidr": "10.10.0.0/16", "port": 5432}]
+    }
+  }
+}

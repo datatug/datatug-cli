@@ -265,20 +265,20 @@ jobs:
       - name: Generate an offline SPDX SBOM
         run: |
           docker run --rm --user "$(id -u):$(id -g)" --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
-            --tmpfs /tmp -e SYFT_CHECK_FOR_APP_UPDATE=false -e XDG_CACHE_HOME=/tmp \
+            --tmpfs "/tmp:rw,noexec,nosuid,size=512m,mode=0700,uid=$(id -u),gid=$(id -g)" -e SYFT_CHECK_FOR_APP_UPDATE=false -e XDG_CACHE_HOME=/tmp \
             -v "$RUNNER_TEMP/image-evidence:/scan" \
             anchore/syft:v1.55.0@sha256:4cc92b64ca74ffca4c94d4c8fcc01f217731375300be14d0b6eeb2e82eaa110a \
             docker-archive:/scan/candidate.tar -o spdx-json=/scan/sbom.spdx.json
       - name: Enforce vulnerability and secret gates
         run: |
           set +e
-          docker run --rm --user "$(id -u):$(id -g)" --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp \
+          docker run --rm --user "$(id -u):$(id -g)" --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs "/tmp:rw,noexec,nosuid,size=512m,mode=0700,uid=$(id -u),gid=$(id -g)" \
             -v "$RUNNER_TEMP/image-evidence:/scan" -v "$RUNNER_TEMP/trivy-cache:/cache" \
             aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c \
             image --cache-dir /cache --input /scan/candidate.tar --scanners vuln \
             --severity HIGH,CRITICAL --format json --output /scan/trivy.private.json --exit-code 1 --no-progress
           scan_status=$?
-          docker run --rm --user "$(id -u):$(id -g)" --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp \
+          docker run --rm --user "$(id -u):$(id -g)" --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs "/tmp:rw,noexec,nosuid,size=512m,mode=0700,uid=$(id -u),gid=$(id -g)" \
             -v "$RUNNER_TEMP/image-evidence:/scan" -v "$RUNNER_TEMP/trivy-cache:/cache" \
             aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c \
             image --cache-dir /cache --input /scan/candidate.tar --scanners secret \

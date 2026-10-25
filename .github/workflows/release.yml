@@ -28,7 +28,30 @@ permissions:
   contents: write
 
 jobs:
+  acceptance-gate:
+    name: Require exact successful quality runs
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Fail closed on missing, skipped or unsuccessful acceptance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_REVISION: ${{ github.sha }}
+        run: |
+          python3 .github/scripts/require-workflows.py \
+            --repo "$RELEASE_REPOSITORY" --sha "$RELEASE_REVISION" --branch main \
+            --workflow 'Go CI' --workflow 'Everywhere candidate acceptance' \
+            --timeout-seconds 1800 --poll-seconds 15
+
   release:
+    needs: acceptance-gate
     # Pin the released private-dependency and macOS signing contract.
     uses: strongo/cicd/.github/workflows/release.yml@v1.22.0 # 686765a7cb84ca84c3cef799f960c730663c182b
     permissions:

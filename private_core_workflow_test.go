@@ -75,7 +75,7 @@ func TestPrivateCoreAuthPrecedesEveryLocalGoJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []string{"goprivate_github_app_repositories: datatug-core", "GOPRIVATE_GITHUB_APP_PRIVATE_KEY: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}", `bash scripts/publish-datatug-release.sh "$TAG" "datatug/datatug-cli" "datatug/datatug"`, "require_notarized_macos: true", "require_workflow_success: 'Go CI'"} {
+	for _, required := range []string{"goprivate_github_app_repositories: datatug-core", "GOPRIVATE_GITHUB_APP_PRIVATE_KEY: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}", `bash scripts/publish-datatug-release.sh "$TAG" "datatug/datatug-cli" "datatug/datatug"`, "require_notarized_macos: true", "require_workflow_success: 'Go CI, Everywhere candidate acceptance'"} {
 		if !strings.Contains(string(release), required) {
 			t.Fatalf("release invariant missing: %s", required)
 		}

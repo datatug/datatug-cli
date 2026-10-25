@@ -40,6 +40,8 @@ jobs:
         env:
           HELM: ${{ runner.temp }}/helm-tool/linux-amd64/helm
         run: python3 -m unittest discover -s distribution/cloud/tests -p 'test_*.py' -v
+      - name: Verify strict publication gate failure modes without network access
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
 
   vscode:
     name: VS Code candidate package
@@ -201,7 +203,14 @@ jobs:
         with:
           go-version: '1.27.3'
           cache: true
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - name: Create an isolated pinned BuildKit builder
+        id: builder
+        run: |
+          docker buildx version
+          docker buildx create --name datatug-everywhere-ci --use --driver docker-container \
+            --driver-opt image=moby/buildkit@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+      - name: Bootstrap the owned builder
+        run: docker buildx inspect --bootstrap
       - name: Test container owner admission and role health
         run: go test ./distribution/entrypoint -count=1
       - name: Build binaries and dependency notices without source in the context
@@ -287,3 +296,6 @@ jobs:
           path: ${{ runner.temp }}/image-evidence/candidate.oci.tar
           if-no-files-found: error
           retention-days: 7
+      - name: Remove this job's isolated builder
+        if: always() && steps.builder.outcome == 'success'
+        run: docker buildx rm datatug-everywhere-ci

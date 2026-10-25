@@ -16,6 +16,7 @@ import (
 
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/privateadmission"
+	"github.com/datatug/datatug-core/pkg/datatug"
 	core "github.com/datatug/datatug-core/pkg/detective"
 	"github.com/datatug/datatug-core/pkg/sessioncontext"
 	"github.com/gofrs/flock"
@@ -523,6 +524,21 @@ func readRunPage(dir, cursor string) ([]CheckRun, bool, string, error) {
 	return runs, hasMore, next, nil
 }
 
+// resolveCreatedAt is the one creation-date rule for checks and scenarios,
+// shared by SaveCheck/SaveScenario, action apply and AI confirm. A true create
+// takes the caller's (already validated) date, else now. An update keeps the
+// stored value as is, so a legacy undated file is never backfilled and a
+// caller cannot backdate.
+func resolveCreatedAt(caller, stored string, exists bool, now time.Time) string {
+	if exists {
+		return stored
+	}
+	if caller != "" {
+		return caller
+	}
+	return datatug.NewCreatedAt(now)
+}
+
 func (s *LocalStore) getCheck(id string) (Check, error) {
 	if !validSlug(id) {
 		return Check{}, ErrInvalid
@@ -570,11 +586,13 @@ func (s *LocalStore) SaveCheck(ctx context.Context, check Check, actor string) (
 				return ErrConflict
 			}
 			check.Version++
+			check.CreatedAt = resolveCreatedAt(check.CreatedAt, old.CreatedAt, true, time.Now())
 		} else if errors.Is(err, ErrNotFound) {
 			if check.Version != 0 {
 				return ErrConflict
 			}
 			check.Version = 1
+			check.CreatedAt = resolveCreatedAt(check.CreatedAt, "", false, time.Now())
 		} else {
 			return err
 		}
@@ -802,6 +820,7 @@ func (s *LocalStore) SaveScenario(ctx context.Context, scenario Scenario, actor 
 				return ErrConflict
 			}
 			scenario.Version++
+			scenario.CreatedAt = resolveCreatedAt(scenario.CreatedAt, old.CreatedAt, true, time.Now())
 		} else if errors.Is(err, os.ErrNotExist) {
 			if scenario.Version != 0 {
 				return ErrConflict
@@ -814,6 +833,7 @@ func (s *LocalStore) SaveScenario(ctx context.Context, scenario Scenario, actor 
 				return ErrCapacity
 			}
 			scenario.Version = 1
+			scenario.CreatedAt = resolveCreatedAt(scenario.CreatedAt, "", false, time.Now())
 		} else {
 			return err
 		}

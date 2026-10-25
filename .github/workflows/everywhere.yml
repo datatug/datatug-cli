@@ -44,6 +44,30 @@ jobs:
         run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
       - name: Verify image version validation and clean stable release sources without building binaries
         run: python3 -m unittest discover -s distribution -p 'test_build_context.py' -v
+      - name: Check out the pinned public Google Marketplace SDK
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: GoogleCloudPlatform/marketplace-k8s-app-tools
+          ref: e6008fba2e5e5da014ce43782c64481b775475fd
+          path: .provider-tools/google-sdk
+          persist-credentials: false
+      - name: Install hashed provider test dependencies in an isolated environment
+        run: |
+          python3 -m venv "$RUNNER_TEMP/provider-test-venv"
+          "$RUNNER_TEMP/provider-test-venv/bin/python" -m pip --isolated install \
+            --disable-pip-version-check --require-hashes --only-binary=:all: \
+            --index-url https://pypi.org/simple -r .github/provider-test-requirements.txt
+      - name: Verify provider packaging with real Helm and no cloud credentials
+        env:
+          HELM: ${{ runner.temp }}/helm-tool/linux-amd64/helm
+        run: '"$RUNNER_TEMP/provider-test-venv/bin/python" -m unittest discover -s distribution/cloud/providers -p test_provider_assets.py -v'
+      - name: Verify the actual Google Marketplace SDK pipeline without cloud API calls
+        env:
+          HELM: ${{ runner.temp }}/helm-tool/linux-amd64/helm
+        run: |
+          "$RUNNER_TEMP/provider-test-venv/bin/python" distribution/cloud/providers/gcp/verify_sdk.py \
+            --source "$GITHUB_WORKSPACE/.provider-tools/google-sdk" --helm "$HELM" \
+            --output "$RUNNER_TEMP/gcp-sdk-receipt.json"
 
   vscode:
     name: VS Code candidate package

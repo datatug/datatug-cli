@@ -516,11 +516,13 @@ func readRunPage(dir, cursor string) ([]CheckRun, bool, string, error) {
 	return runs, hasMore, next, nil
 }
 
-// stampCreatedAt applies the card rule to checks and scenarios: a stored
-// creation date always wins (so a backdated overwrite cannot change it), else
-// the caller's, else now. The caller's value was validated by Core already.
-func stampCreatedAt(caller, stored string, now time.Time) string {
-	if stored != "" {
+// resolveCreatedAt is the one creation-date rule for checks and scenarios,
+// shared by SaveCheck/SaveScenario, action apply and AI confirm. A true create
+// takes the caller's (already validated) date, else now. An update keeps the
+// stored value as is, so a legacy undated file is never backfilled and a
+// caller cannot backdate.
+func resolveCreatedAt(caller, stored string, exists bool, now time.Time) string {
+	if exists {
 		return stored
 	}
 	if caller != "" {
@@ -576,13 +578,13 @@ func (s *LocalStore) SaveCheck(ctx context.Context, check Check, actor string) (
 				return ErrConflict
 			}
 			check.Version++
-			check.CreatedAt = stampCreatedAt(check.CreatedAt, old.CreatedAt, time.Now())
+			check.CreatedAt = resolveCreatedAt(check.CreatedAt, old.CreatedAt, true, time.Now())
 		} else if errors.Is(err, ErrNotFound) {
 			if check.Version != 0 {
 				return ErrConflict
 			}
 			check.Version = 1
-			check.CreatedAt = stampCreatedAt(check.CreatedAt, "", time.Now())
+			check.CreatedAt = resolveCreatedAt(check.CreatedAt, "", false, time.Now())
 		} else {
 			return err
 		}
@@ -810,7 +812,7 @@ func (s *LocalStore) SaveScenario(ctx context.Context, scenario Scenario, actor 
 				return ErrConflict
 			}
 			scenario.Version++
-			scenario.CreatedAt = stampCreatedAt(scenario.CreatedAt, old.CreatedAt, time.Now())
+			scenario.CreatedAt = resolveCreatedAt(scenario.CreatedAt, old.CreatedAt, true, time.Now())
 		} else if errors.Is(err, os.ErrNotExist) {
 			if scenario.Version != 0 {
 				return ErrConflict
@@ -823,7 +825,7 @@ func (s *LocalStore) SaveScenario(ctx context.Context, scenario Scenario, actor 
 				return ErrCapacity
 			}
 			scenario.Version = 1
-			scenario.CreatedAt = stampCreatedAt(scenario.CreatedAt, "", time.Now())
+			scenario.CreatedAt = resolveCreatedAt(scenario.CreatedAt, "", false, time.Now())
 		} else {
 			return err
 		}

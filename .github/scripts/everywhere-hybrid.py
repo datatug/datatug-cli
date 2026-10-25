@@ -27,6 +27,7 @@ def wait_for_completed_run(request, watch_id, timeout=40, sleep=time.sleep, mono
         try:
             runs = request('/v1/watch/runs?watchId='+watch_id).get('runs', [])
         except urllib.error.HTTPError as error:
+            error.close()
             if error.code != 503:
                 raise
             unavailable_reads += 1
@@ -100,7 +101,8 @@ def main():
                 request('/v1/watch/status',token='not-an-authorized-token')
                 raise AssertionError('invalid credential admitted')
             except urllib.error.HTTPError as error:
-                assert error.code in (401,403)
+                with error:
+                    assert error.code in (401,403)
             definition = dict(scope,id='demo-once',title='Synthetic one-shot',owner='operator',visibility='personal',
                 checkId='pass',checkVersion='1',schedule={'intervalSeconds':5},trigger='changes',
                 initialObservation='baseline',mode='one_shot',lifecycle='enabled',enabled=True,
@@ -119,7 +121,9 @@ def main():
                     retained = request('/v1/watch/runs?watchId=demo-once').get('runs',[])
                     assert any(run.get('id')==completed.get('id') for run in retained)
                     break
-                except (OSError,urllib.error.URLError):
+                except (OSError,urllib.error.URLError) as error:
+                    if isinstance(error, urllib.error.HTTPError):
+                        error.close()
                     if time.monotonic()>deadline:
                         raise
                     time.sleep(1)

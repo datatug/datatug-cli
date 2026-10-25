@@ -34,7 +34,7 @@ func useDefaultRoundTripper(t *testing.T, transport http.RoundTripper) {
 }
 
 func TestHealthcheckAndCoordinatorAdmission(t *testing.T) {
-	if err := healthcheck(nil, "://"); err == nil || err.Error() != "invalid health URL" {
+	if err := healthcheck(context.Background(), "://"); err == nil || err.Error() != "invalid health URL" {
 		t.Fatalf("healthcheck with malformed URL = %v; want invalid health URL", err)
 	}
 

@@ -25,9 +25,12 @@ func TestPrivateCoreCredentialMatchesOnlyExactRepository(t *testing.T) {
 		t.Fatal("missing credential script")
 	}
 	script := strings.ReplaceAll(action[start+len("      run: |\n"):], "        ", "")
-	temp := t.TempDir()
+	temp := filepath.Join(t.TempDir(), "runner temp")
+	if err := os.Mkdir(temp, 0700); err != nil {
+		t.Fatal(err)
+	}
 	run := exec.Command("bash", "-c", script)
-	run.Env = []string{"PATH=" + os.Getenv("PATH"), "RUNNER_TEMP=" + temp, "GITHUB_JOB=test", "GITHUB_ENV=" + filepath.Join(temp, "env"), "CORE_READ_TOKEN=TEST_READ_TOKEN"}
+	run.Env = []string{"PATH=" + os.Getenv("PATH"), "RUNNER_TEMP=" + temp, "GITHUB_JOB=test", "RUNNER_OS=" + os.Getenv("RUNNER_OS"), "GITHUB_ENV=" + filepath.Join(temp, "env"), "CORE_READ_TOKEN=TEST_READ_TOKEN"}
 	if out, err := run.CombinedOutput(); err != nil {
 		t.Fatalf("credential setup failed: %v %s", err, out)
 	}

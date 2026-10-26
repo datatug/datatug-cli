@@ -63,7 +63,11 @@ jobs:
         run: |
           set -euo pipefail
           go mod tidy -diff
-          go test ./...
+          # Full CLI regression/coverage stays in the required Go CI workflow.
+          # This native gate checks the published driver and CLI feature on
+          # every release target before testing the actual packaged binary.
+          go test github.com/dal-go/dalgo2duckdb
+          go test ./pkg/dbcopy ./pkg/secureread ./apps/datatugapp/commands -run DuckDB -count=1
           python3 -m unittest discover -s scripts -p 'test_native_release*.py'
       - name: Verify dispatch tag identity
         if: github.event_name == 'workflow_dispatch'

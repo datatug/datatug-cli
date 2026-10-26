@@ -16,8 +16,9 @@ func (s *Store) RegisterRunner(ctx context.Context, identity RunnerIdentity) err
 	}
 	return s.transaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
 		if s.cloud != nil {
-			// A heartbeat updates one existing scoped runner. Counting unrelated
-			// runners would put every heartbeat in the same transaction read set.
+			// Refreshing this exact scoped runner cannot increase cardinality.
+			// Avoid taking the quota range read on every registration heartbeat;
+			// new IDs still admit under the same atomic coordinator fence.
 			exists, e := tx.Exists(ctx, key(runners, identity.Scope, identity.ID))
 			if e != nil {
 				return e

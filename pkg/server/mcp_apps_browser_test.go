@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -128,7 +129,10 @@ func TestMCPAppsBrowserHost(t *testing.T) {
 		_ = agent.Shutdown(ctx)
 		_ = listener.Close()
 		select {
-		case <-agentDone:
+		case err := <-agentDone:
+			if err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
+				t.Errorf("owned agent stopped with unexpected error: %v", err)
+			}
 		case <-ctx.Done():
 			t.Error("owned agent did not stop")
 		}

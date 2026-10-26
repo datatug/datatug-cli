@@ -237,7 +237,7 @@ func (e *Executor) runDuckDBNativeSQL(ctx context.Context, ref dbcopy.BackendRef
 	if err != nil {
 		return Result{}, ref.OpenFailure(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	if err = db.ValidateReadQuery(ctx, text); err != nil {
 		return Result{}, err
 	}

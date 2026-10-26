@@ -14,7 +14,7 @@ import (
 func TestQueryDuckDBParquet(t *testing.T) {
 	db, err := dalgo2duckdb.NewDatabase("")
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { require.NoError(t, db.Close()) }()
 	path := filepath.Join(t.TempDir(), "items.parquet")
 	_, err = db.SQLDB().ExecContext(context.Background(), "COPY (SELECT 1 AS id, 'DuckDB' AS name UNION ALL SELECT 2, 'Parquet') TO '"+strings.ReplaceAll(path, "'", "''")+"' (FORMAT PARQUET)")
 	require.NoError(t, err)

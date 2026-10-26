@@ -65,7 +65,7 @@ var (
 // `datatug db <url>` viewer command takes.
 var localSchemes = sync.OnceValue(func() map[string]bool {
 	local := map[string]bool{
-		"sqlite": true, "ingitdb": true, "openvaultdb": true, "http": true, "https": true, unavailableScheme: true,
+		"duckdb": true, "sqlite": true, "ingitdb": true, "openvaultdb": true, "http": true, "https": true, unavailableScheme: true,
 	}
 	for _, scheme := range dburl.BaseSchemes() {
 		if !scheme.Opaque {

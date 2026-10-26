@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/dalgo2duckdb"
 	"github.com/dal-go/dalgo2sql"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 
@@ -100,14 +101,13 @@ var nativeSQLLimitation = Limitation{
 // installs a connection authorizer that rejects writes, attachments and
 // disabling query_only. Multi-statement SQL cannot weaken this boundary.
 //
-// PostgreSQL, MySQL, Oracle and SQL Server sources run native SQL too, a query only
-// (see runServerNativeSQL). Otherwise only sqlite:// sources support native SQL:
-// dalgo2ingitdb executes only dal.StructuredQuery ("only StructuredQuery is
-// supported"). A source without a SQL-text execution surface fails with
-// ErrNativeSQLUnsupported.
-// A future SQL-capable adapter for another scheme should add a read-only
-// dal.DB.RunReadonlyTransaction branch alongside this PRAGMA one, per the
-// brief's "PRAGMA query_only for SQLite; read-only tx elsewhere" design.
+// PostgreSQL, MySQL, Oracle and SQL Server sources run native SQL through
+// runServerNativeSQL. DuckDB accepts a single SELECT, opens file databases
+// read-only and initializes every physical connection with a read-only
+// transaction. Because DuckDB SELECTs can read external files and URLs,
+// native DuckDB queries require an unrestricted session. SQLite uses the
+// connection authorizer described above. Other sources without SQL text
+// execution fail with ErrNativeSQLUnsupported.
 func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, args ...dal.QueryArg) (Result, error) {
 	if !e.session.Unrestricted && !e.session.AllowOpaqueSQL {
 		return Result{}, ErrOpaqueSQLNotGranted
@@ -118,6 +118,9 @@ func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, 
 	}
 	if dbcopy.IsServerScheme(ref.Scheme) {
 		return e.runServerNativeSQL(ctx, sourceURL, ref, sqlText, args)
+	}
+	if ref.Scheme == "duckdb" {
+		return e.runDuckDBNativeSQL(ctx, ref, sqlText, args)
 	}
 	if ref.Scheme != "sqlite" {
 		return Result{}, fmt.Errorf("%w: scheme %q", ErrNativeSQLUnsupported, ref.Scheme)
@@ -211,4 +214,38 @@ func openReadOnlySQLiteDB(ctx context.Context, path string) (dal.DB, *sql.DB, fu
 	// executes a dal.TextQuery, which the dialect does not touch.
 	db := newNativeSQLDatabase(sqlDB, dal.NewSchema(nil, nil), dalgo2sql.DbOptions{StructuredQueryDialect: "sqlite"})
 	return db, sqlDB, func() { _ = sqlDB.Close() }, nil
+}
+
+// DuckDB native SQL uses a read-only transaction. File databases are opened
+// read-only too; in-memory sessions still allow Parquet SELECTs.
+func (e *Executor) runDuckDBNativeSQL(ctx context.Context, ref dbcopy.BackendRef, text string, args []dal.QueryArg) (Result, error) {
+	// DuckDB queries can read external files and URLs. A policy on a database
+	// cannot bound those resources, so only an operator's unrestricted session
+	// may use this native surface.
+	if !e.session.Unrestricted {
+		return Result{}, fmt.Errorf("DuckDB native SQL requires an unrestricted session because queries can read external files and URLs")
+	}
+	if ref.Path != "" {
+		if err := dbcopy.CheckSourceFile(ref.Path); err != nil {
+			return Result{}, err
+		}
+	}
+	path := ref.Path
+	if path != "" {
+		path += "?access_mode=read_only"
+	}
+	db, err := dalgo2duckdb.NewReadOnlyDatabase(path)
+	if err != nil {
+		return Result{}, ref.OpenFailure(err)
+	}
+	defer db.Close()
+	if err = db.ValidateReadQuery(ctx, text); err != nil {
+		return Result{}, err
+	}
+	result, err := e.runThroughPolicies(ctx, db, dal.NewTextQuery(text, nil, args...), nil)
+	if err != nil {
+		return Result{}, err
+	}
+	result.ColumnOrder = selectListOrder(ctx, db.SQLDB(), text, args)
+	return result, nil
 }

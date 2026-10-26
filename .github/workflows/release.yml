@@ -10,9 +10,9 @@ name: Release artifacts
 # datatug-cli is pre-1.0: allow_major_version_bump stays false, so a stray
 # `feat!:` is capped to a minor bump instead of jumping to v1.0.0.
 #
-# The release binaries are CGO_ENABLED=0 (see .goreleaser.yaml builds), so they
-# cross-compile cleanly on the shared ubuntu runner even though CI tests use cgo
-# for the sqlite driver.
+# DuckDB requires native cgo builds. The shared release workflow dispatches
+# native-release.yml at its guarded exact tag, then imports verified binaries
+# before the existing archive/sign/notarize/promotion gates.
 
 on:
   push:
@@ -30,14 +30,12 @@ permissions:
 jobs:
   release:
     # Pin the released private-dependency and macOS signing contract.
-    uses: strongo/cicd/.github/workflows/release.yml@a62ab9a0ed90f3fba476e37dd59d49002d4d86b6 # v1.23.1
+    uses: strongo/cicd/.github/workflows/release.yml@e9d8156d4d20c4faef7b7b5f01ba3c3c10ba5abc # verified native-build contract
     permissions:
       contents: write
-      # Lets the require_workflow_success guard below read Go CI's result for
-      # this commit. A reusable workflow cannot grant itself more than its
-      # caller allows, so this has to be here rather than in the shared
-      # workflow. Without it the guard fails closed and says so.
-      actions: read
+      # Read exact-head CI results and dispatch the exact-tag native build.
+      # A reusable workflow cannot grant more permission than its caller.
+      actions: write
     with:
       GOPRIVATE: github.com/datatug/datatug-core
       goprivate_github_app_client_id: Iv23li26w131Kv6u3IdM
@@ -54,7 +52,10 @@ jobs:
       # GoReleaser's `go mod tidy` before-hook re-added v90 in the runner.
       # Names the workflow's `name:`, not its filename; a name matching no
       # workflow fails rather than quietly disabling the gate.
-      require_workflow_success: 'Go CI'
+      require_workflow_success: |
+        Go CI
+        Native release builds
+      native_build_workflow: native-release.yml
       # Must be >= go.mod's `go` directive. Adopting github.com/strongo/buildinfo
       # raised it to 1.27.0. The shared release job runs its `go mod tidy`
       # before-hook under this setup-go version with GOTOOLCHAIN=local, so

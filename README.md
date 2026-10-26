@@ -515,6 +515,19 @@ information on how to contribute to the project.
 
 http://datatug.app/download
 
+
+Query an embedded DuckDB database or Parquet files using the normal SQL command:
+
+```sh
+datatug query run --db duckdb:///data/analytics.duckdb --sql 'SELECT * FROM events LIMIT 10' --no-policies
+datatug query run --db duckdb://:memory: --sql "SELECT * FROM read_parquet('/data/events.parquet') LIMIT 10" --no-policies
+```
+
+DuckDB native SQL accepts a single query and runs in a read-only transaction.
+DuckDB queries can read external files and URLs, so native SQL requires an
+unrestricted session (`--no-policies`). Building the CLI from source requires
+cgo and a C/C++ toolchain.
+
 # [License](./LICENSE)
 
 Apache License

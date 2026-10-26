@@ -31,7 +31,7 @@ func TestFirestoreReconcileStaleReadyConcurrentLifecycleHTTP(t *testing.T) {
 	t.Logf("STALE_READY_HTTP endpoint=%s cleanup=httptest.Server.Close", host.URL)
 	done := make(chan error, 1)
 	go func() { _, e := f.Coordinator.ReconcileScope(t.Context(), f.Actor.Scope, 20); done <- e; close(done) }()
-	defer func() { f.Release(); <-done }()
+	defer func() { f.Release(); _ = <-done }()
 	select {
 	case <-f.Admitted:
 	case e := <-done:

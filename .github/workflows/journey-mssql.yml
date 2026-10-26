@@ -68,12 +68,12 @@ jobs:
       # runner; it is never redistributed, republished or copied into a release.
       MSSQL_IMAGE: mcr.microsoft.com/mssql/server:2022-latest@sha256:cf8f0ab2ebe61feec2eed2629061a07d247f791c2a8ddda74a4ac9f06a291718
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7
       - name: Authenticate private Core dependency
         uses: ./.github/actions/private-core
         with:
           private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e #v7
         with:
           # Must be >= go.mod's `go` directive, same constraint as release.yml.
           go-version: '1.27.3'

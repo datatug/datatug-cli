@@ -292,12 +292,13 @@ func TestFirestoreStoreRegistrationLastSlotAndDeletedRunnerReadmission(t *testin
 	accepted, refused := 0, 0
 	for range stores {
 		r := <-results
-		if r.err == nil {
+		switch r.err {
+		case nil:
 			accepted++
 			winner = r.identity
-		} else if r.err == ErrCapacity {
+		case ErrCapacity:
 			refused++
-		} else {
+		default:
 			t.Fatal(r.err)
 		}
 	}

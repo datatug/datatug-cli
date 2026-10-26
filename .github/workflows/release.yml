@@ -30,7 +30,7 @@ permissions:
 jobs:
   release:
     # Pin the released private-dependency and macOS signing contract.
-    uses: strongo/cicd/.github/workflows/release.yml@v1.22.0 # 686765a7cb84ca84c3cef799f960c730663c182b
+    uses: strongo/cicd/.github/workflows/release.yml@a62ab9a0ed90f3fba476e37dd59d49002d4d86b6 # v1.23.1
     permissions:
       contents: write
       # Lets the require_workflow_success guard below read Go CI's result for

@@ -18,3 +18,11 @@ func TestParseDuckDB(t *testing.T) {
 	}
 	require.Contains(t, SupportedSchemes(), "duckdb")
 }
+
+func TestDuckDBBuildCapabilityErrorIsSafeToDisplay(t *testing.T) {
+	ref := BackendRef{Scheme: "duckdb", Raw: "duckdb://:memory:"}
+	err := ref.OpenFailure(errDuckDBRequiresCGO)
+	require.ErrorIs(t, err, errDuckDBRequiresCGO)
+	require.Contains(t, err.Error(), "DuckDB requires a cgo-enabled build")
+	require.Contains(t, err.Error(), "official DataTug release")
+}

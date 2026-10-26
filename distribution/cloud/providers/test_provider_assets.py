@@ -7,6 +7,7 @@ import shutil
 import tempfile
 import tarfile
 import unittest
+from unittest import mock
 
 import yaml
 
@@ -204,6 +205,71 @@ class ProviderAssetTests(unittest.TestCase):
             mutated = copy.deepcopy(resources)
             next(r for r in mutated if r["kind"] == "ConfigMap")["metadata"]["labels"]["unexpected"] = "cannot-normalize-away"
             self.assertNotEqual(validate.runtime(yaml.safe_dump_all(mutated), google_metadata=True), validate.runtime(self.render(config["values"])))
+
+
+class ApplicationCardinalityTests(unittest.TestCase):
+    def rendered(self, google=False, applications=0):
+        resources = [
+            {"kind": "Deployment", "metadata": {"name": "runner", "namespace": "datatug",
+             "labels": {"app.kubernetes.io/instance": "runner"}}, "spec": {
+                "replicas": 1, "strategy": {"type": "Recreate"}, "template": {"spec": {
+                    "automountServiceAccountToken": False,
+                    "securityContext": {"runAsUser": 65532, "runAsNonRoot": True},
+                    "containers": [{"image": "registry.test/runner@sha256:" + "a" * 64,
+                        "securityContext": {"readOnlyRootFilesystem": True,
+                            "allowPrivilegeEscalation": False, "capabilities": {"drop": ["ALL"]}},
+                        "volumeMounts": [{"name": "project", "readOnly": True},
+                                         {"name": "state", "readOnly": False}]}]}}}},
+            {"kind": "ConfigMap", "metadata": {"name": "config", "namespace": "datatug"}},
+            {"kind": "NetworkPolicy", "metadata": {"name": "network", "namespace": "datatug"},
+             "spec": {"ingress": []}},
+        ]
+        if google:
+            for resource in resources:
+                resource["metadata"]["labels"] = {"app.kubernetes.io/instance": "runner"}
+        for index in range(applications):
+            resources.append({"kind": "Application", "metadata": {
+                "name": f"application-{index}", "namespace": "datatug",
+                "labels": {"app.kubernetes.io/instance": "runner"}}, "spec": {
+                    "selector": {"matchLabels": {"app.kubernetes.io/instance": "runner"}},
+                    "componentKinds": [{"kind": kind} for kind in ("Deployment", "ConfigMap", "NetworkPolicy")]}})
+        return yaml.safe_dump_all(resources)
+
+    def validate_rendered(self, provider, actual):
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = pathlib.Path(directory)
+            assets.write_json(bundle / "CANDIDATE-NOT-FOR-SUBMISSION.json",
+                              {"provider": provider, "releaseName": "runner"})
+            assets.write_json(bundle / "common-values.json", fixture()["values"])
+            if provider == "azure":
+                assets.prepare(bundle, fixture())
+            with mock.patch.object(validate, "render", side_effect=[actual, self.rendered()]), \
+                    mock.patch.object(validate, "run", return_value="inert-helm-version"):
+                return validate.validate(bundle, "inert-helm")
+
+    def test_non_google_packages_reject_application_metadata(self):
+        for provider in ("aws", "azure"):
+            with self.subTest(provider=provider), self.assertRaisesRegex(ValueError, "Application"):
+                self.validate_rendered(provider, self.rendered(applications=1))
+
+    def test_google_package_requires_exactly_one_application(self):
+        for count in (0, 2):
+            with self.subTest(applications=count), self.assertRaisesRegex(ValueError, "Application"):
+                self.validate_rendered("gcp", self.rendered(google=True, applications=count))
+
+    def test_valid_provider_shapes_retain_runtime_parity_and_security_checks(self):
+        for provider in ("aws", "azure", "gcp"):
+            google = provider == "gcp"
+            with self.subTest(provider=provider):
+                receipt = self.validate_rendered(provider, self.rendered(google, int(google)))
+                self.assertTrue(receipt["runtimeParity"])
+                self.assertTrue(receipt["securityInvariants"])
+                self.assertEqual(receipt["providerInstall"], "not-run")
+
+    def test_cardinality_is_checked_before_google_label_normalization(self):
+        # A malformed runtime cannot hide the more basic missing-Application gate.
+        with self.assertRaisesRegex(ValueError, "Application"):
+            validate.runtime("kind: Deployment\nmetadata: {}\n", google_metadata=True)
 
 
 if __name__ == "__main__":

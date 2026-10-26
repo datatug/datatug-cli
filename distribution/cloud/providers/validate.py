@@ -32,6 +32,10 @@ def docs(rendered):
 
 def runtime(rendered, google_metadata=False):
     resources = docs(rendered)
+    applications = sum(r["kind"] == "Application" for r in resources)
+    if applications != (1 if google_metadata else 0):
+        raise ValueError("Exactly one Google Application required" if google_metadata
+                         else "Application metadata is only permitted for Google")
     if google_metadata:
         instance = next(r for r in resources if r["kind"] == "Deployment")["metadata"]["labels"]["app.kubernetes.io/instance"]
         for resource in resources:

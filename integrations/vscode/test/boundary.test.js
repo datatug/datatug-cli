@@ -130,6 +130,18 @@ test('hosted auth is separately validated and scrubbed from default child env', 
   const injected = await b.runCLI(process.execPath, ['-e', 'process.stdout.write(JSON.stringify({matches:process.env.DATATUG_SUMMARY_TOKEN === "PRIVATE"}))'], { summaryToken: 'PRIVATE' });
   assert.deepEqual(JSON.parse(injected.stdout), { matches: true });
 });
+test('hosted token casing cannot cross the child boundary without explicit opt-in', async () => {
+  const inherited = { DATATUG_SUMMARY_TOKEN: 'ambient-upper', datatug_summary_token: 'ambient-lower', DataTug_Summary_Token: 'ambient-mixed', SAFE_CONTROL: 'retained' };
+  const original = { ...inherited };
+  const inspect = 'const keys=Object.keys(process.env).filter(key=>key.toUpperCase()==="DATATUG_SUMMARY_TOKEN");process.stdout.write(JSON.stringify({keys,explicit:process.env.DATATUG_SUMMARY_TOKEN==="explicit-private",control:process.env.SAFE_CONTROL}));';
+  const local = await b.runCLI(process.execPath, ['-e', inspect], { env: inherited });
+  assert.equal(local.code, 0);
+  assert.deepEqual(JSON.parse(local.stdout), { keys: [], explicit: false, control: 'retained' });
+  const optedIn = await b.runCLI(process.execPath, ['-e', inspect], { env: inherited, summaryToken: 'explicit-private' });
+  assert.equal(optedIn.code, 0);
+  assert.deepEqual(JSON.parse(optedIn.stdout), { keys: [b.SUMMARY_TOKEN_ENV], explicit: true, control: 'retained' });
+  assert.deepEqual(inherited, original);
+});
 test('summary link needs canonical closed fragment and exact manifest/Space/environment scope', () => {
   const good = summaryURL(summaryFragment); assert.equal(b.safeDeepLink(good, summaryScope), good);
   const malformed = [good.replace('datatug.app/', 'evil/'), good.replace('https:', 'http:'), good.replace('datatug.app/', 'datatug.app:443/'),

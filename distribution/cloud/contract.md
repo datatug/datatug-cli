@@ -81,7 +81,7 @@ hosted-home fallback is not the authorised-result release gate.
 | Azure | AKS Helm inside CNAB with manifest, ARM template and createUiDefinition | Partner/publisher entitlement, Azure image parameterisation, CPA verification, ACR copy permissions and actual AKS install |
 | Google | GKE Helm + Application CR and deployer image/schema | Public deployment-package repository, service name, Producer Portal/partner eligibility, deployer verification and actual GKE install |
 
-These adapters are requirements, not completed provider packages. Azure's CNAB
+Offline provider packaging is implemented and locally validated; actual provider installation, seller/product eligibility, commercial approval and submission approval remain pending. Azure's CNAB
 and Google's deployer are additional deployment artefacts even though runtime
 execution uses one CLI image. Provider registry publication and commercial terms
 require separate owner approval. No paid-plan requirement or additional DataTug

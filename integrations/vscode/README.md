@@ -152,7 +152,7 @@ acceptance remain release gates; unit and CLI process tests are separate evidenc
 | Host | Execution / credentials | Evidence |
 | --- | --- | --- |
 | macOS local | CLI and workspace on Mac; VS Code SecretStorage | Node 22 process/unit + real CLI SQLite tests passed; actual VS Code Insiders 1.142.0 activation/native view and CUA trusted-project selection, local environment, saved query, Check pass/fail, three separate owner consents and native JSON results passed on copied synthetic SQLite data |
-| Linux local | Native CLI on Linux; host credential service | Unit-test design only; actual host pending |
+| Linux local | Native CLI on Linux; host credential service | Ubuntu CI [candidate package job](https://github.com/datatug/datatug-cli/actions/runs/40393872500/job/121821636866) passed 76 Node unit/process tests with zero skips, including actual candidate CLI SQLite saved-query and Check pass/fail/error contracts; a dedicated Linux CI job is configured for pinned-editor no-project activation, registered commands, empty tree and native view focus; its successful run is not yet evidenced here. Interactive Linux trusted-workspace and SecretStorage acceptance remain pending |
 | Windows local | Native `.exe`; host credential service | Pending, including force termination and private evidence ACL/mode compatibility |
 | Remote SSH | Workspace extension + CLI on remote host; secret explicitly transmitted to remote child environment | Pending real-host transport, secret-store and cancellation tests |
 | Dev container | Extension and CLI inside container; private persistent storage outside workspace | Pending container lifecycle/storage tests |

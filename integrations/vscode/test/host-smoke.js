@@ -6,6 +6,10 @@ const fs = require('node:fs/promises');
 const vscode = require('vscode');
 
 async function run() {
+  for (const [actual, name] of [[vscode.version, 'VERSION'], [process.platform, 'PLATFORM'], [process.arch, 'ARCH']]) {
+    const expected = process.env[`DATATUG_VSCODE_EXPECTED_${name}`];
+    if (expected) assert.equal(actual, expected, `The actual host must match the pinned ${name.toLowerCase()}.`);
+  }
   assert.equal(vscode.workspace.workspaceFolders?.length || 0, 0, 'The isolated smoke must open no workspace.');
   const extension = vscode.extensions.getExtension('datatug.datatug-everywhere');
   assert.ok(extension, 'VS Code must discover the candidate extension.');

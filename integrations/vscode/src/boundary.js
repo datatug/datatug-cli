@@ -104,8 +104,9 @@ function secretVariable(name) {
 }
 function childEnvironment(base, secret, hostedToken) {
   const env = { ...base };
-  for (const key of Object.keys(env)) if (/^(NODE_OPTIONS|LD_PRELOAD|LD_LIBRARY_PATH|DYLD_.*)$/i.test(key)) delete env[key];
-  delete env[SUMMARY_TOKEN_ENV];
+  // Windows environment names are case-insensitive; clear every inherited
+  // spelling before optionally inserting the explicitly selected hosted token.
+  for (const key of Object.keys(env)) if (key.toUpperCase() === SUMMARY_TOKEN_ENV || /^(NODE_OPTIONS|LD_PRELOAD|LD_LIBRARY_PATH|DYLD_.*)$/i.test(key)) delete env[key];
   if (hostedToken !== undefined) {
     if (!summaryToken(hostedToken)) throw new SafeError('Invalid hosted token. Store a current hosted bearer token in SecretStorage.');
     env[SUMMARY_TOKEN_ENV] = hostedToken;

@@ -17,7 +17,7 @@ require (
 	charm.land/bubbletea/v2 v2.0.9
 	charm.land/fang/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.6
-	cloud.google.com/go/firestore v1.26.0
+	cloud.google.com/go/firestore v1.29.0
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/LindsayBradford/go-dbf v1.0.0-alpha-5
 	github.com/NimbleMarkets/ntcharts/v2 v2.2.0
@@ -27,7 +27,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/dal-go/dalgo v0.95.3
 	github.com/dal-go/dalgo2bigquery v0.3.2
-	github.com/dal-go/dalgo2firestore v0.10.40
+	github.com/dal-go/dalgo2firestore v0.10.41
 	github.com/dal-go/dalgo2http v0.4.0
 	github.com/dal-go/dalgo2mssql v0.0.1
 	github.com/dal-go/dalgo2mysql v0.2.2
@@ -60,17 +60,17 @@ require (
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
 	github.com/posthog/posthog-go v1.24.3
 	github.com/sijms/go-ora/v3 v3.0.1
-	github.com/sneat-co/sneat-go-core v0.67.3
+	github.com/sneat-co/sneat-go-core v0.71.15-0.20261026093600-b44672c91bb3
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.12.1
-	github.com/strongo/aichat v0.15.0
+	github.com/strongo/aichat v0.15.1
 	github.com/strongo/buildinfo v0.3.0
 	github.com/strongo/cli-helpers v0.27.1
 	github.com/strongo/deviceauth v0.1.0
-	github.com/strongo/logus v0.4.3
+	github.com/strongo/logus v0.4.8
 	github.com/strongo/random v0.0.3
-	github.com/strongo/slice v0.3.13
+	github.com/strongo/slice v0.3.14
 	github.com/strongo/validation v0.0.17
 	github.com/tuigoff/tuigoff v0.8.0
 	github.com/xo/dburl v0.24.2
@@ -80,7 +80,7 @@ require (
 	golang.org/x/sys v0.49.0
 	golang.org/x/term v0.47.0
 	golang.org/x/text v0.43.0
-	google.golang.org/api v0.304.0
+	google.golang.org/api v0.308.0
 	google.golang.org/grpc v1.84.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.61.0
@@ -113,7 +113,7 @@ require (
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/cloudflare/circl v1.6.4 // indirect
-	github.com/crediterra/money v0.3.8 // indirect
+	github.com/crediterra/money v0.4.2 // indirect
 	github.com/cyphar/filepath-securejoin v0.7.0 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/dlclark/regexp2/v2 v2.6.0 // indirect
@@ -178,10 +178,10 @@ require (
 	github.com/sergi/go-diff v1.4.0 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/skeema/knownhosts v1.3.2 // indirect
-	github.com/strongo/analytics v0.2.8 // indirect
+	github.com/strongo/analytics v0.2.10 // indirect
 	github.com/strongo/decimal v0.1.2 // indirect
 	github.com/strongo/gotwilio v0.0.0-20160123000810-f024bbefe80f // indirect
-	github.com/strongo/strongoapp v0.31.55 // indirect
+	github.com/strongo/strongoapp v0.31.72 // indirect
 	github.com/tiendc/go-deepcopy v1.7.2 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	github.com/xo/terminfo v1.0.0 // indirect
@@ -209,7 +209,7 @@ require (
 	golang.org/x/time v0.16.0 // indirect
 	google.golang.org/genproto v0.0.0-20260803160001-6ac0973c030d // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260819154853-08b0e4226688 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20261005182115-fad411399dd8 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20261019180522-ce908d29299b // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 	modernc.org/libc v1.79.0 // indirect

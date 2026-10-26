@@ -525,8 +525,9 @@ datatug query run --db duckdb://:memory: --sql "SELECT * FROM read_parquet('/dat
 
 DuckDB native SQL accepts a single query and runs in a read-only transaction.
 DuckDB queries can read external files and URLs, so native SQL requires an
-unrestricted session (`--no-policies`). Building the CLI from source requires
-cgo and a C/C++ toolchain.
+unrestricted session (`--no-policies`). All official release binaries include DuckDB. Building DuckDB support from
+source requires cgo and a C/C++ toolchain; custom `CGO_ENABLED=0` builds retain
+other backends and report an explicit error when DuckDB is requested.
 
 # [License](./LICENSE)
 

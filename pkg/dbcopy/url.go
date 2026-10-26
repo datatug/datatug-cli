@@ -30,7 +30,6 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo2duckdb"
 	"github.com/dal-go/dalgo2sql"
 	"github.com/dal-go/dalgo2sqlite"
 	"github.com/datatug/datatug-cli/pkg/httpsource"
@@ -713,7 +712,7 @@ func (r BackendRef) openSource(ctx context.Context, mode openMode) (dal.DB, erro
 		if !mode.forWrite && path != "" {
 			path += "?access_mode=read_only"
 		}
-		return dalgo2duckdb.NewDatabase(path)
+		return newDuckDBDatabase(path)
 	case "openvaultdb":
 		return OpenOpenVaultDBSource(r.Path)
 	case "sqlite":

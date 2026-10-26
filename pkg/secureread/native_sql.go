@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo2duckdb"
 	"github.com/dal-go/dalgo2sql"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 
@@ -234,7 +233,7 @@ func (e *Executor) runDuckDBNativeSQL(ctx context.Context, ref dbcopy.BackendRef
 	if path != "" {
 		path += "?access_mode=read_only"
 	}
-	db, err := dalgo2duckdb.NewReadOnlyDatabase(path)
+	db, err := dbcopy.OpenReadOnlyDuckDB(path)
 	if err != nil {
 		return Result{}, ref.OpenFailure(err)
 	}

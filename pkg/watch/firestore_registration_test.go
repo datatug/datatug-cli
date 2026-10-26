@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/dal-go/dalgo/dal"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -145,6 +146,7 @@ func TestFirestoreRegistrationThreeExistingRunnersConcurrent(t *testing.T) {
 			return original(ctx, tx)
 		}
 	}
+	gate := registrationGate(t, stores[0])
 	for round := 0; round < 3; round++ {
 		c.advance(time.Second)
 		start := make(chan struct{})
@@ -164,6 +166,9 @@ func TestFirestoreRegistrationThreeExistingRunnersConcurrent(t *testing.T) {
 	}
 	if authorizations.Load() < 9 {
 		t.Fatal("heartbeat bypassed current transaction authority")
+	}
+	if !reflect.DeepEqual(gate, registrationGate(t, stores[0])) {
+		t.Fatal("concurrent audited heartbeats advanced the project fence")
 	}
 	for i, s := range stores {
 		if controls[i].Calls != 0 {

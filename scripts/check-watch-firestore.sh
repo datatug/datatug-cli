@@ -37,6 +37,7 @@ export WATCH_FIRESTORE_TEST_PROJECT=demo-datatug-watch-ci
 printf 'Owner: check-watch-firestore.sh PID %s\nProject: %s\nEndpoint: %s\n' "$$" "$WATCH_FIRESTORE_TEST_PROJECT" "$FIRESTORE_EMULATOR_HOST" > "$watch_artifacts/lifecycle.txt"
 "$watch_java" -jar "$watch_jar" --host 127.0.0.1 --port "$watch_port" --project_id "$WATCH_FIRESTORE_TEST_PROJECT" > "$watch_artifacts/emulator.log" 2>&1 &
 watch_pid=$!
+printf 'Emulator PID: %s\n' "$watch_pid" >> "$watch_artifacts/lifecycle.txt"
 watch_ready=0
 for ((watch_attempt=0; watch_attempt<200; watch_attempt++)); do
   if ! kill -0 "$watch_pid" 2>/dev/null; then
@@ -73,6 +74,10 @@ assert {
     'TestFirestoreRegistrationRetryRechecksCurrentAuthority',
     'TestFirestoreRegistrationThreeExistingRunnersConcurrent',
     'TestFirestoreRegistrationConcurrentHundredRunnerCapacity',
+    'TestFirestoreRegistrationAuditedHeartbeatPreservesFence',
+    'TestFirestoreRegistrationAuditedPairClosedWriteSet',
+    'TestFirestoreRegistrationAuditedHeartbeatPhysicalErrorsRollback',
+    'TestFirestoreRegistrationAuditEnvelopeFailsClosed',
 } <= registration_passed, 'Missing Watch registration acceptance cases'
 
 PY

@@ -43,12 +43,16 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-      - name: Configure MinGW for DuckDB
+      - name: Verify native Windows compiler
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          if (!(Test-Path 'C:\msys64\mingw64\bin\gcc.exe')) { throw 'MinGW compiler unavailable' }
-          'C:\msys64\mingw64\bin' | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          # Use the runner's supported compiler on PATH; Windows images may
+          # install MinGW outside the former MSYS2 mingw64 directory.
+          Get-Command gcc -ErrorAction Stop
+          Get-Command g++ -ErrorAction Stop
+          gcc --version
+          g++ --version
       - name: Verify native source and release adapter
         shell: bash
         run: |

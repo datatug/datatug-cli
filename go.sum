@@ -353,6 +353,8 @@ github.com/skeema/knownhosts v1.3.2 h1:EDL9mgf4NzwMXCTfaxSD/o/a5fxDw/xL9nkU28Jjd
 github.com/skeema/knownhosts v1.3.2/go.mod h1:bEg3iQAuw+jyiw+484wwFJoKSLwcfd7fqRy+N0QTiow=
 github.com/sneat-co/sneat-go-core v0.71.15-0.20261026093600-b44672c91bb3 h1:kMriOyTymJ1hv8PLnd53vzsps/UE5tifq+CtYRMqL2g=
 github.com/sneat-co/sneat-go-core v0.71.15-0.20261026093600-b44672c91bb3/go.mod h1:88+0btU9/1LxkheqKPSYrq4Pr1qXDXLjivbaytNgFM4=
+github.com/sneat-co/sneat-go-core v0.71.16 h1:mv1uAQ4W62OMK5fTLBr2y+kV2pg5rac/J4l+wz+pwek=
+github.com/sneat-co/sneat-go-core v0.71.16/go.mod h1:88+0btU9/1LxkheqKPSYrq4Pr1qXDXLjivbaytNgFM4=
 github.com/spf13/cobra v1.10.2 h1:DMTTonx5m65Ic0GOoRY2c16WCbHxOOw6xxezuLaBpcU=
 github.com/spf13/cobra v1.10.2/go.mod h1:7C1pvHqHw5A4vrJfjNwvOdzYu0Gml16OCs2GRiTUUS4=
 github.com/spf13/pflag v1.0.9/go.mod h1:McXfInJRrz4CZXVZOBLb0bTZqETkiAhM9Iw0y3An2Bg=

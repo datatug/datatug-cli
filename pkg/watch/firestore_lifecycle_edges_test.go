@@ -210,3 +210,112 @@ func TestFirestoreCompletionReplayRechecksCurrentAuthority(t *testing.T) {
 		})
 	}
 }
+
+// A refresh does not add a runner. Reading the whole runner range on every
+// heartbeat adds unrelated transaction conflicts; new scoped IDs still need
+// the quota query, and a failed read must never grant registration.
+func TestFirestoreStoreRegistrationRefreshAvoidsQuotaRangeRead(t *testing.T) {
+	stores, clock, _ := firestoreFixture(t)
+	s := stores[0]
+	ctx := context.Background()
+	identity := RunnerIdentity{ID: "refresh", Scope: testScope}
+	if err := s.RegisterRunner(ctx, identity); err != nil {
+		t.Fatal(err)
+	}
+	clock.advance(time.Second)
+	control := &watchFaultControl{Kind: "query", Table: runners, FailAt: 1}
+	restore := watchWrapFault(s, control)
+	defer restore()
+	if err := s.RegisterRunner(ctx, identity); err != nil {
+		t.Fatalf("existing runner refresh queried unrelated runner range: %v", err)
+	}
+	if control.Calls != 0 {
+		t.Fatalf("refresh queried runner quota range %d times", control.Calls)
+	}
+	// The same ID in another environment is a new quota admission, not a
+	// refresh of this exact scoped identity.
+	foreign := identity
+	foreign.Scope.Environment = "different-environment"
+	cloudRequireError(t, s.RegisterRunner(ctx, foreign), errWatchInjected)
+	if !control.Triggered || control.Calls != 1 {
+		t.Fatalf("new scoped identity bypassed quota query: %+v", control)
+	}
+	restore()
+	if err := s.transaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
+		current, err := read[Runner](ctx, tx, runners, identity.Scope, identity.ID)
+		if err != nil {
+			return err
+		}
+		if !current.LastSeen.Equal(clock.now()) {
+			t.Fatal("existing runner freshness was not updated")
+		}
+		_, err = read[Runner](ctx, tx, runners, foreign.Scope, foreign.ID)
+		if err != ErrNotFound {
+			t.Fatalf("failed quota admission wrote foreign runner: %v", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFirestoreStoreRegistrationLastSlotAndDeletedRunnerReadmission(t *testing.T) {
+	stores, clock, _ := firestoreFixture(t)
+	ctx := context.Background()
+	s := stores[0]
+	if err := s.transaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
+		for i := 0; i < 99; i++ {
+			id := fmt.Sprintf("quota-%d", i)
+			if err := s.save(ctx, tx, runners, testScope, id, "", id, "", Runner{Scope: testScope, ID: id, LastSeen: clock.now()}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		identity RunnerIdentity
+		err      error
+	}
+	start := make(chan struct{})
+	results := make(chan result, 2)
+	for i, store := range stores {
+		go func() {
+			identity := RunnerIdentity{ID: fmt.Sprintf("last-slot-%d", i), Scope: testScope}
+			<-start
+			results <- result{identity, store.RegisterRunner(ctx, identity)}
+		}()
+	}
+	close(start)
+	var winner RunnerIdentity
+	accepted, refused := 0, 0
+	for range stores {
+		r := <-results
+		if r.err == nil {
+			accepted++
+			winner = r.identity
+		} else if r.err == ErrCapacity {
+			refused++
+		} else {
+			t.Fatal(r.err)
+		}
+	}
+	if accepted != 1 || refused != 1 {
+		t.Fatalf("last slot admission accepted=%d refused=%d", accepted, refused)
+	}
+	// A previously registered ID loses refresh eligibility after deletion.
+	// Replace its slot atomically, then require ordinary capacity admission.
+	if err := s.transaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
+		if err := tx.Delete(ctx, key(runners, winner.Scope, winner.ID)); err != nil {
+			return err
+		}
+		return s.save(ctx, tx, runners, testScope, "replacement", "", "replacement", "", Runner{Scope: testScope, ID: "replacement", LastSeen: clock.now()})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cloudRequireError(t, s.RegisterRunner(ctx, winner), ErrCapacity)
+	if err := s.RegisterRunner(ctx, RunnerIdentity{ID: "replacement", Scope: testScope}); err != nil {
+		t.Fatalf("existing replacement could not refresh at capacity: %v", err)
+	}
+}

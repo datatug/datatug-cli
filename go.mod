@@ -60,7 +60,7 @@ require (
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
 	github.com/posthog/posthog-go v1.24.3
 	github.com/sijms/go-ora/v3 v3.0.1
-	github.com/sneat-co/sneat-go-core v0.71.15-0.20261026093600-b44672c91bb3
+	github.com/sneat-co/sneat-go-core v0.71.16
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.12.1

@@ -55,7 +55,7 @@ if [ "$watch_ready" != 1 ]; then
   exit 1
 fi
 # The required marker makes missing emulator configuration fatal, never SKIP.
-go test -race ./pkg/watch -run '^TestFirestore(Store|Events|Registration)' -count=1 -timeout=180s -json > "$watch_artifacts/tests.jsonl"
+go test -race ./pkg/watch -run '^TestFirestore(Store|Events|Registration|ReconcileStale)' -count=1 -timeout=180s -json > "$watch_artifacts/tests.jsonl"
 python3 - "$watch_artifacts/tests.jsonl" <<'PY'
 import json, pathlib, sys
 rows = [json.loads(line) for line in pathlib.Path(sys.argv[1]).read_text().splitlines()]
@@ -79,6 +79,15 @@ assert {
     'TestFirestoreRegistrationAuditedHeartbeatPhysicalErrorsRollback',
     'TestFirestoreRegistrationAuditEnvelopeFailsClosed',
 } <= registration_passed, 'Missing Watch registration acceptance cases'
+# Stale-selection proofs cannot satisfy the original Store/Events minimum.
+stale = [row for row in rows if row.get('Test', '').startswith('TestFirestoreReconcileStale')]
+assert stale and not any(row['Action'] == 'skip' for row in stale), 'Stale reconciliation gate did not execute'
+stale_passed = {row['Test'] for row in stale if row['Action'] == 'pass'}
+assert {
+    'TestFirestoreReconcileStaleReadySelectionSkipsRunsAfterAdmission',
+    'TestFirestoreReconcileStaleReadyPolicyAndDueTransitions',
+    'TestFirestoreReconcileStaleReadyConcurrentLifecycleHTTP',
+} <= stale_passed, 'Missing stale ready reconciliation acceptance cases'
 
 PY
 printf 'Firestore Watch storage gate passed; emulator teardown owned by this command.\n'

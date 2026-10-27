@@ -35,7 +35,7 @@ require (
 	github.com/dal-go/dalgo2openvaultdb v0.4.1
 	github.com/dal-go/dalgo2oracle v0.0.1
 	github.com/dal-go/dalgo2postgres v0.9.4
-	github.com/dal-go/dalgo2redis v0.0.0-20261027130732-cdb90eca9534
+	github.com/dal-go/dalgo2redis v0.1.0
 	github.com/dal-go/dalgo2sql v0.30.0
 	github.com/dal-go/dalgo2sqlite v0.4.8
 	github.com/dal-go/record v0.1.5

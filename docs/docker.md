@@ -2,9 +2,11 @@
 
 The `datatug-cli` image packages the existing CLI as one execution-only image.
 It supports one-shot Checks and queries and the existing foreground daemon
-Coordinator/Runner roles. It does not contain the DataTug web application,
-Apps bundles, a new execution engine, Go source, module caches, demo projects,
-or credentials. The full visual experience remains at `https://datatug.app`.
+Coordinator/Runner roles. The default binary includes the existing commercial
+entitlement checker and embedded MCP App HTML resource with its notices. That
+resource is distinct from the full hosted DataTug web application and prohibited
+AG Grid/Charts assets. The context excludes Go source, module caches, demo projects
+and credentials. The full visual experience remains at `https://datatug.app`.
 
 The image defaults to `datatug --help`. It runs as UID/GID `65532:65532`, uses
 a read-only root filesystem in both supplied Compose examples, disables
@@ -20,7 +22,12 @@ From the repository root, create a new temporary output directory outside the
 checkout. The helper compiles only static Linux `amd64` and `arm64` executables
 with CGO disabled, inventories actual Go modules from `go list -deps -json`,
 and copies the pinned Dockerfile, license/notice files and private state
-directory skeletons. The generated context contains no Go source, module
+directory skeletons. CGO-off images cannot execute DuckDB: the native DuckDB
+driver requires CGO, and this image retains the explicit unsupported response.
+The native Redis read command uses Redis ACLs rather than DataTug application
+policies; operators must use a dedicated read-only ACL user and verified TLS.
+Compiled MongoDB/Redis support does not establish provider installation or live
+connector acceptance. The generated context contains no Go source, module
 cache, project fixture, environment file, secret or local project config.
 
 ```sh
@@ -40,7 +47,13 @@ an image or satisfy the remaining release gates.
 
 The generated `CONTEXT-INVENTORY.md` lists every included file and its digest;
 `licenses/DEPENDENCY-LICENSE-INVENTORY.md` records each module and included
-notice. The helper requires `github.com/datatug/datatug-core v0.80.0` and
+notice. `licenses/PROJECT-LICENSE-INVENTORY.json` records the closed own-source
+license/map/terms and MCP build-manifest source/destination/scope/SHA-256 map.
+All five required own texts are retained exactly, including the draft commercial
+terms banner; missing, symlinked or unsuitable required files fail the build.
+The default executable has composite source scopes, so the image makes no
+aggregate Apache-2.0 grant. Legal/publication approval remains pending.
+The helper requires `github.com/datatug/datatug-core v0.80.0` and
 retains its MIT license notice. If a dependency has no recognized top-level
 license/notice file, the helper prints it and records a **publication gate**;
 development builds can still be inspected. A release build must use

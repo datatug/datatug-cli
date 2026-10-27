@@ -136,10 +136,47 @@ def write_module_notices(context: Path, modules: dict[str, dict[str, str]]) -> l
     return missing
 
 
+# Closed own-source notice/provenance map; no recursive source-tree copy.
+PROJECT_NOTICES = (
+    ("LICENSE", "PROJECT-LICENSE", "Repository default license; scoped exceptions are in LICENSING.md"),
+    ("THIRD_PARTY_NOTICES.md", "PROJECT-THIRD_PARTY_NOTICES.md", "Third-party attributions, including embedded MCP App notices"),
+    ("LICENSING.md", "PROJECT-LICENSING.md", "Own-source licensing scope map; not aggregate binary permission"),
+    ("LICENSES/Apache-2.0.txt", "PROJECT-LICENSES/Apache-2.0.txt", "Apache-2.0 own-source scopes named by LICENSING.md"),
+    ("LICENSES/COMMERCIAL-TERMS.md", "PROJECT-LICENSES/COMMERCIAL-TERMS.md", "commercial/ scope; draft terms pending qualified legal review"),
+    ("pkg/mcpserver/app/build-manifest.json", "PROJECT-MCP-APP-BUILD-MANIFEST.json", "Embedded MCP App build provenance; notices retained in PROJECT-THIRD_PARTY_NOTICES.md"),
+)
+
+
 def copy_project_notices(context: Path, env: dict[str, str]) -> None:
     target = context / "licenses"
-    shutil.copyfile(ROOT / "LICENSE", target / "PROJECT-LICENSE")
-    shutil.copyfile(ROOT / "THIRD_PARTY_NOTICES.md", target / "PROJECT-THIRD_PARTY_NOTICES.md")
+    retained = []
+    # Validate all fixed inputs before copying. Symlinked ancestors are rejected
+    # as well as symlink files so the closed map cannot read outside the source.
+    for relative, destination, scope in PROJECT_NOTICES:
+        source = ROOT / relative
+        try:
+            if any((ROOT.joinpath(*Path(relative).parts[:i])).is_symlink()
+                   for i in range(1, len(Path(relative).parts) + 1)) or not source.is_file():
+                raise ValueError("not a regular source file")
+            if not 0 < source.stat().st_size <= 4 * 1024 * 1024:
+                raise ValueError("empty or oversized source text")
+            content = source.read_bytes()
+            if not content.decode("utf-8").strip() or b"\0" in content:
+                raise ValueError("unsuitable source text")
+        except (OSError, ValueError) as error:
+            raise RuntimeError(f"required project notice/provenance file unavailable or unsuitable: {relative}") from error
+        retained.append((relative, destination, scope, content))
+    inventory = []
+    for relative, name, scope, content in retained:
+        destination = target / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(content)
+        destination.chmod(0o444)
+        inventory.append({"source": relative, "destination": "licenses/" + name,
+                          "scope": scope, "sha256": hashlib.sha256(content).hexdigest()})
+    inventory_path = target / "PROJECT-LICENSE-INVENTORY.json"
+    inventory_path.write_text(json.dumps({"schemaVersion": 1, "files": inventory}, indent=2) + "\n", encoding="utf-8")
+    inventory_path.chmod(0o444)
     goroot = Path(run(["go", "env", "GOROOT"], cwd=ROOT, env=env).strip())
     shutil.copyfile(goroot / "LICENSE", target / "GO-LICENSE")
     # Include notices of standard-library vendored dependencies without sources.
@@ -147,8 +184,6 @@ def copy_project_notices(context: Path, env: dict[str, str]) -> None:
         if source.is_file() and not source.is_symlink():
             name = safe_name(str(source.relative_to(goroot / "src" / "vendor")))
             shutil.copyfile(source, target / ("GO-VENDOR-" + name))
-    for path in (target / "PROJECT-LICENSE", target / "PROJECT-THIRD_PARTY_NOTICES.md"):
-        path.chmod(0o444)
 
 
 def make_state_dirs(context: Path) -> None:
@@ -221,7 +256,7 @@ def build_context(output: Path, env: dict[str, str], version: str = DEFAULT_VERS
         inventory = [
             "# Generated Docker context inventory",
             "",
-            "This context contains only the pinned Dockerfile, static linux/amd64 and linux/arm64 executables, private state-directory markers, and license/notice texts.",
+            "This context contains only the pinned Dockerfile, static linux/amd64 and linux/arm64 executables, private state-directory markers, and license/notice/provenance texts.",
             "Go source, module caches, project fixtures, credentials and local configuration are excluded.",
             f"Binary version: `{version}`",
             f"Source commit: `{revision}`",

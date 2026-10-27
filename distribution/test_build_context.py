@@ -3,6 +3,8 @@
 import contextlib
 import importlib.util
 import io
+import hashlib
+import json
 from pathlib import Path
 import shlex
 import tempfile
@@ -99,6 +101,112 @@ class VersionTests(unittest.TestCase):
                         contextlib.redirect_stdout(io.StringIO()):
                     self.assertEqual(builder.main(), 0)
                     self.assertEqual(build.call_args.args[2], version or builder.DEFAULT_VERSION)
+
+
+class ProjectNoticeTests(unittest.TestCase):
+    REQUIRED = {
+        "LICENSE": "PROJECT-LICENSE",
+        "THIRD_PARTY_NOTICES.md": "PROJECT-THIRD_PARTY_NOTICES.md",
+        "LICENSING.md": "PROJECT-LICENSING.md",
+        "LICENSES/Apache-2.0.txt": "PROJECT-LICENSES/Apache-2.0.txt",
+        "LICENSES/COMMERCIAL-TERMS.md": "PROJECT-LICENSES/COMMERCIAL-TERMS.md",
+    }
+
+    def fixture(self, directory):
+        root = Path(directory) / "source"
+        context = Path(directory) / "context"
+        goroot = Path(directory) / "go"
+        context.mkdir()
+        (context / "licenses").mkdir()
+        for source in self.REQUIRED:
+            path = root / source
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(("DRAFT — PENDING QUALIFIED LEGAL REVIEW\n" + source + "\n").encode())
+        manifest = root / "pkg/mcpserver/app/build-manifest.json"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text('{"format":"datatug.mcp-app.build.v1"}\n')
+        (goroot / "src/vendor/example").mkdir(parents=True)
+        (goroot / "LICENSE").write_bytes(b"Go license\n")
+        (goroot / "src/vendor/example/LICENSE").write_bytes(b"Vendored notice\n")
+        return root, context, goroot
+
+    def copy(self, root, context, goroot):
+        with patch.object(builder, "ROOT", root), patch.object(builder, "run", return_value=str(goroot)):
+            builder.copy_project_notices(context, {})
+
+    def test_real_copier_retains_scoped_bytes_and_closed_inventory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, context, goroot = self.fixture(directory)
+            self.copy(root, context, goroot)
+            entries = json.loads((context / "licenses/PROJECT-LICENSE-INVENTORY.json").read_text())["files"]
+            expected = {**self.REQUIRED, "pkg/mcpserver/app/build-manifest.json": "PROJECT-MCP-APP-BUILD-MANIFEST.json"}
+            self.assertEqual({entry["source"]: entry["destination"] for entry in entries},
+                             {source: "licenses/" + dest for source, dest in expected.items()})
+            for entry in entries:
+                retained = context / entry["destination"]
+                self.assertEqual(retained.read_bytes(), (root / entry["source"]).read_bytes())
+                self.assertEqual(entry["sha256"], hashlib.sha256(retained.read_bytes()).hexdigest())
+                self.assertTrue(entry["scope"])
+                self.assertEqual(retained.stat().st_mode & 0o777, 0o444)
+            self.assertEqual((context / "licenses/GO-LICENSE").read_bytes(), b"Go license\n")
+            self.assertEqual((context / "licenses/GO-VENDOR-example_LICENSE").read_bytes(), b"Vendored notice\n")
+
+    def test_every_required_own_file_is_mandatory(self):
+        for source in self.REQUIRED:
+            with self.subTest(source=source), tempfile.TemporaryDirectory() as directory:
+                root, context, goroot = self.fixture(directory)
+                (root / source).unlink()
+                with self.assertRaisesRegex(RuntimeError, "required project"):
+                    self.copy(root, context, goroot)
+
+    def test_missing_mcp_build_manifest_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, context, goroot = self.fixture(directory)
+            (root / "pkg/mcpserver/app/build-manifest.json").unlink()
+            with self.assertRaisesRegex(RuntimeError, "required project"):
+                self.copy(root, context, goroot)
+
+    def test_unsuitable_required_text_and_symlink_parent_fail_closed(self):
+        for kind in ("empty", "whitespace", "oversized", "non-utf8", "nul", "directory", "symlink", "parent-symlink"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
+                root, context, goroot = self.fixture(directory)
+                path = root / "LICENSES/COMMERCIAL-TERMS.md"
+                original = path.read_bytes()
+                path.unlink()
+                if kind == "directory":
+                    path.mkdir()
+                elif kind == "symlink":
+                    path.symlink_to(root / "LICENSE")
+                elif kind == "parent-symlink":
+                    (root / "LICENSES").rename(root / "real-licenses")
+                    (root / "real-licenses/COMMERCIAL-TERMS.md").write_bytes(original)
+                    (root / "LICENSES").symlink_to(root / "real-licenses", target_is_directory=True)
+                else:
+                    path.write_bytes({"empty": b"", "whitespace": b" \n", "oversized": b"x" * (4 * 1024 * 1024 + 1), "non-utf8": b"\xff", "nul": b"license\0text"}[kind])
+                with self.assertRaisesRegex(RuntimeError, "required project"):
+                    self.copy(root, context, goroot)
+
+    def test_core_mit_dependency_notice_still_retained(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            module = root / "core"
+            module.mkdir()
+            (module / "LICENSE").write_bytes(b"MIT License\nCore notice\n")
+            self.assertEqual(builder.write_module_notices(root / "context", {
+                builder.CORE_MODULE: {"version": builder.CORE_VERSION, "dir": str(module)}}), [])
+            retained = list((root / "context/licenses/modules").rglob("LICENSE"))
+            self.assertEqual(len(retained), 1)
+            self.assertEqual(retained[0].read_bytes(), (module / "LICENSE").read_bytes())
+
+    def test_image_metadata_discloses_composite_scope_without_aggregate_grant(self):
+        root = Path(__file__).resolve().parents[1]
+        dockerfile = (root / "distribution/Dockerfile").read_text()
+        self.assertNotIn("org.opencontainers.image.licenses=", dockerfile)
+        listing = json.loads((root / "distribution/cloud/providers/listing-draft.json").read_text())
+        for term in ("commercial/licensing", "DRAFT", "MCP", "LICENSING.md"):
+            self.assertIn(term, listing["sourceLicense"])
+        self.assertFalse(listing["ownerPublicationApproved"])
+        self.assertFalse(listing["providerInstallationVerified"])
 
 
 if __name__ == "__main__":

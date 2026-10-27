@@ -4,7 +4,7 @@
   "summary": "Execute existing DataTug Checks inside an operator-controlled Kubernetes environment using an approved HTTPS Coordinator.",
   "dependencyDisclosure": "Requires an existing compatible DataTug Coordinator, a trusted read-only project, scoped Runner token and private block-backed state. This execution component has limited utility without them. An ongoing outbound Coordinator connection is required.",
   "dataHandling": "No SQL, input values, query rows or credential values are added to marketplace metadata. Private execution evidence remains on the operator's state volume. Safe result status and runtime logs require operator access controls.",
-  "sourceLicense": "Apache-2.0; runtime transitive license notices must be retained",
+  "sourceLicense": "Composite executable: Apache-2.0 own-source scopes and commercial/licensing checker under DRAFT DataTug Commercial Terms pending qualified legal review; see LICENSING.md and the retained scoped license inventory. The embedded MCP App HTML and transitive dependencies retain their own notices. No aggregate redistribution grant or publication approval is asserted.",
   "sellerLegalName": null,
   "supportUrl": null,
   "securityContact": null,

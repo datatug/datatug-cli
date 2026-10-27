@@ -100,16 +100,29 @@ Candidate title: **DataTug outbound Check Runner**. Candidate summary: Run exist
 DataTug Checks inside an operator-controlled Kubernetes environment with an
 approved HTTPS Coordinator. This is an execution component; it has limited
 utility without a compatible Coordinator and a trusted project. The full visual
-experience remains at DataTug.app; no UI assets are included. Do not place
+experience remains at DataTug.app. The default CLI embeds an MCP App HTML
+resource; this is distinct from the full hosted application. Do not place
 cross-provider marketing or upsell copy into the AWS listing.
 
-Package/runtime source license: Apache-2.0, with the repository LICENSE and
-transitive notices retained in the actual runtime payload. The pinned Core MIT
-notice and all binary/module licenses remain required. No AG Grid/Charts or Apps
-assets may enter these packages. Provider-tool/deployer images add their own
+The runtime is a composite executable: Apache-2.0 own-source scopes plus the
+linked `commercial/licensing` entitlement checker under the repository's
+**DRAFT — PENDING QUALIFIED LEGAL REVIEW** commercial terms. Its checker and
+underlying terms are unchanged. Retain LICENSE, THIRD_PARTY_NOTICES.md,
+LICENSING.md, LICENSES/Apache-2.0.txt and LICENSES/COMMERCIAL-TERMS.md exactly,
+plus the closed source/destination/scope/hash inventory and MCP build manifest.
+The pinned Core MIT notice, embedded MCP App resource notices and all other
+binary/module notices remain required. This is not an aggregate redistribution
+grant or commercial approval. AG Grid/Charts and full hosted DataTug UI assets
+remain excluded; the embedded MCP resource is a separate, noticed dependency.
+Provider-tool/deployer images add their own
 license/security inventory; validate the final deployer separately from the
 runtime. Hosted AG contractual interpretation remains a distinct owner/legal
 gate; technical absence from a package does not resolve it.
+
+The static CGO-off runtime cannot execute DuckDB; its native driver requires
+CGO. Redis native reads rely on Redis ACLs, not DataTug application policies.
+Use a dedicated read-only ACL user and verified TLS. Compiled connectors do not
+prove live-provider acceptance; the isolated-account protocol remains required.
 
 Before submission the owner must supply the legal seller name, support and
 security contacts/URLs, privacy policy, terms/EULA, approved pricing/licensing

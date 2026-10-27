@@ -9,7 +9,7 @@ LABEL org.opencontainers.image.title="DataTug execution plane" \
     org.opencontainers.image.revision="${DATATUG_SOURCE_REVISION}" \
     io.datatug.source-state="${DATATUG_SOURCE_STATE}" \
     io.datatug.source-status-digest="${DATATUG_SOURCE_STATUS_DIGEST}" \
-    org.opencontainers.image.licenses="Apache-2.0"
+    io.datatug.license-inventory="/usr/share/licenses/datatug/PROJECT-LICENSE-INVENTORY.json"
 
 ENV HOME=/var/lib/datatug \
     DATATUG_TELEMETRY=0 \

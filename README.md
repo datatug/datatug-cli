@@ -512,7 +512,7 @@ the web app talks to (see [spec/features/cli/serve](spec/features/cli/serve/READ
 | OpenVaultDB | not supported yet | not tested in this release |
 | MongoDB | not supported yet | supported, read-only: `--db env:NAME` with `mongodb://` or `mongodb+srv://`, TugQL (`-f`, `--from`), filtering, projection, ordering and bounded results; see [Query MongoDB](docs/databases/mongodb.md) |
 | Redis | not supported yet | supported, read-only, through `datatug query redis --db env:REDIS_URL -- GET key`: native string/hash reads and metadata; Redis ACLs control access. See [Query Redis keys](docs/query/redis.md). SQL, TugQL and saved queries are unavailable |
-| Firestore | not supported yet | supported, read-only: `--db firestore://PROJECT/DATABASE` with TugQL (`-f`, `--from`), filtering, projection, ordering and bounded results; see [Query Firestore](docs/sources/firestore.md) |
+| Firestore | not supported yet | supported, read-only: `--db firestore://PROJECT/DATABASE` with TugQL (`-f`, `--from`), filtering, projection, ordering and optional limits; see [Query Firestore](docs/sources/firestore.md) |
 
 A database that is not in this table is not supported by this release. We are open for pull requests.
 

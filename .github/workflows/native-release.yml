@@ -98,7 +98,7 @@ jobs:
           "$binary" query run --db duckdb://:memory: --sql "SELECT name FROM read_parquet('testdata/duckdb/items.parquet') WHERE id = 1" --format json --no-policies > native-payload/duckdb-smoke.json
           python3 -c 'import json; from pathlib import Path; data=json.loads(Path("native-payload/duckdb-smoke.json").read_text()); assert "DuckDB Parquet release smoke" in str(data), data'
           rm native-payload/duckdb-smoke.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: native-release-${{ inputs.release_request || github.run_id }}-${{ matrix.goos }}-${{ matrix.goarch }}
           path: native-payload/

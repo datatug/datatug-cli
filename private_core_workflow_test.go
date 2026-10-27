@@ -29,38 +29,31 @@ func TestPrivateCoreCredentialMatchesOnlyExactRepository(t *testing.T) {
 	if err := os.Mkdir(temp, 0700); err != nil {
 		t.Fatal(err)
 	}
+	home := filepath.Join(temp, "home")
+	if err := os.Mkdir(home, 0700); err != nil {
+		t.Fatal(err)
+	}
+	gitConfig := filepath.Join(temp, "core-test.gitconfig")
+	gitEnv := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "XDG_CONFIG_HOME=" + filepath.Join(home, "xdg"), "GIT_CONFIG_GLOBAL=" + gitConfig, "GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0"}
 	run := exec.Command("bash", "-c", script)
-	run.Env = []string{"PATH=" + os.Getenv("PATH"), "RUNNER_TEMP=" + temp, "GITHUB_JOB=test", "RUNNER_OS=" + os.Getenv("RUNNER_OS"), "GITHUB_ENV=" + filepath.Join(temp, "env"), "CORE_READ_TOKEN=TEST_READ_TOKEN"}
+	// Neither setup nor lookup may inherit this checkout's credential helpers.
+	run.Dir = temp
+	run.Env = append(append([]string{}, gitEnv...), "RUNNER_TEMP="+temp, "GITHUB_JOB=test", "RUNNER_OS="+os.Getenv("RUNNER_OS"), "GITHUB_ENV="+filepath.Join(temp, "env"), "CORE_READ_TOKEN=TEST_READ_TOKEN")
 	if out, err := run.CombinedOutput(); err != nil {
 		t.Fatalf("credential setup failed: %v %s", err, out)
 	}
-	credentialFile := filepath.Join(temp, "core-test.credentials")
-	credentialData, err := os.ReadFile(credentialFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, repo := range []string{"datatug/datatug-core", "datatug/datatug-core.git"} {
-		found := false
-		for _, line := range strings.Split(string(credentialData), "\n") {
-			if strings.HasSuffix(line, "/"+repo) {
-				found = true
-				break
-			}
+	for _, repo := range []string{"datatug/datatug-core", "datatug/datatug-core.git", "datatug/datatug-core-tools", "other/datatug-core", "datatug/datatug"} {
+		command := exec.Command("git", "credential", "fill")
+		command.Dir = temp
+		command.Env = gitEnv
+		command.Stdin = strings.NewReader("protocol=https\nhost=github.com\npath=" + repo + "\n\n")
+		out, err := command.CombinedOutput()
+		exact := repo == "datatug/datatug-core" || repo == "datatug/datatug-core.git"
+		if exact && (err != nil || !strings.Contains(string(out), "username=x-access-token") || !strings.Contains(string(out), "password=TEST_READ_TOKEN")) {
+			t.Fatalf("exact Core credential lookup failed for %s: %v", repo, err)
 		}
-		if !found {
-			t.Fatalf("missing exact credential entry for %s", repo)
-		}
-	}
-	for _, repo := range []string{"datatug/datatug-core-tools", "other/datatug-core", "datatug/datatug"} {
-		found := false
-		for _, line := range strings.Split(string(credentialData), "\n") {
-			if strings.HasSuffix(line, "/"+repo) {
-				found = true
-				break
-			}
-		}
-		if found {
-			t.Fatalf("non-exact credential entry leaked for %s", repo)
+		if !exact && (err == nil || strings.Contains(string(out), "TEST_READ_TOKEN") || strings.Contains(string(out), "username=x-access-token")) {
+			t.Fatalf("Core credential exposed to %s", repo)
 		}
 	}
 }

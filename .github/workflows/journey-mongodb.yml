@@ -14,7 +14,11 @@ permissions:
   contents: read
 jobs:
   query:
-    runs-on: ubuntu-latest
+    # The mongo:8.0 service hit SERVER-121912's kernel guard on ubuntu-latest.
+    # Ubuntu 22.04 hosted runners retain the supported 6.8 kernel series;
+    # keep the real-server journey on that supported host until upstream fixes it.
+    # https://jira.mongodb.org/browse/SERVER-125742
+    runs-on: ubuntu-22.04
     services:
       mongodb:
         image: mongo:8.0

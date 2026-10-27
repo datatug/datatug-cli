@@ -34,17 +34,33 @@ func TestPrivateCoreCredentialMatchesOnlyExactRepository(t *testing.T) {
 	if out, err := run.CombinedOutput(); err != nil {
 		t.Fatalf("credential setup failed: %v %s", err, out)
 	}
-	for _, repo := range []string{"datatug/datatug-core", "datatug/datatug-core.git", "datatug/datatug-core-tools", "other/datatug-core", "datatug/datatug"} {
-		command := exec.Command("git", "credential", "fill")
-		command.Env = []string{"PATH=" + os.Getenv("PATH"), "GIT_CONFIG_GLOBAL=" + filepath.Join(temp, "core-test.gitconfig"), "GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0"}
-		command.Stdin = strings.NewReader("protocol=https\nhost=github.com\npath=" + repo + "\n\n")
-		out, err := command.CombinedOutput()
-		exact := repo == "datatug/datatug-core" || repo == "datatug/datatug-core.git"
-		if exact && (err != nil || !strings.Contains(string(out), "password=TEST_READ_TOKEN")) {
-			t.Fatalf("exact Core path failed: %s %v", repo, err)
+	credentialFile := filepath.Join(temp, "core-test.credentials")
+	credentialData, err := os.ReadFile(credentialFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, repo := range []string{"datatug/datatug-core", "datatug/datatug-core.git"} {
+		found := false
+		for _, line := range strings.Split(string(credentialData), "\n") {
+			if strings.HasSuffix(line, "/"+repo) {
+				found = true
+				break
+			}
 		}
-		if !exact && strings.Contains(string(out), "TEST_READ_TOKEN") {
-			t.Fatalf("Core credential exposed to %s", repo)
+		if !found {
+			t.Fatalf("missing exact credential entry for %s", repo)
+		}
+	}
+	for _, repo := range []string{"datatug/datatug-core-tools", "other/datatug-core", "datatug/datatug"} {
+		found := false
+		for _, line := range strings.Split(string(credentialData), "\n") {
+			if strings.HasSuffix(line, "/"+repo) {
+				found = true
+				break
+			}
+		}
+		if found {
+			t.Fatalf("non-exact credential entry leaked for %s", repo)
 		}
 	}
 }

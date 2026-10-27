@@ -55,13 +55,21 @@ func TestFirestoreSourceEmulator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer client.Close()
+	defer func() {
+		if err := client.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	collection := "source_" + strconv.FormatInt(time.Now().UnixNano(), 10)
 	doc := client.Collection(collection).Doc("alice")
 	if _, err = doc.Set(ctx, map[string]any{"name": "Alice", "score": int64(42)}); err != nil {
 		t.Fatal(err)
 	}
-	defer doc.Delete(context.Background())
+	defer func() {
+		if _, err := doc.Delete(context.Background()); err != nil {
+			t.Error(err)
+		}
+	}()
 	source, err := Parse("firestore://demo-datatug-source-test")
 	if err != nil {
 		t.Fatal(err)
@@ -75,7 +83,11 @@ func TestFirestoreSourceEmulator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reader.Close()
+	defer func() {
+		if err := reader.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	row, err := reader.Next()
 	if err != nil {
 		t.Fatal(err)

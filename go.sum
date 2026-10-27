@@ -124,6 +124,8 @@ github.com/dal-go/dalgo2http v0.4.0 h1:vtkwd8x88kP4XLEZCt7kTFa5xJfQojJWJRKBHGEBg
 github.com/dal-go/dalgo2http v0.4.0/go.mod h1:9D70F2oimIPSz9r5iKki5xuepReCAMSSla9TmgmuVcs=
 github.com/dal-go/dalgo2mongodb v0.0.0-20261027130047-825d1e9a294c h1:Tw9ovG+MEPqmN1Lp4ZDePED03Vw2rBMnLTWr5ajuIJo=
 github.com/dal-go/dalgo2mongodb v0.0.0-20261027130047-825d1e9a294c/go.mod h1:yNqqEPSxRYB6xPoBx5G2LUwzev16+uBIPgEboOPUvZo=
+github.com/dal-go/dalgo2mongodb v0.0.0-20261027130616-1c6549d8dc1e h1:o7QTjYTpj6yanCM5LB7VyJCHQbMgxDRGFbsyHFhP0uc=
+github.com/dal-go/dalgo2mongodb v0.0.0-20261027130616-1c6549d8dc1e/go.mod h1:yNqqEPSxRYB6xPoBx5G2LUwzev16+uBIPgEboOPUvZo=
 github.com/dal-go/dalgo2mssql v0.0.1 h1:FwbEQRUabs6rfiB8S+aY4bzryCWlYYr/hb+ajgE2QTM=
 github.com/dal-go/dalgo2mssql v0.0.1/go.mod h1:GxabqziGpUHFES5vO70NqIaXPkx6vWK2RuW5w1c2Pbw=
 github.com/dal-go/dalgo2mysql v0.2.2 h1:RLilKnl+6FBncKQ6SThVumNifwvNX0KBn0GccZe8UdQ=

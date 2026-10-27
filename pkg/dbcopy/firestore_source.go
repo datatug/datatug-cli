@@ -16,6 +16,8 @@ import (
 	dalrecord "github.com/dal-go/record"
 )
 
+var newFirestoreSourceClient = firestore.NewClientWithDatabase
+
 var firestoreID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
 // Firestore URLs select the user's Google Cloud project and database. Credentials
@@ -51,7 +53,7 @@ func (r BackendRef) openFirestore(ctx context.Context, mode openMode) (dal.DB, e
 	if db := firestoreSources.dbs[cacheKey]; db != nil {
 		return db, nil
 	}
-	client, err := firestore.NewClientWithDatabase(ctx, r.ProjectID, r.DatasetID)
+	client, err := newFirestoreSourceClient(ctx, r.ProjectID, r.DatasetID)
 	if err != nil {
 		return nil, err
 	}

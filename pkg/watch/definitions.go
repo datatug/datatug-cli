@@ -451,12 +451,35 @@ func (s *Store) ListRuns(ctx context.Context, a Actor, watchID string) ([]Run, e
 		return result, nil
 	}
 
+	if s.cloud != nil {
+		return s.listRunsOnce(ctx, a, watchID)
+	}
+	// Standalone SQLite status reads share the existing store operation cap.
+	// One caller-derived deadline covers every full authorized read attempt.
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	var result []Run
+	err := retrySQLiteBusy(ctx, func() error {
+		result = nil
+		items, err := s.listRunsOnce(ctx, a, watchID)
+		if err == nil {
+			result = items
+		}
+		return err
+	})
+	return result, err
+}
+
+func (s *Store) listRunsOnce(ctx context.Context, a Actor, watchID string) ([]Run, error) {
 	if _, err := s.GetDefinition(ctx, a, watchID); err != nil {
 		return nil, err
 	}
 	items, err := viewItems[Run](ctx, s, runs, a.Scope, watchID, "")
+	if err != nil {
+		return nil, err
+	}
 	sort.Slice(items, func(i, j int) bool { return items[i].DueAt.After(items[j].DueAt) })
-	return items, err
+	return items, nil
 }
 func (s *Store) Inbox(ctx context.Context, a Actor) ([]Notification, error) {
 	if s.cloud != nil && !s.inReadView(ctx) {

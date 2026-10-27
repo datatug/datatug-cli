@@ -20,13 +20,11 @@ func TestPrivateCoreCredentialMatchesOnlyExactRepository(t *testing.T) {
 			t.Fatalf("missing scoped App input %s", value)
 		}
 	}
-	start := strings.Index(action, "      run: |
-")
+	start := strings.Index(action, "      run: |\n")
 	if start < 0 {
 		t.Fatal("missing credential script")
 	}
-	script := strings.ReplaceAll(action[start+len("      run: |
-"):], "        ", "")
+	script := strings.ReplaceAll(action[start+len("      run: |\n"):], "        ", "")
 	temp := filepath.Join(t.TempDir(), "runner temp")
 	if err := os.Mkdir(temp, 0o700); err != nil {
 		t.Fatal(err)
@@ -49,19 +47,18 @@ func TestPrivateCoreCredentialMatchesOnlyExactRepository(t *testing.T) {
 	}
 	credentialFile := filepath.Join(temp, "core-test.credentials")
 	for _, repo := range []string{"datatug/datatug-core", "datatug/datatug-core.git", "datatug/datatug-core-tools", "other/datatug-core", "datatug/datatug"} {
-		command := exec.Command("git", "-C", repoDir, "-c", "credential.helper=store --file=""+credentialFile+""", "-c", "credential.https://github.com.useHttpPath=true", "credential", "fill")
+		command := exec.Command("git", "-C", repoDir, "-c", "credential.helper=store --file=\""+credentialFile+"\"", "-c", "credential.https://github.com.useHttpPath=true", "credential", "fill")
 		command.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "GIT_CONFIG_GLOBAL=" + filepath.Join(temp, "core-test.gitconfig"), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_TERMINAL_PROMPT=0", "XDG_CONFIG_HOME=" + filepath.Join(temp, "git-xdg")} 
-		command.Stdin = strings.NewReader("protocol=https
-host=github.com
-path=" + repo + "
-
-")
+		command.Stdin = strings.NewReader("protocol=https\nhost=github.com\npath=" + repo + "\n\n")
 		out, err := command.CombinedOutput()
 		exact := repo == "datatug/datatug-core" || repo == "datatug/datatug-core.git"
-		if exact && (err != nil || !strings.Contains(string(out), "username=x-access-token")) {
-			t.Fatalf("exact Core path failed: %s %v %s", repo, err, out)
+		if exact {
+			if err != nil || !strings.Contains(string(out), "username=x-access-token") {
+				t.Fatalf("exact Core path failed: %s %v %s", repo, err, out)
+			}
+			continue
 		}
-		if !exact && strings.Contains(string(out), "******") {
+		if strings.Contains(string(out), "username=x-access-token") {
 			t.Fatalf("Core credential exposed to %s: %s", repo, out)
 		}
 	}

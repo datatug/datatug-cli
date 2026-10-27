@@ -158,5 +158,5 @@ async function runHostSmoke({
   }
 }
 
-if (require.main === module) runHostSmoke().then(receipt => console.log(JSON.stringify(receipt))).catch(error => { console.error(error.message); process.exitCode = 1; });
+if (require.main === module) runHostSmoke().then(() => console.log('DATATUG_VSCODE_HOST_SMOKE_PASSED')).catch(() => { console.error('DATATUG_VSCODE_HOST_SMOKE_FAILED'); process.exitCode = 1; });
 module.exports = { runHostSmoke };

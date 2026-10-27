@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const { runHostSmoke } = require('../scripts/host-smoke');
 
 // Inert executable fixture: no VS Code, UI, services or network calls.
@@ -218,4 +218,47 @@ test('host launcher rejects late cancellation and removes any newly published su
       });
     }
   }
+});
+
+
+test('smoke CLI failure never emits an environment-selected private executable path', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'datatug-smoke-stderr-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.mkdir(path.join(root, 'scripts')); await fs.mkdir(path.join(root, 'dist'));
+  const script = path.join(root, 'scripts', 'host-smoke.js');
+  await fs.copyFile(path.resolve(__dirname, '../scripts/host-smoke.js'), script);
+  const receipt = path.join(root, 'dist', 'host-smoke.json');
+  await fs.writeFile(receipt, 'stale success');
+  const marker = 'PRIVATE-SENTINEL-EXECUTABLE';
+  const environment = { ...process.env, DATATUG_VSCODE_TEST_EXECUTABLE: path.join(root, marker, 'missing'), TMPDIR: root };
+  delete environment.NODE_OPTIONS; delete environment.ELECTRON_RUN_AS_NODE;
+  const result = spawnSync(process.execPath, [script], { env: environment, encoding: 'utf8', timeout: 5000, maxBuffer: 4096 });
+  assert.equal(result.error, undefined); assert.equal(result.status, 1); assert.equal(result.signal, null);
+  assert.equal(result.stdout, '');
+  assert.ok(!result.stderr.includes(marker), 'private executable marker must not reach stderr');
+  assert.equal(result.stderr, 'DATATUG_VSCODE_HOST_SMOKE_FAILED\n');
+  await assert.rejects(fs.access(receipt), { code: 'ENOENT' });
+  assert.deepEqual((await fs.readdir(root)).sort(), ['dist', 'scripts']);
+});
+
+
+test('smoke CLI success keeps validated metadata in private artifact with fixed stdout', async t => {
+  const { root, options } = await fixture(t);
+  await fs.mkdir(path.join(root, 'scripts')); await fs.mkdir(path.join(root, 'dist'));
+  const script = path.join(root, 'scripts', 'host-smoke.js');
+  await fs.copyFile(path.resolve(__dirname, '../scripts/host-smoke.js'), script);
+  const environment = { ...options.environment, DATATUG_VSCODE_TEST_EXECUTABLE: options.binary,
+    DATATUG_VSCODE_SOURCE_REVISION: 'a'.repeat(40), DATATUG_VSCODE_RUNTIME_SHA256: 'b'.repeat(64), TMPDIR: root };
+  delete environment.NODE_OPTIONS; delete environment.ELECTRON_RUN_AS_NODE;
+  const result = spawnSync(process.execPath, [script], { env: environment, encoding: 'utf8', timeout: 5000, maxBuffer: 4096 });
+  assert.equal(result.error, undefined); assert.equal(result.status, 0); assert.equal(result.signal, null);
+  assert.equal(result.stderr, '');
+  assert.equal(result.stdout, 'DATATUG_VSCODE_HOST_SMOKE_PASSED\n');
+  const output = path.join(root, 'dist', 'host-smoke.json');
+  const receipt = JSON.parse(await fs.readFile(output, 'utf8'));
+  assert.equal(receipt.sourceRevision, 'a'.repeat(40));
+  assert.equal(receipt.runtimeArtifactSha256, 'b'.repeat(64));
+  assert.equal(receipt.hostExitCode, 0); assert.equal(receipt.isolatedProfileRemoved, true);
+  assert.equal((await fs.stat(output)).mode & 0o777, 0o600);
+  await assertStopped(Number(await fs.readFile(options.environment.FIXTURE_MAIN_PID, 'utf8')));
 });

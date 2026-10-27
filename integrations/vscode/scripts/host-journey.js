@@ -19,6 +19,35 @@ async function filesDigest(folder) {
   await visit(''); return digest.digest('hex');
 }
 
+// Fixed companion source: no repository or environment value becomes JavaScript.
+// The copied journey uses only Node builtins and the real VS Code module; it has
+// no __dirname or relative-file dependency that would change after this copy.
+const COMPANION_DRIVER = `'use strict';
+const vscode = require('vscode');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const { run } = require('./journey.js');
+exports.activate = () => {
+  run().then(() => vscode.commands.executeCommand('workbench.action.quit')).catch(async error => {
+    await fs.writeFile(path.join(process.env.DATATUG_VSCODE_JOURNEY_CONTROL, 'driver-error.txt'), String(error.stack || error), { mode: 0o600 });
+  });
+};
+`;
+
+async function stageJourneyDriver(extensions) {
+  const driver = path.join(extensions, 'localtest.datatug-acceptance-driver');
+  await fs.mkdir(driver);
+  await fs.writeFile(path.join(driver, 'package.json'), JSON.stringify({
+    name: 'datatug-acceptance-driver', publisher: 'localtest', version: '0.0.0',
+    engines: { vscode: '^1.95.0' }, main: './driver.js',
+    activationEvents: ['onStartupFinished'],
+    capabilities: { untrustedWorkspaces: { supported: true } }
+  }));
+  await fs.writeFile(path.join(driver, 'driver.js'), COMPANION_DRIVER);
+  await fs.copyFile(path.resolve(__dirname, '../test/host-journey.js'), path.join(driver, 'journey.js'));
+  return driver;
+}
+
 async function main() {
   const binary = '/Applications/Visual Studio Code - Insiders.app/Contents/MacOS/Code - Insiders';
   const cli = process.env.DATATUG_TEST_CLI;
@@ -34,15 +63,7 @@ async function main() {
   // VS Code's --extensionTestsPath intentionally rejects modal dialogs.
   // A disposable companion extension drives the real API without test-mode
   // overrides. CUA still performs every trust and owner-consent action.
-  const driver = path.join(extensions, 'localtest.datatug-acceptance-driver');
-  await fs.mkdir(driver);
-  await fs.writeFile(path.join(driver, 'package.json'), JSON.stringify({
-    name: 'datatug-acceptance-driver', publisher: 'localtest', version: '0.0.0',
-    engines: { vscode: '^1.95.0' }, main: './driver.js',
-    activationEvents: ['onStartupFinished'],
-    capabilities: { untrustedWorkspaces: { supported: true } }
-  }));
-  await fs.writeFile(path.join(driver, 'driver.js'), `const vscode=require('vscode'); const fs=require('node:fs/promises'); const path=require('node:path'); exports.activate=()=>{require(${JSON.stringify(path.resolve(__dirname, '../test/host-journey.js'))}).run().then(()=>vscode.commands.executeCommand('workbench.action.quit')).catch(async error=>{await fs.writeFile(path.join(process.env.DATATUG_VSCODE_JOURNEY_CONTROL,'driver-error.txt'),String(error.stack||error),{mode:0o600});});};`);
+  await stageJourneyDriver(extensions);
   await fs.cp(path.resolve(__dirname, '../../../testdata/checks-demo'), project, { recursive: true });
   const before = await filesDigest(project);
   await fs.writeFile(path.join(profile, 'User', 'settings.json'), JSON.stringify({
@@ -89,4 +110,5 @@ async function main() {
   }
 }
 
-main().catch(error => { console.error(error.message); process.exitCode = 1; });
+if (require.main === module) main().catch(() => { console.error('DATATUG_VSCODE_JOURNEY_FAILED'); process.exitCode = 1; });
+module.exports = { stageJourneyDriver };

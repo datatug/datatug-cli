@@ -35,7 +35,7 @@ require (
 	github.com/dal-go/dalgo2openvaultdb v0.4.1
 	github.com/dal-go/dalgo2oracle v0.0.1
 	github.com/dal-go/dalgo2postgres v0.9.4
-	github.com/dal-go/dalgo2redis v0.0.0-20261027125716-62034be7236f
+	github.com/dal-go/dalgo2redis v0.0.0-20261027130732-cdb90eca9534
 	github.com/dal-go/dalgo2sql v0.30.0
 	github.com/dal-go/dalgo2sqlite v0.4.8
 	github.com/dal-go/record v0.1.5
@@ -61,6 +61,7 @@ require (
 	github.com/openvaultdb/openvaultdb-go v0.26.1
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
 	github.com/posthog/posthog-go v1.24.3
+	github.com/redis/go-redis/v9 v9.7.3
 	github.com/sijms/go-ora/v3 v3.0.1
 	github.com/sneat-co/sneat-go-core v0.71.16
 	github.com/spf13/cobra v1.10.2
@@ -182,7 +183,6 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/qri-io/jsonpointer v0.1.1 // indirect
 	github.com/qri-io/jsonschema v0.2.1 // indirect
-	github.com/redis/go-redis/v9 v9.7.3 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/richardlehane/mscfb v1.0.7 // indirect
 	github.com/richardlehane/msoleps v1.0.6 // indirect

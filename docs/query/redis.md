@@ -23,8 +23,9 @@ Supported commands: GET, MGET, HGET, HMGET, HEXISTS, EXISTS, TYPE, TTL, PTTL,
 STRLEN, HLEN, LLEN, SCARD and ZCARD. Writes, Lua, administrative operations,
 key enumeration, blocking commands and unbounded collection reads are rejected
 before connecting. Calls accept at most 128 key/field arguments, 64 KiB of
-command text and a ten-second deadline. There is no hard response byte limit;
-large stored values can produce large output.
+command text and a ten-second deadline. Each complete Redis reply is capped at
+1 MiB before driver allocation. Larger replies fail safely and close that
+connection; later queries reconnect.
 
 This command uses Redis's native flat key namespace and ACLs. It does not run
 SQL, TugQL, DataTug application access policies, saved project queries or

@@ -65,4 +65,15 @@ func TestQueryRedisIntegration(t *testing.T) {
 	if err = json.Unmarshal(out.Bytes(), &got); err != nil || len(got) != 2 || got[0] != "hello" || got[1] != nil {
 		t.Fatalf("%q %v", out.String(), err)
 	}
+	refusal := queryCommand()
+	refusal.SetOut(&out)
+	refusal.SetErr(&out)
+	refusal.SetArgs([]string{"redis", "--db", "env:DATATUG_REDIS_TEST_URL", "--", "SET", key, "changed"})
+	if err = refusal.Execute(); err == nil {
+		t.Fatal("wired command accepted mutation")
+	}
+	if got := seed.Get(ctx, key).Val(); got != "hello" {
+		t.Fatalf("mutation changed stored value: %q", got)
+	}
+
 }

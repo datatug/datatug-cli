@@ -314,7 +314,7 @@ func TestDaemonURLReferenceStoreFailure(t *testing.T) {
 func TestDaemonURLMintsTheCodeLocally(t *testing.T) {
 	f := &daemonFake{up: true}
 	useDaemonFake(t, f)
-	dir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "daemon")
 	t.Setenv(agentaccess.DirEnv, dir)
 	args := []string{"url", "--project", "p", "--env", "e", "--db", "d", "--table", "t", "--format", "text"}
 	// running but no key (an agent that predates the token): a link without a code

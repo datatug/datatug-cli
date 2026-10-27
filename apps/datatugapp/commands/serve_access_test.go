@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +17,7 @@ import (
 // opens (the daemon, whose output is a log, prints none).
 func TestServe_AccessKeyAndLink(t *testing.T) {
 	cov100eHome(t, "")
-	dir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "daemon")
 	t.Setenv(agentaccess.DirEnv, dir)
 	call, _ := cov100eSeams(t, nil)
 	out := captureStdout(t, func() {

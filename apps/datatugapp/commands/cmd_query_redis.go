@@ -55,7 +55,7 @@ Examples:
 			if err != nil {
 				return Exit(err.Error(), exitCodeDatabase)
 			}
-			defer client.Close()
+			defer func() { _ = client.Close() }()
 			value, err := client.Query(ctx, args...)
 			if err != nil {
 				return Exit(err.Error(), exitCodeDatabase)

@@ -46,7 +46,7 @@ func TestQueryRedisIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	seed := redis.NewClient(opts)
-	defer seed.Close()
+	defer func() { _ = seed.Close() }()
 	key := "datatug-cli-test:" + time.Now().Format("150405.000000000")
 	if err = seed.Set(ctx, key, "hello", time.Minute).Err(); err != nil {
 		t.Fatal(err)

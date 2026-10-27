@@ -67,6 +67,64 @@ orderBy:
 limit: 5
 `
 
+// TestPostgRESTUnsupportedOperationsAreRefusedBeforeIO proves the refusals that
+// do not need the service: the adapter validates the query shape and the limit
+// before the first request, so a loopback address nothing listens on still fails
+// with the explicit unsupported-operation sentence rather than a transport error.
+func TestPostgRESTUnsupportedOperationsAreRefusedBeforeIO(t *testing.T) {
+	t.Setenv(dbcopy.PostgRESTBearerEnv, "")
+	const source = "postgrest+http://127.0.0.1:1"
+	t.Run("unbounded", func(t *testing.T) {
+		stdout, stderr, code := runQuery(t, "", "--db", source, "--from", "items", "--limit", "0", "--format", "json", "--no-policies")
+		if code != exitCodeDatabase {
+			t.Fatalf("exit %d, want %d: %s", code, exitCodeDatabase, stderr)
+		}
+		if strings.TrimSpace(stdout) != "" {
+			t.Fatalf("a refused read printed rows: %q", stdout)
+		}
+		if !strings.Contains(stderr, "positive limit") {
+			t.Fatalf("stderr should explain that a positive limit is required: %q", stderr)
+		}
+	})
+	t.Run("aggregate", func(t *testing.T) {
+		query := `from: {name: items}
+columns:
+  - {field: qty}
+  - {aggregate: {function: count, args: [{star: true}]}, as: total}
+groupBy: [{field: qty}]
+limit: 3
+`
+		stdout, stderr, code := runQuery(t, query, "--db", source, "-f", "-", "--format", "json", "--no-policies")
+		if code != exitCodeDatabase {
+			t.Fatalf("exit %d, want %d: %s", code, exitCodeDatabase, stderr)
+		}
+		if strings.TrimSpace(stdout) != "" {
+			t.Fatalf("a refused aggregate printed a partial result: %q", stdout)
+		}
+		if !strings.Contains(stderr, "not supported") {
+			t.Fatalf("stderr should say the operation is unsupported: %q", stderr)
+		}
+	})
+	t.Run("join", func(t *testing.T) {
+		query := `from: {name: items, alias: i, joins: [{from: {name: labels, alias: l}, on: [{left: {field: id, source: i}, op: '==', right: {field: id, source: l}}]}]}
+columns:
+  - {field: title, source: i}
+  - {field: name, source: l}
+limit: 2
+`
+		stdout, stderr, code := runQuery(t, query, "--db", source, "-f", "-", "--format", "json", "--no-policies")
+		if code != exitCodeDatabase {
+			t.Fatalf("exit %d, want %d: %s", code, exitCodeDatabase, stderr)
+		}
+		if strings.TrimSpace(stdout) != "" {
+			t.Fatalf("a refused join printed rows: %q", stdout)
+		}
+		if !strings.Contains(stderr, "not supported") {
+			t.Fatalf("stderr should say the operation is unsupported: %q", stderr)
+		}
+	})
+}
+
 func TestPostgRESTQueryJourney(t *testing.T) {
 	fixture := requirePostgRESTRealFixture(t)
 	fixture.useReader(t)
@@ -214,7 +272,7 @@ limit: 2
 		query := `from: {name: items}
 columns:
   - {field: qty}
-  - {aggregate: {function: COUNT, args: [{wildcard: true}]}, as: total}
+  - {aggregate: {function: count, args: [{star: true}]}, as: total}
 groupBy: [{field: qty}]
 limit: 3
 `
@@ -451,7 +509,7 @@ func writePostgRESTProject(t *testing.T) string {
 			t.Fatal(err)
 		}
 	}
-	write("datatug-project.json", `{"id":"postgrest-project","title":"PostgREST project"}`)
+	write("datatug-project.json", `{"id":"postgrest-project","title":"PostgREST project","access":"private"}`)
 	write("environments/local/local.env.json", `{"id":"local","dbServers":[{"driver":"postgrest","catalogs":["items"]}]}`)
 	write("connections/local/items.json", `{"dsnEnv":"`+postgRESTProjectEndpointEnv+`"}`)
 	write("environments/local/catalogs/items/items.db.json", `{"driver":"postgrest","path":"connections/local/items.json","dbModel":"items"}`)

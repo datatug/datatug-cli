@@ -41,18 +41,30 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/datatug-journey-postgrest.XXXXXX")
 # started stays 0 until this script's own Compose project has been created, so a
 # launch failure never removes containers or a project name it did not create.
 started=0
-cleanup() {
-	status=$?
-	set +e
+# teardown removes only this script's own Compose project and its volume; it
+# returns non-zero when it could not, and never removes a project it did not
+# start.
+teardown() {
+	status=0
 	if [ "$started" = 1 ]; then
 		"${compose[@]}" down -v --remove-orphans >/dev/null 2>&1
 		removed=$?
 		if [ "$removed" != 0 ]; then
 			echo "could not remove the owned Compose project $project (docker compose down exited $removed)" >&2
-			[ "$status" != 0 ] || status=1
+			status=1
 		fi
 	fi
 	rm -rf "$work" >/dev/null 2>&1 || true
+	return "$status"
+}
+# cleanup is the trap: it keeps the exit status of the journey, and a teardown
+# failure turns a passing journey into a failing one.
+cleanup() {
+	status=$?
+	set +e
+	teardown
+	torn=$?
+	[ "$status" != 0 ] || status=$torn
 	exit "$status"
 }
 trap cleanup EXIT INT TERM
@@ -161,7 +173,7 @@ export DATATUG_TEST_POSTGREST_ITEMS="$source"
 project_dir="$work/project"
 mkdir -p "$project_dir/environments/local/catalogs/items" "$project_dir/connections/local" "$project_dir/queries/items" "$project_dir/policies"
 cat >"$project_dir/datatug-project.json" <<JSON
-{"id":"postgrest-project","title":"PostgREST project"}
+{"id":"postgrest-project","title":"PostgREST project","access":"private"}
 JSON
 cat >"$project_dir/environments/local/local.env.json" <<JSON
 {"id":"local","dbServers":[{"driver":"postgrest","catalogs":["items"]}]}
@@ -288,7 +300,7 @@ cat >"$work/aggregate.yaml" <<'YAML'
 from: {name: items}
 columns:
   - {field: qty}
-  - {aggregate: {function: COUNT, args: [{wildcard: true}]}, as: total}
+  - {aggregate: {function: count, args: [{star: true}]}, as: total}
 groupBy: [{field: qty}]
 limit: 3
 YAML
@@ -322,21 +334,35 @@ scanned="$work/scanned"
 	echo "the built CLI could not scan the PostgREST API root" >&2
 	exit 1
 }
-[ "$(cat "$scanned/environments/local/catalogs/items/items.db.json")" = '{"driver":"postgrest","path":"connections/local/items.json","dbModel":"items"}' ] || { cat "$scanned/environments/local/catalogs/items/items.db.json" >&2; echo "the scan did not record the descriptor" >&2; exit 1; }
-[ "$(cat "$scanned/connections/local/items.json")" = '{
-  "dsnEnv": "DATATUG_TEST_POSTGREST_ITEMS"
-}' ] || { cat "$scanned/connections/local/items.json" >&2; echo "the descriptor does not name only the variable" >&2; exit 1; }
+python3 - "$scanned/environments/local/catalogs/items/items.db.json" "$scanned/connections/local/items.json" <<'PY'
+import json, sys
+catalog = json.load(open(sys.argv[1]))
+if catalog.get("driver") != "postgrest" or catalog.get("path") != "connections/local/items.json" or catalog.get("dbModel") != "items":
+    sys.exit("the scan did not record the descriptor: %r" % (catalog,))
+descriptor = json.load(open(sys.argv[2]))
+if descriptor != {"dsnEnv": "DATATUG_TEST_POSTGREST_ITEMS"}:
+    sys.exit("the descriptor does not name only the variable: %r" % (descriptor,))
+PY
 if grep -rq -e "$reader_token" -e "127.0.0.1:$postgrest_port" "$scanned"; then
 	echo "the scanned project holds a credential or the endpoint" >&2
 	exit 1
 fi
-[ -f "$scanned/dbmodels/items/default/tables/items/items.columns.json" ] || { find "$scanned" -type f >&2; echo "the scan records no items columns" >&2; exit 1; }
+columns_file="$scanned/dbmodels/items/default/tables/items/default.items.columns.json"
+[ -f "$columns_file" ] || { find "$scanned" -type f >&2; echo "the scan records no items columns" >&2; exit 1; }
+python3 - "$columns_file" <<'PY'
+import json, sys
+columns = {column["name"] for column in json.load(open(sys.argv[1]))["columns"]}
+missing = {"id", "title", "qty", "owner"} - columns
+if missing:
+    sys.exit("the scan records no columns %s: %r" % (sorted(missing), sorted(columns)))
+PY
 
 echo "postgrest journey passed: $project on $base"
 
-cleanup
 trap - EXIT INT TERM
-
+if ! teardown; then
+	exit 1
+fi
 if docker ps -aq --filter "label=com.docker.compose.project=${project}" | grep -q .; then
 	echo "teardown left containers for project ${project}" >&2
 	exit 1

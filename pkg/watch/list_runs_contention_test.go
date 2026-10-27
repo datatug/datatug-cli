@@ -4,12 +4,20 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/record"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/record"
 )
+
+func closeListRunsFixture(t *testing.T, closer interface{ Close() error }) {
+	t.Helper()
+	if err := closer.Close(); err != nil {
+		t.Errorf("close SQLite test fixture: %v", err)
+	}
+}
 
 type listRunsBusyProbe struct {
 	stateDatabase
@@ -41,14 +49,14 @@ func TestListRunsSQLiteExclusiveReadRecovers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer closeListRunsFixture(t, db)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	conn, err := db.Conn(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer closeListRunsFixture(t, conn)
 	if _, err = conn.ExecContext(ctx, "BEGIN EXCLUSIVE"); err != nil {
 		t.Fatal(err)
 	}
@@ -248,12 +256,12 @@ func holdListRunsExclusive(t *testing.T, path string) func() {
 	}
 	conn, err := db.Conn(context.Background())
 	if err != nil {
-		db.Close()
+		closeListRunsFixture(t, db)
 		t.Fatal(err)
 	}
 	if _, err = conn.ExecContext(context.Background(), "BEGIN EXCLUSIVE"); err != nil {
-		conn.Close()
-		db.Close()
+		closeListRunsFixture(t, conn)
+		closeListRunsFixture(t, db)
 		t.Fatal(err)
 	}
 	var once sync.Once
@@ -262,8 +270,8 @@ func holdListRunsExclusive(t *testing.T, path string) func() {
 			if _, err := conn.ExecContext(context.Background(), "ROLLBACK"); err != nil {
 				t.Error(err)
 			}
-			conn.Close()
-			db.Close()
+			closeListRunsFixture(t, conn)
+			closeListRunsFixture(t, db)
 		})
 	}
 	t.Cleanup(release)

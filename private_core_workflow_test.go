@@ -34,7 +34,7 @@ func TestPrivateCoreCredentialMatchesOnlyExactRepository(t *testing.T) {
 	if err := os.Mkdir(home, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	run.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "RUNNER_TEMP=" + temp, "GITHUB_JOB=test", "RUNNER_OS=" + os.Getenv("RUNNER_OS"), "GITHUB_ENV=" + filepath.Join(temp, "env"), "CORE_READ_TOKEN=TEST_READ_TOKEN", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_CONFIG_GLOBAL=" + filepath.Join(temp, "core-test.gitconfig"), "XDG_CONFIG_HOME=" + filepath.Join(temp, "git-xdg")} 
+	run.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "RUNNER_TEMP=" + temp, "GITHUB_JOB=test", "RUNNER_OS=" + os.Getenv("RUNNER_OS"), "GITHUB_ENV=" + filepath.Join(temp, "env"), "CORE_READ_TOKEN=TEST_READ_TOKEN", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_CONFIG_GLOBAL=" + filepath.Join(temp, "core-test.gitconfig"), "XDG_CONFIG_HOME=" + filepath.Join(temp, "git-xdg")}
 	if out, err := run.CombinedOutput(); err != nil {
 		t.Fatalf("credential setup failed: %v %s", err, out)
 	}
@@ -48,7 +48,7 @@ func TestPrivateCoreCredentialMatchesOnlyExactRepository(t *testing.T) {
 	credentialFile := filepath.Join(temp, "core-test.credentials")
 	for _, repo := range []string{"datatug/datatug-core", "datatug/datatug-core.git", "datatug/datatug-core-tools", "other/datatug-core", "datatug/datatug"} {
 		command := exec.Command("git", "-C", repoDir, "-c", "credential.helper=store --file=\""+credentialFile+"\"", "-c", "credential.https://github.com.useHttpPath=true", "credential", "fill")
-		command.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "GIT_CONFIG_GLOBAL=" + filepath.Join(temp, "core-test.gitconfig"), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_TERMINAL_PROMPT=0", "XDG_CONFIG_HOME=" + filepath.Join(temp, "git-xdg")} 
+		command.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "GIT_CONFIG_GLOBAL=" + filepath.Join(temp, "core-test.gitconfig"), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_TERMINAL_PROMPT=0", "XDG_CONFIG_HOME=" + filepath.Join(temp, "git-xdg")}
 		command.Stdin = strings.NewReader("protocol=https\nhost=github.com\npath=" + repo + "\n\n")
 		out, err := command.CombinedOutput()
 		exact := repo == "datatug/datatug-core" || repo == "datatug/datatug-core.git"

@@ -25,9 +25,12 @@ func TestPrivateCoreCredentialMatchesOnlyExactRepository(t *testing.T) {
 		t.Fatal("missing credential script")
 	}
 	script := strings.ReplaceAll(action[start+len("      run: |\n"):], "        ", "")
-	temp := t.TempDir()
+	temp := filepath.Join(t.TempDir(), "runner temp")
+	if err := os.Mkdir(temp, 0700); err != nil {
+		t.Fatal(err)
+	}
 	run := exec.Command("bash", "-c", script)
-	run.Env = []string{"PATH=" + os.Getenv("PATH"), "RUNNER_TEMP=" + temp, "GITHUB_JOB=test", "GITHUB_ENV=" + filepath.Join(temp, "env"), "CORE_READ_TOKEN=TEST_READ_TOKEN"}
+	run.Env = []string{"PATH=" + os.Getenv("PATH"), "RUNNER_TEMP=" + temp, "GITHUB_JOB=test", "RUNNER_OS=" + os.Getenv("RUNNER_OS"), "GITHUB_ENV=" + filepath.Join(temp, "env"), "CORE_READ_TOKEN=TEST_READ_TOKEN"}
 	if out, err := run.CombinedOutput(); err != nil {
 		t.Fatalf("credential setup failed: %v %s", err, out)
 	}
@@ -75,7 +78,20 @@ func TestPrivateCoreAuthPrecedesEveryLocalGoJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []string{"goprivate_github_app_repositories: datatug-core", "GOPRIVATE_GITHUB_APP_PRIVATE_KEY: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}", `bash scripts/publish-datatug-release.sh "$TAG" "datatug/datatug-cli" "datatug/datatug"`, "require_notarized_macos: true", "require_workflow_success: 'Go CI'"} {
+	releaseJob := readWorkflow(t, "release.yml").Jobs["release"]
+	gates, _ := releaseJob.With["require_workflow_success"].(string)
+	for _, gate := range []string{"Go CI", "Native release builds"} {
+		found := false
+		for _, configured := range strings.Split(gates, "\n") {
+			if strings.TrimSpace(configured) == gate {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("release must require exact-head %s workflow", gate)
+		}
+	}
+	for _, required := range []string{"goprivate_github_app_repositories: datatug-core", "GOPRIVATE_GITHUB_APP_PRIVATE_KEY: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}", `bash scripts/publish-datatug-release.sh "$TAG" "datatug/datatug-cli" "datatug/datatug"`, "require_notarized_macos: true"} {
 		if !strings.Contains(string(release), required) {
 			t.Fatalf("release invariant missing: %s", required)
 		}

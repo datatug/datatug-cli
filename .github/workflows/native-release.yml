@@ -1,0 +1,106 @@
+name: Native release builds
+run-name: ${{ inputs.release_request || format('Native release builds {0}', github.sha) }}
+on:
+  workflow_dispatch:
+    inputs:
+      release_request:
+        description: Unique request supplied by the shared release workflow
+        type: string
+        required: true
+  pull_request:
+  push:
+    branches: ['**']
+permissions:
+  contents: read
+jobs:
+  build:
+    name: Native ${{ matrix.goos }}/${{ matrix.goarch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: ubuntu-22.04, goos: linux, goarch: amd64}
+          - {runner: ubuntu-24.04-arm, goos: linux, goarch: arm64}
+          - {runner: macos-15-intel, goos: darwin, goarch: amd64}
+          - {runner: macos-15, goos: darwin, goarch: arm64}
+          - {runner: windows-latest, goos: windows, goarch: amd64}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      GOPRIVATE: github.com/datatug/datatug-core
+      CGO_ENABLED: '1'
+      NATIVE_RELEASE_BUILD: '1'
+    steps:
+      - name: Preserve exact source bytes on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Authenticate private Core dependency
+        uses: ./.github/actions/private-core
+        with:
+          private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Verify native Windows compiler
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # Use the runner's supported compiler on PATH; Windows images may
+          # install MinGW outside the former MSYS2 mingw64 directory.
+          Get-Command gcc -ErrorAction Stop
+          Get-Command g++ -ErrorAction Stop
+          gcc --version
+          g++ --version
+      - name: Verify native source and release adapter
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod tidy -diff
+          # Full CLI regression/coverage stays in the required Go CI workflow.
+          # This native gate checks the published driver and CLI feature on
+          # every release target before testing the actual packaged binary.
+          go test github.com/dal-go/dalgo2duckdb
+          go test ./pkg/dbcopy ./pkg/secureread ./apps/datatugapp/commands -run DuckDB -count=1
+          python3 -m unittest discover -s scripts -p 'test_native_release*.py'
+      - name: Verify dispatch tag identity
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          TAG: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$REF_TYPE" = tag
+          test "$(git rev-parse "${TAG}^{commit}")" = "$SHA"
+      - name: Build native release binary
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: v2.19.0
+          args: build --single-target --clean ${{ github.event_name != 'workflow_dispatch' && '--snapshot' || '' }}
+        env:
+          GORELEASER_CURRENT_TAG: ${{ github.event_name == 'workflow_dispatch' && github.ref_name || '' }}
+      - name: Pack and smoke test the actual native binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/native-release-go.py --pack
+          binary=native-payload/datatug
+          if [ "$RUNNER_OS" = Windows ]; then binary="$binary.exe"; fi
+          "$binary" --version
+          "$binary" query run --db duckdb://:memory: --sql "SELECT name FROM read_parquet('testdata/duckdb/items.parquet') WHERE id = 1" --format json --no-policies > native-payload/duckdb-smoke.json
+          python3 -c 'import json; from pathlib import Path; data=json.loads(Path("native-payload/duckdb-smoke.json").read_text()); assert "DuckDB Parquet release smoke" in str(data), data'
+          rm native-payload/duckdb-smoke.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-release-${{ inputs.release_request || github.run_id }}-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: native-payload/
+          if-no-files-found: error
+          retention-days: 3

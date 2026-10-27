@@ -86,10 +86,10 @@ func TestParse_BigQueryDestinationRequiresProjectDatasetAndLocation(t *testing.T
 // name the unsupported scheme AND list all supported schemes.
 func TestParse_UnknownScheme(t *testing.T) {
 	t.Parallel()
-	_, err := Parse("mongodb://host/db")
+	_, err := Parse("unsupporteddb://host/db")
 	assert.Error(t, err)
 	msg := err.Error()
-	assert.Contains(t, msg, "mongodb")
+	assert.Contains(t, msg, "unsupporteddb")
 	assert.Contains(t, msg, "sqlite")
 	assert.Contains(t, msg, "ingitdb")
 	assert.Contains(t, msg, "postgres")

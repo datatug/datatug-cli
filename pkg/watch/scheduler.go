@@ -16,16 +16,19 @@ func (s *Store) RegisterRunner(ctx context.Context, identity RunnerIdentity) err
 	}
 	return s.transaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
 		if s.cloud != nil {
-			rows, e := cloudRecords(ctx, tx, cloudQuery(runners, Scope{Namespace: s.config.Namespace}, "", nil, 101))
+			// Refreshing this exact scoped runner cannot increase cardinality.
+			// Avoid taking the quota range read on every registration heartbeat;
+			// new IDs still admit under the same atomic coordinator fence.
+			exists, e := tx.Exists(ctx, key(runners, identity.Scope, identity.ID))
 			if e != nil {
 				return e
 			}
-			if len(rows) >= 100 {
-				exists, e := tx.Exists(ctx, key(runners, identity.Scope, identity.ID))
+			if !exists {
+				rows, e := cloudRecords(ctx, tx, cloudQuery(runners, Scope{Namespace: s.config.Namespace}, "", nil, 101))
 				if e != nil {
 					return e
 				}
-				if !exists {
+				if len(rows) >= 100 {
 					return ErrCapacity
 				}
 			}

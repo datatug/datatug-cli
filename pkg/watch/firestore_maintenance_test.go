@@ -69,7 +69,7 @@ func TestFirestoreStoreDeploymentQuotaAcrossSpaces(t *testing.T) {
 	stores, _, options := firestoreFixture(t)
 	ctx := context.Background()
 	db := stores[0].cloud.db
-	options.AccountRoot = record.NewKeyWithID("datatugWatchControl", "accounts-"+stable(options.StorageRoot.String()))
+	options.AccountRoot = record.NewKeyWithParentAndID(record.NewKeyWithID("ext", "datatug"), "watchControl", "accounts-"+stable(options.StorageRoot.String()))
 	options.AccountNamespace = "hosted-deployment"
 	options.Config.EmailDailyLimit = 1
 	options.Config.EmailMinuteLimit = 1

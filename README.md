@@ -11,7 +11,7 @@
             </p>
             <p>
                 Free for personal use, DataTug keeps your workflows transparent, versioned, and portable, whether you work locally, in
-                GitHub, or in the cloud.                
+                GitHub, or in the cloud.
             </p>
         </td>
     </tr>
@@ -109,6 +109,82 @@ Environment prod
 What else works, and what does not yet, is in [Supported databases](#supported-databases). To compare complete database contents across project environments, see [Compare project databases](docs/database-compare.md).
 
 ![datatug-cli-employees-2.png](docs/screenshots/datatug-cli-employees-2.png)
+
+## Terminal UI (TUI) & Local Server
+
+### Interactive Terminal UI (TUI)
+Launch the interactive terminal UI to explore schemas, tables, and run queries with keyboard navigation:
+```bash
+datatug tui
+```
+For details on widget layouts and keybindings, see [TUI Screens](docs/tui-screens.md).
+
+### Local Server (`datatug serve`)
+Run the local DataTug HTTP agent daemon to serve the Web UI, REST endpoints, and IDE integrations:
+```bash
+datatug serve
+```
+By default, `datatug serve` binds strictly to loopback (`127.0.0.1`) with origin protection. It is completely free and unrestricted under Apache License 2.0—no license key is ever required for individual local development.
+
+## Architecture Overview
+
+DataTug provides a unified developer toolchain for multi-database exploration and automation:
+
+- **CLI & TUI (`.`, `apps/datatugapp`)**: High-performance command-line utilities, TugQL query execution, and terminal user interface built with Bubble Tea.
+- **Local HTTP Agent (`pkg/server`, `pkg/server/endpoints`)**: Zero-config daemon providing local REST and WebSocket APIs for the DataTug Web UI and agent integrations.
+- **Model Context Protocol (MCP)**: Native MCP server for AI coding assistants and agentic workflows.
+- **Storage Abstraction (`github.com/datatug/datatug-core/pkg/storage`, `ingitdb`)**: Plain-file, Git-native database definitions, queries, and recordsets.
+- **Watch Daemon (`pkg/watchdaemon`, `pkg/watch`)**: Automated condition monitoring, baseline comparisons, and alert dispatches.
+- **Commercial Licensing Engine (`commercial/licensing`)**: Offline Ed25519-signed entitlements engine for organizational self-hosted deployments.
+
+## Model A Licensing & Capability Matrix
+
+DataTug is distributed under an open-core licensing model (**Model A**):
+- **Community Core (Apache License 2.0)**: The CLI, TUI, local server (`datatug serve`), schema modeling, TugQL queries, and MCP server are free and open source. See [LICENSE](LICENSE) and [LICENSES/Apache-2.0.txt](LICENSES/Apache-2.0.txt).
+- **Commercial Edition (DataTug Commercial Terms)**: Centralized coordination, shared multi-runner orchestration, team execution stores, and carrier SMS notifications are governed by the DataTug Commercial Terms. See [LICENSING.md](LICENSING.md) and [LICENSES/COMMERCIAL-TERMS.md](LICENSES/COMMERCIAL-TERMS.md).
+
+| Capability | Community (Apache 2.0) | Commercial (Pro / Enterprise) |
+| :--- | :---: | :---: |
+| **CLI & TUI** (`datatug`, `datatug tui`) | ✅ Unlimited Free | ✅ Included |
+| **Local Server** (`datatug serve` on localhost) | ✅ Unrestricted | ✅ Included |
+| **TugQL Query Engine & Schema Introspection** | ✅ Included | ✅ Included |
+| **Model Context Protocol (MCP) Server** | ✅ Included | ✅ Included |
+| **Central Watch Coordinator Daemon** | Evaluation / Local | ✅ Licensed (`central_watch_coordinator`) |
+| **Distributed / Team Watch Runners** | Evaluation / Local | ✅ Licensed (`team_runners`) |
+| **Shared Multi-User Execution Store** | ❌ Commercial License | ✅ Licensed (`shared_execution_store`) |
+| **Centralized Team Audit Trail** | ❌ Commercial License | ✅ Licensed (`team_audit_trail`) |
+| **SMS Telephony Alerts (Twilio)** | ❌ Commercial License | ✅ Licensed (`sms_notifications`) |
+
+## Building from Source
+
+### Prerequisites
+- **Go**: 1.23+
+- **C Compiler**: CGo is required for SQLite and DuckDB backends.
+
+### Build Steps
+```bash
+# Clone the repository
+git clone https://github.com/datatug/datatug-cli.git
+cd datatug-cli
+
+# Build the CLI binary
+go build -o bin/datatug .
+
+# Verify installation
+./bin/datatug --version
+./bin/datatug --help
+```
+
+### Running Tests
+```bash
+# Fast targeted tests
+go test -v ./commercial/licensing/...
+go test -v ./pkg/watchdaemon/...
+
+# Full test suite
+go test ./...
+```
+
 
 <!-- dev-approach:v1 -->
 ## Export a database to inGitDB
@@ -434,7 +510,9 @@ the web app talks to (see [spec/features/cli/serve](spec/features/cli/serve/READ
 | BigQuery | not supported yet | supported, read-only, through its own command, `datatug query bigquery` (`preview`, then `run` with the approved digest): one table described by a source profile, chosen columns, simple conditions and order, a limit, and a `--maximum-bytes-billed` cap; you sign in with your Google account (`--auth adc` or `--auth google`). See [pkg/bigqueryread](pkg/bigqueryread/README.md) |
 | REST APIs | not applicable | supported, read-only: `--db http://<project-dir>` reads the project's HTTP queries (`queries/**/*.query.json` of type `HTTP` with a `.query.http` URL template) as collections, calling the API live and falling back to the query's recorded snapshot in `fixtures/http/` when the call fails (the `source:` line says which); a parameter of the URL is set by a `where` condition on its column |
 | OpenVaultDB | not supported yet | not tested in this release |
-| Firestore | not supported yet | not supported yet |
+| MongoDB | not supported yet | supported, read-only: `--db env:NAME` with `mongodb://` or `mongodb+srv://`, TugQL (`-f`, `--from`), filtering, projection, ordering and bounded results; see [Query MongoDB](docs/databases/mongodb.md) |
+| Redis | not supported yet | supported, read-only, through `datatug query redis --db env:REDIS_URL -- GET key`: native string/hash reads and metadata; Redis ACLs control access. See [Query Redis keys](docs/query/redis.md). SQL, TugQL and saved queries are unavailable |
+| Firestore | not supported yet | supported, read-only: `--db firestore://PROJECT/DATABASE` with TugQL (`-f`, `--from`), filtering, projection, ordering and optional limits; see [Query Firestore](docs/sources/firestore.md) |
 
 A database that is not in this table is not supported by this release. We are open for pull requests.
 
@@ -514,6 +592,20 @@ information on how to contribute to the project.
 ## Download
 
 http://datatug.app/download
+
+
+Query an embedded DuckDB database or Parquet files using the normal SQL command:
+
+```sh
+datatug query run --db duckdb:///data/analytics.duckdb --sql 'SELECT * FROM events LIMIT 10' --no-policies
+datatug query run --db duckdb://:memory: --sql "SELECT * FROM read_parquet('/data/events.parquet') LIMIT 10" --no-policies
+```
+
+DuckDB native SQL accepts a single query and runs in a read-only transaction.
+DuckDB queries can read external files and URLs, so native SQL requires an
+unrestricted session (`--no-policies`). All official release binaries include DuckDB. Building DuckDB support from
+source requires cgo and a C/C++ toolchain; custom `CGO_ENABLED=0` builds retain
+other backends and report an explicit error when DuckDB is requested.
 
 # [License](./LICENSE)
 

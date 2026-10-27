@@ -45,6 +45,11 @@ type CoordinatorReference struct {
 	Namespace string `json:"namespace"`
 }
 
+// EntitlementChecker validates authorization for centralized/shared operational features.
+type EntitlementChecker interface {
+	CheckEntitlement() error
+}
+
 type Server struct {
 	// Display/discovery metadata supplied by the trusted hosted facade. It never
 	// selects authentication destinations or grants transport authority.
@@ -60,6 +65,7 @@ type Server struct {
 	PublicUIURL       string
 	ProjectUIURLs     map[string]string
 	Limits            Limits
+	Entitlement       EntitlementChecker
 }
 
 type apiError struct {

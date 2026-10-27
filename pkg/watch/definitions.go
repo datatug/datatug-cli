@@ -106,8 +106,7 @@ func (s *Store) PutDefinition(ctx context.Context, a Actor, d Definition, operat
 	}
 	d.SourceRevision = "" // The server admission hook, never request JSON, pins cloud source.
 	startPaused := d.Lifecycle == "paused"
-	request, _ := json.Marshal(d)
-	digest := stable(string(request), fmt.Sprint(expectedVersion))
+	digest, _ := putDefinitionOperationDigest(d, expectedVersion)
 	var result Definition
 	err := s.transaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
 		opID := stable(a.ID, operationID)
@@ -495,6 +494,9 @@ func (s *Store) Inbox(ctx context.Context, a Actor) ([]Notification, error) {
 func (s *Store) MarkRead(ctx context.Context, a Actor, id string) error {
 	if err := s.actor(a); err != nil {
 		return err
+	}
+	if s.cloud != nil {
+		return s.markReadFirestore(ctx, a, id)
 	}
 	return s.transaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
 		n, err := read[Notification](ctx, tx, inbox, a.Scope, id)

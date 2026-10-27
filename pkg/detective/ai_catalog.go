@@ -133,11 +133,13 @@ func (s LocalAIStore) prepareAICatalog(command ai.Command) (string, json.RawMess
 			}
 			before = data
 			item.Version++
+			item.CreatedAt = resolveCreatedAt(item.CreatedAt, old.CreatedAt, true, time.Now())
 		} else if errors.Is(err, os.ErrNotExist) {
 			if item.Version != 0 {
 				return bad(ErrConflict)
 			}
 			item.Version = 1
+			item.CreatedAt = resolveCreatedAt(item.CreatedAt, "", false, time.Now())
 		} else {
 			return bad(err)
 		}
@@ -272,6 +274,7 @@ func (s LocalAIStore) prepareAICatalog(command ai.Command) (string, json.RawMess
 			}
 			before = data
 			item.Version++
+			item.CreatedAt = resolveCreatedAt(item.CreatedAt, old.CreatedAt, true, time.Now())
 		} else if errors.Is(err, os.ErrNotExist) {
 			if item.Version != 0 {
 				return bad(ErrConflict)
@@ -284,6 +287,7 @@ func (s LocalAIStore) prepareAICatalog(command ai.Command) (string, json.RawMess
 				return bad(ErrCapacity)
 			}
 			item.Version = 1
+			item.CreatedAt = resolveCreatedAt(item.CreatedAt, "", false, time.Now())
 		} else {
 			return bad(err)
 		}

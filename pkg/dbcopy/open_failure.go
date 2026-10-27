@@ -87,6 +87,8 @@ func postgresFailureReason(err error) string {
 func openFailureReason(err error) string {
 	var netErr net.Error
 	switch {
+	case errors.Is(err, errDuckDBRequiresCGO):
+		return errDuckDBRequiresCGO.Error()
 	case errors.Is(err, fs.ErrNotExist):
 		return "the file or directory does not exist"
 	case errors.Is(err, fs.ErrPermission):

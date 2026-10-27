@@ -18,6 +18,11 @@
 //   - http:// https://  fully wired via dal-go/dalgo2http (pkg/httpsource);
 //     local-paths-only, same convention as ingitdb:// — see
 //     parseHTTPSource
+//   - couchdb://        one existing CouchDB database read as one logical
+//     collection via dal-go/dalgo2couchdb; HTTPS unless
+//     couchdb+http:// names a loopback endpoint. Credentials
+//     come from DATATUG_COUCHDB_* environment variables, never
+//     from the URL — see couchdb_source.go
 package dbcopy
 
 import (
@@ -40,7 +45,7 @@ import (
 
 // supportedSchemes is the MVP-supported scheme list, used both for dispatch
 // and to construct the error message for REQ:unknown-scheme-rejected.
-var supportedSchemes = []string{"duckdb", "sqlite", "ingitdb", "postgres", "mysql", "oracle", "sqlserver", "http", "https", "openvaultdb", "bigquery", "mongodb", "mongodb+srv", "firestore"}
+var supportedSchemes = []string{"duckdb", "sqlite", "ingitdb", "postgres", "mysql", "oracle", "sqlserver", "http", "https", "openvaultdb", "bigquery", "mongodb", "mongodb+srv", "firestore", CouchDBScheme, CouchDBHTTPSScheme, CouchDBHTTPScheme}
 
 // SupportedSchemes returns the exact schemes Parse/Open dispatch, in
 // dispatch order. It is the single source of truth other packages should
@@ -147,7 +152,15 @@ type BackendRef struct {
 	//                pkg/httpsource) — same local-path convention as ingitdb,
 	//                NOT a literal remote endpoint; the project's own query
 	//                definitions name the actual remote endpoints.
+	// - couchdb:     "host[:port]/database", the endpoint without a scheme or
+	//                credentials (see CouchDBHost and CouchDBDatabase).
 	Path string
+	// CouchDB endpoint selectors: one existing database, read as one logical
+	// collection. Credentials are never here; they are read from the
+	// DATATUG_COUCHDB_* variables for each request.
+	CouchDBHost              string
+	CouchDBDatabase          string
+	CouchDBAllowLoopbackHTTP bool
 	// BigQuery destination selectors. Credentials are never accepted in the URL;
 	// callers provide local Google credentials separately.
 	ProjectID string
@@ -254,6 +267,8 @@ func parseURL(rawURL string) (BackendRef, error) {
 	switch scheme {
 	case "mongodb", "mongodb+srv":
 		return parseMongoDB(rawURL, display)
+	case CouchDBScheme, CouchDBHTTPSScheme, CouchDBHTTPScheme:
+		return parseCouchDBSource(scheme, rest, display)
 	case "firestore":
 		return parseFirestoreSource(rest, display)
 	case "openvaultdb":
@@ -708,6 +723,8 @@ func (r BackendRef) openSource(ctx context.Context, mode openMode) (dal.DB, erro
 	switch r.Scheme {
 	case "mongodb", "mongodb+srv":
 		return openMongoDB(ctx, r, mode)
+	case CouchDBScheme, CouchDBHTTPSScheme, CouchDBHTTPScheme:
+		return openCouchDB(ctx, r, mode)
 	case "firestore":
 		return r.openFirestore(ctx, mode)
 	case "duckdb":

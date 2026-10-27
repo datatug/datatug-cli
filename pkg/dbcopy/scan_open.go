@@ -22,6 +22,17 @@ type SchemaScanDB interface {
 	io.Closer
 }
 
+// couchDBSchemaScan joins the adapter's DB, its generic schema reader and its
+// idle-connection Close, so a CouchDB scan needs no database-specific scanner in
+// the CLI.
+type couchDBSchemaScan struct {
+	dal.DB
+	dbschema.SchemaReader
+	closeDB func() error
+}
+
+func (s *couchDBSchemaScan) Close() error { return s.closeDB() }
+
 // newPostgresDatabase is the PostgreSQL driver's constructor, a seam so tests
 // reach OpenSchemaScan without a server. Always dalgo2postgres.NewDatabase in
 // production.
@@ -38,6 +49,13 @@ func ParseWithEnv(rawURL string, lookupEnv func(string) (string, bool)) (Backend
 // returned here is for the scan only. DataTug opens
 // it with exact identifiers, so a table is looked up under the name PostgreSQL
 // reports (the driver's default folds every name to lower case).
+//
+// A CouchDB source is read through the same generic dbschema.SchemaReader seam:
+// the adapter reports the one configured collection, its native _id primary key
+// and its real Mango indexes, and leaves the field schema unavailable (native
+// documents declare none). SQL constraints and referrers are reported as
+// unsupported, which the generic scanner records as no keys rather than an
+// empty catalog.
 //
 // The URL is checked before the driver sees it (ParsePostgresTarget): a URL that
 // net/url and pgx read differently from how it was written, such as a password
@@ -63,7 +81,26 @@ func (r BackendRef) OpenSchemaScan(ctx context.Context) (SchemaScanDB, error) {
 		return db, nil
 	}
 	if r.Scheme != "postgres" {
-		return nil, fmt.Errorf("a schema scan through DALgo is available for postgres, mysql, oracle and sqlserver sources only, not %s", r.Scheme)
+		if IsCouchDBScheme(r.Scheme) {
+			db, err := openCouchDB(ctx, r, openMode{})
+			if err != nil {
+				return nil, err
+			}
+			reader, ok := dal.As[dbschema.SchemaReader](db)
+			if !ok {
+				if closer, closeOK := dal.As[io.Closer](db); closeOK {
+					_ = closer.Close()
+				}
+				return nil, fmt.Errorf("a schema scan of a CouchDB source is unavailable: the adapter exposes no schema reader")
+			}
+			return &couchDBSchemaScan{DB: db, SchemaReader: reader, closeDB: func() error {
+				if closer, closeOK := dal.As[io.Closer](db); closeOK {
+					return closer.Close()
+				}
+				return nil
+			}}, nil
+		}
+		return nil, fmt.Errorf("a schema scan through DALgo is available for postgres, mysql, oracle, sqlserver and couchdb sources only, not %s", r.Scheme)
 	}
 	if _, err := ParsePostgresTarget(r.Path); err != nil {
 		return nil, fmt.Errorf("source %s: %w", r, err)

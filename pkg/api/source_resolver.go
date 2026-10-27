@@ -124,6 +124,27 @@ func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, er
 			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
 		}
 		return dbcopy.LocalSourceURL("ingitdb", path), nil
+	case DriverCouchDB:
+		// A CouchDB catalog records its endpoint (host, port and one database) and
+		// nothing else: credentials live in DATATUG_COUCHDB_* in the operator's
+		// environment. A project is not trusted, so Parse revalidates the endpoint
+		// and refuses credentials, a query, a fragment or a non-CouchDB scheme
+		// before the URL is opened. An env:NAME path is refused here: a catalog
+		// records the endpoint, not a variable that could name another service.
+		if catalog.Path == "" {
+			return "", fmt.Errorf("catalog %q has no endpoint configured for its couchdb driver", catalog.ID)
+		}
+		if strings.HasPrefix(catalog.Path, "env:") {
+			return "", fmt.Errorf("catalog %q must record a couchdb://HOST/DATABASE endpoint, not an environment variable", catalog.ID)
+		}
+		ref, err := dbcopyParse(catalog.Path)
+		if err != nil {
+			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
+		}
+		if !dbcopy.IsCouchDBScheme(ref.Scheme) {
+			return "", fmt.Errorf("catalog %q must record a couchdb://HOST/DATABASE endpoint, not a %s source", catalog.ID, ref.Scheme)
+		}
+		return ref.CouchDBSourceURL(), nil
 	case "firestore", DriverPostgres, DriverMySQL, DriverOracle, DriverSQLServer:
 		// The catalog's path names a connection descriptor, a project file that
 		// names an environment variable and nothing else; the variable holds the
@@ -149,7 +170,7 @@ func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, er
 		}
 		return source, nil
 	default:
-		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3, ingitdb, openvaultdb, postgres, mysql, oracle, sqlserver or firestore)", catalog.Driver)
+		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3, ingitdb, openvaultdb, postgres, mysql, oracle, sqlserver, firestore or couchdb)", catalog.Driver)
 	}
 }
 

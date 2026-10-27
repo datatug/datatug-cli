@@ -233,7 +233,8 @@ func updateProjectWithDbCatalog(project *datatug.Project, envID string, dbServer
 				// restore path as path might be normalized if pointing to user's directory.
 				// A PostgreSQL catalog's path is the connection descriptor the scan is writing
 				// now: the catalog and the descriptor are updated together, never apart.
-				if !IsServerDriver(dbServerRef.Driver) {
+				// A CouchDB catalog's path is its endpoint, which a rescan may have to update.
+				if !IsServerDriver(dbServerRef.Driver) && dbServerRef.Driver != DriverCouchDB {
 					dbCatalog.Path = projDbServer.Catalogs[j].Path
 				}
 				// TODO: currently replaces catalog with new info, should merge to preserver comments
@@ -435,6 +436,11 @@ func scanCatalog(ctx context.Context, server datatug.ServerRef, connectionParams
 		// PostgreSQL is read through DALgo's schema reader, and opened from an
 		// environment variable: there is no connection string to give database/sql.
 		return scanPostgresCatalog(ctx, server.Driver, connectionParams)
+	}
+	if server.Driver == DriverCouchDB {
+		// CouchDB is read through the same generic SchemaReader seam; the
+		// endpoint comes from an environment variable, never from a project.
+		return scanCouchDBCatalog(ctx, connectionParams)
 	}
 	if server.Driver == dbconnection.DriverSQLite3 {
 		// SQLite is read through DALgo's schema reader too (dalgo2sqlite).

@@ -46,6 +46,13 @@ const (
 	exitCodeUsage        = 2
 	exitCodeDatabase     = 4
 	exitCodeAccessDenied = 5
+
+	// couchDBSourceDefaultLimit is the bound an exploratory `--from` read of a
+	// CouchDB source gets when the person gave no --limit. The CouchDB adapter
+	// refuses an unbounded read (no silent full scan), so exactly this one
+	// exploration path needs a visible default; a -f or saved query keeps its own
+	// limit, and an explicit --limit (even 0) is never replaced.
+	couchDBSourceDefaultLimit = 100
 )
 
 // dbSchemesHelp lists every URL scheme dbcopy.Parse accepts, generated from
@@ -108,7 +115,7 @@ Examples:
 	flags.String(queryProjectFlag, "", "Project directory or registered project ID (alternative to --db; runs a saved --query by ID)")
 	flags.String(queryQueryFlag, "", "Saved query ID to run, e.g. customers/customer-invoices (requires --project)")
 	flags.String(queryEnvFlag, "", "Environment ID the saved query runs against (default: the project's only environment)")
-	flags.Int(queryLimitFlag, 0, "Read at most this many rows (only with --from; a -f query states its own limit)")
+	flags.Int(queryLimitFlag, 0, "Read at most this many rows (only with --from; a -f query states its own limit); a CouchDB --from read defaults to "+fmt.Sprint(couchDBSourceDefaultLimit)+" when no --limit is given")
 	flags.Int(queryOffsetFlag, 0, "Skip this many rows first (only with --from); rows are ordered by primary key, or by rowid in SQLite, so pages are stable")
 	flags.String(queryFormatFlag, "grid", "Output format: "+strings.Join(queryFormats, ", "))
 	flags.String(queryAsFlag, "", "Principal user ID; also sets $currentUser")
@@ -125,12 +132,16 @@ Examples:
 }
 
 type queryOptions struct {
-	db          string
-	file        string
-	from        string
-	sql         string
-	limit       int
-	offset      int
+	db     string
+	file   string
+	from   string
+	sql    string
+	limit  int
+	offset int
+	// limitSet is whether --limit was typed, so a CouchDB --from read can tell
+	// "no bound given" (use the visible exploration default) from an explicit
+	// --limit 0 (pass it through; the adapter then refuses it).
+	limitSet    bool
 	format      string
 	as          string
 	roles       []string
@@ -158,6 +169,7 @@ func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
 	o.from, _ = flags.GetString(queryFromFlag)
 	o.sql, _ = flags.GetString(querySQLFlag)
 	o.limit, _ = flags.GetInt(queryLimitFlag)
+	o.limitSet = flags.Changed(queryLimitFlag)
 	o.offset, _ = flags.GetInt(queryOffsetFlag)
 	o.format, _ = flags.GetString(queryFormatFlag)
 	o.as, _ = flags.GetString(queryAsFlag)
@@ -230,7 +242,7 @@ func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
 // existing open behavior. Both paths retain the HTTPS-only HTTP-source
 // enforcement.
 var openBackend = func(ctx context.Context, backend dbcopy.BackendRef) (dal.DB, error) {
-	if backend.Scheme == "sqlite" || dbcopy.IsServerScheme(backend.Scheme) {
+	if backend.Scheme == "sqlite" || dbcopy.IsServerScheme(backend.Scheme) || dbcopy.IsCouchDBScheme(backend.Scheme) {
 		return backend.OpenProtected(ctx)
 	}
 	return backend.Open(ctx)
@@ -294,6 +306,16 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	// An exploratory `--from` read of a CouchDB source needs an explicit bound
+	// because the adapter refuses an unbounded read instead of silently scanning
+	// the whole database. Only a missing --limit gets the visible default: a -f
+	// or saved query keeps its own limit, and an explicit --limit 0 reaches the
+	// adapter and fails there rather than being replaced here.
+	defaultedCouchDBLimit := false
+	if o.from != "" && dbcopy.IsCouchDBScheme(backend.Scheme) && !o.limitSet {
+		o.limit = couchDBSourceDefaultLimit
+		defaultedCouchDBLimit = true
+	}
 	// A read of a PostgreSQL, MySQL, Oracle or SQL Server source through policies is not available yet: that is
 	// answered before the source is opened.
 	if err = dbcopy.CheckServerRead(backend, len(loaded)); err != nil {
@@ -331,6 +353,9 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		o.sink.describeAdHoc(ctx, o, backend, db, queryText, variables)
 	}
 	stderr := cmd.ErrOrStderr()
+	if defaultedCouchDBLimit {
+		_, _ = fmt.Fprintf(stderr, "limit: reading at most %d rows (CouchDB exploration default; pass --limit N to change it)\n", o.limit)
+	}
 	if len(loaded) == 0 {
 		_, _ = fmt.Fprintln(stderr, "access: running without access policies")
 	}
@@ -350,17 +375,20 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		_, _ = fmt.Fprintln(stderr, provenanceLine(prov))
 	}
 	if err != nil {
-		return queryFailure(err)
+		return queryFailureFor(o, backend, err)
 	}
 	if o.sink != nil {
 		if provOK {
 			o.sink.meta.Provenance = resultProvenance(prov)
 		}
-		return o.sink.collectAndWrite(cmd.OutOrStdout(), result.Reader, result.Query)
+		if err = o.sink.collectAndWrite(cmd.OutOrStdout(), result.Reader, result.Query); err != nil {
+			return queryFailureFor(o, backend, err)
+		}
+		return nil
 	}
 	rows, err := collectRows(result.Reader)
 	if err != nil {
-		return queryFailure(err)
+		return queryFailureFor(o, backend, err)
 	}
 	columns, err := rowColumns(result.Query, rows)
 	if err != nil {
@@ -388,6 +416,17 @@ func provenanceLine(prov dalgo2http.Provenance) string {
 		return fmt.Sprintf("source: snapshot fixtures/http/%s.json (captured %s)", prov.Collection, fetchedAt.Format("2006-01-02"))
 	}
 	return fmt.Sprintf("source: live %s (%s)", prov.Collection, fetchedAt.Format(time.RFC3339))
+}
+
+// queryFailureFor is queryFailure with what only a CouchDB --from read can say:
+// the adapter refuses a read no Mango index serves rather than falling back to a
+// full scan, and a bare --from read has no selector or sort to serve one. The
+// refusal stays explicit; it is never turned into a partial result.
+func queryFailureFor(o queryOptions, backend dbcopy.BackendRef, err error) error {
+	if o.from != "" && dbcopy.IsCouchDBScheme(backend.Scheme) && dbcopy.IsCouchDBIndexRequired(err) {
+		return Exit("CouchDB requires a Mango index, and --from has no filter or order to serve one: the read is refused rather than falling back to a full scan that could hide documents. Create an index outside DataTug and use -f with a filter and order that index serves.", exitCodeDatabase)
+	}
+	return queryFailure(err)
 }
 
 func queryFailure(err error) error {

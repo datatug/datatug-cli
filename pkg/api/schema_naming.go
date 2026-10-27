@@ -18,7 +18,7 @@ func DefaultSchemaForDriver(driver string) string {
 		return "main"
 	case "postgres", "postgresql", "pgx":
 		return "public"
-	case DriverMySQL, DriverOracle, DriverSQLServer:
+	case DriverMySQL, DriverOracle, DriverSQLServer, DriverCouchDB:
 		return ServerDefaultSchema
 	default:
 		return ""

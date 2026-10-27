@@ -44,6 +44,8 @@ jobs:
         run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
       - name: Verify image version validation and clean stable release sources without building binaries
         run: python3 -m unittest discover -s distribution -p 'test_build_context.py' -v
+      - name: Verify offline OCI provenance subject and runtime/source binding
+        run: python3 -m unittest discover -s distribution -p 'test_verify_provenance.py' -v
       - name: Check out the pinned public Google Marketplace SDK
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -316,9 +318,23 @@ jobs:
           IMAGE_ARCH: ${{ matrix.arch }}
         run: |
           docker buildx build --platform "linux/$IMAGE_ARCH" --provenance=mode=max \
+            --tag datatug-everywhere:candidate \
             --output "type=oci,dest=$RUNNER_TEMP/image-evidence/candidate.oci.tar" \
             --metadata-file "$RUNNER_TEMP/image-evidence/build.json" "$RUNNER_TEMP/execution-context"
           docker save --output "$RUNNER_TEMP/image-evidence/candidate.tar" datatug-everywhere:candidate
+      - name: Require OCI provenance subject and tested-runtime binding
+        env:
+          IMAGE_ARCH: ${{ matrix.arch }}
+          SOURCE_REVISION: ${{ github.sha }}
+        run: |
+          runtime_config_id="$(docker image inspect --format '{{.Id}}' datatug-everywhere:candidate)"
+          python3 distribution/verify_provenance.py \
+            --oci "$RUNNER_TEMP/image-evidence/candidate.oci.tar" \
+            --metadata "$RUNNER_TEMP/image-evidence/build.json" \
+            --arch "$IMAGE_ARCH" --source-sha "$SOURCE_REVISION" \
+            --runtime-config-id "$runtime_config_id" \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            > "$RUNNER_TEMP/image-evidence/provenance-binding.json"
       - name: Inspect every image layer for restricted AG payloads
         run: python3 distribution/audit_archive.py "$RUNNER_TEMP/image-evidence/candidate.tar" > "$RUNNER_TEMP/image-evidence/restricted-assets.json"
       - name: Generate an offline SPDX SBOM
@@ -367,6 +383,7 @@ jobs:
           name: execution-image-${{ matrix.arch }}
           path: |
             ${{ runner.temp }}/image-evidence/build.json
+            ${{ runner.temp }}/image-evidence/provenance-binding.json
             ${{ runner.temp }}/image-evidence/container.json
             ${{ runner.temp }}/image-evidence/hybrid.json
             ${{ runner.temp }}/image-evidence/restricted-assets.json

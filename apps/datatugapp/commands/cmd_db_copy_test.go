@@ -179,7 +179,7 @@ func TestBigQueryRecoveryHintContainsOnlyCredentialFreeReference(t *testing.T) {
 func TestDBCopy_UnknownScheme_Exit2(t *testing.T) {
 	t.Parallel()
 	_, _, err := runCopy(t, "db", "copy",
-		"--from", "mongodb://host/db",
+		"--from", "unsupporteddb://host/db",
 		"--to", "sqlite:///tmp/out.db",
 	)
 	assert.Error(t, err)
@@ -187,7 +187,7 @@ func TestDBCopy_UnknownScheme_Exit2(t *testing.T) {
 		assert.Equal(t, 2, ec.ExitCode())
 	}
 	msg := err.Error()
-	assert.Contains(t, msg, "mongodb")
+	assert.Contains(t, msg, "unsupporteddb")
 	assert.Contains(t, msg, "sqlite")
 	assert.Contains(t, msg, "ingitdb")
 }

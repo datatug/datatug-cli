@@ -510,7 +510,9 @@ the web app talks to (see [spec/features/cli/serve](spec/features/cli/serve/READ
 | BigQuery | not supported yet | supported, read-only, through its own command, `datatug query bigquery` (`preview`, then `run` with the approved digest): one table described by a source profile, chosen columns, simple conditions and order, a limit, and a `--maximum-bytes-billed` cap; you sign in with your Google account (`--auth adc` or `--auth google`). See [pkg/bigqueryread](pkg/bigqueryread/README.md) |
 | REST APIs | not applicable | supported, read-only: `--db http://<project-dir>` reads the project's HTTP queries (`queries/**/*.query.json` of type `HTTP` with a `.query.http` URL template) as collections, calling the API live and falling back to the query's recorded snapshot in `fixtures/http/` when the call fails (the `source:` line says which); a parameter of the URL is set by a `where` condition on its column |
 | OpenVaultDB | not supported yet | not tested in this release |
-| Firestore | not supported yet | not supported yet |
+| MongoDB | not supported yet | supported, read-only: `--db env:NAME` with `mongodb://` or `mongodb+srv://`, TugQL (`-f`, `--from`), filtering, projection, ordering and bounded results; see [Query MongoDB](docs/databases/mongodb.md) |
+| Redis | not supported yet | supported, read-only, through `datatug query redis --db env:REDIS_URL -- GET key`: native string/hash reads and metadata; Redis ACLs control access. See [Query Redis keys](docs/query/redis.md). SQL, TugQL and saved queries are unavailable |
+| Firestore | not supported yet | supported, read-only: `--db firestore://PROJECT/DATABASE` with TugQL (`-f`, `--from`), filtering, projection, ordering and optional limits; see [Query Firestore](docs/sources/firestore.md) |
 
 A database that is not in this table is not supported by this release. We are open for pull requests.
 

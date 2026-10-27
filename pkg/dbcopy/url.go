@@ -40,7 +40,7 @@ import (
 
 // supportedSchemes is the MVP-supported scheme list, used both for dispatch
 // and to construct the error message for REQ:unknown-scheme-rejected.
-var supportedSchemes = []string{"duckdb", "sqlite", "ingitdb", "postgres", "mysql", "oracle", "sqlserver", "http", "https", "openvaultdb", "bigquery"}
+var supportedSchemes = []string{"duckdb", "sqlite", "ingitdb", "postgres", "mysql", "oracle", "sqlserver", "http", "https", "openvaultdb", "bigquery", "mongodb", "mongodb+srv", "firestore"}
 
 // SupportedSchemes returns the exact schemes Parse/Open dispatch, in
 // dispatch order. It is the single source of truth other packages should
@@ -252,6 +252,10 @@ func parseURL(rawURL string) (BackendRef, error) {
 	}
 	display := SourceDisplay(rawURL)
 	switch scheme {
+	case "mongodb", "mongodb+srv":
+		return parseMongoDB(rawURL, display)
+	case "firestore":
+		return parseFirestoreSource(rest, display)
 	case "openvaultdb":
 		if rest == "" {
 			return BackendRef{}, fmt.Errorf("OpenVaultDB connection descriptor path is required")
@@ -702,6 +706,10 @@ func (r BackendRef) CheckFile() error {
 
 func (r BackendRef) openSource(ctx context.Context, mode openMode) (dal.DB, error) {
 	switch r.Scheme {
+	case "mongodb", "mongodb+srv":
+		return openMongoDB(ctx, r, mode)
+	case "firestore":
+		return r.openFirestore(ctx, mode)
 	case "duckdb":
 		if !mode.forWrite && r.Path != "" {
 			if err := CheckSourceFile(r.Path); err != nil {

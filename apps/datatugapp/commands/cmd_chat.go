@@ -440,11 +440,7 @@ func loadChatJoinApplication(ctx context.Context, sourceURL string, executor *se
 	if err != nil {
 		return nil, nil, err
 	}
-	closeDB := func() {
-		if closer, ok := metadataDB.(io.Closer); ok {
-			_ = closer.Close()
-		}
-	}
+	closeDB := dbcopy.SourceCloser(metadataDB)
 	refresh := func(ctx context.Context) (chat.ForeignKeySnapshot, error) {
 		return joinmeta.LoadForeignKeySnapshot(ctx, metadataDB, sourceURL)
 	}

@@ -125,26 +125,29 @@ func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, er
 		}
 		return dbcopy.LocalSourceURL("ingitdb", path), nil
 	case DriverCouchDB:
-		// A CouchDB catalog records its endpoint (host, port and one database) and
-		// nothing else: credentials live in DATATUG_COUCHDB_* in the operator's
-		// environment. A project is not trusted, so Parse revalidates the endpoint
-		// and refuses credentials, a query, a fragment or a non-CouchDB scheme
-		// before the URL is opened. An env:NAME path is refused here: a catalog
-		// records the endpoint, not a variable that could name another service.
-		if catalog.Path == "" {
-			return "", fmt.Errorf("catalog %q has no endpoint configured for its couchdb driver", catalog.ID)
+		// A CouchDB catalog records a connection descriptor (a project file that
+		// names an environment variable and nothing else), exactly as a PostgreSQL
+		// catalog does. The endpoint itself comes only from the operator's
+		// environment, so a project cannot point the operator's CouchDB credentials
+		// at a host of its own choosing; a project that records a literal endpoint
+		// is refused before anything is opened.
+		source, err := couchDBDescriptorSource(catalog, projDir)
+		if err != nil {
+			return "", err
 		}
-		if strings.HasPrefix(catalog.Path, "env:") {
-			return "", fmt.Errorf("catalog %q must record a couchdb://HOST/DATABASE endpoint, not an environment variable", catalog.ID)
-		}
-		ref, err := dbcopyParse(catalog.Path)
+		// Resolving the variable refuses one that is not set, and the scheme check
+		// refuses a variable that holds another engine: a catalog labelled couchdb
+		// whose variable held a postgres or http source would otherwise be opened as
+		// that engine while policy naming still used the couchdb label. No error
+		// names the value, only the variable and the scheme.
+		ref, err := dbcopyParse(source)
 		if err != nil {
 			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
 		}
 		if !dbcopy.IsCouchDBScheme(ref.Scheme) {
-			return "", fmt.Errorf("catalog %q must record a couchdb://HOST/DATABASE endpoint, not a %s source", catalog.ID, ref.Scheme)
+			return "", fmt.Errorf("catalog %q: environment variable %s must hold a couchdb:// URL, not a %s source", catalog.ID, strings.TrimPrefix(source, "env:"), ref.Scheme)
 		}
-		return ref.CouchDBSourceURL(), nil
+		return source, nil
 	case "firestore", DriverPostgres, DriverMySQL, DriverOracle, DriverSQLServer:
 		// The catalog's path names a connection descriptor, a project file that
 		// names an environment variable and nothing else; the variable holds the
@@ -194,6 +197,34 @@ func postgresDescriptorSource(catalog datatug.DbCatalog, projDir string) (string
 		var pathErr *fs.PathError
 		if errors.As(err, &pathErr) {
 			return "", sourceLookupFailed("catalog %q: the "+dbcopy.ServerTitle(catalog.Driver)+" connection descriptor cannot be read", "catalog %q", err, catalog.ID)
+		}
+		return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
+	}
+	return descriptor.SourceURL(), nil
+}
+
+// couchDBDescriptorSource is the source "env:NAME" that the connection descriptor of a CouchDB
+// catalog names: the catalog's path is a descriptor inside the project folder
+// (ResolveDescriptorPath), a project file that names an environment variable and nothing else. The
+// endpoint is read from that variable only when the source is opened; the project can neither hold
+// a literal endpoint nor pick an arbitrary variable (CheckDescriptorEnvName). The variable is not
+// read here, so the source is returned for a variable that is not set (opening it says so).
+func couchDBDescriptorSource(catalog datatug.DbCatalog, projDir string) (string, error) {
+	if catalog.Path == "" {
+		return "", fmt.Errorf("catalog %q has no connection descriptor path configured for its couchdb driver", catalog.ID)
+	}
+	path, err := ResolveDescriptorPath(projDir, catalog.Path)
+	if err != nil {
+		return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
+	}
+	descriptor, err := dbcopy.ReadCouchDBDescriptor(path)
+	if err != nil {
+		// A descriptor that is not there, is a folder or cannot be read fails with the
+		// text of the operating system, which quotes the path of the file in the served
+		// project: the answer for a client is built from the ID of the catalog.
+		var pathErr *fs.PathError
+		if errors.As(err, &pathErr) {
+			return "", sourceLookupFailed("catalog %q: the CouchDB connection descriptor cannot be read", "catalog %q", err, catalog.ID)
 		}
 		return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
 	}

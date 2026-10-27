@@ -51,4 +51,7 @@ var (
 	outputSort                   = func(s resultops.Snapshot, order []resultops.SortKey) ([]int, error) { return s.Sort(order) }
 	dalExecuteRecursiveQuery     = dal.ExecuteRecursiveQuery
 	tugqlDeserialize             = tugql.Deserialize
+	// openSourceFn is openSource, a seam so a test can hand the executor an
+	// owned handle whose Close is observable (the CouchDB/PostgREST shape).
+	openSourceFn = openSource
 )

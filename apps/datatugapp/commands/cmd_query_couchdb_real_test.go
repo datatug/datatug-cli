@@ -176,13 +176,95 @@ func TestCouchDBQueryJourney(t *testing.T) {
 	seedCouchDB(t, fixture)
 	fixture.useReader(t)
 
-	// A bounded --from read (--limit is explicit here, so the exploration default
-	// is not involved) is still refused by the current adapter for lack of a
-	// selector and order a Mango index can serve. This is the adapter's temporary
-	// limitation, not a claim that a bounded primary read must fail; it stays
-	// explicit rather than falling back to a full scan.
-	t.Run("bounded-from-without-filter-or-order-is-refused", func(t *testing.T) {
+	// A bounded --from read has no filter, so the adapter serves it from
+	// CouchDB's native _all_docs primary index: five native documents in _id
+	// order. The fixture's read-only _design document sorts before every
+	// application document and is management metadata, so it must be excluded
+	// without consuming a result slot; that is why the expected five are native
+	// records and not the first five physical rows.
+	t.Run("bounded-from-enumerates-the-primary-index", func(t *testing.T) {
 		stdout, stderr, code := runQuery(t, "", "--db", fixture.source, "--from", fixture.database, "--limit", "5", "--format", "json", "--no-policies")
+		if code != 0 {
+			t.Fatalf("exit %d: %s", code, stderr)
+		}
+		rows := decodeObjects(t, stdout)
+		if len(rows) != 5 {
+			t.Fatalf("rows = %d, want the 5 requested native records: %v", len(rows), rows)
+		}
+		wantIDs := []string{"archived-000", "archived-001", "archived-002", "archived-003", "archived-004"}
+		for i, want := range wantIDs {
+			if rows[i]["$key"] != want {
+				t.Fatalf("row %d key = %v, want %s in native _id order", i, rows[i]["$key"], want)
+			}
+			if rows[i]["name"] != fmt.Sprintf("Archived %03d", i) || rows[i]["status"] != "archived" {
+				t.Fatalf("row %d = %v", i, rows[i])
+			}
+			if rows[i]["ownerID"] != "alice" || rows[i]["score"] != float64(1000+i) {
+				t.Fatalf("row %d projections = %v", i, rows[i])
+			}
+		}
+	})
+
+	// A --from read with no --limit gets the visible exploration bound instead of
+	// an unbounded scan, and that bound is now a real page budget: 180 seeded
+	// documents are read as several primary-index pages.
+	t.Run("from-without-limit-uses-the-visible-default-bound", func(t *testing.T) {
+		stdout, stderr, code := runQuery(t, "", "--db", fixture.source, "--from", fixture.database, "--format", "json", "--no-policies")
+		if code != 0 {
+			t.Fatalf("exit %d: %s", code, stderr)
+		}
+		rows := decodeObjects(t, stdout)
+		if len(rows) != couchDBSourceDefaultLimit {
+			t.Fatalf("rows = %d, want the default bound %d", len(rows), couchDBSourceDefaultLimit)
+		}
+		if !strings.Contains(stderr, fmt.Sprintf("reading at most %d rows", couchDBSourceDefaultLimit)) {
+			t.Fatalf("stderr must state the default bound: %q", stderr)
+		}
+	})
+
+	// A projection with no filter is the same primary-index read: the declared
+	// columns are returned, _id stays the record key and nothing undeclared is
+	// exposed.
+	t.Run("unfiltered-projection-is-served-by-the-primary-index", func(t *testing.T) {
+		query := `from: {name: ` + fixture.database + `}
+columns:
+  - {field: _id}
+  - {field: name}
+limit: 3
+`
+		stdout, stderr, code := runQuery(t, query, "--db", fixture.source, "-f", "-", "--format", "json", "--no-policies")
+		if code != 0 {
+			t.Fatalf("exit %d: %s", code, stderr)
+		}
+		rows := decodeObjects(t, stdout)
+		if len(rows) != 3 || rows[0]["$key"] != "archived-000" || rows[0]["name"] != "Archived 000" {
+			t.Fatalf("rows = %v", rows)
+		}
+		for _, row := range rows {
+			if _, found := row["secret"]; found {
+				t.Fatalf("an undeclared field was returned: %v", row)
+			}
+			if _, found := row["_rev"]; found {
+				t.Fatalf("_rev must not be exposed unless declared: %v", row)
+			}
+		}
+	})
+
+	// A filter keeps the Mango path: no index serves this predicate, so the read
+	// is refused explicitly instead of being served by the primary scan that the
+	// filter was never allowed to use.
+	t.Run("filtered-read-without-a-served-index-is-refused", func(t *testing.T) {
+		query := `from: {name: ` + fixture.database + `}
+columns:
+  - {field: _id}
+  - {field: name}
+where:
+  op: ==
+  left: {field: kind}
+  right: {value: order}
+limit: 3
+`
+		stdout, stderr, code := runQuery(t, query, "--db", fixture.source, "-f", "-", "--format", "json", "--no-policies")
 		if code != exitCodeDatabase {
 			t.Fatalf("exit %d, want %d: %s", code, exitCodeDatabase, stderr)
 		}
@@ -288,10 +370,16 @@ limit: 2
 	})
 }
 
+// couchDBProjectEndpointEnv is the operator variable a saved CouchDB project
+// names through its connection descriptor. The endpoint itself is never written
+// into the project.
+const couchDBProjectEndpointEnv = "DATATUG_TEST_COUCHDB_ORDERS"
+
 func TestCouchDBSavedQueryAndPolicyJourney(t *testing.T) {
 	fixture := requireCouchDBRealFixture(t)
 	seedCouchDB(t, fixture)
 	fixture.useReader(t)
+	t.Setenv(couchDBProjectEndpointEnv, fixture.source)
 	projectDir := writeCouchDBProject(t, fixture)
 
 	policy := `apiVersion: dalgo.io/access/v1
@@ -392,16 +480,39 @@ limit: 2
 			t.Fatalf("Mango indexes = %v", names)
 		}
 	})
+
+	t.Run("literal-endpoint-in-a-project-is-refused-before-io", func(t *testing.T) {
+		unsafeProject := writeCouchDBProject(t, fixture)
+		catalogPath := filepath.Join(unsafeProject, "environments", "local", "catalogs", "orders", "orders.db.json")
+		if err := os.WriteFile(catalogPath, []byte(fmt.Sprintf(`{"driver":"couchdb","path":%q,"dbModel":"orders"}`, fixture.source)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		stdout, stderr, code := runQuery(t, "", "--project", unsafeProject, "--query", "orders/top", "--env", "local", "--as", "alice", "--format", "json")
+		if code == 0 {
+			t.Fatalf("a project that records a literal endpoint was accepted: %s", stdout)
+		}
+		if strings.TrimSpace(stdout) != "" {
+			t.Fatalf("a refused project printed rows: %q", stdout)
+		}
+		if !strings.Contains(stderr, "catalog path is a URL") && !strings.Contains(stderr, "connection descriptor") {
+			t.Fatalf("stderr should name the descriptor rule: %q", stderr)
+		}
+		if strings.Contains(stderr, fixture.readerPass) || strings.Contains(stderr, fixture.adminPassword) {
+			t.Fatalf("stderr leaks a credential: %q", stderr)
+		}
+	})
 }
 
 // writeCouchDBProject writes the minimal project files a saved query needs: the
-// catalog records the endpoint (never a credential) and the query names the one
+// catalog records a connection descriptor that names an operator environment
+// variable (never the endpoint or a credential), and the query names the one
 // logical collection.
 func writeCouchDBProject(t *testing.T, fixture couchDBRealFixture) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "couch-project")
 	for _, folder := range []string{
 		filepath.Join(dir, "environments", "local", "catalogs", "orders"),
+		filepath.Join(dir, "connections", "local"),
 		filepath.Join(dir, "queries", "orders"),
 	} {
 		if err := os.MkdirAll(folder, 0o755); err != nil {
@@ -416,7 +527,8 @@ func writeCouchDBProject(t *testing.T, fixture couchDBRealFixture) string {
 	}
 	write("datatug-project.json", `{"id":"couch-project","title":"CouchDB project"}`)
 	write("environments/local/local.env.json", `{"id":"local","dbServers":[{"driver":"couchdb","catalogs":["orders"]}]}`)
-	write("environments/local/catalogs/orders/orders.db.json", fmt.Sprintf(`{"driver":"couchdb","path":%q,"dbModel":"orders"}`, fixture.source))
+	write("connections/local/orders.json", `{"dsnEnv":"`+couchDBProjectEndpointEnv+`"}`)
+	write("environments/local/catalogs/orders/orders.db.json", `{"driver":"couchdb","path":"connections/local/orders.json","dbModel":"orders"}`)
 	write("queries/orders/top.query.json", `{"id":"orders/top","title":"Top orders","type":"TugQL","createdAt":"2026-01-01T00:00:00Z","targets":[{"catalog":"orders"}]}`)
 	write("queries/orders/top.query.tugql.yaml", `from: {name: `+fixture.database+`}
 columns:

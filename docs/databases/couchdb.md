@@ -19,9 +19,10 @@ export DATATUG_COUCHDB_ORDERS='couchdb://couch.example.com:6984/orders'
 datatug query run --db env:DATATUG_COUCHDB_ORDERS -f orders.tugql.yaml --no-policies --format json
 ```
 
-A CouchDB read needs a Mango index, so a CouchDB query is normally a `-f` file
-with a filter and an order (see [Queries](#queries)); a bare `--from` read is
-refused explicitly rather than silently scanning.
+A filtered CouchDB read needs a Mango index, so such a query is normally a `-f`
+file with a filter and an order (see [Queries](#queries)). An unfiltered read — a
+bare `--from`, or a `-f` file with no `where` — is served by CouchDB's native
+`_all_docs` primary index instead and needs no index.
 
 The URI contract is:
 
@@ -81,29 +82,42 @@ direction; offset; and a positive limit. `_id` is materialized as the record
 key and `$key` in output. An explicitly declared `_id` or `_rev` is exposed;
 an undeclared `_rev` is not.
 
-CouchDB query results must be served by a real Mango index. DataTug never
-enables CouchDB's `allow_fallback`, never falls back to a full `_all_docs`
-scan, and never creates an index. Create indexes with your deployment tooling:
-the index a query needs is the one whose fields cover its selector and sort
-(for example a `score` index for `orderBy` on `score`). An index set that
-includes a broader compound index than the query needs can change Mango's
-choice; check the query with your actual indexes.
+A **filtered** CouchDB query must be served by a real Mango index. DataTug never
+enables CouchDB's `allow_fallback`, never reroutes a predicate to `_all_docs`, and
+never creates an index. Create indexes with your deployment tooling: the index a
+query needs is the one whose fields cover its selector and sort (for example a
+`score` index for `orderBy` on `score`). An index set that includes a broader
+compound index than the query needs can change Mango's choice; check the query
+with your actual indexes.
 
-Because of that rule, a bare `query run --from` read is refused explicitly: it
-has no selector or sort that a Mango index can serve, and reading around that
-would silently omit documents. The same refusal currently applies to a bounded
-`--from` read (`--limit N`): a limit does not by itself give Mango an index to
-serve, and this adapter does not yet read a bounded primary range. That
-bounded-primary-read gap is tracked separately; the refusal stays explicit
-rather than being hidden behind a full scan. For exploration, give the query a
-filter and an order in a `-f` file, and a limit. When `--from` is used anyway,
-CouchDB reads get a visible default bound of 100 (`--limit` overrides it) before
-the index refusal is reported; an explicit `--limit 0` stays explicit and fails
-rather than being replaced.
+A query with **no filter** is different: it is read deliberately from CouchDB's
+native `_all_docs` primary index, so it works on an unindexed database and needs
+no Mango index at all. That covers a bare `--from` read, and a `-f` file whose
+only structure is a projection, a limit, an offset and (optionally) an `_id`
+order:
 
-Pages inside one query use CouchDB bookmarks, so a limit larger than the
-adapter's page size (100 by default) is read as several physical Mango pages.
-The adapter caps a query at 1000 rows, 20 pages, 10000 offset, 4 MiB per
+```sh
+datatug query run --db env:DATATUG_COUCHDB_ORDERS --from orders --limit 5 --no-policies --format json
+```
+
+- Records come back in native `_id` order (ascending, or descending for
+  `orderBy: [{field: _id, desc: true}]`), `_id` as the record key / `$key`.
+- Design (`_design/...`) and other management documents, and deleted documents,
+  are excluded **before** the offset and the limit, so they never consume a
+  result slot.
+- Pages use the native `_id` as an inclusive continuation key and are bounded by
+  the same page, row and byte budgets as a Mango read.
+- This is not a fallback: a query with any `where` predicate stays on Mango and
+  is refused when no index serves it.
+
+Because the adapter requires a positive bounded limit, an exploration `--from`
+read with no `--limit` gets a visible default bound of 100 instead. An explicit
+`--limit 0` stays explicit and fails rather than being replaced.
+
+Pages inside one query stay bounded: a Mango read continues with CouchDB
+bookmarks and a primary-index read continues with the native `_id`, so a limit
+larger than the adapter's page size (100 by default) is read as several physical
+pages. The adapter caps a query at 1000 rows, 20 pages, 10000 offset, 4 MiB per
 response and 16 MiB per operation by default. Exceeding any bound fails.
 
 Not supported: joins, grouping, aggregation, `HAVING`, subqueries, wildcard or
@@ -116,22 +130,37 @@ use an explicit `field == null` comparison for explicit nulls, or
 
 ## Saved queries and access policies
 
-A CouchDB catalog records the endpoint (never a credential) as its path:
+A CouchDB catalog records a connection descriptor, never an endpoint and never a
+credential. The descriptor names the operator's environment variable, and the
+endpoint itself is read only from that variable when the source is opened:
 
 ```json
 {
   "driver": "couchdb",
-  "path": "couchdb://couch.example.com:6984/orders",
+  "path": "connections/local/orders.json",
   "dbModel": "orders"
 }
 ```
 
+```json
+{
+  "dsnEnv": "DATATUG_COUCHDB_ORDERS"
+}
+```
+
 `datatug query run --project <dir> --query <id>` resolves that catalog through
-the same `api.ResolveCatalogSourceURL` path as the other providers, revalidates
-the endpoint, and does not read credentials from the project. DataTug access
-policies work on the one logical collection (the database name); a policy can
-allow rows by a condition and allow-list the fields a query may select, filter
-or sort. There is no CouchDB-specific policy bypass.
+the same `api.ResolveCatalogSourceURL` path as the other providers: it reads the
+descriptor from inside the project, rejects a literal endpoint or an
+`env:`/URL-shaped path, applies the same `DATATUG_*`/`DATATUG_DSN_ENV_ALLOW`
+variable-name rule as a PostgreSQL descriptor, and refuses a variable that is
+not set or that holds another scheme before any request is made. A cloned
+project therefore cannot point the operator's CouchDB credentials at a host of
+its own choosing. Credentials still come from the operator's CouchDB variables;
+the project never holds them.
+
+DataTug access policies work on the one logical collection (the database name);
+a policy can allow rows by a condition and allow-list the fields a query may
+select, filter or sort. There is no CouchDB-specific policy bypass.
 
 CouchDB catalogs do not change the hosted API's admission or SSRF rules; this
 is trusted native CLI configuration, not a new hosted proxy.
@@ -142,7 +171,18 @@ The generic `dbschema.SchemaReader` reports the one configured collection, its
 native `_id` primary key and real Mango indexes. Native CouchDB documents
 declare no field schema, so the scan reports the collection with no columns
 instead of sampling documents; SQL constraints and foreign keys are reported
-as unavailable. A scan needs read access to `_index`.
+as unavailable. A scan needs read access to `_index`. When a scan saves a
+catalog it writes only `connections/<env>/<db>.json` naming the operator's
+variable, exactly as a PostgreSQL scan does, so the saved catalog is the same
+safe descriptor a saved query resolves:
+
+```sh
+export DATATUG_COUCHDB_ORDERS='couchdb://couch.example.com:6984/orders'
+datatug scan -D couchdb --dsn-env DATATUG_COUCHDB_ORDERS --db orders --env LOCAL -d ./project
+```
+
+The scan records the driver and the descriptor path, never the endpoint's host,
+port or credentials.
 
 ## Test fixture
 
@@ -152,6 +192,13 @@ as unavailable. A scan needs read access to `_index`.
 
 The script starts its own `apache/couchdb:3.5.3` container (pinned by digest) on
 a random loopback port under a unique `datatug-cli-couchdb-<run>` name, creates
-a database and a least-privilege reader, runs the Go command-path journey, and
-runs the built `datatug` binary against the same fixture. The container is
+a database and a least-privilege reader, and installs a `validate_doc_update`
+that makes the database server-enforced read-only for every non-admin writer.
+It then proves the reader's write is refused with a real `403`, runs the Go
+command-path journey (seeding only through the admin account, which the
+validation function lets through), and runs the built `datatug` binary against
+the same fixture: a saved query that resolves the descriptor, a filtered query a
+seeded Mango index serves, a bounded native primary-index read (whose
+`_design` document must not consume a slot), the default-bounded `--from` read,
+and a filtered query no index serves, which must be refused. The container is
 removed when the script ends.

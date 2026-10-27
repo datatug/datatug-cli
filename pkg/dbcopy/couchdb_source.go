@@ -190,8 +190,10 @@ var newCouchDBDatabase = dalgo2couchdb.NewDB
 // openCouchDB opens the one database of the ref through the CouchDB adapter. The
 // adapter is read-only: a copy destination is refused before any request. The
 // protected mode needs no provider-side option of its own — the adapter never
-// writes and always requires a usable Mango index, so an outer access-policy
-// wrapper remains the one place a row or a column can be withheld.
+// writes, a filtered query must be served by a real Mango index (a predicate is
+// never rerouted to a scan), and only an unfiltered read enumerates CouchDB's
+// native primary index — so an outer access-policy wrapper remains the one place
+// a row or a column can be withheld.
 func openCouchDB(ctx context.Context, r BackendRef, mode openMode) (dal.DB, error) {
 	if mode.forWrite {
 		return nil, &refusedError{"CouchDB sources are read-only; copying into CouchDB is unavailable"}
@@ -236,7 +238,7 @@ func couchDBFailureReason(err error) string {
 	case errors.Is(err, dalgo2couchdb.ErrDatabaseNotFound):
 		return "the CouchDB database was not found"
 	case errors.Is(err, dalgo2couchdb.ErrIndexRequired):
-		return "the query needs a usable CouchDB Mango index; create one outside DataTug (the adapter never creates or falls back to a full scan)"
+		return "the query needs a usable CouchDB Mango index because it has a filter; create one outside DataTug (the adapter never creates an index, and a predicate never falls back to the primary-index scan)"
 	case errors.Is(err, dalgo2couchdb.ErrHeaderProvider):
 		return "the CouchDB credential environment variables are incomplete or incompatible"
 	case errors.Is(err, dalgo2couchdb.ErrRequestTooLarge), errors.Is(err, dalgo2couchdb.ErrResponseTooLarge), errors.Is(err, dalgo2couchdb.ErrRowTooLarge), errors.Is(err, dalgo2couchdb.ErrTooManyRows), errors.Is(err, dalgo2couchdb.ErrTooManyPages):

@@ -273,8 +273,9 @@ func querySourceURLFromCatalog(catalog datatug.DbCatalog, projectDir string) (st
 		}
 		return dbcopy.LocalSourceURL("ingitdb", path), nil
 	case "firestore", api.DriverPostgres, api.DriverMySQL, api.DriverOracle, api.DriverSQLServer, api.DriverCouchDB:
-		// The catalog's path is a connection descriptor or a CouchDB endpoint; the
-		// source is a value pkg/api builds and validates, never a credential.
+		// The catalog's path is a connection descriptor that names an operator
+		// environment variable; the source is a value pkg/api builds and validates,
+		// never an endpoint or a credential held by the project.
 		return api.ResolveCatalogSourceURL(catalog, projectDir)
 	default:
 		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3, ingitdb, postgres, mysql, oracle, sqlserver, firestore or couchdb)", catalog.Driver)

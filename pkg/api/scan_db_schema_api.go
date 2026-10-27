@@ -53,7 +53,10 @@ func loggedTarget(params dbconnection.Params) string {
 // connection URL that stays in an environment variable: a project is pushed to places the
 // URL must never reach, so its server is the driver and nothing else.
 func serverHasHost(driver string) bool {
-	return driver != dbconnection.DriverSQLite3 && !IsServerDriver(driver)
+	// CouchDB, like PostgreSQL, is reached through a connection descriptor: the
+	// project records the descriptor and the driver, never an endpoint. Non-secret
+	// host metadata may still be shown, but it must not become the bound source.
+	return driver != dbconnection.DriverSQLite3 && driver != DriverCouchDB && !IsServerDriver(driver)
 }
 
 // ScannedServer is the server a scan of driver with dbConnParams reads, as the project
@@ -231,9 +234,8 @@ func updateProjectWithDbCatalog(project *datatug.Project, envID string, dbServer
 		for j, db := range projDbServer.Catalogs {
 			if db.ID == dbCatalog.ID {
 				// restore path as path might be normalized if pointing to user's directory.
-				// A PostgreSQL catalog's path is the connection descriptor the scan is writing
-				// now: the catalog and the descriptor are updated together, never apart.
-				// A CouchDB catalog's path is its endpoint, which a rescan may have to update.
+				// A PostgreSQL or CouchDB catalog's path is the connection descriptor the scan is
+				// writing now: the catalog and the descriptor are updated together, never apart.
 				if !IsServerDriver(dbServerRef.Driver) && dbServerRef.Driver != DriverCouchDB {
 					dbCatalog.Path = projDbServer.Catalogs[j].Path
 				}

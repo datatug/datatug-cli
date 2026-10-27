@@ -346,6 +346,11 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		// the variable of an env:NAME source).
 		return Exit(backend.OpenFailure(err).Error(), exitCodeDatabase)
 	}
+	// This command owns the handle it just opened: release it on success, a
+	// query failure after open, cancellation, or a write failure. A cached
+	// PostgreSQL handle's Close is a no-op; a CouchDB/PostgREST transport is
+	// released through DALgo's optional-capability lookup.
+	defer dbcopy.CloseSource(db)
 	if o.from != "" && (o.limit > 0 || o.offset > 0) {
 		query = fromQuery(o, pagingOrder(ctx, db, backend.Scheme, o.from))
 	}
@@ -375,20 +380,20 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		_, _ = fmt.Fprintln(stderr, provenanceLine(prov))
 	}
 	if err != nil {
-		return queryFailureFor(o, backend, err)
+		return queryFailureFor(backend, err)
 	}
 	if o.sink != nil {
 		if provOK {
 			o.sink.meta.Provenance = resultProvenance(prov)
 		}
 		if err = o.sink.collectAndWrite(cmd.OutOrStdout(), result.Reader, result.Query); err != nil {
-			return queryFailureFor(o, backend, err)
+			return queryFailureFor(backend, err)
 		}
 		return nil
 	}
 	rows, err := collectRows(result.Reader)
 	if err != nil {
-		return queryFailureFor(o, backend, err)
+		return queryFailureFor(backend, err)
 	}
 	columns, err := rowColumns(result.Query, rows)
 	if err != nil {
@@ -418,13 +423,14 @@ func provenanceLine(prov dalgo2http.Provenance) string {
 	return fmt.Sprintf("source: live %s (%s)", prov.Collection, fetchedAt.Format(time.RFC3339))
 }
 
-// queryFailureFor is queryFailure with what only a CouchDB --from read can say:
-// the adapter refuses a read no Mango index serves rather than falling back to a
-// full scan, and a bare --from read has no selector or sort to serve one. The
-// refusal stays explicit; it is never turned into a partial result.
-func queryFailureFor(o queryOptions, backend dbcopy.BackendRef, err error) error {
-	if o.from != "" && dbcopy.IsCouchDBScheme(backend.Scheme) && dbcopy.IsCouchDBIndexRequired(err) {
-		return Exit("CouchDB requires a Mango index, and --from has no filter or order to serve one: the read is refused rather than falling back to a full scan that could hide documents. Create an index outside DataTug and use -f with a filter and order that index serves.", exitCodeDatabase)
+// queryFailureFor is queryFailure with what only a CouchDB index refusal can
+// say: the adapter refuses a filtered read that no Mango index serves rather
+// than falling back to a full scan that could hide documents. The refusal stays
+// explicit; it is never turned into a partial result. An unfiltered read does
+// not reach this: it is served by CouchDB's native primary index.
+func queryFailureFor(backend dbcopy.BackendRef, err error) error {
+	if dbcopy.IsCouchDBScheme(backend.Scheme) && dbcopy.IsCouchDBIndexRequired(err) {
+		return Exit("CouchDB requires a Mango index for a filtered query: the read is refused rather than falling back to a full scan that could hide documents. Create an index outside DataTug that covers the filter and the order, then run the query again.", exitCodeDatabase)
 	}
 	return queryFailure(err)
 }

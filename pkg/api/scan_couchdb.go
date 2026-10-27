@@ -16,16 +16,19 @@ import (
 
 // CouchDBScanParams are the connection parameters of a CouchDB scan. The endpoint
 // (host, port and one database) is read from an environment variable named by
-// --dsn-env; its value is never printed or written to a project. The catalog
-// records the endpoint URL without credentials. Credentials themselves are read
-// from DATATUG_COUCHDB_USERNAME/PASSWORD or DATATUG_COUCHDB_BEARER for each
+// --dsn-env; its value is never printed or written to a project. The project
+// records only a connection descriptor that names that variable
+// (connections/<env>/<catalog>.json), exactly as a PostgreSQL catalog does, so
+// a saved project never holds an executable endpoint. Credentials themselves are
+// read from DATATUG_COUCHDB_USERNAME/PASSWORD or DATATUG_COUCHDB_BEARER for each
 // request by the adapter, exactly as they are for `query run`.
 type CouchDBScanParams struct {
-	dsnEnv  string
-	catalog string
-	ref     dbcopy.BackendRef
-	host    string
-	port    int
+	dsnEnv         string
+	catalog        string
+	ref            dbcopy.BackendRef
+	host           string
+	port           int
+	descriptorPath string
 }
 
 var _ dbconnection.Params = (*CouchDBScanParams)(nil)
@@ -45,10 +48,19 @@ func NewCouchDBScanParams(lookupEnv func(string) (string, bool), dsnEnv, environ
 		return nil, fmt.Errorf("environment %q and database %q must each be a plain name to be recorded in a project", dbcopy.SourceIDDisplay(environment), dbcopy.SourceIDDisplay(catalog))
 	}
 	host, port := couchDBScanTarget(ref)
-	return &CouchDBScanParams{dsnEnv: dsnEnv, catalog: catalog, ref: ref, host: host, port: port}, nil
+	return &CouchDBScanParams{
+		dsnEnv:         dsnEnv,
+		catalog:        catalog,
+		ref:            ref,
+		host:           host,
+		port:           port,
+		descriptorPath: ConnectionDescriptorPath(environment, catalog),
+	}, nil
 }
 
-// couchDBScanTarget is the host and the port a project records for the endpoint.
+// couchDBScanTarget is the host and the port of the endpoint, exposed as
+// non-secret metadata through dbconnection.Params. The project itself records
+// only the connection descriptor, never this endpoint.
 func couchDBScanTarget(ref dbcopy.BackendRef) (host string, port int) {
 	host, portText, err := net.SplitHostPort(ref.CouchDBHost)
 	if err == nil {
@@ -94,9 +106,19 @@ func (p *CouchDBScanParams) LogTarget() string {
 	return "the CouchDB endpoint is read from the environment variable " + p.dsnEnv
 }
 
-// Path is the catalog path the scan records: the endpoint URL, without
-// credentials, a query or a fragment.
-func (p *CouchDBScanParams) Path() string { return p.ref.CouchDBSourceURL() }
+// Path is the project-relative path of the connection descriptor the scan
+// writes, which UpdateDbSchema records as the catalog's path: only the name of
+// the environment variable, never the endpoint or a credential.
+func (p *CouchDBScanParams) Path() string { return p.descriptorPath }
+
+// WriteDescriptor writes the CouchDB connection descriptor into projectDir: a
+// file that names the environment variable and nothing else, using the same
+// plain-file rules as a PostgreSQL descriptor (see
+// PostgresScanParams.WriteDescriptor). It replaces a descriptor already there,
+// and returns the function that takes the write back for a failed save.
+func (p *CouchDBScanParams) WriteDescriptor(projectDir string) (undo func() error, err error) {
+	return writeDescriptorFile(projectDir, p.descriptorPath, p.dsnEnv)
+}
 
 // SourceRef is the source the scan opens: an "env:NAME" ref whose Path holds the
 // real endpoint. Only the open path reads Path.

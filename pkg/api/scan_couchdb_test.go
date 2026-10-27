@@ -2,6 +2,9 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -30,9 +33,23 @@ func TestNewCouchDBScanParams(t *testing.T) {
 	assert.Equal(t, "", params.User(), "credentials are separate from the endpoint")
 	assert.Equal(t, "env:DATATUG_TEST_COUCHDB", params.ConnectionString())
 	assert.Equal(t, "env:DATATUG_TEST_COUCHDB", params.String())
-	assert.Equal(t, "couchdb+http://127.0.0.1:5984/orders", params.Path())
+	assert.Equal(t, "connections/local/orders.json", params.Path(), "a project records the descriptor, never the endpoint")
 	assert.NotContains(t, params.LogTarget(), "127.0.0.1")
 	assert.Equal(t, "env:DATATUG_TEST_COUCHDB", params.SourceRef().Raw)
+
+	// The descriptor the scan writes names the variable and nothing else.
+	dir := t.TempDir()
+	undo, err := params.WriteDescriptor(dir)
+	require.NoError(t, err)
+	body, err := os.ReadFile(filepath.Join(dir, "connections", "local", "orders.json"))
+	require.NoError(t, err)
+	var written map[string]any
+	require.NoError(t, json.Unmarshal(body, &written))
+	assert.Equal(t, map[string]any{"dsnEnv": "DATATUG_TEST_COUCHDB"}, written)
+	assert.NotContains(t, string(body), "127.0.0.1")
+	require.NoError(t, undo())
+	_, err = os.Stat(filepath.Join(dir, "connections", "local", "orders.json"))
+	assert.ErrorIs(t, err, os.ErrNotExist)
 }
 
 func TestNewCouchDBScanParamsRefusesAWrongSourceOrName(t *testing.T) {
@@ -149,25 +166,93 @@ type testConnectionError struct{ message string }
 func (e *testConnectionError) Error() string { return e.message }
 
 func TestSourceURLFromCatalogCouchDB(t *testing.T) {
-	url, err := sourceURLFromCatalog(datatug.DbCatalog{DbCatalogBase: datatug.DbCatalogBase{
-		ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "orders"}},
-		Driver:      DriverCouchDB,
-		Path:        "couchdb+http://127.0.0.1:5984/orders",
-	}}, t.TempDir())
-	require.NoError(t, err)
-	assert.Equal(t, "couchdb+http://127.0.0.1:5984/orders", url)
+	t.Setenv(dbcopy.DescriptorEnvAllowList, "")
+	dir := t.TempDir()
+	writeDescriptor(t, dir, "connections/local/orders.json", `{"dsnEnv":"DATATUG_COUCHDB_ORDERS"}`)
+	t.Setenv("DATATUG_COUCHDB_ORDERS", "couchdb+http://127.0.0.1:5984/orders")
+	catalog := func(path string) datatug.DbCatalog {
+		return datatug.DbCatalog{DbCatalogBase: datatug.DbCatalogBase{
+			ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "orders"}},
+			Driver:      DriverCouchDB,
+			Path:        path,
+		}}
+	}
 
-	for _, tc := range []struct{ path, want string }{
-		{"", "no endpoint"},
-		{"env:DATATUG_COUCHDB", "not an environment variable"},
-		{"postgres://db.example.com/shop", "not a postgres source"},
-		{"couchdb://reader:secret@db.example.com/orders", "credentials are not supported"},
-		{"couchdb://db.example.com/a/b", "database name must be one CouchDB database name"},
+	// A descriptor names the operator's variable; the endpoint is read from the
+	// environment only when the source is opened.
+	url, err := sourceURLFromCatalog(catalog("connections/local/orders.json"), dir)
+	require.NoError(t, err)
+	assert.Equal(t, "env:DATATUG_COUCHDB_ORDERS", url)
+	assert.NotContains(t, url, "127.0.0.1")
+
+	// A project that records a literal endpoint (or an env reference) is refused
+	// before the URL parser or the environment is read: it never reaches I/O.
+	originalParse := dbcopyParse
+	t.Cleanup(func() { dbcopyParse = originalParse })
+	dbcopyParse = func(raw string) (dbcopy.BackendRef, error) {
+		t.Fatalf("a literal catalog path reached the URL parser: %q", raw)
+		return dbcopy.BackendRef{}, nil
+	}
+	for _, literal := range []string{
+		"couchdb+http://evil.example.com/orders",
+		"couchdb://reader:s3cret@evil.example.com/orders",
+		"env:DATATUG_COUCHDB_ORDERS",
+		"postgres://evil.example.com/shop",
 	} {
-		_, err = sourceURLFromCatalog(datatug.DbCatalog{DbCatalogBase: datatug.DbCatalogBase{Driver: DriverCouchDB, Path: tc.path}}, t.TempDir())
-		require.Error(t, err, tc.path)
-		assert.Contains(t, err.Error(), tc.want)
-		assert.NotContains(t, err.Error(), "secret")
+		_, err = sourceURLFromCatalog(catalog(literal), dir)
+		require.Error(t, err, literal)
+		assert.NotContains(t, err.Error(), "s3cret")
+	}
+	dbcopyParse = originalParse
+
+	// A variable that holds another engine is refused by scheme before any
+	// authenticated request.
+	writeDescriptor(t, dir, "connections/local/pg.json", `{"dsnEnv":"DATATUG_COUCHDB_PG"}`)
+	t.Setenv("DATATUG_COUCHDB_PG", "postgres://alice:s3cret@db.example.com/shop")
+	_, err = sourceURLFromCatalog(catalog("connections/local/pg.json"), dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must hold a couchdb:// URL")
+	assert.NotContains(t, err.Error(), "s3cret")
+	assert.NotContains(t, err.Error(), "alice")
+
+	// A variable that is not set is refused when the catalog is resolved.
+	writeDescriptor(t, dir, "connections/local/unset.json", `{"dsnEnv":"DATATUG_COUCHDB_UNSET"}`)
+	_, err = sourceURLFromCatalog(catalog("connections/local/unset.json"), dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "DATATUG_COUCHDB_UNSET is not set")
+
+	// A missing descriptor is reported against the catalog; the route's answer
+	// replaces the path with a fixed sentence (sourceLookupAnswer).
+	_, err = sourceURLFromCatalog(catalog("connections/local/missing.json"), dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `catalog "orders"`)
+	assert.Contains(t, err.Error(), "open CouchDB connection descriptor")
+	assert.Equal(t, `catalog "orders": the CouchDB connection descriptor cannot be read`, sourceLookupAnswer(err).Error())
+
+	// A malformed descriptor (here: a literal password field) is refused, and
+	// neither the field's value nor a credential reaches the message.
+	writeDescriptor(t, dir, "connections/local/bad.json", `{"dsnEnv":"DATATUG_COUCHDB_BAD","password":"s3cret"}`)
+	_, err = sourceURLFromCatalog(catalog("connections/local/bad.json"), dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown CouchDB connection field")
+	assert.NotContains(t, err.Error(), "s3cret")
+
+	// A descriptor may not select a variable the operator did not set aside.
+	writeDescriptor(t, dir, "connections/local/foreign.json", `{"dsnEnv":"PROD_DATABASE_URL"}`)
+	_, err = sourceURLFromCatalog(catalog("connections/local/foreign.json"), dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "PROD_DATABASE_URL")
+	assert.Contains(t, err.Error(), dbcopy.DescriptorEnvPrefix)
+	assert.Contains(t, err.Error(), dbcopy.DescriptorEnvAllowList)
+
+	// Neither a missing descriptor nor a path outside the project is read.
+	_, err = sourceURLFromCatalog(catalog(""), dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no connection descriptor path")
+	for _, outside := range []string{"~/shop.json", "../shop.json", "/etc/shop.json"} {
+		_, err = sourceURLFromCatalog(catalog(outside), dir)
+		require.Error(t, err, outside)
+		assert.NotContains(t, err.Error(), outside)
 	}
 }
 

@@ -54,8 +54,10 @@ run_cleanup_case() {
 		project=owned-fixture-project
 		started=$started_flag
 		compose=(docker compose -p "$project")
-		# The helper invokes this stub indirectly through compose.
-		# shellcheck disable=SC2329
+		# The helper invokes this stub indirectly through compose. SC2317 is the
+		# same indirect-invocation report on the older shellcheck the CI runner
+		# ships (SC2329 superseded it), so both codes stay disabled.
+		# shellcheck disable=SC2329,SC2317
 		docker() {
 			printf '%s\n' "$*" >>"$dir/docker.log"
 			return "$docker_status"

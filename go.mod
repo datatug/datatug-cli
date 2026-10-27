@@ -36,6 +36,7 @@ require (
 	github.com/dal-go/dalgo2openvaultdb v0.4.1
 	github.com/dal-go/dalgo2oracle v0.0.1
 	github.com/dal-go/dalgo2postgres v0.9.4
+	github.com/dal-go/dalgo2redis v0.1.0
 	github.com/dal-go/dalgo2sql v0.30.0
 	github.com/dal-go/dalgo2sqlite v0.4.8
 	github.com/dal-go/record v0.1.5
@@ -61,6 +62,7 @@ require (
 	github.com/openvaultdb/openvaultdb-go v0.26.1
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
 	github.com/posthog/posthog-go v1.24.3
+	github.com/redis/go-redis/v9 v9.7.3
 	github.com/sijms/go-ora/v3 v3.0.1
 	github.com/sneat-co/sneat-go-core v0.71.16
 	github.com/spf13/cobra v1.10.2
@@ -120,6 +122,7 @@ require (
 	github.com/crediterra/money v0.4.2 // indirect
 	github.com/cyphar/filepath-securejoin v0.7.0 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
+	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/dlclark/regexp2/v2 v2.6.0 // indirect
 	github.com/duckdb/duckdb-go-bindings v0.10503.0 // indirect
 	github.com/duckdb/duckdb-go-bindings/lib/darwin-amd64 v0.10503.0 // indirect

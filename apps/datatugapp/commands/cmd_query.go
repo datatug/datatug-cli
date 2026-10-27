@@ -67,7 +67,7 @@ func queryCommand() *cobra.Command {
 		Use:   "query",
 		Short: "Run queries through your access policies",
 	}
-	cmd.AddCommand(queryRunCommand(), queryBigQueryCommand(), queryResultsCommand())
+	cmd.AddCommand(queryRunCommand(), queryBigQueryCommand(), queryRedisCommand(), queryResultsCommand())
 	return cmd
 }
 

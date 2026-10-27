@@ -36,7 +36,7 @@ func TestCov100iQuerySourceURLFromCatalog(t *testing.T) {
 	_, err = querySourceURLFromCatalog(cat, dir)
 	require.Error(t, err)
 
-	cat.Driver = "firestore"
+	cat.Driver = "unsupported-driver"
 	cat.Path = "x"
 	_, err = querySourceURLFromCatalog(cat, dir)
 	require.Error(t, err)

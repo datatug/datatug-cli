@@ -47,7 +47,7 @@ jobs:
           go-version-file: go.mod
       - uses: actions/setup-python@v7
         with:
-          python-version: '3.12'
+          python-version: '3.15'
       - name: Verify native Windows compiler
         if: runner.os == 'Windows'
         shell: pwsh

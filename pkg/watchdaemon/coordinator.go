@@ -11,11 +11,23 @@ import (
 	"github.com/datatug/datatug-cli/pkg/watch"
 )
 
+// CheckEntitlement validates optional entitlement checks for centralized coordinator deployments.
+// In community / standalone mode (s.Entitlement == nil), it returns nil without restriction.
+func (s *Server) CheckEntitlement() error {
+	if s.Entitlement != nil {
+		return s.Entitlement.CheckEntitlement()
+	}
+	return nil
+}
+
 // RunCoordinator reconciles due schedules separately from assignment and drains
 // the durable delivery outbox. A failed delivery never changes evaluation truth.
 func (s *Server) RunCoordinator(ctx context.Context, interval time.Duration) error {
 	if s.Store == nil {
 		return errors.New("watch coordinator storage is unavailable")
+	}
+	if err := s.CheckEntitlement(); err != nil {
+		return err
 	}
 	if interval <= 0 {
 		interval = time.Second

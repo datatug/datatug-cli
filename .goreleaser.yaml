@@ -18,7 +18,9 @@ builds:
   - id: datatug-unix
     main: .
     binary: datatug
-    env: [ CGO_ENABLED=0 ]
+    env: [ CGO_ENABLED=1 ]
+    tool: python3
+    command: scripts/native-release-go.py
     goos: [ linux, darwin ]
     goarch: [ amd64, arm64 ]
     ldflags:
@@ -30,7 +32,9 @@ builds:
   - id: datatug-windows
     main: .
     binary: datatug
-    env: [ CGO_ENABLED=0 ]
+    env: [ CGO_ENABLED=1 ]
+    tool: python3
+    command: scripts/native-release-go.py
     goos: [ windows ]
     goarch: [ amd64 ]
     ldflags:

@@ -169,7 +169,7 @@ jobs:
       - name: Scan a SQLite file with cgo off
         env:
           CGO_ENABLED: '0'
-        run: go test -count=1 -run 'TestScanDbCatalog_SQLite3|TestScanJourney|TestQuickStartOfTheREADMEIsTrue' ./pkg/api/ ./apps/datatugapp/commands/
+        run: go test -count=1 -run 'TestScanDbCatalog_SQLite3|TestScanJourney|TestQuickStartOfTheREADMEIsTrue|TestQueryDuckDBRequiresCGO' ./pkg/api/ ./apps/datatugapp/commands/
       - name: Export SQLite to native inGitDB with cgo off
         env:
           CGO_ENABLED: '0'
@@ -270,7 +270,7 @@ jobs:
           cache: true
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: '22'
+          node-version: '24'
           cache: npm
           cache-dependency-path: pkg/mcpserver/app/package-lock.json
       - name: Check out exact public demo fixture
@@ -299,7 +299,7 @@ jobs:
           npm --prefix pkg/mcpserver/app run test:browser
       - name: Upload browser evidence
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: mcp-apps-browser
           path: ${{ runner.temp }}/mcp-apps-browser-artifacts
@@ -319,17 +319,17 @@ jobs:
         with:
           go-version: '1.27.3'
           cache: true
-      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '25'
       - name: Run pinned emulator with owned teardown
         env:
           WATCH_FIRESTORE_ARTIFACTS: ${{ runner.temp }}/watch-firestore
         run: ./scripts/check-watch-firestore.sh
       - name: Upload transaction evidence
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: watch-firestore
           path: ${{ runner.temp }}/watch-firestore

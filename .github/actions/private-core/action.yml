@@ -24,8 +24,12 @@ runs:
         set -euo pipefail
         test -n "$CORE_READ_TOKEN"
         umask 077
-        credential_file="$RUNNER_TEMP/core-${GITHUB_JOB}.credentials"
-        git_config_global="$RUNNER_TEMP/core-${GITHUB_JOB}.gitconfig"
+        credential_root="$RUNNER_TEMP"
+        if [ "${RUNNER_OS:-}" = Windows ]; then
+          credential_root=$(cygpath -m "$credential_root")
+        fi
+        credential_file="$credential_root/core-${GITHUB_JOB}.credentials"
+        git_config_global="$credential_root/core-${GITHUB_JOB}.gitconfig"
         touch "$git_config_global"
         : > "$credential_file"
         export GIT_CONFIG_GLOBAL="$git_config_global"
@@ -34,4 +38,4 @@ runs:
           printf 'protocol=https\nhost=github.com\npath=%s\nusername=x-access-token\npassword=%s\n\n' "$path" "$CORE_READ_TOKEN" | git credential-store --file "$credential_file" store
         done
         git config --global credential.https://github.com.useHttpPath true
-        git config --global --add credential.helper "store --file=$credential_file"
+        git config --global --add credential.helper "store --file=\"$credential_file\""

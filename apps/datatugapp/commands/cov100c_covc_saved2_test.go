@@ -85,7 +85,7 @@ func TestCovCQuerySourceURLFromCatalog(t *testing.T) {
 			t.Fatalf("%s: %q parses to %q, %v", dir, got, ref.Path, err)
 		}
 	}
-	if _, err := querySourceURLFromCatalog(mk("firestore", "x"), "/p"); err == nil || !strings.Contains(err.Error(), "not supported") {
+	if _, err := querySourceURLFromCatalog(mk("unsupported-driver", "x"), "/p"); err == nil || !strings.Contains(err.Error(), "not supported") {
 		t.Fatalf("unsupported driver: %v", err)
 	}
 }

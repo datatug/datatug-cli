@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/datatug/datatug-cli/commercial/licensing"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/detective"
 	"github.com/datatug/datatug-cli/pkg/executionstore"
@@ -213,7 +214,15 @@ func watchDaemonAction(cmd *cobra.Command, _ []string) error {
 		}
 		// Transactions are durable before shutdown; close cannot revoke accepted work.
 		defer func() { _ = store.Close() }()
-		service := &watchdaemon.Server{Store: store, Auth: auth, AllowedOrigins: cfg.AllowedOrigins, PublicUIURL: cfg.PublicUIURL, ProjectUIURLs: cfg.ProjectUIURLs, Limits: cfg.Limits}
+		service := &watchdaemon.Server{
+			Store:          store,
+			Auth:           auth,
+			AllowedOrigins: cfg.AllowedOrigins,
+			PublicUIURL:    cfg.PublicUIURL,
+			ProjectUIURLs:  cfg.ProjectUIURLs,
+			Limits:         cfg.Limits,
+			Entitlement:    licensing.NewCoordinatorEntitlementChecker(cfg.LicenseKey),
+		}
 		if cfg.Notifications.EmailSink != "" {
 			service.Email = &watchdaemon.FileEmailSink{Path: cfg.Notifications.EmailSink}
 		} else if cfg.Notifications.SMTP != nil {

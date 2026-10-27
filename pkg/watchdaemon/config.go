@@ -14,6 +14,7 @@ type Config struct {
 	Listen         string            `json:"listen,omitempty"`
 	TLSCertFile    string            `json:"tlsCertFile,omitempty"`
 	TLSKeyFile     string            `json:"tlsKeyFile,omitempty"`
+	LicenseKey     string            `json:"licenseKey,omitempty"`
 	Credentials    []Credential      `json:"credentials"`
 	AllowedOrigins []string          `json:"allowedOrigins,omitempty"`
 	PublicUIURL    string            `json:"publicUIURL,omitempty"`

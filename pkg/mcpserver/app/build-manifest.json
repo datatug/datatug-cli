@@ -3,11 +3,11 @@
   "consoleCallsRemoved": true,
   "sdk": {
     "name": "@modelcontextprotocol/ext-apps",
-    "version": "2.0.3",
-    "integrity": "sha512-Tn+4+cyhO4f4cQSDxNyLiIfEE+qlTTuIbWBJB8JTinEXOhDYgCT4wDTQplxD9MBYZH5pCYGC59GaxiwIT4bu8w==",
+    "version": "2.0.4",
+    "integrity": "sha512-B+PcbuGiaf0e5I3uy4iO5tS3Abo+5w8JvZFzHMzQdq9yVwP836zJkw2+KCGOQ0r4TM1fuQi4JdnbuWjkS4aBvg==",
     "gitHead": "82221c0c8ce7661efa6771c9d461511b1650495f"
   },
-  "lockSHA256": "7a1ee3a1ed3fa51f04fe29a042d43e98563c467a3abd62a41bbadb9fc8b8097a",
+  "lockSHA256": "4eb5eed15f57bc7c21111808370df18433fde63eb2e967bef270b5741d513de0",
   "upstream": {
     "repository": "https://github.com/datatug/ai-plugin",
     "commit": "d4ff0c5beac346eb8ead527144630978c5052ff5",
@@ -33,8 +33,8 @@
     },
     {
       "name": "@modelcontextprotocol/ext-apps",
-      "version": "2.0.3",
-      "integrity": "sha512-Tn+4+cyhO4f4cQSDxNyLiIfEE+qlTTuIbWBJB8JTinEXOhDYgCT4wDTQplxD9MBYZH5pCYGC59GaxiwIT4bu8w=="
+      "version": "2.0.4",
+      "integrity": "sha512-B+PcbuGiaf0e5I3uy4iO5tS3Abo+5w8JvZFzHMzQdq9yVwP836zJkw2+KCGOQ0r4TM1fuQi4JdnbuWjkS4aBvg=="
     },
     {
       "name": "eventsource",
@@ -69,11 +69,11 @@
     },
     {
       "path": "package.json",
-      "sha256": "d70891f9a302970c06ae9c8f629f0ee6eb5fadb90a9ae9625ddfae6e25b48040"
+      "sha256": "6fb13f7dee64e7392071410ad04d80e982782f926577811864f3f0d238cf65d6"
     },
     {
       "path": "scripts/build.mjs",
-      "sha256": "df068c3e83f35a213b73858a42df4f8141bcbf2929152cdf9176e11a1c68eb96"
+      "sha256": "10daa4879f16b55ccfd534355372ee4e854b60868f98942af6ca96b2a485d1d3"
     },
     {
       "path": "state.mjs",
@@ -100,6 +100,6 @@
       "sha256": "09ebd3dd6a4280f5868d4bb49e04cfdb8762e0653895aef9963e9b72b77e5b0d"
     }
   ],
-  "htmlSHA256": "8a9b9d77b710e2c4430436c5784627083c07a1bc1f83dd7b37b6ee0821f541ab",
+  "htmlSHA256": "a38cac90b8cbf496445385cdfc80a07d7ef0ff13592ab2650d1e2f2bd1cc87a4",
   "htmlBytes": 658297
 }

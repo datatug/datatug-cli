@@ -13,7 +13,7 @@ for (const file of upstream.files) {
 }
 const lock = JSON.parse(readFileSync(resolve(base, 'package-lock.json')));
 const sdk = lock.packages['node_modules/@modelcontextprotocol/ext-apps'];
-if (sdk.version !== '2.0.3' || sdk.integrity !== 'sha512-Tn+4+cyhO4f4cQSDxNyLiIfEE+qlTTuIbWBJB8JTinEXOhDYgCT4wDTQplxD9MBYZH5pCYGC59GaxiwIT4bu8w==') throw Error('Unreviewed official SDK');
+if (sdk.version !== '2.0.4' || sdk.integrity !== 'sha512-B+PcbuGiaf0e5I3uy4iO5tS3Abo+5w8JvZFzHMzQdq9yVwP836zJkw2+KCGOQ0r4TM1fuQi4JdnbuWjkS4aBvg==') throw Error('Unreviewed official SDK');
 const compiled = await build({ absWorkingDir: base, entryPoints: ['main.mjs'], bundle: true, write: false, format: 'esm', platform: 'browser', target: 'es2022', minify: true, legalComments: 'inline', metafile: true, charset: 'utf8', treeShaking: true, drop: ['console'] });
 if (compiled.outputFiles.length !== 1) throw Error('Expected one offline script');
 const packages = [...new Set(Object.keys(compiled.metafile.inputs).filter(path => path.includes('node_modules/')).map(path => {

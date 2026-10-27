@@ -23,14 +23,14 @@ var firestoreID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 func parseFirestoreSource(rest, display string) (BackendRef, error) {
 	u, err := url.Parse("firestore://" + rest)
 	if err != nil || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
-		return BackendRef{}, fmt.Errorf("Firestore URL must be firestore://PROJECT/DATABASE without credentials or options")
+		return BackendRef{}, fmt.Errorf("firestore URL must be firestore://PROJECT/DATABASE without credentials or options")
 	}
 	project, database := u.Host, strings.TrimPrefix(u.Path, "/")
 	if database == "" {
 		database = "(default)"
 	}
 	if !firestoreID.MatchString(project) || (database != "(default)" && !firestoreID.MatchString(database)) {
-		return BackendRef{}, fmt.Errorf("Firestore URL requires a project ID and one database ID")
+		return BackendRef{}, fmt.Errorf("firestore URL requires a project ID and one database ID")
 	}
 	return BackendRef{Scheme: "firestore", ProjectID: project, DatasetID: database, Path: project + "/" + database, Raw: display}, nil
 }
@@ -43,7 +43,7 @@ var firestoreSources = struct {
 
 func (r BackendRef) openFirestore(ctx context.Context, mode openMode) (dal.DB, error) {
 	if mode.forWrite {
-		return nil, fmt.Errorf("Firestore query sources cannot be opened as copy destinations")
+		return nil, fmt.Errorf("firestore query sources cannot be opened as copy destinations")
 	}
 	firestoreSources.Lock()
 	defer firestoreSources.Unlock()

@@ -260,8 +260,8 @@ func TestRunTugQL_InvalidDocument_Errors(t *testing.T) {
 func TestRunStructured_UnknownScheme_TypedError(t *testing.T) {
 	session := aliceSession(t, permissivePolicy)
 	executor := NewExecutor(session)
-	_, err := executor.RunStructured(context.Background(), "mongodb://host/db", productsQuery(), nil)
-	if err == nil || !strings.Contains(err.Error(), "mongodb") || !strings.Contains(err.Error(), "sqlite") {
+	_, err := executor.RunStructured(context.Background(), "unsupporteddb://host/db", productsQuery(), nil)
+	if err == nil || !strings.Contains(err.Error(), "unsupporteddb") || !strings.Contains(err.Error(), "sqlite") {
 		t.Fatalf("RunStructured(unknown scheme) = %v, want an error naming the scheme and the supported list", err)
 	}
 }

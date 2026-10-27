@@ -30,6 +30,7 @@ require (
 	github.com/dal-go/dalgo2duckdb v0.1.0
 	github.com/dal-go/dalgo2firestore v0.10.41
 	github.com/dal-go/dalgo2http v0.4.0
+	github.com/dal-go/dalgo2mongodb v0.0.0-20261027130616-1c6549d8dc1e
 	github.com/dal-go/dalgo2mssql v0.0.1
 	github.com/dal-go/dalgo2mysql v0.2.2
 	github.com/dal-go/dalgo2openvaultdb v0.4.1
@@ -118,7 +119,6 @@ require (
 	github.com/cloudflare/circl v1.6.4 // indirect
 	github.com/crediterra/money v0.4.2 // indirect
 	github.com/cyphar/filepath-securejoin v0.7.0 // indirect
-	github.com/dal-go/dalgo2mongodb v0.0.0-20261027130616-1c6549d8dc1e // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/dlclark/regexp2/v2 v2.6.0 // indirect
 	github.com/duckdb/duckdb-go-bindings v0.10503.0 // indirect

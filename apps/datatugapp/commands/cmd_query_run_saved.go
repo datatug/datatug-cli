@@ -272,11 +272,11 @@ func querySourceURLFromCatalog(catalog datatug.DbCatalog, projectDir string) (st
 			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
 		}
 		return dbcopy.LocalSourceURL("ingitdb", path), nil
-	case api.DriverPostgres, api.DriverMySQL, api.DriverOracle, api.DriverSQLServer:
+	case "firestore", api.DriverPostgres, api.DriverMySQL, api.DriverOracle, api.DriverSQLServer:
 		// The catalog's path is a connection descriptor; the source is "env:NAME", never the URL.
 		return api.ResolveCatalogSourceURL(catalog, projectDir)
 	default:
-		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3, ingitdb, postgres, mysql, oracle or sqlserver)", catalog.Driver)
+		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3, ingitdb, postgres, mysql, oracle, sqlserver or firestore)", catalog.Driver)
 	}
 }
 

@@ -161,4 +161,30 @@ func TestCoverage100_JournalReconcile_AllBranches(t *testing.T) {
 		t.Fatalf("expected error from journalReaddirnames")
 	}
 	journalReaddirnames = origReaddir
+
+	// 14. visitJournalExcept: non-json files skipped and exceptID skipped
+	testDir := s.privateItemDir("visit-filter-test")
+	if err := os.MkdirAll(testDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(testDir) }()
+	if err := os.WriteFile(filepath.Join(testDir, "readme.txt"), []byte("not-json"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(testDir, "ex.json"), []byte(`{"id":"ex"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(testDir, "keep.json"), []byte(`{"id":"keep"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var visited []string
+	if err := s.visitJournal("visit-filter-test", func(id string, _ []byte) error {
+		visited = append(visited, id)
+		return nil
+	}, "ex"); err != nil {
+		t.Fatal(err)
+	}
+	if len(visited) != 1 || visited[0] != "keep" {
+		t.Fatalf("expected [keep], got %v", visited)
+	}
 }

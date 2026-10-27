@@ -64,4 +64,25 @@ func TestCoordinatorEntitlementChecker(t *testing.T) {
 	if err := checkerEval.CheckEntitlement(); err != nil {
 		t.Errorf("expected evaluation mode (empty license) to succeed, got: %v", err)
 	}
+
+	// 5. Empty key but valid license with feature provided via env
+	t.Setenv("DATATUG_LICENSE_KEY", validKey)
+	checkerEnvValid := NewCoordinatorEntitlementChecker("")
+	if err := checkerEnvValid.CheckEntitlement(); err != nil {
+		t.Errorf("expected env valid license to pass entitlement check, got: %v", err)
+	}
+
+	// 6. Empty key but unentitled license provided via env
+	t.Setenv("DATATUG_LICENSE_KEY", unentitledKey)
+	checkerEnvUnentitled := NewCoordinatorEntitlementChecker("")
+	if err := checkerEnvUnentitled.CheckEntitlement(); err == nil {
+		t.Errorf("expected env unentitled license to fail entitlement check")
+	}
+
+	// 7. Empty key but invalid license in env
+	t.Setenv("DATATUG_LICENSE_KEY", "invalid.key")
+	checkerEnvInvalid := NewCoordinatorEntitlementChecker("")
+	if err := checkerEnvInvalid.CheckEntitlement(); err == nil {
+		t.Errorf("expected env invalid license to fail entitlement check")
+	}
 }

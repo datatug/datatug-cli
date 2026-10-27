@@ -488,4 +488,24 @@ func TestVerifyLicense_EdgeCases(t *testing.T) {
 	if err == nil {
 		t.Errorf("expected error reading non-existent license file")
 	}
+
+	// 6. LoadLicenseFromEnv with invalid key string
+	t.Setenv("DATATUG_LICENSE_FILE", "")
+	t.Setenv("DATATUG_LICENSE_KEY", "invalid.license.key")
+	if _, err := LoadLicenseFromEnv(); err == nil {
+		t.Errorf("expected error from LoadLicenseFromEnv with invalid key")
+	}
+
+	// 7. SignLicense with unmarshalable claims (year >= 10000)
+	unmarshalableClaims := Claims{
+		IssuedAt: time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC),
+	}
+	if _, err := SignLicense(unmarshalableClaims, priv); err == nil {
+		t.Errorf("expected error from SignLicense with unmarshalable claims")
+	}
+
+	// 8. decodeBase64 with URLEncoding with padding
+	if decoded, err := decodeBase64("-_8="); err != nil || len(decoded) != 2 || decoded[0] != 0xfb || decoded[1] != 0xff {
+		t.Errorf("decodeBase64 failed for URLEncoding with padding: %v", err)
+	}
 }

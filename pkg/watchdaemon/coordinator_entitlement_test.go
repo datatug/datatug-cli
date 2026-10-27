@@ -32,4 +32,13 @@ func TestServer_CheckEntitlement(t *testing.T) {
 	if err := sUnentitled.CheckEntitlement(); !errors.Is(err, customErr) {
 		t.Errorf("expected unentitled mock to return customErr, got: %v", err)
 	}
+
+	// 4. RunCoordinator fails fast when entitlement check fails
+	sCoordinator := &Server{
+		Store:       &cloudTickStore{},
+		Entitlement: &mockEntitlementChecker{err: customErr},
+	}
+	if err := sCoordinator.RunCoordinator(t.Context(), 100); !errors.Is(err, customErr) {
+		t.Errorf("expected RunCoordinator to fail with %v, got %v", customErr, err)
+	}
 }

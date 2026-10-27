@@ -58,16 +58,8 @@ var (
 )
 
 func init() {
-	if envHex := os.Getenv("DATATUG_LICENSE_PUBLIC_KEY"); envHex != "" {
-		if keyBytes, err := hex.DecodeString(envHex); err == nil && len(keyBytes) == ed25519.PublicKeySize {
-			trustedPubKey = ed25519.PublicKey(keyBytes)
-			return
-		}
-	}
 	keyBytes, _ := hex.DecodeString(defaultPublicKeyHex)
-	if len(keyBytes) == ed25519.PublicKeySize {
-		trustedPubKey = ed25519.PublicKey(keyBytes)
-	}
+	trustedPubKey = ed25519.PublicKey(keyBytes)
 }
 
 // SetPublicKey configures the Ed25519 public key used for offline verification.

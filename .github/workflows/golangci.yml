@@ -169,7 +169,7 @@ jobs:
       - name: Scan a SQLite file with cgo off
         env:
           CGO_ENABLED: '0'
-        run: go test -count=1 -run 'TestScanDbCatalog_SQLite3|TestScanJourney|TestQuickStartOfTheREADMEIsTrue' ./pkg/api/ ./apps/datatugapp/commands/
+        run: go test -count=1 -run 'TestScanDbCatalog_SQLite3|TestScanJourney|TestQuickStartOfTheREADMEIsTrue|TestQueryDuckDBRequiresCGO' ./pkg/api/ ./apps/datatugapp/commands/
       - name: Export SQLite to native inGitDB with cgo off
         env:
           CGO_ENABLED: '0'

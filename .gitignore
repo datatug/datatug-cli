@@ -44,3 +44,8 @@ demo-dbs/
 # e.g. `v0.13.3+dirty`. GoReleaser's own dirty check only looks at tracked
 # modifications, so it never complains, and the version string lies quietly.
 dist/
+
+# Exact-tag native release payloads
+native-release/
+native-payload/
+__pycache__/

@@ -150,7 +150,7 @@ func TestAuthorized(t *testing.T) {
 }
 
 func TestApply(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "daemon")
 	secret := secretOf(t)
 	if err := WriteKey(dir, 8989, secret); err != nil {
 		t.Fatal(err)

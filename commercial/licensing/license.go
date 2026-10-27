@@ -210,7 +210,7 @@ func VerifyLicense(licenseKey string) (*License, error) {
 		keyMu.RUnlock()
 
 		if out != nil {
-			fmt.Fprintf(out,
+			_, _ = fmt.Fprintf(out,
 				"WARNING: DataTug commercial license for '%s' expired on %s. "+
 					"Operating within 14-day grace period (%d day(s) remaining). "+
 					"Please renew your subscription to maintain uninterrupted centralized services.\n",

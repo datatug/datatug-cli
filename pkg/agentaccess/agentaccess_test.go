@@ -57,7 +57,7 @@ func TestKeyRoundTripAndMode(t *testing.T) {
 	if _, err = os.Stat(target); err == nil {
 		t.Fatal("the key was written through a link")
 	}
-	// a group-readable key and a group-writable directory are refused
+	// a group-readable key and a group-writable directory are repaired, never left shared
 	if err = os.Chmod(KeyPath(dir, 3), 0o640); err != nil {
 		t.Fatal(err)
 	}
@@ -67,8 +67,11 @@ func TestKeyRoundTripAndMode(t *testing.T) {
 	if err = os.Chmod(dir, 0o770); err != nil {
 		t.Fatal(err)
 	}
-	if err = WriteKey(dir, 4, secret); err == nil {
-		t.Fatal("a shared directory must be refused")
+	if err = WriteKey(dir, 4, secret); err != nil {
+		t.Fatal(err)
+	}
+	if info, err = os.Stat(dir); err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("a shared directory must be repaired to private mode: %#o %v", info.Mode().Perm(), err)
 	}
 	_ = os.Chmod(dir, 0o700)
 }
@@ -151,6 +154,9 @@ func TestAuthorized(t *testing.T) {
 
 func TestApply(t *testing.T) {
 	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	secret := secretOf(t)
 	if err := WriteKey(dir, 8989, secret); err != nil {
 		t.Fatal(err)

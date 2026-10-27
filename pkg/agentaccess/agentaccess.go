@@ -82,8 +82,20 @@ func WriteKey(dir string, port int, secret []byte) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	if info, err := os.Stat(dir); err != nil || !privateMode(info) {
-		return errors.New("the state directory is not private to this user")
+	info, err := os.Stat(dir)
+	if err != nil {
+		return err
+	}
+	if !privateMode(info) {
+		if goos == "windows" {
+			return errors.New("the state directory is not private to this user")
+		}
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return err
+		}
+		if info, err = os.Stat(dir); err != nil || !privateMode(info) {
+			return errors.New("the state directory is not private to this user")
+		}
 	}
 	path := KeyPath(dir, port)
 	tmp := path + ".tmp"

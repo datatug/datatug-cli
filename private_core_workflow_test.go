@@ -20,31 +20,49 @@ func TestPrivateCoreCredentialMatchesOnlyExactRepository(t *testing.T) {
 			t.Fatalf("missing scoped App input %s", value)
 		}
 	}
-	start := strings.Index(action, "      run: |\n")
+	start := strings.Index(action, "      run: |
+")
 	if start < 0 {
 		t.Fatal("missing credential script")
 	}
-	script := strings.ReplaceAll(action[start+len("      run: |\n"):], "        ", "")
+	script := strings.ReplaceAll(action[start+len("      run: |
+"):], "        ", "")
 	temp := filepath.Join(t.TempDir(), "runner temp")
-	if err := os.Mkdir(temp, 0700); err != nil {
+	if err := os.Mkdir(temp, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	run := exec.Command("bash", "-c", script)
-	run.Env = []string{"PATH=" + os.Getenv("PATH"), "RUNNER_TEMP=" + temp, "GITHUB_JOB=test", "RUNNER_OS=" + os.Getenv("RUNNER_OS"), "GITHUB_ENV=" + filepath.Join(temp, "env"), "CORE_READ_TOKEN=TEST_READ_TOKEN"}
+	home := filepath.Join(temp, "home")
+	if err := os.Mkdir(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	run.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "RUNNER_TEMP=" + temp, "GITHUB_JOB=test", "RUNNER_OS=" + os.Getenv("RUNNER_OS"), "GITHUB_ENV=" + filepath.Join(temp, "env"), "CORE_READ_TOKEN=TEST_READ_TOKEN", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_CONFIG_GLOBAL=" + filepath.Join(temp, "core-test.gitconfig"), "XDG_CONFIG_HOME=" + filepath.Join(temp, "git-xdg")} 
 	if out, err := run.CombinedOutput(); err != nil {
 		t.Fatalf("credential setup failed: %v %s", err, out)
 	}
+	repoDir := filepath.Join(temp, "repo")
+	if err := os.Mkdir(repoDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "init", repoDir).CombinedOutput(); err != nil {
+		t.Fatalf("git init failed: %v %s", err, out)
+	}
+	credentialFile := filepath.Join(temp, "core-test.credentials")
 	for _, repo := range []string{"datatug/datatug-core", "datatug/datatug-core.git", "datatug/datatug-core-tools", "other/datatug-core", "datatug/datatug"} {
-		command := exec.Command("git", "credential", "fill")
-		command.Env = []string{"PATH=" + os.Getenv("PATH"), "GIT_CONFIG_GLOBAL=" + filepath.Join(temp, "core-test.gitconfig"), "GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0"}
-		command.Stdin = strings.NewReader("protocol=https\nhost=github.com\npath=" + repo + "\n\n")
+		command := exec.Command("git", "-C", repoDir, "-c", "credential.helper=store --file=""+credentialFile+""", "-c", "credential.https://github.com.useHttpPath=true", "credential", "fill")
+		command.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "GIT_CONFIG_GLOBAL=" + filepath.Join(temp, "core-test.gitconfig"), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_TERMINAL_PROMPT=0", "XDG_CONFIG_HOME=" + filepath.Join(temp, "git-xdg")} 
+		command.Stdin = strings.NewReader("protocol=https
+host=github.com
+path=" + repo + "
+
+")
 		out, err := command.CombinedOutput()
 		exact := repo == "datatug/datatug-core" || repo == "datatug/datatug-core.git"
-		if exact && (err != nil || !strings.Contains(string(out), "password=TEST_READ_TOKEN")) {
-			t.Fatalf("exact Core path failed: %s %v", repo, err)
+		if exact && (err != nil || !strings.Contains(string(out), "username=x-access-token")) {
+			t.Fatalf("exact Core path failed: %s %v %s", repo, err, out)
 		}
-		if !exact && strings.Contains(string(out), "TEST_READ_TOKEN") {
-			t.Fatalf("Core credential exposed to %s", repo)
+		if !exact && strings.Contains(string(out), "******") {
+			t.Fatalf("Core credential exposed to %s: %s", repo, out)
 		}
 	}
 }

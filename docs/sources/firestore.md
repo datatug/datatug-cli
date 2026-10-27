@@ -26,6 +26,8 @@ the Firestore URL. Credentials stay outside project files.
 
 Filters, ordering, limits, offsets, and document cursors use the Firestore DALgo
 adapter. Firestore indexes and provider query constraints still apply. SQL,
-joins, GROUP BY and HAVING are unsupported. Copying into Firestore is rejected.
+joins, projection aliases, computed projections, GROUP BY and HAVING are unsupported. Copying into Firestore and DALgo read-write transactions are rejected. The
+query source still requires read-only IAM credentials as defense in depth;
+DataTug cannot reduce permissions already granted to your Google identity.
 This source is separate from Firestore used internally to store DataTug projects
 or watch state; the URL always selects the user's queried database.

@@ -64,4 +64,14 @@ passed = {row['Test'] for row in tests if row['Action'] == 'pass'}
 assert len(passed) >= 7, 'Missing Firestore acceptance cases'
 assert {'TestFirestoreEventsTypedAtomicPrivacyPaginationAndAuthority', 'TestFirestoreEventsSameInstantLanesAndDurableRetention'} <= passed, 'Missing Work event acceptance cases'
 PY
+export FIRESTORE_QUERY_GATE_REQUIRED=1
+go test ./pkg/dbcopy -run '^TestFirestore' -count=1 -json > "$watch_artifacts/query-tests.jsonl"
+python3 - "$watch_artifacts/query-tests.jsonl" <<'PYTEST'
+import json, pathlib, sys
+rows=[json.loads(s) for s in pathlib.Path(sys.argv[1]).read_text().splitlines()]
+assert not any(r['Action']=='skip' for r in rows), 'Firestore query gate skipped'
+assert any(r.get('Test')=='TestFirestoreSourceEmulator' and r['Action']=='pass' for r in rows), 'Firestore query acceptance absent'
+PYTEST
+go build -o "$watch_scratch/datatug" .
+python3 scripts/check-firestore-query.py "$watch_scratch/datatug"
 printf 'Firestore Watch storage gate passed; emulator teardown owned by this command.\n'

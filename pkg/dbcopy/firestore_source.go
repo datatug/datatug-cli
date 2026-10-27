@@ -76,5 +76,18 @@ func (s firestoreQuerySource) ExecuteQueryToRecordsReader(ctx context.Context, q
 	if len(structured.From().Joins()) > 0 {
 		return nil, fmt.Errorf("%w: Firestore joins are unsupported", dal.ErrNotSupported)
 	}
+	for _, column := range structured.Columns() {
+		if column.Alias != "" {
+			return nil, fmt.Errorf("%w: Firestore projection aliases are unsupported", dal.ErrNotSupported)
+		}
+		if _, ok := column.Expression.(dal.FieldRef); !ok {
+			return nil, fmt.Errorf("%w: Firestore projections require plain fields", dal.ErrNotSupported)
+		}
+	}
 	return s.DB.ExecuteQueryToRecordsReader(ctx, firestoreMapQuery{structured})
+}
+
+// Query sources expose no write transaction even when ADC has broader IAM rights.
+func (s firestoreQuerySource) RunReadwriteTransaction(context.Context, dal.RWTxWorker, ...dal.TransactionOption) error {
+	return fmt.Errorf("%w: Firestore query sources are read-only", dal.ErrNotSupported)
 }

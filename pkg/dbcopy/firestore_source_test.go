@@ -44,6 +44,9 @@ func TestFirestoreSourceURL(t *testing.T) {
 // FIRESTORE_EMULATOR_HOST set to the task-owned emulator endpoint.
 func TestFirestoreSourceEmulator(t *testing.T) {
 	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
+		if os.Getenv("FIRESTORE_QUERY_GATE_REQUIRED") == "1" {
+			t.Fatal("required Firestore emulator is absent")
+		}
 		t.Skip("requires Firestore emulator")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -82,5 +85,19 @@ func TestFirestoreSourceEmulator(t *testing.T) {
 	}
 	if _, err = reader.Next(); !errors.Is(err, dal.ErrNoMoreRecords) {
 		t.Fatalf("end: %v", err)
+	}
+}
+
+func TestFirestoreRefusesAliasAndWriteTransaction(t *testing.T) {
+	source := firestoreQuerySource{}
+	query := dal.From(dal.NewRootCollectionRef("customers", "")).NewQuery().SelectColumns(dal.Column{Expression: dal.Field("name"), Alias: "customer"})
+	_, err := source.ExecuteQueryToRecordsReader(context.Background(), query)
+	if !errors.Is(err, dal.ErrNotSupported) {
+		t.Fatalf("alias: %v", err)
+	}
+	called := false
+	err = source.RunReadwriteTransaction(context.Background(), func(context.Context, dal.ReadwriteTransaction) error { called = true; return nil })
+	if !errors.Is(err, dal.ErrNotSupported) || called {
+		t.Fatalf("write transaction: %v called=%v", err, called)
 	}
 }

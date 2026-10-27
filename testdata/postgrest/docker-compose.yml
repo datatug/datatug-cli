@@ -1,0 +1,38 @@
+# A disposable PostgREST fixture for the CLI's real-service journey. Every run
+# gets its own Compose project name and two free loopback ports, and removes its
+# containers and volume (scripts/check-journey-postgrest.sh). The images are the
+# pair the dalgo2postgrest adapter is tested against, pinned by version.
+services:
+  postgres:
+    image: "${POSTGRES_IMAGE:-postgres:17}"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: appdb
+    ports:
+      - "${POSTGRES_PORT:?POSTGRES_PORT is required}:5432"
+    volumes:
+      - ./seed.sql:/docker-entrypoint-initdb.d/seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d appdb"]
+      interval: 1s
+      timeout: 3s
+      retries: 60
+
+  postgrest:
+    image: "${POSTGREST_IMAGE:-postgrest/postgrest:v16.5}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://authenticator:authenticator-pass@postgres:5432/appdb
+      PGRST_DB_SCHEMAS: app
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: datatug-cli-journey-secret-that-is-long-enough
+      PGRST_DB_EXTRA_SEARCH_PATH: app
+      # Deliberately below the adapter's default MaxPageSize (200), so a query
+      # that asks for five rows is read as several physical pages. A short page
+      # must be continued from Content-Range, never treated as the end.
+      PGRST_DB_MAX_ROWS: "2"
+    ports:
+      - "${POSTGREST_PORT:?POSTGREST_PORT is required}:3000"

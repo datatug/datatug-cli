@@ -148,6 +148,30 @@ func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, er
 			return "", fmt.Errorf("catalog %q: environment variable %s must hold a couchdb:// URL, not a %s source", catalog.ID, strings.TrimPrefix(source, "env:"), ref.Scheme)
 		}
 		return source, nil
+	case DriverPostgREST:
+		// A PostgREST catalog records a connection descriptor (a project file that
+		// names an environment variable and nothing else), exactly as a PostgreSQL
+		// or CouchDB catalog does. The API root comes only from the operator's
+		// environment, so a project cannot point the operator's PostgREST credentials
+		// at a host of its own choosing; a project that records a literal API root is
+		// refused before anything is opened.
+		source, err := postgrestDescriptorSource(catalog, projDir)
+		if err != nil {
+			return "", err
+		}
+		// Resolving the variable refuses one that is not set, and the scheme check
+		// refuses a variable that holds another engine: a catalog labelled postgrest
+		// whose variable held a postgres or http source would otherwise be opened as
+		// that engine while policy naming still used the postgrest label. No error
+		// names the value, only the variable and the scheme.
+		ref, err := dbcopyParse(source)
+		if err != nil {
+			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
+		}
+		if !dbcopy.IsPostgRESTScheme(ref.Scheme) {
+			return "", fmt.Errorf("catalog %q: environment variable %s must hold a postgrest:// URL, not a %s source", catalog.ID, strings.TrimPrefix(source, "env:"), ref.Scheme)
+		}
+		return source, nil
 	case "firestore", DriverPostgres, DriverMySQL, DriverOracle, DriverSQLServer:
 		// The catalog's path names a connection descriptor, a project file that
 		// names an environment variable and nothing else; the variable holds the
@@ -173,7 +197,7 @@ func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, er
 		}
 		return source, nil
 	default:
-		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3, ingitdb, openvaultdb, postgres, mysql, oracle, sqlserver, firestore or couchdb)", catalog.Driver)
+		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3, ingitdb, openvaultdb, postgres, mysql, oracle, sqlserver, firestore, couchdb or postgrest)", catalog.Driver)
 	}
 }
 
@@ -210,21 +234,35 @@ func postgresDescriptorSource(catalog datatug.DbCatalog, projDir string) (string
 // a literal endpoint nor pick an arbitrary variable (CheckDescriptorEnvName). The variable is not
 // read here, so the source is returned for a variable that is not set (opening it says so).
 func couchDBDescriptorSource(catalog datatug.DbCatalog, projDir string) (string, error) {
+	return descriptorSource(catalog, projDir, "CouchDB", dbcopy.ReadCouchDBDescriptor)
+}
+
+// postgrestDescriptorSource is couchDBDescriptorSource for a PostgREST catalog: the catalog's
+// path is a descriptor inside the project folder, the descriptor names the operator's variable, and
+// the API root is read from that variable only when the source is opened. The project can neither
+// hold a literal API root nor pick an arbitrary variable (CheckDescriptorEnvName).
+func postgrestDescriptorSource(catalog datatug.DbCatalog, projDir string) (string, error) {
+	return descriptorSource(catalog, projDir, "PostgREST", dbcopy.ReadPostgRESTDescriptor)
+}
+
+// descriptorSource is the source "env:NAME" a catalog's connection descriptor names. title is the
+// source name an error uses ("CouchDB", "PostgREST"); read is that source's strict reader.
+func descriptorSource(catalog datatug.DbCatalog, projDir, title string, read func(string) (dbcopy.ConnectionDescriptor, error)) (string, error) {
 	if catalog.Path == "" {
-		return "", fmt.Errorf("catalog %q has no connection descriptor path configured for its couchdb driver", catalog.ID)
+		return "", fmt.Errorf("catalog %q has no connection descriptor path configured for its %s driver", catalog.ID, catalog.Driver)
 	}
 	path, err := ResolveDescriptorPath(projDir, catalog.Path)
 	if err != nil {
 		return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
 	}
-	descriptor, err := dbcopy.ReadCouchDBDescriptor(path)
+	descriptor, err := read(path)
 	if err != nil {
 		// A descriptor that is not there, is a folder or cannot be read fails with the
 		// text of the operating system, which quotes the path of the file in the served
 		// project: the answer for a client is built from the ID of the catalog.
 		var pathErr *fs.PathError
 		if errors.As(err, &pathErr) {
-			return "", sourceLookupFailed("catalog %q: the CouchDB connection descriptor cannot be read", "catalog %q", err, catalog.ID)
+			return "", sourceLookupFailed("catalog %q: the "+title+" connection descriptor cannot be read", "catalog %q", err, catalog.ID)
 		}
 		return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
 	}

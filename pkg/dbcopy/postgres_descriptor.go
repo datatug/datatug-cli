@@ -34,7 +34,7 @@ const maxPostgresDescriptorBytes = 65536
 // holds the whole connection URL (host, user and password together), so no
 // project file can hold a password, and a project file cannot redirect a
 // credential to a host of its own choosing. PostgreSQL, MySQL, Oracle, SQL
-// Server and CouchDB catalogs all use this one shape.
+// Server, CouchDB and PostgREST catalogs all use this one shape.
 type ConnectionDescriptor struct {
 	// DSNEnv is the name of the environment variable that holds the source URL.
 	// It must match ^[A-Z][A-Z0-9_]*$.
@@ -107,6 +107,20 @@ func readCouchDBDescriptor(path string, lookupEnv func(string) (string, bool)) (
 	return readConnectionDescriptor(path, "CouchDB", lookupEnv)
 }
 
+// ReadPostgRESTDescriptor reads and strictly decodes the PostgREST connection
+// descriptor at path, applying the same dsnEnv rule as ReadPostgresDescriptor and
+// ReadCouchDBDescriptor: a project file may name only a variable the operator
+// allowed, and the API root is never in the project.
+func ReadPostgRESTDescriptor(path string) (ConnectionDescriptor, error) {
+	return readPostgRESTDescriptor(path, os.LookupEnv)
+}
+
+// readPostgRESTDescriptor is ReadPostgRESTDescriptor over an injected environment
+// lookup, so tests never touch the process environment.
+func readPostgRESTDescriptor(path string, lookupEnv func(string) (string, bool)) (ConnectionDescriptor, error) {
+	return readConnectionDescriptor(path, "PostgREST", lookupEnv)
+}
+
 // readConnectionDescriptor is the one reader of a descriptor file; title names
 // the source in the error text ("PostgreSQL", "CouchDB").
 func readConnectionDescriptor(path, title string, lookupEnv func(string) (string, bool)) (ConnectionDescriptor, error) {
@@ -144,6 +158,12 @@ func DecodePostgresDescriptor(data []byte) (PostgresDescriptor, error) {
 // the same one-field shape, with errors that name CouchDB.
 func DecodeCouchDBDescriptor(data []byte) (ConnectionDescriptor, error) {
 	return decodeConnectionDescriptor(data, "CouchDB")
+}
+
+// DecodePostgRESTDescriptor is DecodePostgresDescriptor for a PostgREST
+// descriptor: the same one-field shape, with errors that name PostgREST.
+func DecodePostgRESTDescriptor(data []byte) (ConnectionDescriptor, error) {
+	return decodeConnectionDescriptor(data, "PostgREST")
 }
 
 func decodeConnectionDescriptor(data []byte, title string) (ConnectionDescriptor, error) {

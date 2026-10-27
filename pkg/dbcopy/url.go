@@ -23,6 +23,12 @@
 //     couchdb+http:// names a loopback endpoint. Credentials
 //     come from DATATUG_COUCHDB_* environment variables, never
 //     from the URL — see couchdb_source.go
+//   - postgrest://      one existing PostgREST API root read as native
+//     PostgreSQL relations via dal-go/dalgo2postgrest; HTTPS
+//     unless postgrest+http:// names a loopback endpoint. The
+//     API path may include /rest/v1 (Supabase). Credentials
+//     come from DATATUG_POSTGREST_* environment variables,
+//     never from the URL — see postgrest_source.go
 package dbcopy
 
 import (
@@ -45,7 +51,7 @@ import (
 
 // supportedSchemes is the MVP-supported scheme list, used both for dispatch
 // and to construct the error message for REQ:unknown-scheme-rejected.
-var supportedSchemes = []string{"duckdb", "sqlite", "ingitdb", "postgres", "mysql", "oracle", "sqlserver", "http", "https", "openvaultdb", "bigquery", "mongodb", "mongodb+srv", "firestore", CouchDBScheme, CouchDBHTTPSScheme, CouchDBHTTPScheme}
+var supportedSchemes = []string{"duckdb", "sqlite", "ingitdb", "postgres", "mysql", "oracle", "sqlserver", "http", "https", "openvaultdb", "bigquery", "mongodb", "mongodb+srv", "firestore", CouchDBScheme, CouchDBHTTPSScheme, CouchDBHTTPScheme, PostgRESTScheme, PostgRESTHTTPSScheme, PostgRESTHTTPScheme}
 
 // SupportedSchemes returns the exact schemes Parse/Open dispatch, in
 // dispatch order. It is the single source of truth other packages should
@@ -161,6 +167,16 @@ type BackendRef struct {
 	CouchDBHost              string
 	CouchDBDatabase          string
 	CouchDBAllowLoopbackHTTP bool
+	// PostgREST endpoint selectors: one existing API root, whose relations are
+	// read as native PostgreSQL tables and views. The API path may include
+	// /rest/v1 (Supabase). Schema and IDColumn are the two explicit non-secret
+	// options of the URL; credentials are never here and are read from the
+	// DATATUG_POSTGREST_* variables for each request.
+	PostgRESTHost              string
+	PostgRESTAPIPath           string
+	PostgRESTSchema            string
+	PostgRESTIDColumn          string
+	PostgRESTAllowLoopbackHTTP bool
 	// BigQuery destination selectors. Credentials are never accepted in the URL;
 	// callers provide local Google credentials separately.
 	ProjectID string
@@ -269,6 +285,8 @@ func parseURL(rawURL string) (BackendRef, error) {
 		return parseMongoDB(rawURL, display)
 	case CouchDBScheme, CouchDBHTTPSScheme, CouchDBHTTPScheme:
 		return parseCouchDBSource(scheme, rest, display)
+	case PostgRESTScheme, PostgRESTHTTPSScheme, PostgRESTHTTPScheme:
+		return parsePostgRESTSource(scheme, rest, display)
 	case "firestore":
 		return parseFirestoreSource(rest, display)
 	case "openvaultdb":
@@ -725,6 +743,8 @@ func (r BackendRef) openSource(ctx context.Context, mode openMode) (dal.DB, erro
 		return openMongoDB(ctx, r, mode)
 	case CouchDBScheme, CouchDBHTTPSScheme, CouchDBHTTPScheme:
 		return openCouchDB(ctx, r, mode)
+	case PostgRESTScheme, PostgRESTHTTPSScheme, PostgRESTHTTPScheme:
+		return openPostgREST(ctx, r, mode)
 	case "firestore":
 		return r.openFirestore(ctx, mode)
 	case "duckdb":

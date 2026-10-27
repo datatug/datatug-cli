@@ -8,11 +8,17 @@
 - Explicit SecretStorage connection profiles and hosted-home fallback.
 - Process/security/activation-fake tests, optional real candidate CLI synthetic
   SQLite integration, pinned VSIX packaging and archive allowlist audit.
-- Actual VS Code Insiders no-project activation, registered-command and native
-  view smoke with an isolated temporary profile, without trust overrides.
+- Historical earlier-candidate VS Code Insiders no-project activation and
+  synthetic trusted-project query/Check journey/screenshots are recorded with
+  isolated profiles and separate owner consents. Later Linux no-project
+  activation/cleanup is recorded for b5/da0, with exact CLI79 CI job success;
+  each retained artifact keeps its own source scope.
 - Public community support URL and hosted homepage metadata.
-- Marketplace publication, trusted-project UI acceptance, remote/platform matrix,
-  provider authentication, screenshots and authorised hosted-context links pending.
+- Current genuine workspace trust, password, consent, SecretStorage/native or
+  remote backing-store behavior, hosted summary/authorization and real-provider
+  acceptance remain deferred. Historical screenshots do not close these gates.
+  Marketplace publication, remaining platform/remote acceptance, listing asset
+  review and independent release/owner approval remain pending.
 
 - Added a separate one-run minimal Check summary publication command, explicit
   Space binding, hosted SecretStorage token storage/deletion, and scoped native

@@ -151,8 +151,8 @@ acceptance remain release gates; unit and CLI process tests are separate evidenc
 
 | Host | Execution / credentials | Evidence |
 | --- | --- | --- |
-| macOS local | CLI and workspace on Mac; VS Code SecretStorage | Node 22 process/unit + real CLI SQLite tests passed; actual VS Code Insiders 1.142.0 activation/native view and CUA trusted-project selection, local environment, saved query, Check pass/fail, three separate owner consents and native JSON results passed on copied synthetic SQLite data |
-| Linux local | Native CLI on Linux; host credential service | Ubuntu CI [candidate package job](https://github.com/datatug/datatug-cli/actions/runs/40393872500/job/121821636866) passed 76 Node unit/process tests with zero skips, including actual candidate CLI SQLite saved-query and Check pass/fail/error contracts; a dedicated Linux CI job is configured for pinned-editor no-project activation, registered commands, empty tree and native view focus; its successful run is not yet evidenced here. Interactive Linux trusted-workspace and SecretStorage acceptance remain pending |
+| macOS local | CLI and workspace on Mac; SecretStorage API | Historical earlier-candidate Node/real CLI SQLite tests and VS Code Insiders 1.142.0 no-project/native synthetic query/Check journey are recorded, including three separate owner consents and basic JSON. This is not current summary/password/SecretStorage acceptance; those manual/provider gates remain deferred |
+| Linux local | Native CLI on Linux; SecretStorage API; backing-store/transport acceptance remains separate | On 2026-10-26, the [b5 Everywhere run](https://github.com/datatug/datatug-cli/actions/runs/40404519557) and [da0 run](https://github.com/datatug/datatug-cli/actions/runs/40407664356) passed all nine jobs. Exact CLI79 [Linux no-project activation](https://github.com/datatug/datatug-cli/actions/runs/40412007550/job/121884799905) and [candidate package](https://github.com/datatug/datatug-cli/actions/runs/40412007550/job/121884800146) jobs also passed. Retained da0 artifact 12692155065 records official VS Code 1.143.1/Linux x64 activation, 12 registered commands, empty tree/native view and profile cleanup, without trust bypass or CLI execution. That artifact retains its da0 source scope; unchanged runtime/workflow bytes do not turn it into a newly inspected79 artifact. Interactive trusted-workspace, password/consent, SecretStorage and hosted/provider acceptance remain deferred |
 | Windows local | Native `.exe`; host credential service | Pending, including force termination and private evidence ACL/mode compatibility |
 | Remote SSH | Workspace extension + CLI on remote host; secret explicitly transmitted to remote child environment | Pending real-host transport, secret-store and cancellation tests |
 | Dev container | Extension and CLI inside container; private persistent storage outside workspace | Pending container lifecycle/storage tests |
@@ -179,6 +179,8 @@ and the bounded receipt are in `dist/trusted-project-acceptance/`. This establis
 the macOS synthetic journey, not remote-host or real-provider acceptance.
 Credential-provider, auth expiry and offline negative tests currently
 cover simulated responses/process failures; real-provider acceptance is pending.
+
+The dated [Backstage continuation record](https://github.com/datatug/backstage/blob/51c4e04bc6445d917ca9722cc6dfaab55a1c27b9/spec/features/datatug-everywhere/_evidence/continuation-preparation-2026-10-26.json) binds b5/da0/79 source, run and artifact scopes. See the 2026-10-27 addendum in `TEST-EVIDENCE.md` for the full refs, historical test counts and unchanged-byte limits. No editor, provider or hosted acceptance was rerun for this documentation correction.
 
 ## Build, test, package and inspect
 

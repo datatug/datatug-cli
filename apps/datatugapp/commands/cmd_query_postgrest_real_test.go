@@ -529,3 +529,34 @@ limit: 3
 `)
 	return dir
 }
+
+// TestQueryDefaultExplorationBoundsAreVisibleWithoutAService pins the visible
+// bound of an exploratory --from read for both bounded-only HTTP sources. The
+// open performs no I/O and the bound line is printed before the first read, so a
+// loopback address nothing listens on still shows it; the read itself then fails
+// with the database exit code.
+func TestQueryDefaultExplorationBoundsAreVisibleWithoutAService(t *testing.T) {
+	t.Setenv(dbcopy.CouchDBUsernameEnv, "")
+	t.Setenv(dbcopy.CouchDBPasswordEnv, "")
+	t.Setenv(dbcopy.CouchDBBearerEnv, "")
+	t.Setenv(dbcopy.PostgRESTBearerEnv, "")
+	for _, tc := range []struct {
+		source string
+		from   string
+		want   string
+	}{
+		{"couchdb+http://127.0.0.1:1/orders", "orders", "(CouchDB exploration default"},
+		{"postgrest+http://127.0.0.1:1", "items", "(PostgREST exploration default"},
+	} {
+		t.Run(tc.from, func(t *testing.T) {
+			_, stderr, code := runQuery(t, "", "--db", tc.source, "--from", tc.from, "--format", "json", "--no-policies")
+			if code != exitCodeDatabase {
+				t.Fatalf("exit %d, want %d: %s", code, exitCodeDatabase, stderr)
+			}
+			want := fmt.Sprintf("reading at most %d rows %s", postgRESTSourceDefaultLimit, tc.want)
+			if !strings.Contains(stderr, want) {
+				t.Fatalf("stderr must state the default bound: %q, want %q", stderr, want)
+			}
+		})
+	}
+}

@@ -128,3 +128,13 @@ func TestScanJourneyPostgRESTWritesTheConnectionDescriptor(t *testing.T) {
 	}
 	assert.ElementsMatch(t, []string{"id", "title", "qty"}, columns)
 }
+
+func TestScanPostgRESTConnectionParamsRefusesAnotherSource(t *testing.T) {
+	const variable = "DATATUG_TEST_POSTGREST_WRONG"
+	t.Setenv(variable, "couchdb+http://127.0.0.1:5984/orders")
+	command := &scanDbCommand{Driver: api.DriverPostgREST, DSNEnv: variable, Environment: "local", Database: "items"}
+	_, err := command.connectionParams()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must hold a postgrest")
+	assert.NotContains(t, err.Error(), "127.0.0.1")
+}

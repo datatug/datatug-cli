@@ -284,3 +284,17 @@ func unsetCouchDBEnv(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenSchemaScanCouchDBReportsAnOpenFailure(t *testing.T) {
+	unsetCouchDBEnv(t)
+	t.Setenv(CouchDBUsernameEnv, "reader")
+	t.Setenv(CouchDBPasswordEnv, "pw")
+	t.Setenv(CouchDBBearerEnv, "token")
+	ref, err := Parse("couchdb+http://127.0.0.1:5984/orders")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = ref.OpenSchemaScan(context.Background()); !errors.Is(err, errCouchDBMixedCredentials) {
+		t.Fatalf("OpenSchemaScan = %v, want the mixed-credential refusal", err)
+	}
+}

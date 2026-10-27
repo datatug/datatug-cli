@@ -41,33 +41,12 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/datatug-journey-postgrest.XXXXXX")
 # started stays 0 until this script's own Compose project has been created, so a
 # launch failure never removes containers or a project name it did not create.
 started=0
-# teardown removes only this script's own Compose project and its volume; it
-# returns non-zero when it could not, and never removes a project it did not
-# start.
-teardown() {
-	status=0
-	if [ "$started" = 1 ]; then
-		"${compose[@]}" down -v --remove-orphans >/dev/null 2>&1
-		removed=$?
-		if [ "$removed" != 0 ]; then
-			echo "could not remove the owned Compose project $project (docker compose down exited $removed)" >&2
-			status=1
-		fi
-	fi
-	rm -rf "$work" >/dev/null 2>&1 || true
-	return "$status"
-}
-# cleanup is the trap: it keeps the exit status of the journey, and a teardown
-# failure turns a passing journey into a failing one.
-cleanup() {
-	status=$?
-	set +e
-	teardown
-	torn=$?
-	[ "$status" != 0 ] || status=$torn
-	exit "$status"
-}
-trap cleanup EXIT INT TERM
+# The shared lifecycle helper removes only this script's own Compose project and
+# volume, keeps the journey's exit status (including a failing one) and runs the
+# teardown exactly once, also after INT or TERM.
+# shellcheck source=scripts/lib/fixture-lifecycle.sh
+. scripts/lib/fixture-lifecycle.sh
+fixture_lifecycle_install
 
 echo "PostgREST fixture project: $project"
 echo "PostgreSQL port: $postgres_port, PostgREST port: $postgrest_port"
@@ -76,7 +55,6 @@ started=1
 "${compose[@]}" up -d
 
 base=http://127.0.0.1:$postgrest_port
-jar="$work/cookies.txt"
 admin_auth=postgres
 for attempt in $(seq 1 90); do
 	if curl -fsS -o /dev/null "$base/" 2>/dev/null; then
@@ -153,11 +131,11 @@ export DATATUG_TEST_POSTGREST_NOACCESS_BEARER="$noaccess_token"
 
 echo "running the Go command journey"
 test_log=$work/test.log
-status=0
-go test ./apps/datatugapp/commands/ -run 'TestPostgRESTQueryJourney|TestPostgRESTSavedQueryAndPolicyJourney' -count=1 -v >"$test_log" 2>&1 || status=$?
-if [ "$status" != 0 ]; then
+test_status=0
+go test ./apps/datatugapp/commands/ -run 'TestPostgRESTQueryJourney|TestPostgRESTSavedQueryAndPolicyJourney' -count=1 -v >"$test_log" 2>&1 || test_status=$?
+if [ "$test_status" != 0 ]; then
 	cat "$test_log"
-	exit "$status"
+	exit "$test_status"
 fi
 grep -q -- '--- PASS: TestPostgRESTQueryJourney' "$test_log" || { cat "$test_log"; echo "the PostgREST query journey did not pass" >&2; exit 1; }
 grep -q -- '--- PASS: TestPostgRESTSavedQueryAndPolicyJourney' "$test_log" || { cat "$test_log"; echo "the saved-query journey did not pass" >&2; exit 1; }
@@ -359,8 +337,11 @@ PY
 
 echo "postgrest journey passed: $project on $base"
 
+# The success path tears down explicitly, then proves the owned project is
+# gone; a teardown failure here fails the run instead of being swallowed by a
+# passing exit status.
 trap - EXIT INT TERM
-if ! teardown; then
+if ! fixture_lifecycle_teardown; then
 	exit 1
 fi
 if docker ps -aq --filter "label=com.docker.compose.project=${project}" | grep -q .; then
@@ -368,3 +349,4 @@ if docker ps -aq --filter "label=com.docker.compose.project=${project}" | grep -
 	exit 1
 fi
 echo "Teardown complete: no containers remain for project ${project}"
+echo "postgrest journey PASS: $project on $base; owned project and volume removed"

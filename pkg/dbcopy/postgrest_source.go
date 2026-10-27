@@ -154,11 +154,11 @@ func postgrestAPIPath(u *url.URL, display string) (string, error) {
 	if strings.HasSuffix(path, "/") {
 		return "", fmt.Errorf("invalid PostgREST URL %q: the API path takes no trailing slash", display)
 	}
-	if u.EscapedPath() != path {
-		return "", fmt.Errorf("invalid PostgREST URL %q: the API path must not be percent-encoded", display)
-	}
 	if strings.ContainsRune(path, '\\') {
 		return "", fmt.Errorf("invalid PostgREST URL %q: the API path takes no backslash", display)
+	}
+	if u.EscapedPath() != path {
+		return "", fmt.Errorf("invalid PostgREST URL %q: the API path must not be percent-encoded", display)
 	}
 	for _, segment := range strings.Split(strings.TrimPrefix(path, "/"), "/") {
 		if !postgrestAPISegment.MatchString(segment) || segment == "." || segment == ".." {

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/dbconnection"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -263,4 +265,51 @@ func TestDefaultSchemaForPostgREST(t *testing.T) {
 	assert.Equal(t, "items", PolicyCollectionName("items", DriverPostgREST))
 	unresolved := SourceUnresolvedError{Driver: DriverPostgREST}
 	assert.True(t, strings.HasPrefix(unresolved.Error(), "its catalog path"))
+}
+
+func TestPostgRESTScanParamsAccessorsAndTitles(t *testing.T) {
+	lookup := func(name string) (string, bool) {
+		if name == "DATATUG_TEST_POSTGREST" {
+			return "postgrest://api.example.com/rest/v1", true
+		}
+		return "", false
+	}
+	params, err := NewPostgRESTScanParams(lookup, "DATATUG_TEST_POSTGREST", "local", "items")
+	require.NoError(t, err)
+	assert.Equal(t, dbconnection.ModeReadOnly, params.Mode())
+	assert.Equal(t, params.String(), params.GoString(), "%#v must not print the URL")
+	assert.Equal(t, "CouchDB", driverTitle(DriverCouchDB))
+	assert.Equal(t, "PostgREST", driverTitle(DriverPostgREST))
+}
+
+func TestScanDbCatalog_PostgRESTNeedsItsOwnParameters(t *testing.T) {
+	_, err := scanPostgRESTCatalog(context.Background(), dbconnection.NewSQLite3ConnectionParams("x.db", "items", dbconnection.ModeReadOnly))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "needs connection parameters built from an environment variable")
+}
+
+// postgrestScanFailingDB lists no collections: the generic scanner must classify
+// the failure the way every other scan does.
+type postgrestScanFailingDB struct{ postgrestScanDB }
+
+func (*postgrestScanFailingDB) ListCollections(context.Context, *record.Key) ([]dal.CollectionRef, error) {
+	return nil, errors.New("boom")
+}
+
+func TestScanDbCatalog_PostgRESTScannerFailureIsClassified(t *testing.T) {
+	db := &postgrestScanFailingDB{}
+	stubOpenSchemaScan(t, func(dbcopy.BackendRef, context.Context) (dbcopy.SchemaScanDB, error) {
+		return db, nil
+	})
+	lookup := func(name string) (string, bool) {
+		if name == "DATATUG_TEST_POSTGREST" {
+			return "postgrest://api.example.com/rest/v1", true
+		}
+		return "", false
+	}
+	params, err := NewPostgRESTScanParams(lookup, "DATATUG_TEST_POSTGREST", "local", "items")
+	require.NoError(t, err)
+	_, err = scanDbCatalog(datatug.ServerRef{Driver: DriverPostgREST}, params)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to get dbCatalog metadata")
 }

@@ -2,6 +2,7 @@ package dbcopy
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -27,6 +28,7 @@ func TestParsePostgRESTSource(t *testing.T) {
 		{"postgrest+https://api.example.com/rest/v1", PostgRESTHTTPSScheme, "api.example.com", "/rest/v1", "", "", false},
 		{"postgrest+https://api.example.com", PostgRESTHTTPSScheme, "api.example.com", "", "", "", false},
 		{"postgrest+http://127.0.0.1:3000", PostgRESTHTTPScheme, "127.0.0.1:3000", "", "", "", true},
+		{"postgrest+http://127.0.0.1:3000/", PostgRESTHTTPScheme, "127.0.0.1:3000", "", "", "", true},
 		{"postgrest+http://localhost:3000/rest/v1", PostgRESTHTTPScheme, "localhost:3000", "/rest/v1", "", "", true},
 		{"postgrest+http://[::1]:3000/rest/v1", PostgRESTHTTPScheme, "[::1]:3000", "/rest/v1", "", "", true},
 		{"POSTGREST://api.example.com/rest/v1", PostgRESTScheme, "api.example.com", "/rest/v1", "", "", false},
@@ -76,6 +78,10 @@ func TestParsePostgRESTSourceRefusals(t *testing.T) {
 		{"postgrest://api.example.com/rest/v1?", "takes no empty query"},
 		{"postgrest://api.example.com/rest/v1/", "takes no trailing slash"},
 		{"postgrest://api.example.com/rest/../v1", "plain segments"},
+		{"postgrest://:3000/rest/v1", "names no usable host"},
+		{"postgrest://api.example.com/rest\\v1", "takes no backslash"},
+		{"postgrest://api.example.com/rest/v1?schema=%zz", "URL options cannot be read"},
+		{"postgrest://api.example.com/rest/v1?bad%20name=x", "unknown option"},
 		{"postgrest://api.example.com/rest/%76", "must not be percent-encoded"},
 		{"postgrest://api.example.com/re%2Fst", "must not be percent-encoded"},
 		{"postgrest+http://api.example.com/rest/v1", "allowed only for a loopback endpoint"},
@@ -330,6 +336,8 @@ func TestPostgRESTOpenFailureTextIsSafe(t *testing.T) {
 		{"response", dalgo2postgrest.ErrResponseTooLarge, "configured bound"},
 		{"malformed", dalgo2postgrest.ErrInvalidResponse, "does not recognise"},
 		{"request", dalgo2postgrest.ErrRequestFailed, "PostgREST request failed"},
+		{"server error", &dalgo2postgrest.HTTPError{StatusCode: 500}, "answered with HTTP 500"},
+		{"unknown", errors.New("boom"), "driver could not open the source"},
 		{"closed", dalgo2postgrest.ErrClosed, "closed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -401,5 +409,69 @@ func unsetPostgRESTEnv(t *testing.T) {
 				_ = os.Setenv(name, old)
 			}
 		})
+	}
+}
+
+func TestPostgRESTSourceURLOfAnotherRefIsEmpty(t *testing.T) {
+	t.Parallel()
+	for _, ref := range []BackendRef{
+		{},
+		{Scheme: "postgres", Path: "db.example.com/shop"},
+		{Scheme: PostgRESTScheme},
+	} {
+		if got := ref.PostgRESTSourceURL(); got != "" {
+			t.Fatalf("PostgRESTSourceURL(%#v) = %q, want empty", ref, got)
+		}
+	}
+	withOptions := BackendRef{Scheme: PostgRESTScheme, PostgRESTHost: "api.example.com", PostgRESTAPIPath: "/rest/v1", PostgRESTSchema: "app", PostgRESTIDColumn: "note_id"}
+	if got := withOptions.PostgRESTSourceURL(); got != "postgrest://api.example.com/rest/v1?id=note_id&schema=app" {
+		t.Fatalf("PostgRESTSourceURL = %q", got)
+	}
+}
+
+func TestPostgRESTOpenRefusesAnUnsupportedRef(t *testing.T) {
+	t.Parallel()
+	if _, err := (BackendRef{Scheme: PostgRESTScheme}).Open(context.Background()); !errors.Is(err, errUnsupportedBackend) {
+		t.Fatalf("Open of a hostless PostgREST ref = %v, want errUnsupportedBackend", err)
+	}
+}
+
+// postgRESTNoCloseScanDB is a schema reader without a Close, so the scan wrapper
+// must report a nil release instead of requiring one.
+type postgRESTNoCloseScanDB struct {
+	dal.DB
+	dbschema.SchemaReader
+}
+
+func TestOpenSchemaScanPostgRESTAcceptsAReaderWithoutACloser(t *testing.T) {
+	unsetPostgRESTEnv(t)
+	ref, err := Parse("postgrest+http://127.0.0.1:3000/rest/v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := newPostgRESTDatabase
+	t.Cleanup(func() { newPostgRESTDatabase = original })
+	newPostgRESTDatabase = func(context.Context, dalgo2postgrest.Config) (dal.DB, error) {
+		return &postgRESTNoCloseScanDB{}, nil
+	}
+	scan, err := ref.OpenSchemaScan(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = scan.Close(); err != nil {
+		t.Fatalf("Close of a reader without a closer = %v, want nil", err)
+	}
+}
+
+func TestOpenSchemaScanPostgRESTCredentialFailure(t *testing.T) {
+	unsetPostgRESTEnv(t)
+	t.Setenv(PostgRESTBearerEnv, "token\r\nInjected: 1")
+	ref, err := Parse("postgrest+http://127.0.0.1:3000/rest/v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = ref.OpenSchemaScan(context.Background())
+	if !IsPostgRESTUnsafeCredential(err) {
+		t.Fatalf("OpenSchemaScan = %v, want the unsafe-credential error", err)
 	}
 }

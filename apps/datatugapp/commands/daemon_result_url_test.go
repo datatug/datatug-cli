@@ -2,6 +2,7 @@ package commands
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -87,7 +88,7 @@ func TestDaemonURLOfAResultMintsTheCode(t *testing.T) {
 	resultsHome(t)
 	useDaemonFake(t, &daemonFake{up: true})
 	t.Setenv(daemon.UIBaseEnv, "")
-	dir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "daemon")
 	t.Setenv(agentaccess.DirEnv, dir)
 	secret, _ := agentaccess.NewSecret()
 	require.NoError(t, agentaccess.WriteKey(dir, daemon.DefaultPort, secret))

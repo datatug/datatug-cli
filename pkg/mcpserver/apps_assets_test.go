@@ -31,7 +31,7 @@ func TestAppsEmbeddedAssetProvenance(t *testing.T) {
 	if len(appsHTML) > 1500000 {
 		t.Fatal("offline resource exceeds build bound")
 	}
-	for _, required := range []string{"@modelcontextprotocol/ext-apps@2.0.3", "d4ff0c5beac346eb8ead527144630978c5052ff5", "connect-src 'none'", "frame-src 'none'", "font-src 'none'", `id="view"`, `id="actions"`} {
+	for _, required := range []string{"@modelcontextprotocol/ext-apps@2.0.4", "d4ff0c5beac346eb8ead527144630978c5052ff5", "connect-src 'none'", "frame-src 'none'", "font-src 'none'", `id="view"`, `id="actions"`} {
 		if !strings.Contains(appsHTML, required) {
 			t.Errorf("resource missing %s", required)
 		}

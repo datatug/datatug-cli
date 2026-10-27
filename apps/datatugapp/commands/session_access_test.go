@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"testing"
 
@@ -20,7 +21,7 @@ func TestSessionRequestCarriesTheLocalAgentToken(t *testing.T) {
 	defer srv.Close()
 	u, _ := url.Parse(srv.URL)
 	port, _ := strconv.Atoi(u.Port())
-	dir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "daemon")
 	t.Setenv(agentaccess.DirEnv, dir)
 	secret, _ := agentaccess.NewSecret()
 	if err := agentaccess.WriteKey(dir, port, secret); err != nil {

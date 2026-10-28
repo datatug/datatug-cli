@@ -193,7 +193,7 @@ jobs:
       # The published dalgo2libsql fixture is executed with Node 24: it needs fetch
       # and node:crypto, and the journey's receipt must come from the exact fixture
       # the pinned module ships. The action is pinned to an immutable commit.
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '26'
       - name: Script syntax and shellcheck

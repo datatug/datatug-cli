@@ -77,6 +77,8 @@ func TestScanJourneyCouchDBWritesTheConnectionDescriptor(t *testing.T) {
 		body, readErr := os.ReadFile(filepath.Join(projectDir, filepath.FromSlash(name)))
 		require.NoError(t, readErr)
 		assert.NotContains(t, string(body), "couch.example.com", name)
-		assert.NotContains(t, string(body), "6984", name)
+		// The full endpoint, host and port: a CouchDB port such as 6984 alone
+		// also occurs inside an unrelated random id or path.
+		assert.NotContains(t, string(body), "couch.example.com:6984", name)
 	}
 }

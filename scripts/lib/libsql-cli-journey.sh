@@ -238,7 +238,8 @@ def serve():
         while len(body) < length:
             chunk = conn.recv(4096)
             if not chunk:
-                break
+                # A premature close is not a complete request: never ACK it.
+                raise RuntimeError("the client closed after %d of %d declared body bytes" % (len(body), length))
             body += chunk
         # The ACK: the full headers, and the declared body bytes, are in.
         request_ready.set()
@@ -272,6 +273,36 @@ proc = subprocess.Popen(
     text=True,
 )
 
+def reap(proc):
+    """Stop the exact child with finite waits; never block unboundedly."""
+    if proc.poll() is not None:
+        return
+    proc.terminate()
+    try:
+        proc.wait(timeout=5)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    proc.kill()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def drain(proc, timeout):
+    """Read the child's pipes with a finite wait, reaping on timeout."""
+    try:
+        return proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        reap(proc)
+        try:
+            proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        raise RuntimeError("the CLI ignored cancellation and had to be killed")
+
+
 status = 1
 try:
     if not request_ready.wait(20):
@@ -281,12 +312,7 @@ try:
 
     # Signal the exact child, never a process group and never a guessed PID.
     proc.send_signal(signal.SIGINT)
-    try:
-        out, err = proc.communicate(timeout=20)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        out, err = proc.communicate()
-        raise RuntimeError("the CLI ignored cancellation and had to be killed")
+    out, err = drain(proc, 20)
 
     if proc.returncode == 0:
         raise RuntimeError("a cancelled read reported success")
@@ -296,21 +322,21 @@ try:
         raise RuntimeError("the cancellation was not reported safely: %r" % err[:200])
     if not client_gone.wait(10):
         raise RuntimeError("the server did not observe the client disconnect after cancellation")
+    thread.join(timeout=5)
+    if thread.is_alive():
+        raise RuntimeError("the cancellation listener did not stop after the read")
     print("cancellation: complete request held, exact PID interrupted, client disconnected, no rows")
     status = 0
 finally:
-    if proc.poll() is None:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait(timeout=5)
+    reap(proc)
     try:
         srv.close()
     except OSError:
         pass
     thread.join(timeout=5)
+    if thread.is_alive():
+        print("the cancellation listener did not stop after the read", file=sys.stderr)
+        status = 1
 
 sys.exit(status)
 PY

@@ -273,13 +273,20 @@ func queryRunCommandAction(cmd *cobra.Command, _ []string) error {
 	// classification for a source that has one) instead of being killed in the
 	// middle of a read. A second signal still ends the process, and stop gives
 	// the signals back when the command returns.
-	parent := cmd.Context()
+	original := cmd.Context()
+	// The helper always needs a parent context, but the command keeps the
+	// caller's own one (even nil) and gets it back when this invocation ends: a
+	// reused Cobra command must not inherit a cancelled per-invocation context.
+	parent := original
 	if parent == nil {
 		parent = context.Background()
 	}
 	ctx, _, stop := interruptContext(parent)
-	defer stop()
 	cmd.SetContext(ctx)
+	defer func() {
+		cmd.SetContext(original)
+		stop()
+	}()
 
 	o, err := readQueryOptions(cmd)
 	if err == nil {

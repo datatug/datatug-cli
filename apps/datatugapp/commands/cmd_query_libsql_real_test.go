@@ -355,11 +355,12 @@ scopes:
 			}
 		}
 		writeScanned("queries/items/scanned-items.query.json", `{"id":"items/scanned-items","title":"Scanned items","type":"TugQL","createdAt":"2026-01-01T00:00:00Z","targets":[{"catalog":"main"}]}`)
-		// TugQL names a SQLite relation by its own "schema" plus "name":
-		// `name: main.items` would quote one table literally named "main.items".
-		// The scan persisted that relation under main, and the bare /items policy
-		// below matches the same collection name DALgo derives from it.
-		writeScanned("queries/items/scanned-items.query.tugql.yaml", "from: {schema: main, name: items}\ncolumns:\n  - {field: title}\n  - {field: rank}\n  - {field: code}\norderBy:\n  - {field: rank}\n  - {field: code}\nlimit: 10\n")
+		// The scan persisted main.items. The query names the collection
+		// unqualified, which libSQL resolves to that relation, because DALgo's
+		// access layer treats every schema-qualified source as an opaque-query
+		// resource that a /items path policy cannot match. `name: main.items`
+		// would ask SQLite for one table literally named "main.items".
+		writeScanned("queries/items/scanned-items.query.tugql.yaml", "from: {name: items}\ncolumns:\n  - {field: title}\n  - {field: rank}\n  - {field: code}\norderBy:\n  - {field: rank}\n  - {field: code}\nlimit: 10\n")
 		writeScanned("policies/global.yaml", `apiVersion: dalgo.io/access/v1
 kind: AccessPolicy
 metadata:

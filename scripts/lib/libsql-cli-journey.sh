@@ -355,17 +355,20 @@ fi
 echo "scan recorded the descriptor and native SQLite columns"
 
 # The scanned project must serve a normal saved query: the source descriptor,
-# catalog and table metadata all came from the scan. The query uses TugQL's
-# supported schema qualifier, "main", for the scanned SQLite relation
-# ("main.items" is a relation id, not a TugQL name: `name: main.items` would ask
-# SQLite for a table literally named "main.items"). The bare /items policy must
-# match the same relation.
+# catalog and table metadata all came from the scan. The query names the
+# collection unqualified ("items"), which libSQL/SQLite resolves to the scanned
+# main.items relation. A TugQL "schema: main" qualifier would execute the same
+# SQL, but DALgo's access layer classifies every schema-qualified source as an
+# opaque-query resource (opaque-query:main.items), which a path policy such as
+# /items does not match; naming a schema a second way here would therefore hide
+# the very path-policy behaviour this check proves. "name: main.items" is not a
+# qualifier at all: it asks SQLite for a table literally named "main.items".
 mkdir -p "$scanned/queries/items" "$scanned/policies"
 cat >"$scanned/queries/items/scanned-items.query.json" <<'JSON'
 {"id":"items/scanned-items","title":"Scanned items","type":"TugQL","createdAt":"2026-01-01T00:00:00Z","targets":[{"catalog":"main"}]}
 JSON
 cat >"$scanned/queries/items/scanned-items.query.tugql.yaml" <<'YAML'
-from: {schema: main, name: items}
+from: {name: items}
 columns:
   - {field: title}
   - {field: rank}
@@ -395,7 +398,7 @@ scopes:
 YAML
 "$work/datatug" query run --project "$scanned" --query items/scanned-items --env local --as a --format json >"$work/scanned-query.json" 2>"$work/scanned-query.err" || {
 	cat "$work/scanned-query.err" >&2
-	echo "the built CLI could not query the scanned main.items relation through a bare /items policy" >&2
+	echo "the built CLI could not query the scanned main.items relation through a bare /items policy (unqualified items resolves to main.items)" >&2
 	exit 1
 }
 python3 - "$work/scanned-query.json" <<'PY'

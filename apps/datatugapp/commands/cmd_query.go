@@ -268,6 +268,19 @@ var openBackend = func(ctx context.Context, backend dbcopy.BackendRef) (dal.DB, 
 // queryRunCommandAction runs `query run`. With --result-id every failure
 // after the flags were parsed also prints the path-free failure line.
 func queryRunCommandAction(cmd *cobra.Command, _ []string) error {
+	// A read is cancellable: the first SIGINT/SIGTERM cancels its context so the
+	// command returns through its own error path (a safe "read was cancelled"
+	// classification for a source that has one) instead of being killed in the
+	// middle of a read. A second signal still ends the process, and stop gives
+	// the signals back when the command returns.
+	parent := cmd.Context()
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, _, stop := interruptContext(parent)
+	defer stop()
+	cmd.SetContext(ctx)
+
 	o, err := readQueryOptions(cmd)
 	if err == nil {
 		err = runQueryCommand(cmd, o)

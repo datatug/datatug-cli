@@ -142,6 +142,7 @@ func dbTableAction(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	defer session.Close()
 	detail, err := describeTable(session, entry)
 	if err != nil {
 		return session.failure(err)
@@ -159,6 +160,7 @@ func dbColumnAction(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	defer session.Close()
 	detail, err := describeTable(session, entry)
 	if err != nil {
 		return session.failure(err)
@@ -190,6 +192,14 @@ func openSchemaObject(cmd *cobra.Command, command, name string) (*schemaSession,
 	if err != nil {
 		return nil, schemaEntry{}, err
 	}
+	// The session owns the handle until it is handed to the action; a listing
+	// or lookup failure has no action to hand it to and closes it here.
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			session.Close()
+		}
+	}()
 	entries, err := listSchemaEntries(session.ctx, session.ref.Scheme, session.db)
 	if err != nil {
 		return nil, schemaEntry{}, session.failure(err)
@@ -199,6 +209,7 @@ func openSchemaObject(cmd *cobra.Command, command, name string) (*schemaSession,
 	if err != nil {
 		return nil, schemaEntry{}, err
 	}
+	handedOff = true
 	return session, entry, nil
 }
 

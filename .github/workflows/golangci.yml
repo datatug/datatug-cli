@@ -80,6 +80,15 @@ jobs:
       code_coverage: true
       # Enforce 100% statement test coverage across datatug-cli.
       min_test_coverage_percent: 100
+      # Must be >= go.mod's `go` directive, same constraint as release.yml.
+      # This input drives setup-go for BOTH the Lint and Build & test jobs of
+      # the shared workflow (workflow.yml@a62ab9a, lines 413 and 923), and its
+      # default is '1.27.0' — below this module's `go 1.27.1`, which failed both
+      # jobs before any test ran with
+      # "go.mod requires go >= 1.27.1 (running go 1.27.0; GOTOOLCHAIN=local)".
+      # Keep in sync with release.yml's go_version: a mismatch means CI proves
+      # a build under a different toolchain than the release actually uses.
+      go_version: '1.27.1'
   # Fail fast on go.mod/go.sum drift — the gap that shipped v0.13.2.
   #
   # Renovate raised two PRs for the same go-github v90->v91 bump a minute

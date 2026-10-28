@@ -17,7 +17,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 CORE_MODULE = "github.com/datatug/datatug-core"
-CORE_VERSION = "v0.80.0"
+CORE_VERSION = "v0.124.2"
 ARCHITECTURES = ("amd64", "arm64")
 GO_TOOLCHAIN = "go1.27.3"
 DEFAULT_VERSION = "0.0.0-candidate"

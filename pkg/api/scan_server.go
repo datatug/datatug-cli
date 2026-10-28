@@ -10,6 +10,21 @@ const (
 	// DriverSQLServer is the driver name a SQL Server server and catalog carry in a project.
 	DriverSQLServer = "sqlserver"
 
+	// DriverCouchDB is the driver name a CouchDB catalog carries, and the --driver
+	// value `datatug scan` reads it with. One CouchDB database is one logical
+	// collection.
+	DriverCouchDB = "couchdb"
+
+	// DriverPostgREST is the driver name a PostgREST catalog carries, and the
+	// --driver value `datatug scan` reads it with. One PostgREST API root exposes
+	// native PostgreSQL relations as collections.
+	DriverPostgREST = "postgrest"
+
+	// DriverLibSQL is the driver name a libSQL catalog carries, and the --driver
+	// value `datatug scan` reads it with. One libSQL database exposes SQLite
+	// tables and views as collections; the token comes from the environment.
+	DriverLibSQL = "libsql"
+
 	// ServerDefaultSchema is the schema a MySQL, Oracle or SQL Server catalog records its tables
 	// under: the schema the connection reads (a MySQL connection's database, an Oracle session's
 	// current schema, a SQL Server login's default schema), by a fixed name and not its own. The real name is the database of the URL or, for

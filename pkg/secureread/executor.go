@@ -3,7 +3,6 @@ package secureread
 import (
 	"context"
 	"fmt"
-	"io"
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/tugql"
@@ -62,7 +61,7 @@ func (e *Executor) RunStructuredInsecureForTest(ctx context.Context, sourceURL s
 }
 
 func (e *Executor) runStructured(ctx context.Context, sourceURL string, query dal.Query, variables map[string]any, insecureAllowLoopback bool) (Result, error) {
-	db, closeSource, err := openSource(ctx, sourceURL, insecureAllowLoopback, len(e.session.Policies))
+	db, closeSource, err := openSourceFn(ctx, sourceURL, insecureAllowLoopback, len(e.session.Policies))
 	if err != nil {
 		return Result{}, err
 	}
@@ -131,7 +130,9 @@ func (e *Executor) runThroughPolicies(ctx context.Context, db dal.DB, query dal.
 // openSource opens sourceURL via pkg/dbcopy (sqlite:// through dalgo2sqlite,
 // ingitdb:// through dalgo2ingitdb); an unknown scheme fails with
 // dbcopy.Parse's own descriptive error. The returned close func is always
-// safe to call, even when the backend has no Close method.
+// safe to call, even when the backend has no Close method; it closes an owned
+// handle at most once through DALgo's optional-capability lookup, which sees
+// the backend behind the framework's sealed DB wrapper (CouchDB, PostgREST).
 //
 // Every Executor call — RunStructured, RunTugQL, RunNativeSQL — runs the
 // result through accesspolicies.Run before a caller ever sees a row (see
@@ -168,10 +169,5 @@ func openSource(ctx context.Context, sourceURL string, insecureAllowLoopback boo
 	if err != nil {
 		return nil, nil, err
 	}
-	closeFn := func() {
-		if closer, ok := db.(io.Closer); ok {
-			_ = closer.Close()
-		}
-	}
-	return db, closeFn, nil
+	return db, dbcopy.SourceCloser(db), nil
 }

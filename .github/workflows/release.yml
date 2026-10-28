@@ -80,12 +80,15 @@ jobs:
         Everywhere candidate acceptance
         Native release builds
       native_build_workflow: native-release.yml
-      # Must be >= go.mod's `go` directive. Adopting github.com/strongo/buildinfo
-      # raised it to 1.27.0. The shared release job runs its `go mod tidy`
-      # before-hook under this setup-go version with GOTOOLCHAIN=local, so
-      # leaving it unset (default '1.26') fails with
-      # "go.mod requires go >= 1.27.0" before the build starts.
-      go_version: '1.27.3'
+      # Must be >= go.mod's `go` directive, whose current value is `go 1.27.1`
+      # (it was 1.27.0 when adopting github.com/strongo/buildinfo raised it;
+      # the directive has moved on since). The shared release job runs its
+      # `go mod tidy` before-hook under this setup-go version with
+      # GOTOOLCHAIN=local, so leaving it unset (default '1.27.0') fails with
+      # "go.mod requires go >= 1.27.1" before the build starts. This input is
+      # also kept equal to golangci.yml's strongo_workflow go_version, so CI
+      # proves the same toolchain the release builds under.
+      go_version: '1.27.1'
       # Pre-1.0: cap an accidental major (feat!:) to a minor bump.
       allow_major_version_bump: false
       # Block publication unless the macOS build is genuinely signed, notarized,

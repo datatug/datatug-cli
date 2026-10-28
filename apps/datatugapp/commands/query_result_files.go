@@ -187,11 +187,7 @@ func savedTugQLSources(ctx context.Context, store datatug.ProjectStore, projectD
 			if err != nil {
 				return nil, backend.Scheme, nil, err
 			}
-			return db, backend.Scheme, func() {
-				if closer, ok := db.(io.Closer); ok {
-					_ = closer.Close()
-				}
-			}, nil
+			return db, backend.Scheme, dbcopy.SourceCloser(db), nil
 		},
 		ref: func(database string) *string {
 			if projectID == "" || envID == "" {

@@ -41,13 +41,13 @@ type Case struct {
 
 // Schemes are the schemes the CLI knows: everything Parse dispatches, and the
 // postgresql alias.
-var Schemes = []string{"sqlite", "ingitdb", "postgres", "postgresql", "http", "https", "openvaultdb"}
+var Schemes = []string{"sqlite", "ingitdb", "postgres", "postgresql", "http", "https", "openvaultdb", "couchdb", "postgrest", "libsql"}
 
 // wrapperSchemes name a file or directory, so a URL may be written after them.
 var wrapperSchemes = []string{"ingitdb", "sqlite", "openvaultdb", "http", "https"}
 
 // innerSchemes are the schemes of a URL written inside a wrapper.
-var innerSchemes = []string{"https", "http", "postgres"}
+var innerSchemes = []string{"https", "http", "postgres", "couchdb", "postgrest", "libsql"}
 
 var secretStyles = []string{"word", "digits only", "with spaces", "with slash", "with at sign", "digits then slash", "with question mark", "with hash", "percent-encoded"}
 

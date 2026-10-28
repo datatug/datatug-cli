@@ -287,6 +287,12 @@ func (p *provider) listIndexes(ctx context.Context, ref *dal.CollectionRef) ([]d
 	return p.indexes.get(p.key(ref), func() ([]dbschema.IndexDef, error) {
 		indexes, err := limited(ctx, p.slots, func() ([]dbschema.IndexDef, error) { return p.reader.ListIndexes(ctx, ref) }, p.observe)
 		if err != nil {
+			if errors.Is(err, dal.ErrNotSupported) {
+				// The reader states that the service exposes no index metadata (PostgREST's
+				// OpenAPI document has none). That is no indexes, not a failed scan: the
+				// relations and their columns are still read.
+				return nil, nil
+			}
 			return nil, fmt.Errorf("list indexes of %s: %w", ref.Name(), err)
 		}
 		return indexes, nil

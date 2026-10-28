@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -25,11 +24,7 @@ var dalAsSchemaReader = dal.As[dbschema.SchemaReader]
 var dbcopyParse = dbcopy.Parse
 
 // closeSchemaDB releases a source opened to read a schema (a no-op for a backend with no Close).
-var closeSchemaDB = func(db dal.DB) {
-	if closer, ok := db.(io.Closer); ok {
-		_ = closer.Close()
-	}
-}
+var closeSchemaDB = dbcopy.CloseSource
 
 // recordsetDefinitionPath is the project's declared shape for a
 // non-SQL (inGitDB-backed) collection: recordsets/<source>.recordset.json,

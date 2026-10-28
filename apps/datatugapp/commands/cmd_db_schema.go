@@ -132,6 +132,19 @@ type schemaSession struct {
 	detectedFrom string
 	// target is what the output calls the source: its URL without credentials, or the datatug:// reference.
 	target string
+	// closeSource releases the source handle this session opened; it is safe to
+	// call more than once (see dbcopy.SourceCloser).
+	closeSource func()
+}
+
+// Close releases the source this session opened. A metadata command owns that
+// handle: it closes on success, on a read failure and on a write failure, and a
+// close failure never replaces the command's original error.
+func (s *schemaSession) Close() {
+	if s == nil || s.closeSource == nil {
+		return
+	}
+	s.closeSource()
 }
 
 // openSchemaSession reads --db (a URL, env:NAME, a path or a datatug:// reference) and --format of cmd and
@@ -170,7 +183,10 @@ func openSchemaSession(cmd *cobra.Command, command string) (*schemaSession, erro
 	if err != nil {
 		return nil, Exit(ref.OpenFailure(err).Error(), exitCodeDatabase)
 	}
-	return &schemaSession{ctx: ctx, ref: ref, db: db, dbArg: dbArg, format: format, detectedFrom: detectedFrom, target: target}, nil
+	return &schemaSession{
+		ctx: ctx, ref: ref, db: db, dbArg: dbArg, format: format,
+		detectedFrom: detectedFrom, target: target, closeSource: dbcopy.SourceCloser(db),
+	}, nil
 }
 
 // failure is the exit error for a read of the opened source that failed; the
@@ -184,6 +200,7 @@ func dbSchemaAction(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	defer session.Close()
 	withColumns, _ := cmd.Flags().GetBool("columns")
 	withCounts, _ := cmd.Flags().GetBool("counts")
 	entries, err := listSchemaEntries(session.ctx, session.ref.Scheme, session.db)

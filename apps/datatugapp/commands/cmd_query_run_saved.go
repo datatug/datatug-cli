@@ -194,13 +194,19 @@ func resolveQueryEnvironment(ctx context.Context, projStore datatug.ProjectStore
 // runs against: the query's first declared target naming a Catalog, else
 // the resolved environment's only database catalog, erroring with the full
 // candidate list otherwise. envID is what --env was given, and a source string
-// can be typed there: each message shows it only when it is a plain name (see
-// api.LookupError).
+// can be typed there: it is refused before the environment's catalogs are read,
+// and each message shows it only when it is a plain name (see api.LookupError).
 func resolveQueryDatabase(ctx context.Context, projStore datatug.ProjectStore, envID string, queryDef *datatug.QueryDef) (string, error) {
 	for _, target := range queryDef.Targets {
 		if target.Catalog != "" {
 			return target.Catalog, nil
 		}
+	}
+	// A source string typed where an environment ID belongs is not an ID: it is
+	// refused before the environment is read, naming nothing of it. A plain name,
+	// and an unknown nonplain name, still take the catalog path below.
+	if isSourceString(envID) {
+		return "", api.LookupError("load database catalogs for environment %q: an environment ID must be a plain name, not a source URL or a path", nil, envID)
 	}
 	catalogs, err := projStore.LoadEnvDbCatalogs(ctx, envID)
 	if err != nil {
@@ -272,11 +278,13 @@ func querySourceURLFromCatalog(catalog datatug.DbCatalog, projectDir string) (st
 			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
 		}
 		return dbcopy.LocalSourceURL("ingitdb", path), nil
-	case "firestore", api.DriverPostgres, api.DriverMySQL, api.DriverOracle, api.DriverSQLServer:
-		// The catalog's path is a connection descriptor; the source is "env:NAME", never the URL.
+	case "firestore", api.DriverPostgres, api.DriverMySQL, api.DriverOracle, api.DriverSQLServer, api.DriverCouchDB, api.DriverPostgREST, api.DriverLibSQL:
+		// The catalog's path is a connection descriptor that names an operator
+		// environment variable; the source is a value pkg/api builds and validates,
+		// never an endpoint or a credential held by the project.
 		return api.ResolveCatalogSourceURL(catalog, projectDir)
 	default:
-		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3, ingitdb, postgres, mysql, oracle, sqlserver or firestore)", catalog.Driver)
+		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3, ingitdb, postgres, mysql, oracle, sqlserver, firestore, couchdb, postgrest or libsql)", catalog.Driver)
 	}
 }
 

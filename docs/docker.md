@@ -24,6 +24,11 @@ with CGO disabled, inventories actual Go modules from `go list -deps -json`,
 and copies the pinned Dockerfile, license/notice files and private state
 directory skeletons. CGO-off images cannot execute DuckDB: the native DuckDB
 driver requires CGO, and this image retains the explicit unsupported response.
+The pinned libSQL adapter uses a Go `database/sql` connector over the Hrana 3
+HTTP pipeline, rather than a native SQLite library. Its dependency path is present in both CGO-off Linux target graphs. This
+source and dependency-metadata inspection is not a compilation, live-provider
+or current-image execution result. Fresh candidate CI and image acceptance
+remain required.
 The native Redis read command uses Redis ACLs rather than DataTug application
 policies; operators must use a dedicated read-only ACL user and verified TLS.
 Compiled MongoDB/Redis support does not establish provider installation or live
@@ -53,8 +58,10 @@ All five required own texts are retained exactly, including the draft commercial
 terms banner; missing, symlinked or unsuitable required files fail the build.
 The default executable has composite source scopes, so the image makes no
 aggregate Apache-2.0 grant. Legal/publication approval remains pending.
-The helper requires `github.com/datatug/datatug-core v0.80.0` and
-retains its MIT license notice. If a dependency has no recognized top-level
+The helper requires `github.com/datatug/datatug-core v0.124.2` and
+retains that exact source module's Apache 2.0 license text. Historical `v0.80.0`
+MIT-notice evidence is not current-version evidence. This is an existing source
+license, not a new owner approval or an aggregate redistribution grant. If a dependency has no recognized top-level
 license/notice file, the helper prints it and records a **publication gate**;
 development builds can still be inspected. A release build must use
 `--fail-on-missing-licenses` and resolve every missing notice with the

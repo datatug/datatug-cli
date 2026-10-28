@@ -153,6 +153,21 @@ var (
 	setSessionNotices = func(ui *chat.ChatUI, lines []string) { ui.SetSessionNotices(lines) }
 )
 
+// chatDatabaseRefusal is the one answer to --database when the value is not an ID
+// of the environment. It names nothing that was typed.
+const chatDatabaseRefusal = "--database takes the ID of a catalog of the environment (a name such as chinook-local), not a source URL or a path"
+
+// isSourceString reports whether value reads as a source string: a URL or a path
+// after a scheme the CLI knows, an env:NAME, or a datatug:// reference (see
+// dbcopy.SourceDisplay). A plain name is never one. Neither is an unknown nonplain
+// name such as "Chinook db": that may be a catalog ID of an existing project, so it
+// is still looked up (and refused later only if the environment has no such
+// catalog). This is the cheap check that keeps a source string from being read as
+// an ID, before the project and catalog are loaded; it adds no parser of its own.
+func isSourceString(value string) bool {
+	return !dbcopy.IsPlainSourceID(value) && dbcopy.SourceDisplay(value) != dbcopy.UnparsableSource
+}
+
 func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	ctx := cmd.Context()
 	if ctx == nil {
@@ -175,6 +190,14 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	}
 
 	database := options.database
+	// A source string typed into --database is not an ID of the environment: it is
+	// refused before the project and its catalogs are read, naming nothing of it.
+	// A plain name and a configured catalog ID that is not a plain name (such as
+	// "Chinook db") are not source strings: they still reach the catalog, so the
+	// degraded session of a known unresolved catalog opens exactly as before.
+	if database != "" && isSourceString(database) {
+		return "", Exit(chatDatabaseRefusal, exitCodeUsage)
+	}
 	if database == "" {
 		database, err = resolveQueryDatabase(ctx, projectStore, options.env, &datatug.QueryDef{ID: "chat"})
 		if err != nil {
@@ -194,7 +217,7 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	// hashes or the stand-in source of a failed lookup.
 	_, known := sourceURLs[database]
 	if options.database != "" && !known && !projectCatalogHasSource(projectCatalog, database) && !dbcopy.IsPlainSourceID(database) {
-		return "", Exit("--database takes the ID of a catalog of the environment (a name such as chinook-local), not a source URL or a path", exitCodeUsage)
+		return "", Exit(chatDatabaseRefusal, exitCodeUsage)
 	}
 	sourceURL, sourceErr := resolveQuerySourceURL(ctx, projectStore, projectDir, options.env, database)
 	if sourceErr != nil {
@@ -440,11 +463,7 @@ func loadChatJoinApplication(ctx context.Context, sourceURL string, executor *se
 	if err != nil {
 		return nil, nil, err
 	}
-	closeDB := func() {
-		if closer, ok := metadataDB.(io.Closer); ok {
-			_ = closer.Close()
-		}
-	}
+	closeDB := dbcopy.SourceCloser(metadataDB)
 	refresh := func(ctx context.Context) (chat.ForeignKeySnapshot, error) {
 		return joinmeta.LoadForeignKeySnapshot(ctx, metadataDB, sourceURL)
 	}

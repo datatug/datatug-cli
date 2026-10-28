@@ -141,7 +141,7 @@ func TestScanJourneyUnsupportedDriverNamesTheFlag(t *testing.T) {
 
 			require.Error(t, err)
 			assert.ErrorContains(t, err, "--driver")
-			assert.ErrorContains(t, err, "sqlite3, postgres, mysql, oracle or sqlserver", "and what it takes")
+			assert.ErrorContains(t, err, "sqlite3, postgres, mysql, oracle, sqlserver, couchdb, postgrest or libsql", "and what it takes")
 			assert.NotContains(t, err.Error(), secret)
 			assert.NotContains(t, err.Error(), "db.example.com")
 			assert.NotContains(t, stderr, secret)

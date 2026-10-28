@@ -46,6 +46,25 @@ class VersionTests(unittest.TestCase):
                 modules.assert_not_called()
                 run.assert_not_called()
 
+    def test_current_core_policy_accepts_exact_pin(self):
+        self.assertEqual(builder.CORE_VERSION, "v0.124.2")
+        self.build_fake_context("1.2.3")
+
+    def test_wrong_or_missing_core_fails_before_compilation_and_notice_copy(self):
+        for version in (None, "v0.80.0", "v0.124.1", "v0.124.3"):
+            modules = {} if version is None else {builder.CORE_MODULE: {"version": version}}
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as directory, \
+                    patch.object(builder, "source_provenance", return_value=("a" * 40, "clean", "none")), \
+                    patch.object(builder, "module_inventory", return_value=modules), \
+                    patch.object(builder, "run", return_value="2026-10-28T00:00:00+00:00") as run, \
+                    patch.object(builder, "write_module_notices") as notices:
+                output = Path(directory) / "context"
+                with self.assertRaisesRegex(RuntimeError, "expected .* v0.124.2"):
+                    builder.build_context(output, {}, "1.2.3")
+                self.assertFalse(output.exists())
+                self.assertTrue(all(call.args[0][:2] != ["go", "build"] for call in run.call_args_list))
+                notices.assert_not_called()
+
     def build_fake_context(self, version=None, dirty=False):
         commands = []
 
@@ -186,17 +205,33 @@ class ProjectNoticeTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "required project"):
                     self.copy(root, context, goroot)
 
-    def test_core_mit_dependency_notice_still_retained(self):
+    def test_historical_core080_mit_dependency_notice_still_retained(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             module = root / "core"
             module.mkdir()
             (module / "LICENSE").write_bytes(b"MIT License\nCore notice\n")
             self.assertEqual(builder.write_module_notices(root / "context", {
-                builder.CORE_MODULE: {"version": builder.CORE_VERSION, "dir": str(module)}}), [])
+                builder.CORE_MODULE: {"version": "v0.80.0", "dir": str(module)}}), [])
             retained = list((root / "context/licenses/modules").rglob("LICENSE"))
             self.assertEqual(len(retained), 1)
             self.assertEqual(retained[0].read_bytes(), (module / "LICENSE").read_bytes())
+
+    def test_current_core_apache_notice_retains_exact_source_bytes(self):
+        source = Path(__file__).resolve().parents[1]
+        expected = (source / "LICENSES/Apache-2.0.txt").read_bytes()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            module = root / "core"
+            module.mkdir()
+            (module / "LICENSE").write_bytes(expected)
+            self.assertEqual(builder.write_module_notices(root / "context", {
+                builder.CORE_MODULE: {"version": "v0.124.2", "dir": str(module)}}), [])
+            retained = root / "context/licenses/modules/github.com_datatug_datatug-core@v0.124.2/LICENSE"
+            self.assertEqual(retained.read_bytes(), expected)
+            inventory = (root / "context/licenses/DEPENDENCY-LICENSE-INVENTORY.md").read_text()
+            self.assertIn("v0.124.2", inventory)
+            self.assertIn("github.com_datatug_datatug-core@v0.124.2/LICENSE", inventory)
 
     def test_image_metadata_discloses_composite_scope_without_aggregate_grant(self):
         root = Path(__file__).resolve().parents[1]

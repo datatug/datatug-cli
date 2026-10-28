@@ -53,7 +53,11 @@ func loggedTarget(params dbconnection.Params) string {
 // connection URL that stays in an environment variable: a project is pushed to places the
 // URL must never reach, so its server is the driver and nothing else.
 func serverHasHost(driver string) bool {
-	return driver != dbconnection.DriverSQLite3 && !IsServerDriver(driver)
+	// CouchDB and PostgREST, like PostgreSQL, are reached through a connection
+	// descriptor: the project records the descriptor and the driver, never an
+	// endpoint. Non-secret host metadata may still be shown, but it must not become
+	// the bound source.
+	return driver != dbconnection.DriverSQLite3 && driver != DriverCouchDB && driver != DriverPostgREST && driver != DriverLibSQL && !IsServerDriver(driver)
 }
 
 // ScannedServer is the server a scan of driver with dbConnParams reads, as the project
@@ -231,9 +235,9 @@ func updateProjectWithDbCatalog(project *datatug.Project, envID string, dbServer
 		for j, db := range projDbServer.Catalogs {
 			if db.ID == dbCatalog.ID {
 				// restore path as path might be normalized if pointing to user's directory.
-				// A PostgreSQL catalog's path is the connection descriptor the scan is writing
-				// now: the catalog and the descriptor are updated together, never apart.
-				if !IsServerDriver(dbServerRef.Driver) {
+				// A PostgreSQL, CouchDB or PostgREST catalog's path is the connection descriptor the scan is
+				// writing now: the catalog and the descriptor are updated together, never apart.
+				if !IsServerDriver(dbServerRef.Driver) && dbServerRef.Driver != DriverCouchDB && dbServerRef.Driver != DriverPostgREST && dbServerRef.Driver != DriverLibSQL {
 					dbCatalog.Path = projDbServer.Catalogs[j].Path
 				}
 				// TODO: currently replaces catalog with new info, should merge to preserver comments
@@ -418,6 +422,12 @@ func driverTitle(driver string) string {
 		return "MySQL"
 	case DriverOracle:
 		return "Oracle"
+	case DriverCouchDB:
+		return "CouchDB"
+	case DriverPostgREST:
+		return "PostgREST"
+	case DriverLibSQL:
+		return "libSQL"
 	default:
 		return driver
 	}
@@ -435,6 +445,21 @@ func scanCatalog(ctx context.Context, server datatug.ServerRef, connectionParams
 		// PostgreSQL is read through DALgo's schema reader, and opened from an
 		// environment variable: there is no connection string to give database/sql.
 		return scanPostgresCatalog(ctx, server.Driver, connectionParams)
+	}
+	if server.Driver == DriverCouchDB {
+		// CouchDB is read through the same generic SchemaReader seam; the
+		// endpoint comes from an environment variable, never from a project.
+		return scanCouchDBCatalog(ctx, connectionParams)
+	}
+	if server.Driver == DriverPostgREST {
+		// PostgREST is read through the same generic SchemaReader seam; the API
+		// root comes from an environment variable, never from a project.
+		return scanPostgRESTCatalog(ctx, connectionParams)
+	}
+	if server.Driver == DriverLibSQL {
+		// libSQL is read through the same generic SchemaReader seam; the server
+		// base address comes from an environment variable, never from a project.
+		return scanLibSQLCatalog(ctx, connectionParams)
 	}
 	if server.Driver == dbconnection.DriverSQLite3 {
 		// SQLite is read through DALgo's schema reader too (dalgo2sqlite).

@@ -155,10 +155,14 @@ func dbCopyAction(cmd *cobra.Command, _ []string) error {
 	// Open both backends (REQ:exit-codes — 4 for connection failures). The source is opened as a
 	// read; the target is the one open that is written through, so a PostgreSQL target is not
 	// opened read-only.
-	src, err := srcRef.OpenForCopy(ctx, fromSchema)
+	src, err := openCopySource(ctx, srcRef, fromSchema)
 	if err != nil {
 		return Exit(fmt.Sprintf("open --from: %v", err), 4)
 	}
+	// This command owns both handles it opens, and the copy engine owns neither:
+	// release the source on every path from here, including the BigQuery
+	// destination, which opens no target.
+	defer dbcopy.SourceCloser(src)()
 
 	directives, err := buildDirectivesFromFlags(cmd)
 	if err != nil {
@@ -179,10 +183,11 @@ func dbCopyAction(cmd *cobra.Command, _ []string) error {
 	if tgtRef.Scheme == "bigquery" {
 		return dbCopyToBigQuery(ctx, src, srcRef, fromSchema, tgtRef, opts, errWriter)
 	}
-	tgt, err := tgtRef.OpenForWrite(ctx)
+	tgt, err := openCopyTarget(ctx, tgtRef)
 	if err != nil {
 		return Exit(fmt.Sprintf("open --to: %v", err), 4)
 	}
+	defer dbcopy.SourceCloser(tgt)()
 
 	summary, err := dbCopyRunner(ctx, src, tgt, opts)
 	if errors.Is(err, dbcopy.ErrSourceHasNoTables) {
@@ -317,6 +322,14 @@ var (
 	dbCopyRunner       = dbcopy.Copy
 	dbCopyToSinkRunner = dbcopy.CopyToSink
 	bqRecoveryMarshal  = json.Marshal
+	// openCopySource and openCopyTarget are the two opens dbCopyAction owns;
+	// package vars so tests can observe that each is released on every path.
+	openCopySource = func(ctx context.Context, ref dbcopy.BackendRef, schema string) (dal.DB, error) {
+		return ref.OpenForCopy(ctx, schema)
+	}
+	openCopyTarget = func(ctx context.Context, ref dbcopy.BackendRef) (dal.DB, error) {
+		return ref.OpenForWrite(ctx)
+	}
 )
 
 func bigQueryRecoveryHint(target dbcopy.BackendRef, ref bqwriter.LoadJobRef) string {

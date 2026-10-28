@@ -110,8 +110,11 @@ linked `commercial/licensing` entitlement checker under the repository's
 underlying terms are unchanged. Retain LICENSE, THIRD_PARTY_NOTICES.md,
 LICENSING.md, LICENSES/Apache-2.0.txt and LICENSES/COMMERCIAL-TERMS.md exactly,
 plus the closed source/destination/scope/hash inventory and MCP build manifest.
-The pinned Core MIT notice, embedded MCP App resource notices and all other
-binary/module notices remain required. This is not an aggregate redistribution
+The current `github.com/datatug/datatug-core v0.124.2` Apache 2.0 source
+license text, embedded MCP App resource notices and all other binary/module
+notices remain required. Historical Core `v0.80.0` MIT-notice artifacts do not
+prove current retention. This existing source license is not a new owner legal
+approval. This is not an aggregate redistribution
 grant or commercial approval. AG Grid/Charts and full hosted DataTug UI assets
 remain excluded; the embedded MCP resource is a separate, noticed dependency.
 Provider-tool/deployer images add their own

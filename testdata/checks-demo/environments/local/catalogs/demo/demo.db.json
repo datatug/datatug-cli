@@ -1,0 +1,6 @@
+{
+  "id": "demo",
+  "driver": "sqlite3",
+  "path": "demo.sqlite",
+  "dbModel": "demo"
+}

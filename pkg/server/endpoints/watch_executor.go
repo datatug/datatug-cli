@@ -17,7 +17,7 @@ func ExecuteWatchCheck(ctx context.Context, project, environment, checkID, check
 	if api.ValidateIdentifier("environment", environment) != nil || operationID == "" {
 		return detective.CheckRun{}, "", detective.ErrInvalid
 	}
-	store, actor, err := detectiveStore(project, api.SecurityContextID())
+	store, actor, err := detectiveStoreContext(ctx, project, api.SecurityContextID())
 	if err != nil {
 		return detective.CheckRun{}, "", errors.New("watch Check project asset access is unavailable")
 	}

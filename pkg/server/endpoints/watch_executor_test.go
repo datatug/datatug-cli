@@ -8,9 +8,11 @@ import (
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/storage"
+	"github.com/gofrs/flock"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestWatchExecutorUsesExistingSavedQueryAndPinsSource(t *testing.T) {
@@ -79,5 +81,38 @@ func TestWatchExecutorInvalidAndSecuredAssetsFailClosed(t *testing.T) {
 	api.ConfigureSecureSession(secureread.Session{}, nil, api.Capabilities{})
 	if _, _, e := ExecuteWatchCheck(ctx, "missing", "local", "check", "1", "", "op", nil); e == nil {
 		t.Fatal("unavailable asset accepted")
+	}
+}
+
+func TestWatchExecutorHeldPrivateLockHonorsContext(t *testing.T) {
+	dir, project := writeRunQueryTestProject(t)
+	previous := storage.NewDatatugStore
+	defer func() { storage.NewDatatugStore = previous }()
+	configureSemanticSession(t, dir, project, "alice", []string{"admin"})
+	private := t.TempDir()
+	api.ConfigureSecureSession(secureread.Session{Unrestricted: true}, map[string]string{project: dir}, api.Capabilities{EvidencePrivateDir: private})
+	defer api.ConfigureSecureSession(secureread.Session{}, nil, api.Capabilities{})
+	if _, err := detective.NewLocalStore(project, dir, private); err != nil {
+		t.Fatal(err)
+	}
+	paths, err := filepath.Glob(filepath.Join(private, "detective", "*", "store.lock"))
+	if err != nil || len(paths) != 1 {
+		t.Fatal(paths, err)
+	}
+	lock := flock.New(paths[0])
+	if err = lock.Lock(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := lock.Unlock(); err != nil {
+			t.Error(err)
+		}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, _, err = ExecuteWatchCheck(ctx, project, semanticTestEnv, "unused", "1", "", "context-test", nil)
+	if err == nil || ctx.Err() != context.DeadlineExceeded || time.Since(start) > time.Second {
+		t.Fatal(err, ctx.Err(), time.Since(start))
 	}
 }

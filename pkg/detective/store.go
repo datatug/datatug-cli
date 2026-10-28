@@ -89,6 +89,14 @@ type LocalStore struct {
 }
 
 func NewLocalStore(projectID, projectDir, privateBase string) (*LocalStore, error) {
+	return NewLocalStoreContext(context.Background(), projectID, projectDir, privateBase)
+}
+
+// NewLocalStoreContext preserves cancellation while acquiring the private scope lock.
+func NewLocalStoreContext(ctx context.Context, projectID, projectDir, privateBase string) (*LocalStore, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if !validServedProjectID(projectID) || projectDir == "" || privateBase == "" {
 		return nil, ErrInvalid
 	}
@@ -144,7 +152,7 @@ func NewLocalStore(projectID, projectDir, privateBase string) (*LocalStore, erro
 	// physical checkout. Bind it to its first served project ID under the same
 	// lock, including when upgrading an existing directory, so two logical
 	// projects cannot read each other's Cases through one checkout alias.
-	err = store.withLock(context.Background(), func() error {
+	err = store.withLock(ctx, func() error {
 		data, err := safeReadFile(private, "scope")
 		if errors.Is(err, os.ErrNotExist) {
 			return writeItem(private, "scope", struct {

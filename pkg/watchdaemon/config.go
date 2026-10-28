@@ -31,8 +31,11 @@ type Config struct {
 		Environment         string             `json:"environment"`
 		Principal           string             `json:"principal"`
 		EvidenceDir         string             `json:"evidenceDir"`
-		AllowOpaqueSQL      bool               `json:"allowOpaqueSQL,omitempty"`
-		Telegram            *TelegramBotConfig `json:"telegram,omitempty"`
+		// PrivateExecutionEvidence routes immutable receipts and snapshots outside
+		// the project for deployments that mount trusted project files read-only.
+		PrivateExecutionEvidence bool               `json:"privateExecutionEvidence,omitempty"`
+		AllowOpaqueSQL           bool               `json:"allowOpaqueSQL,omitempty"`
+		Telegram                 *TelegramBotConfig `json:"telegram,omitempty"`
 	} `json:"runner"`
 	Notifications struct {
 		EmailSink string      `json:"emailSink,omitempty"`

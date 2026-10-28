@@ -1,0 +1,96 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["image", "trustedLocalOwner", "scope", "coordinator", "projectClaim", "stateClaim", "stateFilesystem", "runnerSecret", "serviceAccount", "podAnnotations", "sourceCredentials", "resources", "networkPolicy"],
+  "properties": {
+    "image": {
+      "type": "object", "additionalProperties": false,
+      "required": ["repository", "digest"],
+      "properties": {
+        "repository": {"type": "string", "minLength": 1, "pattern": "^[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)+$"},
+        "digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}
+      }
+    },
+    "trustedLocalOwner": {"type": "boolean", "const": true},
+    "scope": {
+      "type": "object", "additionalProperties": false,
+      "required": ["namespace", "environment"],
+      "properties": {
+        "namespace": {"type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"},
+        "environment": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"}
+      }
+    },
+    "coordinator": {
+      "type": "object", "additionalProperties": false,
+      "required": ["endpoint", "port", "caConfigMap"],
+      "properties": {
+        "endpoint": {"type": "string", "minLength": 1, "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._/-]*)?$"},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "caConfigMap": {"type": "string", "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"}
+      }
+    },
+    "projectClaim": {"type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"},
+    "stateClaim": {"type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"},
+    "stateFilesystem": {"type": "string", "const": "node-local-block"},
+    "runnerSecret": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "key"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"},
+        "key": {"type": "string", "minLength": 1, "maxLength": 253, "pattern": "^[A-Za-z0-9._-]+$"}
+      }
+    },
+    "serviceAccount": {"type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"},
+    "podAnnotations": {"type": "object", "additionalProperties": {"type": "string"}},
+    "sourceCredentials": {
+      "type": "array", "maxItems": 50,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["envName", "secretName", "key"],
+        "properties": {
+          "envName": {"type": "string", "pattern": "^(PGPASSWORD|[A-Z][A-Z0-9_]*_URL)$"},
+          "secretName": {"type": "string", "minLength": 1, "maxLength": 253, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"},
+          "key": {"type": "string", "minLength": 1, "maxLength": 253, "pattern": "^[A-Za-z0-9._-]+$"}
+        }
+      }
+    },
+    "resources": {
+      "type": "object", "additionalProperties": false,
+      "required": ["requests", "limits"],
+      "properties": {
+        "requests": {"$ref": "#/definitions/resourceQuantities"},
+        "limits": {"$ref": "#/definitions/resourceQuantities"}
+      }
+    },
+    "networkPolicy": {
+      "type": "object", "additionalProperties": false,
+      "required": ["enabled", "dnsNamespace", "databaseEgress"],
+      "properties": {
+        "enabled": {"type": "boolean", "const": true},
+        "dnsNamespace": {"type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"},
+        "databaseEgress": {
+          "type": "array", "maxItems": 50,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["cidr", "port"],
+            "properties": {
+              "cidr": {"type": "string", "pattern": "^[0-9]{1,3}(\\.[0-9]{1,3}){3}/([0-9]|[12][0-9]|3[0-2])$"},
+              "port": {"type": "integer", "minimum": 1, "maximum": 65535}
+            }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "resourceQuantities": {
+      "type": "object", "additionalProperties": false, "minProperties": 2, "maxProperties": 2,
+      "required": ["cpu", "memory"],
+      "properties": {
+        "cpu": {"type": "string", "pattern": "^([1-9][0-9]*m|[1-9][0-9]*)$"},
+        "memory": {"type": "string", "pattern": "^[1-9][0-9]*(Ki|Mi|Gi|Ti)$"}
+      }
+    }
+  }
+}

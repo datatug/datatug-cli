@@ -51,8 +51,12 @@ archives:
     ids: [ datatug-unix ]
     files:
       - README.md
-      - LICENSE*
+      - LICENSE
+      - LICENSING.md
+      - LICENSES/Apache-2.0.txt
+      - LICENSES/COMMERCIAL-TERMS.md
       - THIRD_PARTY_NOTICES.md
+      - pkg/mcpserver/app/build-manifest.json
 
   - id: zip
     formats: [ zip ]
@@ -61,8 +65,12 @@ archives:
     ids: [ datatug-windows ]
     files:
       - README.md
-      - LICENSE*
+      - LICENSE
+      - LICENSING.md
+      - LICENSES/Apache-2.0.txt
+      - LICENSES/COMMERCIAL-TERMS.md
       - THIRD_PARTY_NOTICES.md
+      - pkg/mcpserver/app/build-manifest.json
 
 checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
@@ -111,7 +119,8 @@ homebrew_casks:
       - tarball
     description: "DataTug – Context-aware data viewer & collaborative query manager for effortless exploration of related data — CLI + Web UI"
     homepage: https://datatug.io
-    license: Apache-2.0
+    # Cask has no license stanza; retained scoped texts do not grant an
+    # aggregate license for the composite executable. See docs/native-packaging.md.
 
     repository:
       owner: datatug

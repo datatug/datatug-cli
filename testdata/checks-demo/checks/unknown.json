@@ -1,0 +1,16 @@
+{
+  "id": "unknown",
+  "title": "Trusted demo Check",
+  "version": 1,
+  "inputs": [],
+  "steps": [
+    {
+      "id": "rows",
+      "kind": "query",
+      "queryId": "items",
+      "validators": []
+    }
+  ],
+  "updatedAt": "2026-10-25T00:00:00Z",
+  "updatedBy": "demo"
+}

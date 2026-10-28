@@ -110,6 +110,12 @@ func (s *Store) reconcileDefinition(ctx context.Context, tx dal.ReadwriteTransac
 			}
 			return e
 		}
+		// The ready query can be stale after another coordinator advances this
+		// observation. Keep fresh source admission, but avoid locking run rows
+		// when this transaction has no scheduling work left to do.
+		if obs.NextEvaluation.After(now) {
+			return nil
+		}
 	}
 	jobs, err := s.activeRuns(ctx, tx, d.Scope, d.ID)
 	if err != nil {
@@ -122,7 +128,7 @@ func (s *Store) reconcileDefinition(ctx context.Context, tx dal.ReadwriteTransac
 			break
 		}
 	}
-	if obs.NextEvaluation.After(now) {
+	if s.cloud == nil && obs.NextEvaluation.After(now) {
 		return nil
 	}
 	if active {

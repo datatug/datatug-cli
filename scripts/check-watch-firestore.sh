@@ -37,6 +37,7 @@ export WATCH_FIRESTORE_TEST_PROJECT=demo-datatug-watch-ci
 printf 'Owner: check-watch-firestore.sh PID %s\nProject: %s\nEndpoint: %s\n' "$$" "$WATCH_FIRESTORE_TEST_PROJECT" "$FIRESTORE_EMULATOR_HOST" > "$watch_artifacts/lifecycle.txt"
 "$watch_java" -jar "$watch_jar" --host 127.0.0.1 --port "$watch_port" --project_id "$WATCH_FIRESTORE_TEST_PROJECT" > "$watch_artifacts/emulator.log" 2>&1 &
 watch_pid=$!
+printf 'Emulator PID: %s\n' "$watch_pid" >> "$watch_artifacts/lifecycle.txt"
 watch_ready=0
 for ((watch_attempt=0; watch_attempt<200; watch_attempt++)); do
   if ! kill -0 "$watch_pid" 2>/dev/null; then
@@ -54,7 +55,7 @@ if [ "$watch_ready" != 1 ]; then
   exit 1
 fi
 # The required marker makes missing emulator configuration fatal, never SKIP.
-go test -race ./pkg/watch -run '^TestFirestore(Store|Events)' -count=1 -timeout=180s -json > "$watch_artifacts/tests.jsonl"
+go test -race ./pkg/watch -run '^TestFirestore(Store|Events|Registration|ReconcileStale)' -count=1 -timeout=180s -json > "$watch_artifacts/tests.jsonl"
 python3 - "$watch_artifacts/tests.jsonl" <<'PY'
 import json, pathlib, sys
 rows = [json.loads(line) for line in pathlib.Path(sys.argv[1]).read_text().splitlines()]
@@ -63,6 +64,31 @@ assert tests and not any(row['Action'] == 'skip' for row in tests), 'Firestore g
 passed = {row['Test'] for row in tests if row['Action'] == 'pass'}
 assert len(passed) >= 7, 'Missing Firestore acceptance cases'
 assert {'TestFirestoreEventsTypedAtomicPrivacyPaginationAndAuthority', 'TestFirestoreEventsSameInstantLanesAndDurableRetention'} <= passed, 'Missing Work event acceptance cases'
+# Keep the original Store/Events minimum independent of the registration cases.
+registration = [row for row in rows if row.get('Test', '').startswith('TestFirestoreRegistration')]
+assert registration and not any(row['Action'] == 'skip' for row in registration), 'Registration gate did not execute'
+registration_passed = {row['Test'] for row in registration if row['Action'] == 'pass'}
+assert {
+    'TestFirestoreRegistrationExistingRunnerDoesNotScanQuota',
+    'TestFirestoreRegistrationNewScopeAndProviderFailuresRemainAtomic',
+    'TestFirestoreRegistrationRetryRechecksCurrentAuthority',
+    'TestFirestoreRegistrationThreeExistingRunnersConcurrent',
+    'TestFirestoreRegistrationConcurrentHundredRunnerCapacity',
+    'TestFirestoreRegistrationAuditedHeartbeatPreservesFence',
+    'TestFirestoreRegistrationAuditedPairClosedWriteSet',
+    'TestFirestoreRegistrationAuditedHeartbeatPhysicalErrorsRollback',
+    'TestFirestoreRegistrationAuditEnvelopeFailsClosed',
+} <= registration_passed, 'Missing Watch registration acceptance cases'
+# Stale-selection proofs cannot satisfy the original Store/Events minimum.
+stale = [row for row in rows if row.get('Test', '').startswith('TestFirestoreReconcileStale')]
+assert stale and not any(row['Action'] == 'skip' for row in stale), 'Stale reconciliation gate did not execute'
+stale_passed = {row['Test'] for row in stale if row['Action'] == 'pass'}
+assert {
+    'TestFirestoreReconcileStaleReadySelectionSkipsRunsAfterAdmission',
+    'TestFirestoreReconcileStaleReadyPolicyAndDueTransitions',
+    'TestFirestoreReconcileStaleReadyConcurrentLifecycleHTTP',
+} <= stale_passed, 'Missing stale ready reconciliation acceptance cases'
+
 PY
 export FIRESTORE_QUERY_GATE_REQUIRED=1
 go test ./pkg/dbcopy -run '^TestFirestore' -count=1 -json > "$watch_artifacts/query-tests.jsonl"

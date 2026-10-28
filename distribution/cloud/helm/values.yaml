@@ -1,0 +1,34 @@
+# Local candidate only. No publisher image, entitlement or commercial terms implied.
+image:
+  repository: ''
+  digest: ''
+trustedLocalOwner: false
+scope:
+  namespace: ''
+  environment: ''
+coordinator:
+  endpoint: ''
+  port: 443
+  caConfigMap: ''
+projectClaim: ''
+stateClaim: ''
+# Must attest node-local block filesystem semantics: EBS/Azure Disk/GCE PD,
+# not NFS/EFS/Filestore. ReadWriteOnce alone does not establish this property.
+stateFilesystem: ''
+runnerSecret:
+  name: ''
+  key: token
+serviceAccount: ''
+podAnnotations: {}
+sourceCredentials: []
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: '1'
+    memory: 768Mi
+networkPolicy:
+  enabled: true
+  dnsNamespace: kube-system
+  databaseEgress: []

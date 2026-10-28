@@ -1,0 +1,150 @@
+{{- if not .Values.trustedLocalOwner }}{{ fail "Explicit trustedLocalOwner=true is required; secured Check asset grants remain unsupported" }}{{ end -}}
+{{- $repository := required "image.repository is required" .Values.image.repository -}}
+{{- if not (regexMatch "^[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)+$" $repository) }}{{ fail "image.repository must be a lowercase registry/repository path without tag or digest" }}{{ end -}}
+{{- $digest := required "image.digest is required" .Values.image.digest -}}
+{{- if not (regexMatch "^sha256:[a-f0-9]{64}$" $digest) }}{{ fail "image.digest must be an immutable sha256 digest" }}{{ end -}}
+{{- if not (regexMatch "^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._/-]*)?$" .Values.coordinator.endpoint) }}{{ fail "A trusted HTTPS Coordinator URL with a valid host and no credentials, query, or fragment is required" }}{{ end -}}
+{{- $urlPort := regexFind "^https://[A-Za-z0-9.-]+:[0-9]+" .Values.coordinator.endpoint -}}
+{{- if $urlPort }}{{- $urlPortNumber := atoi (last (splitList ":" $urlPort)) -}}{{- if ne (toString $urlPortNumber) (toString .Values.coordinator.port) }}{{ fail "coordinator.port must match the explicit HTTPS endpoint port" }}{{ end }}{{ end -}}
+{{- if and (not $urlPort) (ne (toString .Values.coordinator.port) "443") }}{{ fail "coordinator.port must be 443 for an implicit HTTPS endpoint port" }}{{ end -}}
+{{- if ne .Values.stateFilesystem "node-local-block" }}{{ fail "stateFilesystem=node-local-block is required; SQLite WAL must not use NFS/EFS/Filestore" }}{{ end -}}
+{{- $project := required "projectClaim is required" .Values.projectClaim -}}
+{{- $state := required "stateClaim is required" .Values.stateClaim -}}
+{{- if eq $project $state }}{{ fail "Project and private state must use distinct claims" }}{{ end -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $project) }}{{ fail "projectClaim must be a DNS-label PVC name" }}{{ end -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $state) }}{{ fail "stateClaim must be a DNS-label PVC name" }}{{ end -}}
+{{- $account := required "An existing least-privilege serviceAccount is required" .Values.serviceAccount -}}
+{{- $secret := required "runnerSecret.name is required" .Values.runnerSecret.name -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $account) }}{{ fail "serviceAccount must be a DNS-label name" }}{{ end -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $secret) }}{{ fail "runnerSecret.name must be a DNS-label name" }}{{ end -}}
+{{- $namespace := required "scope.namespace is required" .Values.scope.namespace -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $namespace) }}{{ fail "scope.namespace must be a DNS-label namespace" }}{{ end -}}
+{{- if ne $namespace .Release.Namespace }}{{ fail "scope.namespace must match the Helm release namespace" }}{{ end -}}
+{{- $environment := required "scope.environment is required" .Values.scope.environment -}}
+{{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" $environment) }}{{ fail "scope.environment must be a valid DataTug identifier" }}{{ end -}}
+{{- $release := .Release.Name -}}
+{{- if or (gt (len $release) 56) (not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $release)) }}{{ fail "Release name must be a DNS label of at most 56 characters" }}{{ end -}}
+{{- $envNames := dict "DATATUG_LOCAL_OWNER" true "DATATUG_TELEMETRY" true "DATATUG_WATCH_RUNNER_TOKEN" true -}}
+{{- if .Values.coordinator.caConfigMap }}{{ $_ := set $envNames "SSL_CERT_FILE" true }}{{ end -}}
+{{- range .Values.sourceCredentials }}
+  {{- if hasKey $envNames .envName }}{{ fail (printf "Duplicate or reserved secret environment name: %s" .envName) }}{{ end -}}
+  {{- $_ := set $envNames .envName true -}}
+{{- end -}}
+{{- $name := printf "%s-runner" .Release.Name -}}
+{{- $runnerConfig := dict "namespace" $namespace "runner" (dict "tokenEnv" "DATATUG_WATCH_RUNNER_TOKEN" "coordinatorEndpoint" .Values.coordinator.endpoint "projectDir" "/project" "environment" $environment "principal" "deployment-local-owner" "evidenceDir" "/var/lib/datatug/evidence" "privateExecutionEvidence" true) | toJson -}}
+{{- if hasKey .Values.podAnnotations "datatug.io/config-checksum" }}{{ fail "datatug.io/config-checksum is reserved for automatic configuration rollout" }}{{ end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+data:
+  runner.json: |
+    {{ $runnerConfig }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: datatug-execution
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    datatug.io/project-id-source: project-manifest
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: runner
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: runner
+        datatug.io/project-id-source: project-manifest
+      annotations:
+        datatug.io/config-checksum: {{ $runnerConfig | sha256sum | quote }}
+        datatug.io/coordinator-readiness: "Observe authenticated Coordinator heartbeat and run outcome; Pod Running is not execution readiness"
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ $account | quote }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 35
+      nodeSelector:
+        kubernetes.io/os: linux
+        kubernetes.io/arch: amd64
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: runner
+          image: {{ printf "%s@%s" $repository $digest | quote }}
+          imagePullPolicy: IfNotPresent
+          args: ["daemon", "--run", "--watch-config", "/run/config/runner.json"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          env:
+            - name: DATATUG_LOCAL_OWNER
+              value: "true"
+            - name: DATATUG_TELEMETRY
+              value: "0"
+            - name: DATATUG_WATCH_RUNNER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret | quote }}
+                  key: {{ .Values.runnerSecret.key | quote }}
+            {{- if .Values.coordinator.caConfigMap }}
+            - name: SSL_CERT_FILE
+              value: /run/ca/ca.crt
+            {{- end }}
+            {{- range .Values.sourceCredentials }}
+            {{- if not (or (eq .envName "PGPASSWORD") (and (regexMatch "^[A-Z][A-Z0-9_]*_URL$" .envName) (not (regexMatch "^(DATATUG|NODE|LD_|DYLD_|VSCODE|ELECTRON|GIT|SSH)" .envName)))) }}{{ fail "Source secret environment name is unsafe" }}{{ end }}
+            - name: {{ .envName | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .secretName | quote }}
+                  key: {{ .key | quote }}
+            {{- end }}
+          volumeMounts:
+            - {name: project, mountPath: /project, readOnly: true}
+            - {name: state, mountPath: /var/lib/datatug, readOnly: false}
+            - {name: config, mountPath: /run/config, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+            {{- if .Values.coordinator.caConfigMap }}
+            - {name: ca, mountPath: /run/ca, readOnly: true}
+            {{- end }}
+      volumes:
+        - name: project
+          persistentVolumeClaim:
+            claimName: {{ $project | quote }}
+            readOnly: true
+        - name: state
+          persistentVolumeClaim:
+            claimName: {{ $state | quote }}
+        - name: config
+          configMap:
+            name: {{ $name }}
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+        {{- if .Values.coordinator.caConfigMap }}
+        - name: ca
+          configMap:
+            name: {{ .Values.coordinator.caConfigMap | quote }}
+        {{- end }}

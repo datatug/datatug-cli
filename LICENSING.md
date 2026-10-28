@@ -45,10 +45,12 @@ Local developer workflows—running `datatug serve` on localhost, inspecting dat
 
 ## Architectural Separation of Concerns
 
-1. **Pure Community Core (`pkg/`, `apps/`, `internal/`)**:
-   All core packages are licensed under Apache 2.0 and have **zero** import dependencies on proprietary modules. Extension points (such as `watchdaemon.EntitlementChecker`) use clean interfaces, allowing community builds to compile cleanly without commercial code.
+1. **Source scopes and default executable (`pkg/`, `apps/`, `internal/`)**:
+   These source directories use the Apache 2.0 scope above. The default CLI is a composite executable: `apps/datatugapp/commands/cmd_daemon_watch.go` imports `commercial/licensing` and installs its `CoordinatorEntitlementChecker` through `watchdaemon.EntitlementChecker`. Interface separation does not mean the default binary excludes commercial code. The checker and its existing behavior remain in place; the commercial terms remain **DRAFT — PENDING QUALIFIED LEGAL REVIEW**. This source map is not an aggregate binary redistribution grant.
 2. **Commercial Subsystem (`commercial/`)**:
    Commercial features, including the offline Ed25519 entitlement engine and `CoordinatorEntitlementChecker`, reside strictly in `commercial/licensing/` and are governed by the [DataTug Commercial Terms](LICENSES/COMMERCIAL-TERMS.md).
+
+The default CLI also embeds `pkg/mcpserver/app/index.html`, an MCP App resource. Its build manifest and third-party notices are separate source files retained by container packaging; they are not additional `go:embed` inputs. This resource is distinct from the full hosted DataTug UI and from AG Grid/Charts. Container packaging retains the five own license/map/terms texts, the MCP build manifest and dependency notices; final artifact and legal review remain publication gates.
 
 ---
 

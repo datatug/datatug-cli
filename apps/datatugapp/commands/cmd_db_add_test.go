@@ -149,9 +149,12 @@ func TestDbAddPostgresHoldsTheVariableNameOnly(t *testing.T) {
 	files := projectFilesOf(t, dir)
 	assert.JSONEq(t, `{"dsnEnv":"DATATUG_SHOP_PG"}`, files["connections/prod/shop-pg.json"])
 	for name, content := range files {
-		for _, secret := range []string{"alice", "s3cr3tpw", "db.internal", "5432"} {
+		for _, secret := range []string{"alice", "s3cr3tpw", "db.internal"} {
 			assert.NotContains(t, content, secret, name)
 		}
+		// Ownership digests and random nonces can contain these four digits.
+		// A persisted port is a complete number or endpoint token, not a hash substring.
+		assert.NotRegexp(t, `(?i)(^|[^0-9a-f])5432([^0-9a-f]|$)`, content, name)
 	}
 	shown, _, err := runShowCommand(t, "-p", "shop", "--format", "json", "--depth", "sources")
 	require.NoError(t, err)

@@ -26,6 +26,9 @@ type firestoreSession struct {
 	sweepCursor   string
 	ready         map[string]WorkEvent
 	changed       map[string]Definition
+	// Set only by the ordinary audit writer in this SDK attempt. Preserve the
+	// writer's original time/ID; a JSON time cannot reconstruct time.String().
+	registrationAudit *AuditEvent
 }
 
 type cloudRow struct {

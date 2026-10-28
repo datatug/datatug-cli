@@ -34,6 +34,8 @@ import (
 // persistent machine services or weakening the actual Coordinator/Runner ports.
 var (
 	watchUserHomeDir           = os.UserHomeDir
+	watchPrivateEvidencePaths  = privateExecutionEvidencePaths
+	watchPrivateMkdirAll       = os.MkdirAll
 	watchResolveCoordinator    = resolveWatchCoordinator
 	watchConfigureExecution    = configureWatchExecution
 	watchExecuteCheck          = endpoints.ExecuteWatchCheck
@@ -127,6 +129,17 @@ func watchDaemonAction(cmd *cobra.Command, _ []string) error {
 		if cfg.Runner.Environment == "" || cfg.Runner.Principal == "" {
 			return errors.New("watch runner requires an explicit environment and local principal")
 		}
+		privateRepository := ""
+		if cfg.Runner.PrivateExecutionEvidence {
+			cfg.Runner.EvidenceDir, err = watchExecutionEvidenceDir(cfg.Runner.EvidenceDir)
+			if err != nil {
+				return err
+			}
+			privateRepository, _, err = watchPrivateEvidencePaths(cfg.Runner.ProjectDir, cfg.Runner.EvidenceDir)
+			if err != nil {
+				return errors.New("watch private execution evidence unavailable")
+			}
+		}
 		cleanup, err := watchConfigureExecution(cfg, projectID)
 		if err != nil {
 			return err
@@ -146,6 +159,11 @@ func watchDaemonAction(cmd *cobra.Command, _ []string) error {
 			// never reuses an uncertain prior source execution journal.
 			op := "watch-" + claim.RunID + fmt.Sprintf("-%d", claim.Fence)
 			run, fingerprint, err := watchExecuteCheck(ctx, d.Project, d.Environment, d.CheckID, d.CheckVersion, d.SourceFingerprint, op, d.Inputs)
+			if privateRepository != "" {
+				if privacyErr := securePrivateExecutionTree(privateRepository); privacyErr != nil {
+					return watch.Completion{}, errors.New("watch private execution evidence unavailable")
+				}
+			}
 			completion := watch.Completion{ExecutionStatus: run.ExecutionStatus, Outcome: run.Outcome, Severity: run.Severity, DurationMS: time.Since(start).Milliseconds(), CheckRunRef: run.ID, SourceFingerprint: fingerprint}
 			if errors.Is(err, detective.ErrConflict) {
 				completion.ExecutionStatus = "error"
@@ -324,17 +342,48 @@ func configureWatchExecution(cfg watchdaemon.Config, projectID string) (func(), 
 	paths := map[string]string{projectID: cfg.Runner.ProjectDir}
 	storage.NewDatatugStore = func(string) (storage.Store, error) { return filestore.NewStore("files", paths) }
 	filestore.SetProjectPath(projectID, cfg.Runner.ProjectDir)
-	evidence := cfg.Runner.EvidenceDir
-	if evidence == "" {
-		home, err := watchUserHomeDir()
-		if err != nil {
-			return nil, errors.New("watch evidence location unavailable")
-		}
-		evidence = filepath.Join(home, ".datatug", "watch-evidence")
+	evidence, err := watchExecutionEvidenceDir(cfg.Runner.EvidenceDir)
+	if err != nil {
+		return nil, err
 	}
 	api.ConfigureSecureSession(session, paths, api.Capabilities{EvidencePrivateDir: evidence, AllowOpaqueSQL: cfg.Runner.AllowOpaqueSQL})
 	if err = api.ConfigureExecutionEvidence(paths, nil, executionstore.Options{PrivateDir: evidence}); err != nil {
 		return nil, errors.New("watch execution evidence unavailable")
 	}
-	return func() { _ = api.CloseExecutionEvidence() }, nil
+	privateRepository := ""
+	if cfg.Runner.PrivateExecutionEvidence {
+		// The existing manager validation above checks project/Git disjointness
+		// before creating any deployment-private directories.
+		if err = watchPrivateMkdirAll(evidence, 0700); err != nil {
+			_ = api.CloseExecutionEvidence()
+			return nil, errors.New("watch private execution evidence unavailable")
+		}
+		info, statErr := os.Lstat(evidence)
+		if statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0077 != 0 {
+			_ = api.CloseExecutionEvidence()
+			return nil, errors.New("watch private execution evidence unavailable")
+		}
+		privateRepository, err = configurePrivateExecutionEvidence(projectID, cfg.Runner.ProjectDir, evidence)
+		if err != nil {
+			_ = api.CloseExecutionEvidence()
+			return nil, errors.New("watch private execution evidence unavailable")
+		}
+	}
+	return func() {
+		_ = api.CloseExecutionEvidence()
+		if privateRepository != "" {
+			_ = securePrivateExecutionTree(privateRepository)
+		}
+	}, nil
+}
+
+func watchExecutionEvidenceDir(explicit string) (string, error) {
+	if explicit != "" {
+		return explicit, nil
+	}
+	home, err := watchUserHomeDir()
+	if err != nil {
+		return "", errors.New("watch evidence location unavailable")
+	}
+	return filepath.Join(home, ".datatug", "watch-evidence"), nil
 }

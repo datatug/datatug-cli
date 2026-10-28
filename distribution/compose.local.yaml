@@ -1,0 +1,51 @@
+services:
+  checks-demo:
+    image: ${DATATUG_IMAGE:?set DATATUG_IMAGE to the locally built DataTug image}
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 64
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,mode=1777
+    environment:
+      DATATUG_LOCAL_OWNER: ${DATATUG_LOCAL_OWNER:?set DATATUG_LOCAL_OWNER explicitly to true}
+      DATATUG_TELEMETRY: "0"
+    volumes:
+      - type: bind
+        source: ../testdata/checks-demo
+        target: /project
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: volume
+        source: checks-evidence
+        target: /var/lib/datatug/evidence
+    command:
+      - checks
+      - run
+      - --project
+      - /project
+      - --env
+      - local
+      - --check
+      - pass
+      - --local-owner=${DATATUG_LOCAL_OWNER:?set DATATUG_LOCAL_OWNER explicitly to true}
+      - --evidence-dir
+      - /var/lib/datatug/evidence
+      - --timeout
+      - 30s
+      - --warnings
+      - fail
+      - --format
+      - json
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  checks-evidence:

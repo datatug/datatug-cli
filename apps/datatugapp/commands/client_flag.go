@@ -52,6 +52,10 @@ func EnsureDaemonForCaller(root *cobra.Command, args []string, stderr io.Writer)
 	for top.HasParent() && top.Parent() != root {
 		top = top.Parent()
 	}
+	// One-shot local Checks must never leave a daemon running, even for mods.
+	if top.Name() == "checks" && cmd.Name() == "run" {
+		return
+	}
 	if noDaemonCommands[top.Name()] {
 		return
 	}

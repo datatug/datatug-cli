@@ -285,7 +285,13 @@ func (s *Store) log(ctx context.Context, tx dal.ReadwriteTransaction, scope Scop
 		}
 		session.changed[d.ID] = d
 	}
-	return s.save(ctx, tx, audit, scope, e.ID, id, actor, "", e)
+	if err := s.save(ctx, tx, audit, scope, e.ID, id, actor, "", e); err != nil {
+		return err
+	}
+	if session, ok := ctx.Value(firestoreReadContext{}).(*firestoreSession); ok && action == "runner.register" {
+		session.registrationAudit = &e
+	}
+	return nil
 }
 func visible(a Actor, d Definition) bool {
 	return a.Scope == d.Scope && d.Lifecycle != "deleted" && (d.Visibility == "shared" || d.Owner == a.ID)

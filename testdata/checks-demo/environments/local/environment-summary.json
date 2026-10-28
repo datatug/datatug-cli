@@ -1,0 +1,8 @@
+{
+  "id": "local",
+  "dbServers": [
+    {
+      "driver": "sqlite3"
+    }
+  ]
+}

@@ -172,6 +172,30 @@ func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, er
 			return "", fmt.Errorf("catalog %q: environment variable %s must hold a postgrest:// URL, not a %s source", catalog.ID, strings.TrimPrefix(source, "env:"), ref.Scheme)
 		}
 		return source, nil
+	case DriverLibSQL:
+		// A libSQL catalog records a connection descriptor (a project file that
+		// names an environment variable and nothing else), exactly as a PostgreSQL or
+		// PostgREST catalog does. The server base address comes only from the
+		// operator's environment, so a project cannot point the operator's libSQL
+		// token at a host of its own choosing; a project that records a literal
+		// endpoint is refused before anything is opened.
+		source, err := libSQLDescriptorSource(catalog, projDir)
+		if err != nil {
+			return "", err
+		}
+		// Resolving the variable refuses one that is not set, and the scheme check
+		// refuses a variable that holds another engine: a catalog labelled libsql
+		// whose variable held a postgres or http source would otherwise be opened as
+		// that engine while policy naming still used the libsql label. No error
+		// names the value, only the variable and the scheme.
+		ref, err := dbcopyParse(source)
+		if err != nil {
+			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
+		}
+		if !dbcopy.IsLibSQLScheme(ref.Scheme) {
+			return "", fmt.Errorf("catalog %q: environment variable %s must hold a libsql:// URL, not a %s source", catalog.ID, strings.TrimPrefix(source, "env:"), ref.Scheme)
+		}
+		return source, nil
 	case "firestore", DriverPostgres, DriverMySQL, DriverOracle, DriverSQLServer:
 		// The catalog's path names a connection descriptor, a project file that
 		// names an environment variable and nothing else; the variable holds the
@@ -197,7 +221,7 @@ func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, er
 		}
 		return source, nil
 	default:
-		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3, ingitdb, openvaultdb, postgres, mysql, oracle, sqlserver, firestore, couchdb or postgrest)", catalog.Driver)
+		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3, ingitdb, openvaultdb, postgres, mysql, oracle, sqlserver, firestore, couchdb, postgrest or libsql)", catalog.Driver)
 	}
 }
 
@@ -235,6 +259,15 @@ func postgresDescriptorSource(catalog datatug.DbCatalog, projDir string) (string
 // read here, so the source is returned for a variable that is not set (opening it says so).
 func couchDBDescriptorSource(catalog datatug.DbCatalog, projDir string) (string, error) {
 	return descriptorSource(catalog, projDir, "CouchDB", dbcopy.ReadCouchDBDescriptor)
+}
+
+// libSQLDescriptorSource is couchDBDescriptorSource for a libSQL catalog: the catalog's path is a
+// descriptor inside the project folder, the descriptor names the operator's variable, and the server
+// base address is read from that variable only when the source is opened. The project can neither
+// hold a literal base address nor pick an arbitrary variable (CheckDescriptorEnvName). The token is
+// not in the descriptor at all: it comes from DATATUG_LIBSQL_BEARER for each request.
+func libSQLDescriptorSource(catalog datatug.DbCatalog, projDir string) (string, error) {
+	return descriptorSource(catalog, projDir, "libSQL", dbcopy.ReadLibSQLDescriptor)
 }
 
 // postgrestDescriptorSource is couchDBDescriptorSource for a PostgREST catalog: the catalog's

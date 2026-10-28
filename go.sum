@@ -118,6 +118,8 @@ github.com/cyphar/filepath-securejoin v0.7.0 h1:s0Y3ITPy6sQn5xt54DuYvTF8hu134ooY
 github.com/cyphar/filepath-securejoin v0.7.0/go.mod h1:ymLGms/u3BYaviIiuKFnUx8EkQEZeK6cInNoAPJA3o4=
 github.com/dal-go/dalgo v0.95.3 h1:akSxeGS7COan5XvQ6JC7LAKkKSlkj9ZyG90b3DxGUTg=
 github.com/dal-go/dalgo v0.95.3/go.mod h1:UCGV7G50rWbXamWXbmbBGmHiACWtNYUFNIL+qM5AAs8=
+github.com/dal-go/dalgo v0.95.4 h1:AjfaI7S/dreCfmZL8ybcahBlm8l8XVuJ25ZVLorfxxs=
+github.com/dal-go/dalgo v0.95.4/go.mod h1:UCGV7G50rWbXamWXbmbBGmHiACWtNYUFNIL+qM5AAs8=
 github.com/dal-go/dalgo2bigquery v0.3.2 h1:1csPB0KBMZVCuK7jYTo0RT9GDvGnAn/26tDEIEs4RFY=
 github.com/dal-go/dalgo2bigquery v0.3.2/go.mod h1:HSFmmveLpuU56sYBmnubGMReGqyWBzU883ckm1l4MyI=
 github.com/dal-go/dalgo2couchdb v0.0.0-20261027213543-120b25e81833 h1:iXzRdMr4f/thKHO6AKbCcLbPhekpUNbm1hupkyvTNng=
@@ -128,6 +130,8 @@ github.com/dal-go/dalgo2firestore v0.10.41 h1:drYcKl+0dOYhkditP1YnlwyCgkj7dxksP/
 github.com/dal-go/dalgo2firestore v0.10.41/go.mod h1:b5XGSypRMQWN4dPtOxwrToFrKIbC0IliB2Yr6RLy9i8=
 github.com/dal-go/dalgo2http v0.4.0 h1:vtkwd8x88kP4XLEZCt7kTFa5xJfQojJWJRKBHGEBg0k=
 github.com/dal-go/dalgo2http v0.4.0/go.mod h1:9D70F2oimIPSz9r5iKki5xuepReCAMSSla9TmgmuVcs=
+github.com/dal-go/dalgo2libsql v0.0.0-20261028000517-7d8187759a51 h1:wNIXBhXuA3GWR0tEEuZtzU7XMCBcm6dO5N+enH7K5Gk=
+github.com/dal-go/dalgo2libsql v0.0.0-20261028000517-7d8187759a51/go.mod h1:qEefPrjNb5DWSq3cPUqlHhfwDIJN+qrVE4Xlc2K4OLQ=
 github.com/dal-go/dalgo2mongodb v0.0.0-20261027130616-1c6549d8dc1e h1:o7QTjYTpj6yanCM5LB7VyJCHQbMgxDRGFbsyHFhP0uc=
 github.com/dal-go/dalgo2mongodb v0.0.0-20261027130616-1c6549d8dc1e/go.mod h1:yNqqEPSxRYB6xPoBx5G2LUwzev16+uBIPgEboOPUvZo=
 github.com/dal-go/dalgo2mssql v0.0.1 h1:FwbEQRUabs6rfiB8S+aY4bzryCWlYYr/hb+ajgE2QTM=
@@ -146,8 +150,12 @@ github.com/dal-go/dalgo2redis v0.1.0 h1:+tqsnvap/k3BCZdpIdYr3V4qQwtD46MNvuPUrZki
 github.com/dal-go/dalgo2redis v0.1.0/go.mod h1:/R1BNL+dUgQ54CJlFVkxYx/T/Dg9mkPNgUrkdxJqHu4=
 github.com/dal-go/dalgo2sql v0.30.0 h1:52q+LDO4IcehyOBYqTBLYKPL5S6oVWQbiLbYlJBd8R0=
 github.com/dal-go/dalgo2sql v0.30.0/go.mod h1:RU60NYTU0ao5iAuWcoBfbGabr0UAR6N9kSS7XCFVPEA=
+github.com/dal-go/dalgo2sql v0.31.0 h1:HPIEtlxrPkg1DvuRQ/Zsv1/otFY7T/CWGPfUm+yCjsw=
+github.com/dal-go/dalgo2sql v0.31.0/go.mod h1:q/L7EXw7f1nnfn4aKfm3G5s0AJAkX0FNPyK3CdbLR28=
 github.com/dal-go/dalgo2sqlite v0.4.8 h1:8f095AhFge7zoGh39yugXjwdfKLVL/AlEABAJ+Np/MI=
 github.com/dal-go/dalgo2sqlite v0.4.8/go.mod h1:lQvd53Ci0FIECtSMSdj2lKVVR4uq71BcfO/FIOkRG6U=
+github.com/dal-go/dalgo2sqlite v0.5.1 h1:fFrAnKRlYtSbUSBvzyWRFbLyhNIVesh5r1RiRnKzeuI=
+github.com/dal-go/dalgo2sqlite v0.5.1/go.mod h1:hPl9xxMHEN1Y+5T+oB37D6AJ2Mox+KXQnsy8ErF7vMw=
 github.com/dal-go/record v0.1.5 h1:lkPxiJA7S2oE5tA0WUayezd+lmaiEekrEcGz/HRhzLg=
 github.com/dal-go/record v0.1.5/go.mod h1:PuoOCH74/Vf+pIVWSdrMg7OdUmlSlPgj68yJ+gM42To=
 github.com/danieljoos/wincred v1.2.3 h1:v7dZC2x32Ut3nEfRH+vhoZGvN72+dQ/snVXo/vMFLdQ=
@@ -156,6 +164,8 @@ github.com/datatug/cliformat v0.0.3 h1:d9p5vo7r8BH6qSKyTHQ9Al2sT6QHsQTK9KRlihaJd
 github.com/datatug/cliformat v0.0.3/go.mod h1:DwX9tWHiyH+vZtbVEVOyHOEOw1Km9AzhgHoqI0PowAc=
 github.com/datatug/datatug-core v0.124.1 h1:UEJzaEuFGq5IkdBtDk17qvlcYycN6xbY4nwVK3TUfz4=
 github.com/datatug/datatug-core v0.124.1/go.mod h1:V92o0v0gXOAvqr+1WXXErnfKbvabksEkkwxVCVoF/kY=
+github.com/datatug/datatug-core v0.124.2 h1:YqrQQtmNeoNMoMK9S0zSmVrRGa3hTsvmM95v3Rod8M4=
+github.com/datatug/datatug-core v0.124.2/go.mod h1:V92o0v0gXOAvqr+1WXXErnfKbvabksEkkwxVCVoF/kY=
 github.com/datatug/sql2csv v0.0.1 h1:mmQI9gWAqVKtnwwNKPEPamplV0g1+KaTovME7/7+SIY=
 github.com/datatug/sql2csv v0.0.1/go.mod h1:nZwHW70TWPF2PTXyCa4hysB+nVgY/AcF6m/KclO3fvs=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

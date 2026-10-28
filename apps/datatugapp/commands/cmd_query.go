@@ -59,6 +59,15 @@ const (
 	// and DALgo's local aggregation fallback also asks for unbounded source rows
 	// (which the adapter refuses rather than returning a partial aggregate).
 	postgRESTSourceDefaultLimit = 100
+
+	// libSQLSourceDefaultLimit is the same visible bound for an exploratory
+	// `--from` read of a libSQL source. The adapter has its own hard response,
+	// row, request and deadline bounds, but a read still needs a positive
+	// semantic limit: an exploration never silently reads a whole table, and an
+	// explicit --limit (even 0) is never replaced. This is an output bound, not
+	// the adapter's transport budget: a result the adapter truncates at a hard
+	// bound fails instead of returning a partial page.
+	libSQLSourceDefaultLimit = 100
 )
 
 // dbSchemesHelp lists every URL scheme dbcopy.Parse accepts, generated from
@@ -107,6 +116,7 @@ Examples:
   datatug query run --db ingitdb://./crm --from products --var minPrice=10 --format json
   datatug query run --db env:SHOP_PG_URL -f report.tugql.yaml --as alice   # SHOP_PG_URL holds the whole connection URL
   datatug query run --db env:DATATUG_POSTGREST_ITEMS --from items --limit 10 --no-policies   # a PostgREST relation; credentials stay in DATATUG_POSTGREST_*
+  datatug query run --db env:DATATUG_LIBSQL_DB --from items --limit 10 --no-policies   # a libSQL table; the token stays in DATATUG_LIBSQL_BEARER
   datatug query run --db datatug://shop/crm --from customers --no-policies   # crm is a source of the registered project shop
   datatug query run --project ./demo-project-1 --query customers/customer-invoices --as alice --var CustomerId=5
   datatug query run --project demo-project-1 --query reference/country-facts --env local --var name=Brazil`,
@@ -122,7 +132,7 @@ Examples:
 	flags.String(queryProjectFlag, "", "Project directory or registered project ID (alternative to --db; runs a saved --query by ID)")
 	flags.String(queryQueryFlag, "", "Saved query ID to run, e.g. customers/customer-invoices (requires --project)")
 	flags.String(queryEnvFlag, "", "Environment ID the saved query runs against (default: the project's only environment)")
-	flags.Int(queryLimitFlag, 0, "Read at most this many rows (only with --from; a -f query states its own limit); a CouchDB or PostgREST --from read defaults to "+fmt.Sprint(couchDBSourceDefaultLimit)+" when no --limit is given")
+	flags.Int(queryLimitFlag, 0, "Read at most this many rows (only with --from; a -f query states its own limit); a CouchDB, PostgREST or libSQL --from read defaults to "+fmt.Sprint(couchDBSourceDefaultLimit)+" when no --limit is given")
 	flags.Int(queryOffsetFlag, 0, "Skip this many rows first (only with --from); rows are ordered by primary key, or by rowid in SQLite, so pages are stable")
 	flags.String(queryFormatFlag, "grid", "Output format: "+strings.Join(queryFormats, ", "))
 	flags.String(queryAsFlag, "", "Principal user ID; also sets $currentUser")
@@ -249,7 +259,7 @@ func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
 // existing open behavior. Both paths retain the HTTPS-only HTTP-source
 // enforcement.
 var openBackend = func(ctx context.Context, backend dbcopy.BackendRef) (dal.DB, error) {
-	if backend.Scheme == "sqlite" || dbcopy.IsServerScheme(backend.Scheme) || dbcopy.IsCouchDBScheme(backend.Scheme) || dbcopy.IsPostgRESTScheme(backend.Scheme) {
+	if backend.Scheme == "sqlite" || dbcopy.IsServerScheme(backend.Scheme) || dbcopy.IsCouchDBScheme(backend.Scheme) || dbcopy.IsPostgRESTScheme(backend.Scheme) || dbcopy.IsLibSQLScheme(backend.Scheme) {
 		return backend.OpenProtected(ctx)
 	}
 	return backend.Open(ctx)
@@ -327,6 +337,9 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		case dbcopy.IsPostgRESTScheme(backend.Scheme):
 			o.limit = postgRESTSourceDefaultLimit
 			defaultedSourceLimit = "PostgREST"
+		case dbcopy.IsLibSQLScheme(backend.Scheme):
+			o.limit = libSQLSourceDefaultLimit
+			defaultedSourceLimit = "libSQL"
 		}
 	}
 	// A read of a PostgreSQL, MySQL, Oracle or SQL Server source through policies is not available yet: that is

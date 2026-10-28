@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -73,6 +74,7 @@ limit: 5
 // with the explicit unsupported-operation sentence rather than a transport error.
 func TestPostgRESTUnsupportedOperationsAreRefusedBeforeIO(t *testing.T) {
 	t.Setenv(dbcopy.PostgRESTBearerEnv, "")
+	t.Setenv(dbcopy.LibSQLBearerEnv, "")
 	const source = "postgrest+http://127.0.0.1:1"
 	t.Run("unbounded", func(t *testing.T) {
 		stdout, stderr, code := runQuery(t, "", "--db", source, "--from", "items", "--limit", "0", "--format", "json", "--no-policies")
@@ -540,6 +542,7 @@ func TestQueryDefaultExplorationBoundsAreVisibleWithoutAService(t *testing.T) {
 	t.Setenv(dbcopy.CouchDBPasswordEnv, "")
 	t.Setenv(dbcopy.CouchDBBearerEnv, "")
 	t.Setenv(dbcopy.PostgRESTBearerEnv, "")
+	t.Setenv(dbcopy.LibSQLBearerEnv, "")
 	for _, tc := range []struct {
 		source string
 		from   string
@@ -558,5 +561,28 @@ func TestQueryDefaultExplorationBoundsAreVisibleWithoutAService(t *testing.T) {
 				t.Fatalf("stderr must state the default bound: %q, want %q", stderr, want)
 			}
 		})
+	}
+}
+
+// TestQueryDefaultLibSQLLimitIsVisibleWithoutAService is the libSQL half of
+// TestQueryDefaultExplorationBoundsAreVisibleWithoutAService. It is a test of its
+// own because the libSQL adapter clones http.DefaultTransport, and this package's
+// test binary wraps that transport to refuse the live demo site; the wrapper is an
+// artifact of the test binary (a real process has a plain *http.Transport), so the
+// probe puts a plain transport back for its loopback-only attempt. Nothing is
+// dialled beyond 127.0.0.1:1: the visible bound is printed before the first read.
+func TestQueryDefaultLibSQLLimitIsVisibleWithoutAService(t *testing.T) {
+	original := http.DefaultTransport
+	http.DefaultTransport = &http.Transport{}
+	t.Cleanup(func() { http.DefaultTransport = original })
+	t.Setenv(dbcopy.LibSQLBearerEnv, "")
+
+	_, stderr, code := runQuery(t, "", "--db", "libsql+http://127.0.0.1:1", "--from", "items", "--format", "json", "--no-policies")
+	if code != exitCodeDatabase {
+		t.Fatalf("exit %d, want %d: %s", code, exitCodeDatabase, stderr)
+	}
+	want := fmt.Sprintf("reading at most %d rows (libSQL exploration default", libSQLSourceDefaultLimit)
+	if !strings.Contains(stderr, want) {
+		t.Fatalf("stderr must state the default bound: %q, want %q", stderr, want)
 	}
 }

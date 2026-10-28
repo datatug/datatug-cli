@@ -78,7 +78,7 @@ func TestScanCommand_MySQLAndOracleFlags(t *testing.T) {
 	_, err = runScanCommand(t, "-d", dir, "-D", "oracle", "-s", "db.example.com", "--db", "hr", "--env", "local")
 	assert.ErrorContains(t, err, "--server not accepted for an oracle scan")
 	_, err = runScanCommand(t, "-d", dir, "-D", "sqlite3", "--dsn-env", "DATATUG_X", "--db", "x", "--env", "local")
-	assert.EqualError(t, err, "--dsn-env applies only to -D postgres, mysql, oracle, sqlserver, couchdb or postgrest")
+	assert.EqualError(t, err, "--dsn-env applies only to -D postgres, mysql, oracle, sqlserver, couchdb, postgrest or libsql")
 }
 
 func TestScanAndQuery_MySQLThroughAStandIn(t *testing.T) {

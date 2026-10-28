@@ -202,6 +202,10 @@ func displayAfterScheme(scheme, rest string) (string, bool) {
 		// the schema/id options are non-secret: they stay off the text, which names
 		// the endpoint and no option.
 		return hostPortPath(rest, 4), true
+	case IsLibSQLScheme(scheme):
+		// A libSQL server may name a base path of a few segments; the text names the
+		// endpoint and never a credential, a query or a fragment (Parse refuses them).
+		return hostPortPath(rest, 2), true
 	case isLocalScheme(scheme):
 		return localTextDisplay(rest), true
 	default:

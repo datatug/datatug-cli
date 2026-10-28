@@ -18,6 +18,23 @@
 
 </table>
 
+## Watch
+
+<table>
+  <tr>
+    <td valign="top">
+      <a href="https://youtu.be/tjOzdzB_PGA"><img src="https://datatug.app/static/illustrations/intro-video-poster-1280.webp" alt="DataTug in one minute — watch the intro (1:01)" width="420"></a><br>
+      ▶ <b><a href="https://youtu.be/tjOzdzB_PGA">Watch the DataTug intro (1:01)</a></b><br>
+      The DataTug intro.
+    </td>
+    <td valign="top">
+      <a href="https://youtu.be/_mla67RoPWY"><img src="https://datatug.app/static/illustrations/explainer-sales-per-capita-poster-1280.webp" alt="Where are we underselling? Sales per capita across three sources (1:30)" width="420"></a><br>
+      ▶ <b><a href="https://youtu.be/_mla67RoPWY">Where are we underselling? (1:30)</a></b><br>
+      The sales-per-capita query in this explainer runs with the DataTug CLI.
+    </td>
+  </tr>
+</table>
+
 ## Quick start
 
 Install the CLI (macOS and Linux with Homebrew; the other ways are in [Installation](#installation)):

@@ -1,9 +1,9 @@
 # Query PostgREST
 
-> Post-release source documentation. The PostgREST source is wired into the CLI
-> in this checkout and is not part of a released `datatug` binary yet, and it is
-> not listed as a supported database on the website. Hosted Supabase is a
-> separate, manual acceptance gate (see [Hosted Supabase](#hosted-supabase)).
+> Available in DataTug CLI 0.126.0 — see the
+> [v0.126.0 release](https://github.com/datatug/datatug/releases/tag/v0.126.0).
+> Hosted Supabase is a separate, manual acceptance gate (see
+> [Hosted Supabase](#hosted-supabase)).
 
 DataTug reads the native PostgreSQL tables and views a [PostgREST](https://postgrest.org/)
 API exposes, through the [dalgo2postgrest](https://github.com/dal-go/dalgo2postgrest)

@@ -1,8 +1,7 @@
 # Query CouchDB
 
-> Pre-release source documentation. The CouchDB source is wired into the CLI in
-> this checkout and is not part of a released `datatug` binary yet, and it is not
-> yet listed as a supported database on the website.
+> Available in DataTug CLI 0.126.0 — see the
+> [v0.126.0 release](https://github.com/datatug/datatug/releases/tag/v0.126.0).
 
 DataTug reads native documents from one existing CouchDB 3.5 database as one
 logical collection. Documents are read as an application stored them: `_id` is

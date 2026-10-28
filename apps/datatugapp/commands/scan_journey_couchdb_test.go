@@ -48,6 +48,10 @@ var _ dbcopy.SchemaScanDB = (*couchScanFakeDB)(nil)
 // catalog holds a project-relative descriptor path, and the descriptor names the
 // operator's variable and nothing else. The endpoint itself never reaches the
 // project.
+// A CouchDB scan records the same safe descriptor as a PostgreSQL scan: the
+// catalog holds a project-relative descriptor path, and the descriptor names the
+// operator's variable and nothing else. The endpoint itself never reaches the
+// project.
 func TestScanJourneyCouchDBWritesTheConnectionDescriptor(t *testing.T) {
 	const variable = "DATATUG_JOURNEY_COUCH_URL"
 	const endpoint = "couchdb://couch.example.com:6984/orders"
@@ -79,4 +83,16 @@ func TestScanJourneyCouchDBWritesTheConnectionDescriptor(t *testing.T) {
 		assert.NotContains(t, string(body), "couch.example.com", name)
 		assert.NotContains(t, string(body), "6984", name)
 	}
+}
+
+// A variable that holds another engine is refused by the scan before any
+// descriptor is written, and its credentials never reach the message.
+func TestScanCouchDBConnectionParamsRefusesAnotherSource(t *testing.T) {
+	const variable = "DATATUG_TEST_COUCHDB_WRONG"
+	t.Setenv(variable, "postgres://alice:s3cret@db.example.com/shop")
+	command := &scanDbCommand{Driver: api.DriverCouchDB, DSNEnv: variable, Environment: "local", Database: "orders"}
+	_, err := command.connectionParams()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must hold a couchdb")
+	assert.NotContains(t, err.Error(), "s3cret")
 }

@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,9 +15,37 @@ import (
 	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/dbconnection"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestNewCouchDBScanParamsExposesOnlySafeConnectionMetadata(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		endpoint string
+		host     string
+	}{
+		{"a host without a port", "couchdb://couch.example.com/orders", "couch.example.com"},
+		{"an IPv6 loopback without a port", "couchdb://[::1]/orders", "::1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lookup := func(name string) (string, bool) {
+				if name == "DATATUG_TEST_COUCHDB" {
+					return tc.endpoint, true
+				}
+				return "", false
+			}
+			params, err := NewCouchDBScanParams(lookup, "DATATUG_TEST_COUCHDB", "local", "orders")
+			require.NoError(t, err)
+			assert.Equal(t, tc.host, params.Server())
+			assert.Zero(t, params.Port(), "the endpoint names no port")
+			assert.Equal(t, dbconnection.ModeReadOnly, params.Mode(), "a scan only reads")
+			assert.Equal(t, "env:DATATUG_TEST_COUCHDB", fmt.Sprintf("%#v", params), "formatting the parameters names the variable, never the endpoint")
+			assert.NotContains(t, fmt.Sprintf("%#v", params), tc.host)
+		})
+	}
+}
 
 func TestNewCouchDBScanParams(t *testing.T) {
 	lookup := func(name string) (string, bool) {
@@ -157,6 +187,43 @@ func TestScanDbCatalog_CouchDBFailureIsClassified(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to open CouchDB")
 	assert.NotContains(t, err.Error(), "password")
+}
+
+func TestScanDbCatalog_CouchDBMetadataFailureIsClassified(t *testing.T) {
+	stubOpenSchemaScan(t, func(dbcopy.BackendRef, context.Context) (dbcopy.SchemaScanDB, error) {
+		return &fakeScanDB{listErr: errors.New("server said " + "couch.example.com/orders is broken")}, nil
+	})
+	lookup := func(name string) (string, bool) {
+		if name == "DATATUG_TEST_COUCHDB" {
+			return "couchdb://couch.example.com:6984/orders", true
+		}
+		return "", false
+	}
+	params, err := NewCouchDBScanParams(lookup, "DATATUG_TEST_COUCHDB", "local", "orders")
+	require.NoError(t, err)
+	_, err = scanDbCatalog(datatug.ServerRef{Driver: DriverCouchDB}, params)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "couch.example.com", "a read failure never quotes the endpoint")
+	assert.Contains(t, err.Error(), "failed to get dbCatalog metadata")
+	assert.Contains(t, err.Error(), "the catalog could not be read")
+}
+
+func TestScanDbCatalog_CouchDBNeedsParametersOfAnEnvironmentSource(t *testing.T) {
+	lookup := func(name string) (string, bool) {
+		if name == "DATATUG_TEST_COUCHDB" {
+			return "couchdb://couch.example.com:6984/orders", true
+		}
+		return "", false
+	}
+	params, err := NewCouchDBScanParams(lookup, "DATATUG_TEST_COUCHDB", "local", "orders")
+	require.NoError(t, err)
+	// Hiding the concrete type's SourceRef method is what a caller that built
+	// the parameters by hand (or from a literal endpoint) looks like to the scan.
+	catalog, err := scanCouchDBCatalog(context.Background(), struct{ dbconnection.Params }{params})
+	require.Error(t, err)
+	assert.Nil(t, catalog)
+	assert.Contains(t, err.Error(), "needs connection parameters built from an environment variable")
+	assert.NotContains(t, err.Error(), "couch.example.com")
 }
 
 // testConnectionError stands in for an adapter failure whose own text quotes the

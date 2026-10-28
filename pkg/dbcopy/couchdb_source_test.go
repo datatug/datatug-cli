@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -49,6 +50,18 @@ func TestParseCouchDBSource(t *testing.T) {
 	}
 }
 
+func TestCouchDBSourceURLNeedsACouchDBEndpoint(t *testing.T) {
+	t.Parallel()
+	// A ref of another source, and a CouchDB ref that names no endpoint, have no
+	// CouchDB URL to show: answering one would invent an endpoint.
+	if got := (BackendRef{Scheme: "postgres", Path: "db.example.com/shop"}).CouchDBSourceURL(); got != "" {
+		t.Fatalf("a postgres ref produced a CouchDB URL: %q", got)
+	}
+	if got := (BackendRef{Scheme: CouchDBScheme}).CouchDBSourceURL(); got != "" {
+		t.Fatalf("a CouchDB ref without a path produced a URL: %q", got)
+	}
+}
+
 func TestParseCouchDBSourceRefusals(t *testing.T) {
 	t.Parallel()
 	secret := "s3cr3t-CouchDB"
@@ -68,6 +81,7 @@ func TestParseCouchDBSourceRefusals(t *testing.T) {
 		{"couchdb+http://couch.example.com/orders", "allowed only for a loopback endpoint"},
 		{"couchdb+http://10.0.0.5/orders", "allowed only for a loopback endpoint"},
 		{"couchdb:///orders", "expected couchdb://HOST/DATABASE"},
+		{"couchdb://:5984/orders", "names no usable host"},
 		{"couchdb://couch.example.com:notaport/orders", "invalid CouchDB URL"},
 	} {
 		_, err := Parse(tc.source)
@@ -196,6 +210,41 @@ func TestCouchDBOpenConfigurationAndReadOnly(t *testing.T) {
 	}
 }
 
+func TestCouchDBOpenRefusesARefWithNoEndpointBeforeTheDriver(t *testing.T) {
+	unsetCouchDBEnv(t)
+	original := newCouchDBDatabase
+	t.Cleanup(func() { newCouchDBDatabase = original })
+	newCouchDBDatabase = func(context.Context, dalgo2couchdb.Config) (dal.DB, error) {
+		t.Fatal("the driver must not be called for a ref that names no CouchDB endpoint")
+		return nil, nil
+	}
+	for _, ref := range []BackendRef{
+		{Scheme: "postgres", Path: "db.example.com/shop"},
+		{Scheme: CouchDBScheme, CouchDBDatabase: "orders"},
+		{Scheme: CouchDBScheme, CouchDBHost: "couch.example.com"},
+	} {
+		if _, err := openCouchDB(context.Background(), ref, openMode{}); !errors.Is(err, errUnsupportedBackend) {
+			t.Fatalf("openCouchDB(%#v) = %v, want the unsupported-backend refusal", ref, err)
+		}
+	}
+}
+
+func TestIsCouchDBIndexRequiredSurvivesWrapping(t *testing.T) {
+	t.Parallel()
+	if !IsCouchDBIndexRequired(dalgo2couchdb.ErrIndexRequired) {
+		t.Fatal("the adapter's own refusal was not recognised")
+	}
+	wrapped := fmt.Errorf("read orders: %w", dalgo2couchdb.ErrIndexRequired)
+	if !IsCouchDBIndexRequired(wrapped) {
+		t.Fatal("a wrapped index refusal was not recognised")
+	}
+	for _, other := range []error{nil, dalgo2couchdb.ErrDatabaseNotFound, errors.New("read failed")} {
+		if IsCouchDBIndexRequired(other) {
+			t.Fatalf("%v was classified as an index refusal", other)
+		}
+	}
+}
+
 func TestCouchDBOpenRefusesAnAmbiguousCredentialConfiguration(t *testing.T) {
 	unsetCouchDBEnv(t)
 	t.Setenv(CouchDBUsernameEnv, "reader")
@@ -249,18 +298,24 @@ func TestCouchDBOpenFailureTextIsSafe(t *testing.T) {
 		{"unauthorized", &dalgo2couchdb.HTTPError{StatusCode: 401}, "refused the request (HTTP 401)"},
 		{"forbidden", &dalgo2couchdb.HTTPError{StatusCode: 403}, "refused the request (HTTP 403)"},
 		{"not found", &dalgo2couchdb.HTTPError{StatusCode: 404}, "database was not found"},
+		{"unexpected status", &dalgo2couchdb.HTTPError{StatusCode: 500}, "answered with HTTP 500"},
+		{"database sentinel", dalgo2couchdb.ErrDatabaseNotFound, "CouchDB database was not found"},
 		{"index", dalgo2couchdb.ErrIndexRequired, "usable CouchDB Mango index"},
 		{"header provider", dalgo2couchdb.ErrHeaderProvider, "credential environment variables"},
 		{"response", dalgo2couchdb.ErrResponseTooLarge, "configured bound"},
+		{"malformed", dalgo2couchdb.ErrMalformedResponse, "does not recognise"},
+		{"unsafe value", dalgo2couchdb.ErrUnsafeValue, "not safe to send"},
+		{"continuation", dalgo2couchdb.ErrContinuationMismatch, "does not belong to this query"},
 		{"request", dalgo2couchdb.ErrRequestFailed, "CouchDB request failed"},
+		{"unknown failure", errors.New("boom-" + "must-not-be-shown"), "driver could not open the source"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			shown := ref.OpenFailure(tc.err).Error()
 			if !strings.Contains(shown, tc.want) {
 				t.Fatalf("OpenFailure = %q, want %q", shown, tc.want)
 			}
-			if strings.Contains(shown, "Authorization") || strings.Contains(shown, "token") || strings.Contains(shown, "password") {
-				t.Fatalf("OpenFailure shows a credential: %q", shown)
+			if strings.Contains(shown, "Authorization") || strings.Contains(shown, "token") || strings.Contains(shown, "password") || strings.Contains(shown, "must-not-be-shown") {
+				t.Fatalf("OpenFailure shows details of the failure: %q", shown)
 			}
 		})
 	}

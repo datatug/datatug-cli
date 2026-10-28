@@ -150,7 +150,12 @@ func scanLibSQLCatalog(ctx context.Context, connectionParams dbconnection.Params
 	defer func() { _ = scanDB.Close() }()
 
 	catalogID := connectionParams.Catalog()
-	provider := dalgoschema.NewSchemaProvider(scanDB, nil, catalogID, ServerDefaultSchema)
+	// libSQL is SQLite over HTTP: its one implicit database is "main", not the
+	// fixed "default" schema of a MySQL/Oracle/SQL Server catalog. Recording the
+	// tables under "main" is what lets a scanned "main.items" reference resolve
+	// and lets a bare "/items" policy match (see DefaultSchemaForDriver and
+	// PolicyCollectionName).
+	provider := dalgoschema.NewSchemaProvider(scanDB, nil, catalogID, DefaultSchemaForDriver(DriverLibSQL))
 	dbCatalog, err := schemer.NewScanner(provider).ScanCatalog(ctx, catalogID)
 	if err != nil {
 		return dbCatalog, fmt.Errorf("failed to get dbCatalog metadata: %w", catalogReadFailure(source, err))

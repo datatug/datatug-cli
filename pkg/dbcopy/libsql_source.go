@@ -245,6 +245,23 @@ func IsLibSQLUnsafeCredential(err error) bool {
 	return errors.As(err, &unsafe)
 }
 
+// LibSQLFailureReason is the fixed, safe sentence a caller shows for a libSQL
+// read or open failure. Like libSQLFailureReason it never includes the endpoint,
+// the SQL, a response body or a credential even when err wraps one of them; it
+// names only a classification, plus the cancellation/deadline diagnosis that is
+// useful to tell a caller what happened.
+func LibSQLFailureReason(err error) string {
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, context.Canceled):
+		return "the read was cancelled"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "the read exceeded its deadline"
+	}
+	return libSQLFailureReason(err)
+}
+
 // libSQLFailureReason is what OpenFailure says about a libSQL failure: a fixed
 // sentence, never the adapter's response body (which it does not expose anyway),
 // never the endpoint and never a credential.

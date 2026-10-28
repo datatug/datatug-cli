@@ -458,6 +458,21 @@ func queryFailureFor(backend dbcopy.BackendRef, err error) error {
 	if dbcopy.IsCouchDBScheme(backend.Scheme) && dbcopy.IsCouchDBIndexRequired(err) {
 		return Exit("CouchDB requires a Mango index for a filtered query: the read is refused rather than falling back to a full scan that could hide documents. Create an index outside DataTug that covers the filter and the order, then run the query again.", exitCodeDatabase)
 	}
+	if dbcopy.IsLibSQLScheme(backend.Scheme) {
+		switch {
+		case errors.Is(err, access.ErrAccessDenied),
+			errors.Is(err, accesspolicies.ErrInvalidQuery),
+			errors.Is(err, accesspolicies.ErrNoPolicies):
+			// A policy refusal or an unusable policy set is decided outside the
+			// adapter and keeps its own exit code and text; it is not a libSQL
+			// read failure.
+			return queryFailure(err)
+		}
+		// The adapter seals its own errors, but an outer wrapper is not that
+		// boundary: show only a fixed libSQL classification so no SQL, response
+		// body, wrapper text or credential can reach the message.
+		return Exit("libSQL read failed: "+dbcopy.LibSQLFailureReason(err)+"; check "+dbcopy.LibSQLBearerEnv+" and the token's read grant on the database", exitCodeDatabase)
+	}
 	return queryFailure(err)
 }
 

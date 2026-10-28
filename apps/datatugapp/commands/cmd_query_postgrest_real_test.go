@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -572,9 +571,7 @@ func TestQueryDefaultExplorationBoundsAreVisibleWithoutAService(t *testing.T) {
 // probe puts a plain transport back for its loopback-only attempt. Nothing is
 // dialled beyond 127.0.0.1:1: the visible bound is printed before the first read.
 func TestQueryDefaultLibSQLLimitIsVisibleWithoutAService(t *testing.T) {
-	original := http.DefaultTransport
-	http.DefaultTransport = &http.Transport{}
-	t.Cleanup(func() { http.DefaultTransport = original })
+	libSQLTestTransport(t)
 	t.Setenv(dbcopy.LibSQLBearerEnv, "")
 
 	_, stderr, code := runQuery(t, "", "--db", "libsql+http://127.0.0.1:1", "--from", "items", "--format", "json", "--no-policies")

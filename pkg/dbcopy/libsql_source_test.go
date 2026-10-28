@@ -3,6 +3,8 @@ package dbcopy
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"strings"
 	"testing"
 
@@ -284,6 +286,25 @@ func TestLibSQLFailureReason(t *testing.T) {
 	if !strings.Contains(reason, "cancel") {
 		t.Fatalf("cancel reason = %q", reason)
 	}
+
+	// An outer wrapper is not the adapter's own boundary: it can add arbitrary
+	// text, including a credential or SQL. The exported reason keeps the fixed
+	// classification and drops that text.
+	const secret = "s3cret-bearer-value"
+	wrapped := errors.Join(dalgo2libsql.ErrBackend, errors.New("Authorization: Bearer "+secret+" select * from items"))
+	reason = LibSQLFailureReason(wrapped)
+	if strings.Contains(reason, secret) || strings.Contains(reason, "select *") {
+		t.Fatalf("a wrapped secret or SQL reached the reason: %q", reason)
+	}
+	if !strings.Contains(reason, LibSQLBearerEnv) {
+		t.Fatalf("wrapped backend reason = %q", reason)
+	}
+	if got := LibSQLFailureReason(fmt.Errorf("outer: %w", context.Canceled)); !strings.Contains(got, "cancelled") {
+		t.Fatalf("wrapped cancel reason = %q", got)
+	}
+	if got := LibSQLFailureReason(nil); got != "" {
+		t.Fatalf("nil reason = %q", got)
+	}
 }
 
 func TestOpenFailureNamesALibSQLSourceWithoutItsToken(t *testing.T) {
@@ -320,5 +341,37 @@ func TestDecodeLibSQLDescriptor(t *testing.T) {
 		} else if !strings.Contains(err.Error(), "libSQL") {
 			t.Fatalf("%s: error does not name libSQL: %q", body, err)
 		}
+	}
+}
+
+// TestLibSQLAdapterRefusesUnsupportedOperations pins the adapter's own contract
+// at the boundary this CLI relies on: NewDB performs no I/O, so a text query, a
+// join and a write transaction are all refused before the fixture would be
+// reached. There is no SELECT-prefix pseudo-parser here and no local fallback in
+// this package.
+func TestLibSQLAdapterRefusesUnsupportedOperations(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db, err := dalgo2libsql.NewDB(ctx, dalgo2libsql.Config{
+		URL:               "http://127.0.0.1:1",
+		AllowLoopbackHTTP: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if closer, ok := dal.As[io.Closer](db); ok {
+			_ = closer.Close()
+		}
+	})
+
+	if _, err = db.ExecuteQueryToRecordsReader(ctx, dal.NewTextQuery("select 1", nil)); !errors.Is(err, dalgo2libsql.ErrNotSupported) {
+		t.Fatalf("a text query was not refused as unsupported: %v", err)
+	}
+	if err = db.RunReadwriteTransaction(ctx, func(context.Context, dal.ReadwriteTransaction) error { return nil }); !errors.Is(err, dalgo2libsql.ErrNotSupported) {
+		t.Fatalf("a write transaction was not refused as unsupported: %v", err)
+	}
+	if err = db.RunReadonlyTransaction(ctx, func(context.Context, dal.ReadTransaction) error { return nil }); !errors.Is(err, dalgo2libsql.ErrNotSupported) {
+		t.Fatalf("a read-only transaction was not refused as unsupported: %v", err)
 	}
 }

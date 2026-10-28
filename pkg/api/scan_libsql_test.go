@@ -141,10 +141,12 @@ func TestScanDbCatalog_LibSQLUsesTheGenericSchemaReader(t *testing.T) {
 	assert.Equal(t, 1, db.closed, "the connection pool is released")
 
 	require.Len(t, catalog.Schemas, 1)
-	assert.Equal(t, ServerDefaultSchema, catalog.Schemas[0].ID)
+	assert.Equal(t, "main", catalog.Schemas[0].ID,
+		"a libSQL scan records SQLite's implicit database as \"main\", not the fixed \"default\" schema")
 	require.Len(t, catalog.Schemas[0].Tables, 1)
 	table := catalog.Schemas[0].Tables[0]
 	assert.Equal(t, "items", table.Name())
+	assert.Equal(t, "main", catalog.Schemas[0].ID, "the persisted columns path is dbmodels/<catalog>/main/...")
 	require.Len(t, table.Columns, 3, "the native SQLite columns are reported")
 	assert.Equal(t, "title", table.Columns[1].Name)
 	assert.Equal(t, "item_id", table.Columns[0].Name)

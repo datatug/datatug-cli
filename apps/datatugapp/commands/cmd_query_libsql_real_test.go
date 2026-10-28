@@ -108,6 +108,45 @@ func TestLibSQLQueryJourney(t *testing.T) {
 		}
 	})
 
+	// A view has no declared primary key, so a scan never records it (the
+	// adapter has no ViewLister and its strict DescribeCollection refuses a
+	// view) and --from cannot page it in key order. A structured read that names
+	// it and orders explicitly still works: the fixture's items_view is
+	// SELECT id, title, rank FROM items, so LIMIT 2 in id order is the same two
+	// first rows.
+	t.Run("structured-read-of-a-view-orders-explicitly", func(t *testing.T) {
+		query := `from: {name: items_view}
+columns:
+  - {field: id}
+  - {field: title}
+orderBy:
+  - {field: id}
+limit: 2
+`
+		stdout, stderr, code := runQuery(t, query, "--db", fixture.source, "-f", "-", "--format", "json", "--no-policies")
+		if code != 0 {
+			t.Fatalf("exit %d: %s", code, stderr)
+		}
+		var rows []map[string]any
+		if err := json.Unmarshal([]byte(stdout), &rows); err != nil {
+			t.Fatalf("view output is not JSON: %v: %s", err, stdout)
+		}
+		if len(rows) != 2 {
+			t.Fatalf("view rows = %d, want 2: %v", len(rows), rows)
+		}
+		for i, wantID := range []float64{1, 2} {
+			if rows[i]["id"] != wantID {
+				t.Fatalf("view row %d id = %v, want %v in id order: %v", i, rows[i]["id"], wantID, rows)
+			}
+			if _, found := rows[i]["rank"]; found {
+				t.Fatalf("a column the view query did not select was returned: %v", rows[i])
+			}
+		}
+		if rows[0]["title"] != "Alpha" {
+			t.Fatalf("view first row = %v", rows[0])
+		}
+	})
+
 	t.Run("structured-filter-projection-and-native-aggregate", func(t *testing.T) {
 		query := `from: {name: items}
 columns:

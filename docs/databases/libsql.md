@@ -5,10 +5,11 @@
 > Go CLI provider only: no hosted Turso account, no TypeScript/web execution and
 > no Go-backed web substitute is claimed here.
 
-DataTug reads the native SQLite tables and views of a [libSQL](https://github.com/tursodatabase/libsql)
+DataTug reads the native SQLite tables of a [libSQL](https://github.com/tursodatabase/libsql)
 server through the [dalgo2libsql](https://github.com/dal-go/dalgo2libsql)
-adapter. libSQL speaks the SQLite dialect, so a query collection is one table or
-view of the database's single implicit `main` schema. The connection is HTTPS
+adapter. libSQL speaks the SQLite dialect, so a query collection is a relation of
+the database's single implicit `main` schema: a table a scan records, or another
+relation such as a view that a structured read names. The connection is HTTPS
 (Hrana over HTTP); it is not a local file and not a Turso account API.
 
 ## Endpoint and credentials
@@ -73,8 +74,15 @@ form is for the person typing the command; it is never written to a project.
 - All five schema-reader methods (`ListCollections`, `DescribeCollection`,
   `ListIndexes`, `ListConstraints`, `ListReferrers`) come from the adapter's
   generic SQLite catalog reader, so `datatug scan` records real columns, primary
-  keys, indexes, foreign keys and views. No `id` column is invented, and a view
-  or `WITHOUT ROWID` table is not assumed to have a rowid key.
+  keys, indexes, foreign keys and constraints under SQLite's `main` schema. No
+  `id` column is invented, and a `WITHOUT ROWID` table is not assumed to have a
+  rowid key.
+- A scan reports **tables only**. The adapter implements the five strict
+  `SchemaReader` methods and no `ViewLister`, and its strict `DescribeCollection`
+  refuses a view, so `ListCollections` lists tables and a view is never
+  discovered by a scan. A structured read can still name a view as a relation
+  when the query orders explicitly (a view has no declared primary key, so
+  `--from` cannot page it in key order).
 - Keyed reads (`Get`/`GetMulti`) need a live-validated single non-null
   `INTEGER`/`TEXT` primary key declared in the adapter's `Recordsets` map.
   `datatug query run` and `datatug scan` use structured reads, which discover

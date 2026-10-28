@@ -105,6 +105,35 @@ for row in rows:
         sys.exit("an undeclared column was returned: %r" % (row,))
 PY
 
+# A view is a relation a structured read can name, with an explicit order: it has
+# no declared primary key, so a scan never records it and --from cannot page it in
+# key order.
+cat >"$work/view.yaml" <<'YAML'
+from: {name: items_view}
+columns:
+  - {field: id}
+  - {field: title}
+orderBy:
+  - {field: id}
+limit: 2
+YAML
+"$work/datatug" query run --db "$source" -f "$work/view.yaml" --format json --no-policies >"$work/view.json" 2>"$work/view.err" || {
+	cat "$work/view.err" >&2
+	echo "the built CLI could not read the items_view relation" >&2
+	exit 1
+}
+python3 - "$work/view.json" <<'PY'
+import json, sys
+rows = json.load(open(sys.argv[1]))
+if [row["id"] for row in rows] != [1, 2]:
+    sys.exit("items_view ids = %r, want [1, 2] in explicit id order" % ([row["id"] for row in rows],))
+if len(rows) != 2 or rows[0]["title"] != "Alpha":
+    sys.exit("items_view rows = %r" % (rows,))
+if any("rank" in row for row in rows):
+    sys.exit("an unselected view column was returned: %r" % (rows,))
+PY
+echo "the built CLI read the items_view relation in explicit id order"
+
 # Native values: full int64 digits beyond 2^53, blobs/null/empty blob, and more
 # than one storage class in one column.
 "$work/datatug" query run --db "$source" --from bigints --format json --no-policies >"$work/bigints.json" 2>"$work/bigints.err"

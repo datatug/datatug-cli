@@ -131,12 +131,17 @@ type libSQLScanSource interface {
 }
 
 // scanLibSQLCatalog reads a libSQL database through the generic
-// dbschema.SchemaReader seam: its tables and views, their native SQLite column
-// types, primary keys, indexes, constraints and referrers. A libSQL database is a
-// SQLite database served over HTTP, so the metadata is SQLite's own and the
-// adapter reports it from the live catalog rather than inventing an "id" key. It
-// opens the source through pkg/dbcopy and classifies a failure the same way every
-// other scan does.
+// dbschema.SchemaReader seam: its native SQLite column types, primary keys,
+// indexes, constraints and referrers. A libSQL database is a SQLite database
+// served over HTTP, so the metadata is SQLite's own and the adapter reports it
+// from the live catalog rather than inventing an "id" key. It opens the source
+// through pkg/dbcopy and classifies a failure the same way every other scan does.
+//
+// A scan reports tables only: the adapter provides the five strict SchemaReader
+// methods (ListCollections, DescribeCollection, ListIndexes, ListConstraints,
+// ListReferrers) and no ViewLister, and its strict DescribeCollection refuses a
+// view, so ListCollections lists tables. A view is not discovered by a scan; a
+// structured read may still name one as a relation.
 func scanLibSQLCatalog(ctx context.Context, connectionParams dbconnection.Params) (*datatug.DbCatalog, error) {
 	params, ok := connectionParams.(libSQLScanSource)
 	if !ok {

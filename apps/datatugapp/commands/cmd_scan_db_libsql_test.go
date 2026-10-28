@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,4 +27,22 @@ func TestScanLibSQLRefusesAParamsErrorBeforeAnyIO(t *testing.T) {
 	assert.NotContains(t, err.Error(), "db.example.com")
 	assert.NotContains(t, stderr, "db.example.com")
 	assert.NoFileExists(t, filepath.Join(projectDir, "connections", "local", "main.json"))
+}
+
+// The command builds the libSQL scan parameters from the variable's value: the
+// driver, the env:NAME connection string and non-secret host metadata, never the
+// value itself in the parameters' text.
+func TestLibSQLScanParametersAreBuiltForTheCommand(t *testing.T) {
+	const variable = "DATATUG_TEST_LIBSQL_SCAN_OK"
+	t.Setenv(variable, "libsql://db.example.com:8443")
+	t.Setenv(dbcopy.DescriptorEnvAllowList, "")
+
+	v := &scanDbCommand{Driver: api.DriverLibSQL, DSNEnv: variable, Environment: "local", Database: "main"}
+	params, err := v.descriptorConnectionParams()
+	require.NoError(t, err)
+	assert.Equal(t, api.DriverLibSQL, params.Driver())
+	assert.Equal(t, "env:"+variable, params.ConnectionString())
+	assert.Equal(t, "db.example.com", params.Server())
+	assert.Equal(t, 8443, params.Port())
+	assert.NotContains(t, params.String(), "db.example.com", "the parameter text is the env:NAME source")
 }

@@ -101,6 +101,23 @@ func TestQueryRunKeepsExternallyCancelledParentRefused(t *testing.T) {
 	require.Equal(t, 1, capture.stops)
 }
 
+// runQueryCommand is also callable on its own: with no command context it still
+// reads through a background context.
+func TestRunQueryCommandUsesBackgroundForANilCommandContext(t *testing.T) {
+	path := covCSQLiteFile(t, "direct.sqlite", `CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)`, `INSERT INTO t VALUES (1,'a')`)
+	cmd, out, _ := covCRunCmd(t, map[string]string{
+		queryDBFlag:         "sqlite://" + path,
+		queryFromFlag:       "t",
+		queryNoPoliciesFlag: "true",
+		queryFormatFlag:     "json",
+	})
+	require.Nil(t, cmd.Context())
+	o, err := readQueryOptions(cmd)
+	require.NoError(t, err)
+	require.NoError(t, runQueryCommand(cmd, o))
+	assert.Contains(t, out.String(), `"name"`)
+}
+
 // Called directly (never through Execute) the command has no context: the
 // helper still gets one, and nil is what the command holds again afterwards.
 func TestQueryRunRestoresANilContext(t *testing.T) {

@@ -194,13 +194,19 @@ func resolveQueryEnvironment(ctx context.Context, projStore datatug.ProjectStore
 // runs against: the query's first declared target naming a Catalog, else
 // the resolved environment's only database catalog, erroring with the full
 // candidate list otherwise. envID is what --env was given, and a source string
-// can be typed there: each message shows it only when it is a plain name (see
-// api.LookupError).
+// can be typed there: it is refused before the environment's catalogs are read,
+// and each message shows it only when it is a plain name (see api.LookupError).
 func resolveQueryDatabase(ctx context.Context, projStore datatug.ProjectStore, envID string, queryDef *datatug.QueryDef) (string, error) {
 	for _, target := range queryDef.Targets {
 		if target.Catalog != "" {
 			return target.Catalog, nil
 		}
+	}
+	// A source string typed where an environment ID belongs is not an ID: it is
+	// refused before the environment is read, naming nothing of it. A plain name,
+	// and an unknown nonplain name, still take the catalog path below.
+	if isSourceString(envID) {
+		return "", api.LookupError("load database catalogs for environment %q: an environment ID must be a plain name, not a source URL or a path", nil, envID)
 	}
 	catalogs, err := projStore.LoadEnvDbCatalogs(ctx, envID)
 	if err != nil {

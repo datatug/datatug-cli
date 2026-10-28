@@ -13,6 +13,7 @@ import (
 
 	"github.com/datatug/datatug-cli/pkg/chat"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/datatug/datatug-core/pkg/datatug"
 )
 
 // `datatug chat --database` takes a catalog ID, and a source string such as
@@ -83,6 +84,80 @@ func TestRememberedDatabase_OnlyAPlainCatalogIDIsWrittenToTheConfigDirectory(t *
 			t.Errorf("rememberedDatabase(%q) = %q, want %q", in, got, want)
 		}
 	}
+}
+
+// A source string typed where --database or --env takes an ID is refused before
+// the project or its catalog is read. The fixture is deliberately not a project:
+// its invalid project file would surface as a load error, so the absence of that
+// error proves no project read happened. The same values used to reach
+// buildChatProjectCatalog, whose Core read lock spawns a git process for each
+// store read; the refusal at the entry keeps the safety assertion and the cost
+// apart. The configured nonplain catalog ID keeps its degraded session.
+func TestSourceStringAsDatabaseOrEnvironmentIsRefusedBeforeProjectIO(t *testing.T) {
+	opened := false
+	t.Cleanup(chat.SetRunTeaProgramForTest(func(*tea.Program) (tea.Model, error) {
+		opened = true
+		return nil, nil
+	}))
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "datatug-project.json"), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	projectDir, store, err := resolveQueryProject(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	refused := func(t *testing.T, err error, wants ...string) {
+		t.Helper()
+		if err == nil {
+			t.Fatal("the source string was accepted: want a refusal at the entry")
+		}
+		for _, want := range wants {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("refusal %q does not contain %q", err, want)
+			}
+		}
+		for _, forbidden := range []string{"load project explorer", "invalid character", sourceSecret, "alice", "db.example.com"} {
+			if strings.Contains(err.Error(), forbidden) {
+				t.Fatalf("the refusal shows %q, so a project was read or the value was echoed: %v", forbidden, err)
+			}
+		}
+		if opened {
+			t.Fatal("a refused source string opened a chat session")
+		}
+	}
+
+	t.Run("chat --database", func(t *testing.T) {
+		opened = false
+		_, err := runChatProject(chatCommand(), chatOptions{project: dir, env: "local", database: typedSource, model: defaultChatModel, thinking: "low"})
+		refused(t, err, "--database takes the ID of a catalog")
+	})
+	t.Run("chat --env", func(t *testing.T) {
+		opened = false
+		_, err := runChatProject(chatCommand(), chatOptions{project: dir, env: typedSource, model: defaultChatModel, thinking: "low"})
+		refused(t, err, "database catalogs", "must be a plain name")
+	})
+	t.Run("resolveQueryDatabase --env", func(t *testing.T) {
+		opened = false
+		_, err := resolveQueryDatabase(context.Background(), store, typedSource, &datatug.QueryDef{ID: "saved"})
+		refused(t, err, "database catalogs", "must be a plain name")
+	})
+	t.Run("resolveSQLOrTugQLSourceURL --env", func(t *testing.T) {
+		opened = false
+		_, err := resolveSQLOrTugQLSourceURL(context.Background(), store, projectDir, typedSource, &datatug.QueryDef{ID: "saved"})
+		refused(t, err, "database catalogs", "must be a plain name")
+	})
+
+	// A configured catalog ID that is not a plain name is not a source string:
+	// chat still opens the degraded session that reports its unresolved source.
+	t.Run("configured nonplain catalog ID", func(t *testing.T) {
+		opened = false
+		project := writeChatProjectWithUnresolvedCatalog(t, "Chinook db")
+		if _, err := runChatProject(chatCommand(), chatOptions{project: project, env: "local", database: "Chinook db", model: defaultChatModel, thinking: "low"}); err != nil || !opened {
+			t.Fatalf("a catalog of the environment: err = %v, session opened = %v, want the degraded session to open", err, opened)
+		}
+	})
 }
 
 // A value for --database that is neither a source of the project nor a plain

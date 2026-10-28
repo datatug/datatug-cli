@@ -375,6 +375,51 @@ func TestDecodeLibSQLDescriptor(t *testing.T) {
 // join and a write transaction are all refused before the fixture would be
 // reached. There is no SELECT-prefix pseudo-parser here and no local fallback in
 // this package.
+// TestOpenSchemaScanLibSQLUsesTheBorrowedSchemaReader covers the scan route's
+// libSQL branch without a server: the constructor seam returns a schema reader,
+// which OpenSchemaScan must expose and close through SourceCloser ownership.
+func TestOpenSchemaScanLibSQLUsesTheBorrowedSchemaReader(t *testing.T) {
+	t.Setenv(LibSQLBearerEnv, "")
+	ref, err := Parse("libsql://db.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &postgRESTScanFakeDB{}
+	original := newLibSQLDatabase
+	newLibSQLDatabase = func(context.Context, dalgo2libsql.Config) (dal.DB, error) {
+		return fake, nil
+	}
+	t.Cleanup(func() { newLibSQLDatabase = original })
+
+	scanDB, err := ref.OpenSchemaScan(context.Background())
+	if err != nil {
+		t.Fatalf("OpenSchemaScan: %v", err)
+	}
+	if err = scanDB.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if fake.closed != 1 {
+		t.Fatalf("the schema reader was closed %d times, want 1", fake.closed)
+	}
+}
+
+// TestOpenSchemaScanLibSQLReturnsTheOpenFailure keeps a refused libSQL scan an
+// error rather than a half-open schema reader, and it names no credential.
+func TestOpenSchemaScanLibSQLReturnsTheOpenFailure(t *testing.T) {
+	const secret = "unsafe-token-value"
+	t.Setenv(LibSQLBearerEnv, "token\r\nX-Injected: "+secret)
+	ref, err := Parse("libsql://db.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = ref.OpenSchemaScan(context.Background()); !IsLibSQLUnsafeCredential(err) {
+		t.Fatalf("OpenSchemaScan error = %v, want the unsafe-credential refusal", err)
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("the refusal echoed the credential: %v", err)
+	}
+}
+
 func TestLibSQLAdapterRefusesUnsupportedOperations(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

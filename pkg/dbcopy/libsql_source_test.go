@@ -78,6 +78,7 @@ func TestParseLibSQLSourceRefusals(t *testing.T) {
 		{"libsql://db.example.com/health", "not an API endpoint"},
 		{"libsql+http://db.example.com", "loopback endpoint"},
 		{"libsql://db.example.com:bad-port", "expected libsql://HOST"},
+		{"libsql://:8080", "names no usable host"},
 	} {
 		_, err := Parse(tc.source)
 		if err == nil {
@@ -107,6 +108,12 @@ func TestLibSQLDoesNotReinterpretHTTPS(t *testing.T) {
 	}
 	if ref.Path != "db.example.com" {
 		t.Fatalf("https source path = %q", ref.Path)
+	}
+	if got := ref.LibSQLSourceURL(); got != "" {
+		t.Fatalf("a non-libSQL ref has a libSQL source URL: %q", got)
+	}
+	if got := (BackendRef{Scheme: LibSQLScheme}).LibSQLSourceURL(); got != "" {
+		t.Fatalf("a libSQL ref without a host has a source URL: %q", got)
 	}
 }
 
@@ -285,6 +292,9 @@ func TestLibSQLFailureReason(t *testing.T) {
 	reason := libSQLFailureReason(context.Canceled)
 	if !strings.Contains(reason, "cancel") {
 		t.Fatalf("cancel reason = %q", reason)
+	}
+	if got := LibSQLFailureReason(fmt.Errorf("outer: %w", context.DeadlineExceeded)); !strings.Contains(got, "deadline") {
+		t.Fatalf("deadline reason = %q", got)
 	}
 
 	// An outer wrapper is not the adapter's own boundary: it can add arbitrary

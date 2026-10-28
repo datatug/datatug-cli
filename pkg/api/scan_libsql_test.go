@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dal-go/dalgo/dal"
@@ -12,6 +14,7 @@ import (
 	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/dbconnection"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -26,12 +29,14 @@ func TestNewLibSQLScanParams(t *testing.T) {
 	params, err := NewLibSQLScanParams(lookup, "DATATUG_TEST_LIBSQL", "local", "main")
 	require.NoError(t, err)
 	assert.Equal(t, DriverLibSQL, params.Driver())
+	assert.Equal(t, dbconnection.ModeReadOnly, params.Mode())
 	assert.Equal(t, "127.0.0.1", params.Server())
 	assert.Equal(t, 8080, params.Port())
 	assert.Equal(t, "main", params.Catalog())
 	assert.Equal(t, "", params.User(), "credentials are separate from the endpoint")
 	assert.Equal(t, "env:DATATUG_TEST_LIBSQL", params.ConnectionString())
 	assert.Equal(t, "env:DATATUG_TEST_LIBSQL", params.String())
+	assert.Equal(t, "env:DATATUG_TEST_LIBSQL", params.GoString())
 	assert.Equal(t, "connections/local/main.json", params.Path(), "a project records the descriptor, never the endpoint")
 	assert.NotContains(t, params.LogTarget(), "127.0.0.1")
 	assert.Equal(t, "env:DATATUG_TEST_LIBSQL", params.SourceRef().Raw)
@@ -81,7 +86,8 @@ func TestNewLibSQLScanParamsRefusesAWrongSourceOrName(t *testing.T) {
 // keys and indexes, and no invented "id" column.
 type libSQLScanDB struct {
 	dal.DB
-	closed int
+	closed      int
+	describeErr error
 }
 
 func (f *libSQLScanDB) Close() error { f.closed++; return nil }
@@ -90,7 +96,10 @@ func (*libSQLScanDB) ListCollections(context.Context, *record.Key) ([]dal.Collec
 	return []dal.CollectionRef{dal.NewRootCollectionRef("items", "")}, nil
 }
 
-func (*libSQLScanDB) DescribeCollection(_ context.Context, ref *dal.CollectionRef) (*dbschema.CollectionDef, error) {
+func (f *libSQLScanDB) DescribeCollection(_ context.Context, ref *dal.CollectionRef) (*dbschema.CollectionDef, error) {
+	if f.describeErr != nil {
+		return nil, f.describeErr
+	}
 	return &dbschema.CollectionDef{
 		Name:       ref.Name(),
 		PrimaryKey: []dal.FieldName{"item_id"},
@@ -172,6 +181,33 @@ func TestScanDbCatalog_LibSQLFailureIsClassified(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to open libSQL")
 	assert.NotContains(t, err.Error(), "db.example.com")
+}
+
+func TestScanLibSQLCatalogRefusesWrongParamsAndClassifiesMetadataFailure(t *testing.T) {
+	if _, err := scanLibSQLCatalog(context.Background(), nil); err == nil ||
+		!strings.Contains(err.Error(), "--dsn-env") {
+		t.Fatalf("nil params error = %v", err)
+	}
+
+	const secret = "catalog-secret-value"
+	db := &libSQLScanDB{describeErr: errors.New("driver text holding " + secret)}
+	stubOpenSchemaScan(t, func(dbcopy.BackendRef, context.Context) (dbcopy.SchemaScanDB, error) {
+		return db, nil
+	})
+	lookup := func(name string) (string, bool) {
+		if name == "DATATUG_TEST_LIBSQL" {
+			return "libsql://db.example.com", true
+		}
+		return "", false
+	}
+	params, err := NewLibSQLScanParams(lookup, "DATATUG_TEST_LIBSQL", "local", "main")
+	require.NoError(t, err)
+	_, err = scanLibSQLCatalog(context.Background(), params)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to get dbCatalog metadata")
+	assert.NotContains(t, err.Error(), secret)
+	assert.NotContains(t, err.Error(), "db.example.com")
+	assert.Equal(t, 1, db.closed, "a failed metadata read still releases the handle")
 }
 
 func TestSourceURLFromCatalogLibSQL(t *testing.T) {

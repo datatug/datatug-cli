@@ -86,7 +86,7 @@ func (e *Executor) StreamFederatedTugQL(ctx context.Context, document []byte, so
 		if url == "" {
 			return nil, fmt.Errorf("database %q is not configured", database)
 		}
-		db, closeSource, err := openSource(ctx, url, false, len(e.session.Policies))
+		db, closeSource, err := openSourceFn(ctx, url, false, len(e.session.Policies))
 		if err != nil {
 			return nil, fmt.Errorf("open database %q: %w", database, err)
 		}

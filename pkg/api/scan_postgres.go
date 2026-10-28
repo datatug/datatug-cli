@@ -180,10 +180,16 @@ func (p *PostgresScanParams) WriteDescriptor(projectDir string) (undo func() err
 	return writeDescriptorFile(projectDir, p.descriptorPath, p.dsnEnv)
 }
 
-// PostgresDescriptorPath is the project-relative path of the connection descriptor of catalog
-// in environment: connections/<env>/<catalog>.json, with "/" separators.
-func PostgresDescriptorPath(environment, catalog string) string {
+// ConnectionDescriptorPath is the project-relative path of the connection descriptor of catalog
+// in environment: connections/<env>/<catalog>.json, with "/" separators. Every descriptor-backed
+// source (a SQL server and CouchDB) uses it.
+func ConnectionDescriptorPath(environment, catalog string) string {
 	return path.Join(postgresDescriptorFolder, environment, catalog+".json")
+}
+
+// PostgresDescriptorPath is ConnectionDescriptorPath, kept as the historical name.
+func PostgresDescriptorPath(environment, catalog string) string {
+	return ConnectionDescriptorPath(environment, catalog)
 }
 
 // WritePostgresDescriptor writes the connection descriptor of catalog in environment into

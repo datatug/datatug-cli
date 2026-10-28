@@ -1,6 +1,6 @@
 module github.com/datatug/datatug-cli
 
-go 1.27.0
+go 1.27.1
 
 // All sibling deps now ship the upstream changes db-copy depends on
 // at tagged versions:
@@ -27,6 +27,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/dal-go/dalgo v0.95.3
 	github.com/dal-go/dalgo2bigquery v0.3.2
+	github.com/dal-go/dalgo2couchdb v0.0.0-20261027213543-120b25e81833
 	github.com/dal-go/dalgo2duckdb v0.1.0
 	github.com/dal-go/dalgo2firestore v0.10.41
 	github.com/dal-go/dalgo2http v0.4.0
@@ -36,12 +37,13 @@ require (
 	github.com/dal-go/dalgo2openvaultdb v0.4.1
 	github.com/dal-go/dalgo2oracle v0.0.1
 	github.com/dal-go/dalgo2postgres v0.9.4
+	github.com/dal-go/dalgo2postgrest v0.0.0-20261027200821-d952c8fc3279
 	github.com/dal-go/dalgo2redis v0.1.0
 	github.com/dal-go/dalgo2sql v0.30.0
 	github.com/dal-go/dalgo2sqlite v0.4.8
 	github.com/dal-go/record v0.1.5
 	github.com/datatug/cliformat v0.0.3
-	github.com/datatug/datatug-core v0.80.0
+	github.com/datatug/datatug-core v0.124.1
 	github.com/datatug/sql2csv v0.0.1
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/go-sql-driver/mysql v1.10.0

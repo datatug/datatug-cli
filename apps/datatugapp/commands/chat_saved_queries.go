@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/url"
 	"sort"
 	"strings"
@@ -208,9 +207,7 @@ func (s chatSavedQueries) LookupParameter(ctx context.Context, queryID, paramete
 	if err != nil {
 		return nil, err
 	}
-	if closer, ok := db.(io.Closer); ok {
-		defer func() { _ = closer.Close() }()
-	}
+	defer dbcopy.SourceCloser(db)()
 	snapshot, err := chatLoadForeignKeySnapshot(ctx, db, source)
 	if err != nil {
 		return nil, err

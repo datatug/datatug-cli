@@ -63,7 +63,7 @@ func (e *Executor) RunExactAggregateTugQL(ctx context.Context, sourceURL string,
 	if err != nil {
 		return ExactAggregateResult{}, err
 	}
-	db, closeSource, err := openSource(ctx, sourceURL, false, len(e.session.Policies))
+	db, closeSource, err := openSourceFn(ctx, sourceURL, false, len(e.session.Policies))
 	if err != nil {
 		return ExactAggregateResult{}, err
 	}

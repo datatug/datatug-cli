@@ -66,6 +66,18 @@ func (r BackendRef) OpenFailure(err error) error {
 	if r.Scheme == "postgres" {
 		return &openError{message: postgresFailureText(postgresFailureReason(err), r.connectionHint()), cause: err, server: true}
 	}
+	if IsCouchDBScheme(r.Scheme) {
+		return &openError{
+			message: fmt.Sprintf("open %s source %q: %s", r.Scheme, r.Display(), couchDBFailureReason(err)),
+			cause:   err,
+		}
+	}
+	if IsPostgRESTScheme(r.Scheme) {
+		return &openError{
+			message: fmt.Sprintf("open %s source %q: %s", r.Scheme, r.Display(), postgRESTFailureReason(err)),
+			cause:   err,
+		}
+	}
 	return &openError{
 		message: fmt.Sprintf("open %s source %q: %s", r.Scheme, r.Display(), openFailureReason(err)),
 		cause:   err,

@@ -26,16 +26,17 @@ import (
 // covCStore is a datatug.ProjectStore whose loaders return scripted values.
 type covCStore struct {
 	datatug.ProjectStore
-	envs        datatug.Environments
-	envsErr     error
-	env         *datatug.Environment
-	envErr      error
-	catalogs    datatug.DbCatalogs
-	catalogsErr error
-	catalog     datatug.DbCatalog
-	catalogErr  error
-	queryDef    *datatug.QueryDef
-	queryErr    error
+	envs          datatug.Environments
+	envsErr       error
+	env           *datatug.Environment
+	envErr        error
+	catalogs      datatug.DbCatalogs
+	catalogsErr   error
+	catalogsCalls int
+	catalog       datatug.DbCatalog
+	catalogErr    error
+	queryDef      *datatug.QueryDef
+	queryErr      error
 }
 
 func (s *covCStore) LoadEnvironments(context.Context, ...datatug.StoreOption) (datatug.Environments, error) {
@@ -45,6 +46,7 @@ func (s *covCStore) LoadEnvironment(context.Context, string, ...datatug.StoreOpt
 	return s.env, s.envErr
 }
 func (s *covCStore) LoadEnvDbCatalogs(context.Context, string, ...datatug.StoreOption) (datatug.DbCatalogs, error) {
+	s.catalogsCalls++
 	return s.catalogs, s.catalogsErr
 }
 func (s *covCStore) LoadEnvDbCatalog(context.Context, string, string, string, ...datatug.StoreOption) (datatug.DbCatalog, error) {

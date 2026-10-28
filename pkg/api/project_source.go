@@ -288,10 +288,10 @@ type SourceUnresolvedError struct {
 }
 
 func (e *SourceUnresolvedError) Error() string {
-	if isSQLiteDriver(e.Driver) || IsServerDriver(e.Driver) {
+	if isSQLiteDriver(e.Driver) || IsServerDriver(e.Driver) || e.Driver == DriverCouchDB || e.Driver == DriverPostgREST {
 		return "its catalog path or connection descriptor cannot be resolved"
 	}
-	return "its driver is not one that can be opened (sqlite3, postgres, mysql, oracle or sqlserver)"
+	return "its driver is not one that can be opened (sqlite3, ingitdb, openvaultdb, postgres, mysql, oracle, sqlserver, firestore, couchdb or postgrest)"
 }
 
 func (e *SourceUnresolvedError) Unwrap() error { return e.cause }

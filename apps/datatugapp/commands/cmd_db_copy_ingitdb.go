@@ -149,6 +149,9 @@ func runNativeInGitDB(cmd *cobra.Command, req nativeInGitDBRequest) error {
 		}
 		return fail(4, "open --from: %v", srcRef.OpenFailure(err))
 	}
+	// The export engine reads through the handle; the command owns it and
+	// releases it on success, on a failed export and on an interrupt.
+	defer dbcopy.SourceCloser(src)()
 	result, err := runNativeExport(ctx, src, req.tgt.Path, dbcopy.ExportOptions{RecordsFormat: req.recordsFormat, Filters: req.directives, DryRun: dryRun})
 	if err != nil {
 		if sig := interrupted(); sig != nil {

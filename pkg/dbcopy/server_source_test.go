@@ -205,7 +205,7 @@ func TestOpenServerSources(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, scanDB)
 	_, err = BackendRef{Scheme: "sqlite"}.OpenSchemaScan(ctx)
-	assert.EqualError(t, err, "a schema scan through DALgo is available for postgres, mysql, oracle and sqlserver sources only, not sqlite")
+	assert.EqualError(t, err, "a schema scan through DALgo is available for postgres, mysql, oracle, sqlserver, couchdb and postgrest sources only, not sqlite")
 }
 
 func TestServerOpenFailuresNameNoPartOfTheURL(t *testing.T) {

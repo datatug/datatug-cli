@@ -475,9 +475,7 @@ func openBigQueryCompareDatabase(ref dbcopy.BackendRef) (dal.DB, error) {
 }
 
 func closeCompareDB(db dal.DB) {
-	if closer, ok := db.(io.Closer); ok {
-		_ = closer.Close()
-	}
+	dbcopy.CloseSource(db)
 }
 
 func writeDatabaseCompareText(w io.Writer, report dbcompare.Report, details bool) error {

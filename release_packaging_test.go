@@ -1,10 +1,16 @@
 package main
 
 import (
+	"archive/tar"
+	"archive/zip"
+	"bytes"
+	"compress/gzip"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -523,4 +529,253 @@ func TestVerifyHomebrewCaskScript(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Own-source scope/provenance inputs, not an aggregate binary license.
+var nativeArchiveInputs = []string{
+	"README.md", "LICENSE", "LICENSING.md", "LICENSES/Apache-2.0.txt",
+	"LICENSES/COMMERCIAL-TERMS.md", "THIRD_PARTY_NOTICES.md", "pkg/mcpserver/app/build-manifest.json",
+}
+
+func nativeArchiveConfig(t *testing.T) []map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile(".goreleaser.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		Archives []map[string]any `yaml:"archives"`
+		Casks    []map[string]any `yaml:"homebrew_casks"`
+		Brews    any              `yaml:"brews"`
+	}
+	if err := yaml.Unmarshal(raw, &config); err != nil {
+		t.Fatal(err)
+	}
+	if len(config.Archives) != 2 || len(config.Casks) != 1 || config.Brews != nil {
+		t.Fatal("expected both archives and the existing cask")
+	}
+	if _, exists := config.Casks[0]["license"]; exists {
+		t.Error("cask must not assert an aggregate license")
+	}
+	return config.Archives
+}
+
+func TestNativeArchiveOwnSourceInputs(t *testing.T) {
+	for _, archive := range nativeArchiveConfig(t) {
+		var got []string
+		for _, file := range archive["files"].([]any) {
+			value, ok := file.(string)
+			if !ok {
+				t.Fatal("own inputs must use explicit preserved paths")
+			}
+			got = append(got, value)
+		}
+		if !reflect.DeepEqual(got, nativeArchiveInputs) {
+			t.Errorf("archive %s inputs = %v, want %v", archive["id"], got, nativeArchiveInputs)
+		}
+	}
+	for _, file := range nativeArchiveInputs {
+		info, err := os.Lstat(file)
+		if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
+			t.Fatalf("required native archive input is absent, empty or unsuitable: %s", file)
+		}
+	}
+}
+
+// Actual GoReleaser archives, with inert binaries: this is not a native release.
+func TestNativeArchiveGoReleaserFixture(t *testing.T) {
+	tool := os.Getenv("DATATUG_GORELEASER_FIXTURE")
+	if tool == "" {
+		t.Skip("set DATATUG_GORELEASER_FIXTURE for nonpublishing inert packaging fixtures")
+	}
+	tool, err := filepath.Abs(tool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archives := nativeArchiveConfig(t)
+	for _, archive := range archives {
+		for key := range archive {
+			if key != "id" && key != "formats" && key != "name_template" && key != "ids" && key != "files" {
+				t.Fatalf("unsupported fixture archive option: %s", key)
+			}
+		}
+	}
+	expected := map[string][]byte{}
+	for _, file := range nativeArchiveInputs {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		expected[file] = data
+	}
+	for _, missing := range append([]string{""}, nativeArchiveInputs[1:]...) {
+		name := "complete"
+		if missing != "" {
+			name = "missing_" + missing
+		}
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			if output := os.Getenv("DATATUG_NATIVE_ARCHIVE_FIXTURE_OUTPUT"); output != "" && missing == "" {
+				dir = filepath.Join(output, "complete")
+				if err := os.Mkdir(dir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for file, data := range expected {
+				if file == missing {
+					continue
+				}
+				dest := filepath.Join(dir, file)
+				if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(dest, data, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\nfunc main() {}\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			driver := "import pathlib,sys\np=pathlib.Path(sys.argv[sys.argv.index('-o')+1]);p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(b'INERT NATIVE ARCHIVE FIXTURE\\n')\n"
+			if err := os.WriteFile(filepath.Join(dir, "fixture.py"), []byte(driver), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			builds := []map[string]any{}
+			for _, target := range []struct{ id, os string }{{"datatug-unix", "linux"}, {"datatug-windows", "windows"}} {
+				builds = append(builds, map[string]any{"id": target.id, "binary": "datatug", "tool": "python3", "command": "fixture.py", "goos": []string{target.os}, "goarch": []string{"amd64"}, "ldflags": []string{}})
+			}
+			// No publishers, signing, notarization, global/archive hooks or real compiler.
+			config := map[string]any{"version": 2, "project_name": "datatug", "builds": builds, "archives": archives, "changelog": map[string]any{"disable": true}}
+			raw, err := yaml.Marshal(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "fixture.yaml"), raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command(tool, "release", "--snapshot", "--config", "fixture.yaml", "--skip=before,announce,publish,sign,notarize", "--timeout=1m")
+			cmd.Dir = dir
+			cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + dir, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull, "GOTOOLCHAIN=local", "GOPROXY=off", "GOSUMDB=off"}
+			output, err := cmd.CombinedOutput()
+			if missing != "" {
+				if err == nil || !strings.Contains(string(output), "failed to find files to archive") || !strings.Contains(string(output), missing) {
+					t.Fatalf("missing required input did not refuse packaging: %v\n%s", err, output)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("fixture packaging failed: %v\n%s", err, output)
+			}
+			files, err := filepath.Glob(filepath.Join(dir, "dist", "datatug_*"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			count := 0
+			for _, archive := range files {
+				if !strings.HasSuffix(archive, ".tar.gz") && !strings.HasSuffix(archive, ".zip") {
+					continue
+				}
+				count++
+				contents := nativeFixtureArchive(t, archive)
+				binary := "datatug"
+				if strings.HasSuffix(archive, ".zip") {
+					binary += ".exe"
+				}
+				if !bytes.Equal(contents[binary], []byte("INERT NATIVE ARCHIVE FIXTURE\n")) {
+					t.Fatal("fixture binary bytes changed")
+				}
+				var absent []string
+				for file, want := range expected {
+					if !bytes.Equal(contents[file], want) {
+						absent = append(absent, file)
+					}
+				}
+				if len(absent) != 0 || len(contents) != len(expected)+1 {
+					t.Fatalf("archive bindings failed: %v (members %d)", absent, len(contents))
+				}
+			}
+			if count != 2 {
+				t.Fatalf("expected real tar.gz and zip, got %d", count)
+			}
+		})
+	}
+}
+
+func nativeFixtureArchive(t *testing.T, name string) map[string][]byte {
+	t.Helper()
+	contents := map[string][]byte{}
+	add := func(name string, r io.Reader) {
+		if filepath.IsAbs(name) || strings.Contains(name, "..") {
+			t.Fatal("unsafe fixture archive member")
+		}
+		if _, duplicate := contents[name]; duplicate {
+			t.Fatal("duplicate archive member")
+		}
+		data, err := io.ReadAll(io.LimitReader(r, 2<<20))
+		if err != nil {
+			t.Fatal(err)
+		}
+		contents[name] = data
+	}
+	if strings.HasSuffix(name, ".zip") {
+		z, err := zip.OpenReader(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := z.Close(); err != nil {
+				t.Error(err)
+			}
+		}()
+		for _, entry := range z.File {
+			if entry.FileInfo().IsDir() {
+				continue
+			}
+			r, err := entry.Open()
+			if err != nil {
+				t.Fatal(err)
+			}
+			add(entry.Name, r)
+			if err := r.Close(); err != nil {
+				t.Fatal(err)
+			}
+		}
+	} else {
+		f, err := os.Open(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := f.Close(); err != nil {
+				t.Error(err)
+			}
+		}()
+		gz, err := gzip.NewReader(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := gz.Close(); err != nil {
+				t.Error(err)
+			}
+		}()
+		tr := tar.NewReader(gz)
+		for {
+			h, err := tr.Next()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if h.Typeflag == tar.TypeDir {
+				continue
+			}
+			if h.Typeflag != tar.TypeReg {
+				t.Fatal("non-regular fixture member")
+			}
+			add(h.Name, tr)
+		}
+	}
+	return contents
 }

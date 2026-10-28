@@ -1,9 +1,8 @@
 # Query libSQL
 
-> Post-release source documentation. The libSQL source is wired into the Go CLI
-> in this checkout and is not part of a released `datatug` binary yet. It is a
-> Go CLI provider only: no hosted Turso account, no TypeScript/web execution and
-> no Go-backed web substitute is claimed here.
+> This guide describes reading a libSQL server from the Go CLI through
+> structured, read-only queries. Hosted Turso and browser support are out of
+> scope.
 
 DataTug reads the native SQLite tables of a [libSQL](https://github.com/tursodatabase/libsql)
 server through the [dalgo2libsql](https://github.com/dal-go/dalgo2libsql)
@@ -138,8 +137,6 @@ fails with a read-only refusal.
 
 ## What is not claimed
 
-- A released `datatug` binary does not include this provider yet; until a
-  release carries it, only a build from this branch can use it.
 - Hosted Turso (an account, a platform token, a management API) is out of scope.
   Only a libSQL server reachable at its HTTPS base address is read.
 - The TypeScript and web UI providers, and any Go-backed web substitute, are

@@ -266,9 +266,12 @@ func LibSQLFailureReason(err error) string {
 // sentence, never the adapter's response body (which it does not expose anyway),
 // never the endpoint and never a credential.
 func libSQLFailureReason(err error) string {
+	var unsafe *libSQLCredentialError
 	switch {
-	case IsLibSQLUnsafeCredential(err):
-		return err.Error()
+	case errors.As(err, &unsafe):
+		// The typed error's own sentence names the variable and nothing else.
+		// err.Error() would include whatever an outer wrapper added around it.
+		return unsafe.Error()
 	case errors.Is(err, dalgo2libsql.ErrUnsafeTarget):
 		return "the libSQL source address is not a safe base URL: use libsql:// or https://, plain http:// only for a loopback host, and no credentials, query, fragment or API suffix"
 	case errors.Is(err, dalgo2libsql.ErrInvalidConfig):

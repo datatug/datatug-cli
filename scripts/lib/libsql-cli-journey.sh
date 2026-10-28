@@ -189,27 +189,133 @@ set -e
 [ ! -s "$work/sql.out" ] || { cat "$work/sql.out" >&2; echo "a refused native SQL read printed rows" >&2; exit 1; }
 grep -qi 'native SQL is not supported' "$work/sql.err" || { cat "$work/sql.err" >&2; echo "the native SQL refusal was not explicit" >&2; exit 1; }
 
-# Cancellation: a process killed before its read finishes must not print a
-# successful partial result.
-set +e
-python3 - "$work/datatug" "$source" <<'PY'
-import subprocess, sys
+# Cancellation: hold the first request open so the read is definitely in flight,
+# then interrupt the CLI. A cancelled read is not a successful partial result.
+# Python owns the plain TCP listener and the child process: the listener ACKs
+# only after it has read the complete request headers (and the declared body),
+# the parent then signals that exact child PID, and the listener observes the
+# client disconnect. It sends no protocol data and forwards nothing, so no
+# adapter protocol is copied here. Every wait is bounded and each resource is
+# closed exactly once; a timeout kill is a failure, never a cancellation pass.
+if ! python3 - "$work/datatug" <<'PY'
+import signal
+import socket
+import subprocess
+import sys
+import threading
 
-# Kill the CLI while its libSQL read is in flight. A cancellation is not a
-# successful partial result: the process must not exit 0.
+cli = sys.argv[1]
+srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+srv.bind(("127.0.0.1", 0))
+srv.listen(1)
+srv.settimeout(20)
+request_ready = threading.Event()
+client_gone = threading.Event()
+server_failure = []
+
+
+def serve():
+    conn = None
+    try:
+        conn, _ = srv.accept()
+        conn.settimeout(0.2)
+        request = b""
+        while b"\r\n\r\n" not in request:
+            chunk = conn.recv(4096)
+            if not chunk:
+                raise RuntimeError("the client closed before sending complete request headers")
+            request += chunk
+        head, _, body = request.partition(b"\r\n\r\n")
+        length = 0
+        for line in head.split(b"\r\n")[1:]:
+            name, _, value = line.partition(b":")
+            if name.strip().lower() == b"content-length":
+                try:
+                    length = int(value.strip())
+                except ValueError:
+                    length = 0
+        while len(body) < length:
+            chunk = conn.recv(4096)
+            if not chunk:
+                break
+            body += chunk
+        # The ACK: the full headers, and the declared body bytes, are in.
+        request_ready.set()
+        while True:
+            try:
+                chunk = conn.recv(4096)
+            except socket.timeout:
+                continue
+            if not chunk:
+                client_gone.set()
+                return
+    except Exception as exc:  # noqa: BLE001 - reported as a test failure
+        server_failure.append(repr(exc))
+        request_ready.set()
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except OSError:
+                pass
+
+
+thread = threading.Thread(target=serve, daemon=True)
+thread.start()
+port = srv.getsockname()[1]
+proc = subprocess.Popen(
+    [cli, "query", "run", "--db", "libsql+http://127.0.0.1:%d" % port,
+     "--from", "items", "--format", "json", "--no-policies"],
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+    text=True,
+)
+
+status = 1
 try:
-    proc = subprocess.run(
-        [sys.argv[1], "query", "run", "--db", sys.argv[2], "--from", "items", "--format", "json", "--no-policies"],
-        capture_output=True, text=True, timeout=0.15,
-    )
-except subprocess.TimeoutExpired:
-    sys.exit(0)
-sys.exit(0 if proc.returncode != 0 else 1)
+    if not request_ready.wait(20):
+        raise RuntimeError("the CLI sent no complete request within 20s")
+    if server_failure:
+        raise RuntimeError("the cancellation listener failed: " + server_failure[0])
+
+    # Signal the exact child, never a process group and never a guessed PID.
+    proc.send_signal(signal.SIGINT)
+    try:
+        out, err = proc.communicate(timeout=20)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        out, err = proc.communicate()
+        raise RuntimeError("the CLI ignored cancellation and had to be killed")
+
+    if proc.returncode == 0:
+        raise RuntimeError("a cancelled read reported success")
+    if out.strip():
+        raise RuntimeError("a cancelled read printed rows: %r" % out[:200])
+    if "cancel" not in err.lower():
+        raise RuntimeError("the cancellation was not reported safely: %r" % err[:200])
+    if not client_gone.wait(10):
+        raise RuntimeError("the server did not observe the client disconnect after cancellation")
+    print("cancellation: complete request held, exact PID interrupted, client disconnected, no rows")
+    status = 0
+finally:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    try:
+        srv.close()
+    except OSError:
+        pass
+    thread.join(timeout=5)
+
+sys.exit(status)
 PY
-cancel_status=$?
-set -e
-if [ "$cancel_status" = 0 ]; then
-	echo "a cancelled read reported success" >&2
+then
+	echo "the cancellation check failed" >&2
 	exit 1
 fi
 
@@ -234,6 +340,7 @@ if descriptor != {"dsnEnv": "DATATUG_TEST_LIBSQL_URL"}:
 PY
 columns_file="$scanned/dbmodels/main/main/tables/items/main.items.columns.json"
 [ -f "$columns_file" ] || { find "$scanned" -type f >&2; echo "the scan records no items columns under main" >&2; exit 1; }
+[ ! -e "$scanned/dbmodels/main/default" ] || { find "$scanned/dbmodels" -type f >&2; echo "the scan persisted the fixed default schema instead of SQLite's main" >&2; exit 1; }
 python3 - "$columns_file" <<'PY'
 import json, sys
 columns = {column["name"] for column in json.load(open(sys.argv[1]))["columns"]}
@@ -247,16 +354,18 @@ if grep -rq -e "$DATATUG_LIBSQL_BEARER" -e '127.0.0.1' "$scanned" "$work/from.er
 fi
 echo "scan recorded the descriptor and native SQLite columns"
 
-# The scanned project's own table reference (main.items, the schema the scan
-# actually persisted) must resolve and match a bare /items policy: the default
-# schema qualifier is dropped for policy identity, so the policy is neither
-# bypassed nor silently mismatched.
+# The scanned project must serve a normal saved query: the source descriptor,
+# catalog and table metadata all came from the scan. The query uses TugQL's
+# supported schema qualifier, "main", for the scanned SQLite relation
+# ("main.items" is a relation id, not a TugQL name: `name: main.items` would ask
+# SQLite for a table literally named "main.items"). The bare /items policy must
+# match the same relation.
 mkdir -p "$scanned/queries/items" "$scanned/policies"
 cat >"$scanned/queries/items/scanned-items.query.json" <<'JSON'
 {"id":"items/scanned-items","title":"Scanned items","type":"TugQL","createdAt":"2026-01-01T00:00:00Z","targets":[{"catalog":"main"}]}
 JSON
 cat >"$scanned/queries/items/scanned-items.query.tugql.yaml" <<'YAML'
-from: {name: main.items}
+from: {schema: main, name: items}
 columns:
   - {field: title}
   - {field: rank}
@@ -286,7 +395,7 @@ scopes:
 YAML
 "$work/datatug" query run --project "$scanned" --query items/scanned-items --env local --as a --format json >"$work/scanned-query.json" 2>"$work/scanned-query.err" || {
 	cat "$work/scanned-query.err" >&2
-	echo "the built CLI could not query the scanned main.items reference through a bare /items policy" >&2
+	echo "the built CLI could not query the scanned main.items relation through a bare /items policy" >&2
 	exit 1
 }
 python3 - "$work/scanned-query.json" <<'PY'
@@ -300,7 +409,7 @@ if row.get("code") != "a" or row.get("title") != "Alpha":
 if set(row) - {"$key", "title", "rank", "code"}:
     sys.exit("a denied row or column reached the scanned-reference result: %r" % (row,))
 PY
-echo "scanned main.items query matched the bare /items policy and withheld denied rows and columns"
+echo "scanned project query matched the bare /items policy and withheld denied rows and columns"
 
 # Saved query through the descriptor, with row and column policies enforced.
 project_dir="$work/project"

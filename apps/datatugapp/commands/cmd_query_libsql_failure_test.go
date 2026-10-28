@@ -42,6 +42,14 @@ func TestQueryFailureForLibSQLShowsOnlyAFixedClassification(t *testing.T) {
 			err:  fmt.Errorf("outer with %s: %w", secret, errors.Join(dalgo2libsql.ErrBackend, context.Canceled)),
 			want: "cancelled",
 		},
+		{
+			name: "wrapped unsafe credential",
+			err: fmt.Errorf("outer wrapper with %s and select * from items: %w",
+				secret, dbcopy.CheckLibSQLCredentials(func(string) (string, bool) {
+					return "token\r\nX-Injected: " + secret, true
+				})),
+			want: "cannot be sent in an HTTP header",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

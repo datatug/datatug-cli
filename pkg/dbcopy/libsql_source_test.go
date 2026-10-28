@@ -299,6 +299,22 @@ func TestLibSQLFailureReason(t *testing.T) {
 	if !strings.Contains(reason, LibSQLBearerEnv) {
 		t.Fatalf("wrapped backend reason = %q", reason)
 	}
+
+	// A wrapped unsafe-credential refusal must show the typed error's fixed
+	// sentence, not the wrapper's: only the wrapper can quote the value.
+	const unsafeValue = "token\r\nX-Injected: " + secret
+	unsafe := CheckLibSQLCredentials(func(string) (string, bool) { return unsafeValue, true })
+	if unsafe == nil {
+		t.Fatal("an unsafe value was accepted")
+	}
+	reason = LibSQLFailureReason(fmt.Errorf("outer carrying %s: %w", unsafeValue, unsafe))
+	if strings.Contains(reason, secret) || strings.Contains(reason, unsafeValue) || strings.Contains(reason, "outer carrying") {
+		t.Fatalf("a wrapped credential value or wrapper text reached the reason: %q", reason)
+	}
+	if !strings.Contains(reason, LibSQLBearerEnv) || !strings.Contains(reason, "cannot be sent in an HTTP header") {
+		t.Fatalf("wrapped unsafe-credential reason = %q", reason)
+	}
+
 	if got := LibSQLFailureReason(fmt.Errorf("outer: %w", context.Canceled)); !strings.Contains(got, "cancelled") {
 		t.Fatalf("wrapped cancel reason = %q", got)
 	}

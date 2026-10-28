@@ -191,7 +191,7 @@ func TestReferenceSaysWhyADatabaseCannotBeOpened(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "environments", "local", "local.env.json"), []byte(`{"id":"local"}`), 0o644))
 	_, err := runProjectMetadata(t, dbSchemaCommand(), "--db", "datatug://shop/mssql")
 	assert.Equal(t, 2, exitCodeOf(t, err))
-	assert.EqualError(t, err, `database "mssql" cannot be opened: its driver is not one that can be opened (sqlite3, ingitdb, openvaultdb, postgres, mysql, oracle, sqlserver, firestore, couchdb or postgrest)`)
+	assert.EqualError(t, err, `database "mssql" cannot be opened: its driver is not one that can be opened (sqlite3, ingitdb, openvaultdb, postgres, mysql, oracle, sqlserver, firestore, couchdb, postgrest or libsql)`)
 	for _, id := range []string{"url", "pg"} {
 		_, err = runProjectMetadata(t, dbSchemaCommand(), "--db", "datatug://shop/"+id)
 		assert.Equal(t, 2, exitCodeOf(t, err), id)

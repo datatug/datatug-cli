@@ -121,6 +121,21 @@ func readPostgRESTDescriptor(path string, lookupEnv func(string) (string, bool))
 	return readConnectionDescriptor(path, "PostgREST", lookupEnv)
 }
 
+// ReadLibSQLDescriptor reads and strictly decodes the libSQL connection
+// descriptor at path, applying the same dsnEnv rule as the other descriptor
+// readers: a project file may name only a variable the operator allowed, and the
+// server base address is never in the project. The token is never in the
+// descriptor either: it comes from the operator's environment for each request.
+func ReadLibSQLDescriptor(path string) (ConnectionDescriptor, error) {
+	return readLibSQLDescriptor(path, os.LookupEnv)
+}
+
+// readLibSQLDescriptor is ReadLibSQLDescriptor over an injected environment
+// lookup, so tests never touch the process environment.
+func readLibSQLDescriptor(path string, lookupEnv func(string) (string, bool)) (ConnectionDescriptor, error) {
+	return readConnectionDescriptor(path, "libSQL", lookupEnv)
+}
+
 // readConnectionDescriptor is the one reader of a descriptor file; title names
 // the source in the error text ("PostgreSQL", "CouchDB").
 func readConnectionDescriptor(path, title string, lookupEnv func(string) (string, bool)) (ConnectionDescriptor, error) {
@@ -164,6 +179,12 @@ func DecodeCouchDBDescriptor(data []byte) (ConnectionDescriptor, error) {
 // descriptor: the same one-field shape, with errors that name PostgREST.
 func DecodePostgRESTDescriptor(data []byte) (ConnectionDescriptor, error) {
 	return decodeConnectionDescriptor(data, "PostgREST")
+}
+
+// DecodeLibSQLDescriptor is DecodePostgresDescriptor for a libSQL descriptor: the
+// same one-field shape, with errors that name libSQL.
+func DecodeLibSQLDescriptor(data []byte) (ConnectionDescriptor, error) {
+	return decodeConnectionDescriptor(data, "libSQL")
 }
 
 func decodeConnectionDescriptor(data []byte, title string) (ConnectionDescriptor, error) {

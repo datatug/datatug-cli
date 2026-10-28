@@ -59,6 +59,15 @@ const (
 	// and DALgo's local aggregation fallback also asks for unbounded source rows
 	// (which the adapter refuses rather than returning a partial aggregate).
 	postgRESTSourceDefaultLimit = 100
+
+	// libSQLSourceDefaultLimit is the same visible bound for an exploratory
+	// `--from` read of a libSQL source. The adapter has its own hard response,
+	// row, request and deadline bounds, but a read still needs a positive
+	// semantic limit: an exploration never silently reads a whole table, and an
+	// explicit --limit (even 0) is never replaced. This is an output bound, not
+	// the adapter's transport budget: a result the adapter truncates at a hard
+	// bound fails instead of returning a partial page.
+	libSQLSourceDefaultLimit = 100
 )
 
 // dbSchemesHelp lists every URL scheme dbcopy.Parse accepts, generated from
@@ -107,6 +116,7 @@ Examples:
   datatug query run --db ingitdb://./crm --from products --var minPrice=10 --format json
   datatug query run --db env:SHOP_PG_URL -f report.tugql.yaml --as alice   # SHOP_PG_URL holds the whole connection URL
   datatug query run --db env:DATATUG_POSTGREST_ITEMS --from items --limit 10 --no-policies   # a PostgREST relation; credentials stay in DATATUG_POSTGREST_*
+  datatug query run --db env:DATATUG_LIBSQL_DB --from items --limit 10 --no-policies   # a libSQL table; the token stays in DATATUG_LIBSQL_BEARER
   datatug query run --db datatug://shop/crm --from customers --no-policies   # crm is a source of the registered project shop
   datatug query run --project ./demo-project-1 --query customers/customer-invoices --as alice --var CustomerId=5
   datatug query run --project demo-project-1 --query reference/country-facts --env local --var name=Brazil`,
@@ -122,7 +132,7 @@ Examples:
 	flags.String(queryProjectFlag, "", "Project directory or registered project ID (alternative to --db; runs a saved --query by ID)")
 	flags.String(queryQueryFlag, "", "Saved query ID to run, e.g. customers/customer-invoices (requires --project)")
 	flags.String(queryEnvFlag, "", "Environment ID the saved query runs against (default: the project's only environment)")
-	flags.Int(queryLimitFlag, 0, "Read at most this many rows (only with --from; a -f query states its own limit); a CouchDB or PostgREST --from read defaults to "+fmt.Sprint(couchDBSourceDefaultLimit)+" when no --limit is given")
+	flags.Int(queryLimitFlag, 0, "Read at most this many rows (only with --from; a -f query states its own limit); a CouchDB, PostgREST or libSQL --from read defaults to "+fmt.Sprint(couchDBSourceDefaultLimit)+" when no --limit is given")
 	flags.Int(queryOffsetFlag, 0, "Skip this many rows first (only with --from); rows are ordered by primary key, or by rowid in SQLite, so pages are stable")
 	flags.String(queryFormatFlag, "grid", "Output format: "+strings.Join(queryFormats, ", "))
 	flags.String(queryAsFlag, "", "Principal user ID; also sets $currentUser")
@@ -249,7 +259,7 @@ func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
 // existing open behavior. Both paths retain the HTTPS-only HTTP-source
 // enforcement.
 var openBackend = func(ctx context.Context, backend dbcopy.BackendRef) (dal.DB, error) {
-	if backend.Scheme == "sqlite" || dbcopy.IsServerScheme(backend.Scheme) || dbcopy.IsCouchDBScheme(backend.Scheme) || dbcopy.IsPostgRESTScheme(backend.Scheme) {
+	if backend.Scheme == "sqlite" || dbcopy.IsServerScheme(backend.Scheme) || dbcopy.IsCouchDBScheme(backend.Scheme) || dbcopy.IsPostgRESTScheme(backend.Scheme) || dbcopy.IsLibSQLScheme(backend.Scheme) {
 		return backend.OpenProtected(ctx)
 	}
 	return backend.Open(ctx)
@@ -258,6 +268,26 @@ var openBackend = func(ctx context.Context, backend dbcopy.BackendRef) (dal.DB, 
 // queryRunCommandAction runs `query run`. With --result-id every failure
 // after the flags were parsed also prints the path-free failure line.
 func queryRunCommandAction(cmd *cobra.Command, _ []string) error {
+	// A read is cancellable: the first SIGINT/SIGTERM cancels its context so the
+	// command returns through its own error path (a safe "read was cancelled"
+	// classification for a source that has one) instead of being killed in the
+	// middle of a read. A second signal still ends the process, and stop gives
+	// the signals back when the command returns.
+	original := cmd.Context()
+	// The helper always needs a parent context, but the command keeps the
+	// caller's own one (even nil) and gets it back when this invocation ends: a
+	// reused Cobra command must not inherit a cancelled per-invocation context.
+	parent := original
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, _, stop := interruptContext(parent)
+	cmd.SetContext(ctx)
+	defer func() {
+		cmd.SetContext(original)
+		stop()
+	}()
+
 	o, err := readQueryOptions(cmd)
 	if err == nil {
 		err = runQueryCommand(cmd, o)
@@ -327,6 +357,9 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		case dbcopy.IsPostgRESTScheme(backend.Scheme):
 			o.limit = postgRESTSourceDefaultLimit
 			defaultedSourceLimit = "PostgREST"
+		case dbcopy.IsLibSQLScheme(backend.Scheme):
+			o.limit = libSQLSourceDefaultLimit
+			defaultedSourceLimit = "libSQL"
 		}
 	}
 	// A read of a PostgreSQL, MySQL, Oracle or SQL Server source through policies is not available yet: that is
@@ -444,6 +477,21 @@ func provenanceLine(prov dalgo2http.Provenance) string {
 func queryFailureFor(backend dbcopy.BackendRef, err error) error {
 	if dbcopy.IsCouchDBScheme(backend.Scheme) && dbcopy.IsCouchDBIndexRequired(err) {
 		return Exit("CouchDB requires a Mango index for a filtered query: the read is refused rather than falling back to a full scan that could hide documents. Create an index outside DataTug that covers the filter and the order, then run the query again.", exitCodeDatabase)
+	}
+	if dbcopy.IsLibSQLScheme(backend.Scheme) {
+		switch {
+		case errors.Is(err, access.ErrAccessDenied),
+			errors.Is(err, accesspolicies.ErrInvalidQuery),
+			errors.Is(err, accesspolicies.ErrNoPolicies):
+			// A policy refusal or an unusable policy set is decided outside the
+			// adapter and keeps its own exit code and text; it is not a libSQL
+			// read failure.
+			return queryFailure(err)
+		}
+		// The adapter seals its own errors, but an outer wrapper is not that
+		// boundary: show only a fixed libSQL classification so no SQL, response
+		// body, wrapper text or credential can reach the message.
+		return Exit("libSQL read failed: "+dbcopy.LibSQLFailureReason(err)+"; check "+dbcopy.LibSQLBearerEnv+" and the token's read grant on the database", exitCodeDatabase)
 	}
 	return queryFailure(err)
 }

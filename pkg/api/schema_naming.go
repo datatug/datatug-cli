@@ -20,6 +20,9 @@ func DefaultSchemaForDriver(driver string) string {
 		return "public"
 	case DriverMySQL, DriverOracle, DriverSQLServer, DriverCouchDB, DriverPostgREST:
 		return ServerDefaultSchema
+	case DriverLibSQL:
+		// libSQL is SQLite over HTTP: one implicit database, named "main".
+		return "main"
 	default:
 		return ""
 	}

@@ -57,7 +57,7 @@ func serverHasHost(driver string) bool {
 	// descriptor: the project records the descriptor and the driver, never an
 	// endpoint. Non-secret host metadata may still be shown, but it must not become
 	// the bound source.
-	return driver != dbconnection.DriverSQLite3 && driver != DriverCouchDB && driver != DriverPostgREST && !IsServerDriver(driver)
+	return driver != dbconnection.DriverSQLite3 && driver != DriverCouchDB && driver != DriverPostgREST && driver != DriverLibSQL && !IsServerDriver(driver)
 }
 
 // ScannedServer is the server a scan of driver with dbConnParams reads, as the project
@@ -237,7 +237,7 @@ func updateProjectWithDbCatalog(project *datatug.Project, envID string, dbServer
 				// restore path as path might be normalized if pointing to user's directory.
 				// A PostgreSQL, CouchDB or PostgREST catalog's path is the connection descriptor the scan is
 				// writing now: the catalog and the descriptor are updated together, never apart.
-				if !IsServerDriver(dbServerRef.Driver) && dbServerRef.Driver != DriverCouchDB && dbServerRef.Driver != DriverPostgREST {
+				if !IsServerDriver(dbServerRef.Driver) && dbServerRef.Driver != DriverCouchDB && dbServerRef.Driver != DriverPostgREST && dbServerRef.Driver != DriverLibSQL {
 					dbCatalog.Path = projDbServer.Catalogs[j].Path
 				}
 				// TODO: currently replaces catalog with new info, should merge to preserver comments
@@ -426,6 +426,8 @@ func driverTitle(driver string) string {
 		return "CouchDB"
 	case DriverPostgREST:
 		return "PostgREST"
+	case DriverLibSQL:
+		return "libSQL"
 	default:
 		return driver
 	}
@@ -453,6 +455,11 @@ func scanCatalog(ctx context.Context, server datatug.ServerRef, connectionParams
 		// PostgREST is read through the same generic SchemaReader seam; the API
 		// root comes from an environment variable, never from a project.
 		return scanPostgRESTCatalog(ctx, connectionParams)
+	}
+	if server.Driver == DriverLibSQL {
+		// libSQL is read through the same generic SchemaReader seam; the server
+		// base address comes from an environment variable, never from a project.
+		return scanLibSQLCatalog(ctx, connectionParams)
 	}
 	if server.Driver == dbconnection.DriverSQLite3 {
 		// SQLite is read through DALgo's schema reader too (dalgo2sqlite).

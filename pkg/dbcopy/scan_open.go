@@ -119,7 +119,14 @@ func (r BackendRef) OpenSchemaScan(ctx context.Context) (SchemaScanDB, error) {
 			}
 			return schemaReaderOf(db, "PostgREST")
 		}
-		return nil, fmt.Errorf("a schema scan through DALgo is available for postgres, mysql, oracle, sqlserver, couchdb and postgrest sources only, not %s", r.Scheme)
+		if IsLibSQLScheme(r.Scheme) {
+			db, err := openLibSQL(ctx, r, openMode{})
+			if err != nil {
+				return nil, err
+			}
+			return schemaReaderOf(db, "libSQL")
+		}
+		return nil, fmt.Errorf("a schema scan through DALgo is available for postgres, mysql, oracle, sqlserver, couchdb, postgrest and libsql sources only, not %s", r.Scheme)
 	}
 	if _, err := ParsePostgresTarget(r.Path); err != nil {
 		return nil, fmt.Errorf("source %s: %w", r, err)

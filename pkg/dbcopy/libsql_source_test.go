@@ -439,6 +439,15 @@ func TestLibSQLAdapterRefusesUnsupportedOperations(t *testing.T) {
 	if _, err = db.ExecuteQueryToRecordsReader(ctx, dal.NewTextQuery("select 1", nil)); !errors.Is(err, dalgo2libsql.ErrNotSupported) {
 		t.Fatalf("a text query was not refused as unsupported: %v", err)
 	}
+	joined := dal.From(dal.NewRootCollectionRef("items", "i")).Join(
+		dal.NewJoinedSource(dal.NewRootCollectionRef("labels", "l"), dal.JoinInner,
+			dal.NewComparison(dal.NewFieldRef("i", "id"), dal.Equal, dal.NewFieldRef("l", "item_id")))).NewQuery().SelectColumns()
+	// DALgo's join planner wraps the adapter, so a join reaches its own refusal
+	// (no declared key to preflight) rather than the adapter's checkQuery; either
+	// way it must return no reader and an error, never a successful partial read.
+	if reader, joinErr := db.ExecuteQueryToRecordsReader(ctx, joined); joinErr == nil || reader != nil {
+		t.Fatalf("a join returned a reader: %v", joinErr)
+	}
 	if err = db.RunReadwriteTransaction(ctx, func(context.Context, dal.ReadwriteTransaction) error { return nil }); !errors.Is(err, dalgo2libsql.ErrNotSupported) {
 		t.Fatalf("a write transaction was not refused as unsupported: %v", err)
 	}

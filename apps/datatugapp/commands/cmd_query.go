@@ -68,6 +68,13 @@ const (
 	// the adapter's transport budget: a result the adapter truncates at a hard
 	// bound fails instead of returning a partial page.
 	libSQLSourceDefaultLimit = 100
+
+	// typesenseSourceDefaultLimit is the same visible bound for an exploratory
+	// `--from` read of a Typesense collection. The adapter requires a positive
+	// limit and has its own page, offset, request, response and row budgets: an
+	// exploration never silently reads a whole collection, and an explicit
+	// --limit (even 0) is never replaced.
+	typesenseSourceDefaultLimit = 100
 )
 
 // dbSchemesHelp lists every URL scheme dbcopy.Parse accepts, generated from
@@ -89,7 +96,7 @@ func queryCommand() *cobra.Command {
 		Use:   "query",
 		Short: "Run queries through your access policies",
 	}
-	cmd.AddCommand(queryRunCommand(), queryBigQueryCommand(), queryRedisCommand(), queryResultsCommand())
+	cmd.AddCommand(queryRunCommand(), queryBigQueryCommand(), queryRedisCommand(), queryTypesenseCommand(), queryResultsCommand())
 	return cmd
 }
 
@@ -117,6 +124,7 @@ Examples:
   datatug query run --db env:SHOP_PG_URL -f report.tugql.yaml --as alice   # SHOP_PG_URL holds the whole connection URL
   datatug query run --db env:DATATUG_POSTGREST_ITEMS --from items --limit 10 --no-policies   # a PostgREST relation; credentials stay in DATATUG_POSTGREST_*
   datatug query run --db env:DATATUG_LIBSQL_DB --from items --limit 10 --no-policies   # a libSQL table; the token stays in DATATUG_LIBSQL_BEARER
+  datatug query run --db env:DATATUG_TYPESENSE_BOOKS --from books --limit 10 --no-policies   # a Typesense collection; the scoped key stays in DATATUG_TYPESENSE_API_KEY
   datatug query run --db datatug://shop/crm --from customers --no-policies   # crm is a source of the registered project shop
   datatug query run --project ./demo-project-1 --query customers/customer-invoices --as alice --var CustomerId=5
   datatug query run --project demo-project-1 --query reference/country-facts --env local --var name=Brazil`,
@@ -132,8 +140,8 @@ Examples:
 	flags.String(queryProjectFlag, "", "Project directory or registered project ID (alternative to --db; runs a saved --query by ID)")
 	flags.String(queryQueryFlag, "", "Saved query ID to run, e.g. customers/customer-invoices (requires --project)")
 	flags.String(queryEnvFlag, "", "Environment ID the saved query runs against (default: the project's only environment)")
-	flags.Int(queryLimitFlag, 0, "Read at most this many rows (only with --from; a -f query states its own limit); a CouchDB, PostgREST or libSQL --from read defaults to "+fmt.Sprint(couchDBSourceDefaultLimit)+" when no --limit is given")
-	flags.Int(queryOffsetFlag, 0, "Skip this many rows first (only with --from); rows are ordered by primary key, or by rowid in SQLite, so pages are stable")
+	flags.Int(queryLimitFlag, 0, "Read at most this many rows (only with --from; a -f query states its own limit); a CouchDB, PostgREST, libSQL or Typesense --from read defaults to "+fmt.Sprint(couchDBSourceDefaultLimit)+" when no --limit is given")
+	flags.Int(queryOffsetFlag, 0, "Skip this many rows first (only with --from); pages are ordered by primary key (rowid in SQLite), so they are stable, except for a Typesense source, which keeps the engine's native relevance order and gives no generic stable-key guarantee")
 	flags.String(queryFormatFlag, "grid", "Output format: "+strings.Join(queryFormats, ", "))
 	flags.String(queryAsFlag, "", "Principal user ID; also sets $currentUser")
 	flags.StringArray(queryRoleFlag, nil, "Principal role (repeatable)")
@@ -259,7 +267,7 @@ func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
 // existing open behavior. Both paths retain the HTTPS-only HTTP-source
 // enforcement.
 var openBackend = func(ctx context.Context, backend dbcopy.BackendRef) (dal.DB, error) {
-	if backend.Scheme == "sqlite" || dbcopy.IsServerScheme(backend.Scheme) || dbcopy.IsCouchDBScheme(backend.Scheme) || dbcopy.IsPostgRESTScheme(backend.Scheme) || dbcopy.IsLibSQLScheme(backend.Scheme) {
+	if backend.Scheme == "sqlite" || dbcopy.IsServerScheme(backend.Scheme) || dbcopy.IsCouchDBScheme(backend.Scheme) || dbcopy.IsPostgRESTScheme(backend.Scheme) || dbcopy.IsLibSQLScheme(backend.Scheme) || dbcopy.IsTypesenseScheme(backend.Scheme) {
 		return backend.OpenProtected(ctx)
 	}
 	return backend.Open(ctx)
@@ -360,6 +368,9 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		case dbcopy.IsLibSQLScheme(backend.Scheme):
 			o.limit = libSQLSourceDefaultLimit
 			defaultedSourceLimit = "libSQL"
+		case dbcopy.IsTypesenseScheme(backend.Scheme):
+			o.limit = typesenseSourceDefaultLimit
+			defaultedSourceLimit = "Typesense"
 		}
 	}
 	// A read of a PostgreSQL, MySQL, Oracle or SQL Server source through policies is not available yet: that is
@@ -493,6 +504,21 @@ func queryFailureFor(backend dbcopy.BackendRef, err error) error {
 		// body, wrapper text or credential can reach the message.
 		return Exit("libSQL read failed: "+dbcopy.LibSQLFailureReason(err)+"; check "+dbcopy.LibSQLBearerEnv+" and the token's read grant on the database", exitCodeDatabase)
 	}
+	if dbcopy.IsTypesenseScheme(backend.Scheme) {
+		switch {
+		case errors.Is(err, access.ErrAccessDenied),
+			errors.Is(err, accesspolicies.ErrInvalidQuery),
+			errors.Is(err, accesspolicies.ErrNoPolicies):
+			// A policy refusal, an exact-predicate refusal the policy layer turns
+			// into an unsupported query, or an unusable policy set keeps its own
+			// exit code and text; it is not a Typesense read failure.
+			return queryFailure(err)
+		}
+		// A Typesense failure keeps a fixed classification: the adapter does not
+		// expose a response body, and the endpoint, the request and the key are
+		// never put in the sentence.
+		return Exit("Typesense read failed: "+dbcopy.TypesenseFailureReason(err)+"; check "+dbcopy.TypesenseAPIKeyEnv+" and the key's scoped read grant on the collection", exitCodeDatabase)
+	}
 	return queryFailure(err)
 }
 
@@ -556,7 +582,19 @@ func fromQuery(o queryOptions, order []dal.OrderExpression) dal.Query {
 // pagingOrder is the order a paged --from read uses so that pages do not
 // move: the primary key of the table when it has one, else rowid for a SQLite
 // table; any other source, and a SQLite view, keeps its own order.
+//
+// A Typesense collection is answered before any metadata request. Typesense has
+// an implicit string id but no sortable id field, which the adapter correctly
+// refuses to sort by; and a pure documents:search key cannot read collection
+// metadata at all, so asking would break a read the key is allowed to make.
+// Falling back to a hidden or fabricated sort would also silently replace the
+// engine's own relevance order. Explicit ordering therefore stays in the TugQL
+// document and the adapter's validated sort fields, and a --from page keeps the
+// native default order.
 func pagingOrder(ctx context.Context, db dal.DB, scheme, collection string) []dal.OrderExpression {
+	if dbcopy.IsTypesenseScheme(scheme) {
+		return nil
+	}
 	ref := dal.NewRootCollectionRef(collection, "")
 	def, err := dbschema.DescribeCollection(ctx, db, &ref)
 	if err != nil {

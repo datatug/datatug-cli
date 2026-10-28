@@ -10,6 +10,7 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
+	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/schemers/dalgoschema"
 	"github.com/spf13/cobra"
@@ -25,7 +26,7 @@ const (
 
 // schemaProviders are the providers `db schema` lists, in the order the
 // unsupported-provider error names them.
-var schemaProviders = []string{"sqlite", "postgres"}
+var schemaProviders = []string{"sqlite", "postgres", "typesense"}
 
 // schemaEntry is one table or view of the listing.
 type schemaEntry struct {
@@ -203,6 +204,9 @@ func dbSchemaAction(cmd *cobra.Command, _ []string) error {
 	defer session.Close()
 	withColumns, _ := cmd.Flags().GetBool("columns")
 	withCounts, _ := cmd.Flags().GetBool("counts")
+	if withCounts && dbcopy.IsTypesenseScheme(session.ref.Scheme) {
+		return Exit("--counts is not available for a Typesense source: Typesense has no bounded native count, and DataTug does not read a whole collection to count it", exitCodeUsage)
+	}
 	entries, err := listSchemaEntries(session.ctx, session.ref.Scheme, session.db)
 	if err != nil {
 		return session.failure(err)
@@ -218,6 +222,10 @@ func dbSchemaAction(cmd *cobra.Command, _ []string) error {
 }
 
 func isSchemaProvider(scheme string) bool {
+	if dbcopy.IsTypesenseScheme(scheme) {
+		// `typesense`, `typesense+https` and `typesense+http` are one provider.
+		return true
+	}
 	for _, p := range schemaProviders {
 		if p == scheme {
 			return true
@@ -239,15 +247,33 @@ func schemaTarget(ref dbcopy.BackendRef) string {
 func listSchemaEntries(ctx context.Context, provider string, db dal.DB) ([]schemaEntry, error) {
 	var entries []schemaEntry
 	var err error
-	if provider == "postgres" {
+	switch {
+	case provider == "postgres":
 		entries, err = postgresEntries(ctx, db)
-	} else {
+	case dbcopy.IsTypesenseScheme(provider):
+		entries, err = typesenseEntries(ctx, db)
+	default:
 		entries, err = sqliteEntries(ctx, db)
 	}
 	if err != nil {
 		return nil, err
 	}
 	sortSchemaEntries(entries)
+	return entries, nil
+}
+
+// typesenseEntries lists the collections a Typesense credential can read through
+// the generic SchemaReader. Typesense has no views, so every collection is a
+// table, recorded under the logical ServerDefaultSchema grouping the scan uses.
+func typesenseEntries(ctx context.Context, db dal.DB) ([]schemaEntry, error) {
+	refs, err := dbschema.ListCollections(ctx, db, nil)
+	if err != nil {
+		return nil, fmt.Errorf("list collections: %w", err)
+	}
+	entries := make([]schemaEntry, 0, len(refs))
+	for _, ref := range refs {
+		entries = append(entries, schemaEntry{Schema: api.ServerDefaultSchema, Name: ref.Name(), Kind: schemaKindTable, ref: ref})
+	}
 	return entries, nil
 }
 

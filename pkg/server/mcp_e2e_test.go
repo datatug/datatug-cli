@@ -63,7 +63,11 @@ func mcpChildCommand(t *testing.T, ctx context.Context, base string) *exec.Cmd {
 func TestMCPRealSavedSQLChildProcess(t *testing.T) {
 	projectDir := copyDemoProjectToTempDir(t, resolveDemoProjectDir(t))
 	installLocalChinookFixture(t, projectDir)
-	t.Setenv(agentaccess.DirEnv, t.TempDir())
+	dir := filepath.Join(t.TempDir(), "daemon")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(agentaccess.DirEnv, dir)
 	secret, err := agentaccess.NewSecret()
 	if err != nil {
 		t.Fatal(err)

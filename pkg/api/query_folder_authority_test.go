@@ -221,7 +221,7 @@ func TestQueryFolderAuthoritySurvivesNeitherOuterNorProviderWait(t *testing.T) {
 						want = dto.ErrBranchHeadConflict
 					}
 					if got.folder != nil || got.err == nil || drift != "branch read failure" && !errors.Is(got.err, want) {
-						t.Fatalf("stale request acknowledged: %+v want=%v", got, want)
+						t.Fatalf("stale request acknowledged: folder=%v err=%v (%T) want=%v", got.folder, got.err, got.err, want)
 					}
 				case <-time.After(5 * time.Second):
 					t.Fatal("request did not finish after lock release")
@@ -231,5 +231,41 @@ func TestQueryFolderAuthoritySurvivesNeitherOuterNorProviderWait(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestQueryFolderCancellationBeforeWritePreservesItsCause(t *testing.T) {
+	for index, boundary := range []string{"initial Git read", "after real project lock"} {
+		t.Run(boundary, func(t *testing.T) {
+			project := fmt.Sprintf("folder-cancel-cause-%d", index)
+			dir, _ := setupTestGitProject(t, project)
+			paths := map[string]string{project: dir}
+			configureWriteSession(t, secureread.SessionOptions{As: "alice", NoPolicies: true}, paths, Capabilities{AllowWrites: true})
+			oldStore := storage.NewDatatugStore
+			t.Cleanup(func() { storage.NewDatatugStore = oldStore })
+			storage.NewDatatugStore = func(string) (storage.Store, error) { return filestore.NewStore("files", paths) }
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if boundary == "initial Git read" {
+				cancel()
+			} else {
+				original := flockTryLockContextSeam
+				t.Cleanup(func() { flockTryLockContextSeam = original })
+				flockTryLockContextSeam = func(f *flock.Flock, ctx context.Context, retry time.Duration) (bool, error) {
+					locked, err := original(f, ctx, retry)
+					if locked && err == nil {
+						cancel() // The real acquisition can win the cancellation/release race.
+					}
+					return locked, err
+				}
+			}
+			out, err := CreateProjectQueryFolder(ctx, QueryFolderCreate{ProjectRef: dto.ProjectRef{StoreID: LocalStoreID, ProjectID: project}, Path: "~", Name: "must-not-exist"})
+			if out != nil || !errors.Is(err, context.Canceled) {
+				t.Fatalf("cancellation lost before write: folder=%v err=%v (%T)", out, err, err)
+			}
+			if _, err := os.Lstat(filepath.Join(dir, "queries", "must-not-exist")); !os.IsNotExist(err) {
+				t.Fatal("canceled request wrote folder/README/marker", err)
+			}
+		})
 	}
 }

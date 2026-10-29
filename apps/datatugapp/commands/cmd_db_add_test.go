@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -149,9 +150,7 @@ func TestDbAddPostgresHoldsTheVariableNameOnly(t *testing.T) {
 	files := projectFilesOf(t, dir)
 	assert.JSONEq(t, `{"dsnEnv":"DATATUG_SHOP_PG"}`, files["connections/prod/shop-pg.json"])
 	for name, content := range files {
-		for _, secret := range []string{"alice", "s3cr3tpw", "db.internal", "5432"} {
-			assert.NotContains(t, content, secret, name)
-		}
+		assert.Empty(t, dbAddPostgresConnectionLeaks(content), name)
 	}
 	shown, _, err := runShowCommand(t, "-p", "shop", "--format", "json", "--depth", "sources")
 	require.NoError(t, err)
@@ -190,6 +189,48 @@ func TestDbAddPostgresHoldsTheVariableNameOnly(t *testing.T) {
 		assert.ErrorContains(t, err, tc.message, name)
 		assert.NotContains(t, err.Error()+stderr, "s3cr3tpw", name)
 		assert.NotContains(t, err.Error()+stderr, "junk", name)
+	}
+}
+
+// A port is a complete token, not four digits inside an opaque owner digest or
+// namespace. Every file is still checked; JSON port fields are checked at any
+// depth, including string/number values, alongside all original secret parts.
+var dbAddPostgresPortToken = regexp.MustCompile(`(^|[^[:alnum:]_])5432([^[:alnum:]_]|$)`)
+
+func dbAddPostgresConnectionLeaks(content string) (leaks []string) {
+	for _, part := range []string{"alice", "s3cr3tpw", "db.internal", "postgres://", "postgresql://"} {
+		if strings.Contains(content, part) {
+			leaks = append(leaks, part)
+		}
+	}
+	if dbAddPostgresPortToken.MatchString(content) {
+		leaks = append(leaks, "5432 port token")
+	}
+	var value any
+	if json.Unmarshal([]byte(content), &value) == nil {
+		leaks = append(leaks, keysNamed(value, []string{"port"})...)
+	}
+	return leaks
+}
+
+func TestDbAddPostgresLeakCheckDistinguishesOpaqueIDsFromConnectionParts(t *testing.T) {
+	digest := strings.Repeat("a", 20) + "5432" + strings.Repeat("b", 40)
+	namespace := strings.Repeat("c", 12) + "5432" + strings.Repeat("d", 16)
+	for _, content := range []string{
+		`{"format":"datatug-environment-owner/1","rootDigest":"` + digest + `","uid":1001,"namespaceId":"` + namespace + `","directory":"/tmp/operations/` + digest + `-598201058"}`,
+		"environment-owner/1:" + digest + ":" + namespace,
+	} {
+		assert.Contains(t, content, "5432", "deterministic witness of the old substring false positive")
+		assert.Empty(t, dbAddPostgresConnectionLeaks(content), content)
+	}
+	for _, content := range []string{
+		`{"port":5432}`, `{"nested":[{"PoRt":"5432"}]}`,
+		`{"port":15432}`, `{"endpoint":"search:5432/shop"}`, "port=5432", "5432",
+		`{"username":"alice"}`, `{"password":"s3cr3tpw"}`, `{"host":"db.internal"}`,
+		`{"dsn":"postgres://alice:s3cr3tpw@db.internal:5432/shop"}`,
+		`{"dsn":"postgresql://other:another@elsewhere:1234/db"}`,
+	} {
+		assert.NotEmpty(t, dbAddPostgresConnectionLeaks(content), "actual connection part must be detected: %s", content)
 	}
 }
 

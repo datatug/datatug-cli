@@ -3,9 +3,43 @@ package licensing
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"io"
+	"os"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestCoordinatorEntitlementCheckerFreeUsageNotice(t *testing.T) {
+	t.Setenv("DATATUG_LICENSE_KEY", "")
+	t.Setenv("DATATUG_LICENSE_FILE", "")
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
+	previous := os.Stderr
+	os.Stderr = w
+	t.Cleanup(func() { os.Stderr = previous; _ = w.Close() })
+	if err := NewCoordinatorEntitlementChecker("").CheckEntitlement(); err != nil {
+		t.Fatalf("notice must not change existing no-key startup behavior: %v", err)
+	}
+	_ = w.Close()
+	os.Stderr = previous
+	output, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(output)
+	for _, want := range []string{"owner-only private", "shared public", "shared private", "https://datatug.app/en/pricing/", "does not establish project-plan entitlement"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("startup guidance does not explain %q: %s", want, text)
+		}
+	}
+	if strings.Contains(text, "community evaluation mode") || strings.Contains(text, "Centralized shared multi-runner deployments require") {
+		t.Errorf("startup guidance must not impose a blanket coordinator paywall: %s", text)
+	}
+}
 
 func TestCoordinatorEntitlementChecker(t *testing.T) {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)

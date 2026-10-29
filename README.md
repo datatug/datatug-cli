@@ -141,7 +141,7 @@ Run the local DataTug HTTP agent daemon to serve the Web UI, REST endpoints, and
 ```bash
 datatug serve
 ```
-By default, `datatug serve` binds strictly to loopback (`127.0.0.1`) with origin protection. It is completely free and unrestricted under Apache License 2.0—no license key is ever required for individual local development.
+By default, `datatug serve` binds strictly to loopback (`127.0.0.1`) with origin protection. Owner-only private projects and shared public projects follow the Free plan. Shared private projects follow the paid project-sharing rules; the listen address does not determine the plan. See [licensing scopes and enforcement status](LICENSING.md).
 
 ## Architecture Overview
 
@@ -152,25 +152,37 @@ DataTug provides a unified developer toolchain for multi-database exploration an
 - **Model Context Protocol (MCP)**: Native MCP server for AI coding assistants and agentic workflows.
 - **Storage Abstraction (`github.com/datatug/datatug-core/pkg/storage`, `ingitdb`)**: Plain-file, Git-native database definitions, queries, and recordsets.
 - **Watch Daemon (`pkg/watchdaemon`, `pkg/watch`)**: Automated condition monitoring, baseline comparisons, and alert dispatches.
-- **Commercial Licensing Engine (`commercial/licensing`)**: Offline Ed25519-signed entitlements engine for organizational self-hosted deployments.
+- **Legacy Licence Verifier (`commercial/licensing`)**: Offline Ed25519 coordinator-key verification; project-plan and billing decisions require separate server authority.
 
-## Model A Licensing & Capability Matrix
+## One CLI, free and paid project plans
 
-DataTug is distributed under an open-core licensing model (**Model A**):
-- **Community Core (Apache License 2.0)**: The CLI, TUI, local server (`datatug serve`), schema modeling, TugQL queries, and MCP server are free and open source. See [LICENSE](LICENSE) and [LICENSES/Apache-2.0.txt](LICENSES/Apache-2.0.txt).
-- **Commercial Edition (DataTug Commercial Terms)**: Centralized coordination, shared multi-runner orchestration, team execution stores, and carrier SMS notifications are governed by the DataTug Commercial Terms. See [LICENSING.md](LICENSING.md) and [LICENSES/COMMERCIAL-TERMS.md](LICENSES/COMMERCIAL-TERMS.md).
+DataTug uses one CLI. Its product boundary follows
+[DataTug pricing](https://datatug.app/en/pricing/):
 
-| Capability | Community (Apache 2.0) | Commercial (Pro / Enterprise) |
-| :--- | :---: | :---: |
-| **CLI & TUI** (`datatug`, `datatug tui`) | ✅ Unlimited Free | ✅ Included |
-| **Local Server** (`datatug serve` on localhost) | ✅ Unrestricted | ✅ Included |
-| **TugQL Query Engine & Schema Introspection** | ✅ Included | ✅ Included |
-| **Model Context Protocol (MCP) Server** | ✅ Included | ✅ Included |
-| **Central Watch Coordinator Daemon** | Evaluation / Local | ✅ Licensed (`central_watch_coordinator`) |
-| **Distributed / Team Watch Runners** | Evaluation / Local | ✅ Licensed (`team_runners`) |
-| **Shared Multi-User Execution Store** | ❌ Commercial License | ✅ Licensed (`shared_execution_store`) |
-| **Centralized Team Audit Trail** | ❌ Commercial License | ✅ Licensed (`team_audit_trail`) |
-| **SMS Telephony Alerts (Twilio)** | ❌ Commercial License | ✅ Licensed (`sms_notifications`) |
+| Project / plan | Project-sharing rule |
+| --- | --- |
+| Free personal private | Unlimited owner-only private projects. |
+| Free public | Unlimited public projects; no plan cap on users or editors. |
+| Pro shared private | Five shared private projects, each with five authenticated human users including the owner; access counts regardless of activity or role. |
+| Business shared private | Unlimited projects and invitations. First paid month: no extra-active-user charges. Afterward: seven included monthly active humans, with additional usage under purchased terms. |
+| Enterprise | Custom terms explicitly agreed. |
+
+CLI, TUI, queries, Checks, MCP and CI can be used personally or for business
+within these project rules. Running a server or connecting to a remote database
+is not inherently paid. Business activity counts actual query edits/executions,
+including local execution in a shared cloud project, once per subscription
+billing month; metadata viewing is not activity. Project permissions always apply.
+
+**Source licences and binary licensing are different.** Apache-2.0 covers the
+source scopes listed in [LICENSING.md](LICENSING.md). The default executable
+also includes proprietary `commercial/licensing` code and dependencies with
+their own terms, including Commons Clause. It is not an Apache-only executable.
+The [commercial terms](LICENSES/COMMERCIAL-TERMS.md) remain a working draft;
+rights and final distribution clearance must be resolved separately.
+
+The existing coordinator startup checker does not implement Pro/Business
+project access or monthly activity accounting. See the
+[implementation contract and remaining acceptance criteria](docs/licensing-pricing.md).
 
 ## Building from Source
 
@@ -624,6 +636,10 @@ unrestricted session (`--no-policies`). All official release binaries include Du
 source requires cgo and a C/C++ toolchain; custom `CGO_ENABLED=0` builds retain
 other backends and report an explicit error when DuckDB is requested.
 
-# [License](./LICENSE)
+## Licensing
 
-Apache License
+Apache-2.0 applies to the source scopes identified in [LICENSING.md](LICENSING.md)
+and [LICENSE](LICENSE). The default executable also includes proprietary and
+third-party components under separate terms. See the licensing map and
+[draft commercial terms](LICENSES/COMMERCIAL-TERMS.md); this is not an aggregate
+Apache-only binary licence or completed distribution clearance.

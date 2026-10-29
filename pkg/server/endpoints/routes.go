@@ -36,6 +36,11 @@ func registerRoutesOn(path string, router router, wrapper wrapper, writeOnly boo
 		route(router, wrapper, http.MethodGet, path+"/meanings/catalog", projectMeaningsCatalogHandler)
 	}
 	route(router, wrapper, http.MethodPost, path+"/meanings/change", requireWriteCapability(caps, projectMeaningChangeHandler))
+	if !writeOnly {
+		route(router, wrapper, http.MethodGet, path+"/projects/lifecycle/review", projectLifecycleReviewHandler)
+		route(router, wrapper, http.MethodGet, path+"/projects/lifecycle/catalog", projectLifecycleCatalogHandler)
+	}
+	route(router, wrapper, http.MethodPost, path+"/projects/lifecycle/change", requireWriteCapability(caps, projectLifecycleChangeHandler))
 	boardsRoutes(path, router, wrapper, writeOnly, caps)
 	cardsRoutes(path, router, wrapper, writeOnly, caps)
 	environmentsRoutes(path, router, wrapper, writeOnly, caps)
@@ -105,7 +110,8 @@ func semanticRoutes(path string, router router, wrap wrapper, writeOnly bool) {
 // gated by requireWriteCapability (api-contract.md "Security and errors").
 func foldersRoutes(path string, router router, wrap wrapper, caps Capabilities) {
 	route(router, wrap, http.MethodPut, path+"/folders/create_folder", requireWriteCapability(caps, createFolder))
-	route(router, wrap, http.MethodDelete, path+"/folders/delete_folder", requireWriteCapability(caps, deleteFolder))
+	route(router, wrap, http.MethodPut, path+"/queries/create_folder", requireWriteCapability(caps, createQueryFolder))
+	route(router, wrap, http.MethodDelete, path+"/folders/delete_folder", requireWriteCapability(caps, rejectUnreviewedProjectLifecycle))
 }
 
 func queriesRoutes(path string, router router, wrap wrapper, writeOnly bool, caps Capabilities) {
@@ -117,7 +123,7 @@ func queriesRoutes(path string, router router, wrap wrapper, writeOnly bool, cap
 	route(router, wrap, http.MethodPost, path+"/queries/save_query", requireWriteCapability(caps, saveProjectQueryHandler))
 	route(router, wrap, http.MethodPost, path+"/queries/create_query", requireWriteCapability(caps, createQuery))
 	route(router, wrap, http.MethodPut, path+"/queries/update_query", requireWriteCapability(caps, updateQuery))
-	route(router, wrap, http.MethodDelete, path+"/queries/delete_query", requireWriteCapability(caps, deleteQuery))
+	route(router, wrap, http.MethodDelete, path+"/queries/delete_query", requireWriteCapability(caps, rejectUnreviewedProjectLifecycle))
 	// queries/capture: "Save as project query" (Phase 2 task 2). Behind the
 	// process write capability here, then authorized for the serving
 	// principal inside the handler (api.AuthorizeProjectQueryWrite).
@@ -131,7 +137,7 @@ func boardsRoutes(path string, router router, wrap wrapper, writeOnly bool, caps
 	}
 	route(router, wrap, http.MethodPost, path+"/boards/create_board", requireWriteCapability(caps, createBoard))
 	route(router, wrap, http.MethodPut, path+"/boards/save_board", requireWriteCapability(caps, saveBoard))
-	route(router, wrap, http.MethodDelete, path+"/boards/delete_board", requireWriteCapability(caps, deleteBoard))
+	route(router, wrap, http.MethodDelete, path+"/boards/delete_board", requireWriteCapability(caps, rejectUnreviewedProjectLifecycle))
 }
 
 func cardsRoutes(path string, router router, wrap wrapper, writeOnly bool, caps Capabilities) {
@@ -141,7 +147,7 @@ func cardsRoutes(path string, router router, wrap wrapper, writeOnly bool, caps 
 	}
 	route(router, wrap, http.MethodPost, path+"/cards/create_card", requireWriteCapability(caps, createCard))
 	route(router, wrap, http.MethodPut, path+"/cards/save_card", requireWriteCapability(caps, saveCard))
-	route(router, wrap, http.MethodDelete, path+"/cards/delete_card", requireWriteCapability(caps, deleteCard))
+	route(router, wrap, http.MethodDelete, path+"/cards/delete_card", requireWriteCapability(caps, rejectUnreviewedProjectLifecycle))
 }
 
 func projectsRoutes(path string, router router, wrap wrapper, writeOnly bool, caps Capabilities) {
@@ -157,15 +163,17 @@ func projectsRoutes(path string, router router, wrap wrapper, writeOnly bool, ca
 	route(router, wrap, http.MethodPut, path+"/projects/item_tags", requireWriteCapability(caps, saveProjectItemTags))
 	projectEndpoints := ProjectAgentEndpoints{}
 	route(router, wrap, http.MethodPost, path+"/projects/create_project", requireWriteCapability(caps, projectEndpoints.createProject))
-	route(router, wrap, http.MethodDelete, path+"/projects/delete_project", requireWriteCapability(caps, projectEndpoints.deleteProject))
+	route(router, wrap, http.MethodDelete, path+"/projects/delete_project", requireWriteCapability(caps, rejectUnreviewedProjectLifecycle))
 }
 
 func environmentsRoutes(path string, router router, wrap wrapper, writeOnly bool, caps Capabilities) {
+	route(router, wrap, http.MethodPost, path+"/connections/create_public_ovdb", requireWriteCapability(caps, createPublicOVDBConnectionHandler))
 	route(router, wrap, http.MethodPost, path+"/environment/create_environment", requireWriteCapability(caps, createEnvironmentHandler))
 	route(router, wrap, http.MethodPost, path+"/environments/save_order", requireWriteCapability(caps, saveEnvironmentOrderHandler))
 	route(router, wrap, http.MethodPost, path+"/environments/operation_status", environmentOperationStatusHandler)
 
 	if !writeOnly {
+		route(router, wrap, http.MethodGet, path+"/connections/public_ovdb_state", publicOVDBConnectionStateHandler)
 		route(router, wrap, http.MethodGet, path+"/environments/all_environments", getEnvironments)
 		route(router, wrap, http.MethodGet, path+"/environments/state", environmentStateHandler)
 		route(router, wrap, http.MethodGet, path+"/environment-summary", getEnvironmentSummary)
@@ -182,7 +190,7 @@ func dbServerRoutes(path string, router router, wrap wrapper, writeOnly bool, ca
 		route(router, wrap, http.MethodGet, path+"/dbserver-databases", requireLiveConnections(caps, getServerDatabases))
 	}
 	route(router, wrap, http.MethodPost, path+"/dbserver-add", requireWriteCapability(caps, addDbServer))
-	route(router, wrap, http.MethodDelete, path+"/dbserver-delete", requireWriteCapability(caps, deleteDbServer))
+	route(router, wrap, http.MethodDelete, path+"/dbserver-delete", requireWriteCapability(caps, rejectUnreviewedProjectLifecycle))
 }
 
 func entitiesRoutes(path string, router router, wrap wrapper, writeOnly bool, caps Capabilities) {
@@ -192,7 +200,7 @@ func entitiesRoutes(path string, router router, wrap wrapper, writeOnly bool, ca
 	}
 	route(router, wrap, http.MethodPost, path+"/entities/create_entity", requireWriteCapability(caps, saveEntity))
 	route(router, wrap, http.MethodPut, path+"/entities/save_entity", requireWriteCapability(caps, saveEntity))
-	route(router, wrap, http.MethodDelete, path+"/entities/delete_entity", requireWriteCapability(caps, deleteEntity))
+	route(router, wrap, http.MethodDelete, path+"/entities/delete_entity", requireWriteCapability(caps, rejectUnreviewedProjectLifecycle))
 }
 
 func recordsetsRoutes(path string, router router, wrap wrapper, writeOnly bool, caps Capabilities) {

@@ -58,6 +58,14 @@ func authorizeMeaningWrite(ctx context.Context, project string) error {
 // withLocalMeanings holds the same lock as revisioned query writes. Branches
 // other than the checked-out branch and pinned/detached checkouts are refused.
 func withLocalMeanings(ctx context.Context, ref dto.ProjectRef, branch string, mutating bool, fn func(*os.Root, datatug.MeaningScope, gitState) error) error {
+	return withLocalProjectFiles(ctx, ref, branch, mutating, func(root *os.Root, state gitState) error {
+		return fn(root, datatug.MeaningScope{Storage: LocalStoreID, Project: ref.ProjectID, Branch: state.branch}, state)
+	})
+}
+
+// Shared branch/HEAD and project-file lock boundary. The owning command must
+// authorize its own resource before invoking it; it grants no lifecycle coverage.
+func withLocalProjectFiles(ctx context.Context, ref dto.ProjectRef, branch string, mutating bool, fn func(*os.Root, gitState) error) error {
 	if err := requireLocalReadPrincipal(); err != nil {
 		return err
 	}
@@ -100,8 +108,7 @@ func withLocalMeanings(ctx context.Context, ref dto.ProjectRef, branch string, m
 		return err
 	}
 	defer func() { _ = root.Close() }()
-	scope := datatug.MeaningScope{Storage: LocalStoreID, Project: ref.ProjectID, Branch: state.branch}
-	if err = fn(root, scope, state); err != nil {
+	if err = fn(root, state); err != nil {
 		return err
 	}
 	after, err := localGitStateSeam(ctx, dir)

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/datatug/datatug-core/pkg/apicontract"
+	"github.com/datatug/datatug-core/pkg/datatug"
 	core "github.com/datatug/datatug-core/pkg/detective"
 	"github.com/datatug/datatug-core/pkg/investigation"
 )
@@ -260,6 +261,76 @@ func TestOrdinaryActionRecoversAuditFailureWithoutRepeatingMutation(t *testing.T
 	recorded, err := s.auditRecorded(AuditEvent{ID: "case-audit-op", Project: "p", Actor: "alice", Action: "create-case"})
 	if err != nil || !recorded {
 		t.Fatalf("audit receipt = %v, %v", recorded, err)
+	}
+}
+
+func TestPendingLegacyCaseArchiveCannotBeMaterializedByAnotherEdit(t *testing.T) {
+	for _, persisted := range []bool{false, true} {
+		t.Run(strconv.FormatBool(persisted), func(t *testing.T) {
+			ctx := context.Background()
+			s := testStore(t)
+			before, err := s.SaveCase(ctx, Case{ID: "case-legacy", Title: "Legacy"}, "alice", "create-case")
+			if err != nil {
+				t.Fatal(err)
+			}
+			before.Status, before.ClosureReason = "closed", "Investigation complete"
+			before, err = s.SaveCase(ctx, before, "alice", "update-case")
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := before
+			request.Status = "archived"
+			after, audit, err := core.UpdateCase(before, request, "alice", time.Now().UTC())
+			if err != nil {
+				t.Fatal(err)
+			}
+			binding, err := s.ActionBinding(ActionRequest{Type: "update-case", Project: "p", Case: &request}, "alice")
+			if err != nil {
+				t.Fatal(err)
+			}
+			receipt, err := core.NewOperationReceipt("legacy-archive", binding, after.Version, time.Now().UTC())
+			if err != nil {
+				t.Fatal(err)
+			}
+			audit.Project, audit.ID = "p", "legacy-archive"
+			beforeJSON, _ := json.Marshal(before)
+			afterJSON, _ := json.Marshal(after)
+			op := actionOperation{Receipt: receipt, Kind: "cases", ID: before.ID, Before: beforeJSON, After: afterJSON, Audit: audit, Produced: true, Response: ActionResponse{Case: &after}}
+			if err = writeDurableItem(s.privateItemDir("action-operations"), "legacy-archive", op); err != nil {
+				t.Fatal(err)
+			}
+			if persisted {
+				if err = writeItem(s.privateItemDir("cases"), before.ID, after); err != nil {
+					t.Fatal(err)
+				}
+			}
+			edit := before
+			edit.Title = "Ordinary edit"
+			_, err = s.ExecuteAction(ctx, "later-edit", "alice", ActionRequest{Type: "update-case", Project: "p", Case: &edit}, nil, nil, nil, nil)
+			if !persisted && !errors.Is(err, datatug.ErrProjectUsageIncomplete) {
+				t.Fatalf("pending archive admitted: %v", err)
+			}
+			stored, readErr := s.GetCase(ctx, before.ID)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if !persisted && (stored.Status == "archived" || stored.Version != before.Version) {
+				t.Fatalf("archive applied: %+v", stored)
+			}
+			data, readErr := safeReadFile(s.privateItemDir("action-operations"), "legacy-archive")
+			if readErr != nil || json.Unmarshal(data, &op) != nil {
+				t.Fatalf("journal read: %v", readErr)
+			}
+			if op.Done != persisted {
+				t.Fatalf("journal Done=%v, persisted=%v", op.Done, persisted)
+			}
+			if persisted {
+				recorded, auditErr := s.auditRecorded(audit)
+				if auditErr != nil || !recorded {
+					t.Fatalf("persisted archive audit not recovered: %v, %v", recorded, auditErr)
+				}
+			}
+		})
 	}
 }
 

@@ -155,8 +155,16 @@ func TestWatchUserManagementRoutesAndDefaultSharedSubscription(t *testing.T) {
 	}
 	_ = json.Unmarshal(body, &out)
 	code, body = f.request(t, "alice", "POST", "delete", map[string]any{"id": "shared", "operationId": "delete", "expectedVersion": out.Definition.Version})
+	if code != 503 || !strings.Contains(string(body), "REFERENCES_INCOMPLETE") {
+		t.Fatalf("unverified delete %d %s", code, body)
+	}
+	code, body = f.request(t, "alice", "GET", "definition?id=shared", nil)
 	if code != 200 {
-		t.Fatalf("delete %d %s", code, body)
+		t.Fatalf("refused deletion changed definition: %d %s", code, body)
+	}
+	code, body = f.request(t, "alice", "POST", "lifecycle", map[string]any{"id": "shared", "lifecycle": "deleted", "operationId": "delete-via-lifecycle", "expectedVersion": out.Definition.Version})
+	if code != 503 || !strings.Contains(string(body), "REFERENCES_INCOMPLETE") {
+		t.Fatalf("lifecycle deletion bypass: %d %s", code, body)
 	}
 	code, _ = f.request(t, "alice", "POST", "retry", map[string]string{"id": "foreign-delivery"})
 	if code != 404 && code != 403 {

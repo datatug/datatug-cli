@@ -110,7 +110,7 @@ func TestValidateServerRef(t *testing.T) {
 		}
 	}
 	// A server driver may have a host, and postgres may have none.
-	for _, server := range []datatug.ServerRef{{Driver: "postgres"}, {Driver: "postgres", Host: "db.example.com", Port: 5432}, {Driver: "mysql", Host: "db.example.com"}} {
+	for _, server := range []datatug.ServerRef{{Driver: "postgres"}, {Driver: "postgres", Host: "db.example.com", Port: 5432}, {Driver: "mysql", Host: "db.example.com"}, {Driver: "typesense"}, {Driver: "typesense", Host: "search.example.com", Port: 8108}} {
 		if err := ValidateServerRef(server); err != nil {
 			t.Errorf("%+v is refused: %v", server, err)
 		}

@@ -176,6 +176,9 @@ func (s chatSavedQueries) LookupParameter(ctx context.Context, queryID, paramete
 	if err != nil {
 		return nil, err
 	}
+	if err = definition.RefuseContextVariables(); err != nil {
+		return nil, err
+	}
 	if definition.Type != datatug.QueryTypeTugQL {
 		return nil, nil
 	}
@@ -277,6 +280,9 @@ func (s chatSavedQueries) run(ctx context.Context, id string, variables map[stri
 	}
 	definition, err := s.store.LoadQuery(ctx, canonical)
 	if err != nil {
+		return chat.QueryResult{}, err
+	}
+	if err = definition.RefuseContextVariables(); err != nil {
 		return chat.QueryResult{}, err
 	}
 	if allowedType != "" && definition.Type != allowedType {

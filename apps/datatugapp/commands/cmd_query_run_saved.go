@@ -67,6 +67,13 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	if err != nil {
 		return Exit(fmt.Sprintf("load query %q: %v", canonicalID, err), exitCodeDatabase)
 	}
+	// A context variable ({SneatUserPersonalSpaceID}, @SneatUserID) is bound
+	// only by the DataTug web app for a signed-in user: refused here, before
+	// any session, executor or connection exists, rather than run with an
+	// empty value (backstage spec/features/my-data-project).
+	if err = queryDef.RefuseContextVariables(); err != nil {
+		return Exit(err.Error(), exitCodeUsage)
+	}
 
 	variables, err := accesspolicies.ParseVariables(o.vars)
 	if err != nil {

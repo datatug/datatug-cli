@@ -181,6 +181,12 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 		}
 	}
 
+	// A context variable is bound only by the DataTug web app for a signed-in
+	// user: a saved or ad-hoc query using one is refused before its source is
+	// resolved or opened (backstage spec/features/my-data-project).
+	if refuseErr := refuseExecutionContextVariables(req, queryDef); refuseErr != nil {
+		return apicontract.Result{}, refuseErr
+	}
 	resolved, targetErr := resolveWatchExecutionSource(ctx, projStore, projDir, req, queryDef, options.acceptedQuery != nil)
 	if targetErr != nil {
 		return apicontract.Result{}, targetErr
@@ -817,3 +823,18 @@ var runNativeSQLHook = func(e *secureread.Executor, ctx context.Context, sourceU
 	return e.RunNativeSQL(ctx, sourceURL, text, args...)
 }
 var recordQueryExecutionHook = recordQueryExecution
+
+// refuseExecutionContextVariables answers INVALID_REQUEST (400) for a saved
+// query, or an ad-hoc structured TugQL document, that uses a context variable
+// (datatug.QueryDef.RefuseContextVariables), naming the field it came from.
+func refuseExecutionContextVariables(req apicontract.ExecutionRequest, queryDef *datatug.QueryDef) *contractError {
+	field := "queryId"
+	if queryDef == nil {
+		field = "tugql"
+		queryDef = &datatug.QueryDef{Type: datatug.QueryTypeTugQL, Text: req.TugQL, StructuredBody: true}
+	}
+	if err := queryDef.RefuseContextVariables(); err != nil {
+		return newInvalidRequest(field, err.Error())
+	}
+	return nil
+}

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 
@@ -39,25 +40,53 @@ func CreateProjectQueryFolder(ctx context.Context, r QueryFolderCreate) (*datatu
 		return nil, err
 	}
 	secureMu.RLock()
-	allowed := capabilities.AllowWrites && secureSession.Unrestricted
+	generation := securityContextID
+	allowed := generation != "" && capabilities.AllowWrites && secureSession.Unrestricted && secureSession.Principal != nil && secureSession.Principal.ID != nil
+	actor := ""
+	if allowed {
+		actor = fmt.Sprint(secureSession.Principal.ID)
+	}
 	secureMu.RUnlock()
 	if !allowed {
 		return nil, secureread.ErrAccessDenied
+	}
+	currentAuthority := func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		secureMu.RLock()
+		defer secureMu.RUnlock()
+		if securityContextID != generation || !capabilities.AllowWrites || !secureSession.Unrestricted || secureSession.Principal == nil || secureSession.Principal.ID == nil || fmt.Sprint(secureSession.Principal.ID) != actor {
+			return secureread.ErrAccessDenied
+		}
+		return nil
 	}
 	parent := strings.TrimPrefix(r.Path, "~/")
 	if parent == "~" {
 		parent = ""
 	}
-	err := withLocalProjectFiles(ctx, r.ProjectRef, r.Branch, true, func(_ *os.Root, _ gitState) error {
+	err := withLocalProjectFiles(ctx, r.ProjectRef, r.Branch, true, func(root *os.Root, state gitState) error {
+		if err := currentAuthority(); err != nil {
+			return err
+		}
 		store, err := projectStoreForID(r.StoreID, r.ProjectID)
 		if err != nil {
 			return err
 		}
-		creator, ok := store.(datatug.QueryFolderDirectories)
+		creator, ok := store.(datatug.GuardedQueryFolderDirectories)
 		if !ok {
 			return datatug.ErrProjectUsageIncomplete
 		}
-		return creator.CreateQueryFolder(ctx, parent, r.Name)
+		return creator.CreateQueryFolderGuarded(ctx, parent, r.Name, func() error {
+			current, err := localGitStateSeam(ctx, root.Name())
+			if err != nil {
+				return err
+			}
+			if current.branch != state.branch || current.head != state.head {
+				return dto.ErrBranchHeadConflict
+			}
+			return currentAuthority()
+		})
 	})
 	if err != nil {
 		return nil, err

@@ -141,7 +141,7 @@ Run the local DataTug HTTP agent daemon to serve the Web UI, REST endpoints, and
 ```bash
 datatug serve
 ```
-By default, `datatug serve` binds strictly to loopback (`127.0.0.1`) with origin protection. It is completely free and unrestricted under Apache License 2.0—no license key is ever required for individual local development.
+By default, `datatug serve` binds strictly to loopback (`127.0.0.1`) with origin protection. Owner-only private projects and shared public projects follow the Free plan. Shared private projects follow the paid project-sharing rules; the listen address does not determine the plan. See [licensing scopes and enforcement status](LICENSING.md).
 
 ## Architecture Overview
 
@@ -636,6 +636,10 @@ unrestricted session (`--no-policies`). All official release binaries include Du
 source requires cgo and a C/C++ toolchain; custom `CGO_ENABLED=0` builds retain
 other backends and report an explicit error when DuckDB is requested.
 
-# [License](./LICENSE)
+## Licensing
 
-Apache License
+Apache-2.0 applies to the source scopes identified in [LICENSING.md](LICENSING.md)
+and [LICENSE](LICENSE). The default executable also includes proprietary and
+third-party components under separate terms. See the licensing map and
+[draft commercial terms](LICENSES/COMMERCIAL-TERMS.md); this is not an aggregate
+Apache-only binary licence or completed distribution clearance.

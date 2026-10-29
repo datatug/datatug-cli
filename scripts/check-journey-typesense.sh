@@ -46,9 +46,13 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 echo "creating $image as $name"
+# /data is a bounded ephemeral tmpfs that Docker creates for us: the pinned server
+# requires its data directory to exist, and the synthetic fixture data must stay
+# off the host without adding persistent-volume ownership handling.
 container_id=$(docker create --name "$name" \
 	--label "datatug.fixture=typesense-$run" \
 	--memory 2g --memory-swap 2g --cpus 2 --pids-limit 256 \
+	--tmpfs /data:size=128m,mode=0700,nosuid,nodev \
 	-p 127.0.0.1::8108 \
 	"$image" \
 	--data-dir=/data --api-key="$bootstrap" --listen-port=8108)

@@ -86,7 +86,8 @@ func validateHost(field, host string) error {
 }
 
 // dbServerDrivers are the drivers datatug.ServerRef.Validate accepts (datatug-core
-// v0.42.3: the drivers of a file or a URL, then the drivers of a server). A driver that is
+// descriptor contract: the drivers of a file or a URL, then the drivers of a server).
+// Descriptor acceptance does not register a query or scan runtime for that driver. A driver that is
 // a plain name and is not one of them is refused by ValidateServerRef with a fixed
 // message: the one of datatug.ServerRef quotes the driver.
 var dbServerDrivers = []string{"sqlite3", "ingitdb", "openvaultdb", "https-json", "sqlserver", "mysql", "oracle", "postgres", "couchdb", "postgrest", "libsql", "typesense"}

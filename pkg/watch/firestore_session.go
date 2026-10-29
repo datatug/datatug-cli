@@ -16,16 +16,19 @@ import (
 // not a general DALGO adapter. No SDK write is queued before flush.
 type firestoreSession struct {
 	dal.ReadwriteTransaction
-	database      *firestoreDatabase
-	reader        dal.ReadTransaction
-	original      map[string]cloudRow
-	pending       map[string]*cloudRow
-	queryCache    map[string][]record.Record
-	readCount     int
-	pendingOutbox int64
-	sweepCursor   string
-	ready         map[string]WorkEvent
-	changed       map[string]Definition
+	database       *firestoreDatabase
+	reader         dal.ReadTransaction
+	original       map[string]cloudRow
+	pending        map[string]*cloudRow
+	queryCache     map[string][]record.Record
+	readCount      int
+	pendingOutbox  int64
+	sweepCursor    string
+	ready          map[string]WorkEvent
+	changed        map[string]Definition
+	sealed         bool
+	admissionRows  int
+	admissionBytes int
 }
 
 type cloudRow struct {
@@ -128,6 +131,9 @@ func (t *firestoreSession) Exists(ctx context.Context, k *record.Key) (bool, err
 }
 
 func (t *firestoreSession) Insert(ctx context.Context, r record.Record, options ...dal.InsertOption) error {
+	if t.sealed {
+		return ErrInvalid
+	}
 	if len(options) != 0 {
 		return dal.ErrNotSupported
 	}
@@ -151,6 +157,9 @@ func (t *firestoreSession) Insert(ctx context.Context, r record.Record, options 
 }
 
 func (t *firestoreSession) Update(ctx context.Context, k *record.Key, updates []update.Update, conditions ...dal.Precondition) error {
+	if t.sealed {
+		return ErrInvalid
+	}
 	if len(conditions) != 0 {
 		return dal.ErrNotSupported
 	}
@@ -176,6 +185,9 @@ func (t *firestoreSession) Update(ctx context.Context, k *record.Key, updates []
 }
 
 func (t *firestoreSession) Delete(ctx context.Context, k *record.Key) error {
+	if t.sealed {
+		return ErrInvalid
+	}
 	row, err := t.load(ctx, k)
 	if err != nil {
 		return err
@@ -210,10 +222,10 @@ func (t *firestoreSession) validateRow(table string, data map[string]any) error 
 }
 
 func (t *firestoreSession) budget() error {
-	if len(t.pending)+len(t.changed)+len(t.ready)+1 > cloudWriteRows {
+	if len(t.pending)+len(t.changed)+len(t.ready)+1+t.admissionRows > cloudWriteRows {
 		return ErrCapacity
 	}
-	size := (len(t.changed)+len(t.ready))*1024 + 1024
+	size := (len(t.changed)+len(t.ready))*1024 + 1024 + t.admissionBytes
 	for _, row := range t.pending {
 		if row == nil {
 			continue
@@ -231,6 +243,9 @@ func (t *firestoreSession) budget() error {
 }
 
 func (t *firestoreSession) flush(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := t.budget(); err != nil {
 		return err
 	}
@@ -240,6 +255,9 @@ func (t *firestoreSession) flush(ctx context.Context) error {
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		row := t.pending[id]
 		original := t.original[id]
 		if row == nil {
@@ -264,7 +282,7 @@ func (t *firestoreSession) flush(ctx context.Context) error {
 			}
 		}
 	}
-	return nil
+	return ctx.Err()
 }
 
 func (t *firestoreSession) backlog() int64 {

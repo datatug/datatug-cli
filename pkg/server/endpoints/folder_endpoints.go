@@ -21,3 +21,10 @@ func createFolder(w http.ResponseWriter, r *http.Request) {
 
 // deleteFolder handles delete query folder endpoint
 var deleteFolder = deleteProjItem(api.DeleteFolder)
+
+func createQueryFolder(w http.ResponseWriter, r *http.Request) {
+	var request api.QueryFolderCreate
+	createProjectItem(w, r, &request.ProjectRef, &request, func(ctx context.Context) (apicore.ResponseDTO, error) {
+		return api.CreateProjectQueryFolder(ctx, request)
+	})
+}

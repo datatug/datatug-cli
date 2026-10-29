@@ -130,7 +130,7 @@ func parseQueriesRoot(q url.Values) (string, error) {
 // business-logic functions' signatures (e.g. computeSemanticApplicable) —
 // loadModuleQueries itself does no I/O that needs cancellation (a plain
 // filepath.WalkDir), so it is not threaded through further.
-func getAllQueries(_ context.Context, ref dto.ProjectRef) (*datatug.QueriesFolder, error) {
+func getAllQueries(ctx context.Context, ref dto.ProjectRef) (*datatug.QueriesFolder, error) {
 	if err := ref.Validate(); err != nil {
 		return nil, err
 	}
@@ -142,7 +142,11 @@ func getAllQueries(_ context.Context, ref dto.ProjectRef) (*datatug.QueriesFolde
 	if err != nil {
 		return nil, queriesNotLoaded(ref.ProjectID, err)
 	}
-	return buildQueriesFolderTree(queries, canonicalIDs, datatug.RootSharedFolderName), nil
+	declared, err := api.DeclaredProjectQueryFolders(ctx, ref)
+	if err != nil {
+		return nil, queriesNotLoaded(ref.ProjectID, err)
+	}
+	return buildQueriesFolderTree(queries, canonicalIDs, datatug.RootSharedFolderName, declared...), nil
 }
 
 // queriesNotLoaded is the answer for the queries of a project that cannot be loaded (listed,
@@ -226,7 +230,7 @@ func getPersonalQueries(_ context.Context, ref dto.ProjectRef) (*datatug.Queries
 // — datatug.RootSharedFolderName ("~") for getAllQueries' shared tree, or
 // a personal root's "user:<principalID>" for getPersonalQueries; every
 // other (sub)folder's ID is its own directory name.
-func buildQueriesFolderTree(queries []*datatug.QueryDef, canonicalIDs map[*datatug.QueryDef]string, rootID string) *datatug.QueriesFolder {
+func buildQueriesFolderTree(queries []*datatug.QueryDef, canonicalIDs map[*datatug.QueryDef]string, rootID string, declared ...string) *datatug.QueriesFolder {
 	root := &datatug.QueriesFolder{ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: rootID}}}
 	folders := map[string]*datatug.QueriesFolder{"": root}
 	var ensureFolder func(path string) *datatug.QueriesFolder
@@ -248,6 +252,9 @@ func buildQueriesFolderTree(queries []*datatug.QueryDef, canonicalIDs map[*datat
 		folderPath, _ := splitCanonicalQueryID(canonicalIDs[q])
 		f := ensureFolder(folderPath)
 		f.Items = append(f.Items, q)
+	}
+	for _, folder := range declared {
+		ensureFolder(folder)
 	}
 	sortQueriesFolderTree(root)
 	return root
@@ -311,9 +318,6 @@ func updateQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	saveProjectItem(lw, r, &ref, &request, saveFunc)
 }
-
-// deleteQuery handles delete query endpoint
-var deleteQuery = legacyQueryDelete(api.DeleteQuery)
 
 // legacyQueryDelete is deleteProjItem(del) answering through
 // legacyQueryWriteResponse.

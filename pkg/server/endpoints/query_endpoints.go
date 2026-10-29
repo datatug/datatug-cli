@@ -319,9 +319,6 @@ func updateQuery(w http.ResponseWriter, r *http.Request) {
 	saveProjectItem(lw, r, &ref, &request, saveFunc)
 }
 
-// deleteQuery handles delete query endpoint
-var deleteQuery = legacyQueryDelete(api.DeleteQuery)
-
 // legacyQueryDelete is deleteProjItem(del) answering through
 // legacyQueryWriteResponse.
 func legacyQueryDelete(del func(ctx context.Context, ref dto.ProjectItemRef) error) http.HandlerFunc {

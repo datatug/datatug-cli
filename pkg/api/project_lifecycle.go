@@ -28,7 +28,7 @@ func localLifecycleStore(selection LocalLifecycleSelection, write bool) (datatug
 	if err := requireLocalReadPrincipal(); err != nil {
 		return nil, scope, err
 	}
-	if err := selection.ProjectRef.Validate(); err != nil {
+	if err := selection.Validate(); err != nil {
 		return nil, scope, err
 	}
 	if err := ValidateProjectIdentifier("project", selection.ProjectID); err != nil {
@@ -93,7 +93,7 @@ func LocalProjectLifecycleReview(ctx context.Context, selection LocalLifecycleSe
 
 func LocalProjectLifecycleChange(ctx context.Context, request LocalLifecycleWrite) (datatug.ProjectLifecycleAck, error) {
 	var out datatug.ProjectLifecycleAck
-	if err := request.ProjectLifecycleWrite.Validate(); err != nil {
+	if err := request.Validate(); err != nil {
 		return out, err
 	}
 	provider, scope, err := localLifecycleStore(request.LocalLifecycleSelection, true)

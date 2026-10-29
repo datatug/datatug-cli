@@ -95,8 +95,21 @@ func (tx cloudInventoryResultTx) ExecuteQueryToRecordsReader(context.Context, da
 func TestCloudRetainedInventoryAdapterFailuresNeverReturnPartialData(t *testing.T) {
 	stores, _, _ := firestoreContractFixture(t)
 	s := stores[0]
-	if out, err := s.RetainedProjectInventoryInTransaction(nil, cloudInventoryResultTx{}, CloudRetainedInventoryLimits{MaxDocuments: 100, MaxBytes: 1 << 20}); err == nil || !reflect.DeepEqual(out, CloudRetainedInventory{}) {
-		t.Fatal("nil inventory context accepted")
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, testCase := range []struct {
+		name string
+		ctx  context.Context
+		want error
+	}{
+		{name: "nil context", ctx: nil, want: ErrInvalid},
+		{name: "canceled context", ctx: canceled, want: context.Canceled},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			if out, err := s.RetainedProjectInventoryInTransaction(testCase.ctx, cloudInventoryResultTx{}, CloudRetainedInventoryLimits{MaxDocuments: 100, MaxBytes: 1 << 20}); !errors.Is(err, testCase.want) || !reflect.DeepEqual(out, CloudRetainedInventory{}) {
+				t.Fatal("invalid context accepted or partial inventory returned", err)
+			}
+		})
 	}
 	for _, mode := range []string{"query", "read", "bad data", "bad metadata"} {
 		t.Run(mode, func(t *testing.T) {

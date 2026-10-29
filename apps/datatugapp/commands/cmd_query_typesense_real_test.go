@@ -206,8 +206,10 @@ func TestTypesenseQueryJourney(t *testing.T) {
 		if !strings.Contains(string(first["tags"]), "classic") || !strings.Contains(string(first["tags"]), "desert") {
 			t.Fatalf("tags = %s, want the native array values", first["tags"])
 		}
-		if string(document.Hits[2].Document["note"]) != "a b (c) && d" {
-			t.Fatalf("a stored string note did not survive: %s", document.Hits[2].Document["note"])
+		var storedNote string
+		require.NoError(t, json.Unmarshal(document.Hits[2].Document["note"], &storedNote), "the stored note must decode as a JSON string: %s", document.Hits[2].Document["note"])
+		if storedNote != "a b (c) && d" {
+			t.Fatalf("a stored string note did not survive: %q", storedNote)
 		}
 		// Typesense keeps an optional field that was stored with a string, but it
 		// may omit an optional field whose stored value was null. Assert the

@@ -161,8 +161,10 @@ var (
 // requestPath is "-", or from the file it names. The document is one object with
 // no unknown field and nothing after it, and it must state a positive limit: that
 // is checked before any provider I/O, so a malformed or unbounded request never
-// opens a source. A read failure is reported as a fixed classification, never as
-// the reader's own sentence, which could hold a value from the request.
+// opens a source. A failure to open the caller's own request file says which path
+// it named and quotes no provider detail; a failure to read the stream, and every
+// decoder failure, is replaced by a fixed classification so a value from the
+// request can never reach the message.
 func readTypesenseSearchRequest(stdin io.Reader, requestPath string) (dalgo2typesense.SearchRequest, error) {
 	var data []byte
 	var err error

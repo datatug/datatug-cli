@@ -550,6 +550,7 @@ func TestDriverTitle(t *testing.T) {
 		"postgres":  "PostgreSQL",
 		"mysql":     "MySQL",
 		"oracle":    "Oracle",
+		"typesense": "Typesense",
 		"db2":       "db2",
 	} {
 		assert.Equal(t, want, driverTitle(driver), driver)

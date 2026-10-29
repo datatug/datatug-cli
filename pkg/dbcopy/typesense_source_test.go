@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -63,12 +65,32 @@ func TestParseTypesenseSourceRefusesAnUnusableURL(t *testing.T) {
 		{"typesense://search.example.com/-books", "plain Typesense collection name"},
 		{"typesense://search.example.com/books%2Fmore", "percent-encoded"},
 		{"typesense+http://search.example.com/books", "loopback"},
+		{"typesense://", "expected typesense://HOST/COLLECTION"},
+		{"typesense://:8108/books", "names no usable host"},
+		{"typesense://search.example.com/books\\more", "one plain path segment"},
 	} {
 		_, err := Parse(tc.raw)
 		require.Error(t, err, tc.raw)
 		assert.Contains(t, err.Error(), tc.want, tc.raw)
 		assert.NotContains(t, err.Error(), "secret-key", tc.raw)
 	}
+}
+
+func TestTypesenseSourceURLIsEmptyForAnIncompleteRef(t *testing.T) {
+	for name, ref := range map[string]BackendRef{
+		"no scheme":     {TypesenseHost: "search.example.com:8108", TypesenseCollection: "books"},
+		"no host":       {Scheme: TypesenseScheme, TypesenseCollection: "books"},
+		"no collection": {Scheme: TypesenseScheme, TypesenseHost: "search.example.com:8108"},
+	} {
+		assert.Empty(t, ref.TypesenseSourceURL(), name)
+	}
+}
+
+func TestOpenTypesenseRefusesAnIncompleteRef(t *testing.T) {
+	db, err := openTypesense(context.Background(), BackendRef{Scheme: TypesenseScheme}, openMode{})
+	require.Error(t, err)
+	assert.Nil(t, db)
+	assert.ErrorIs(t, err, errUnsupportedBackend)
 }
 
 func TestTypesenseHeadersReadTheEnvironmentAndRefuseAnUnsendableKey(t *testing.T) {
@@ -215,6 +237,122 @@ func TestTypesenseFailureReasonIsFixedAndRedacted(t *testing.T) {
 	assert.True(t, errors.Is(failed, dalgo2typesense.ErrRequestFailed))
 	assert.NotContains(t, failed.Error(), "secret")
 	assert.NotContains(t, failed.Error(), "secret-key")
+}
+
+func TestTypesenseFailureReasonCoversEveryAdapterClassification(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err  error
+		want string
+	}{
+		"semantic mismatch":  {dalgo2typesense.ErrSemanticMismatch, "narrow the filter"},
+		"permission denied":  {dalgo2typesense.ErrPermissionDenied, "refused the credential"},
+		"request too large":  {dalgo2typesense.ErrRequestTooLarge, "bounded request"},
+		"response too large": {dalgo2typesense.ErrResponseTooLarge, "bounded request"},
+		"row too large":      {dalgo2typesense.ErrRowTooLarge, "bounded request"},
+		"too many rows":      {dalgo2typesense.ErrTooManyRows, "bounded request"},
+		"too many pages":     {dalgo2typesense.ErrTooManyPages, "bounded request"},
+		"partial result":     {dalgo2typesense.ErrPartialResult, "fewer hits than its own found count"},
+		"duplicate id":       {dalgo2typesense.ErrDuplicateID, "repeated a document id"},
+		"redirect refused":   {dalgo2typesense.ErrRedirectRefused, "attempted a redirect"},
+		"malformed response": {dalgo2typesense.ErrMalformedResponse, "does not recognise"},
+		"closed handle":      {dalgo2typesense.ErrClosed, "handle is closed"},
+		"no collection":      {dalgo2typesense.ErrCollectionNotConfigured, "names no collection"},
+		"request failed":     {dalgo2typesense.ErrRequestFailed, "could not be reached"},
+		"unsafe value":       {dalgo2typesense.ErrUnsafeValue, "refused a value"},
+		"deadline exceeded":  {context.DeadlineExceeded, "exceeded its deadline"},
+	} {
+		reason := TypesenseFailureReason(tc.err)
+		assert.Contains(t, reason, tc.want, name)
+		assert.NotContains(t, reason, "127.0.0.1", name)
+	}
+}
+
+func TestReadTypesenseDescriptorReadsOnlyTheAllowedVariableName(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "books.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"dsnEnv":"DATATUG_TYPESENSE_BOOKS"}`), 0o600))
+	lookup := func(name string) (string, bool) {
+		if name == DescriptorEnvAllowList {
+			return "DATATUG_TYPESENSE_BOOKS", true
+		}
+		return "", false
+	}
+	descriptor, err := readTypesenseDescriptor(path, lookup)
+	require.NoError(t, err)
+	assert.Equal(t, ConnectionDescriptor{DSNEnv: "DATATUG_TYPESENSE_BOOKS"}, descriptor)
+
+	t.Setenv(DescriptorEnvAllowList, "DATATUG_TYPESENSE_BOOKS")
+	descriptor, err = ReadTypesenseDescriptor(path)
+	require.NoError(t, err)
+	assert.Equal(t, "DATATUG_TYPESENSE_BOOKS", descriptor.DSNEnv)
+
+	// A descriptor that names a variable the operator did not set aside is
+	// refused, and the variable is named but no value is.
+	foreign := filepath.Join(dir, "foreign.json")
+	require.NoError(t, os.WriteFile(foreign, []byte(`{"dsnEnv":"PROD_TYPESENSE_URL"}`), 0o600))
+	t.Setenv(DescriptorEnvAllowList, "")
+	_, err = ReadTypesenseDescriptor(foreign)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "PROD_TYPESENSE_URL")
+	assert.Contains(t, err.Error(), DescriptorEnvAllowList)
+
+	// A descriptor that is not there fails with the path the server-owned reader
+	// would have opened, never with a value.
+	_, err = ReadTypesenseDescriptor(filepath.Join(dir, "missing.json"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "open Typesense connection descriptor")
+	assert.NotContains(t, err.Error(), "secret")
+}
+
+func TestOpenSchemaScanTypesenseUsesTheAdapterSchemaReader(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/collections":
+			_, _ = w.Write([]byte(`[{"name":"books","fields":[{"name":"title","type":"string"}],"num_documents":1}]`))
+		case "/collections/books":
+			_, _ = w.Write([]byte(`{"name":"books","fields":[{"name":"title","type":"string"},{"name":"tags","type":"string[]"}],"num_documents":1}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	t.Setenv(TypesenseAPIKeyEnv, "scoped-key")
+
+	ref, err := Parse("typesense+http://" + server.Listener.Addr().String() + "/books")
+	require.NoError(t, err)
+	scanDB, err := ref.OpenSchemaScan(context.Background())
+	require.NoError(t, err)
+	defer func() { _ = scanDB.Close() }()
+
+	collections, err := scanDB.ListCollections(context.Background(), nil)
+	require.NoError(t, err)
+	require.Len(t, collections, 1)
+	assert.Equal(t, "books", collections[0].Name())
+	definition, err := scanDB.DescribeCollection(context.Background(), &collections[0])
+	require.NoError(t, err)
+	assert.Equal(t, []dal.FieldName{"id"}, definition.PrimaryKey)
+	types := map[string]string{}
+	for _, column := range definition.SourceDefinition.Columns {
+		types[column.Name] = column.DeclaredType
+	}
+	assert.Equal(t, "string", types["id"])
+	assert.Equal(t, "string[]", types["tags"])
+}
+
+func TestOpenSchemaScanTypesenseReportsAMissingKeyBeforeAnyRequest(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		requests++
+	}))
+	defer server.Close()
+	t.Setenv(TypesenseAPIKeyEnv, "")
+	ref, err := Parse("typesense+http://" + server.Listener.Addr().String() + "/books")
+	require.NoError(t, err)
+	scanDB, err := ref.OpenSchemaScan(context.Background())
+	require.Error(t, err)
+	assert.Nil(t, scanDB)
+	assert.True(t, IsTypesenseCredentialError(err))
+	assert.Zero(t, requests)
 }
 
 func TestTypesenseDescriptorRoundTripsTheVariableNameOnly(t *testing.T) {

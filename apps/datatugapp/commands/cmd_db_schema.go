@@ -150,7 +150,9 @@ func (s *schemaSession) Close() {
 
 // openSchemaSession reads --db (a URL, env:NAME, a path or a datatug:// reference) and --format of cmd and
 // opens the source read-only: it is the one place a metadata command resolves, checks and opens
-// its source.
+// its source. A command that offers --counts is refused for Typesense here, after the source is
+// parsed and before it is opened, so every caller answers the refused flag before any credential
+// is read or any request is made.
 func openSchemaSession(cmd *cobra.Command, command string) (*schemaSession, error) {
 	dbArg, _ := cmd.Flags().GetString("db")
 	format, _ := cmd.Flags().GetString("format")
@@ -180,6 +182,9 @@ func openSchemaSession(cmd *cobra.Command, command string) (*schemaSession, erro
 	if !isSchemaProvider(ref.Scheme) {
 		return nil, Exit(fmt.Sprintf("unsupported provider %q for %s: supported providers are %s", ref.Scheme, command, strings.Join(schemaProviders, ", ")), exitCodeUsage)
 	}
+	if withCounts, _ := cmd.Flags().GetBool("counts"); withCounts && dbcopy.IsTypesenseScheme(ref.Scheme) {
+		return nil, Exit("--counts is not available for a Typesense source: Typesense has no bounded native count, and DataTug does not read a whole collection to count it", exitCodeUsage)
+	}
 	db, err := openSchemaSource(ctx, ref)
 	if err != nil {
 		return nil, Exit(ref.OpenFailure(err).Error(), exitCodeDatabase)
@@ -204,9 +209,6 @@ func dbSchemaAction(cmd *cobra.Command, _ []string) error {
 	defer session.Close()
 	withColumns, _ := cmd.Flags().GetBool("columns")
 	withCounts, _ := cmd.Flags().GetBool("counts")
-	if withCounts && dbcopy.IsTypesenseScheme(session.ref.Scheme) {
-		return Exit("--counts is not available for a Typesense source: Typesense has no bounded native count, and DataTug does not read a whole collection to count it", exitCodeUsage)
-	}
 	entries, err := listSchemaEntries(session.ctx, session.ref.Scheme, session.db)
 	if err != nil {
 		return session.failure(err)

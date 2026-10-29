@@ -85,6 +85,9 @@ func withLocalProjectFiles(ctx context.Context, ref dto.ProjectRef, branch strin
 	}
 	state, err := localGitStateSeam(ctx, dir)
 	if err != nil {
+		if canceled := ctx.Err(); canceled != nil {
+			return canceled
+		}
 		return err
 	}
 	lock := flock.New(filepath.Join(state.gitDir, "datatug-project-api.lock"))
@@ -98,6 +101,9 @@ func withLocalProjectFiles(ctx context.Context, ref dto.ProjectRef, branch strin
 	defer func() { _ = lock.Unlock() }()
 	state, err = localGitStateSeam(ctx, dir)
 	if err != nil {
+		if canceled := ctx.Err(); canceled != nil {
+			return canceled
+		}
 		return err
 	}
 	if branch != "" && branch != state.branch {

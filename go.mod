@@ -25,7 +25,7 @@ require (
 	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/ultraviolet v0.0.0-20260812204455-68fa937c71be
 	github.com/charmbracelet/x/ansi v0.11.8
-	github.com/dal-go/dalgo v0.95.6-0.20261029151756-0939fe35f1d0
+	github.com/dal-go/dalgo v0.95.6-0.20261029153456-625b79c0e4ce
 	github.com/dal-go/dalgo2bigquery v0.3.2
 	github.com/dal-go/dalgo2couchdb v0.0.0-20261027213543-120b25e81833
 	github.com/dal-go/dalgo2duckdb v0.1.0

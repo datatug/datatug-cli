@@ -150,6 +150,8 @@ github.com/dal-go/dalgo2sql v0.31.0 h1:HPIEtlxrPkg1DvuRQ/Zsv1/otFY7T/CWGPfUm+yCj
 github.com/dal-go/dalgo2sql v0.31.0/go.mod h1:q/L7EXw7f1nnfn4aKfm3G5s0AJAkX0FNPyK3CdbLR28=
 github.com/dal-go/dalgo2sqlite v0.5.1 h1:fFrAnKRlYtSbUSBvzyWRFbLyhNIVesh5r1RiRnKzeuI=
 github.com/dal-go/dalgo2sqlite v0.5.1/go.mod h1:hPl9xxMHEN1Y+5T+oB37D6AJ2Mox+KXQnsy8ErF7vMw=
+github.com/dal-go/dalgo2typesense v0.0.0-20261028075318-b1ba445d3434 h1:5DocjqmWr9qWBl/zCAekxUQlO93eKQuAjh18A32Ae9U=
+github.com/dal-go/dalgo2typesense v0.0.0-20261028075318-b1ba445d3434/go.mod h1:wTgdMyhr1bTAELZX+NwOVFsMEy/Yob1G9d5z0GLuivQ=
 github.com/dal-go/record v0.1.5 h1:lkPxiJA7S2oE5tA0WUayezd+lmaiEekrEcGz/HRhzLg=
 github.com/dal-go/record v0.1.5/go.mod h1:PuoOCH74/Vf+pIVWSdrMg7OdUmlSlPgj68yJ+gM42To=
 github.com/danieljoos/wincred v1.2.3 h1:v7dZC2x32Ut3nEfRH+vhoZGvN72+dQ/snVXo/vMFLdQ=

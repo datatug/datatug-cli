@@ -34,6 +34,11 @@
 //     libsql+http:// names a loopback endpoint. The token comes
 //     from DATATUG_LIBSQL_BEARER for each request, never from
 //     the URL — see libsql_source.go
+//   - typesense://      one existing Typesense collection read through
+//     dal-go/dalgo2typesense; HTTPS unless typesense+http://
+//     names a loopback endpoint. The scoped API key comes from
+//     DATATUG_TYPESENSE_API_KEY for each request, never from
+//     the URL — see typesense_source.go
 package dbcopy
 
 import (
@@ -56,7 +61,7 @@ import (
 
 // supportedSchemes is the MVP-supported scheme list, used both for dispatch
 // and to construct the error message for REQ:unknown-scheme-rejected.
-var supportedSchemes = []string{"duckdb", "sqlite", "ingitdb", "postgres", "mysql", "oracle", "sqlserver", "http", "https", "openvaultdb", "bigquery", "mongodb", "mongodb+srv", "firestore", CouchDBScheme, CouchDBHTTPSScheme, CouchDBHTTPScheme, PostgRESTScheme, PostgRESTHTTPSScheme, PostgRESTHTTPScheme, LibSQLScheme, LibSQLHTTPSScheme, LibSQLHTTPScheme}
+var supportedSchemes = []string{"duckdb", "sqlite", "ingitdb", "postgres", "mysql", "oracle", "sqlserver", "http", "https", "openvaultdb", "bigquery", "mongodb", "mongodb+srv", "firestore", CouchDBScheme, CouchDBHTTPSScheme, CouchDBHTTPScheme, PostgRESTScheme, PostgRESTHTTPSScheme, PostgRESTHTTPScheme, LibSQLScheme, LibSQLHTTPSScheme, LibSQLHTTPScheme, TypesenseScheme, TypesenseHTTPSScheme, TypesenseHTTPScheme}
 
 // SupportedSchemes returns the exact schemes Parse/Open dispatch, in
 // dispatch order. It is the single source of truth other packages should
@@ -188,6 +193,12 @@ type BackendRef struct {
 	LibSQLHost              string
 	LibSQLBasePath          string
 	LibSQLAllowLoopbackHTTP bool
+	// Typesense endpoint selectors: one existing Typesense collection. The
+	// endpoint is the server origin and holds no credentials; the scoped API key
+	// is read from DATATUG_TYPESENSE_API_KEY for each request.
+	TypesenseHost              string
+	TypesenseCollection        string
+	TypesenseAllowLoopbackHTTP bool
 	// BigQuery destination selectors. Credentials are never accepted in the URL;
 	// callers provide local Google credentials separately.
 	ProjectID string
@@ -300,6 +311,8 @@ func parseURL(rawURL string) (BackendRef, error) {
 		return parsePostgRESTSource(scheme, rest, display)
 	case LibSQLScheme, LibSQLHTTPSScheme, LibSQLHTTPScheme:
 		return parseLibSQLSource(scheme, rest, display)
+	case TypesenseScheme, TypesenseHTTPSScheme, TypesenseHTTPScheme:
+		return parseTypesenseSource(scheme, rest, display)
 	case "firestore":
 		return parseFirestoreSource(rest, display)
 	case "openvaultdb":
@@ -760,6 +773,8 @@ func (r BackendRef) openSource(ctx context.Context, mode openMode) (dal.DB, erro
 		return openPostgREST(ctx, r, mode)
 	case LibSQLScheme, LibSQLHTTPSScheme, LibSQLHTTPScheme:
 		return openLibSQL(ctx, r, mode)
+	case TypesenseScheme, TypesenseHTTPSScheme, TypesenseHTTPScheme:
+		return openTypesense(ctx, r, mode)
 	case "firestore":
 		return r.openFirestore(ctx, mode)
 	case "duckdb":

@@ -25,6 +25,12 @@ const (
 	// tables and views as collections; the token comes from the environment.
 	DriverLibSQL = "libsql"
 
+	// DriverTypesense is the driver name a Typesense catalog carries, and the
+	// --driver value `datatug scan` reads it with. One Typesense server exposes
+	// one configured collection of native documents; the scoped API key comes
+	// from the environment.
+	DriverTypesense = "typesense"
+
 	// ServerDefaultSchema is the schema a MySQL, Oracle or SQL Server catalog records its tables
 	// under: the schema the connection reads (a MySQL connection's database, an Oracle session's
 	// current schema, a SQL Server login's default schema), by a fixed name and not its own. The real name is the database of the URL or, for

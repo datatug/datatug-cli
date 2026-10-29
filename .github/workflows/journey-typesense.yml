@@ -1,0 +1,134 @@
+name: Journey (Typesense)
+
+# A dedicated, path-filtered journey for the Typesense source. It runs on a Linux
+# runner because the real proof needs Docker: scripts/check-journey-typesense.sh
+# starts one pinned, RAM/CPU/PID-limited typesense/typesense:30.2 container on a
+# random loopback port, seeds synthetic books/semantics/archive documents, creates
+# a search-only key and a search+metadata key scoped to books and semantics, and
+# then runs the Go command journey plus the datatug binary built from this
+# checkout. No account, production data or hosted service is involved.
+#
+# It is deliberately separate from golangci.yml ("Go CI"): that workflow's checks
+# are required by branch protection and gate releases, so it runs on every change
+# and cannot take `paths:` filters. The default Go tests stay fast and offline;
+# only this workflow enables the real provider.
+#
+# The container is removed by the journey's own EXIT trap, and the last step
+# proves nothing from this job's unique name prefix survived. Docker is
+# preinstalled on the GitHub-hosted Ubuntu runner.
+
+on:
+  pull_request:
+    paths:
+      - 'apps/datatugapp/commands/**'
+      - 'pkg/accesspolicies/**'
+      - 'pkg/api/**'
+      - 'pkg/dbcopy/**'
+      - 'pkg/secureread/**'
+      - 'pkg/schemers/**'
+      - 'scripts/check-journey-typesense.sh'
+      - 'scripts/test-typesense-lifecycle.sh'
+      - 'scripts/lib/typesense-fixture-lifecycle.sh'
+      - 'scripts/lib/typesense-cli-journey.sh'
+      - 'docs/query/typesense.md'
+      - 'main.go'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/journey-typesense.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'apps/datatugapp/commands/**'
+      - 'pkg/accesspolicies/**'
+      - 'pkg/api/**'
+      - 'pkg/dbcopy/**'
+      - 'pkg/secureread/**'
+      - 'pkg/schemers/**'
+      - 'scripts/check-journey-typesense.sh'
+      - 'scripts/test-typesense-lifecycle.sh'
+      - 'scripts/lib/typesense-fixture-lifecycle.sh'
+      - 'scripts/lib/typesense-cli-journey.sh'
+      - 'docs/query/typesense.md'
+      - 'main.go'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/journey-typesense.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  typesense:
+    name: Journey (Typesense)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Authenticate private Core dependency
+        uses: ./.github/actions/private-core
+        with:
+          private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          # Must be >= go.mod's `go` directive, same constraint as release.yml.
+          go-version: '1.27.3'
+          cache: true
+      - name: Fixture lifecycle regression
+        run: bash scripts/test-typesense-lifecycle.sh
+      - name: Script syntax and shellcheck
+        run: |
+          set -euo pipefail
+          scripts=(
+            scripts/check-journey-typesense.sh
+            scripts/test-typesense-lifecycle.sh
+            scripts/lib/typesense-fixture-lifecycle.sh
+            scripts/lib/typesense-cli-journey.sh
+          )
+          for script in "${scripts[@]}"; do
+            bash -n "$script"
+          done
+          # The runner image ships shellcheck. A missing linter is a hard failure
+          # here, never a silent pass: the scripts must lint on the image CI uses.
+          command -v shellcheck >/dev/null || { echo "shellcheck is not installed on this runner" >&2; exit 1; }
+          shellcheck --version
+          shellcheck -x "${scripts[@]}"
+      - name: Typesense journey
+        env:
+          CGO_ENABLED: '1'
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/typesense-journey.log"
+          # pipefail keeps the journey script's own status through tee, so a
+          # failing journey fails this step; tee only captures the receipts.
+          bash scripts/check-journey-typesense.sh 2>&1 | tee "$log"
+          grep -qF -- 'Go command journey passed' "$log"
+          grep -qF -- 'typesense CLI journey passed:' "$log"
+          grep -qF -- 'typesense journey passed:' "$log"
+      - name: Owned Typesense container removed
+        if: always()
+        run: |
+          set -euo pipefail
+          # The journey removes its exact owned container in its EXIT trap. This
+          # final read-only inspection proves the receipts above describe a
+          # cleanup that really happened, and nothing from this job's unique
+          # name prefix survived the run. It runs even after a failed journey, so
+          # a leaked fixture is reported instead of hidden.
+          filters=(--filter 'name=datatug-cli-typesense-' --filter 'label=datatug.fixture')
+          listing_status=0
+          listing=$(docker ps -aq "${filters[@]}") || listing_status=$?
+          if [ "$listing_status" != 0 ]; then
+            echo "docker ps failed with status $listing_status; the owned Typesense container's absence is unproven" >&2
+            exit 1
+          fi
+          if [ -n "$listing" ]; then
+            docker ps -a "${filters[@]}"
+            echo "the owned Typesense container was not removed" >&2
+            exit 1
+          fi
+          echo "no datatug-cli-typesense- container remains"

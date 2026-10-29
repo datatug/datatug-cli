@@ -234,7 +234,7 @@ var scanLookupEnv = os.LookupEnv
 var scanUpdateDbSchema = api.UpdateDbSchema
 
 // scanDrivers are the drivers a scan reads, in the order the messages name them.
-var scanDrivers = []string{dbconnection.DriverSQLite3, api.DriverPostgres, api.DriverMySQL, api.DriverOracle, api.DriverSQLServer, api.DriverCouchDB, api.DriverPostgREST, api.DriverLibSQL}
+var scanDrivers = []string{dbconnection.DriverSQLite3, api.DriverPostgres, api.DriverMySQL, api.DriverOracle, api.DriverSQLServer, api.DriverCouchDB, api.DriverPostgREST, api.DriverLibSQL, api.DriverTypesense}
 
 // checkScanDriver is an error, naming --driver and the drivers a scan reads, when driver is not
 // one of them. The value is said as it was typed only when it is a plain name: the flag may have
@@ -256,11 +256,11 @@ func scanDriverNames() string {
 
 // connectionParams builds DB connection parameters from the scan flags.
 func (v *scanDbCommand) connectionParams() (dbconnection.Params, error) {
-	if api.IsServerDriver(v.Driver) || v.Driver == api.DriverCouchDB || v.Driver == api.DriverPostgREST || v.Driver == api.DriverLibSQL {
+	if api.IsServerDriver(v.Driver) || v.Driver == api.DriverCouchDB || v.Driver == api.DriverPostgREST || v.Driver == api.DriverLibSQL || v.Driver == api.DriverTypesense {
 		return v.descriptorConnectionParams()
 	}
 	if v.DSNEnv != "" {
-		return nil, fmt.Errorf("--dsn-env applies only to -D %s, %s, %s, %s, %s, %s or %s", api.DriverPostgres, api.DriverMySQL, api.DriverOracle, api.DriverSQLServer, api.DriverCouchDB, api.DriverPostgREST, api.DriverLibSQL)
+		return nil, fmt.Errorf("--dsn-env applies only to -D %s, %s, %s, %s, %s, %s, %s or %s", api.DriverPostgres, api.DriverMySQL, api.DriverOracle, api.DriverSQLServer, api.DriverCouchDB, api.DriverPostgREST, api.DriverLibSQL, api.DriverTypesense)
 	}
 	// sqlite3 is the one driver a scan reads that is not a server (checkScanDriver has refused any other).
 	if v.Path == "" {
@@ -286,6 +286,7 @@ var scanURLExamples = map[string]string{
 	api.DriverCouchDB:   "couchdb://host:6984/database (couchdb+http://127.0.0.1:5984/database for a loopback development server)",
 	api.DriverPostgREST: "postgrest://host:3000/rest/v1 (postgrest+http://127.0.0.1:3000 for a loopback development server)",
 	api.DriverLibSQL:    "libsql://host[:port][/base-path] (libsql+http://127.0.0.1:8080 for a loopback development server); the token is never in the URL but in DATATUG_LIBSQL_BEARER",
+	api.DriverTypesense: "typesense://host[:port]/collection (typesense+http://127.0.0.1:8108/books for a loopback development server); the scoped API key is never in the URL but in DATATUG_TYPESENSE_API_KEY",
 }
 
 // descriptorConnectionParams builds the parameters of a PostgreSQL, MySQL, Oracle, SQL Server or CouchDB
@@ -338,6 +339,13 @@ func (v *scanDbCommand) descriptorConnectionParams() (dbconnection.Params, error
 		}
 		return params, nil
 	}
+	if v.Driver == api.DriverTypesense {
+		params, err := api.NewTypesenseScanParams(scanLookupEnv, v.DSNEnv, v.Environment, v.Database)
+		if err != nil {
+			return nil, err // not params: a nil *TypesenseScanParams would be a non-nil Params
+		}
+		return params, nil
+	}
 	params, err := api.NewServerScanParams(v.Driver, scanLookupEnv, v.DSNEnv, v.Environment, v.Database)
 	if err != nil {
 		return nil, err // not params: a nil *PostgresScanParams would be a non-nil Params
@@ -363,13 +371,15 @@ func scanCommandArgs() *cobra.Command {
 			"the project likewise records a connection descriptor that names the operator's variable, never the endpoint. " +
 			"Scanning PostgREST (-D postgrest --dsn-env NAME, postgrest://host:3000/rest/v1) reads the relations the role can see from the API root's OpenAPI document; " +
 			"the project likewise records a connection descriptor that names the operator's variable, never the endpoint. " +
+			"Scanning Typesense (-D typesense --dsn-env NAME, typesense://host:8108/books) reads one existing collection's declared field types, including native arrays, " +
+			"and its implicit string id primary key; the project likewise records a connection descriptor that names the operator's variable, never the endpoint, and the scoped key is read from DATATUG_TYPESENSE_API_KEY. " +
 			"-s/--server, --port, -U/--user and -P/--password are not accepted: a password on a command line stays in the shell history and the process list.",
 		RunE: scanCommandAction,
 	}
 	flags := cmd.Flags()
 	flags.StringP("project", "p", "", "Registered project id/name to scan into; with --directory, the id of a new project (default: the name of the folder)")
 	flags.StringP("directory", "d", "", "Path to the project directory (alternative to --project); made if it does not exist")
-	flags.StringP("driver", "D", "", "DB driver: sqlite3, postgres, mysql, oracle, sqlserver, couchdb, postgrest or libsql (postgres reads every schema; for every driver but sqlite3 the connection URL comes from the environment variable of --dsn-env)")
+	flags.StringP("driver", "D", "", "DB driver: sqlite3, postgres, mysql, oracle, sqlserver, couchdb, postgrest, libsql or typesense (postgres reads every schema; for every driver but sqlite3 the connection URL comes from the environment variable of --dsn-env)")
 	flags.StringP("server", "s", "", "Not accepted: a server's host is in the connection URL of --dsn-env")
 	flags.Int("port", 0, "Not accepted: a server's port is in the connection URL of --dsn-env")
 	flags.StringP("user", "U", "", "Not accepted: the user is in the connection URL of --dsn-env")
@@ -378,7 +388,7 @@ func scanCommandArgs() *cobra.Command {
 	flags.String("dbmodel", "", "ID of DB model: a plain name (default: the model the project already records for the database in this environment, else the model the other environments record for it when they agree, else the ID of the database)")
 	flags.String("env", "", "Environment the DB belongs to: a plain name. E.g.: LOCAL, DEV, SIT, UAT, PERF, PROD.")
 	flags.String("path", "", "Path to the SQLite database file (required for -D sqlite3); it must exist")
-	flags.String("dsn-env", "", "Environment variable that holds the connection URL, for -D postgres (postgres://user:password@host/database), -D mysql (mysql://user:password@host:3306/database), -D oracle (oracle://user:password@host:1521/service), -D sqlserver (sqlserver://user:password@host:1433/database), -D couchdb (couchdb://host:6984/database) -D postgrest (postgrest://host:3000/rest/v1) or -D libsql (libsql://host:8080). The host, port, user and password stay in the variable and are never written to the project, which holds only the name of the variable. The name must start with "+dbcopy.DescriptorEnvPrefix+" or be listed in "+dbcopy.DescriptorEnvAllowList)
+	flags.String("dsn-env", "", "Environment variable that holds the connection URL, for -D postgres (postgres://user:password@host/database), -D mysql (mysql://user:password@host:3306/database), -D oracle (oracle://user:password@host:1521/service), -D sqlserver (sqlserver://user:password@host:1433/database), -D couchdb (couchdb://host:6984/database) -D postgrest (postgrest://host:3000/rest/v1), -D libsql (libsql://host:8080) or -D typesense (typesense://host:8108/books). The host, port, user and password stay in the variable and are never written to the project, which holds only the name of the variable. The name must start with "+dbcopy.DescriptorEnvPrefix+" or be listed in "+dbcopy.DescriptorEnvAllowList)
 	registerFollowProjectLinkFlag(cmd)
 	_ = cmd.MarkFlagRequired("db")
 	_ = cmd.MarkFlagRequired("env")

@@ -56,6 +56,7 @@ Pinning the contract surface lets the implementation evolve without breaking use
 | [self-update](self-update/README.md) | datatug self-update, built from github.com/strongo/cli-helpers/selfupdate against datatug's own compiled-in cliinstall catalog entry. |
 | [install](install/README.md) | datatug install, built from github.com/strongo/cli-helpers/cliinstall against the same catalog entry — lists and installs the fleet CLIs relevant to datatug (ingitdb, ovdb, specscore). |
 | [backup](backup/README.md) | `backup new\|list\|pin\|run\|point list\|restore\|verify` — named, commit-safe backup profiles (secrets by reference) that keep incremental, append-only restore points of a project source in a git remote, a local folder or object storage; built on `db copy` (Draft; retention is a later Feature) |
+| [project-plan-licensing](project-plan-licensing/README.md) | One CLI follows the published project-sharing and Business activity model; distinguish source scopes and implemented controls from remaining integration and legal gates. |
 
 External command groups live in their own packages and are referenced here but not specified in this tree:
 

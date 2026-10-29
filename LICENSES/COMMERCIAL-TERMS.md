@@ -1,60 +1,108 @@
-# DataTug Commercial Terms of Use
+# DataTug Commercial Terms — working draft
 
-> **NOTICE: DRAFT VERSION — PENDING QUALIFIED LEGAL REVIEW**
->
-> This document sets forth draft commercial licensing terms for enterprise and organizational self-hosted deployments of DataTug. These terms apply solely to software modules located within the `commercial/` directory and proprietary enterprise features as defined herein.
+> **DRAFT — PENDING QUALIFIED LEGAL REVIEW.** The product boundary below is
+> owner-approved; proposed legal grants and restrictions are not a finalized
+> licence, checkout agreement, redistribution clearance or release approval.
 
----
+## 1. Covered material and one CLI
 
-## 1. Preamble & Scope
+DataTug provides one CLI executable. Its default build contains both Apache-2.0
+source components and proprietary `commercial/` components. This draft concerns
+only the proprietary components and separately contracted services. It does not
+relicense Apache components or third-party material, and does not make a feature
+proprietary merely because it has a plan flag or is used by an organisation.
+See [LICENSING.md](../LICENSING.md) for the source scopes and actual build boundary.
 
-DataTug is distributed under an open-core licensing model:
-1. **Community Edition (Apache License 2.0)**: The core DataTug toolchain—including the command-line interface (`datatug`), terminal UI (`datatug tui`), local daemon server (`datatug serve` running locally on loopback), local query execution, TugQL parser, schema explorer, Model Context Protocol (MCP) server, and standalone utilities—is licensed under the permissive Apache License 2.0.
-2. **Commercial Edition (DataTug Commercial Terms)**: Advanced centralized coordination, team synchronization, shared execution storage, team audit logging, SMS notification dispatch, and multi-tenant organizational deployments located in `commercial/` or gated by commercial feature flags require a valid, signed DataTug Commercial License.
+A final agreement must identify the licensor with authority to grant the rights,
+the covered versions/components, the customer and the purchased entitlement.
+A licence key alone is not a contract or evidence of ownership of third-party rights.
 
-## 2. Definitions
+## 2. Approved product boundary
 
-- **"Community Software"**: The open-source portions of DataTug contained within `cmd/`, `apps/`, `pkg/`, `internal/`, `testdata/`, `scripts/`, and `docs/`, licensed under Apache 2.0.
-- **"Commercial Features"**: Software located in `commercial/` and enterprise capabilities such as `central_watch_coordinator`, `shared_execution_store`, `team_audit_trail`, and `sms_notifications`.
-- **"Organizational Self-Hosted Deployment"**: Any multi-user, team-shared, or centralized service instance deployed within an organization's network, cloud VPC, or managed infrastructure.
-- **"License Key"**: A cryptographically signed Ed25519 token issued by DataTug or an authorized reseller authorizing specific tiers, capacities, and feature flags.
+The commercial product rules must match [DataTug pricing](https://datatug.app/en/pricing/).
+As approved on 2026-10-29:
 
-## 3. Grant of Commercial License
+- **Free:** unlimited owner-only private projects and unlimited public projects.
+  Public projects have no plan cap on users or editors. Personal and business
+  CLI, TUI, queries, Checks, MCP and CI use follow the same project rules.
+- **Pro:** adds five shared private projects, each permitting five authenticated
+  human users including the owner. Every permitted user counts regardless of
+  activity or role.
+- **Business:** unlimited projects and invitations. The first paid month has no
+  extra-active-user charges. After that, seven monthly active humans are
+  included; additional usage and prepaid capacity follow the purchased terms.
+- **Enterprise:** only the custom scope and commitments expressly agreed.
 
-Upon payment of applicable subscription or perpetual license fees and receipt of a valid License Key, DataTug grants Licensee a non-exclusive, non-transferable, revocable license to install, operate, and utilize Commercial Features strictly within the licensed capacity limits (e.g., maximum coordinators, maximum runners, maximum active team users).
+Merely running a server, serving many public-project users, connecting to a
+remote database or running CI does not create a paid-plan requirement. Sharing
+private projects is the relevant paid product boundary. Project permissions
+remain separate from both payment and activity measurement.
 
-### Commercial Tiers:
-- **Pro**: Designed for departmental teams requiring centralized watch coordination and shared runner pools with standard capacity limits.
-- **Enterprise Self-Hosted**: Designed for large organizations requiring high-availability coordinator clusters, custom runner scaling, team audit trail logging, and enterprise SLAs.
+## 3. Business activity and entitlement scope
 
-## 4. Verification and Air-Gapped Operation
+An active human edits a data query or executes a data query in an applicable
+shared cloud project, including local execution. Loading table or dashboard data
+counts when it executes a query. Metadata viewing and opening/focusing an editor
+alone do not count. Each human counts once per Business subscription billing
+month across that subscription's applicable shared projects. Public and owner-only
+private projects do not consume shared-private active-user capacity.
 
-1. **Offline & Air-Gapped Guarantee**: DataTug Commercial License verification operates 100% offline via local Ed25519 digital signature validation. The software does not "phone home" or require outbound network connectivity to any external licensing server.
-2. **14-Day Grace Period**: If a time-limited subscription license expires, DataTug enters a fourteen (14) calendar-day operational grace period. During this period:
-   - All commercial features remain fully functional to avoid service disruption.
-   - Actionable warning diagnostics are logged to standard error (`stderr`) alerting operators of the expiration and instructions to renew.
-   - Upon expiration of the grace period without renewal, commercial features refuse startup or fail closed until a valid key is provided.
+Invitations and passive membership are not Business activity. Runners, CI jobs,
+service credentials and retries are not additional human seats and must not
+conceal attribution of qualifying human activity. Accepted activity reporting
+requires authenticated, project-scoped server authority; a local report is not
+proof of actual execution.
 
-## 5. Free Developer Guarantee
+Prepaid units add monthly capacity under the published product rule; unused
+monthly capacity does not roll over. Non-empty prepaid closing is not yet
+supported by the inspected backend close path. This draft does not activate
+prepaid billing or choose a partial-window rule.
 
-Nothing in these Commercial Terms shall restrict, encumber, or require payment for:
-- Individual local development workflows using `datatug` CLI or TUI.
-- Running `datatug serve` on localhost for personal exploration or agent-assisted development.
-- Interacting with local databases, repositories, or local file storage.
-- Using TugQL queries, MCP protocol bridges, and standard exporters.
+Amounts, discounts, tax, refunds, billing periods and purchased limits belong to
+the applicable checkout/order and subscription terms. Preserve their version;
+later website edits must not silently reduce purchased limits. Free allowances
+may change only with the notice described by the pricing policy.
 
-## 6. Restrictions
+## 4. Free-use and distribution clauses to finalize
 
-Licensee shall not:
-- Tamper with, alter, or circumvent cryptographic license signature verification or capacity metering.
-- Sub-license, lease, or offer DataTug Commercial Features as a public managed service (SaaS) to third parties without an explicit OEM agreement.
-- Remove, alter, or obscure any proprietary notices or copyright labels on commercial source code or binary distributions.
+The final proprietary-component agreement must expressly authorize free operation
+of the official composite CLI for the Free cases above, including personal
+private projects and collaboration on public projects. It must identify permitted
+download, internal copying, installation and redistribution of the unmodified
+official binary and its required notices. It must separately define any permitted
+building or modification of proprietary source. These rights must not be inferred
+from the Apache licence of other directories.
 
-## 7. Disclaimer of Warranty and Limitation of Liability
+Paid operation of the covered proprietary components for shared private projects
+must be tied to the applicable Pro, Business or Enterprise entitlement. Do not
+impose those restrictions on separately Apache-licensed source or derivative
+works exercising their existing rights. Third-party grants and trademark rights
+must be checked independently. These clauses are review requirements, not an
+assertion that all proposed distribution rights have already been granted.
 
-EXCEPT AS EXPRESSLY AGREED IN A SEPARATE WRITTEN COMMERCIAL CONTRACT:
-THE COMMERCIAL SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. IN NO EVENT SHALL DATATUG AUTHORS, CONTRIBUTORS, OR AFFILIATES BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE USE OR INABILITY TO USE THE COMMERCIAL SOFTWARE.
+## 5. Enforcement, expiry and operation
 
----
+The current offline Ed25519 verifier and legacy coordinator startup check do not
+implement the product sharing and Business usage model by themselves. A final
+agreement must distinguish legal obligations from implemented controls, specify
+entitlement/issuer trust and operation when entitlement data is unavailable, and
+state any support or service commitments expressly.
 
-*For commercial licensing inquiries, enterprise support contracts, or custom volume agreements, contact: sales@datatug.app*
+The existing verifier calculates a fourteen-day expiry grace period at the time
+it verifies a key. This does not establish automatic renewal or continuous expiry
+checks. The published subscription-end policy makes affected shared projects
+read-only and disables their AI; personal and public Free projects retain their
+Free limits. Future enforcement must preserve permissions and avoid treating a
+missing key as proof of unrestricted shared-private entitlement.
+
+## 6. Finalization checklist
+
+Before this draft can become an effective commercial licence or release clearance:
+identify the legal licensor and authority; finalize the free-use, copying,
+redistribution and proprietary-source rights; resolve the selected Commons Clause
+dependency; reconcile signed entitlement versions with purchased plan limits;
+review expiry, termination, warranty, liability and applicable-law provisions;
+and verify actual distribution notices and enforcement claims.
+
+No prices, payment activation, AI allowances, public releases or additional
+permissions for AG Grid/Charts are introduced by this draft.

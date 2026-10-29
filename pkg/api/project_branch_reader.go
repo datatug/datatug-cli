@@ -373,8 +373,13 @@ func readQualifiedEnvironment(reader *qualifiedProjectReader, id string) (*datat
 		if err := json.Unmarshal(legacy, &summary); err != nil {
 			return nil, nil, err
 		}
+		summary.SetID(id)
+		if err := summary.Validate(); err != nil {
+			return nil, nil, err
+		}
 		env.ProjectItem = summary.ProjectItem
 		env.DbServers = summary.Servers
+		env.EditionConnections = append([]string(nil), summary.EditionConnections...)
 		selected = legacy
 	}
 	env.SetID(id)

@@ -401,6 +401,8 @@ func detectiveError(err error) error {
 		return nil
 	}
 	switch {
+	case errors.Is(err, datatug.ErrProjectUsageIncomplete):
+		return newContractError(apicontract.ErrCodeSourceUnavailable, "all retained references must be verified before archive or restore", "usage")
 	case errors.Is(err, detective.ErrConflict):
 		return newContractError(apicontract.ErrCodeRevisionConflict, "item changed; reload before saving", "version")
 	case errors.Is(err, detective.ErrNotFound):

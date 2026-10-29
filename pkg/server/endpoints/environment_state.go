@@ -99,6 +99,7 @@ func saveEnvironmentOrderHandler(w http.ResponseWriter, r *http.Request) {
 	writeProjectMutationJSON(w, r, 200, result)
 }
 func environmentOperationStatusHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	var request dto.EnvironmentOperationStatusRequest
 	if !readEnvironmentRequest(w, r, &request) {
 		return

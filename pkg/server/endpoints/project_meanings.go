@@ -50,6 +50,8 @@ func projectMeaningChangeHandler(w http.ResponseWriter, r *http.Request) {
 }
 func writeMeaningError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
+	case errors.Is(err, datatug.ErrProjectUsageIncomplete), errors.Is(err, datatug.ErrProjectObjectReferenced):
+		writeLifecycleError(w, r, err)
 	case errors.Is(err, datatug.ErrMeaningConflict), errors.Is(err, datatug.ErrMeaningReferenced), errors.Is(err, datatug.ErrMeaningIncomplete), errors.Is(err, datatug.ErrMeaningOperationConflict):
 		code := "MEANING_REVISION_CONFLICT"
 		if errors.Is(err, datatug.ErrMeaningReferenced) {

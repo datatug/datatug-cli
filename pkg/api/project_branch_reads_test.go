@@ -534,12 +534,19 @@ func TestQualifiedReaderDualLayoutsAndLegacyEnvironment(t *testing.T) {
 
 	envDir := filepath.Join(dir, "environments", "legacy")
 	require.NoError(t, os.MkdirAll(envDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(envDir, "environment-summary.json"), []byte(`{"id":"legacy","title":"Legacy","dbServers":[{"id":"server"}]}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(envDir, "environment-summary.json"), []byte(`{"id":"legacy","title":"Legacy","dbServers":[{"driver":"postgres"}]}`), 0o600))
 	environments, err := readQualifiedEnvironments(reader)
 	require.NoError(t, err)
 	require.Len(t, environments, 1)
 	require.Equal(t, "Legacy", environments[0].env.Title)
 	require.Len(t, environments[0].env.DbServers, 1)
+	require.Equal(t, "postgres", environments[0].env.DbServers[0].Driver)
+	// Legacy layout is supported; incomplete server definitions are not.
+	require.NoError(t, os.WriteFile(filepath.Join(envDir, "environment-summary.json"), []byte(`{"id":"legacy","dbServers":[{"id":"server"}]}`), 0o600))
+	if _, err := readQualifiedEnvironments(reader); err == nil {
+		t.Fatal("legacy summary without an owning driver was accepted")
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(envDir, "environment-summary.json"), []byte(`{"id":"legacy","title":"Legacy","dbServers":[{"driver":"postgres"}]}`), 0o600))
 
 	invalidEnvDir := filepath.Join(dir, "environments", "broken")
 	require.NoError(t, os.MkdirAll(invalidEnvDir, 0o755))

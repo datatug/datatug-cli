@@ -70,6 +70,9 @@ func (s *FederatedStream) Limitations() []Limitation {
 
 // StreamFederatedTugQL exposes the secured DALgo reader without collecting rows.
 func (e *Executor) StreamFederatedTugQL(ctx context.Context, document []byte, sourceURLs map[string]string, variables map[string]any) (*FederatedStream, error) {
+	if err := refuseContextVariables(document); err != nil {
+		return nil, err
+	}
 	query, err := tugql.Deserialize(document)
 	if err != nil {
 		return nil, fmt.Errorf("parse federated TugQL: %w", err)

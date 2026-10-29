@@ -55,6 +55,9 @@ func (e *Executor) RunExactAggregateTugQL(ctx context.Context, sourceURL string,
 	if err := ctx.Err(); err != nil {
 		return ExactAggregateResult{}, err
 	}
+	if err := refuseContextVariables(document); err != nil {
+		return ExactAggregateResult{}, err
+	}
 	plan, err := prepareExactAggregate(originalDocument, document, columns)
 	if err != nil {
 		return ExactAggregateResult{}, err

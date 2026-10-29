@@ -86,6 +86,9 @@ func (e *Executor) runStructured(ctx context.Context, sourceURL string, query da
 // RunTugQL deserializes a TugQL-YAML document (dal-go/dalgo/tugql.Deserialize)
 // and executes it exactly like RunStructured (REQ:tugql-query-type).
 func (e *Executor) RunTugQL(ctx context.Context, sourceURL string, tugqlDoc []byte, variables map[string]any) (Result, error) {
+	if err := refuseContextVariables(tugqlDoc); err != nil {
+		return Result{}, err
+	}
 	query, err := tugql.Deserialize(tugqlDoc)
 	if err != nil {
 		return Result{}, fmt.Errorf("secureread: parse TugQL: %w", err)

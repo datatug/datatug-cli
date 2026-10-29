@@ -18,6 +18,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/httpsource"
 	"github.com/datatug/datatug-cli/pkg/queryresults"
+	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/spf13/cobra"
 )
 
@@ -539,6 +540,9 @@ func buildQuery(o queryOptions, stdin io.Reader) (dal.Query, string, error) {
 	if o.from != "" {
 		query := fromQuery(o, nil)
 		text, _ := tugql.Serialize(query.(dal.StructuredQuery))
+		if err := refuseAdHocContextVariables(string(text)); err != nil {
+			return nil, "", err
+		}
 		return query, string(text), nil
 	}
 	var (
@@ -560,7 +564,21 @@ func buildQuery(o queryOptions, stdin io.Reader) (dal.Query, string, error) {
 	if err != nil {
 		return nil, "", Exit(fmt.Sprintf("query %s: %v", o.file, err), exitCodeUsage)
 	}
+	if err = refuseAdHocContextVariables(string(content)); err != nil {
+		return nil, "", err
+	}
 	return query, string(content), nil
+}
+
+// refuseAdHocContextVariables refuses an ad-hoc structured TugQL document
+// that uses a context variable (datatug.QueryDef.RefuseContextVariables):
+// only the DataTug web app binds one, so it exits before any source opens.
+func refuseAdHocContextVariables(document string) error {
+	queryDef := datatug.QueryDef{Type: datatug.QueryTypeTugQL, Text: document, StructuredBody: true}
+	if err := queryDef.RefuseContextVariables(); err != nil {
+		return Exit(err.Error(), exitCodeUsage)
+	}
+	return nil
 }
 
 // fromQuery selects every row of the --from collection, paged by --limit and

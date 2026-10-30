@@ -18,6 +18,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/storage"
+	"github.com/julienschmidt/httprouter"
 )
 
 // What the tests of this file cover, exactly.
@@ -767,5 +768,47 @@ func TestRoutes_ExecSelectWithNoProjectIsAskedForOne(t *testing.T) {
 	}
 	if *asked != 0 {
 		t.Errorf("no project reached %d project stores, want 0", *asked)
+	}
+}
+
+// create_entity refuses an ID that is taken and leaves the entity as it was;
+// save_entity on the same ID still replaces it.
+func TestRoutes_CreateEntityRefusesAnExistingID(t *testing.T) {
+	withApicoreHandle(t)
+	previousStore := storage.NewDatatugStore
+	t.Cleanup(func() { storage.NewDatatugStore = previousStore })
+	scope, _ := captureTestSetup(t, "alice", []string{"admin"}, true)
+	projectDir, ok := api.ProjectDir(scope.Project)
+	if !ok {
+		t.Fatal("the project is not served")
+	}
+	query := "?project=" + url.QueryEscape(scope.Project)
+	create := "/datatug/entities/create_entity" + query
+	// Through the route table, so the route itself is what is proved.
+	routes := httprouter.New()
+	entitiesRoutes("/datatug", routes, nil, false, Capabilities{AllowWrites: true})
+
+	if w := sendBody(t, routes.ServeHTTP, http.MethodPost, create, map[string]any{"id": "Order", "title": "First"}); w.Code != http.StatusCreated {
+		t.Fatalf("a new entity: %d %s, want 201", w.Code, w.Body.String())
+	}
+	file := filepath.Join(projectDir, "entities", "Order", "Order.entity.json")
+	first, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := sendBody(t, routes.ServeHTTP, http.MethodPost, create, map[string]any{"id": "Order", "title": "Second"})
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "already exists") {
+		t.Fatalf("a create of an ID that is taken: %d %s, want a 400 that says it exists", w.Code, w.Body.String())
+	}
+	if after, err := os.ReadFile(file); err != nil || string(after) != string(first) {
+		t.Fatalf("the refused create changed the entity: %s, %v", after, err)
+	}
+
+	if w := sendBody(t, saveEntity, http.MethodPut, "/datatug/entities/save_entity"+query, map[string]any{"id": "Order", "title": "Second"}); w.Code != http.StatusCreated {
+		t.Fatalf("a save of an existing entity: %d %s, want 201", w.Code, w.Body.String())
+	}
+	if after, err := os.ReadFile(file); err != nil || string(after) == string(first) {
+		t.Fatalf("the save did not replace the entity: %v", err)
 	}
 }

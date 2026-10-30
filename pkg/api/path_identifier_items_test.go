@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -259,7 +260,11 @@ func askedStores(t *testing.T) *int {
 	}
 	projectStore := mockProjectStore{
 		dbServersStoreFunc: func(string) datatug.ProjDbServersStore { return servers },
-		loadBoardFunc: func(context.Context, string, ...datatug.StoreOption) (*datatug.Board, error) {
+		loadBoardFunc: func(_ context.Context, id string, _ ...datatug.StoreOption) (*datatug.Board, error) {
+			// A create uses an absent plain target; read/delete positives use b1.
+			if id == "new-board" {
+				return nil, os.ErrNotExist
+			}
 			return &datatug.Board{}, nil
 		},
 		loadEntityFunc: func(context.Context, string, ...datatug.StoreOption) (*datatug.Entity, error) {
@@ -274,7 +279,7 @@ func askedStores(t *testing.T) *int {
 	storage.NewDatatugStore = func(string) (storage.Store, error) {
 		return mockStore{getProjectStoreFunc: func(string) datatug.ProjectStore {
 			*asked++
-			return projectStore
+			return guardedBoardTestProject{ProjectStore: projectStore}
 		}}, nil
 	}
 	return asked
@@ -301,7 +306,7 @@ func itemRef(id string) dto.ProjectItemRef {
 }
 
 func plainBoard(id string) datatug.Board {
-	return datatug.Board{ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: id}}}
+	return datatug.Board{ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: id, Title: "Board", Folder: "~"}}}
 }
 
 func plainEntity(id, title string) *datatug.Entity {
@@ -534,7 +539,7 @@ func TestEntries_APlainRequestReachesTheStore(t *testing.T) {
 		"GetBoard":      func() error { _, err := GetBoard(ctx, itemRef("b1")); return err },
 		"DeleteBoard":   func() error { return DeleteBoard(ctx, itemRef("b1")) },
 		"SaveBoard":     func() error { _, err := SaveBoard(ctx, plainProject(), plainBoard("b1")); return err },
-		"CreateBoard":   func() error { _, err := CreateBoard(ctx, plainProject(), plainBoard("b1")); return err },
+		"CreateBoard":   func() error { _, err := CreateBoard(ctx, plainProject(), plainBoard("new-board")); return err },
 		"GetEntity":     func() error { _, err := GetEntity(ctx, itemRef("Customer")); return err },
 		"DeleteEntity":  func() error { return DeleteEntity(ctx, itemRef("Customer")) },
 		"SaveEntity":    func() error { return SaveEntity(ctx, plainProject(), plainEntity("Customer", "")) },
@@ -590,7 +595,7 @@ func TestEntries_AStoreFailureIsOneFixedAnswerThatQuotesNoPath(t *testing.T) {
 		previous := storage.NewDatatugStore
 		t.Cleanup(func() { storage.NewDatatugStore = previous })
 		storage.NewDatatugStore = func(string) (storage.Store, error) {
-			return mockStore{getProjectStoreFunc: func(string) datatug.ProjectStore { return project }}, nil
+			return mockStore{getProjectStoreFunc: func(string) datatug.ProjectStore { return guardedBoardTestProject{ProjectStore: project} }}, nil
 		}
 	}
 	for _, cause := range causes {

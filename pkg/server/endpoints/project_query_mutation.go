@@ -61,6 +61,7 @@ func getProjectQueryRevisionHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func projectCapabilitiesHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	ref, err := newProjectRef(r.URL.Query())
 	if err != nil {
 		writeProjectMutationError(w, r, err)
@@ -71,7 +72,12 @@ func projectCapabilitiesHandler(w http.ResponseWriter, r *http.Request) {
 		writeProjectMutationError(w, r, err)
 		return
 	}
-	writeProjectMutationJSON(w, r, http.StatusOK, projectCapabilitiesWithTags{ProjectCapabilities: result, BoardTags: true, DbServerTags: true})
+	guardedBoardCreate := false
+	query, queryErr := guardedBoardCreateSelector(r.URL.RawQuery)
+	if queryErr == nil {
+		guardedBoardCreate = api.LocalGuardedBoardCreateSupported(r.Context(), ref, query.Get("branch"))
+	}
+	writeProjectMutationJSON(w, r, http.StatusOK, projectCapabilitiesWithTags{ProjectCapabilities: result, BoardTags: true, DbServerTags: true, GuardedBoardCreate: guardedBoardCreate})
 }
 
 func projectConnectionCatalogHandler(w http.ResponseWriter, r *http.Request) {

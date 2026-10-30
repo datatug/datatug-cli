@@ -68,7 +68,7 @@ require (
 	github.com/posthog/posthog-go v1.24.3
 	github.com/redis/go-redis/v9 v9.7.3
 	github.com/sijms/go-ora/v3 v3.0.1
-	github.com/sneat-co/sneat-go-core v0.71.16
+	github.com/sneat-co/sneat-go-core v0.74.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.12.1
@@ -200,7 +200,7 @@ require (
 	github.com/sergi/go-diff v1.4.0 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/skeema/knownhosts v1.3.2 // indirect
-	github.com/strongo/analytics v0.2.10 // indirect
+	github.com/strongo/analytics v0.2.12 // indirect
 	github.com/strongo/decimal v0.1.2 // indirect
 	github.com/strongo/gotwilio v0.0.0-20160123000810-f024bbefe80f // indirect
 	github.com/strongo/strongoapp v0.31.72 // indirect

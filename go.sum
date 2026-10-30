@@ -407,8 +407,8 @@ github.com/sijms/go-ora/v3 v3.0.1/go.mod h1:9NMI4/C/J9ExE/YNgQQlZXic2U1aCLHchJmm
 github.com/sirupsen/logrus v1.7.0/go.mod h1:yWOB1SBYBC5VeMP7gHvWumXLIWorT60ONWic61uBYv0=
 github.com/skeema/knownhosts v1.3.2 h1:EDL9mgf4NzwMXCTfaxSD/o/a5fxDw/xL9nkU28JjdBg=
 github.com/skeema/knownhosts v1.3.2/go.mod h1:bEg3iQAuw+jyiw+484wwFJoKSLwcfd7fqRy+N0QTiow=
-github.com/sneat-co/sneat-go-core v0.71.16 h1:mv1uAQ4W62OMK5fTLBr2y+kV2pg5rac/J4l+wz+pwek=
-github.com/sneat-co/sneat-go-core v0.71.16/go.mod h1:88+0btU9/1LxkheqKPSYrq4Pr1qXDXLjivbaytNgFM4=
+github.com/sneat-co/sneat-go-core v0.74.0 h1:CyHWJYj5bb+RaOLQQTsipkS59GuCauU2fIexCOKDyCg=
+github.com/sneat-co/sneat-go-core v0.74.0/go.mod h1:jrmhT0s23CtEYd2+054X/O9YNUzQMnFOHO5kQHZUbxs=
 github.com/spf13/cobra v1.10.2 h1:DMTTonx5m65Ic0GOoRY2c16WCbHxOOw6xxezuLaBpcU=
 github.com/spf13/cobra v1.10.2/go.mod h1:7C1pvHqHw5A4vrJfjNwvOdzYu0Gml16OCs2GRiTUUS4=
 github.com/spf13/pflag v1.0.9/go.mod h1:McXfInJRrz4CZXVZOBLb0bTZqETkiAhM9Iw0y3An2Bg=
@@ -425,8 +425,8 @@ github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWD
 github.com/stretchr/testify v1.12.1/go.mod h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=
 github.com/strongo/aichat v0.15.1 h1:tDHlOyI/gyGqzCXRUZkLCwNS0inUyNpoYUFkzg1wSpk=
 github.com/strongo/aichat v0.15.1/go.mod h1:x5NGnyj0TMozy+HiNhzMGfmmn7dBeqLptn4fZZbtqbo=
-github.com/strongo/analytics v0.2.10 h1:VX7QkQvPX+sI3x+5wPTbH3wotlizZopqmVK95KqxFtM=
-github.com/strongo/analytics v0.2.10/go.mod h1:o9czh6b7MoBhoQe7DSd5Mr1t8Ndfjc7NSZDMtkXFedw=
+github.com/strongo/analytics v0.2.12 h1:T+g84q9jRhAFBP9MAHd4fYmKVvJAi8DqInGZYEyLlvI=
+github.com/strongo/analytics v0.2.12/go.mod h1:WRQ+hUgzABvqmlg5dPdFECcrtWziXTQg9ww5yLP7KEg=
 github.com/strongo/buildinfo v0.3.0 h1:nPbCrSA+7I3bct6mwZ24U6SHfV7TaRafoYzDucwl1Qg=
 github.com/strongo/buildinfo v0.3.0/go.mod h1:JpxZ3Jku81LJC1RNIqCNYwguDzLk90eemxUXx4JnSlA=
 github.com/strongo/cli-helpers v0.27.1 h1:mdvCeYCkS5zah5eKmPHxUiWEPOfUYtvV+uVjSSTvmSU=

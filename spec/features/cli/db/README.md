@@ -18,6 +18,7 @@ status: Planned
 
 ```
 datatug db <url>
+datatug db get --space <space> --project <project> --connection <catalog-id> --collection <table> --id <record-id> --realm <realm>
 ```
 
 ## Contents
@@ -39,7 +40,7 @@ Users often want to look at a database that has nothing to do with a DataTug pro
 
 #### REQ: parses-dburl
 
-The positional argument MUST be parsed by `github.com/xo/dburl`. Supported schemes (sqlite, mssql, etc.) MUST match the drivers linked into the CLI binary.
+For the viewer invocation, the positional argument MUST be parsed by `github.com/xo/dburl`. Supported schemes (sqlite, mssql, etc.) MUST match the drivers linked into the CLI binary.
 
 #### REQ: missing-url-fails
 
@@ -63,7 +64,17 @@ The viewer MUST connect read-only by default, mirroring [scan REQ: connection-st
 
 #### REQ: project-independent
 
-`datatug db` MUST NOT require, resolve, or modify any DataTug project. It MUST work in any directory, regardless of `~/.datatug.yaml`.
+The viewer invocation `datatug db <url>` MUST NOT require, resolve, or modify any DataTug project. It MUST work in any directory, regardless of `~/.datatug.yaml`.
+
+### Protected record lookup
+
+#### REQ: protected-record-lookup
+
+`datatug db get` MUST send only `spaceID`, `projectId`, `connectionId`, `collection`, and `id` to `POST /v0/datatug/access/read`. The connection selector is the exact project catalog connection ID. The server owns the source binding, subject, opener, and shared core authorization. The command MUST NOT open a local database or evaluate grants itself.
+
+The command MUST use the separate product login described in [CLI product authentication](../README.md#req-product-only-login). `--base-url` selects an HTTPS API ending in `/v0/` (loopback HTTP is permitted for development); `--auth-host`, `--realm`, and `--insecure-storage` select the matching product credential. Redirects MUST NOT receive the bearer. The response MUST be a bounded JSON object containing only a non-null `record` object; output is `{"record":{...}}`, preserving JSON integer precision. Any error MUST withhold record data. Missing or invalid selectors exit `2`, authentication/authorization HTTP denials exit `5`, and other server failures exit `4`.
+
+This initial protected profile supports typed point reads. Protected recordsets and object-grant execution remain unavailable; existing local viewer and query commands retain their existing behavior.
 
 ## Parameters
 
@@ -87,9 +98,15 @@ The viewer MUST connect read-only by default, mirroring [scan REQ: connection-st
 | [CLI](../README.md) | Parent. |
 | [ui](../ui/README.md) | The viewer this command launches SHOULD be the same DB viewer the TUI uses. |
 | [backup](../backup/README.md) | `backup` keeps named, repeatable restore points of a project source on top of `db copy`; `db copy` and `db export` stay one-shot, and remote or cloud destinations belong to `backup` only. |
-| [scan](../scan/README.md) | Independent. `scan` updates a project; `db` only opens a viewer. The subcommand [`db add`](add/README.md) is the exception to "no project": it registers a database in a project, and writes the files a scan writes. |
+| [scan](../scan/README.md) | Independent. `scan` updates a project; `db <url>` only opens a viewer. [`db add`](add/README.md) registers a project database, while `db get` identifies a protected project connection through the server. |
 
 ## Acceptance Criteria
+
+### AC: protected-record-lookup
+
+**Requirements:** db#req:protected-record-lookup
+
+Given a current product credential and five valid selectors, the command sends exactly the selector DTO and prints only a successful record. HTTP denial, unavailable authority, malformed response, redirect, or credential error produces no record output. Client protocol tests verify this boundary; a real grant/read/revoke/expiry journey is a separate integration gate.
 
 ### AC: missing-url-rejected
 

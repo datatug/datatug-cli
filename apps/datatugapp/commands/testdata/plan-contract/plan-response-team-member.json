@@ -1,0 +1,79 @@
+{
+  "v": 1,
+  "payer": "organisation",
+  "accountId": "t4Bq9",
+  "accountTitle": "Example Team",
+  "role": "member",
+  "plan": "team",
+  "effectivePlan": "team",
+  "status": "active",
+  "period": "month",
+  "paidUntil": "2026-03-20T10:12:00Z",
+  "founding": false,
+  "limits": {
+    "contributors": 5,
+    "projectGuests": 0,
+    "aiQuestions": 13,
+    "aiModelClasses": [
+      "fast",
+      "standard"
+    ],
+    "aiPaysFor": "contributors"
+  },
+  "ai": {
+    "unit": "questions",
+    "enforced": true,
+    "periodId": "2026-03",
+    "used": 4,
+    "limit": 13,
+    "left": 9,
+    "resetsAt": "2026-04-01T00:00:00Z",
+    "today": {
+      "used": 1,
+      "limit": 17
+    },
+    "blocked": null,
+    "models": [
+      {
+        "id": "example-fast",
+        "class": "fast",
+        "weight": 1,
+        "default": true
+      },
+      {
+        "id": "example-fast-b",
+        "class": "fast",
+        "weight": 1,
+        "default": false
+      },
+      {
+        "id": "example-standard",
+        "class": "standard",
+        "weight": 3,
+        "default": false
+      }
+    ]
+  },
+  "ownKeyWorks": true,
+  "canUpgrade": false,
+  "upgradeUrl": "https://example.com/pricing",
+  "supportEmail": "support@example.com",
+  "accounts": [
+    {
+      "accountId": "p7Xk2",
+      "kind": "personal",
+      "title": "Alex Example",
+      "plan": "free",
+      "role": "owner",
+      "pays": false
+    },
+    {
+      "accountId": "t4Bq9",
+      "kind": "organisation",
+      "title": "Example Team",
+      "plan": "team",
+      "role": "member",
+      "pays": true
+    }
+  ]
+}

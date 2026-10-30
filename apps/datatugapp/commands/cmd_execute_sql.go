@@ -7,9 +7,9 @@ import (
 	"io"
 	"log"
 	"os"
-	"regexp"
 	"strings"
 
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/dbconnection"
 	"github.com/datatug/sql2csv"
 	"github.com/google/uuid"
@@ -59,11 +59,45 @@ type executeSQLCommand struct {
 	OutputFormat string
 }
 
+// errExecuteSQLPostgresDriver is the one answer to a PostgreSQL driver name. It is
+// static, so that no part of the connection the caller typed is in it.
+var errExecuteSQLPostgresDriver = errors.New("the PostgreSQL drivers (pgx, pgx/v5) are not available to this command: the PostgreSQL adapter opens a source from a connection URL held in an environment variable (env:NAME), never from a password on a command line")
+
 func (v *executeSQLCommand) Validate() error {
+	// The PostgreSQL adapter's import registers these two names with database/sql
+	// in the binary, and this command opens a driver by the name it is given, with
+	// the host, user and password of its flags.
+	switch v.Driver {
+	case "pgx", "pgx/v5":
+		return validation.NewBadRequestError(errExecuteSQLPostgresDriver)
+	}
 	if v.Query != "" && v.CommandText != "" {
 		return validation.NewBadRequestError(errors.New("either 'query' or 'consoleCommand-text' arguments should be specified but not both at the same time"))
 	}
 	return nil
+}
+
+// executeSQLFatal and executeSQLColumnTypes are test seams; they default to
+// log.Fatal and (*sql.Rows).ColumnTypes.
+var (
+	executeSQLFatal       = log.Fatal
+	executeSQLColumnTypes = (*sql.Rows).ColumnTypes
+)
+
+// String describes the command for a message, with the password hidden. %+v
+// uses it, so printing the command can never print the password.
+func (v *executeSQLCommand) String() string {
+	hidden := *v
+	if hidden.Password != "" {
+		hidden.Password = "xxxxx"
+	}
+	type fields executeSQLCommand // no String method: avoids recursing
+	return fmt.Sprintf("%+v", fields(hidden))
+}
+
+// redact removes the command's password, and every URL secret, from text.
+func (v *executeSQLCommand) redact(text string) string {
+	return dbcopy.RedactTextWithSecrets(text, v.Password)
 }
 
 // Execute - executes SQL consoleCommand
@@ -88,12 +122,12 @@ func (v *executeSQLCommand) Execute() error {
 
 	var db *sql.DB
 
-	log.Printf("Connecting to: %v\n", regexp.MustCompile("password=.+?(;|$)").ReplaceAllString(connString.String(), "password=******"))
+	log.Printf("Connecting to: %v\n", v.redact(connString.String()))
 
 	// Create connection pool
 
 	if db, err = sql.Open(v.Driver, connString.String()); err != nil {
-		log.Fatal("Error creating connection pool: " + err.Error())
+		executeSQLFatal("Error creating connection pool: " + v.redact(err.Error()))
 	}
 	// Close the database connection pool after consoleCommand executes
 	defer func() {
@@ -109,6 +143,7 @@ func (v *executeSQLCommand) Execute() error {
 
 	var rows *sql.Rows
 	if rows, err = db.Query(v.CommandText); err != nil {
+		err = dbcopy.RedactErrorWithLiterals(err, v.Password)
 		log.Printf("Failed to updateUrlConfig %v: %v", v.CommandText, err)
 		return err
 	}
@@ -119,7 +154,7 @@ func (v *executeSQLCommand) Execute() error {
 	}()
 
 	var columnTypes []*sql.ColumnType
-	if columnTypes, err = rows.ColumnTypes(); err != nil {
+	if columnTypes, err = executeSQLColumnTypes(rows); err != nil {
 		return err
 	}
 	colNames := make([]interface{}, len(columnTypes))

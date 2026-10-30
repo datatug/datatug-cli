@@ -6,16 +6,25 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/incidents"
 	"github.com/datatug/datatug-core/pkg/investigation"
 )
 
+var (
+	compareFactsProjectStoreFor       = api.ProjectStoreFor
+	compareFactsIncidentViewHook      = api.IncidentView
+	proveNativeFactsBindingHook       = proveNativeFactsBinding
+	resolveExecutionSourceHookCompare = resolveExecutionSource
+	executionQueryDocumentHookCompare = executionQueryDocument
+)
+
 // executeCompareFactsSide binds one current-policy-visible incident cohort to
-// one saved DTQL query parameter. It accepts only structured SQLite and
+// one saved TugQL query parameter. It accepts only structured SQLite and
 // inGitDB paths whose parsed query proves an exact `field In $parameter` node.
 // HTTP templates and opaque SQL cannot provide that proof, so they fail before
 // computeRunQuery reaches a data source rather than looping or filtering rows.
@@ -27,7 +36,7 @@ func executeCompareFactsSide(ctx context.Context, request apicontract.CompareReq
 	if err != nil {
 		return compareSideData{}, err
 	}
-	view, _, err := api.IncidentView(ctx, stored, events)
+	view, _, err := compareFactsIncidentViewHook(ctx, stored, events)
 	if err != nil {
 		return compareSideData{}, newAccessDenied("current access policy does not permit this incident")
 	}
@@ -35,7 +44,7 @@ func executeCompareFactsSide(ctx context.Context, request apicontract.CompareReq
 	if err != nil {
 		return compareSideData{}, err
 	}
-	parameterID, err := proveNativeFactsBinding(ctx, request.QueryID, side, entity, field)
+	parameterID, err := proveNativeFactsBindingHook(ctx, request.QueryID, side, entity, field)
 	if err != nil {
 		return compareSideData{}, err
 	}
@@ -85,27 +94,36 @@ func visibleFactCohort(view incidents.IncidentView, side apicontract.CompareSide
 }
 
 func proveNativeFactsBinding(ctx context.Context, queryID string, side apicontract.CompareSideSpec, entity, field string) (string, error) {
+	// The source below is resolved in side.Environment, which the project store turns
+	// into a folder name, before computeRunQuery's own scope check runs: a name that
+	// is not a plain name goes no further.
+	if api.ValidateIdentifier("environment", side.Environment) != nil {
+		return "", newInvalidRequest("environment", api.PlainNameRule)
+	}
 	projectDir, ok := api.ProjectDir(side.Project)
 	if !ok {
-		return "", newNotFound(fmt.Sprintf("unknown project %q", side.Project))
+		return "", newNotFound(fmt.Sprintf("unknown project %q", dbcopy.SourceIDDisplay(side.Project)))
 	}
 	if resolved, err := api.ResolveStoreID(side.StoreID, side.Project); err != nil || resolved != side.StoreID {
 		return "", newInvalidRequest("storeId", "does not identify the exact configured project store")
 	}
 	canonicalID, err := api.ResolveQueryID(projectDir, queryID)
 	if err != nil {
-		return "", newNotFound(fmt.Sprintf("query %q not found", queryID))
+		return "", newNotFound(fmt.Sprintf("query %q not found", dbcopy.QueryIDDisplay(queryID)))
 	}
-	projectStore, err := api.ProjectStoreFor(side.Project)
+	projectStore, err := compareFactsProjectStoreFor(side.Project)
 	if err != nil {
 		return "", newInvalidRequest("project", err.Error())
 	}
 	queryDef, err := projectStore.LoadQuery(ctx, canonicalID)
 	if err != nil {
-		return "", newNotFound(fmt.Sprintf("query %q not found", queryID))
+		return "", newNotFound(fmt.Sprintf("query %q not found", dbcopy.QueryIDDisplay(queryID)))
 	}
-	if queryDef.Type != datatug.QueryTypeDTQL {
-		return "", newSourceUnavailable("facts comparison requires a saved structured DTQL query with native set binding")
+	if err = queryDef.RefuseContextVariables(); err != nil {
+		return "", newInvalidRequest("queryId", err.Error())
+	}
+	if queryDef.Type != datatug.QueryTypeTugQL {
+		return "", newSourceUnavailable("facts comparison requires a saved structured TugQL query with native set binding")
 	}
 	parameterID, err := matchingCohortParameter(queryDef, entity, field)
 	if err != nil {
@@ -115,7 +133,7 @@ func proveNativeFactsBinding(ctx context.Context, queryID string, side apicontra
 		StoreID: side.StoreID, Project: side.Project, Environment: side.Environment,
 		QueryID: canonicalID,
 	}
-	resolved, err := resolveExecutionSource(ctx, projectStore, projectDir, executionRequest, queryDef)
+	resolved, err := resolveExecutionSourceHookCompare(ctx, projectStore, projectDir, executionRequest, queryDef)
 	if err != nil {
 		return "", err
 	}
@@ -124,11 +142,11 @@ func proveNativeFactsBinding(ctx context.Context, queryID string, side apicontra
 	if !nativeStructured {
 		return "", newSourceUnavailable("facts comparison requires a structured SQLite or inGitDB source with native set binding")
 	}
-	document, err := executionQueryDocument(side.Project, canonicalID, queryDef, "")
+	document, err := executionQueryDocumentHookCompare(side.Project, canonicalID, queryDef, "")
 	if err != nil {
 		return "", newSourceUnavailable("the saved structured query document is unavailable")
 	}
-	query, err := dtql.Deserialize([]byte(document))
+	query, err := tugql.Deserialize([]byte(document))
 	if err != nil {
 		return "", newSourceUnavailable("the saved structured query cannot prove native set binding")
 	}

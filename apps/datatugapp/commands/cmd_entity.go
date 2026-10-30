@@ -2,7 +2,6 @@ package commands
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/datatug/datatug-cli/internal/plainfs"
 	"github.com/datatug/datatug-cli/pkg/dtentity"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/spf13/cobra"
@@ -26,6 +26,23 @@ const (
 
 	entityContinueOnErrorFlagName = "continue-on-error"
 )
+
+// Seams so tests can exercise encoder/marshal failure branches that real
+// inputs cannot reach.
+var (
+	entityJSONMarshal   = json.Marshal
+	entityJSONUnmarshal = json.Unmarshal
+	entityMarshalFile   = dtentity.MarshalEntity
+
+	newEntityYAMLEncoder = func(w io.Writer) entityYAMLEncoder { return yaml.NewEncoder(w) }
+)
+
+// entityYAMLEncoder is the subset of *yaml.Encoder that renderEntityShow uses.
+type entityYAMLEncoder interface {
+	SetIndent(spaces int)
+	Encode(v any) error
+	Close() error
+}
 
 // registerEntityProjectFlags registers the --directory/-d and --project/-p
 // flags shared by every entity subcommand.
@@ -113,36 +130,6 @@ func entityShowCommandArgs() *cobra.Command {
 	return cmd
 }
 
-// loadEntityWithTables loads an entity via projectStore.LoadEntity (which
-// datatug-core v0.20.0 correctly finds regardless of the on-disk entities
-// layout), then repairs its Tables field. datatug.ProjectStore.LoadEntity
-// does a generic JSON unmarshal, which still cannot populate Tables -
-// datatug.TableKeys/DBCollectionKey has no exported fields or
-// UnmarshalJSON, see dtentity's doc comment - so a plain load always comes
-// back with Tables empty. Left unrepaired, any load-modify-save round trip
-// (entity field add/set/rm) would silently drop the entity's mapping copy
-// on save. This CLI always writes entities at the nested
-// <dir>/<id>/<id>.entity.json path (see entityFilePath in
-// entityAddCommandAction), so re-reading that same file and taking its
-// Tables via dtentity.UnmarshalEntity recovers it; a read failure here just
-// means no Tables to recover, not a load failure.
-func loadEntityWithTables(ctx context.Context, projectStore datatug.ProjectStore, projectDir, id string) (*datatug.Entity, error) {
-	entity, err := projectStore.LoadEntity(ctx, id)
-	if err != nil {
-		return entity, err
-	}
-	data, readErr := os.ReadFile(filepath.Join(projectDir, "entities", id, id+".entity.json"))
-	if readErr != nil {
-		return entity, nil
-	}
-	reparsed, parseErr := dtentity.UnmarshalEntity(data)
-	if parseErr != nil {
-		return entity, nil
-	}
-	entity.Tables = reparsed.Tables
-	return entity, nil
-}
-
 func entityShowCommandAction(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	name := argAt(args, 0)
@@ -160,7 +147,7 @@ func entityShowCommandAction(cmd *cobra.Command, args []string) error {
 
 	projectStore := v.store.GetProjectStore(v.projectID)
 
-	entity, err := loadEntityWithTables(ctx, projectStore, v.ProjectDir, name)
+	entity, err := projectStore.LoadEntity(ctx, name)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return Exit(fmt.Sprintf("entity %q not found", name), 1)
@@ -192,30 +179,23 @@ func argAt(args []string, i int) string {
 // through the model's JSON tags (which flatten the embedded ProjItemBrief, so
 // the id/title surface correctly) and then re-renders as YAML.
 func renderEntityShow(entity *datatug.Entity) (string, error) {
-	jsonData, err := json.Marshal(entity)
+	jsonData, err := entityJSONMarshal(entity)
 	if err != nil {
 		return "", err
 	}
 	var doc map[string]any
-	if err = json.Unmarshal(jsonData, &doc); err != nil {
+	if err = entityJSONUnmarshal(jsonData, &doc); err != nil {
 		return "", err
 	}
 
-	// The mapping copy (tables) is a read-only generated artifact: render it in a
-	// clearly-labelled, separate section so a reader never mistakes it for
-	// authored content. Rendered from entity.Tables directly via
-	// dtentity.TableKeyDoc rather than doc["tables"], which generic
-	// marshalling of datatug.TableKeys cannot populate (see that type's doc
-	// comment for why).
-	var tables []dtentity.TableKeyDoc
-	for _, k := range entity.Tables {
-		tables = append(tables, dtentity.TableKeyDoc{Name: k.Name(), Schema: k.Schema(), Catalog: k.Catalog()})
-	}
-	hasTables := len(tables) > 0
+	// Render the complete canonical mapping copy separately from authored fields.
+	// Core owns named table metadata, including physical identity and typed parents.
+	tables := doc["tables"]
+	hasTables := len(entity.Tables) > 0
 	delete(doc, "tables")
 
 	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf)
+	enc := newEntityYAMLEncoder(&buf)
 	enc.SetIndent(2)
 	if err = enc.Encode(doc); err != nil {
 		return "", err
@@ -226,7 +206,7 @@ func renderEntityShow(entity *datatug.Entity) (string, error) {
 
 	if hasTables {
 		buf.WriteString("# generated mapping copy (read-only)\n")
-		tablesEnc := yaml.NewEncoder(&buf)
+		tablesEnc := newEntityYAMLEncoder(&buf)
 		tablesEnc.SetIndent(2)
 		if err = tablesEnc.Encode(map[string]any{"tables": tables}); err != nil {
 			return "", err
@@ -260,6 +240,7 @@ func entityFieldRmCommandArgs() *cobra.Command {
 	}
 	registerEntityProjectFlags(cmd)
 	registerGitFlag(cmd)
+	registerFollowProjectLinkFlag(cmd)
 	return cmd
 }
 
@@ -274,8 +255,9 @@ func entityFieldRmCommandAction(cmd *cobra.Command, args []string) error {
 	v := &projectBaseCommand{}
 	v.ProjectDir, _ = cmd.Flags().GetString(entityDirFlagName)
 	v.ProjectName, _ = cmd.Flags().GetString(entityProjectFlagName)
+	v.FollowProjectLink, _ = cmd.Flags().GetBool(followProjectLinkFlagName)
 
-	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
+	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true, writesProject: true}); err != nil {
 		return err
 	}
 
@@ -291,7 +273,7 @@ func entityFieldRmCommandAction(cmd *cobra.Command, args []string) error {
 
 	projectStore := v.store.GetProjectStore(v.projectID)
 
-	entity, err := loadEntityWithTables(ctx, projectStore, v.ProjectDir, name)
+	entity, err := projectStore.LoadEntity(ctx, name)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return Exit(fmt.Sprintf("entity %q not found", name), 1)
@@ -317,7 +299,7 @@ func entityFieldRmCommandAction(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	entityPath := filepath.Join(v.ProjectDir, "entities", name, name+".entity.json")
-	if err = atomicWriteFiles([]fileWrite{{path: entityPath, content: content}}); err != nil {
+	if err = atomicWriteFiles(v.ProjectDir, []fileWrite{{path: entityPath, content: content}}); err != nil {
 		return err
 	}
 	if err = applyGit(v.ProjectDir, mode, []string{entityPath}); err != nil {
@@ -347,6 +329,7 @@ func entityFieldSetCommandArgs() *cobra.Command {
 	cmd.Flags().String(entityFieldTitleFlagName, "", "Field title")
 	cmd.Flags().Bool(entityFieldKeyFlagName, false, "Whether the field is a key field")
 	registerGitFlag(cmd)
+	registerFollowProjectLinkFlag(cmd)
 	return cmd
 }
 
@@ -368,8 +351,9 @@ func entityFieldSetCommandAction(cmd *cobra.Command, args []string) error {
 	v := &projectBaseCommand{}
 	v.ProjectDir, _ = cmd.Flags().GetString(entityDirFlagName)
 	v.ProjectName, _ = cmd.Flags().GetString(entityProjectFlagName)
+	v.FollowProjectLink, _ = cmd.Flags().GetBool(followProjectLinkFlagName)
 
-	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
+	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true, writesProject: true}); err != nil {
 		return err
 	}
 
@@ -385,7 +369,7 @@ func entityFieldSetCommandAction(cmd *cobra.Command, args []string) error {
 
 	projectStore := v.store.GetProjectStore(v.projectID)
 
-	entity, err := loadEntityWithTables(ctx, projectStore, v.ProjectDir, name)
+	entity, err := projectStore.LoadEntity(ctx, name)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return Exit(fmt.Sprintf("entity %q not found", name), 1)
@@ -423,7 +407,7 @@ func entityFieldSetCommandAction(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	entityPath := filepath.Join(v.ProjectDir, "entities", name, name+".entity.json")
-	if err = atomicWriteFiles([]fileWrite{{path: entityPath, content: content}}); err != nil {
+	if err = atomicWriteFiles(v.ProjectDir, []fileWrite{{path: entityPath, content: content}}); err != nil {
 		return err
 	}
 	if err = applyGit(v.ProjectDir, mode, []string{entityPath}); err != nil {
@@ -445,6 +429,7 @@ func entityFieldAddCommandArgs() *cobra.Command {
 	registerEntityProjectFlags(cmd)
 	registerEntityDefinitionFlags(cmd)
 	registerGitFlag(cmd)
+	registerFollowProjectLinkFlag(cmd)
 	return cmd
 }
 
@@ -496,6 +481,7 @@ func entityAddCommandArgs() *cobra.Command {
 	registerEntityProjectFlags(cmd)
 	registerEntityDefinitionFlags(cmd)
 	registerGitFlag(cmd)
+	registerFollowProjectLinkFlag(cmd)
 	return cmd
 }
 
@@ -509,13 +495,13 @@ func parseEntityDocs(data []byte) ([]*datatug.Entity, error) {
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		return nil, err
 	}
-	jsonData, err := json.Marshal(doc)
+	jsonData, err := entityJSONMarshal(doc)
 	if err != nil {
 		return nil, err
 	}
 	if _, isList := doc.([]any); isList {
 		var rawEntities []json.RawMessage
-		if err = json.Unmarshal(jsonData, &rawEntities); err != nil {
+		if err = entityJSONUnmarshal(jsonData, &rawEntities); err != nil {
 			return nil, err
 		}
 		entities := make([]*datatug.Entity, len(rawEntities))
@@ -542,19 +528,19 @@ func parseFieldDocs(data []byte) ([]*datatug.EntityField, error) {
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		return nil, err
 	}
-	jsonData, err := json.Marshal(doc)
+	jsonData, err := entityJSONMarshal(doc)
 	if err != nil {
 		return nil, err
 	}
 	if _, isList := doc.([]any); isList {
 		var fields []*datatug.EntityField
-		if err = json.Unmarshal(jsonData, &fields); err != nil {
+		if err = entityJSONUnmarshal(jsonData, &fields); err != nil {
 			return nil, err
 		}
 		return fields, nil
 	}
 	field := &datatug.EntityField{}
-	if err = json.Unmarshal(jsonData, field); err != nil {
+	if err = entityJSONUnmarshal(jsonData, field); err != nil {
 		return nil, err
 	}
 	return []*datatug.EntityField{field}, nil
@@ -602,33 +588,50 @@ type fileWrite struct {
 // write fails, all staged temp files are removed and nothing is committed.
 // Renames happen after all temps are staged, so a fully-validated batch is
 // committed together. Reusable by other authoring commands.
-func atomicWriteFiles(writes []fileWrite) error {
+//
+// Every path is inside root, the project folder, and is written only as a plain
+// file in plain folders of it (see package plainfs): a link in the place of a
+// file or of a folder above it is refused, naming its path in the project and not
+// where it leads, and so is a rename onto anything but a plain file. A temp file
+// is made only where the rename that follows will be checked.
+func atomicWriteFiles(root string, writes []fileWrite) error {
+	// The project folder is the person's own to have named, and is made when it is not there, with
+	// the folders above it, as it always was; what is below it is made only as plain folders.
+	if err := os.MkdirAll(root, 0o777); err != nil {
+		return fmt.Errorf("failed to create the project folder %q: %w", root, err)
+	}
+	tree := plainfs.New(root, 0o777)
 	type staged struct{ temp, final string }
 	var stagedFiles []staged
 	cleanup := func() {
 		for _, s := range stagedFiles {
-			_ = os.Remove(s.temp)
+			_ = tree.Remove(s.temp)
 		}
 	}
 	for i, w := range writes {
-		if err := os.MkdirAll(filepath.Dir(w.path), 0777); err != nil {
-			cleanup()
-			return fmt.Errorf("failed to create directory for %s: %w", w.path, err)
-		}
 		temp := fmt.Sprintf("%s.tmp-%d", w.path, i)
-		if err := os.WriteFile(temp, w.content, 0666); err != nil {
+		if err := tree.WriteFile(temp, w.content, 0o666); err != nil {
 			cleanup()
-			return fmt.Errorf("failed to stage %s: %w", w.path, err)
+			return fmt.Errorf("failed to stage %s: %w", pathInProject(root, w.path), err)
 		}
 		stagedFiles = append(stagedFiles, staged{temp: temp, final: w.path})
 	}
 	for _, s := range stagedFiles {
-		if err := os.Rename(s.temp, s.final); err != nil {
+		if err := tree.Rename(s.temp, s.final); err != nil {
 			cleanup()
-			return fmt.Errorf("failed to commit %s: %w", s.final, err)
+			return fmt.Errorf("failed to commit %s: %w", pathInProject(root, s.final), err)
 		}
 	}
 	return nil
+}
+
+// pathInProject is path as a message names it: below the project folder root, with "/"
+// separators.
+func pathInProject(root, path string) string {
+	if rel, err := filepath.Rel(root, path); err == nil {
+		return filepath.ToSlash(rel)
+	}
+	return filepath.ToSlash(path)
 }
 
 // marshalEntityFile marshals an entity to the canonical on-disk JSON form,
@@ -638,7 +641,7 @@ func marshalEntityFile(entity *datatug.Entity) ([]byte, error) {
 	if len(entity.Fields) == 0 && entity.Fields != nil {
 		entity.Fields = nil
 	}
-	return dtentity.MarshalEntity(entity)
+	return entityMarshalFile(entity)
 }
 
 func entityAddCommandAction(cmd *cobra.Command, _ []string) error {
@@ -646,8 +649,9 @@ func entityAddCommandAction(cmd *cobra.Command, _ []string) error {
 	v := &projectBaseCommand{}
 	v.ProjectDir, _ = cmd.Flags().GetString(entityDirFlagName)
 	v.ProjectName, _ = cmd.Flags().GetString(entityProjectFlagName)
+	v.FollowProjectLink, _ = cmd.Flags().GetBool(followProjectLinkFlagName)
 
-	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
+	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true, writesProject: true}); err != nil {
 		return err
 	}
 
@@ -697,9 +701,9 @@ func entityAddCommandAction(cmd *cobra.Command, _ []string) error {
 
 	var written []string
 	if continueOnError {
-		written, err = addEntitiesContinueOnError(w, entities, entityExists, entityFilePath)
+		written, err = addEntitiesContinueOnError(v.ProjectDir, w, entities, entityExists, entityFilePath)
 	} else {
-		written, err = addEntitiesAtomic(w, entities, entityExists, entityFilePath)
+		written, err = addEntitiesAtomic(v.ProjectDir, w, entities, entityExists, entityFilePath)
 	}
 	// Stage exactly the files actually written, even on partial failure.
 	if stageErr := applyGit(v.ProjectDir, mode, written); stageErr != nil {
@@ -713,6 +717,7 @@ func entityAddCommandAction(cmd *cobra.Command, _ []string) error {
 // nothing is written. Prints a per-item report and returns an error (non-zero
 // exit) if any item failed.
 func addEntitiesAtomic(
+	root string,
 	w io.Writer,
 	entities []*datatug.Entity,
 	entityExists func(id string) bool,
@@ -765,7 +770,7 @@ func addEntitiesAtomic(
 		return nil, fmt.Errorf("entity add failed (atomic mode, nothing written): %s", strings.Join(failures, "; "))
 	}
 
-	if err := atomicWriteFiles(writes); err != nil {
+	if err := atomicWriteFiles(root, writes); err != nil {
 		return nil, err
 	}
 	written := make([]string, len(writes))
@@ -782,6 +787,7 @@ func addEntitiesAtomic(
 // independently, passing items are written, failures are collected and
 // reported. Returns an error (non-zero exit) if any item failed.
 func addEntitiesContinueOnError(
+	root string,
 	w io.Writer,
 	entities []*datatug.Entity,
 	entityExists func(id string) bool,
@@ -806,7 +812,7 @@ func addEntitiesContinueOnError(
 			path := entityFilePath(entity.ID)
 			content, err := marshalEntityFile(entity)
 			if err == nil {
-				err = atomicWriteFiles([]fileWrite{{path: path, content: content}})
+				err = atomicWriteFiles(root, []fileWrite{{path: path, content: content}})
 			}
 			if err != nil {
 				failures = append(failures, fmt.Sprintf("%s (%v)", entity.ID, err))
@@ -833,8 +839,9 @@ func entityFieldAddCommandAction(cmd *cobra.Command, args []string) error {
 	v := &projectBaseCommand{}
 	v.ProjectDir, _ = cmd.Flags().GetString(entityDirFlagName)
 	v.ProjectName, _ = cmd.Flags().GetString(entityProjectFlagName)
+	v.FollowProjectLink, _ = cmd.Flags().GetBool(followProjectLinkFlagName)
 
-	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
+	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true, writesProject: true}); err != nil {
 		return err
 	}
 
@@ -864,7 +871,7 @@ func entityFieldAddCommandAction(cmd *cobra.Command, args []string) error {
 	projectStore := v.store.GetProjectStore(v.projectID)
 
 	// field add operates only on existing entities: load it, requiring presence.
-	entity, err := loadEntityWithTables(ctx, projectStore, v.ProjectDir, name)
+	entity, err := projectStore.LoadEntity(ctx, name)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return Exit(fmt.Sprintf("entity %q not found", name), 1)
@@ -923,7 +930,7 @@ func entityFieldAddCommandAction(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		if err = atomicWriteFiles([]fileWrite{{path: entityPath, content: content}}); err != nil {
+		if err = atomicWriteFiles(v.ProjectDir, []fileWrite{{path: entityPath, content: content}}); err != nil {
 			return err
 		}
 		if err = applyGit(v.ProjectDir, mode, []string{entityPath}); err != nil {

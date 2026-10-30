@@ -2,6 +2,7 @@ package dtlog
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -246,4 +247,46 @@ func TestEnqueue_NoopBeforeStart(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	assert.Empty(t, queue, "Enqueue must not queue before Start has been called")
+}
+
+func TestGetPosthogConfigFilePath(t *testing.T) {
+	path := getPosthogConfigFilePath()
+	assert.NotEmpty(t, path)
+}
+
+func TestGetPostHogClient_WriteConfigError(t *testing.T) {
+	tempDir := t.TempDir()
+	badPath := filepath.Join(tempDir, "non_existent", "config.yaml")
+
+	oldGetPath := getPosthogConfigFilePath
+	getPosthogConfigFilePath = func() string {
+		return badPath
+	}
+	defer func() {
+		getPosthogConfigFilePath = oldGetPath
+	}()
+
+	oldCreate := osCreate
+	osCreate = func(name string) (*os.File, error) {
+		return nil, errors.New("cannot create file")
+	}
+	defer func() {
+		osCreate = oldCreate
+	}()
+
+	oldNewClient := posthogNewWithConfig
+	posthogNewWithConfig = func(apiKey string, config posthog.Config) (posthog.Client, error) {
+		return &mockPosthogClient{}, nil
+	}
+	defer func() {
+		posthogNewWithConfig = oldNewClient
+	}()
+
+	// The key fetch is faked: without this the test made a real request to
+	// raw.githubusercontent.com (the default now panics in a test binary).
+	oldFetch := getPostHogApiKeyFromServerFunc
+	getPostHogApiKeyFromServerFunc = func() (string, error) { return "test-key", nil }
+	defer func() { getPostHogApiKeyFromServerFunc = oldFetch }()
+
+	_ = getPostHogClient()
 }

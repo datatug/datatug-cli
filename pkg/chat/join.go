@@ -10,43 +10,34 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
+	"github.com/datatug/datatug-cli/pkg/joinmeta"
 )
 
-// RelationInstanceID identifies a node in the DTQL source tree. It is stable
-// for a given document: root is "root" and child joins append their index.
-type RelationInstanceID string
+var (
+	tugqlSerialize     = tugql.Serialize
+	tugqlDeserialize   = tugql.Deserialize
+	sqliteQueryContext = func(db *sql.DB, ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+		return db.QueryContext(ctx, query, args...)
+	}
+	sqliteRowsErr = func(rows *sql.Rows) error {
+		return rows.Err()
+	}
+	canExpandQueryFn = (ForeignKeyJoinApplication).canExpandQuery
+)
+
+// The relation and foreign-key types live in pkg/joinmeta, which the chat
+// shares with `query run --result-id`.
+type (
+	RelationInstanceID = joinmeta.RelationInstanceID
+	RelationInstance   = joinmeta.RelationInstance
+	ForeignKey         = joinmeta.ForeignKey
+	ForeignKeySnapshot = joinmeta.ForeignKeySnapshot
+)
 
 // JoinCandidateID is opaque. Callers must pass the value selected from the
 // catalog back to ApplyJoinCandidate instead of reconstructing an edge.
 type JoinCandidateID string
-
-type RelationInstance struct {
-	ID       RelationInstanceID
-	Schema   string
-	Relation string
-	Alias    string
-}
-
-// ForeignKey is source-scoped schema evidence. Fields are paired by index and
-// are intentionally not flattened: a composite FK remains one relationship.
-type ForeignKey struct {
-	ConstraintID string
-	Schema       string
-	FromRelation string
-	FromFields   []string
-	ToSchema     string
-	ToRelation   string
-	ToFields     []string
-}
-
-type ForeignKeySnapshot struct {
-	Source string
-	Keys   []ForeignKey
-	// Columns contains the source's ordered physical columns, keyed by
-	// lowercase schema.relation. It is used to expand wildcards before a JOIN.
-	Columns map[string][]string
-}
 
 type JoinFieldPair struct{ SourceField, TargetField string }
 
@@ -70,7 +61,7 @@ type JoinApplication interface {
 
 // ForeignKeyJoinApplication is the production-neutral implementation. Its
 // snapshot is source-bound and it delegates every read to the existing secure
-// DTQL executor; it never constructs SQL or joins displayed rows locally.
+// TugQL executor; it never constructs SQL or joins displayed rows locally.
 // When Secure is true, every existing source is preflighted for unrestricted
 // readability before a JOIN is exposed or executed.
 type ForeignKeyJoinApplication struct {
@@ -81,26 +72,26 @@ type ForeignKeyJoinApplication struct {
 	// source; a stale edge never falls back to the startup snapshot.
 	Refresh       func(context.Context) (ForeignKeySnapshot, error)
 	CanReadTarget func(context.Context, RelationInstance) error
-	Executor      DTQLExecutor
+	Executor      TugQLExecutor
 	Secure        bool
 }
 
 func (a ForeignKeyJoinApplication) Candidates(ctx context.Context, record RecordSet) ([]JoinCandidate, error) {
-	if a.Source == "" || record.Source != a.Source {
+	if a.Source == "" || !storedSourceNames(record.Source, a.Source) {
 		return []JoinCandidate{}, nil
 	}
 	snapshot, err := a.snapshot(ctx)
 	if err != nil {
 		return nil, err
 	}
-	parent, err := dtql.Deserialize([]byte(record.DTQL))
+	parent, err := tugqlDeserialize([]byte(record.TugQL))
 	if err != nil {
 		return nil, err
 	}
-	if a.Secure && !a.canExpandQuery(ctx, parent.From()) {
+	if a.Secure && !canExpandQueryFn(a, ctx, parent.From()) {
 		return []JoinCandidate{}, nil
 	}
-	candidates, err := DiscoverJoinCandidates([]byte(record.DTQL), snapshot, appliedEdges(record)...)
+	candidates, err := DiscoverJoinCandidates([]byte(record.TugQL), snapshot, appliedEdges(record)...)
 	if err != nil {
 		return nil, err
 	}
@@ -120,24 +111,34 @@ func (a ForeignKeyJoinApplication) Candidates(ctx context.Context, record Record
 }
 
 func (a ForeignKeyJoinApplication) Apply(ctx context.Context, record RecordSet, id JoinCandidateID) (QueryResult, error) {
+	return a.apply(ctx, record, id, dal.JoinInner)
+}
+
+// ApplyAttached preserves rows from a fresh root query when optional attached
+// metadata is joined. Interactive JOIN actions keep their existing semantics.
+func (a ForeignKeyJoinApplication) ApplyAttached(ctx context.Context, record RecordSet, id JoinCandidateID) (QueryResult, error) {
+	return a.apply(ctx, record, id, dal.JoinLeft)
+}
+
+func (a ForeignKeyJoinApplication) apply(ctx context.Context, record RecordSet, id JoinCandidateID, joinType dal.JoinType) (QueryResult, error) {
 	if a.Executor == nil {
 		return QueryResult{}, fmt.Errorf("JOIN exploration has no secure query executor")
 	}
-	if a.Source == "" || record.Source != a.Source {
+	if a.Source == "" || !storedSourceNames(record.Source, a.Source) {
 		return QueryResult{}, fmt.Errorf("selected foreign-key edge is not available for this source")
 	}
 	snapshot, err := a.snapshot(ctx)
 	if err != nil {
 		return QueryResult{}, err
 	}
-	q, err := dtql.Deserialize([]byte(record.DTQL))
+	q, err := tugqlDeserialize([]byte(record.TugQL))
 	if err != nil {
-		return QueryResult{}, fmt.Errorf("parse RecordSet DTQL: %w", err)
+		return QueryResult{}, fmt.Errorf("parse RecordSet TugQL: %w", err)
 	}
-	if a.Secure && !a.canExpandQuery(ctx, q.From()) {
+	if a.Secure && !canExpandQueryFn(a, ctx, q.From()) {
 		return QueryResult{}, fmt.Errorf("JOIN exploration cannot prove every existing source is fully readable under this policy")
 	}
-	doc, candidate, err := DeriveJoinDTQL([]byte(record.DTQL), snapshot, id, appliedEdges(record)...)
+	doc, candidate, err := deriveJoinTugQL([]byte(record.TugQL), snapshot, id, joinType, appliedEdges(record)...)
 	if err != nil {
 		return QueryResult{}, err
 	}
@@ -147,13 +148,13 @@ func (a ForeignKeyJoinApplication) Apply(ctx context.Context, record RecordSet, 
 	if a.CanReadTarget != nil && a.CanReadTarget(ctx, candidate.Target) != nil {
 		return QueryResult{}, fmt.Errorf("selected JOIN target is not readable by this policy")
 	}
-	result, err := a.Executor.RunDTQL(ctx, a.Source, doc, record.Parameters)
+	result, err := a.Executor.RunTugQL(ctx, a.Source, doc, record.Parameters)
 	if err != nil {
 		return QueryResult{}, err
 	}
 	edges := append([]AppliedJoinEdge(nil), appliedEdges(record)...)
 	edges = append(edges, AppliedJoinEdge{JoinPath: candidate.Target.ID, SourcePath: candidate.Source.ID, ConstraintID: candidate.ConstraintID, Direction: candidate.Direction, CandidateID: id, Fields: append([]JoinFieldPair(nil), candidate.Fields...)})
-	return QueryResult{Title: record.Title + " + " + candidate.Target.Relation, DTQL: string(doc), Result: result, Parameters: record.Parameters, Source: a.Source, Lineage: &JoinLineage{ParentRecordSetID: record.ID, CandidateID: id, AppliedEdges: edges}}, nil
+	return QueryResult{Title: record.Title + " + " + candidate.Target.Relation, TugQL: string(doc), Result: result, Parameters: record.Parameters, Source: a.Source, Lineage: &JoinLineage{ParentRecordSetID: record.ID, CandidateID: id, AppliedEdges: edges}}, nil
 }
 
 func appliedEdges(record RecordSet) []AppliedJoinEdge {
@@ -196,7 +197,7 @@ func LoadSQLiteForeignKeySnapshot(ctx context.Context, source string, db *sql.DB
 	if db == nil || source == "" {
 		return ForeignKeySnapshot{}, fmt.Errorf("SQLite FK metadata requires a source and database")
 	}
-	rows, err := db.QueryContext(ctx, `SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
+	rows, err := sqliteQueryContext(db, ctx, `SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
 	if err != nil {
 		return ForeignKeySnapshot{}, err
 	}
@@ -209,14 +210,14 @@ func LoadSQLiteForeignKeySnapshot(ctx context.Context, source string, db *sql.DB
 		}
 		tables = append(tables, name)
 	}
-	if err := rows.Err(); err != nil {
+	if err := sqliteRowsErr(rows); err != nil {
 		return ForeignKeySnapshot{}, err
 	}
 	snapshot := ForeignKeySnapshot{Source: source, Keys: []ForeignKey{}, Columns: map[string][]string{}}
 	primaryKeys := map[string][]string{}
 	for _, table := range tables {
 		pragma := "PRAGMA table_info('" + strings.ReplaceAll(table, "'", "''") + "')"
-		columnRows, queryErr := db.QueryContext(ctx, pragma)
+		columnRows, queryErr := sqliteQueryContext(db, ctx, pragma)
 		if queryErr != nil {
 			return ForeignKeySnapshot{}, queryErr
 		}
@@ -238,7 +239,7 @@ func LoadSQLiteForeignKeySnapshot(ctx context.Context, source string, db *sql.DB
 				primary = append(primary, primaryColumn{pk, name})
 			}
 		}
-		if rowsErr := columnRows.Err(); rowsErr != nil {
+		if rowsErr := sqliteRowsErr(columnRows); rowsErr != nil {
 			_ = columnRows.Close()
 			return ForeignKeySnapshot{}, rowsErr
 		}
@@ -250,7 +251,7 @@ func LoadSQLiteForeignKeySnapshot(ctx context.Context, source string, db *sql.DB
 	}
 	for _, table := range tables {
 		pragma := "PRAGMA foreign_key_list('" + strings.ReplaceAll(table, "'", "''") + "')"
-		fkRows, err := db.QueryContext(ctx, pragma)
+		fkRows, err := sqliteQueryContext(db, ctx, pragma)
 		if err != nil {
 			return ForeignKeySnapshot{}, err
 		}
@@ -258,7 +259,9 @@ func LoadSQLiteForeignKeySnapshot(ctx context.Context, source string, db *sql.DB
 		byIDSequence := map[int]map[int]JoinFieldPair{}
 		for fkRows.Next() {
 			var id, seq int
-			var target, from, to, onUpdate, onDelete, match string
+			var target, from string
+			var to sql.NullString
+			var onUpdate, onDelete, match string
 			if err := fkRows.Scan(&id, &seq, &target, &from, &to, &onUpdate, &onDelete, &match); err != nil {
 				_ = fkRows.Close()
 				return ForeignKeySnapshot{}, err
@@ -271,9 +274,9 @@ func LoadSQLiteForeignKeySnapshot(ctx context.Context, source string, db *sql.DB
 			if byIDSequence[id] == nil {
 				byIDSequence[id] = map[int]JoinFieldPair{}
 			}
-			byIDSequence[id][seq] = JoinFieldPair{SourceField: from, TargetField: to}
+			byIDSequence[id][seq] = JoinFieldPair{SourceField: from, TargetField: to.String}
 		}
-		if err := fkRows.Err(); err != nil {
+		if err := sqliteRowsErr(fkRows); err != nil {
 			_ = fkRows.Close()
 			return ForeignKeySnapshot{}, err
 		}
@@ -309,19 +312,15 @@ func LoadSQLiteForeignKeySnapshot(ctx context.Context, source string, db *sql.DB
 	return snapshot, nil
 }
 
-func relationKey(schema, relation string) string {
-	if schema == "" {
-		schema = "main"
-	}
-	return strings.ToLower(schema + "." + relation)
-}
+// relationKey is joinmeta.RelationKey.
+var relationKey = joinmeta.RelationKey
 
 // DiscoverJoinCandidates walks only the query's actual relation tree. It does
 // not recursively walk metadata targets, so cyclic schemas cannot recurse.
 func DiscoverJoinCandidates(doc []byte, snapshot ForeignKeySnapshot, applied ...AppliedJoinEdge) ([]JoinCandidate, error) {
-	q, err := dtql.Deserialize(doc)
+	q, err := tugqlDeserialize(doc)
 	if err != nil {
-		return nil, fmt.Errorf("parse RecordSet DTQL: %w", err)
+		return nil, fmt.Errorf("parse RecordSet TugQL: %w", err)
 	}
 	instances := relationInstances(q.From())
 	active := activeJoinPairs(q.From(), applied)
@@ -359,9 +358,13 @@ func DiscoverJoinCandidates(doc []byte, snapshot ForeignKeySnapshot, applied ...
 	return out, nil
 }
 
-// DeriveJoinDTQL derives a real AST join. It refuses a stale candidate rather
+// DeriveJoinTugQL derives a real AST join. It refuses a stale candidate rather
 // than accepting caller-provided field names or a replacement relation.
-func DeriveJoinDTQL(parent []byte, snapshot ForeignKeySnapshot, id JoinCandidateID, applied ...AppliedJoinEdge) ([]byte, JoinCandidate, error) {
+func DeriveJoinTugQL(parent []byte, snapshot ForeignKeySnapshot, id JoinCandidateID, applied ...AppliedJoinEdge) ([]byte, JoinCandidate, error) {
+	return deriveJoinTugQL(parent, snapshot, id, dal.JoinInner, applied...)
+}
+
+func deriveJoinTugQL(parent []byte, snapshot ForeignKeySnapshot, id JoinCandidateID, joinType dal.JoinType, applied ...AppliedJoinEdge) ([]byte, JoinCandidate, error) {
 	candidates, err := DiscoverJoinCandidates(parent, snapshot, applied...)
 	if err != nil {
 		return nil, JoinCandidate{}, err
@@ -376,9 +379,9 @@ func DeriveJoinDTQL(parent []byte, snapshot ForeignKeySnapshot, id JoinCandidate
 	if candidate.ID == "" {
 		return nil, JoinCandidate{}, fmt.Errorf("selected foreign-key edge is stale or unavailable")
 	}
-	q, err := dtql.Deserialize(parent)
+	q, err := tugqlDeserialize(parent)
 	if err != nil {
-		return nil, JoinCandidate{}, fmt.Errorf("parse RecordSet DTQL: %w", err)
+		return nil, JoinCandidate{}, fmt.Errorf("parse RecordSet TugQL: %w", err)
 	}
 	if len(q.GroupBy()) > 0 || q.Having() != nil || queryHasAggregate(q) {
 		return nil, JoinCandidate{}, fmt.Errorf("cannot add a JOIN to an aggregate query without changing its grouping")
@@ -416,12 +419,12 @@ func DeriveJoinDTQL(parent []byte, snapshot ForeignKeySnapshot, id JoinCandidate
 		return nil, JoinCandidate{}, fmt.Errorf("selected relation instance is stale")
 	}
 	candidate.Target.ID = RelationInstanceID(fmt.Sprintf("%s/%d", candidate.Source.ID, len(node.Joins())))
-	node.Join(dal.NewJoinedSource(target, dal.JoinInner, on...))
-	derived, err := dtql.Serialize(q)
+	node.Join(dal.NewJoinedSource(target, joinType, on...))
+	derived, err := tugqlSerialize(q)
 	if err != nil {
-		return nil, JoinCandidate{}, fmt.Errorf("derive JOIN DTQL: %w", err)
+		return nil, JoinCandidate{}, fmt.Errorf("derive JOIN TugQL: %w", err)
 	}
-	if _, err := dtql.Deserialize(derived); err != nil {
+	if _, err := tugqlDeserialize(derived); err != nil {
 		return nil, JoinCandidate{}, fmt.Errorf("derived JOIN is invalid: %w", err)
 	}
 	return derived, candidate, nil
@@ -609,6 +612,16 @@ func qualifyJoinExpression(expression dal.Expression, source string, single bool
 		}
 		return dal.Binary(left, value.Operator, right), nil
 	case dal.AggregateFunc:
+		distinct := false
+		if named, ok := value.(dal.DistinctAggregateFunc); ok {
+			distinct = named.IsDistinct()
+		}
+		// The rebuild below keeps only the name, the distinct flag and the
+		// arguments. An aggregate whose text says more than that would be
+		// rebuilt as a different aggregate, so it is refused.
+		if value.String() != dal.NewAggregate(value.FuncName(), distinct, value.FuncArgs()...).String() {
+			return nil, fmt.Errorf("this aggregate form is not supported here: %s; remove it from the query before adding a JOIN", value.FuncName())
+		}
 		args := make([]dal.Expression, len(value.FuncArgs()))
 		for i, arg := range value.FuncArgs() {
 			var err error
@@ -617,13 +630,9 @@ func qualifyJoinExpression(expression dal.Expression, source string, single bool
 				return nil, err
 			}
 		}
-		distinct := false
-		if named, ok := value.(dal.DistinctAggregateFunc); ok {
-			distinct = named.IsDistinct()
-		}
 		return dal.NewAggregate(value.FuncName(), distinct, args...), nil
 	default:
-		return expression, nil // DTQL already validated constants, arrays, params and stars.
+		return expression, nil // TugQL already validated constants, arrays, params and stars.
 	}
 }
 
@@ -653,6 +662,9 @@ func queryHasAggregate(q dal.StructuredQuery) bool {
 }
 
 func fromAtPath(from dal.FromSource, id RelationInstanceID) dal.FromSource {
+	if from == nil {
+		return nil
+	}
 	if id == "root" {
 		return from
 	}
@@ -672,27 +684,8 @@ func fromAtPath(from dal.FromSource, id RelationInstanceID) dal.FromSource {
 	return node
 }
 
-func relationInstances(from dal.FromSource) []RelationInstance {
-	var out []RelationInstance
-	var walk func(dal.FromSource, string)
-	walk = func(node dal.FromSource, path string) {
-		base := node.Base()
-		instance := RelationInstance{ID: RelationInstanceID(path), Relation: base.Name(), Alias: base.Alias()}
-		if qualified, ok := base.(dal.CollectionRef); ok {
-			instance.Schema = qualified.Schema()
-		}
-		out = append(out, instance)
-		for i, join := range node.Joins() {
-			child := join.From()
-			if child == nil {
-				child = dal.From(join.RecordsetSource)
-			}
-			walk(child, fmt.Sprintf("%s/%d", path, i))
-		}
-	}
-	walk(from, "root")
-	return out
-}
+// relationInstances is joinmeta.RelationInstances.
+var relationInstances = joinmeta.RelationInstances
 
 func sameRelation(schema, relation, otherSchema, otherRelation string) bool {
 	if schema == "" {

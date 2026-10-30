@@ -1,40 +1,53 @@
 package gcloudui
 
 import (
-	"github.com/datatug/datatug-cli/pkg/sneatv"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
-	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
+	tea "charm.land/bubbletea/v2"
+	"github.com/tuigoff/tuigoff/pkg/nav"
+	"github.com/tuigoff/tuigoff/pkg/widgets"
 )
 
-func goFirestoreIndexes(gcProjCtx *CGProjectContext) error {
-	breadcrumbs := newGCloudProjectBreadcrumbs(gcProjCtx)
-	breadcrumbs.Push(sneatv.NewBreadcrumb("Firestore", nil))
-	menu := firestoreMainMenu(gcProjCtx, firestoreScreenIndexes, "")
+const indexesListID = "gcloudui.indexes"
 
-	list := tview.NewList()
-	sneatv.DefaultBorderWithPadding(list.Box)
-	list.SetTitle("Firestore Indexes")
-	content := sneatnav.NewPanel(gcProjCtx.TUI, sneatv.WithDefaultBorders(list, list.Box))
+// indexes is the Firestore Indexes screen.
+type indexes struct {
+	listPane
+	ctx *CGProjectContext
+}
 
-	list.AddItem("Loading...", "(not implemented yet)", 0, nil)
+var (
+	_ nav.Screen       = indexes{}
+	_ nav.Titled       = indexes{}
+	_ nav.ShortHelper  = indexes{}
+	_ widgets.Boundary = indexes{}
+	_ widgets.Editor   = indexes{}
+)
 
-	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() {
-		case tcell.KeyLeft:
-			gcProjCtx.TUI.Menu.TakeFocus()
-			return nil
-		case tcell.KeyUp:
-			if list.GetCurrentItem() == 0 {
-				gcProjCtx.TUI.Header.SetFocus(sneatnav.ToBreadcrumbs, list)
-				return nil
-			}
-			return event
-		default:
-			return event
-		}
-	})
+func newIndexes(ctx *CGProjectContext) indexes {
+	return indexes{
+		ctx: ctx,
+		listPane: newListPane(indexesListID,
+			widgets.MenuItem{ID: "loading", Label: "Loading...", Detail: "(not implemented yet)"},
+		),
+	}
+}
 
-	gcProjCtx.TUI.SetPanels(menu, content, sneatnav.WithFocusTo(sneatnav.FocusToContent))
-	return nil
+// Init implements nav.Screen.
+func (indexes) Init() tea.Cmd { return nil }
+
+// Update implements nav.Screen.
+func (i indexes) Update(msg tea.Msg) (nav.Screen, tea.Cmd) {
+	var cmd tea.Cmd
+	i.listPane, cmd = i.update(msg)
+	return i, cmd
+}
+
+// Title implements nav.Titled.
+func (i indexes) Title() string { return "Firestore Indexes" + projectSuffix(i.ctx) }
+
+// projectSuffix returns " — <project ID>" for a title, or "" without a project.
+func projectSuffix(ctx *CGProjectContext) string {
+	if id := ctx.projectID(); id != "" {
+		return " — " + id
+	}
+	return ""
 }

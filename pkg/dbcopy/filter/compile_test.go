@@ -1,6 +1,7 @@
 package filter
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/dal-go/dalgo/dal"
@@ -8,6 +9,7 @@ import (
 )
 
 func TestCompileWhereForTable_SingleCondition(t *testing.T) {
+	t.Parallel()
 	def := &dbschema.CollectionDef{
 		Name: "Customer",
 		Fields: []dbschema.FieldDef{
@@ -35,6 +37,7 @@ func TestCompileWhereForTable_SingleCondition(t *testing.T) {
 
 // TestCompileWhereForTable_NilAndEmpty covers the early-return on line 20.
 func TestCompileWhereForTable_NilAndEmpty(t *testing.T) {
+	t.Parallel()
 	def := &dbschema.CollectionDef{Name: "T", Fields: []dbschema.FieldDef{{Name: "f", Type: dbschema.String}}}
 	t.Run("nil group returns nil", func(t *testing.T) {
 		conds, err := CompileWhereForTable("T", nil, def)
@@ -52,6 +55,7 @@ func TestCompileWhereForTable_NilAndEmpty(t *testing.T) {
 
 // TestCompileWhereForTable_ValidateError covers the validate-failure branch (line 26-28).
 func TestCompileWhereForTable_ValidateError(t *testing.T) {
+	t.Parallel()
 	def := &dbschema.CollectionDef{
 		Name:   "T",
 		Fields: []dbschema.FieldDef{{Name: "age", Type: dbschema.Int}},
@@ -69,6 +73,7 @@ func TestCompileWhereForTable_ValidateError(t *testing.T) {
 // ValidateWhereAgainstSchema only checks field existence and value coercion, not the operator,
 // so an invalid operator token passes validation but fails ParseOperator.
 func TestCompileWhereForTable_ParseOperatorError(t *testing.T) {
+	t.Parallel()
 	def := &dbschema.CollectionDef{
 		Name:   "T",
 		Fields: []dbschema.FieldDef{{Name: "name", Type: dbschema.String}},
@@ -82,6 +87,7 @@ func TestCompileWhereForTable_ParseOperatorError(t *testing.T) {
 	}
 }
 
+// Not parallel: mutates package-level coerceValueSeam.
 // TestCompileWhereForTable_CoercionError covers the coerce-failure branch (line 37-39).
 func TestCompileWhereForTable_CoercionError(t *testing.T) {
 	def := &dbschema.CollectionDef{
@@ -89,15 +95,21 @@ func TestCompileWhereForTable_CoercionError(t *testing.T) {
 		Fields: []dbschema.FieldDef{{Name: "age", Type: dbschema.Int}},
 	}
 	group := &PredicateGroup{Conditions: []Predicate{
-		{Field: "age", Operator: OpEqual, Value: "not-an-int"},
+		{Field: "age", Operator: OpEqual, Value: "123"},
 	}}
+	orig := coerceValueSeam
+	t.Cleanup(func() { coerceValueSeam = orig })
+	coerceValueSeam = func(raw string, target dbschema.Type) (any, error) {
+		return nil, errors.New("simulated coerce error")
+	}
 	_, err := CompileWhereForTable("T", group, def)
 	if err == nil {
-		t.Fatal("expected coercion error for non-integer value on Int column")
+		t.Fatal("expected coercion error on line 37-39")
 	}
 }
 
 func TestCompileWhereForTable_AndComposition(t *testing.T) {
+	t.Parallel()
 	def := &dbschema.CollectionDef{
 		Name: "Customer",
 		Fields: []dbschema.FieldDef{

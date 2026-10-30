@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 )
 
@@ -52,17 +53,19 @@ type contractError struct {
 
 func (e *contractError) Error() string {
 	if e.Field != "" {
-		return fmt.Sprintf("%s: %s: %s", e.Code, e.Field, e.Message)
+		return fmt.Sprintf("%s: %s: %s", e.Code, e.Field, dbcopy.RedactText(e.Message))
 	}
-	return fmt.Sprintf("%s: %s", e.Code, e.Message)
+	return fmt.Sprintf("%s: %s", e.Code, dbcopy.RedactText(e.Message))
 }
 
 // newRequestID returns a fresh opaque correlation ID: 16 random bytes, hex
 // encoded (api-contract.md requires every error to carry one; "Server logs
 // record a correlation ID and operation, not raw facts").
+var randRead = rand.Read
+
 func newRequestID() string {
 	buf := make([]byte, 16)
-	if _, err := rand.Read(buf); err != nil {
+	if _, err := randRead(buf); err != nil {
 		// crypto/rand.Read failing is effectively unrecoverable on any real
 		// platform; fall back to a fixed marker rather than panicking a
 		// request handler over an ID string.
@@ -213,16 +216,17 @@ func targetOptions(targets []apicontract.CandidateTarget) []apicontract.TargetOp
 }
 
 // httpStatusFor maps code to its exact appendix HTTP status
-// (apicontract.ErrorCode.HTTPStatus()), falling back to 500 for codeInternal
+// (apicontract.ErrorCode.HTTPStatus()). OUTCOME_UNCERTAIN is the local
+// operation journal's explicit 409; otherwise we fall back to 500 for codeInternal
 // and any other code outside the closed set (HTTPStatus returns 0 for an
 // unknown code; the same fallback the deleted provisional package's own
 // StatusFor default case used).
 func httpStatusFor(code apicontract.ErrorCode) int {
+	if code == "OUTCOME_UNCERTAIN" {
+		return http.StatusConflict
+	}
 	if status := code.HTTPStatus(); status != 0 {
 		return status
-	}
-	if code == codeRevisionConflict {
-		return http.StatusConflict
 	}
 	return http.StatusInternalServerError
 }
@@ -251,7 +255,10 @@ func (e *contractError) envelope() apicontract.ErrorEnvelope {
 	if e.RequestID == "" {
 		e.RequestID = newRequestID()
 	}
+	// Message is redacted here, the one place every contract error becomes a
+	// response: many handlers pass an executor's or a driver's own error text
+	// on as the message, and that text can quote a source URL and its password.
 	return apicontract.ErrorEnvelope{Error: apicontract.ErrorBody{
-		Code: string(e.Code), Message: e.Message, Field: e.Field, RequestID: e.RequestID, Targets: e.Targets,
+		Code: string(e.Code), Message: dbcopy.RedactText(e.Message), Field: e.Field, RequestID: e.RequestID, Targets: e.Targets,
 	}}
 }

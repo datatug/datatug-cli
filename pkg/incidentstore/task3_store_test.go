@@ -127,7 +127,7 @@ func TestRepositoryStoreReconcilesLegacyIncidentDirectories(t *testing.T) {
 }
 
 func TestRepositoryStoreRejectsAmbiguousIncidentDirectoryNames(t *testing.T) {
-	for _, incidentID := range []string{"INC-x", "INC-0", "INC-01"} {
+	for _, incidentID := range []string{"INC-x", "INC-0", "INC-01", "INC-1"} {
 		t.Run(incidentID, func(t *testing.T) {
 			store := newTestStore(t)
 			require.NoError(t, os.Mkdir(filepath.Join(store.root, "incidents", incidentID), 0o755))

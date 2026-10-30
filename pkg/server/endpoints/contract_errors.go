@@ -5,27 +5,34 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strings"
 
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 )
 
-// writeCORSOrigin echoes the request's Origin as Access-Control-Allow-Origin.
-// writeContractResponse's success branch used to skip this entirely — only
-// writeContractError set it — so every "new-contract" route (agent-info,
-// semantic/columns, exec/run_query) that succeeded carried no CORS header at
-// all. curl (S77's own manual reproduction tool) never exercises CORS, so
-// this went unnoticed until a real browser blocked it outright as an opaque
-// CORS failure, distinct in shape from every other request's ordinary
-// HttpErrorResponse (agent-info always succeeds — nil error, never routed
-// through writeContractError — so it was the one route this gap reliably
-// hit; S85's finding, reproduced through the journey Playwright suite's real
-// browser). legacy-envelope routes never had this asymmetry: returnJSON and
-// handleError both already set this header on every response, success or
-// error alike (util_json.go, util_error_handling.go).
+// writeCORSOrigin sets Access-Control-Allow-Origin to the request's Origin when the Origin is on
+// the list of IsSupportedOrigin, and sets nothing for any other. It is the one place an answer of
+// a route names an origin: returnJSON, handleError, writeContractResponse and
+// writeContractError all call it, so no answer echoes an origin that is not on the list (a
+// request with such an origin is refused before any route answers it, see RequestGuard). A
+// request with no Origin gets no header, as curl, which never exercises CORS, does not need one.
 func writeCORSOrigin(w http.ResponseWriter, r *http.Request) {
-	if origin := r.Header.Get("Origin"); origin != "" {
-		w.Header().Set("Access-Control-Allow-Origin", origin)
+	var varied bool
+	for _, line := range w.Header().Values("Vary") {
+		for _, field := range strings.Split(line, ",") {
+			if strings.EqualFold(strings.TrimSpace(field), "Origin") || strings.TrimSpace(field) == "*" {
+				varied = true
+			}
+		}
+	}
+	if !varied {
+		w.Header().Add("Vary", "Origin")
+	}
+	origins := r.Header.Values("Origin")
+	if len(origins) == 1 && IsSupportedOrigin(origins[0]) {
+		w.Header().Set("Access-Control-Allow-Origin", origins[0])
 	}
 }
 
@@ -91,7 +98,7 @@ func writeContractError(w http.ResponseWriter, r *http.Request, err error) {
 		ce = contractErrAccessDenied(err.Error())
 	default:
 		ce = &contractError{Code: codeInternal, Message: unclassifiedErrorMessage, RequestID: newRequestID()}
-		log.Printf("%s: request %s: answered 500 INTERNAL: %v", r.URL.Path, ce.RequestID, err)
+		log.Printf("%s: request %s: answered 500 INTERNAL: %v", r.URL.Path, ce.RequestID, dbcopy.RedactError(err))
 	}
 	status := httpStatusFor(ce.Code)
 	if ce.Code == codeInternal {

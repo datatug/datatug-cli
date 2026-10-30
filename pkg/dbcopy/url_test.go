@@ -58,14 +58,38 @@ func TestParse_Postgres_Recognized(t *testing.T) {
 	assert.NotEmpty(t, ref.Path)
 }
 
+func TestParse_BigQueryDestinationRequiresProjectDatasetAndLocation(t *testing.T) {
+	t.Parallel()
+	ref, err := Parse("bigquery://demodb/research?location=US")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Scheme != "bigquery" || ref.ProjectID != "demodb" || ref.DatasetID != "research" || ref.Location != "US" {
+		t.Fatalf("parsed destination = %#v", ref)
+	}
+	for _, raw := range []string{
+		"bigquery://demodb/research",
+		"bigquery://demodb/research?location=US&location=EU",
+		"bigquery://demodb/research?location=US&billingProject=other",
+		"bigquery://user@demodb/research?location=US",
+		"bigquery://demodb/research?location=US#fragment",
+		"bigquery://demodb/research/extra?location=US",
+		"bigquery://demodb/research?location=bad%20location",
+	} {
+		if _, err := Parse(raw); err == nil {
+			t.Errorf("Parse(%q) unexpectedly succeeded", raw)
+		}
+	}
+}
+
 // TestParse_UnknownScheme verifies REQ:unknown-scheme-rejected: the error must
 // name the unsupported scheme AND list all supported schemes.
 func TestParse_UnknownScheme(t *testing.T) {
 	t.Parallel()
-	_, err := Parse("mongodb://host/db")
+	_, err := Parse("unsupporteddb://host/db")
 	assert.Error(t, err)
 	msg := err.Error()
-	assert.Contains(t, msg, "mongodb")
+	assert.Contains(t, msg, "unsupporteddb")
 	assert.Contains(t, msg, "sqlite")
 	assert.Contains(t, msg, "ingitdb")
 	assert.Contains(t, msg, "postgres")
@@ -110,7 +134,7 @@ func writeHTTPSourceProject(t *testing.T, urlTemplate, fixtureBody string) strin
 	root := t.TempDir()
 	queriesDir := filepath.Join(root, "queries", "reference")
 	assert.NoError(t, os.MkdirAll(queriesDir, 0o755))
-	assert.NoError(t, os.WriteFile(filepath.Join(queriesDir, "greeting.query.json"), []byte(`{
+	assert.NoError(t, os.WriteFile(filepath.Join(queriesDir, "greeting.query.json"), []byte(`{"createdAt":"2026-01-01T00:00:00Z",
 		"id": "greeting",
 		"title": "Greeting",
 		"type": "HTTP",
@@ -170,16 +194,6 @@ func TestOpen_HTTP_NoQueriesErrors(t *testing.T) {
 	assert.NoError(t, err)
 	_, err = ref.Open(context.Background())
 	assert.Error(t, err)
-}
-
-func TestOpen_Postgres_ReturnsErrPostgresNotWired(t *testing.T) {
-	t.Parallel()
-	ref, err := Parse("postgres://user@host/db")
-	assert.NoError(t, err)
-	db, openErr := ref.Open(context.Background())
-	assert.Nil(t, db)
-	assert.True(t, errors.Is(openErr, ErrPostgresNotWired),
-		"expected ErrPostgresNotWired, got %v", openErr)
 }
 
 // TestOpen_SQLite_OpensChinookFixture exercises the sqlite Open path against
@@ -493,12 +507,18 @@ func TestStructuredDialect_StringParamEmitsPlaceholderNotLiteral(t *testing.T) {
 		WhereField("BillingCountry", dal.Equal, aliasDialectMaliciousBillingCountry).
 		SelectColumns(dal.Column{Expression: dal.Field("InvoiceId")})
 
+	mock.ExpectQuery(`SELECT name, type, "notnull", pk FROM pragma_table_xinfo\(\?\)`).
+		WithArgs("Invoice").WillReturnRows(sqlmock.NewRows([]string{"name", "type", "notnull", "pk"}).
+		AddRow("InvoiceId", "INTEGER", 1, 1).AddRow("BillingCountry", "TEXT", 0, 0))
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM pragma_index_list\(\?\) WHERE origin = 'pk'`).WithArgs("Invoice").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectQuery("SELECT `InvoiceId` FROM `Invoice` AS `i` WHERE \\(\\+`BillingCountry` COLLATE BINARY\\) = \\?").
 		WithArgs(aliasDialectMaliciousBillingCountry).
 		WillReturnRows(sqlmock.NewRows([]string{"InvoiceId"}))
 
 	reader, err := sqlDB.ExecuteQueryToRecordsReader(context.Background(), q)
-	assert.NoError(t, err)
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer func() { _ = reader.Close() }()
 	_, err = reader.Next()
 	assert.ErrorIs(t, err, dal.ErrNoMoreRecords)

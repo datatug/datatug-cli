@@ -6,9 +6,12 @@ import (
 	"slices"
 
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
 )
+
+var compareKeyProjectStoreFor = api.ProjectStoreFor
 
 type compareKeyMapping struct {
 	column string
@@ -46,19 +49,19 @@ func mappedCompareKey(ctx context.Context, queryID string, side apicontract.Comp
 	}
 	projectDir, ok := api.ProjectDir(side.Project)
 	if !ok {
-		return nil, newNotFound(fmt.Sprintf("unknown project %q", side.Project))
+		return nil, newNotFound(fmt.Sprintf("unknown project %q", dbcopy.SourceIDDisplay(side.Project)))
 	}
 	canonicalID, err := api.ResolveQueryID(projectDir, queryID)
 	if err != nil {
-		return nil, newNotFound(fmt.Sprintf("query %q not found", queryID))
+		return nil, newNotFound(fmt.Sprintf("query %q not found", dbcopy.QueryIDDisplay(queryID)))
 	}
-	store, err := api.ProjectStoreFor(side.Project)
+	store, err := compareKeyProjectStoreFor(side.Project)
 	if err != nil {
 		return nil, newInvalidRequest("project", err.Error())
 	}
 	query, err := store.LoadQuery(ctx, canonicalID)
 	if err != nil {
-		return nil, newNotFound(fmt.Sprintf("query %q not found", queryID))
+		return nil, newNotFound(fmt.Sprintf("query %q not found", dbcopy.QueryIDDisplay(queryID)))
 	}
 	if len(query.Recordsets) != 1 || query.Recordsets[0].PrimaryKey == nil || len(query.Recordsets[0].PrimaryKey.Columns) == 0 {
 		return nil, newInvalidRequest("key", "the live query must declare one recordset with a primary key or the caller must provide --key")

@@ -28,7 +28,7 @@ func writeSyntheticProjectWithURL(t *testing.T, countryFactsURLTemplate string) 
 	if err := os.MkdirAll(queriesDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	writeFile(t, filepath.Join(queriesDir, "country-facts.query.json"), `{
+	writeFile(t, filepath.Join(queriesDir, "country-facts.query.json"), `{"createdAt":"2026-01-01T00:00:00Z",
 		"id": "country-facts",
 		"title": "Country facts (currency by country name)",
 		"type": "HTTP",
@@ -41,7 +41,7 @@ func writeSyntheticProjectWithURL(t *testing.T, countryFactsURLTemplate string) 
 	if err := os.MkdirAll(sqlDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	writeFile(t, filepath.Join(sqlDir, "customer-invoices.query.json"), `{
+	writeFile(t, filepath.Join(sqlDir, "customer-invoices.query.json"), `{"createdAt":"2026-01-01T00:00:00Z",
 		"id": "customer-invoices",
 		"title": "Customer invoices",
 		"type": "SQL",
@@ -115,5 +115,28 @@ func TestReadFixtureSample_Missing(t *testing.T) {
 	root := writeSyntheticProject(t)
 	if sample := readFixtureSample(fixturesDir(root), "no-such-query"); sample != nil {
 		t.Fatalf("readFixtureSample() = %#v, want nil", sample)
+	}
+}
+
+// A project with no queries folder has no HTTP queries. Git keeps no empty
+// folder, so a project that `datatug scan` or `datatug init` made, pushed and
+// cloned has none, and listing its sources (serve, chat) must still work.
+func TestLoadHTTPQueries_ProjectWithoutQueriesFolder(t *testing.T) {
+	loaded, err := LoadHTTPQueries(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadHTTPQueries: %v", err)
+	}
+	if len(loaded) != 0 {
+		t.Fatalf("loaded = %v, want none", loaded)
+	}
+}
+
+// Only a missing queries folder is "no queries": a project directory that is not
+// a directory at all is still an error.
+func TestLoadHTTPQueries_ProjectThatIsNotADirectory(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "not-a-project")
+	writeFile(t, file, "a file")
+	if _, err := LoadHTTPQueries(file); err == nil {
+		t.Fatal("LoadHTTPQueries of a file: want an error")
 	}
 }

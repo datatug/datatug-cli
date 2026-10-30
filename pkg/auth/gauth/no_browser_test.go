@@ -16,7 +16,7 @@ import (
 // any browser or local listener is touched.
 func TestGetTokenFromWeb_NeverOpensBrowserUnderGoTest(t *testing.T) {
 	orig := openBrowser
-	openBrowser = func(url string) error {
+	openBrowser = func(_ context.Context, url string) error {
 		t.Fatalf("browser.OpenURL must not be called under go test (url=%q)", url)
 		return nil
 	}
@@ -34,7 +34,7 @@ func TestGetTokenFromWeb_NeverOpensBrowserUnderGoTest(t *testing.T) {
 func TestGetGoogleCloudClient_NoTokenNoBrowser(t *testing.T) {
 	keyring.MockInit()
 	orig := openBrowser
-	openBrowser = func(url string) error {
+	openBrowser = func(_ context.Context, url string) error {
 		t.Fatalf("browser.OpenURL must not be called under go test (url=%q)", url)
 		return nil
 	}

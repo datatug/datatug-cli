@@ -26,13 +26,13 @@ Do not bind an owner credential to a less-privileged user's session. Requests
 cannot provide a token, URL, principal, roles, groups, or descriptor. A missing
 or mismatched fixed local principal fails closed, even with `--no-policies`.
 
-Use an existing saved DTQL query or the existing ad-hoc query request with
+Use an existing saved TugQL query or the existing ad-hoc query request with
 that source ID. The local policies rewrite/restrict the query through DALgo
-before the source sends it to OVDB's `/v1/databases/{id}/dtql`; OVDB and InGitDB
+before the source sends it to OVDB's `/v1/databases/{id}/tugql`; OVDB and InGitDB
 then enforce their own policies. Native execution and generic transactions
 are refused by this source. There is no fallback to unprotected execution.
 
-Structured owner denials retain their DTQL result in `details.authorization`
+Structured owner denials retain their TugQL result in `details.authorization`
 of the existing `ACCESS_DENIED` error envelope, using the same sibling-details
 extension already used for snapshot diagnostics. The owner projects diagnostic
 visibility; the client does not gain policy administration. The matching app
@@ -46,7 +46,7 @@ methods and their existing validation tests. Their former standalone UI/proxy
 is not restored: connecting writes and Explain to the lead-owned current
 write/session APIs requires that coordinated contract, and must not be mistaken
 for a fully integrated browser write/Explain flow. The new integration proves
-real remote DTQL reads against SQLite and InGitDB; OVDB's own suite separately
+real remote TugQL reads against SQLite and InGitDB; OVDB's own suite separately
 proves protected writes. This distinction remains a task-24 acceptance item.
 
 Provider review PRs: dal-go/dalgo#159, dal-go/dalgo2sql#181,

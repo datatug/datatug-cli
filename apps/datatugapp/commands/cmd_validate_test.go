@@ -11,7 +11,7 @@ import (
 
 // TestQueryDefTarget_Validate_RejectsEmbeddedCredentials proves datatug-core
 // v0.17.0 is actually live (not the pre-migration vendored model, which had
-// no QueryDefTarget.Validate() or QueryTypeDTQL at all): the project's
+// no QueryDefTarget.Validate() or QueryTypeTugQL at all): the project's
 // Validate() now runs the new query-target credential check, matching
 // `datatug validate`'s semantics (validateProject calls project.Validate()).
 func TestQueryDefTarget_Validate_RejectsEmbeddedCredentials(t *testing.T) {
@@ -27,7 +27,7 @@ func TestQueryDefTarget_Validate_RejectsEmbeddedCredentials(t *testing.T) {
 					ProjectItem: datatug.ProjectItem{
 						ProjItemBrief: datatug.ProjItemBrief{ID: "q1", Title: "Query 1"},
 					},
-					Type: datatug.QueryTypeDTQL,
+					Type: datatug.QueryTypeTugQL, StructuredBody: true,
 					Targets: []datatug.QueryDefTarget{
 						{Driver: "postgres", Credentials: datatug.Credentials{Password: "hunter2"}},
 					},
@@ -45,10 +45,10 @@ func TestQueryDefTarget_Validate_RejectsEmbeddedCredentials(t *testing.T) {
 	}
 }
 
-// TestQueryDefTarget_Validate_AcceptsCredentialFreeDTQLQuery proves a
-// QueryTypeDTQL query (new in v0.17.0 - the pre-migration model had no DTQL
+// TestQueryDefTarget_Validate_AcceptsCredentialFreeTugQLQuery proves a
+// QueryTypeTugQL query (new in v0.17.0 - the pre-migration model had no TugQL
 // query type at all) with no embedded credentials passes validation.
-func TestQueryDefTarget_Validate_AcceptsCredentialFreeDTQLQuery(t *testing.T) {
+func TestQueryDefTarget_Validate_AcceptsCredentialFreeTugQLQuery(t *testing.T) {
 	project := &datatug.Project{
 		ProjectItem: datatug.ProjectItem{
 			ProjItemBrief: datatug.ProjItemBrief{ID: "proj1"},
@@ -61,7 +61,7 @@ func TestQueryDefTarget_Validate_AcceptsCredentialFreeDTQLQuery(t *testing.T) {
 					ProjectItem: datatug.ProjectItem{
 						ProjItemBrief: datatug.ProjItemBrief{ID: "q1", Title: "Query 1"},
 					},
-					Type:    datatug.QueryTypeDTQL,
+					Type: datatug.QueryTypeTugQL, StructuredBody: true,
 					Targets: []datatug.QueryDefTarget{{Driver: "postgres", Catalog: "mydb"}},
 				},
 			},
@@ -69,7 +69,7 @@ func TestQueryDefTarget_Validate_AcceptsCredentialFreeDTQLQuery(t *testing.T) {
 	}
 
 	if err := project.Validate(); err != nil {
-		t.Fatalf("expected a credential-free DTQL query to validate, got: %v", err)
+		t.Fatalf("expected a credential-free TugQL query to validate, got: %v", err)
 	}
 }
 
@@ -136,5 +136,49 @@ func TestValidateProject_RealDemoProject(t *testing.T) {
 
 	if err := validateProject(dir); err != nil {
 		t.Fatalf("validateProject(%s): %v", dir, err)
+	}
+}
+
+// TestValidateCommand_ShowcaseBoard keeps the published CLI validator aligned
+// with the saved chart and nested-tab board contract. The fixture is the
+// showcase board at datatug-demo-project origin/main 11d88a220354.
+func TestValidateCommand_ShowcaseBoard(t *testing.T) {
+	dir := t.TempDir()
+	initCmd := initCommand()
+	initCmd.SetArgs([]string{"showcase-fixture", dir})
+	if err := initCmd.Execute(); err != nil {
+		t.Fatalf("init project: %v", err)
+	}
+
+	board, err := os.ReadFile(filepath.Join("testdata", "visual-showcase-board.json"))
+	if err != nil {
+		t.Fatalf("read saved showcase board: %v", err)
+	}
+	boardDir := filepath.Join(dir, "boards", "showcase")
+	if err := os.MkdirAll(boardDir, 0o755); err != nil {
+		t.Fatalf("create board directory: %v", err)
+	}
+	boardPath := filepath.Join(boardDir, "board.json")
+	if err := os.WriteFile(boardPath, board, 0o600); err != nil {
+		t.Fatalf("write saved showcase board: %v", err)
+	}
+
+	cmd := testCommandArgs()
+	cmd.SetArgs([]string{"-d=" + dir})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("datatug validate rejected the saved showcase board: %v", err)
+	}
+
+	invalidBoard := strings.Replace(string(board), `"type": "bar-race"`, `"type": "invalid-chart"`, 1)
+	if invalidBoard == string(board) {
+		t.Fatal("saved showcase board no longer contains the race chart under test")
+	}
+	if err := os.WriteFile(boardPath, []byte(invalidBoard), 0o600); err != nil {
+		t.Fatalf("write invalid chart board: %v", err)
+	}
+	cmd = testCommandArgs()
+	cmd.SetArgs([]string{"-d=" + dir})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("datatug validate accepted an invalid chart type")
 	}
 }

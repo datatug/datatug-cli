@@ -122,8 +122,8 @@ func TestRunNativeSQL_NamedArgBindsThroughDriver(t *testing.T) {
 	if got := result.Rows[0].Data["name"]; got != "book" {
 		t.Errorf("name = %v, want book", got)
 	}
-	if got := result.Rows[0].Data["price"]; got != float64(10) {
-		t.Errorf("price = %v (%T), want 10", got, got)
+	if got := result.Rows[0].Data["price"]; got != int64(10) {
+		t.Errorf("price = %v (%T), want int64(10)", got, got)
 	}
 }
 
@@ -193,5 +193,43 @@ func TestRunNativeSQL_MissingSourceFile_TypedError(t *testing.T) {
 	_, err = executor.RunNativeSQL(context.Background(), sourceURL, "SELECT 1")
 	if !errors.Is(err, dbcopy.ErrSourceFileMissing) {
 		t.Fatalf("RunNativeSQL(missing sqlite source) = %v, want dbcopy.ErrSourceFileMissing", err)
+	}
+}
+
+// TestRunNativeSQL_ColumnOrderIsTheSelectList: Columns stays the sorted union
+// (stdout's documented order) while ColumnOrder is the SELECT list's order.
+func TestRunNativeSQL_ColumnOrderIsTheSelectList(t *testing.T) {
+	sourceURL := newSQLiteFixture(t)
+	session := aliceSession(t, opaqueSQLAllowedPolicy)
+	session.AllowOpaqueSQL = true
+	executor := NewExecutor(session)
+	ctx := context.Background()
+
+	result, err := executor.RunNativeSQL(ctx, sourceURL, "SELECT price, name FROM products WHERE price >= @min;\n", dal.QueryArg{Name: "min", Value: 0})
+	if err != nil {
+		t.Fatalf("RunNativeSQL: %v", err)
+	}
+	if got := strings.Join(result.Columns, ","); got != "name,price" {
+		t.Errorf("Columns = %s, want the sorted union", got)
+	}
+	if got := strings.Join(result.ColumnOrder, ","); got != "price,name" {
+		t.Errorf("ColumnOrder = %s, want the select list", got)
+	}
+
+	positional, err := executor.RunNativeSQL(ctx, sourceURL, "SELECT price, name FROM products WHERE price >= ?", dal.QueryArg{Value: 0})
+	if err != nil {
+		t.Fatalf("positional RunNativeSQL: %v", err)
+	}
+	if got := strings.Join(positional.ColumnOrder, ","); got != "price,name" {
+		t.Errorf("positional ColumnOrder = %s", got)
+	}
+
+	// a statement that cannot be wrapped in a subquery has no select-list order
+	pragma, err := executor.RunNativeSQL(ctx, sourceURL, "PRAGMA table_info(products)")
+	if err != nil {
+		t.Fatalf("pragma RunNativeSQL: %v", err)
+	}
+	if pragma.ColumnOrder != nil {
+		t.Errorf("ColumnOrder = %v, want nil", pragma.ColumnOrder)
 	}
 }

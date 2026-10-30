@@ -99,6 +99,13 @@ func (d *Directives) IsEmpty() bool {
 		len(d.GlobalExcludeColumns) == 0
 }
 
+// HasRowFilters reports whether a directive selects or limits rows within a
+// table. IncludeTables and ExcludeTables only select whole collections, so
+// they do not require query-based row reads.
+func (d *Directives) HasRowFilters() bool {
+	return d != nil && (len(d.Where) > 0 || len(d.LimitsByTable) > 0)
+}
+
 // PreValidate runs validation rules that do NOT require source-schema
 // introspection: mutex checks, structural sanity. Called immediately
 // after parsing (CLI or YAML), before opening source/target.

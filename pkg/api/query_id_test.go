@@ -22,7 +22,7 @@ func writeQueryFile(t *testing.T, projectDir, relPath, id string) {
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", filepath.Dir(full), err)
 	}
-	content := `{"id":"` + id + `","title":"` + id + `","type":"SQL"}`
+	content := `{"createdAt":"2026-10-01T00:00:00Z","id":"` + id + `","title":"` + id + `","type":"SQL"}`
 	if err := os.WriteFile(full, []byte(content), 0o600); err != nil {
 		t.Fatalf("write %s: %v", full, err)
 	}

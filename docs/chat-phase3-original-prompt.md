@@ -3,8 +3,8 @@
 The following are already implemented and working:
 
 - `datatug chat`;
-- inexpensive AI model → DTQL;
-- DTQL validation/execution through DataTug;
+- inexpensive AI model → TugQL;
+- TugQL validation/execution through DataTug;
 - real database results;
 - interactive inline grids;
 - multiple durable chat sessions;
@@ -52,7 +52,7 @@ The primary acceptance scenario is:
 
 > Show their largest orders.
 
-[new DTQL generated using the selected/docked customers as structured context]
+[new TugQL generated using the selected/docked customers as structured context]
 
 [new RecordSet/grid]
 ```
@@ -80,7 +80,7 @@ Understand:
 - current chat/TUI structure;
 - session persistence;
 - RecordSet model/storage;
-- DTQL execution;
+- TugQL execution;
 - ADK/tool architecture;
 - artifact/grid rendering;
 - model context reconstruction;
@@ -659,7 +659,7 @@ selection/view
         ↓
 customer IDs
         ↓
-agent produces DTQL
+agent produces TugQL
         ↓
 DataTug executes
         ↓
@@ -777,7 +777,7 @@ Chinook │ Customer analysis │ rs:3 │ context:2 │ selected:5 │ ready
 Also use it for transient operational states such as:
 
 ```text
-generating DTQL…
+generating TugQL…
 executing…
 loading…
 ```
@@ -923,7 +923,7 @@ $ datatug chat
 
 > Show their largest orders.
 
-[new real DTQL]
+[new real TugQL]
 [new RecordSet/grid]
 ```
 

@@ -15,13 +15,22 @@ import (
 	"github.com/strongo/logus"
 )
 
+// Seams over the OS calls initCommandAction makes, so tests can drive their
+// failure branches. Always the real functions in production.
+var (
+	initStat        = os.Stat
+	initCurrentUser = user.Current
+)
+
 func initCommand() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "init [project] [projectPath]",
 		Short: "Creates a new datatug project",
 		Long:  "Creates a new datatug project in specified directory using a connection to some database",
 		RunE:  initCommandAction,
 	}
+	registerFollowProjectLinkFlag(cmd)
+	return cmd
 }
 
 // initCommandAction reads two optional positional arguments: project (ID)
@@ -33,12 +42,20 @@ func initCommandAction(cmd *cobra.Command, args []string) (err error) {
 
 	projectID := argAt(args, 0)
 	projectDir := argAt(args, 1)
+	// The project folder is the person's to name, but a link in its place leads the files of the
+	// project somewhere else: the command stops there unless it is told to go on.
+	followLink, _ := cmd.Flags().GetBool(followProjectLinkFlagName)
+	if projectDir != "" {
+		if err = checkProjectFolderLink(projectDir, followLink); err != nil {
+			return err
+		}
+	}
 	if err = os.MkdirAll(projectDir, 0777); err != nil {
 		return err
 	}
 	dataTugDirPath := path.Join(projectDir, "datatug")
 	var fileInfo os.FileInfo
-	if fileInfo, err = os.Stat(dataTugDirPath); err != nil {
+	if fileInfo, err = initStat(dataTugDirPath); err != nil {
 		if !os.IsNotExist(err) {
 			return fmt.Errorf("failed to get info about %v: %w", dataTugDirPath, err)
 		}
@@ -99,7 +116,7 @@ func initCommandAction(cmd *cobra.Command, args []string) (err error) {
 		//},
 	}
 	var currentUser *user.User
-	if currentUser, err = user.Current(); err != nil {
+	if currentUser, err = initCurrentUser(); err != nil {
 		return err
 	}
 	if currentUser != nil {

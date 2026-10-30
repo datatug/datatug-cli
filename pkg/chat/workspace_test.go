@@ -9,9 +9,11 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/datatug/datatug-cli/pkg/secureread"
-	"google.golang.org/adk/v2/model"
-	"google.golang.org/genai"
+	"github.com/strongo/aichat/ai"
+	"github.com/tuigoff/tuigoff/pkg/uitest"
 )
 
 func workspaceTestCatalog() ProjectCatalog {
@@ -22,6 +24,51 @@ func workspaceTestCatalog() ProjectCatalog {
 	}}
 }
 
+// TestProjectExplorerShowsSourceIssueInPlace and
+// TestProjectExplorerIssueDetailsRemainVisibleInLongTree were ported onto
+// ChatUI's workspacePanel in chatui_sidepanel_test.go.
+
+// TestAttachedTableContextSurvivesHistoryAndIncludesColumnDefinitions is
+// pure SessionChat/buildSessionContext logic -- no UI involved -- so it
+// ports from datatug-cli#291 unchanged.
+func TestAttachedTableContextSurvivesHistoryAndIncludesColumnDefinitions(t *testing.T) {
+	t.Parallel()
+	catalog := workspaceTestCatalog()
+	catalog.Objects[2].ColumnTypes = map[string]string{"CustomerId": "INTEGER", "City": "NVARCHAR(40)"}
+	attached := catalog.Objects[2].Reference
+	session := ChatSession{Workspace: WorkspaceState{Attachments: []ContextReference{attached}}}
+	for range 20 {
+		session.Messages = append(session.Messages, ChatMessage{Role: "You", Kind: "text", Text: strings.Repeat("Invoice ", 250)})
+	}
+	contextText := buildSessionContext(session, catalog)
+	if !strings.Contains(contextText, "Attached table Customer") || !strings.Contains(contextText, "CustomerId INTEGER") || !strings.Contains(contextText, "City NVARCHAR(40)") {
+		t.Fatalf("attached table definition was lost: %s", contextText)
+	}
+	if len(contextText) > maxContextChars {
+		t.Fatalf("context exceeded limit: %d", len(contextText))
+	}
+}
+
+// TestComposerAttachmentChipsCanBeFocusedClearedAndRestored (datatug-cli#291)
+// does not port: it drove ui.go's own composer directly (u.input,
+// u.attachmentFocus, u.composerView, mouse-click chip removal, Shift+Esc
+// draft/attachment restore). ChatUI's composer is
+// tui/chatshell.Model's -- a different module (strongo/aichat) -- which
+// today renders no attachment chips at all (see chatui_bridge_test.go's own
+// note on the same gap for the web-link hint) and exposes no Tab-focus,
+// Backspace-remove, or Shift+Esc-restore hooks for them. Porting this
+// behaviour needs new chatshell composer API first: a chip list the host
+// can set, chip focus/backspace/click-to-remove wired into
+// chatshell.Model's own key/mouse handling, and an undo (Shift+Esc) stack
+// chatshell owns since it already owns the composer's draft text.
+//
+// TestProjectExplorerShowsSourceIssueInPlace and
+// TestProjectExplorerIssueDetailsRemainVisibleInLongTree were already
+// ported onto ChatUI's workspacePanel in chatui_sidepanel_test.go
+// (TestChatUIProjectExplorerShowsSourceIssueInPlace/
+// TestChatUIProjectExplorerIssueDetailsRemainVisibleInLongTree above in
+// HEAD's own history) so are not duplicated here.
+
 func workspaceTestRecord(t *testing.T, store *SessionStore, sessionID string) string {
 	t.Helper()
 	ctx := context.Background()
@@ -30,7 +77,7 @@ func workspaceTestRecord(t *testing.T, store *SessionStore, sessionID string) st
 		t.Fatal(err)
 	}
 	turn, err := store.AppendTurn(ctx, sessionID, user.ID, "sqlite:///chinook.db", Turn{Queries: []QueryResult{{
-		Title: "Customers", DTQL: "from: {name: Customer}\nlimit: 3",
+		Title: "Customers", TugQL: "from: {name: Customer}\nlimit: 3",
 		Result: secureread.Result{Columns: []string{"CustomerId", "City"}, Rows: []secureread.Row{
 			{Data: map[string]any{"CustomerId": int64(5), "City": "Prague"}},
 			{Data: map[string]any{"CustomerId": int64(6), "City": "Prague"}},
@@ -44,6 +91,7 @@ func workspaceTestRecord(t *testing.T, store *SessionStore, sessionID string) st
 }
 
 func TestWorkspacePersistenceSelectionAttachmentsDocksAndSessionIsolation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
@@ -114,8 +162,8 @@ func TestWorkspacePersistenceSelectionAttachmentsDocksAndSessionIsolation(t *tes
 	if len(restored.Workspace.Docks) != 1 || len(restored.Workspace.Selections) != 2 || len(restored.RecordSets) != 1 {
 		t.Fatalf("workspace did not restore: %+v", restored.Workspace)
 	}
-	if result, ok := resultForReference(restored, pragueRef); !ok || len(result.Rows) != 2 {
-		t.Fatalf("docked view did not resolve original rows: %+v, %v", result, ok)
+	if data, ok := gridDataForReference(restored, pragueRef); !ok || len(data.Result.Rows) != 2 {
+		t.Fatalf("docked view did not resolve original rows: %+v, %v", data.Result, ok)
 	}
 	if _, err := chat.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "undock", DockID: restored.Workspace.Docks[0].ID}); err != nil {
 		t.Fatal(err)
@@ -154,6 +202,7 @@ func TestWorkspacePersistenceSelectionAttachmentsDocksAndSessionIsolation(t *tes
 }
 
 func TestWorkspaceRejectsUnavailableReferencesAndMissingColumns(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	chat, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
@@ -222,6 +271,7 @@ func TestWorkspaceRejectsUnavailableReferencesAndMissingColumns(t *testing.T) {
 }
 
 func TestWorkspaceLoadRejectsInvalidPersistedCoordinates(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	session, err := store.Create(ctx, "test")
@@ -275,6 +325,7 @@ func TestWorkspaceLoadRejectsInvalidPersistedCoordinates(t *testing.T) {
 }
 
 func TestDockedSelectionIsContextWithoutImplicitAttachment(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	chat, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
@@ -311,6 +362,7 @@ func TestDockedSelectionIsContextWithoutImplicitAttachment(t *testing.T) {
 }
 
 func TestAgentSelectDockAndFollowUpBindsSelectionLocally(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	seed, err := store.LatestOrCreate(ctx)
@@ -319,16 +371,16 @@ func TestAgentSelectDockAndFollowUpBindsSelectionLocally(t *testing.T) {
 	}
 	recordID := workspaceTestRecord(t, store, seed.ID)
 	doc := "from: {name: Invoice}\nwhere:\n  op: In\n  left: {field: CustomerId}\n  right: {param: selection_1_c1}\nlimit: 20"
-	llm := &scriptedLLM{responses: []*model.LLMResponse{
-		{Content: genai.NewContentFromFunctionCall("workspace_action", map[string]any{"kind": "select", "recordSetId": recordID, "column": "City", "equals": "Prague", "limit": 2, "columns": []string{"CustomerId"}}, genai.RoleModel)},
-		{Content: genai.NewContentFromText("Selected.", genai.RoleModel)},
-		{Content: genai.NewContentFromFunctionCall("workspace_action", map[string]any{"kind": "dock"}, genai.RoleModel)},
-		{Content: genai.NewContentFromText("Docked.", genai.RoleModel)},
-		{Content: genai.NewContentFromFunctionCall("run_dtql", map[string]any{"dtql": doc, "title": "Largest selected orders"}, genai.RoleModel)},
-		{Content: genai.NewContentFromText("Here are their invoices.", genai.RoleModel)},
+	llm := &scriptedProvider{steps: []scriptedStep{
+		{toolCalls: []ai.ToolCall{toolCall("1", toolWorkspaceAction, map[string]any{"kind": "select", "recordSetId": recordID, "column": "City", "equals": "Prague", "limit": 2, "columns": []string{"CustomerId"}})}},
+		{text: "Selected."},
+		{toolCalls: []ai.ToolCall{toolCall("2", toolWorkspaceAction, map[string]any{"kind": "dock"})}},
+		{text: "Docked."},
+		{toolCalls: []ai.ToolCall{toolCall("3", toolRunTugQL, map[string]any{"tugql": doc, "title": "Largest selected orders"})}},
+		{text: "Here are their invoices."},
 	}}
 	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"InvoiceId", "CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 404, "CustomerId": 6}}}}}
-	agent, err := NewADKConversation(llm, executor, "sqlite:///chinook.db", "- Customer: CustomerId, City\n- Invoice: InvoiceId, CustomerId")
+	agent, err := NewAIConversation(llm, executor, "sqlite:///chinook.db", "- Customer: CustomerId, City\n- Invoice: InvoiceId, CustomerId")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -363,6 +415,7 @@ func TestAgentSelectDockAndFollowUpBindsSelectionLocally(t *testing.T) {
 }
 
 func TestSortingViewKeepsSelectionAndDockOrderDurable(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
@@ -411,6 +464,7 @@ func TestSortingViewKeepsSelectionAndDockOrderDurable(t *testing.T) {
 }
 
 func TestPrivateSelectionErrorStaysOutOfSavedModelContext(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	session, err := store.LatestOrCreate(ctx)
@@ -423,7 +477,7 @@ func TestPrivateSelectionErrorStaysOutOfSavedModelContext(t *testing.T) {
 	}
 	const secret = "Paris-private-selected-value"
 	_, err = store.AppendQuery(ctx, session.ID, user.ID, "sqlite:///chinook.db", QueryResult{
-		DTQL: "from: {name: Customer}\nlimit: 5", Err: errors.New("driver echoed " + secret),
+		TugQL: "from: {name: Customer}\nlimit: 5", Err: errors.New("driver echoed " + secret),
 		Parameters: map[string]any{"selection_1_c1": []any{secret}},
 	})
 	if err != nil {
@@ -439,16 +493,17 @@ func TestPrivateSelectionErrorStaysOutOfSavedModelContext(t *testing.T) {
 }
 
 func TestFailedBoundQueryNeverSendsSelectedValueToModelAcrossTurns(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	const secret = "Paris"
 	doc := "from: {name: Customer}\nwhere:\n  op: In\n  left: {field: City}\n  right: {param: selection_1_c1}\nlimit: 5"
-	llm := &scriptedLLM{responses: []*model.LLMResponse{
-		{Content: genai.NewContentFromFunctionCall("run_dtql", map[string]any{"dtql": doc}, genai.RoleModel)},
-		{Content: genai.NewContentFromText("The query could not be completed.", genai.RoleModel)},
-		{Content: genai.NewContentFromText("Ready to try again.", genai.RoleModel)},
+	llm := &scriptedProvider{steps: []scriptedStep{
+		{toolCalls: []ai.ToolCall{toolCall("1", toolRunTugQL, map[string]any{"tugql": doc})}},
+		{text: "The query could not be completed."},
+		{text: "Ready to try again."},
 	}}
-	agent, err := NewADKConversation(llm, &fakeExecutor{err: errors.New("driver echoed selected value " + secret)}, "sqlite:///chinook.db", "- Customer: CustomerId, City")
+	agent, err := NewAIConversation(llm, &fakeExecutor{err: errors.New("driver echoed selected value " + secret)}, "sqlite:///chinook.db", "- Customer: CustomerId, City")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -478,17 +533,18 @@ func TestFailedBoundQueryNeverSendsSelectedValueToModelAcrossTurns(t *testing.T)
 		t.Fatalf("model requests = %d, want 3", len(llm.requests))
 	}
 	for i, request := range llm.requests {
-		if text := fmt.Sprint(request.Contents); strings.Contains(text, secret) {
+		if text := fmt.Sprint(request.Messages); strings.Contains(text, secret) {
 			t.Fatalf("selected value leaked into model request %d: %s", i+1, text)
 		}
 	}
 }
 
 func TestSelectedCellValueStaysOutOfModelRequest(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
-	llm := &scriptedLLM{responses: []*model.LLMResponse{{Content: genai.NewContentFromText("Ready.", genai.RoleModel)}}}
-	agent, err := NewADKConversation(llm, &fakeExecutor{}, "sqlite:///chinook.db", "- Customer: CustomerId, City")
+	llm := &scriptedProvider{steps: []scriptedStep{{text: "Ready."}}}
+	agent, err := NewAIConversation(llm, &fakeExecutor{}, "sqlite:///chinook.db", "- Customer: CustomerId, City")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -514,182 +570,195 @@ func TestSelectedCellValueStaysOutOfModelRequest(t *testing.T) {
 	if len(llm.requests) != 1 {
 		t.Fatalf("model requests = %d", len(llm.requests))
 	}
-	prompt := llm.requests[0].Contents[0].Parts[0].Text
-	if strings.Contains(prompt, "Paris") {
-		t.Fatalf("selected cell value leaked to model: %s", prompt)
+	request := llm.requests[0]
+	if request.Messages[0].Text != "Use the selected cell later" || len(request.Context) != 1 {
+		t.Fatalf("current prompt and context were not separate: %+v", request)
 	}
-	if !strings.Contains(prompt, "selection_1_c1") {
-		t.Fatalf("opaque local binding missing from model prompt: %s", prompt)
+	if strings.Contains(request.Context[0].Text, "Paris") {
+		t.Fatalf("selected cell value leaked to model context: %s", request.Context[0].Text)
+	}
+	if !strings.Contains(request.Context[0].Text, "selection_1_c1") {
+		t.Fatalf("opaque local binding missing from model context: %s", request.Context[0].Text)
 	}
 }
 
-func TestWorkspaceSplitAndKeyboardSelection(t *testing.T) {
-	ctx := context.Background()
-	store := openTestStore(t, testStorePath(t), testScope())
-	chat, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
-	if err != nil {
-		t.Fatal(err)
+// TestWorkspaceSplitAndKeyboardSelection was ported onto ChatUI's
+// workspacePanel in chatui_sidepanel_test.go
+// (TestChatUIWorkspaceSplitAndKeyboardSelection) — its mouse-click
+// attachment-close sub-case is a documented, real gap there (ChatUI's
+// topBar renders no attachment chips yet); the detach behaviour itself is
+// covered via the explorer's keyboard "space" toggle instead.
+//
+// TestExplorerGroupsObjectsByDeclaredSourceAndCollapses was ported onto
+// ChatUI's workspacePanel in chatui_sidepanel_test.go.
+//
+// TestProjectPickerSelectsConfiguredProject's Down-navigation case was
+// ported onto ChatUI's project picker overlay in chatui_pickers_test.go
+// (TestChatUIProjectPickerDownThenEnterSelectsSecondChoice); its
+// Enter-selects-the-first-choice case is already covered there by
+// TestChatUIF3OpensProjectPickerAndSelects.
+
+//
+// TestSplitDividerResizesWithinUsefulBounds was removed (not ported): Ctrl+←/→
+// split resize is checklist item #46, NATIVE to tui/chatshell (chatshell.Model
+// owns chatPanePercent/growPanelChat itself now, unexported, with its own test
+// coverage in strongo/aichat). It tested only ui.go's own chatPaneWidth/
+// chatPanePercent, which no longer exist once the legacy UI is deleted.
+//
+// TestDockedGridSortAndCellSelectionUseSourceCoordinates and
+// TestDockGridHasNoViewSwitcher were ported onto ChatUI's workspacePanel in
+// chatui_sidepanel_test.go (TestChatUIDockedGridSortAndCellSelectionUseSourceCoordinates/
+// TestChatUIDockGridHasNoViewSwitcher).
+//
+// TestComposerShrinksAsWrappedAttachmentsAreRemoved (datatug-cli#291) does
+// not port for the same reason as TestComposerAttachmentChipsCanBeFocusedClearedAndRestored
+// above: it drove ui.go's own u.attachmentRows/u.chatPaneWidth/u.composerView/
+// u.historyHeight/u.attachmentCloseAt directly, and chatshell's composer has
+// no chip layout at all yet to ask the same questions of.
+//
+// Project identification, selected catalog metadata, and tree navigation are
+// exercised below through the unified shell: Explorer stays in the left pane,
+// Inspect remains independent on the right, and Alt+I opens read-only details.
+
+func TestProjectCardUsesProjectTitle(t *testing.T) {
+	t.Parallel()
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.catalog = workspaceTestCatalog()
+	u.shell.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	view := ansi.Strip(u.shell.View().Content)
+	if !strings.Contains(view, "Explorer") || !strings.Contains(view, u.catalog.Title) || !strings.Contains(view, "Inspect") {
+		t.Fatalf("Explorer/Inspect panes do not identify the project:\n%s", view)
 	}
-	session, _ := chat.Snapshot(ctx)
-	workspaceTestRecord(t, store, session.ID)
-	u, err := NewSessionUI(ctx, chat, "fake-model")
-	if err != nil {
-		t.Fatal(err)
+	if strings.Contains(ansi.Strip(u.workspace.View(40, 20, false)), "Project: "+u.catalog.Title) {
+		t.Fatalf("the right Inspect pane duplicated the Explorer's project card:\n%s", view)
 	}
-	_, _ = u.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
-	view := u.View().Content
-	for _, want := range []string{"Project: Chinook", "[Project]", "[Selected]", "[Docked]", "Customer"} {
-		if !strings.Contains(view, want) {
-			t.Errorf("split view missing %q", want)
-		}
-	}
-	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyF6})
-	for index, node := range u.explorerNodes() {
-		if node.objectIndex >= 0 && u.catalog.Objects[node.objectIndex].Reference.Kind == "table" {
-			u.explorerIndex = index
+}
+
+func TestExplorerSelectionShowsTableAndQueryCards(t *testing.T) {
+	t.Parallel()
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.catalog = workspaceTestCatalog()
+	u.catalog.Objects[2].ColumnTypes = map[string]string{"CustomerId": "INTEGER", "City": "TEXT"}
+	queryText := "SELECT GenreName\n" + strings.Repeat("-- detail line\n", 40) + "FROM purchases"
+	u.catalog.Objects = append(u.catalog.Objects, ProjectObject{Reference: ContextReference{
+		Kind: "query", SourceID: "chinook-local", ObjectID: "purchases", Title: "Customer purchases by genre",
+	}, QueryType: "SQL", QueryText: queryText})
+	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 22})
+	u.shell.FocusLeftPanel()
+	for index, node := range u.explorer.explorerNodes() {
+		if node.label == "Customer" {
+			u.explorer.explorerIndex = index
 			break
 		}
 	}
-	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeySpace})
-	if len(u.snapshot.Workspace.Attachments) != 1 || u.snapshot.Workspace.Attachments[0].Kind != "table" {
-		t.Fatalf("project attachment = %+v", u.snapshot.Workspace.Attachments)
+	u.explorer.inspectExplorerSelection()
+	view := ansi.Strip(u.shell.View().Content)
+	if !strings.Contains(view, "Table: Customer") || !strings.Contains(view, "CustomerId") || !strings.Contains(view, "INTEGER") {
+		t.Fatalf("Explorer selection did not show authoritative table details:\n%s", view)
 	}
-	_, _ = u.Update(tea.MouseClickMsg{X: responsiveGutter(u.width) + len("Customer") + 2, Y: u.historyHeight() + 2, Button: tea.MouseLeft})
-	if len(u.snapshot.Workspace.Attachments) != 0 {
-		t.Fatalf("clicking attachment close did not detach: %+v", u.snapshot.Workspace.Attachments)
-	}
-	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeySpace}) // attach again
-	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
-	if !u.focusLatestGrid() {
-		t.Fatal("grid missing")
-	}
-	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeySpace})
-	if len(u.snapshot.Workspace.Selections) != 1 || u.snapshot.Workspace.CurrentSelectionID == "" {
-		t.Fatalf("row selection = %+v", u.snapshot.Workspace)
-	}
-	if len(u.snapshot.Workspace.Attachments) != 1 {
-		t.Fatalf("row selection changed attachments: %+v", u.snapshot.Workspace.Attachments)
-	}
-	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyF6})
-	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeySpace}) // explicitly attach selected rows
-	if len(u.snapshot.Workspace.Attachments) != 2 {
-		t.Fatalf("selected rows were not attached: %+v", u.snapshot.Workspace.Attachments)
-	}
-	_, _ = u.Update(tea.KeyPressMsg{Code: 'd'})
-	if len(u.snapshot.Workspace.Docks) != 1 {
-		t.Fatalf("dock state = %+v", u.snapshot.Workspace.Docks)
-	}
-	if !strings.Contains(u.View().Content, "Selected") || !strings.Contains(u.View().Content, "Docked") {
-		t.Fatal("workspace disappeared after selection/dock")
-	}
-}
-
-func TestExplorerGroupsObjectsByDeclaredSourceAndCollapses(t *testing.T) {
-	u := NewUI(context.Background(), nil, "fake-model")
-	u.catalog = workspaceTestCatalog()
-	u.catalog.Objects = append(u.catalog.Objects,
-		ProjectObject{Reference: ContextReference{Kind: "query", ProjectID: "chinook", SourceID: "chinook-local", ObjectID: "by-city", Title: "By city"}},
-		ProjectObject{Reference: ContextReference{Kind: "query", ProjectID: "chinook", ObjectID: "unbound", Title: "Unbound"}},
-	)
-	nodes := u.explorerNodes()
-	var sourceDepth, boundDepth, unboundDepth int
-	for _, node := range nodes {
-		switch node.label {
-		case "Chinook local":
-			sourceDepth = node.depth
-		case "By city":
-			boundDepth = node.depth
-		case "Unbound":
-			unboundDepth = node.depth
+	for index, node := range u.explorer.explorerNodes() {
+		if node.label == "Customer purchases by genre" {
+			u.explorer.explorerIndex = index
+			break
 		}
 	}
-	if sourceDepth != 1 || boundDepth != 3 || unboundDepth != 2 {
-		t.Fatalf("unexpected explorer hierarchy: %+v", nodes)
+	u.explorer.inspectExplorerSelection()
+	view = flattenView(u.workspace.View(24, 18, true))
+	if !strings.Contains(view, "Query: Customer purchases by genre") || !strings.Contains(view, "SQL") || !strings.Contains(view, "SELECT GenreName") {
+		t.Fatalf("Explorer selection did not show query details:\n%s", view)
 	}
-	u.explorerCollapsed["source:chinook-local"] = true
-	for _, node := range u.explorerNodes() {
-		if node.label == "By city" || node.label == "Customer" {
-			t.Fatalf("collapsed source still exposes child %q", node.label)
+	u.shell.FocusRightPanel()
+	u.shell.Update(uitest.Key("end"))
+	view = ansi.Strip(u.shell.View().Content)
+	if !strings.Contains(view, "FROM purchases") {
+		t.Fatalf("shell End did not scroll catalog query detail to its final line:\n%s", view)
+	}
+	u.shell.Update(uitest.Key("home"))
+	view = ansi.Strip(u.shell.View().Content)
+	if !strings.Contains(view, "SELECT GenreName") || strings.Contains(view, "FROM purchases") {
+		t.Fatalf("shell Home did not reset catalog query detail to its first line:\n%s", view)
+	}
+}
+
+// TestExplorerTypingAndArrowNavigation keeps printable h/l available for
+// instant Explorer search while Left/Right own tree navigation.
+func TestExplorerTypingAndArrowNavigation(t *testing.T) {
+	t.Parallel()
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.catalog = workspaceTestCatalog()
+	u.shell.SetLeftPanel(u.explorer)
+	u.shell.FocusLeftPanel()
+	var leafIndex, sourceIndex int
+	nodes := u.explorer.explorerNodes()
+	for index, node := range nodes {
+		if node.label == "Customer" {
+			leafIndex = index
+		}
+		if node.id == "source:chinook-local" {
+			sourceIndex = index
 		}
 	}
+	u.shell.Update(uitest.Text("h"))
+	if u.explorer.explorerSearch != "h" || u.shell.WorkspaceFocus() != "explorer" {
+		t.Fatalf("the first printable should start Explorer search: search=%q focus=%q", u.explorer.explorerSearch, u.shell.WorkspaceFocus())
+	}
+	u.shell.Update(uitest.Text("l"))
+	u.shell.Update(uitest.Text("3"))
+	if u.explorer.explorerSearch != "hl3" || u.shell.WorkspaceFocus() != "explorer" {
+		t.Fatalf("printable h/l/digits should extend Explorer search: search=%q focus=%q", u.explorer.explorerSearch, u.shell.WorkspaceFocus())
+	}
+	u.shell.Update(uitest.Key("esc"))
+	if u.explorer.explorerSearch != "" || !u.explorer.explorerSearchFocused || u.shell.WorkspaceFocus() != "explorer" {
+		t.Fatal("the first Esc should clear Explorer search and retain focus")
+	}
+	u.shell.Update(uitest.Key("esc"))
+	if u.explorer.explorerSearchFocused || u.shell.WorkspaceFocus() != "explorer" {
+		t.Fatal("the second Esc should leave search without moving focus")
+	}
+	u.explorer.explorerIndex = leafIndex
+	u.shell.Update(uitest.Key("left"))
+	if u.explorer.explorerIndex >= leafIndex || !nodes[u.explorer.explorerIndex].branch {
+		t.Fatalf("Left on a leaf should jump to a shallower branch ancestor: got index %d from leaf %d", u.explorer.explorerIndex, leafIndex)
+	}
+	u.explorer.explorerIndex = sourceIndex
+	foldedID := nodes[sourceIndex].id
+	u.shell.Update(uitest.Key("left"))
+	if !u.explorer.explorerCollapsed[foldedID] {
+		t.Fatalf("Left on a branch should fold it")
+	}
+	u.shell.Update(uitest.Key("right"))
+	if u.explorer.explorerCollapsed[foldedID] || u.shell.WorkspaceFocus() != "explorer" {
+		t.Fatalf("Right should unfold the branch and keep Explorer focused: collapsed=%v focus=%q", u.explorer.explorerCollapsed[foldedID], u.shell.WorkspaceFocus())
+	}
 }
 
-func TestProjectPickerSelectsConfiguredProject(t *testing.T) {
-	u := NewUI(context.Background(), nil, "fake-model")
+func TestExplorerArrowsFoldTreeAndTabKeepsExplorerFocus(t *testing.T) {
+	t.Parallel()
+	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = workspaceTestCatalog()
-	u.SetProjectChoices([]ProjectChoice{{Key: "/projects/chinook", Title: "Chinook"}, {Key: "sales", Title: "Sales"}})
-	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyF3})
-	if !u.projectPicker || !strings.Contains(u.View().Content, "Sales") {
-		t.Fatal("project picker did not open")
+	u.shell.SetLeftPanel(u.explorer)
+	u.shell.FocusLeftPanel()
+	for index, node := range u.explorer.explorerNodes() {
+		if node.id == "source:chinook-local" {
+			u.explorer.explorerIndex = index
+			break
+		}
 	}
-	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	_, cmd := u.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if got := u.SelectedProject(); got != "sales" || cmd == nil {
-		t.Fatalf("project switch = %q, quit command = %v", got, cmd)
+	u.shell.Update(uitest.Key("left"))
+	if !u.explorer.explorerCollapsed["source:chinook-local"] || u.shell.WorkspaceFocus() != "explorer" {
+		t.Fatalf("Left should collapse source and keep Explorer focused: collapsed=%v focus=%q", u.explorer.explorerCollapsed["source:chinook-local"], u.shell.WorkspaceFocus())
 	}
-}
-
-func TestSplitDividerResizesWithinUsefulBounds(t *testing.T) {
-	u := NewUI(context.Background(), nil, "fake-model")
-	_, _ = u.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
-	initial := u.chatPaneWidth()
-	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModCtrl})
-	if u.chatPaneWidth() <= initial || u.workspacePaneWidth() < 23 {
-		t.Fatalf("right resize: chat=%d workspace=%d", u.chatPaneWidth(), u.workspacePaneWidth())
+	u.shell.Update(uitest.Key("right"))
+	if u.explorer.explorerCollapsed["source:chinook-local"] || u.shell.WorkspaceFocus() != "explorer" {
+		t.Fatalf("Right should expand source and keep Explorer focused: collapsed=%v focus=%q", u.explorer.explorerCollapsed["source:chinook-local"], u.shell.WorkspaceFocus())
 	}
-	for range 20 {
-		_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModCtrl})
+	rightTab := u.workspace.tab
+	u.shell.Update(uitest.Key("tab"))
+	if u.shell.WorkspaceFocus() != "explorer" || u.workspace.tab != rightTab {
+		t.Fatalf("Tab should keep focus in Explorer without changing Inspect tab: focus=%q inspectTab=%d", u.shell.WorkspaceFocus(), u.workspace.tab)
 	}
-	if u.chatPanePercent != 40 || u.chatPaneWidth() < 42 {
-		t.Fatalf("left resize exceeded minimum: percent=%d width=%d", u.chatPanePercent, u.chatPaneWidth())
-	}
-}
-
-func TestDockedGridSortAndCellSelectionUseSourceCoordinates(t *testing.T) {
-	ctx := context.Background()
-	store := openTestStore(t, testStorePath(t), testScope())
-	chat, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
-	if err != nil {
-		t.Fatal(err)
-	}
-	session, err := chat.Snapshot(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	recordID := workspaceTestRecord(t, store, session.ID)
-	ref, err := chat.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "select", RecordSetID: recordID, Rows: []int{0, 2}, Title: "Subset"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := chat.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "dock", Reference: ref}); err != nil {
-		t.Fatal(err)
-	}
-	u, err := NewSessionUI(ctx, chat, "fake-model")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _ = u.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
-	u.workspaceTab, u.workspaceFocused, u.dockGridFocused = 2, true, true
-	dock := u.snapshot.Workspace.Docks[0]
-	grid := u.dockGrids[dock.ID]
-	grid.selectedColumn = 0
-	_, _ = u.Update(tea.KeyPressMsg{Code: 's'}) // ascending
-	_, _ = u.Update(tea.KeyPressMsg{Code: 's'}) // descending
-	grid = u.dockGrids[dock.ID]
-	if got := grid.model.SourceRows; !reflect.DeepEqual(got, []int{2, 0}) {
-		t.Fatalf("docked sorted source rows = %v", got)
-	}
-	grid.selectedColumn, grid.rowIndex = 1, 0 // City in source row 2
-	_, _ = u.Update(tea.KeyPressMsg{Code: 'c'})
-	saved, err := chat.Snapshot(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	selection := saved.Workspace.Selections[saved.Workspace.CurrentSelectionID]
-	if !reflect.DeepEqual(selection.Rows, []int{2}) || !reflect.DeepEqual(selection.Columns, []string{"City"}) {
-		t.Fatalf("docked cell selection = %+v", selection)
-	}
-	if !reflect.DeepEqual(selection.Ranges, []CellRange{{FirstRow: 2, LastRow: 2, FirstCol: 1, LastCol: 1}}) {
-		t.Fatalf("docked cell coordinates = %+v", selection.Ranges)
+	u.shell.Update(uitest.Key("shift+tab"))
+	if u.shell.WorkspaceFocus() != "explorer" || u.workspace.tab != rightTab {
+		t.Fatalf("Shift+Tab should retain Explorer focus without changing Inspect tab: focus=%q inspectTab=%d", u.shell.WorkspaceFocus(), u.workspace.tab)
 	}
 }

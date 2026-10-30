@@ -1,0 +1,57 @@
+package secureread
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"math/big"
+	"os"
+
+	"github.com/dal-go/dalgo/condeval"
+	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/dalgo/tugql"
+	"github.com/dal-go/dalgo2sql"
+	"github.com/datatug/datatug-cli/pkg/accesspolicies"
+	"github.com/datatug/datatug-cli/pkg/resultops"
+	"github.com/datatug/datatug-core/pkg/apicontract"
+)
+
+var (
+	collectRowsFn          = collectRows
+	collectRowsFederatedFn = collectRows
+	streamFederatedTugQLFn = func(e *Executor, ctx context.Context, document []byte, sourceURLs map[string]string, variables map[string]any) (*FederatedStream, error) {
+		return e.StreamFederatedTugQL(ctx, document, sourceURLs, variables)
+	}
+	osMkdirTemp            = os.MkdirTemp
+	osChmod                = os.Chmod
+	sqlOpenSnapshot        = sql.Open
+	dbCloseSnapshot        = func(db *sql.DB) error { return db.Close() }
+	restoredValidate       = func(rs *apicontract.Recordset) error { return rs.Validate() }
+	beginTxSnapshot        = func(ctx context.Context, db *sql.DB) (*sql.Tx, error) { return db.BeginTx(ctx, nil) }
+	prepareContextSnapshot = func(ctx context.Context, tx *sql.Tx, query string) (*sql.Stmt, error) {
+		return tx.PrepareContext(ctx, query)
+	}
+	stmtExecSnapshot = func(ctx context.Context, stmt *sql.Stmt, args ...any) (sql.Result, error) {
+		return stmt.ExecContext(ctx, args...)
+	}
+	sqlOpenNative = sql.Open
+	// newNativeSQLDatabase is a seam over dalgo2sql.NewDatabase so a test can
+	// see the options the native-SQL connection is wrapped with.
+	newNativeSQLDatabase = dalgo2sql.NewDatabase
+	pragmaQueryOnly      = func(ctx context.Context, db *sql.DB) error {
+		_, err := db.ExecContext(ctx, "PRAGMA query_only = ON")
+		return err
+	}
+	tugqlSerialize               = tugql.Serialize
+	resultopsCapture             = resultops.Capture
+	accesspoliciesRun            = accesspolicies.Run
+	condevalSubstitute           = condeval.Substitute
+	exactAggregateRatFloatString = func(r *big.Rat, prec int) string { return r.FloatString(prec) }
+	exactAggregateJSONMarshal    = json.Marshal
+	outputSort                   = func(s resultops.Snapshot, order []resultops.SortKey) ([]int, error) { return s.Sort(order) }
+	dalExecuteRecursiveQuery     = dal.ExecuteRecursiveQuery
+	tugqlDeserialize             = tugql.Deserialize
+	// openSourceFn is openSource, a seam so a test can hand the executor an
+	// owned handle whose Close is observable (the CouchDB/PostgREST shape).
+	openSourceFn = openSource
+)

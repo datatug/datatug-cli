@@ -9,18 +9,17 @@ import (
 	"os"
 	"runtime/debug"
 	"strings"
-	"time"
 
 	"charm.land/fang/v2"
 	"github.com/datatug/datatug-cli/apps/datatugapp/commands"
-	"github.com/datatug/datatug-cli/apps/global"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/dtlog"
-	_ "github.com/denisenkom/go-mssqldb"
-	"github.com/posthog/posthog-go"
+	_ "github.com/microsoft/go-mssqldb"
 	"github.com/spf13/cobra"
 	"github.com/strongo/buildinfo"
 	"github.com/strongo/buildinfo/fangcmd"
 	"github.com/strongo/logus"
+	"golang.org/x/term"
 
 	//_ "github.com/jackc/pgx/v5"
 	_ "github.com/mattn/go-sqlite3"
@@ -45,6 +44,18 @@ var dtlogEnqueue = dtlog.Enqueue
 // doc comment.
 var dtlogStart = dtlog.Start
 
+// dtlogNotice is a seam over dtlog.ShowNoticeOnce, the first-run telemetry
+// notice, so tests can prove when it is and is not printed without writing to
+// the person's home.
+var dtlogNotice = dtlog.ShowNoticeOnce
+
+// stderrIsTerminal says whether stderr is a terminal a person reads. The notice
+// is printed, and recorded as shown, only then: a run with stderr discarded or
+// captured (a script, a service, shell completion) did not tell anyone.
+var stderrIsTerminal = func() bool { return isTerminal(os.Stderr) }
+
+func isTerminal(f *os.File) bool { return term.IsTerminal(int(f.Fd())) }
+
 func main() {
 
 	// skipTelemetry is set below, before fang.Execute runs, but declared
@@ -59,25 +70,21 @@ func main() {
 	defer func() {
 		r := recover()
 		if r != nil {
-			if global.App != nil {
-				global.App.Stop() // VERY IMPORTANT: restore terminal
-			}
-			rText := fmt.Sprintf("%v", r)
+			// The terminal is already restored: datatugui.Run quits the Bubble
+			// Tea program, which restores it, before it raises a panic again.
+			// The panic text goes to the log, to telemetry and to stderr, so a
+			// source URL it quotes must not carry its password to any of them.
+			rText := dbcopy.RedactText(fmt.Sprintf("%v", r))
 			ctx := context.Background()
 			logus.Errorf(ctx, "panic: %s", rText)
-			timestamp := time.Now()
-			distinctID := dtlog.DistinctID()
-			dtlogEnqueue(posthog.NewDefaultException(
-				timestamp,
-				distinctID,
-				"panic",
-				rText,
-			))
-			_, _ = fmt.Fprintln(os.Stderr, "panic:", r)
+			// The report carries the Go type of the panic value and the stack,
+			// never its text: rText stays on stderr and in the log.
+			dtlogEnqueue(dtlog.PanicEvent(r))
+			_, _ = fmt.Fprintln(os.Stderr, "panic:", rText)
 			debug.PrintStack()
 		}
 		if !skipTelemetry {
-			dtlogEnqueue(posthog.Capture{Event: "DataTug CLI exited"})
+			dtlogEnqueue(dtlog.ExitedEvent())
 		}
 		dtlog.Close()
 		//time.Sleep(10 * time.Millisecond) // Allow some time for event to be sent
@@ -108,11 +115,17 @@ func main() {
 	skipTelemetry = isVersionJSONInvocation(root, args)
 
 	if !skipTelemetry {
+		// The notice comes first: on the run that prints it nothing is sent.
+		dtlogNotice(os.Stderr, stderrIsTerminal())
 		dtlogStart()
-		dtlogEnqueue(posthog.Capture{Event: "DataTug CLI started"})
+		dtlogEnqueue(dtlog.StartedEvent())
 	}
 
-	if err := fang.Execute(context.Background(), root, fangOpts...); err != nil {
+	err := fang.Execute(context.Background(), root, fangOpts...)
+	// --client <caller>: after the command's own work (success or failure), make sure the
+	// local API daemon runs. Stderr only; never the command's stdout or exit code.
+	ensureDaemon(root, args, os.Stderr)
+	if err != nil {
 		// fang.Execute has already printed err (styled, or bare on a
 		// non-terminal stderr — see charm.land/fang/v2's DefaultErrorHandler).
 		// Resolve only the process exit code here: an ExitCoder (this
@@ -127,6 +140,9 @@ func main() {
 		osExit(1)
 	}
 }
+
+// ensureDaemon is a seam over the --client wrapper (spec/features/cli/daemon).
+var ensureDaemon = commands.EnsureDaemonForCaller
 
 var getCommand = func() (*cobra.Command, []fang.Option) {
 	root := commands.DatatugCommand()
@@ -149,7 +165,11 @@ var getCommand = func() (*cobra.Command, []fang.Option) {
 
 func preserveErrorTextCase(w io.Writer, styles fang.Styles, err error) {
 	styles.ErrorText = styles.ErrorText.UnsetTransform()
-	fang.DefaultErrorHandler(w, styles, err)
+	// Every error a command returns is printed here: redact it once, so a
+	// password inside a source URL never reaches the terminal whichever
+	// command built the error.
+	redacted := errors.New(dbcopy.RedactText(err.Error()))
+	fang.DefaultErrorHandler(w, styles, redacted)
 }
 
 // isVersionJSONInvocation reports whether args would dispatch root to the

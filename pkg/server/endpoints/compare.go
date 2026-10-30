@@ -10,6 +10,8 @@ import (
 	"net/http"
 
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/comparecache"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/incidents"
@@ -17,6 +19,23 @@ import (
 )
 
 const maxCompareBodyBytes = 1 << 20
+
+type compareCacheSession interface {
+	Observer() recordsetcompare.RecordObserver
+	Commit(result apicontract.CompareResult) error
+	Abort()
+}
+
+var (
+	compareResultValidateHook = (*apicontract.CompareResult).Validate
+	apiBeginCompareCache      = func(ctx context.Context, req comparecache.BeginRequest) (compareCacheSession, error) {
+		s, err := api.BeginCompareCache(ctx, req)
+		if err != nil || s == nil {
+			return nil, err
+		}
+		return s, nil
+	}
+)
 
 type compareSideData struct {
 	recordset apicontract.Recordset
@@ -88,9 +107,6 @@ func computeCompareWith(ctx context.Context, req apicontract.CompareRequest, dep
 		return apicontract.CompareResult{}, requestValidationError(err)
 	}
 	if len(req.Key) == 0 {
-		if req.Left.Kind == apicontract.CompareSideRecord || req.Right.Kind == apicontract.CompareSideRecord {
-			return apicontract.CompareResult{}, newInvalidRequest("key", "an explicit key is required when comparing an execution record")
-		}
 		if deps.resolveKey == nil {
 			return apicontract.CompareResult{}, newInvalidRequest("key", "the live query has no resolvable mapped key")
 		}
@@ -140,12 +156,38 @@ func computeCompareWith(ctx context.Context, req apicontract.CompareRequest, dep
 	if req.Limit != nil {
 		limit = *req.Limit
 	}
-	result, err := recordsetcompare.Compare(left.recordset, right.recordset, left.receipt, right.receipt, recordsetcompare.Options{
+	options := recordsetcompare.Options{
 		Key: append([]string(nil), req.Key...), DistributionColumn: req.DistributionColumn, Limit: limit,
+	}
+	session, cacheErr := apiBeginCompareCache(ctx, comparecache.BeginRequest{
+		QueryID: req.QueryID, Left: left.receipt.Execution, Right: right.receipt.Execution,
 	})
+	if cacheErr != nil {
+		api.LogCompareCacheSkip("begin", cacheErr)
+	} else if session != nil {
+		observer := session.Observer()
+		options.Observer = func(record recordsetcompare.ComparedRecord) error {
+			if cacheErr == nil {
+				cacheErr = observer(record)
+				if cacheErr != nil {
+					session.Abort()
+					api.LogCompareCacheSkip("observe", cacheErr)
+				}
+			}
+			// This sidecar must never veto the authoritative comparison.
+			return nil
+		}
+		defer session.Abort()
+	}
+	result, err := recordsetcompare.Compare(left.recordset, right.recordset, left.receipt, right.receipt, options)
 	if err != nil {
 		leftReceipt, rightReceipt := left.receipt, right.receipt
 		return apicontract.CompareResult{}, &compareComputationError{cause: newInvalidRequest("compare", err.Error()), left: &leftReceipt, right: &rightReceipt}
+	}
+	if session != nil && cacheErr == nil {
+		if commitErr := session.Commit(result); commitErr != nil {
+			api.LogCompareCacheSkip("commit", commitErr)
+		}
 	}
 	if req.Incident != nil {
 		comparison := incidents.ComparisonRef{Left: incidents.ExecutionRef(result.Left.Execution), Right: incidents.ExecutionRef(result.Right.Execution)}
@@ -158,7 +200,7 @@ func computeCompareWith(ctx context.Context, req apicontract.CompareRequest, dep
 			return apicontract.CompareResult{}, &compareComputationError{cause: err, left: &leftReceipt, right: &rightReceipt}
 		}
 	}
-	if err := result.Validate(); err != nil {
+	if err := compareResultValidateHook(&result); err != nil {
 		return apicontract.CompareResult{}, fmt.Errorf("validate compare result: %w", err)
 	}
 	return result, nil
@@ -178,7 +220,7 @@ func writeCompareError(w http.ResponseWriter, r *http.Request, err error) {
 		ce = contractErrAccessDenied(err.Error())
 	default:
 		ce = &contractError{Code: codeInternal, Message: unclassifiedErrorMessage, RequestID: newRequestID()}
-		log.Printf("%s: request %s: answered 500 INTERNAL: %v", r.URL.Path, ce.RequestID, err)
+		log.Printf("%s: request %s: answered 500 INTERNAL: %v", r.URL.Path, ce.RequestID, dbcopy.RedactError(err))
 	}
 	response := apicontract.CompareErrorResponse{Error: ce.envelope().Error}
 	if computation != nil {

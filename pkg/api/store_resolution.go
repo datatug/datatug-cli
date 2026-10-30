@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/storage"
+	"github.com/strongo/validation"
 )
 
 // LocalStoreID is the store id a `datatug serve` session's filestore-backed
@@ -74,16 +76,36 @@ func resolveStoreID(explicit, projectID string, configured []string) (string, er
 				return explicit, nil
 			}
 		}
-		return "", fmt.Errorf("%w: %q is not configured for project %q", ErrUnknownStoreID, explicit, projectID)
+		// explicit and projectID are what a client sent: only a plain name is quoted.
+		return "", fmt.Errorf("%w: %q is not configured for project %q", ErrUnknownStoreID, dbcopy.SourceIDDisplay(explicit), dbcopy.SourceIDDisplay(projectID))
 	}
 	switch len(configured) {
 	case 1:
 		return configured[0], nil
 	case 0:
-		return "", fmt.Errorf("%w: no store configured for project %q", ErrUnknownStoreID, projectID)
+		return "", errNoStoreConfigured(projectID)
 	default:
-		return "", fmt.Errorf("%w: project %q", ErrAmbiguousStore, projectID)
+		return "", fmt.Errorf("%w: project %q", ErrAmbiguousStore, dbcopy.SourceIDDisplay(projectID))
 	}
+}
+
+// errNoStoreConfigured is the answer for a project that nothing serves (see
+// ResolveStoreID), shown with the project's ID only when it is a plain name.
+func errNoStoreConfigured(projectID string) error {
+	return fmt.Errorf("%w: no store configured for project %q", ErrUnknownStoreID, dbcopy.SourceIDDisplay(projectID))
+}
+
+// servedProjectDir returns the directory of a project this process serves, and for any
+// other project the answer of a route that resolves its store (see ResolveStoreID).
+// An entry that takes the project from the request itself, and so is not reached
+// through such a route, asks it before it asks for a project store: a project the
+// process does not serve has no folder to open, and its ID is not turned into one.
+func servedProjectDir(projectID string) (string, error) {
+	dir, served := projectDir(projectID)
+	if !served {
+		return "", errNoStoreConfigured(projectID)
+	}
+	return dir, nil
 }
 
 // storeFor resolves storeID via storage.NewDatatugStore — the mechanism
@@ -105,10 +127,43 @@ func storeFor(storeID string) (storage.Store, error) {
 // projectStoreForID is storeFor plus the project-store lookup, replacing
 // every remaining storage.GetProjectStore(ctx, storeID, projectID) call
 // site — see storeFor's doc comment.
+//
+// It is the one place an entry gets the store of a served project from (ProjectStoreFor and
+// every entry call it, and a test fails on a call of GetProjectStore anywhere else); the scan
+// opens the folder it is given and builds its own store (see
+// TestFileStoreConstructors_AreCalledByTheScanOnly). So the rule about which projects there
+// is a store for is kept here, once, and not in each entry: the
+// project's ID must be a served project or a plain name (see ValidateProjectIdentifier), and
+// when a session is configured (see sessionConfigured) it must be a project that this process
+// serves. A plain name that is not served has no project folder, so no store is handed out for
+// it: the answer is the one of the routes that resolve the store of their project (see
+// ResolveStoreID), as a bad request. With no session (a handler under test, or a command that
+// is not serve) any plain name is handed a store.
 func projectStoreForID(storeID, projectID string) (datatug.ProjectStore, error) {
+	if err := ValidateProjectIdentifier("project", projectID); err != nil {
+		return nil, err
+	}
+	if sessionConfigured() {
+		if _, err := servedProjectDir(projectID); err != nil {
+			return nil, projectNotServed{err}
+		}
+	}
 	store, err := storeFor(storeID)
 	if err != nil {
 		return nil, err
 	}
 	return store.GetProjectStore(projectID), nil
+}
+
+// projectNotServed is the refusal of a project that this process does not serve: the answer
+// of a route that resolves its store (an ErrUnknownStoreID, which the legacy routes answer
+// as a 400 of their own) that is also a bad request, which is the only error that the routes
+// answered by apicore give a status of 400 to.
+type projectNotServed struct{ refusal error }
+
+func (e projectNotServed) Error() string { return e.refusal.Error() }
+
+// Unwrap lets errors.Is find both: the refusal, and a bad request that says the same.
+func (e projectNotServed) Unwrap() []error {
+	return []error{e.refusal, validation.NewBadRequestError(e.refusal)}
 }

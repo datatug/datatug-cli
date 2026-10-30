@@ -45,7 +45,18 @@ func incidentScopeFromQuery(r *http.Request) apicontract.IncidentScope {
 	return apicontract.IncidentScope{StoreID: query.Get("storeId"), Project: query.Get("project"), Environment: query.Get("environment"), SecurityContextID: query.Get("securityContextId")}
 }
 
-var incidentStoreByID = api.IncidentStoreByID
+var (
+	incidentStoreByID                   = api.IncidentStoreByID
+	incidentResponseValidateHook        = (*apicontract.IncidentResponse).Validate
+	incidentListResponseValidateHook    = (*apicontract.IncidentListResponse).Validate
+	incidentSimilarResponseValidateHook = (*apicontract.IncidentSimilarResponse).Validate
+	incidentViewHook                    = api.IncidentView
+	incidentActorHook                   = api.SecureIncidentActor
+	incidentResolveProjectHook          = api.ResolveIncidentProject
+	incidentStreamItemMarshalHook       = json.Marshal
+	incidentApplyEventViewHook          = incidents.ApplyEventView
+	incidentApplyStreamItemViewHook     = incidents.ApplyStreamItemView
+)
 
 func validateIncidentScope(scope apicontract.IncidentScope) (incidents.APIStore, incidents.ProjectRef, error) {
 	if err := validateScope(apicontract.Scope(scope)); err != nil {
@@ -54,7 +65,7 @@ func validateIncidentScope(scope apicontract.IncidentScope) (incidents.APIStore,
 	if err := scope.Validate(); err != nil {
 		return nil, incidents.ProjectRef{}, requestValidationError(err)
 	}
-	resolved, err := api.ResolveIncidentProject(scope.Project, scope.Environment)
+	resolved, err := incidentResolveProjectHook(scope.Project, scope.Environment)
 	if err != nil {
 		return nil, incidents.ProjectRef{}, newNotFound("project not found")
 	}
@@ -103,14 +114,14 @@ func incidentCreateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if err == nil {
 		for _, project := range req.Projects {
-			served, resolveErr := api.ResolveIncidentProject(project.ProjectID, project.Environment)
+			served, resolveErr := incidentResolveProjectHook(project.ProjectID, project.Environment)
 			if resolveErr != nil || served != project {
 				err = newNotFound("declared project not found")
 				break
 			}
 		}
 	}
-	actor, actorErr := api.SecureIncidentActor(incidents.ActorViaAPI)
+	actor, actorErr := incidentActorHook(incidents.ActorViaAPI)
 	if err == nil && actorErr != nil {
 		err = newAccessDenied(actorErr.Error())
 	}
@@ -133,10 +144,10 @@ func incidentCreateHandler(w http.ResponseWriter, r *http.Request) {
 		writeContractError(w, r, incidentStoreError(err))
 		return
 	}
-	view, _, err := api.IncidentView(r.Context(), result.Projection, events)
+	view, _, err := incidentViewHook(r.Context(), result.Projection, events)
 	response := apicontract.IncidentResponse{Incident: view}
 	if err == nil {
-		err = response.Validate()
+		err = incidentResponseValidateHook(&response)
 	}
 	if err != nil {
 		writeContractError(w, r, err)
@@ -174,14 +185,14 @@ func incidentListHandler(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 			var view incidents.IncidentView
-			view, _, err = api.IncidentView(r.Context(), candidate, events)
+			view, _, err = incidentViewHook(r.Context(), candidate, events)
 			if err == nil && incidents.MatchesListQuery(view, listQuery) {
 				response.Incidents = append(response.Incidents, view)
 			}
 		}
 	}
 	if err == nil {
-		err = response.Validate()
+		err = incidentListResponseValidateHook(&response)
 	}
 	writeContractResponse(w, r, err, response)
 }
@@ -224,10 +235,10 @@ func incidentShowHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	var response apicontract.IncidentResponse
 	if err == nil {
-		response.Incident, _, err = api.IncidentView(r.Context(), stored, events)
+		response.Incident, _, err = incidentViewHook(r.Context(), stored, events)
 	}
 	if err == nil {
-		err = response.Validate()
+		err = incidentResponseValidateHook(&response)
 	}
 	writeContractResponse(w, r, incidentStoreError(err), response)
 }
@@ -258,7 +269,7 @@ func incidentAppendHandler(w http.ResponseWriter, r *http.Request) {
 			err = newNotFound("incident not found")
 		}
 	}
-	actor, actorErr := api.SecureIncidentActor(incidents.ActorViaAPI)
+	actor, actorErr := incidentActorHook(incidents.ActorViaAPI)
 	if err == nil && actorErr != nil {
 		err = newAccessDenied(actorErr.Error())
 	}
@@ -285,11 +296,11 @@ func incidentAppendHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	events, err := store.Events(r.Context(), req.Incident, 0)
-	view, policy, viewErr := api.IncidentView(r.Context(), result.Projection, events)
+	view, policy, viewErr := incidentViewHook(r.Context(), result.Projection, events)
 	if err == nil {
 		err = viewErr
 	}
-	event, visible, eventErr := incidents.ApplyEventView(result.Event, policy)
+	event, visible, eventErr := incidentApplyEventViewHook(result.Event, policy)
 	if err == nil {
 		err = eventErr
 	}
@@ -320,11 +331,11 @@ func authorizeIncidentEvent(ctx context.Context, store incidents.APIStore, mutat
 		}
 	}
 	draft := incidents.Event{ID: mutation.MutationID, Seq: authorizedSeq + 1, At: mutation.Event.At, VisibleAt: mutation.Event.At, Incident: mutation.Incident, Actor: mutation.Event.Actor, Type: mutation.Event.Type, Assertion: mutation.Event.Assertion, Refs: mutation.Event.Refs, Payload: mutation.Event.Payload}
-	_, policy, err := api.IncidentView(ctx, stored, append(events, draft))
+	_, policy, err := incidentViewHook(ctx, stored, append(events, draft))
 	if err != nil {
 		return 0, err
 	}
-	_, visible, err := incidents.ApplyEventView(draft, policy)
+	_, visible, err := incidentApplyEventViewHook(draft, policy)
 	if err != nil {
 		return 0, newInvalidRequest("event", err.Error())
 	}
@@ -366,7 +377,7 @@ func incidentMergeHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if _, actorErr := api.SecureIncidentActor(incidents.ActorViaAPI); err == nil && actorErr != nil {
+	if _, actorErr := incidentActorHook(incidents.ActorViaAPI); err == nil && actorErr != nil {
 		err = newAccessDenied(actorErr.Error())
 	}
 	var result incidents.MergeResult
@@ -382,9 +393,9 @@ func incidentMergeHandler(w http.ResponseWriter, r *http.Request) {
 		} else if intoErr != nil {
 			err = intoErr
 		} else {
-			response.Source, _, err = api.IncidentView(r.Context(), result.Source, sourceEvents)
+			response.Source, _, err = incidentViewHook(r.Context(), result.Source, sourceEvents)
 			if err == nil {
-				response.Into, _, err = api.IncidentView(r.Context(), result.Into, intoEvents)
+				response.Into, _, err = incidentViewHook(r.Context(), result.Into, intoEvents)
 			}
 			response.Replayed = result.Replayed
 		}
@@ -448,7 +459,7 @@ func incidentSimilarHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	response := apicontract.IncidentSimilarResponse{Matches: incidents.Similar(subject, views)}
 	if err == nil {
-		err = response.Validate()
+		err = incidentSimilarResponseValidateHook(&response)
 	}
 	writeContractResponse(w, r, err, response)
 }
@@ -464,7 +475,7 @@ func incidentViews(ctx context.Context, store incidents.APIStore, query incident
 		if err != nil {
 			return nil, err
 		}
-		view, _, err := api.IncidentView(ctx, candidate, events)
+		view, _, err := incidentViewHook(ctx, candidate, events)
 		if err != nil {
 			return nil, err
 		}
@@ -539,7 +550,7 @@ func incidentEventsHandler(w http.ResponseWriter, r *http.Request) {
 		writeContractError(w, r, incidentStoreError(firstErr))
 		return
 	}
-	firstLine, err := json.Marshal(first)
+	firstLine, err := incidentStreamItemMarshalHook(first)
 	if err != nil {
 		writeContractError(w, r, err)
 		return
@@ -561,7 +572,7 @@ func incidentEventsHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			panic(http.ErrAbortHandler)
 		}
-		line, encodeErr := json.Marshal(item)
+		line, encodeErr := incidentStreamItemMarshalHook(item)
 		if encodeErr != nil {
 			panic(http.ErrAbortHandler)
 		}
@@ -591,11 +602,11 @@ func nextVisibleIncidentStreamItem(ctx context.Context, store incidents.APIStore
 		if err != nil {
 			return incidents.StreamItem{}, err
 		}
-		_, policy, err := api.IncidentView(ctx, stored, events)
+		_, policy, err := incidentViewHook(ctx, stored, events)
 		if err != nil {
 			return incidents.StreamItem{}, err
 		}
-		visibleItem, visible, err := incidents.ApplyStreamItemView(item, policy)
+		visibleItem, visible, err := incidentApplyStreamItemViewHook(item, policy)
 		if err != nil {
 			return incidents.StreamItem{}, err
 		}

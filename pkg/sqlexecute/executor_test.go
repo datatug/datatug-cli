@@ -1,11 +1,13 @@
 package sqlexecute
 
 import (
+	"context"
 	"database/sql"
 	"database/sql/driver"
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -457,7 +459,7 @@ func TestExecuteCommand_GetDbByIDNil_InvalidServer(t *testing.T) {
 		Text:      "SELECT 1",
 		Env:       "dev",
 	}
-	_, err := e.executeCommand(cmd)
+	_, err := e.executeCommand(context.Background(), cmd)
 	if err == nil {
 		t.Fatal("expected error for invalid server params")
 	}
@@ -466,7 +468,7 @@ func TestExecuteCommand_GetDbByIDNil_InvalidServer(t *testing.T) {
 // TestExecuteCommand_SQLite3_Success covers the sqlite3 case end-to-end.
 func TestExecuteCommand_SQLite3_Success(t *testing.T) {
 	e := sqliteExecutor(":memory:")
-	recordset, err := e.executeCommand(RequestCommand{
+	recordset, err := e.executeCommand(context.Background(), RequestCommand{
 		Env:  "dev",
 		Text: "SELECT 1 AS num, 'hello' AS greeting",
 	})
@@ -495,7 +497,7 @@ func TestExecuteCommand_SQLite3_HomedirExpandError(t *testing.T) {
 			}, nil
 		},
 	)
-	_, err := e.executeCommand(RequestCommand{Env: "dev", DB: "mydb", Text: "SELECT 1"})
+	_, err := e.executeCommand(context.Background(), RequestCommand{Env: "dev", DB: "mydb", Text: "SELECT 1"})
 	if err == nil {
 		t.Fatal("expected error from homedir.Expand")
 	}
@@ -504,7 +506,7 @@ func TestExecuteCommand_SQLite3_HomedirExpandError(t *testing.T) {
 // TestExecuteCommand_SQLite3_WithParameters covers parameter substitution path.
 func TestExecuteCommand_SQLite3_WithParameters(t *testing.T) {
 	e := sqliteExecutor(":memory:")
-	recordset, err := e.executeCommand(RequestCommand{
+	recordset, err := e.executeCommand(context.Background(), RequestCommand{
 		Env:  "dev",
 		Text: "SELECT @val AS v",
 		Parameters: []datatug.Parameter{
@@ -524,7 +526,7 @@ func TestExecuteCommand_SQLite3_WithParameters(t *testing.T) {
 // the retry fills in nil and re-runs successfully.
 func TestExecuteCommand_SQLite3_NotEnoughArgsRetry(t *testing.T) {
 	e := sqliteExecutor(":memory:")
-	recordset, err := e.executeCommand(RequestCommand{
+	recordset, err := e.executeCommand(context.Background(), RequestCommand{
 		Env:  "dev",
 		Text: "SELECT @param1 AS v",
 	})
@@ -546,7 +548,7 @@ func TestExecuteCommand_SQLite3_NotEnoughArgs_DuplicateParam(t *testing.T) {
 	// so @p is never substituted by the first loop. Both @p occurrences
 	// remain and the retry loop processes them: first @p → appends nil,
 	// second @p → duplicate → continue.
-	recordset, err := e.executeCommand(RequestCommand{
+	recordset, err := e.executeCommand(context.Background(), RequestCommand{
 		Env:  "dev",
 		Text: "SELECT @p AS a, @p AS b",
 	})
@@ -566,7 +568,7 @@ func TestExecuteCommand_GetDbByIDError(t *testing.T) {
 		},
 		nil,
 	)
-	_, err := e.executeCommand(RequestCommand{Env: "env", DB: "mydb", Text: "SELECT 1"})
+	_, err := e.executeCommand(context.Background(), RequestCommand{Env: "env", DB: "mydb", Text: "SELECT 1"})
 	if err == nil {
 		t.Fatal("expected error from getDbByID")
 	}
@@ -584,29 +586,32 @@ func TestExecuteCommand_GetCatalogSummaryError(t *testing.T) {
 			return nil, errors.New("catalog summary not found")
 		},
 	)
-	_, err := e.executeCommand(RequestCommand{Env: "env", DB: "mydb", Text: "SELECT 1"})
+	_, err := e.executeCommand(context.Background(), RequestCommand{Env: "env", DB: "mydb", Text: "SELECT 1"})
 	if err == nil {
 		t.Fatal("expected error from getCatalogSummary")
 	}
 }
 
-// TestExecuteCommand_DefaultDriver_InvalidMode covers the "invalid connection parameters"
-// error path. Port != 0 causes options=["mode=<port>"] which is not a valid mode string,
-// so NewConnectionString returns an error → "invalid connection parameters: ..." wrapping.
-func TestExecuteCommand_DefaultDriver_InvalidMode(t *testing.T) {
+// TestExecuteCommand_DefaultDriver_PortOfAnUnregisteredDriver covers a server with a port
+// whose driver is not registered in this test binary: the server passes the checks of the
+// command, the connection string is built, and it is sql.Open that refuses the driver, so
+// nothing is dialled. The test asserts that refusal: were a driver of that name linked into
+// this binary, the error would be another and the test would fail.
+func TestExecuteCommand_DefaultDriver_PortOfAnUnregisteredDriver(t *testing.T) {
 	e := NewExecutor(nil, nil)
 	cmd := RequestCommand{
 		Env:  "dev",
 		Text: "SELECT 1",
 		ServerRef: datatug.ServerRef{
-			Driver: "sqlserver",
+			// Not sqlserver, mysql or oracle, whose drivers pkg/dbcopy links in; pgx registers itself as "pgx".
+			Driver: "postgres",
 			Host:   "myhost",
 			Port:   9999,
 		},
 	}
-	_, err := e.executeCommand(cmd)
-	if err == nil {
-		t.Fatal("expected error for invalid connection parameters (bad mode)")
+	_, err := e.executeCommand(context.Background(), cmd)
+	if err == nil || !strings.Contains(err.Error(), "unknown driver") {
+		t.Fatalf("got %v, want the refusal of sql.Open for a driver that is not registered", err)
 	}
 }
 
@@ -621,7 +626,7 @@ func TestExecuteCommand_UnknownDriver_SqlOpenError(t *testing.T) {
 		},
 		nil,
 	)
-	_, err := e.executeCommand(RequestCommand{Env: "dev", DB: "mydb", Text: "SELECT 1"})
+	_, err := e.executeCommand(context.Background(), RequestCommand{Env: "dev", DB: "mydb", Text: "SELECT 1"})
 	if err == nil {
 		t.Fatal("expected error from sql.Open for unknown driver")
 	}
@@ -635,7 +640,7 @@ func TestExecuteCommand_NotEnoughArgsNoParams(t *testing.T) {
 	// "?" is a positional placeholder in sqlite3. Passing no args triggers
 	// "not enough args to execute query: want 1 got 0".
 	// The query has no @param patterns so the retry cannot help → bare return with error.
-	_, err := e.executeCommand(RequestCommand{
+	_, err := e.executeCommand(context.Background(), RequestCommand{
 		Env:  "dev",
 		Text: "SELECT ? AS v",
 	})
@@ -655,7 +660,7 @@ func TestExecuteQuery_Error(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	e := NewExecutor(nil, nil)
-	_, err = e.executeQuery(db, "sqlite3", "THIS IS NOT VALID SQL", nil)
+	_, err = e.executeQuery(context.Background(), db, "sqlite3", "THIS IS NOT VALID SQL", nil)
 	if err == nil {
 		t.Fatal("expected error for invalid SQL")
 	}
@@ -667,7 +672,7 @@ func TestExecuteQuery_Success(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	e := NewExecutor(nil, nil)
-	recordset, err := e.executeQuery(db, "sqlite3", "SELECT id, name FROM items ORDER BY id", nil)
+	recordset, err := e.executeQuery(context.Background(), db, "sqlite3", "SELECT id, name FROM items ORDER BY id", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -697,7 +702,7 @@ func TestExecuteQuery_NullableColumns(t *testing.T) {
 	}
 
 	e := NewExecutor(nil, nil)
-	recordset, err := e.executeQuery(db, "sqlite3", "SELECT v FROM nulltest", nil)
+	recordset, err := e.executeQuery(context.Background(), db, "sqlite3", "SELECT v FROM nulltest", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -716,7 +721,7 @@ func TestExecuteQuery_UNIQUEIDENTIFIER_NonSqlserver(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	e := NewExecutor(nil, nil)
-	recordset, err := e.executeQuery(db, "fakeuid", "SELECT uid", nil)
+	recordset, err := e.executeQuery(context.Background(), db, "fakeuid", "SELECT uid", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -734,7 +739,7 @@ func TestExecuteQuery_UNIQUEIDENTIFIER_Sqlserver(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	e := NewExecutor(nil, nil)
-	recordset, err := e.executeQuery(db, "sqlserver", "SELECT uid", nil)
+	recordset, err := e.executeQuery(context.Background(), db, "sqlserver", "SELECT uid", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -752,7 +757,7 @@ func TestExecuteQuery_UNIQUEIDENTIFIER_Null(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	e := NewExecutor(nil, nil)
-	recordset, err := e.executeQuery(db, "fakeuidnull", "SELECT uid", nil)
+	recordset, err := e.executeQuery(context.Background(), db, "fakeuidnull", "SELECT uid", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -778,7 +783,7 @@ func TestExecuteQuery_RowsCloseError(t *testing.T) {
 	e := NewExecutor(nil, nil)
 	// The query succeeds; the rows.Close() defer path at executor.go:208-210 is
 	// structurally unreachable (see TEST-COVERAGE.md gap documentation).
-	recordset, err := e.executeQuery(db, "fakecloseerr", "SELECT n", nil)
+	recordset, err := e.executeQuery(context.Background(), db, "fakecloseerr", "SELECT n", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -801,7 +806,7 @@ func TestExecuteCommand_DBCloseError(t *testing.T) {
 		nil,
 	)
 	// The query succeeds; db.Close() logs an error but does not return it.
-	recordset, err := e.executeCommand(RequestCommand{
+	recordset, err := e.executeCommand(context.Background(), RequestCommand{
 		Env:  "dev",
 		DB:   "mydb",
 		Text: "SELECT n",
@@ -825,8 +830,74 @@ func TestExecuteQuery_UNIQUEIDENTIFIER_BadBytes(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	e := NewExecutor(nil, nil)
-	_, err = e.executeQuery(db, "fakebaduid", "SELECT uid", nil)
+	_, err = e.executeQuery(context.Background(), db, "fakebaduid", "SELECT uid", nil)
 	if err == nil {
 		t.Fatal("expected error from uuid.FromBytes with invalid byte slice")
 	}
+}
+
+func TestRequestCommand_Validate_DbAndPort(t *testing.T) {
+	cmd := RequestCommand{
+		Env:  "dev",
+		Text: "SELECT 1",
+		DB:   "mydb",
+		ServerRef: datatug.ServerRef{
+			Port: 5432,
+		},
+	}
+	err := cmd.Validate()
+	if err == nil || !strings.Contains(err.Error(), "both 'db' & 'port' were provided") {
+		t.Fatalf("expected db & port error, got: %v", err)
+	}
+}
+
+func TestExecuteQuery_SeamsErrors(t *testing.T) {
+	db := openMemDB(t)
+	defer func() { _ = db.Close() }()
+	e := NewExecutor(nil, nil)
+
+	// Test closeRowsSeam error (logged in defer)
+	t.Run("closeRows error", func(t *testing.T) {
+		origClose := closeRowsSeam
+		defer func() { closeRowsSeam = origClose }()
+		closeRowsSeam = func(rows *sql.Rows) error {
+			_ = rows.Close()
+			return errors.New("simulated close rows error")
+		}
+		rs, err := e.executeQuery(context.Background(), db, "sqlite3", "SELECT id, name FROM items", nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(rs.Rows) != 2 {
+			t.Fatalf("expected 2 rows, got %d", len(rs.Rows))
+		}
+	})
+
+	// Test columnTypesSeam error
+	t.Run("columnTypes error", func(t *testing.T) {
+		origCT := columnTypesSeam
+		defer func() { columnTypesSeam = origCT }()
+		simErr := errors.New("simulated column types error")
+		columnTypesSeam = func(rows *sql.Rows) ([]*sql.ColumnType, error) {
+			return nil, simErr
+		}
+		_, err := e.executeQuery(context.Background(), db, "sqlite3", "SELECT id, name FROM items", nil)
+		if !errors.Is(err, simErr) {
+			t.Fatalf("expected %v, got %v", simErr, err)
+		}
+	})
+
+	// Test scanRowSeam error
+	t.Run("scanRow error", func(t *testing.T) {
+		origScan := scanRowSeam
+		defer func() { scanRowSeam = origScan }()
+		simErr := errors.New("simulated scan error")
+		scanRowSeam = func(rows *sql.Rows, dest ...interface{}) error {
+			return simErr
+		}
+		_, err := e.executeQuery(context.Background(), db, "sqlite3", "SELECT id, name FROM items", nil)
+		if err == nil || !strings.Contains(err.Error(), "failed to scan values for row #1") {
+			t.Fatalf("expected scan row error, got: %v", err)
+		}
+	})
 }

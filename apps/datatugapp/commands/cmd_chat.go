@@ -1,9 +1,11 @@
 package commands
 
 import (
+	tea "charm.land/bubbletea/v2"
 	"context"
-	"database/sql"
 	"fmt"
+	"github.com/dal-go/dalgo/dal"
+	"io"
 	"net/url"
 	"os"
 	"sort"
@@ -12,37 +14,80 @@ import (
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/chat"
+	"github.com/datatug/datatug-cli/pkg/chat/narrowing"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/datatug/datatug-cli/pkg/joinmeta"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
-	"github.com/datatug/datatug-core/pkg/dtconfig"
-	"github.com/dimetron/pi-go/pimodels"
 	"github.com/spf13/cobra"
+	"github.com/strongo/aichat/ai"
+	"github.com/strongo/aichat/ai/cloud"
 )
 
 const defaultChatModel = "gpt-5.6-luna"
 
 type chatOptions struct {
-	project  string
-	env      string
-	database string
-	ai       string
-	model    string
-	baseURL  string
-	thinking string
-	apiKey   string
-	as       string
-	roles    []string
-	groups   []string
+	workspace       *workspaceStart
+	project         string
+	env             string
+	database        string
+	ai              string
+	model           string
+	baseURL         string
+	thinking        string
+	apiKey          string
+	insecureStorage bool
+	as              string
+	cloudDecision   string
+	cloudModel      string
+	cloudProject    string
+	cloudIdentity   string // saved preference's login scope, verified at cloud preflight
+	cloudScope      string // saved preference's local project, verified at cloud preflight
+	cloudAPI        string // saved preference's API base, verified at cloud preflight
+	roles           []string
+	groups          []string
+	// result is a stored query result the workspace opens on (`ui --result`).
+	result *resultOpen
 }
 
 func chatCommand() *cobra.Command {
 	options := chatOptions{}
 	cmd := &cobra.Command{
 		Use:   "chat",
-		Short: "Ask questions about project data using DTQL",
-		Args:  cobra.NoArgs,
+		Short: "Ask questions about project data using TugQL",
+		Long: `Ask questions about project data using TugQL.
+
+Table narrowing: before each AI turn the chat can decide which of the project's
+tables the model needs and show it only those definitions. The model is told
+which tables were left out and can read up to two of them per turn with
+describe_relation, and the chat prints one line naming the tables it was given.
+When it cannot decide, or would save little, the full schema is sent as before.
+Narrowing is a trade-off: it saves schema bytes (about 40% of the schema context
+on the 11-table Chinook sample, more on larger schemas) but a table the model is
+not shown can cost a describe_relation round trip.
+
+  Project rules (always on, local): <project>/ai/table-rules.yaml maps an exact
+  question to the tables it needs; a match never calls out.
+
+  Cloud decider (OFF until YOU turn it on): with --model cloud it asks the
+  DataTug AI cloud, which relays to TypeSafe AI's Jev decision model. That sends
+  your question, up to three earlier questions of the session, and every table
+  name with its column names (no types, no rows) to the DataTug cloud and to
+  TypeSafe AI. Only you can turn it on:
+    DATATUG_AI_DECISION_PROVIDER=auto     for this session (=disabled always wins)
+    datatug chat --cloud-decision allow   for this project, remembered in your
+                                          user config directory (refuse|forget)
+  A project's "decision: auto" in ai/table-rules.yaml only REQUESTS it: it is
+  ignored, with a notice, until you allow it. Whenever it is on, the chat says so
+  at start: as a system line at the top of the chat (the terminal UI hides what
+  is printed before it starts), and on stderr for non-interactive runs. After a failure it is not asked again for five minutes;
+  DATATUG_AI_DECISION_TIMEOUT sets how long it may take per turn (default 1.5s).
+  Schemas above 255 tables are not sent to it.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := applyLastChatOptions(cmd, &options); err != nil {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: load previous chat options: %v\n", err)
+			}
 			return runChat(cmd, options)
 		},
 	}
@@ -51,14 +96,26 @@ func chatCommand() *cobra.Command {
 	flags.StringVar(&options.env, "env", "local", "Project environment ID")
 	flags.StringVar(&options.database, "database", "", "Database catalog ID (auto-selected when the environment has one)")
 	flags.StringVar(&options.ai, "ai", "", "Configured AI profile name")
-	flags.StringVar(&options.model, "model", defaultChatModel, "Model name (for example gpt-5.6-luna, claude-haiku, or ollama/qwen3:4b)")
-	flags.StringVar(&options.baseURL, "base-url", "", "OpenAI-compatible model API base URL")
+	flags.StringVar(&options.model, "model", defaultChatModel, "Model name (for example gpt-5.6-luna, claude-haiku, cloud, or none for local queries)")
+	flags.StringVar(&options.baseURL, "base-url", "", "model API base URL (for cloud, the shared API /v0/ URL; comma-separated list = failover hosts, primary first)")
+	flags.BoolVar(&options.insecureStorage, "insecure-storage", false, "use the plaintext DataTug auth session created with auth login --insecure-storage (cloud only)")
 	flags.StringVar(&options.thinking, "thinking", "low", "Model reasoning effort: low, medium, or high (provider support varies)")
+	flags.StringVar(&options.cloudDecision, "cloud-decision", "", "Record your choice about the cloud decision engine for this project: allow, refuse or forget (it is off until you allow it)")
+	flags.StringVar(&options.cloudModel, "cloud-model", "", "choose a hosted model listed by datatug plan (cloud only)")
+	flags.StringVar(&options.cloudProject, "cloud-project", "", "opaque cloud-registered project ID hint, verified by the server (cloud only)")
 	flags.StringVar(&options.as, "as", "", "Principal ID used for access policies")
 	flags.StringSliceVar(&options.roles, "role", nil, "Principal role (repeatable)")
 	flags.StringSliceVar(&options.groups, "group", nil, "Principal group (repeatable)")
 	return cmd
 }
+
+// runChatProjectFunc is a seam over runChatProject: runChat's project-switch
+// loop (options.project = nextProject) is otherwise only reachable by
+// driving ChatUI's real F3 project-picker overlay end to end through
+// chat.SetRunTeaProgramForTest's runTeaProgram seam, which the coverage
+// lanes' other tests deliberately avoid.
+// Always runChatProject in production.
+var runChatProjectFunc = runChatProject
 
 func runChat(cmd *cobra.Command, options chatOptions) error {
 	if options.ai != "" {
@@ -67,13 +124,48 @@ func runChat(cmd *cobra.Command, options chatOptions) error {
 		}
 	}
 	for {
-		nextProject, err := runChatProject(cmd, options)
+		nextProject, err := runChatProjectFunc(cmd, options)
 		if err != nil || nextProject == "" || nextProject == options.project {
 			return err
 		}
 		options.project = nextProject
-		options.database = "" // resolve the new project's source independently
+		options.database = ""      // resolve the new project's source independently
+		options.cloudDecision = "" // a consent choice is for the project it was given for
+		options.cloudModel, options.cloudProject = "", ""
+		options.cloudIdentity, options.cloudScope = "", ""
+		options.cloudAPI = ""
 	}
+}
+
+// The following are narrow seams over runChatProject's real-dependency
+// constructors, each of which can otherwise only fail after every prior
+// step in the same synchronous call has already succeeded -- no real
+// fixture can diverge, say, a just-opened store's chat.NewSessionChat call
+// from the chat.OpenSessionStore call three lines above it. Always the
+// named real function/method in production.
+var (
+	newSessionChat       = chat.NewSessionChat
+	newSessionChatUI     = chat.NewSessionChatUI
+	startBrowserBridge   = chat.StartBrowserBridge
+	setSavedQueryService = func(ui *chat.ChatUI, service chat.SavedQueryService) error {
+		return ui.SetSavedQueryService(service)
+	}
+	setSessionNotices = func(ui *chat.ChatUI, lines []string) { ui.SetSessionNotices(lines) }
+)
+
+// chatDatabaseRefusal is the one answer to --database when the value is not an ID
+// of the environment. It names nothing that was typed.
+const chatDatabaseRefusal = "--database takes the ID of a catalog of the environment (a name such as chinook-local), not a source URL or a path"
+
+// isSourceString reports whether value reads as a source string: a URL or a path
+// after a scheme the CLI knows, an env:NAME, or a datatug:// reference (see
+// dbcopy.SourceDisplay). A plain name is never one. Neither is an unknown nonplain
+// name such as "Chinook db": that may be a catalog ID of an existing project, so it
+// is still looked up (and refused later only if the environment has no such
+// catalog). This is the cheap check that keeps a source string from being read as
+// an ID, before the project and catalog are loaded; it adds no parser of its own.
+func isSourceString(value string) bool {
+	return !dbcopy.IsPlainSourceID(value) && dbcopy.SourceDisplay(value) != dbcopy.UnparsableSource
 }
 
 func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
@@ -83,30 +175,74 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	}
 	projectDir, projectStore, err := resolveQueryProject(options.project)
 	if err != nil {
-		return "", Exit(err.Error(), exitCodeUsage)
+		return "", Exit(err.Error()+"\nChoose an existing project: datatug projects, then datatug chat --project <ID-or-directory>\nStart a new project: datatug init <ID> <directory>", exitCodeUsage)
+	}
+
+	if options.cloudDecision != "" {
+		path, consentErr := setCloudDecisionConsent(projectDir, options.cloudDecision)
+		if consentErr != nil {
+			return "", Exit(consentErr.Error(), exitCodeUsage)
+		}
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "cloud decision engine for this project: %s (stored in %s)\n", options.cloudDecision, path)
+		if advice := consentAdvice(projectDir, options.cloudDecision); advice != "" {
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "note: %s\n", advice)
+		}
 	}
 
 	database := options.database
+	// A source string typed into --database is not an ID of the environment: it is
+	// refused before the project and its catalogs are read, naming nothing of it.
+	// A plain name and a configured catalog ID that is not a plain name (such as
+	// "Chinook db") are not source strings: they still reach the catalog, so the
+	// degraded session of a known unresolved catalog opens exactly as before.
+	if database != "" && isSourceString(database) {
+		return "", Exit(chatDatabaseRefusal, exitCodeUsage)
+	}
 	if database == "" {
 		database, err = resolveQueryDatabase(ctx, projectStore, options.env, &datatug.QueryDef{ID: "chat"})
 		if err != nil {
 			return "", Exit(err.Error(), exitCodeUsage)
 		}
 	}
-	sourceURL, err := resolveQuerySourceURL(ctx, projectStore, projectDir, options.env, database)
-	if err != nil {
-		return "", Exit(err.Error(), exitCodeUsage)
-	}
-	storedSchema, err := api.GetCatalogSchema(projectDir, options.env, database)
-	if err != nil {
-		return "", Exit(fmt.Sprintf("load project schema: %v", err), exitCodeUsage)
-	}
-	if len(storedSchema.Relations) == 0 {
-		return "", Exit("the selected database has no scanned schema; run datatug scan first", exitCodeUsage)
-	}
 	projectCatalog, sourceURLs, err := buildChatProjectCatalog(ctx, projectDir, projectStore, options.env)
 	if err != nil {
 		return "", Exit(fmt.Sprintf("load project explorer: %v", err), exitCodeUsage)
+	}
+	// --database takes the ID of a catalog of the environment, and what is typed
+	// there can be a whole source string with its password. A typed value that is
+	// neither a source of the project, a catalog of the environment (whether or not
+	// its source resolves: it opens the degraded session that shows the issue) nor a
+	// plain name is refused here, naming nothing of it, so that no later step holds
+	// it: not the connect screen, the settings the browser reads, the scope the store
+	// hashes or the stand-in source of a failed lookup.
+	_, known := sourceURLs[database]
+	if options.database != "" && !known && !projectCatalogHasSource(projectCatalog, database) && !dbcopy.IsPlainSourceID(database) {
+		return "", Exit(chatDatabaseRefusal, exitCodeUsage)
+	}
+	sourceURL, sourceErr := resolveQuerySourceURL(ctx, projectStore, projectDir, options.env, database)
+	if sourceErr != nil {
+		sourceURL = "unavailable://" + url.PathEscape(database)
+		sourceURLs[database] = sourceURL // stable degraded session scope; never executed
+		setCatalogSourceIssue(&projectCatalog, database, "Source unavailable: "+sourceErr.Error())
+	}
+	storedSchema, schemaErr := api.GetCatalogSchemaPartial(projectDir, options.env, database)
+	if schemaErr != nil {
+		setCatalogSourceIssue(&projectCatalog, database, "Schema unavailable: "+schemaErr.Error())
+	}
+	schemaContext := ""
+	healthyRelations := 0
+	var healthy api.CatalogSchema
+	if storedSchema != nil {
+		for _, relation := range storedSchema.Relations {
+			if relation.Issue == "" {
+				healthy.Relations = append(healthy.Relations, relation)
+				healthyRelations++
+			}
+		}
+		schemaContext = chat.FormatSchemaContext(&healthy)
+	}
+	if healthyRelations == 0 || sourceErr != nil {
+		schemaContext = projectSchemaContext(projectCatalog, sourceURLs, database)
 	}
 
 	session, err := resolveServeSession(projectDir, serveFlags{
@@ -119,13 +255,85 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 		return "", Exit("chat: "+strings.TrimPrefix(err.Error(), "serve: "), exitCodeUsage)
 	}
 	executor := secureread.NewExecutor(session)
-	llm, err := pimodels.New(ctx, options.model, chatModelOptions(options)...)
-	if err != nil {
-		return "", Exit(fmt.Sprintf("configure chat model %q: %v", options.model, err), exitCodeUsage)
+	var conversation chat.ContextualConversation
+	var foreignKeys []narrowing.Link // set once the source's foreign keys are read
+	var sessionNotices []string      // shown inside the chat as well as on stderr
+	var cloudClient *cloud.Client
+	var cloudContext ai.ClientContext
+	var hostedSession cloudSession
+	if options.model == "cloud" {
+		cloudSession, loadErr := loadCloudSession(ctx, options)
+		if loadErr != nil {
+			return "", Exit(fmt.Sprintf("configure cloud chat: %v", loadErr), exitCodeUsage)
+		}
+		plan, planErr := resolveCloudSelection(ctx, cmd, &options, cloudSession)
+		if planErr != nil {
+			return "", Exit(fmt.Sprintf("configure cloud chat: %v", planErr), exitCodeUsage)
+		}
+		if plan.V == 1 {
+			notice := fmt.Sprintf("Hosted AI payer: %s (%s), %s; %d of %d questions left until %s", plan.AccountTitle, plan.AccountID, plan.EffectivePlan, *plan.AI.Left, *plan.AI.Limit, plan.AI.ResetsAt)
+			if !plan.AI.Enforced {
+				notice += "; AI allowance is currently observed, not enforced"
+			}
+			if plan.AI.Blocked != nil {
+				notice += "; AI temporarily blocked: " + *plan.AI.Blocked
+			}
+			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), notice)
+			sessionNotices = append(sessionNotices, notice)
+		}
+		cloudClient, cloudContext, err = cloudChatClientFromSession(options, cloudSession)
+		if err != nil {
+			return "", Exit(fmt.Sprintf("configure cloud chat: %v", err), exitCodeUsage)
+		}
+		hostedSession = cloudSession
 	}
-	conversation, err := chat.NewADKConversation(llm, executor, sourceURL, chat.FormatSchemaContext(storedSchema), chat.WithThinkingLevel(options.thinking), chat.WithSources(sourceURLs))
-	if err != nil {
-		return "", Exit(err.Error(), exitCodeUsage)
+	if !hasQueryableProjectTables(projectCatalog, sourceURLs) {
+		conversation = unavailableSchemaConversation{database: database}
+	} else {
+		var provider ai.LLMProvider
+		if cloudClient != nil {
+			provider = cloudUserProvider{cloudClient}
+		} else {
+			var providerErr error
+			if options.model != "none" {
+				provider, providerErr = chat.NewLLMProvider(options.model, options.baseURL, options.apiKey)
+			}
+			if providerErr != nil || options.model == "none" {
+				conversation = providerUnavailableConversation{}
+				sessionNotices = append(sessionNotices, "AI provider is not configured. Explorer Open data and New query work locally; configure a provider under Settings → AI for chat.")
+			}
+		}
+		if provider != nil {
+			conversationOptions := []chat.Option{chat.WithThinkingLevel(options.thinking), chat.WithSources(sourceURLs)}
+			if cloudClient != nil {
+				conversationOptions = append(conversationOptions, chat.WithHostedModel(options.cloudModel))
+			}
+			// Narrowing applies to the stored-schema context only: the degraded
+			// multi-source context is left exactly as it is.
+			if healthyRelations > 0 && sourceErr == nil {
+				choice, consentPath, consentWarning := readDecisionConsent(projectDir)
+				if consentWarning != "" {
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: table narrowing: %s\n", consentWarning)
+					sessionNotices = append(sessionNotices, "Warning: table narrowing: "+consentWarning)
+				}
+				narrower, warnings, notices := chatTableNarrower(projectDir, cloudClient, healthy.Relations, func() []narrowing.Link { return foreignKeys }, consentState{choice, consentPath})
+				for _, notice := range notices {
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "table narrowing: %s\n", notice)
+					sessionNotices = append(sessionNotices, "Table narrowing: "+notice)
+				}
+				for _, warning := range warnings {
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: table narrowing: %s\n", warning)
+					sessionNotices = append(sessionNotices, "Warning: table narrowing: "+warning)
+				}
+				if narrower != nil {
+					conversationOptions = append(conversationOptions, chat.WithTableNarrowing(narrower))
+				}
+			}
+			conversation, err = chat.NewAIConversation(provider, executor, sourceURL, schemaContext, conversationOptions...)
+			if err != nil {
+				return "", Exit(err.Error(), exitCodeUsage)
+			}
+		}
 	}
 	storePath, err := chat.DefaultChatStorePath(projectDir)
 	if err != nil {
@@ -141,58 +349,200 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 		return "", Exit(fmt.Sprintf("open chat sessions: %v", err), exitCodeUsage)
 	}
 	defer func() { _ = store.Close() }()
-	sessions, err := chat.NewSessionChat(ctx, store, conversation, sourceURL, projectCatalog)
+	joinApplication, closeJoin, joinErr := loadChatJoinApplication(ctx, sourceURL, executor, session.Unrestricted)
+	if closeJoin != nil {
+		defer closeJoin()
+	}
+	if joinErr != nil {
+		setCatalogSourceIssue(&projectCatalog, database, "JOIN metadata unavailable: "+joinErr.Error())
+	}
+	if joinApplication != nil {
+		foreignKeys = foreignKeyLinks(joinApplication.Snapshot.Keys)
+	}
+	if options.result != nil {
+		if err := seedResult(ctx, store, sourceURL, options.result); err != nil {
+			return "", Exit(fmt.Sprintf("open the query result: %v", err), exitCodeUsage)
+		}
+	}
+	sessions, err := newSessionChat(ctx, store, conversation, sourceURL, projectCatalog)
 	if err != nil {
 		return "", Exit(fmt.Sprintf("restore chat session: %v", err), exitCodeUsage)
 	}
-	// FK evidence is source-scoped. Non-SQLite sources remain usable for Chat,
-	// but expose no inferred JOINs in this first discovery implementation.
-	joinSource, err := dbcopy.Parse(sourceURL)
-	if err != nil {
-		return "", Exit(fmt.Sprintf("resolve chat source: %v", err), exitCodeUsage)
+	if cloudClient != nil {
+		enableChatReports(sessions, cloudClient, cloudContext)
+		defer sessions.WaitForTelemetry()
 	}
-	if joinSource.Scheme == "sqlite" {
-		if err := dbcopy.CheckSourceFile(joinSource.Path); err != nil {
-			return "", Exit(fmt.Sprintf("load JOIN metadata: %v", err), exitCodeUsage)
-		}
-		readOnlyURL := (&url.URL{Scheme: "file", Path: joinSource.Path, RawQuery: "mode=ro"}).String()
-		metadataDB, openErr := sql.Open("sqlite", readOnlyURL)
-		if openErr != nil {
-			return "", Exit(fmt.Sprintf("open JOIN metadata: %v", openErr), exitCodeUsage)
-		}
-		defer func() { _ = metadataDB.Close() }()
-		refresh := func(ctx context.Context) (chat.ForeignKeySnapshot, error) {
-			return chat.LoadSQLiteForeignKeySnapshot(ctx, sourceURL, metadataDB)
-		}
-		snapshot, scanErr := refresh(ctx)
-		if scanErr != nil {
-			return "", Exit(fmt.Sprintf("load JOIN metadata: %v", scanErr), exitCodeUsage)
-		}
-		sessions.ConfigureJoinApplication(chat.ForeignKeyJoinApplication{
-			Source: sourceURL, Snapshot: snapshot, Refresh: refresh,
-			Executor: executor, Secure: !session.Unrestricted,
-			CanReadTarget: func(ctx context.Context, target chat.RelationInstance) error {
-				if target.Schema != "" && !strings.EqualFold(target.Schema, "main") {
-					return fmt.Errorf("JOIN target schema is not supported by this policy preflight")
-				}
-				return executor.CanReadWholeCollection(ctx, target.Relation)
-			},
-		})
+	sessions.ConfigureQueryExecutor(executor)
+	if joinApplication != nil {
+		sessions.ConfigureJoinApplication(*joinApplication)
 	}
-	ui, err := chat.NewSessionUI(ctx, sessions, options.model)
+	ui, err := newSessionChatUI(ctx, sessions, options.model)
 	if err != nil {
 		return "", Exit(fmt.Sprintf("render chat session: %v", err), exitCodeUsage)
 	}
+	if cloudClient != nil {
+		ui.SetHostedPlanLookup(func(ctx context.Context) (string, error) {
+			var output strings.Builder
+			err := writeHostedPlan(ctx, hostedSession, options.cloudProject, &output)
+			return output.String(), err
+		})
+	}
+	if len(sessionNotices) > 0 {
+		// The terminal UI uses the alternate screen: what was printed to stderr
+		// above is not visible until the user quits, so show it in the chat too.
+		setSessionNotices(ui, sessionNotices)
+	}
+	if err := setSavedQueryService(ui, chatSavedQueries{projectDir: projectDir, store: projectStore, executor: executor, env: options.env, projectID: projectCatalog.ID, session: session}); err != nil {
+		return "", Exit(fmt.Sprintf("list saved project queries: %v", err), exitCodeUsage)
+	}
+	bridge, err := startBrowserBridge(sessions)
+	if err != nil {
+		return "", Exit(fmt.Sprintf("start browser chat: %v", err), exitCodeUsage)
+	}
+	defer func() { _ = bridge.Close() }()
+	ui.SetBrowserURL(bridge.URL)
+	// Opening a stored result is not a choice of project, environment or
+	// database for the next chat, so it leaves the saved choices as they were.
+	if options.result == nil {
+		if err := saveLastChatOptions(cmd, options); err != nil {
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: save chat options: %v\n", err)
+		}
+	}
 	ui.SetProjectChoices(chatProjectChoices(options.project, projectDir, projectCatalog))
-	if err := ui.Run(); err != nil {
+	if options.workspace != nil {
+		mountExplore(ui, *options.workspace)
+	}
+	var programOptions []tea.ProgramOption
+	if options.workspace != nil {
+		programOptions = options.workspace.programOptions
+	}
+	if err := ui.Run(programOptions...); err != nil {
 		return "", err
 	}
 	return ui.SelectedProject(), nil
 }
 
+func writeHostedPlan(ctx context.Context, session cloudSession, project string, w io.Writer) error {
+	plan, err := session.getPlan(ctx, project)
+	if err != nil {
+		return err
+	}
+	if err := plan.requirePersonalFreeOrPro(); err != nil {
+		return err
+	}
+	return writePlan(w, plan)
+}
+
+type unavailableSchemaConversation struct{ database string }
+
+func (c unavailableSchemaConversation) AskWithContext(context.Context, string, string) (chat.Turn, error) {
+	// c.database is what --database was given, and a source string can be typed
+	// where a catalog ID belongs: only a plain name is echoed.
+	return chat.Turn{Text: "I can't query " + dbcopy.SourceIDDisplay(c.database) + " because its source or schema is unavailable. Open Project explorer for details."}, nil
+}
+
+// JOIN discovery is optional: a failed metadata read should disable JOIN
+// suggestions for this source, not prevent chat or other sources from loading.
+// The source is opened as `query run` opens it (read-only for SQLite and
+// PostgreSQL) and its foreign keys are read through DALgo's engine-neutral
+// schema calls, so every engine whose provider reports them gets JOINs.
+// openJoinMetadataDB is that opener; a package var so tests can make it fail.
+var openJoinMetadataDB = func(ctx context.Context, backend dbcopy.BackendRef) (dal.DB, error) {
+	return openBackend(ctx, backend)
+}
+
+func loadChatJoinApplication(ctx context.Context, sourceURL string, executor *secureread.Executor, unrestricted bool) (*chat.ForeignKeyJoinApplication, func(), error) {
+	if strings.HasPrefix(sourceURL, "unavailable://") {
+		return nil, nil, nil
+	}
+	joinSource, err := dbcopy.Parse(sourceURL)
+	if err != nil {
+		return nil, nil, err
+	}
+	metadataDB, err := openJoinMetadataDB(ctx, joinSource)
+	if err != nil {
+		return nil, nil, err
+	}
+	closeDB := dbcopy.SourceCloser(metadataDB)
+	refresh := func(ctx context.Context) (chat.ForeignKeySnapshot, error) {
+		return joinmeta.LoadForeignKeySnapshot(ctx, metadataDB, sourceURL)
+	}
+	snapshot, err := refresh(ctx)
+	if err != nil {
+		closeDB()
+		return nil, nil, err
+	}
+	// CanReadWholeCollection checks a relation by name only, so a target in
+	// another schema than the source's default one is refused.
+	defaultSchema := api.DefaultSchemaForDriver(joinSource.Scheme)
+	application := &chat.ForeignKeyJoinApplication{
+		Source: sourceURL, Snapshot: snapshot, Refresh: refresh,
+		Executor: executor, Secure: !unrestricted,
+		CanReadTarget: func(ctx context.Context, target chat.RelationInstance) error {
+			if target.Schema != "" && !strings.EqualFold(target.Schema, defaultSchema) {
+				return fmt.Errorf("JOIN target schema is not supported by this policy preflight")
+			}
+			return executor.CanReadWholeCollection(ctx, target.Relation)
+		},
+	}
+	return application, closeDB, nil
+}
+
+func setCatalogSourceIssue(catalog *chat.ProjectCatalog, sourceID, issue string) {
+	for i := range catalog.Objects {
+		object := &catalog.Objects[i]
+		if object.Reference.Kind == "source" && object.Reference.SourceID == sourceID {
+			if object.Issue != "" {
+				object.Issue += "; "
+			}
+			object.Issue += issue
+			return
+		}
+	}
+}
+
+func hasQueryableProjectTables(catalog chat.ProjectCatalog, urls map[string]string) bool {
+	for _, object := range catalog.Objects {
+		if (object.Reference.Kind == "table" || object.Reference.Kind == "project_view") && object.Issue == "" {
+			if source := urls[object.Reference.SourceID]; source != "" && !strings.HasPrefix(source, "unavailable://") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func projectSchemaContext(catalog chat.ProjectCatalog, urls map[string]string, selectedSource string) string {
+	var b strings.Builder
+	// selectedSource is what --database was given (see unavailableSchemaConversation)
+	// and this text goes to the model provider: only a plain name is sent.
+	fmt.Fprintf(&b, "Selected source %q has unavailable schema or connection. Do not query it. For another listed source, always set sourceId in run_tugql.\n", dbcopy.SourceIDDisplay(selectedSource))
+	for _, object := range catalog.Objects {
+		ref := object.Reference
+		if (ref.Kind != "table" && ref.Kind != "project_view") || object.Issue != "" || ref.SourceID == selectedSource {
+			continue
+		}
+		if source := urls[ref.SourceID]; source == "" || strings.HasPrefix(source, "unavailable://") {
+			continue
+		}
+		fmt.Fprintf(&b, "- sourceId %q, %s: ", ref.SourceID, ref.ObjectID)
+		for i, column := range object.Columns {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%s [%s]", column, object.ColumnTypes[column])
+		}
+		b.WriteByte('\n')
+		if b.Len() > 8000 {
+			break
+		}
+	}
+	return b.String()
+}
+
 func chatProjectChoices(current, currentDir string, catalog chat.ProjectCatalog) []chat.ProjectChoice {
 	choices := []chat.ProjectChoice{{Key: current, Title: catalog.Title, Detail: currentDir}}
-	settings, err := dtconfig.GetSettings()
+	settings, err := getChatSettings()
 	if err != nil { // A direct project path can run without a project registry.
 		return choices
 	}
@@ -214,6 +564,12 @@ func sameProjectDirectory(a, b string) bool {
 	right, rightErr := os.Stat(b)
 	return leftErr == nil && rightErr == nil && left.IsDir() && right.IsDir() && os.SameFile(left, right)
 }
+
+// queryIDIndexFunc is a seam over api.QueryIDIndex: buildChatProjectCatalog's
+// QueryIDIndex error branch (a filesystem walk, not routed through
+// projectStore) has no other fault-injection point available to a test.
+// Always api.QueryIDIndex in production.
+var queryIDIndexFunc = api.QueryIDIndex
 
 func buildChatProjectCatalog(ctx context.Context, projectDir string, projectStore datatug.ProjectStore, environment string) (chat.ProjectCatalog, map[string]string, error) {
 	project, err := projectStore.LoadProject(ctx)
@@ -245,19 +601,31 @@ func buildChatProjectCatalog(ctx context.Context, projectDir string, projectStor
 			continue
 		}
 		id := database.ID
-		if urls[id] == "" {
-			continue
-		}
 		label := database.Title
 		if label == "" {
 			label = id
 		}
+		sourceIndex := len(catalog.Objects)
 		catalog.Objects = append(catalog.Objects, chat.ProjectObject{Reference: chat.ContextReference{
 			Kind: "source", ProjectID: project.ID, SourceID: id, ObjectID: id, Title: label,
 		}})
-		schema, schemaErr := api.GetCatalogSchema(projectDir, environment, id)
+		if urls[id] == "" {
+			catalog.Objects[sourceIndex].Issue = "Source connection could not be resolved. Check its catalog driver and path."
+		}
+		// An unscanned catalog is still a usable source. Only its table list
+		// depends on a dbModel; do not let it block another catalog's chat.
+		if database.DbModel == "" {
+			setCatalogSourceIssue(&catalog, id, "Schema not scanned (dbModel is not set). Run datatug scan for this source.")
+			continue
+		}
+		schema, schemaErr := api.GetCatalogSchemaPartial(projectDir, environment, id)
 		if schemaErr != nil {
-			return catalog, nil, schemaErr
+			setCatalogSourceIssue(&catalog, id, "Schema unavailable: "+schemaErr.Error())
+			continue
+		}
+		if len(schema.Relations) == 0 {
+			setCatalogSourceIssue(&catalog, id, "No scanned tables or views. Run datatug scan for this source.")
+			continue
 		}
 		for _, relation := range schema.Relations {
 			name := relation.Name
@@ -269,15 +637,24 @@ func buildChatProjectCatalog(ctx context.Context, projectDir string, projectStor
 				kind = "project_view"
 			}
 			columns := make([]string, len(relation.Columns))
+			columnTypes := make(map[string]string, len(relation.Columns))
+			primaryKey := []string{}
+			keyPositions := map[string]int{}
 			for i, column := range relation.Columns {
 				columns[i] = column.Name
+				columnTypes[column.Name] = column.DbType
+				if column.PrimaryKeyPosition > 0 {
+					primaryKey = append(primaryKey, column.Name)
+					keyPositions[column.Name] = column.PrimaryKeyPosition
+				}
 			}
+			sort.SliceStable(primaryKey, func(i, j int) bool { return keyPositions[primaryKey[i]] < keyPositions[primaryKey[j]] })
 			catalog.Objects = append(catalog.Objects, chat.ProjectObject{Reference: chat.ContextReference{
 				Kind: kind, ProjectID: project.ID, SourceID: id, ObjectID: name, Title: relation.Name,
-			}, Columns: columns})
+			}, Columns: columns, ColumnTypes: columnTypes, PrimaryKey: primaryKey, Issue: relation.Issue})
 		}
 	}
-	queryIDs, err := api.QueryIDIndex(projectDir)
+	queryIDs, err := queryIDIndexFunc(projectDir)
 	if err != nil {
 		return catalog, nil, err
 	}
@@ -313,18 +690,27 @@ func buildChatProjectCatalog(ctx context.Context, projectDir string, projectStor
 		}
 		catalog.Objects = append(catalog.Objects, chat.ProjectObject{Reference: chat.ContextReference{
 			Kind: "query", ProjectID: project.ID, SourceID: sourceID, ObjectID: id, Title: title,
-		}})
+		}, QueryType: string(query.Type), QueryText: query.Text})
 	}
 	return catalog, urls, nil
 }
 
-func chatModelOptions(options chatOptions) []pimodels.Option {
-	modelOptions := []pimodels.Option{pimodels.WithThinkingLevel(options.thinking)}
-	if options.apiKey != "" {
-		modelOptions = append(modelOptions, pimodels.WithAPIKey(options.apiKey))
+// projectCatalogHasSource reports whether the environment has a catalog with this
+// ID: buildChatProjectCatalog adds a "source" object for every catalog of the
+// environment, whether or not its source resolves.
+func projectCatalogHasSource(catalog chat.ProjectCatalog, id string) bool {
+	for _, object := range catalog.Objects {
+		if object.Reference.Kind == "source" && object.Reference.SourceID == id {
+			return true
+		}
 	}
-	if options.baseURL != "" {
-		modelOptions = append(modelOptions, pimodels.WithBaseURL(options.baseURL))
-	}
-	return modelOptions
+	return false
+}
+
+// providerUnavailableConversation keeps the project/session and secure manual
+// executor available while provider credentials are absent or offline is chosen.
+type providerUnavailableConversation struct{}
+
+func (providerUnavailableConversation) AskWithContext(context.Context, string, string) (chat.Turn, error) {
+	return chat.Turn{Text: "Configure an AI provider under Settings → AI for chat. Use Explorer Open data or New query to work with your project locally. No query was executed."}, nil
 }

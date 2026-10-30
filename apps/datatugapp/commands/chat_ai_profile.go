@@ -13,7 +13,7 @@ var getChatSettings = dtconfig.GetSettings
 
 // resolveChatAIProfile applies a named user configuration profile to the
 // chat options. Explicit command-line model settings always win over profile
-// defaults; the API key itself is kept in memory only for pimodels.
+// defaults; the API key itself is kept in memory only to build the ai.LLMProvider.
 func resolveChatAIProfile(options *chatOptions, cmd *cobra.Command) error {
 	settings, err := getChatSettings()
 	if err != nil {

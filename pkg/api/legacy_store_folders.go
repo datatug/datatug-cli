@@ -25,7 +25,7 @@ var _ datatug.RevisionedQueriesStore
 // legacyStoreResolvesFolders reports whether the project store the legacy
 // query routes write through puts a query in the folder its request names.
 // See legacy_store_default.go.
-const legacyStoreResolvesFolders = true
+var legacyStoreResolvesFolders = true
 
 // storeLocationRefusal reports the store's refusal of a query location
 // (datatug.InvalidQueryLocationError: a symlinked, non-directory or

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,6 +16,9 @@ import (
 	"time"
 
 	"github.com/dal-go/dalgo2http"
+	"github.com/tuigoff/tuigoff/pkg/grid"
+
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
@@ -34,32 +38,36 @@ type ChatScope struct {
 }
 
 type ChatSession struct {
-	ID         string
-	Title      string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	Messages   []ChatMessage
-	Queries    []ExecutedQuery
-	RecordSets map[string]RecordSet
-	Bookmarks  map[string]Bookmark
-	Workspace  WorkspaceState
+	ID            string
+	Title         string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	Messages      []ChatMessage
+	Queries       []ExecutedQuery
+	RecordSets    map[string]RecordSet
+	HTTPResponses map[string]HTTPResponse
+	Bookmarks     map[string]Bookmark
+	Workspace     WorkspaceState
+	// Narrowings are the table-narrowing decisions made before each AI turn.
+	Narrowings []StoredNarrowing
 }
 
 type ChatMessage struct {
-	ID          string
-	Role        string
-	Kind        string
-	Text        string
-	QueryID     string
-	RecordSetID string
-	CreatedAt   time.Time
+	ID             string
+	Role           string
+	Kind           string
+	Text           string
+	QueryID        string
+	RecordSetID    string
+	HTTPResponseID string
+	CreatedAt      time.Time
 }
 
 type ExecutedQuery struct {
 	ID              string
 	OriginMessageID string
 	Title           string
-	DTQL            string
+	TugQL           string
 	Source          string
 	Parameters      map[string]any
 	ExecutedAt      time.Time
@@ -74,14 +82,46 @@ type RecordSet struct {
 	QueryID         string
 	OriginMessageID string
 	Title           string
-	DTQL            string
+	TugQL           string
 	Source          string
 	Environment     string
 	Database        string
 	Parameters      map[string]any
 	CreatedAt       time.Time
 	Result          secureread.Result
+	HTTPResponseID  string
+	RefreshParentID string
 	Lineage         *JoinLineage
+}
+
+// HTTPResponse is the immutable original download behind an HTTP chat result.
+// Body is stored verbatim, while URL is stripped of query parameters before persistence.
+type HTTPResponse struct {
+	ID              string
+	Method          string
+	SessionID       string
+	OriginMessageID string
+	URL             string
+	StatusCode      int
+	ContentType     string
+	Headers         map[string][]string
+	RequestHeaders  map[string][]string
+	TimeToResponse  time.Duration
+	DownloadTime    time.Duration
+	FinalURL        string
+	Redirects       []HTTPRedirect
+	RequestHasQuery bool
+	Body            []byte
+	RefreshParentID string
+	CreatedAt       time.Time
+}
+
+// HTTPRedirect is one completed HTTP hop before the final response. URLs are
+// stripped of query strings and credentials before entering session storage.
+type HTTPRedirect struct {
+	URL        string        `json:"url"`
+	StatusCode int           `json:"statusCode"`
+	Elapsed    time.Duration `json:"elapsed"`
 }
 
 // JoinLineage preserves the exact user-selected edge without making a saved
@@ -93,7 +133,7 @@ type JoinLineage struct {
 }
 
 // AppliedJoinEdge ties an FK constraint to the exact joined relation path in
-// immutable DTQL. It distinguishes duplicate constraints with identical ON
+// immutable TugQL. It distinguishes duplicate constraints with identical ON
 // field pairs; older RecordSets without it use conservative ON matching.
 type AppliedJoinEdge struct {
 	JoinPath     RelationInstanceID `json:"joinPath"`
@@ -105,29 +145,87 @@ type AppliedJoinEdge struct {
 }
 
 type SessionStore struct {
-	db    *sql.DB
-	scope string
-	info  ChatScope
-	path  string
+	db         *sql.DB
+	settingsDB *sql.DB
+	scope      string
+	info       ChatScope
+	path       string
 }
+
+var (
+	userHomeDir               = os.UserHomeDir
+	filepathAbs               = filepath.Abs
+	sqlOpenStore              = sql.Open
+	dbClose                   = func(db *sql.DB) error { return db.Close() }
+	settingsDBClose           = func(db *sql.DB) error { return db.Close() }
+	dbExec                    = func(db *sql.DB, query string) (sql.Result, error) { return db.Exec(query) }
+	settingsDBExec            = func(db *sql.DB, query string) (sql.Result, error) { return db.Exec(query) }
+	initChatSchemaFn          = initChatSchema
+	migrateLegacyChatScopesFn = migrateLegacyChatScopes
+	openHTTPSettingsDBFn      = openHTTPSettingsDB
+	osLstat                   = os.Lstat
+	osOpenFile                = os.OpenFile
+	addColumnIfMissingFn      = addColumnIfMissing
+	addRecordsetColumnFn      = addRecordsetColumnIfMissing
+	jsonMarshalWorkspace      = json.Marshal
+	validateBookmarkRefsFn    = (*SessionStore).validateBookmarkReferences
+	encodeResultFn            = encodeResult
+	sessionExistsFn           = sessionExists
+	insertMessageFn           = insertMessage
+	appendQueryTxFn           = (*SessionStore).appendQueryTx
+	quickCheckFn              = func(db *sql.DB) (string, error) {
+		var integrity string
+		err := db.QueryRow("PRAGMA quick_check").Scan(&integrity)
+		return integrity, err
+	}
+	dbBeginFn        = func(db *sql.DB) (*sql.Tx, error) { return db.Begin() }
+	txQueryFn        = func(tx *sql.Tx, query string, args ...any) (*sql.Rows, error) { return tx.Query(query, args...) }
+	txExecFn         = func(tx *sql.Tx, query string, args ...any) (sql.Result, error) { return tx.Exec(query, args...) }
+	txExecSchemaFn   = func(tx *sql.Tx, query string) (sql.Result, error) { return tx.Exec(query) }
+	tableInfoQueryFn = func(tx *sql.Tx, table string) (*sql.Rows, error) {
+		return tx.Query(`PRAGMA table_info(` + table + `)`)
+	}
+	execContextFn = func(db *sql.DB, ctx context.Context, query string, args ...any) (sql.Result, error) {
+		return db.ExecContext(ctx, query, args...)
+	}
+	dbQueryContextFn = func(db *sql.DB, ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+		return db.QueryContext(ctx, query, args...)
+	}
+	txExecContextFn = func(tx *sql.Tx, ctx context.Context, query string, args ...any) (sql.Result, error) {
+		return tx.ExecContext(ctx, query, args...)
+	}
+	txCommitFn          = func(tx *sql.Tx) error { return tx.Commit() }
+	txQueryRowContextFn = func(tx *sql.Tx, ctx context.Context, query string, args ...any) *sql.Row {
+		return tx.QueryRowContext(ctx, query, args...)
+	}
+	loadHTTPResponsesFn = (*SessionStore).loadHTTPResponses
+	loadBookmarksFn     = (*SessionStore).loadBookmarks
+	loadWorkspaceFn     = (*SessionStore).loadWorkspace
+	jsonMarshalLineage  = json.Marshal
+	rowsErrFn           = func(rows *sql.Rows) error { return rows.Err() }
+)
 
 // DefaultChatStorePath keeps snapshots outside the project repository. The
 // hash distinguishes projects without exposing their path in a filename.
 func DefaultChatStorePath(projectDir string) (string, error) {
-	root, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("find chat home: %w", err)
+	root := os.Getenv("DATATUG_CHAT_STORE_DIR")
+	if root == "" {
+		home, err := userHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("find chat home: %w", err)
+		}
+		root = filepath.Join(home, ".datatug", "chat")
 	}
 	canonical, err := canonicalProjectPath(projectDir)
 	if err != nil {
 		return "", err
 	}
 	sum := sha256.Sum256([]byte(canonical))
-	return filepath.Join(root, ".datatug", "chat", hex.EncodeToString(sum[:12])+".sqlite"), nil
+	return filepath.Join(root, hex.EncodeToString(sum[:12])+".sqlite"), nil
 }
 
 func canonicalProjectPath(projectDir string) (string, error) {
-	abs, err := filepath.Abs(projectDir)
+	abs, err := filepathAbs(projectDir)
 	if err != nil {
 		return "", err
 	}
@@ -141,7 +239,7 @@ func OpenSessionStore(path string, scope ChatScope) (*SessionStore, error) {
 	if path == "" {
 		return nil, errors.New("chat session store path is empty")
 	}
-	path, err := filepath.Abs(path)
+	path, err := filepathAbs(path)
 	if err != nil {
 		return nil, err
 	}
@@ -152,20 +250,20 @@ func OpenSessionStore(path string, scope ChatScope) (*SessionStore, error) {
 	if info, err := os.Stat(dir); err != nil || !info.IsDir() || info.Mode().Perm()&0o077 != 0 {
 		return nil, fmt.Errorf("chat directory %q must be private (mode 0700)", dir)
 	}
-	if info, err := os.Lstat(path); err == nil {
+	if info, err := osLstat(path); err == nil {
 		if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
 			return nil, fmt.Errorf("chat database %q must be a private regular file", path)
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	} else {
-		file, createErr := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+		file, createErr := osOpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
 		if createErr != nil {
 			return nil, fmt.Errorf("create chat database: %w", createErr)
 		}
 		_ = file.Close()
 	}
-	db, err := sql.Open("sqlite", path)
+	db, err := sqlOpenStore("sqlite", path)
 	if err != nil {
 		return nil, err
 	}
@@ -175,23 +273,41 @@ func OpenSessionStore(path string, scope ChatScope) (*SessionStore, error) {
 		"PRAGMA busy_timeout = 5000",
 		"PRAGMA journal_mode = WAL",
 	} {
-		if _, err = db.Exec(statement); err != nil {
+		if _, err = dbExec(db, statement); err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("initialize chat database: %w", err)
 		}
 	}
-	if err = initChatSchema(db); err != nil {
+	if err = initChatSchemaFn(db); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
-	// Keep the persisted scope identity byte-for-byte compatible with Phase 3.
+	if err = ensureNarrowingSchema(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if _, err = dbExec(db, `CREATE TABLE IF NOT EXISTS session_archives (session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE, archived_at TEXT NOT NULL)`); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("initialize session archives: %w", err)
+	}
 	// ProjectID is an additional bookmark boundary, not a session-scope change.
+	//
+	// Each source enters the identity as dbcopy.SourceScopeIdentity says: where it
+	// points, never a password. That is not the display form the store keeps for a
+	// source (dbcopy.SourceDisplay), which drops the user name of a URL and cuts a
+	// path at a "?" or a "#": two roles of one database, or two directories that
+	// differ after a "#", would share a scope. A store written under the identity
+	// main computed (see previousScopeIdentity) is moved to this one below, with
+	// its bookmarks and preferences.
+	//
+	// An env:NAME source enters the identity with a hash of where the variable
+	// points now, so repointing it at another database is another scope.
 	encoded, _ := json.Marshal(struct {
 		Environment       string
 		Database          string
 		AccessFingerprint string
 		Sources           map[string]string
-	}{scope.Environment, scope.Database, scope.AccessFingerprint, scope.Sources})
+	}{scope.Environment, scope.Database, scope.AccessFingerprint, scopeIdentitySources(scope.Sources)})
 	sum := sha256.Sum256(encoded)
 	newScope := hex.EncodeToString(sum[:])
 	legacy, _ := json.Marshal(struct {
@@ -200,11 +316,21 @@ func OpenSessionStore(path string, scope ChatScope) (*SessionStore, error) {
 		AccessFingerprint string
 	}{scope.Environment, scope.Database, scope.AccessFingerprint})
 	legacySum := sha256.Sum256(legacy)
-	if err := migrateLegacyChatScopes(db, hex.EncodeToString(legacySum[:]), newScope, scope.Sources[scope.Database]); err != nil {
+	previous := previousScopeIdentity(scope)
+	if err := migrateLegacyChatScopesFn(db, hex.EncodeToString(legacySum[:]), newScope, previous.selected); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
-	return &SessionStore{db: db, scope: newScope, info: scope, path: path}, nil
+	if err := moveChatScope(db, previous.scope, newScope); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	settingsDB, err := openHTTPSettingsDBFn(filepath.Join(dir, "http-settings.sqlite"))
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return &SessionStore{db: db, settingsDB: settingsDB, scope: newScope, info: scope, path: path}, nil
 }
 
 // Phase 2 scope hashes omitted source identity. Reopen those sessions only if
@@ -215,12 +341,12 @@ func migrateLegacyChatScopes(db *sql.DB, oldScope, newScope, selectedURL string)
 	if oldScope == newScope {
 		return nil
 	}
-	tx, err := db.Begin()
+	tx, err := dbBeginFn(db)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	sessions, err := tx.Query(`SELECT id FROM sessions WHERE scope = ?`, oldScope)
+	sessions, err := txQueryFn(tx, `SELECT id FROM sessions WHERE scope = ?`, oldScope)
 	if err != nil {
 		return fmt.Errorf("read legacy chat sessions: %w", err)
 	}
@@ -233,13 +359,13 @@ func migrateLegacyChatScopes(db *sql.DB, oldScope, newScope, selectedURL string)
 		}
 		ids = append(ids, id)
 	}
-	if err := sessions.Err(); err != nil {
+	if err := rowsErrFn(sessions); err != nil {
 		_ = sessions.Close()
 		return err
 	}
 	_ = sessions.Close()
 	for _, id := range ids {
-		rows, err := tx.Query(`SELECT source FROM queries WHERE session_id = ? UNION SELECT source FROM recordsets WHERE session_id = ?`, id, id)
+		rows, err := txQueryFn(tx, `SELECT source FROM queries WHERE session_id = ? UNION SELECT source FROM recordsets WHERE session_id = ?`, id, id)
 		if err != nil {
 			return fmt.Errorf("read legacy chat sources: %w", err)
 		}
@@ -254,13 +380,13 @@ func migrateLegacyChatScopes(db *sql.DB, oldScope, newScope, selectedURL string)
 				compatible = false
 			}
 		}
-		if err := rows.Err(); err != nil {
+		if err := rowsErrFn(rows); err != nil {
 			_ = rows.Close()
 			return err
 		}
 		_ = rows.Close()
 		if compatible {
-			if _, err := tx.Exec(`UPDATE sessions SET scope = ? WHERE id = ?`, newScope, id); err != nil {
+			if _, err := txExecFn(tx, `UPDATE sessions SET scope = ? WHERE id = ?`, newScope, id); err != nil {
 				return fmt.Errorf("migrate legacy chat session: %w", err)
 			}
 		}
@@ -268,12 +394,22 @@ func migrateLegacyChatScopes(db *sql.DB, oldScope, newScope, selectedURL string)
 	return tx.Commit()
 }
 
+// scopeIdentitySources returns a copy of sources with every source passed
+// through dbcopy.SourceScopeIdentity.
+func scopeIdentitySources(sources map[string]string) map[string]string {
+	identities := make(map[string]string, len(sources))
+	for id, source := range sources {
+		identities[id] = dbcopy.SourceScopeIdentity(source)
+	}
+	return identities
+}
+
 func initChatSchema(db *sql.DB) error {
 	var version int
 	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return fmt.Errorf("read chat schema version: %w", err)
 	}
-	if version != 0 && version != 1 && version != 2 && version != 3 && version != 4 && version != 5 {
+	if version < 0 || version > 9 {
 		return fmt.Errorf("unsupported chat database schema version %d", version)
 	}
 	if version >= 1 {
@@ -284,7 +420,8 @@ func initChatSchema(db *sql.DB) error {
 			}
 		}
 		var integrity string
-		if err := db.QueryRow("PRAGMA quick_check").Scan(&integrity); err != nil || integrity != "ok" {
+		integrity, err := quickCheckFn(db)
+		if err != nil || integrity != "ok" {
 			return fmt.Errorf("chat database integrity check failed: %s: %v", integrity, err)
 		}
 		if version >= 2 {
@@ -298,12 +435,18 @@ func initChatSchema(db *sql.DB) error {
 			if err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'bookmarks'`).Scan(&name); err != nil {
 				return fmt.Errorf("chat database is missing bookmark metadata: %w", err)
 			}
-			if version == 5 {
-				return nil
+			if version >= 8 {
+				var name string
+				if err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'chat_preferences'`).Scan(&name); err != nil {
+					return fmt.Errorf("chat database is missing preference metadata: %w", err)
+				}
+				if version >= 9 {
+					return nil
+				}
 			}
 		}
 	}
-	tx, err := db.Begin()
+	tx, err := dbBeginFn(db)
 	if err != nil {
 		return err
 	}
@@ -311,39 +454,89 @@ func initChatSchema(db *sql.DB) error {
 	for _, statement := range []string{
 		`CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, scope TEXT NOT NULL, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
 		`CREATE INDEX IF NOT EXISTS sessions_scope_recent ON sessions(scope, updated_at DESC)`,
-		`CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, role TEXT NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL, query_id TEXT NOT NULL DEFAULT '', recordset_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, role TEXT NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL, query_id TEXT NOT NULL DEFAULT '', recordset_id TEXT NOT NULL DEFAULT '', http_response_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)`,
 		`CREATE INDEX IF NOT EXISTS messages_session_order ON messages(session_id)`,
-		`CREATE TABLE IF NOT EXISTS queries (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, origin_message_id TEXT NOT NULL, title TEXT NOT NULL, dtql TEXT NOT NULL, source TEXT NOT NULL, parameters_json TEXT NOT NULL, executed_at TEXT NOT NULL, error TEXT NOT NULL)`,
-		`CREATE TABLE IF NOT EXISTS recordsets (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, query_id TEXT NOT NULL REFERENCES queries(id) ON DELETE CASCADE, origin_message_id TEXT NOT NULL, title TEXT NOT NULL, dtql TEXT NOT NULL, source TEXT NOT NULL, environment TEXT NOT NULL, database_id TEXT NOT NULL, parameters_json TEXT NOT NULL, created_at TEXT NOT NULL, result_json BLOB NOT NULL, parent_recordset_id TEXT NOT NULL DEFAULT '', join_candidate_id TEXT NOT NULL DEFAULT '', join_applied_edges_json TEXT NOT NULL DEFAULT '[]')`,
+		`CREATE TABLE IF NOT EXISTS queries (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, origin_message_id TEXT NOT NULL, title TEXT NOT NULL, tugql TEXT NOT NULL, source TEXT NOT NULL, parameters_json TEXT NOT NULL, executed_at TEXT NOT NULL, error TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS recordsets (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, query_id TEXT NOT NULL REFERENCES queries(id) ON DELETE CASCADE, origin_message_id TEXT NOT NULL, title TEXT NOT NULL, tugql TEXT NOT NULL, source TEXT NOT NULL, environment TEXT NOT NULL, database_id TEXT NOT NULL, parameters_json TEXT NOT NULL, created_at TEXT NOT NULL, result_json BLOB NOT NULL, parent_recordset_id TEXT NOT NULL DEFAULT '', join_candidate_id TEXT NOT NULL DEFAULT '', join_applied_edges_json TEXT NOT NULL DEFAULT '[]', http_response_id TEXT NOT NULL DEFAULT '', refresh_parent_id TEXT NOT NULL DEFAULT '')`,
+		`CREATE TABLE IF NOT EXISTS http_responses (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, origin_message_id TEXT NOT NULL, method TEXT NOT NULL DEFAULT 'GET', url TEXT NOT NULL, status_code INTEGER NOT NULL, content_type TEXT NOT NULL, headers_json TEXT NOT NULL DEFAULT '{}', request_headers_json TEXT NOT NULL DEFAULT '{}', response_nanos INTEGER NOT NULL DEFAULT 0, download_nanos INTEGER NOT NULL DEFAULT 0, final_url TEXT NOT NULL DEFAULT '', redirects_json TEXT NOT NULL DEFAULT '[]', request_has_query INTEGER NOT NULL, body BLOB NOT NULL, refresh_parent_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS session_workspace (session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE, state_json TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS chat_preferences (scope TEXT PRIMARY KEY, table_style TEXT NOT NULL, result_versions_to_keep INTEGER NOT NULL DEFAULT 2)`,
 		// A bookmark snapshot has no foreign key to the transient session rows.
 		// It owns its encoded result, view, and selection after creation.
 		`CREATE TABLE IF NOT EXISTS bookmarks (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, scope TEXT NOT NULL, title TEXT NOT NULL, tags_json TEXT NOT NULL, target_kind TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, snapshot_json BLOB NOT NULL)`,
 		`CREATE INDEX IF NOT EXISTS bookmarks_scope_project_recent ON bookmarks(scope, project_id, updated_at DESC, id DESC)`,
-		`PRAGMA user_version = 5`,
+		`PRAGMA user_version = 9`,
 	} {
-		if _, err := tx.Exec(statement); err != nil {
+		if _, err := txExecSchemaFn(tx, statement); err != nil {
 			return fmt.Errorf("initialize chat schema: %w", err)
 		}
 	}
 	if version >= 1 && version < 4 {
-		if err := addRecordsetColumnIfMissing(tx, "parent_recordset_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		if err := addRecordsetColumnFn(tx, "parent_recordset_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 			return fmt.Errorf("migrate chat lineage parent: %w", err)
 		}
-		if err := addRecordsetColumnIfMissing(tx, "join_candidate_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		if err := addRecordsetColumnFn(tx, "join_candidate_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 			return fmt.Errorf("migrate chat lineage candidate: %w", err)
 		}
 	}
 	if version >= 1 && version < 5 {
-		if err := addRecordsetColumnIfMissing(tx, "join_applied_edges_json", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
+		if err := addRecordsetColumnFn(tx, "join_applied_edges_json", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
 			return fmt.Errorf("migrate chat lineage edges: %w", err)
+		}
+	}
+	if version >= 1 && version < 7 {
+		if err := addColumnIfMissingFn(tx, "messages", "http_response_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+			return fmt.Errorf("migrate HTTP message link: %w", err)
+		}
+		if err := addRecordsetColumnFn(tx, "http_response_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+			return fmt.Errorf("migrate HTTP RecordSet link: %w", err)
+		}
+		if err := addColumnIfMissingFn(tx, "http_responses", "headers_json", "TEXT NOT NULL DEFAULT '{}'"); err != nil {
+			return fmt.Errorf("migrate HTTP response headers: %w", err)
+		}
+		for _, column := range []string{"response_nanos", "download_nanos"} {
+			if err := addColumnIfMissingFn(tx, "http_responses", column, "INTEGER NOT NULL DEFAULT 0"); err != nil {
+				return fmt.Errorf("migrate HTTP response timing: %w", err)
+			}
+		}
+		for _, column := range []string{"final_url", "redirects_json"} {
+			definition := "TEXT NOT NULL DEFAULT ''"
+			if column == "redirects_json" {
+				definition = "TEXT NOT NULL DEFAULT '[]'"
+			}
+			if err := addColumnIfMissingFn(tx, "http_responses", column, definition); err != nil {
+				return fmt.Errorf("migrate HTTP redirect trace: %w", err)
+			}
+		}
+		if err := addRecordsetColumnFn(tx, "refresh_parent_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+			return fmt.Errorf("migrate RecordSet refresh lineage: %w", err)
+		}
+		if err := addColumnIfMissingFn(tx, "http_responses", "refresh_parent_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+			return fmt.Errorf("migrate HTTP refresh lineage: %w", err)
+		}
+	}
+	if version >= 1 && version < 9 {
+		if err := addColumnIfMissingFn(tx, "http_responses", "method", "TEXT NOT NULL DEFAULT 'GET'"); err != nil {
+			return fmt.Errorf("migrate HTTP request method: %w", err)
+		}
+		if err := addColumnIfMissingFn(tx, "http_responses", "request_headers_json", "TEXT NOT NULL DEFAULT '{}'"); err != nil {
+			return fmt.Errorf("migrate HTTP request headers: %w", err)
+		}
+	}
+	if version >= 6 && version < 7 {
+		if _, err := tx.Exec(`ALTER TABLE chat_preferences ADD COLUMN result_versions_to_keep INTEGER NOT NULL DEFAULT 2`); err != nil {
+			return fmt.Errorf("migrate result version preference: %w", err)
 		}
 	}
 	return tx.Commit()
 }
 
 func addRecordsetColumnIfMissing(tx *sql.Tx, name, definition string) error {
-	rows, err := tx.Query(`PRAGMA table_info(recordsets)`)
+	return addColumnIfMissing(tx, "recordsets", name, definition)
+}
+
+func addColumnIfMissing(tx *sql.Tx, table, name, definition string) error {
+	rows, err := tableInfoQueryFn(tx, table)
 	if err != nil {
 		return err
 	}
@@ -361,17 +554,23 @@ func addRecordsetColumnIfMissing(tx *sql.Tx, name, definition string) error {
 			return nil
 		}
 	}
-	if err := rows.Err(); err != nil {
+	if err := rowsErrFn(rows); err != nil {
 		return err
 	}
-	_, err = tx.Exec(`ALTER TABLE recordsets ADD COLUMN ` + name + ` ` + definition)
+	_, err = txExecSchemaFn(tx, `ALTER TABLE `+table+` ADD COLUMN `+name+` `+definition)
 	return err
 }
 
-func (s *SessionStore) Close() error { return s.db.Close() }
+func (s *SessionStore) Close() error {
+	settingsErr := settingsDBClose(s.settingsDB)
+	if err := dbClose(s.db); err != nil {
+		return err
+	}
+	return settingsErr
+}
 
 func (s *SessionStore) List(ctx context.Context) ([]ChatSession, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, title, created_at, updated_at FROM sessions WHERE scope = ? ORDER BY updated_at DESC, id DESC`, s.scope)
+	rows, err := dbQueryContextFn(s.db, ctx, `SELECT id, title, created_at, updated_at FROM sessions WHERE scope = ? ORDER BY updated_at DESC, id DESC`, s.scope)
 	if err != nil {
 		return nil, err
 	}
@@ -397,7 +596,7 @@ func (s *SessionStore) List(ctx context.Context) ([]ChatSession, error) {
 func (s *SessionStore) Create(ctx context.Context, title string) (ChatSession, error) {
 	now := time.Now().UTC()
 	item := ChatSession{ID: uuid.NewString(), Title: normalizeSessionTitle(title), CreatedAt: now, UpdatedAt: now}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions (id, scope, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, item.ID, s.scope, item.Title, stamp(now), stamp(now))
+	_, err := execContextFn(s.db, ctx, `INSERT INTO sessions (id, scope, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, item.ID, s.scope, item.Title, stamp(now), stamp(now))
 	return item, err
 }
 
@@ -417,8 +616,14 @@ func (s *SessionStore) LatestOrCreate(ctx context.Context) (ChatSession, error) 
 	if err != nil {
 		return ChatSession{}, err
 	}
-	if len(list) > 0 {
-		return s.Load(ctx, list[0].ID)
+	archived, err := s.ArchivedSessionIDs(ctx)
+	if err != nil {
+		return ChatSession{}, err
+	}
+	for _, item := range list {
+		if !archived[item.ID] {
+			return s.Load(ctx, item.ID)
+		}
 	}
 	return s.Create(ctx, "New chat")
 }
@@ -440,6 +645,7 @@ func (s *SessionStore) Load(ctx context.Context, id string) (ChatSession, error)
 		return item, fmt.Errorf("corrupt chat session timestamp: %w", err)
 	}
 	item.RecordSets = make(map[string]RecordSet)
+	item.HTTPResponses = make(map[string]HTTPResponse)
 	item.Bookmarks = make(map[string]Bookmark)
 	if err := s.loadMessages(ctx, &item); err != nil {
 		return ChatSession{}, err
@@ -450,13 +656,19 @@ func (s *SessionStore) Load(ctx context.Context, id string) (ChatSession, error)
 	if err := s.loadRecordSets(ctx, &item); err != nil {
 		return ChatSession{}, err
 	}
-	if err := s.loadBookmarks(ctx, &item); err != nil {
+	if err := loadHTTPResponsesFn(s, ctx, &item); err != nil {
 		return ChatSession{}, err
 	}
-	if err := s.loadWorkspace(ctx, &item); err != nil {
+	if err := loadBookmarksFn(s, ctx, &item); err != nil {
 		return ChatSession{}, err
 	}
-	if err := s.validateBookmarkReferences(ctx, s.db, item.Workspace); err != nil {
+	if err := loadWorkspaceFn(s, ctx, &item); err != nil {
+		return ChatSession{}, err
+	}
+	if err := s.loadNarrowings(ctx, &item); err != nil {
+		return ChatSession{}, err
+	}
+	if err := validateBookmarkRefsFn(s, ctx, s.db, item.Workspace); err != nil {
 		return ChatSession{}, err
 	}
 	for _, message := range item.Messages {
@@ -492,6 +704,16 @@ func (s *SessionStore) loadWorkspace(ctx context.Context, item *ChatSession) err
 }
 
 func validateLoadedWorkspace(item ChatSession) error {
+	seenBucket := map[string]bool{}
+	for _, id := range item.Workspace.ExportBucket {
+		if _, ok := item.RecordSets[id]; !ok {
+			return fmt.Errorf("export bucket references a missing RecordSet")
+		}
+		if seenBucket[id] {
+			return fmt.Errorf("export bucket contains a duplicate RecordSet")
+		}
+		seenBucket[id] = true
+	}
 	for id, view := range item.Workspace.Views {
 		if view.ID != id {
 			return fmt.Errorf("workspace view %q has inconsistent identity", id)
@@ -563,7 +785,7 @@ func validateLoadedWorkspace(item ChatSession) error {
 // SaveWorkspace replaces only session-scoped presentation/context state; it
 // never modifies an immutable RecordSet or reruns a query.
 func (s *SessionStore) SaveWorkspace(ctx context.Context, sessionID string, state WorkspaceState) error {
-	payload, err := json.Marshal(state)
+	payload, err := jsonMarshalWorkspace(state)
 	if err != nil {
 		return fmt.Errorf("encode workspace: %w", err)
 	}
@@ -572,23 +794,77 @@ func (s *SessionStore) SaveWorkspace(ctx context.Context, sessionID string, stat
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := sessionExists(ctx, tx, sessionID, s.scope); err != nil {
+	if err := sessionExistsFn(ctx, tx, sessionID, s.scope); err != nil {
 		return err
 	}
-	if err := s.validateBookmarkReferences(ctx, tx, state); err != nil {
+	if err := validateBookmarkRefsFn(s, ctx, tx, state); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO session_workspace (session_id, state_json) VALUES (?, ?) ON CONFLICT(session_id) DO UPDATE SET state_json = excluded.state_json`, sessionID, string(payload)); err != nil {
+	if _, err := txExecContextFn(tx, ctx, `INSERT INTO session_workspace (session_id, state_json) VALUES (?, ?) ON CONFLICT(session_id) DO UPDATE SET state_json = excluded.state_json`, sessionID, string(payload)); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET updated_at = ? WHERE id = ?`, stamp(time.Now().UTC()), sessionID); err != nil {
+	if _, err := txExecContextFn(tx, ctx, `UPDATE sessions SET updated_at = ? WHERE id = ?`, stamp(time.Now().UTC()), sessionID); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return txCommitFn(tx)
+}
+
+// TableStyle is a scope-level presentation preference shared by every chat
+// session for the same project, environment, database and role.
+func (s *SessionStore) TableStyle(ctx context.Context) (string, error) {
+	var name string
+	err := s.db.QueryRowContext(ctx, `SELECT table_style FROM chat_preferences WHERE scope = ?`, s.scope).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return grid.StyleLines.Name, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+func (s *SessionStore) SetTableStyle(ctx context.Context, name string) error {
+	known := false
+	for _, style := range grid.Styles {
+		known = known || style.Name == name
+	}
+	if !known {
+		return fmt.Errorf("unknown table style %q", name)
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO chat_preferences (scope, table_style) VALUES (?, ?) ON CONFLICT(scope) DO UPDATE SET table_style = excluded.table_style`, s.scope, name)
+	return err
+}
+
+const defaultResultVersionsToKeep = 2
+
+// ResultVersionsToKeep is a DataTug-owned preference, shared by chat sessions
+// in the same project/database/access scope. Immutable snapshots are retained
+// independently; this controls how many versions a result card exposes.
+func (s *SessionStore) ResultVersionsToKeep(ctx context.Context) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT result_versions_to_keep FROM chat_preferences WHERE scope = ?`, s.scope).Scan(&count)
+	if errors.Is(err, sql.ErrNoRows) {
+		return defaultResultVersionsToKeep, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	if count < 1 {
+		return 0, fmt.Errorf("invalid saved result version limit %d", count)
+	}
+	return count, nil
+}
+
+func (s *SessionStore) SetResultVersionsToKeep(ctx context.Context, count int) error {
+	if count < 1 || count > 100 {
+		return fmt.Errorf("result version limit must be between 1 and 100")
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO chat_preferences (scope, table_style, result_versions_to_keep) VALUES (?, ?, ?) ON CONFLICT(scope) DO UPDATE SET result_versions_to_keep = excluded.result_versions_to_keep`, s.scope, grid.StyleLines.Name, count)
+	return err
 }
 
 func (s *SessionStore) loadMessages(ctx context.Context, item *ChatSession) error {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, role, kind, text, query_id, recordset_id, created_at FROM messages WHERE session_id = ? ORDER BY rowid`, item.ID)
+	rows, err := dbQueryContextFn(s.db, ctx, `SELECT id, role, kind, text, query_id, recordset_id, http_response_id, created_at FROM messages WHERE session_id = ? ORDER BY rowid`, item.ID)
 	if err != nil {
 		return err
 	}
@@ -596,7 +872,7 @@ func (s *SessionStore) loadMessages(ctx context.Context, item *ChatSession) erro
 	for rows.Next() {
 		var message ChatMessage
 		var created string
-		if err := rows.Scan(&message.ID, &message.Role, &message.Kind, &message.Text, &message.QueryID, &message.RecordSetID, &created); err != nil {
+		if err := rows.Scan(&message.ID, &message.Role, &message.Kind, &message.Text, &message.QueryID, &message.RecordSetID, &message.HTTPResponseID, &created); err != nil {
 			return err
 		}
 		if message.CreatedAt, err = time.Parse(time.RFC3339Nano, created); err != nil {
@@ -608,7 +884,7 @@ func (s *SessionStore) loadMessages(ctx context.Context, item *ChatSession) erro
 }
 
 func (s *SessionStore) loadQueries(ctx context.Context, item *ChatSession) error {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, origin_message_id, title, dtql, source, parameters_json, executed_at, error FROM queries WHERE session_id = ? ORDER BY rowid`, item.ID)
+	rows, err := dbQueryContextFn(s.db, ctx, `SELECT id, origin_message_id, title, tugql, source, parameters_json, executed_at, error FROM queries WHERE session_id = ? ORDER BY rowid`, item.ID)
 	if err != nil {
 		return err
 	}
@@ -616,10 +892,10 @@ func (s *SessionStore) loadQueries(ctx context.Context, item *ChatSession) error
 	for rows.Next() {
 		var query ExecutedQuery
 		var params, executed string
-		if err := rows.Scan(&query.ID, &query.OriginMessageID, &query.Title, &query.DTQL, &query.Source, &params, &executed, &query.Error); err != nil {
+		if err := rows.Scan(&query.ID, &query.OriginMessageID, &query.Title, &query.TugQL, &query.Source, &params, &executed, &query.Error); err != nil {
 			return err
 		}
-		if err := json.Unmarshal([]byte(params), &query.Parameters); err != nil {
+		if err := decodeExactJSON([]byte(params), &query.Parameters); err != nil {
 			return fmt.Errorf("corrupt chat query parameters %q: %w", query.ID, err)
 		}
 		if query.ExecutedAt, err = time.Parse(time.RFC3339Nano, executed); err != nil {
@@ -631,7 +907,7 @@ func (s *SessionStore) loadQueries(ctx context.Context, item *ChatSession) error
 }
 
 func (s *SessionStore) loadRecordSets(ctx context.Context, item *ChatSession) error {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, query_id, origin_message_id, title, dtql, source, environment, database_id, parameters_json, created_at, result_json, parent_recordset_id, join_candidate_id, join_applied_edges_json FROM recordsets WHERE session_id = ? ORDER BY rowid`, item.ID)
+	rows, err := dbQueryContextFn(s.db, ctx, `SELECT id, query_id, origin_message_id, title, tugql, source, environment, database_id, parameters_json, created_at, result_json, parent_recordset_id, join_candidate_id, join_applied_edges_json, http_response_id, refresh_parent_id FROM recordsets WHERE session_id = ? ORDER BY rowid`, item.ID)
 	if err != nil {
 		return err
 	}
@@ -641,11 +917,11 @@ func (s *SessionStore) loadRecordSets(ctx context.Context, item *ChatSession) er
 		var params, created string
 		var payload []byte
 		var parentID, candidateID, appliedJSON string
-		if err := rows.Scan(&record.ID, &record.QueryID, &record.OriginMessageID, &record.Title, &record.DTQL, &record.Source, &record.Environment, &record.Database, &params, &created, &payload, &parentID, &candidateID, &appliedJSON); err != nil {
+		if err := rows.Scan(&record.ID, &record.QueryID, &record.OriginMessageID, &record.Title, &record.TugQL, &record.Source, &record.Environment, &record.Database, &params, &created, &payload, &parentID, &candidateID, &appliedJSON, &record.HTTPResponseID, &record.RefreshParentID); err != nil {
 			return err
 		}
 		record.SessionID = item.ID
-		if err := json.Unmarshal([]byte(params), &record.Parameters); err != nil {
+		if err := decodeExactJSON([]byte(params), &record.Parameters); err != nil {
 			return fmt.Errorf("corrupt RecordSet parameters %q: %w", record.ID, err)
 		}
 		if record.CreatedAt, err = time.Parse(time.RFC3339Nano, created); err != nil {
@@ -680,18 +956,18 @@ func (s *SessionStore) Clear(ctx context.Context, id string) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := sessionExists(ctx, tx, id, s.scope); err != nil {
+	if err := sessionExistsFn(ctx, tx, id, s.scope); err != nil {
 		return err
 	}
-	for _, table := range []string{"session_workspace", "recordsets", "queries", "messages"} {
-		if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE session_id = ?", id); err != nil {
+	for _, table := range []string{"session_workspace", "recordsets", "queries", "messages", "http_responses", "narrowing_decisions"} {
+		if _, err := txExecContextFn(tx, ctx, "DELETE FROM "+table+" WHERE session_id = ?", id); err != nil {
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET title = 'New chat', updated_at = ? WHERE id = ?`, stamp(time.Now().UTC()), id); err != nil {
+	if _, err := txExecContextFn(tx, ctx, `UPDATE sessions SET title = 'New chat', updated_at = ? WHERE id = ?`, stamp(time.Now().UTC()), id); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return txCommitFn(tx)
 }
 
 func (s *SessionStore) Delete(ctx context.Context, id string) error {
@@ -699,7 +975,7 @@ func (s *SessionStore) Delete(ctx context.Context, id string) error {
 }
 
 func (s *SessionStore) updateSession(ctx context.Context, id, statement string, args ...any) error {
-	result, err := s.db.ExecContext(ctx, statement, args...)
+	result, err := execContextFn(s.db, ctx, statement, args...)
 	if err != nil {
 		return err
 	}
@@ -715,7 +991,7 @@ func (s *SessionStore) updateSession(ctx context.Context, id, statement string, 
 
 func sessionExists(ctx context.Context, tx *sql.Tx, id, scope string) error {
 	var exists int
-	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM sessions WHERE id = ? AND scope = ?`, id, scope).Scan(&exists); err != nil {
+	if err := txQueryRowContextFn(tx, ctx, `SELECT 1 FROM sessions WHERE id = ? AND scope = ?`, id, scope).Scan(&exists); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("chat session %q not found in this access scope", id)
 		}
@@ -731,29 +1007,29 @@ func (s *SessionStore) AppendUser(ctx context.Context, sessionID, prompt string)
 		return ChatMessage{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := sessionExists(ctx, tx, sessionID, s.scope); err != nil {
+	if err := sessionExistsFn(ctx, tx, sessionID, s.scope); err != nil {
 		return ChatMessage{}, err
 	}
-	if err := insertMessage(ctx, tx, sessionID, message); err != nil {
+	if err := insertMessageFn(ctx, tx, sessionID, message); err != nil {
 		return ChatMessage{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET updated_at = ? WHERE id = ?`, stamp(message.CreatedAt), sessionID); err != nil {
+	if _, err := txExecContextFn(tx, ctx, `UPDATE sessions SET updated_at = ? WHERE id = ?`, stamp(message.CreatedAt), sessionID); err != nil {
 		return ChatMessage{}, err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := txCommitFn(tx); err != nil {
 		return ChatMessage{}, err
 	}
 	return message, nil
 }
 
 func insertMessage(ctx context.Context, tx *sql.Tx, sessionID string, message ChatMessage) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO messages (id, session_id, role, kind, text, query_id, recordset_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, message.ID, sessionID, message.Role, message.Kind, message.Text, message.QueryID, message.RecordSetID, stamp(message.CreatedAt))
+	_, err := txExecContextFn(tx, ctx, `INSERT INTO messages (id, session_id, role, kind, text, query_id, recordset_id, http_response_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, message.ID, sessionID, message.Role, message.Kind, message.Text, message.QueryID, message.RecordSetID, message.HTTPResponseID, stamp(message.CreatedAt))
 	return err
 }
 
 // AppendQuery commits a successful execution at the tool boundary, before
 // the model's final response. Each invocation gets a new immutable snapshot,
-// including repeated executions of identical DTQL.
+// including repeated executions of identical TugQL.
 func (s *SessionStore) AppendQuery(ctx context.Context, sessionID, originID, source string, query QueryResult) (QueryResult, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -764,24 +1040,24 @@ func (s *SessionStore) AppendQuery(ctx context.Context, sessionID, originID, sou
 		return QueryResult{}, err
 	}
 	now := time.Now().UTC()
-	if err := s.appendQueryTx(ctx, tx, sessionID, originID, source, &query, now); err != nil {
+	if err := appendQueryTxFn(s, ctx, tx, sessionID, originID, source, &query, now); err != nil {
 		return QueryResult{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET updated_at = ? WHERE id = ?`, stamp(now), sessionID); err != nil {
+	if _, err := txExecContextFn(tx, ctx, `UPDATE sessions SET updated_at = ? WHERE id = ?`, stamp(now), sessionID); err != nil {
 		return QueryResult{}, err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := txCommitFn(tx); err != nil {
 		return QueryResult{}, err
 	}
 	return query, nil
 }
 
 func (s *SessionStore) checkOrigin(ctx context.Context, tx *sql.Tx, sessionID, originID string) error {
-	if err := sessionExists(ctx, tx, sessionID, s.scope); err != nil {
+	if err := sessionExistsFn(ctx, tx, sessionID, s.scope); err != nil {
 		return err
 	}
 	var exists int
-	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM messages WHERE id = ? AND session_id = ? AND role = 'You'`, originID, sessionID).Scan(&exists); err != nil {
+	if err := txQueryRowContextFn(tx, ctx, `SELECT 1 FROM messages WHERE id = ? AND session_id = ? AND role = 'You'`, originID, sessionID).Scan(&exists); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("originating user message %q is missing from this session", originID)
 		}
@@ -791,6 +1067,11 @@ func (s *SessionStore) checkOrigin(ctx context.Context, tx *sql.Tx, sessionID, o
 }
 
 func (s *SessionStore) appendQueryTx(ctx context.Context, tx *sql.Tx, sessionID, originID, source string, query *QueryResult, now time.Time) error {
+	// The chat database is a file on disk: it never holds a password from a
+	// source URL. What it stores is the display form of the source (see
+	// dbcopy.SourceDisplay); a source named "env:NAME" is stored as is, because it
+	// carries the variable's name and not its value.
+	source = dbcopy.SourceDisplay(source)
 	query.QueryID = uuid.NewString()
 	parameters := query.Parameters
 	if parameters == nil {
@@ -804,10 +1085,10 @@ func (s *SessionStore) appendQueryTx(ctx context.Context, tx *sql.Tx, sessionID,
 	if query.Err != nil {
 		errText = publicQueryError(query.Err, query.Parameters)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO queries (id, session_id, origin_message_id, title, dtql, source, parameters_json, executed_at, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, query.QueryID, sessionID, originID, query.Title, query.DTQL, source, string(paramsJSON), stamp(now), errText); err != nil {
+	if _, err := txExecContextFn(tx, ctx, `INSERT INTO queries (id, session_id, origin_message_id, title, tugql, source, parameters_json, executed_at, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, query.QueryID, sessionID, originID, query.Title, query.TugQL, source, string(paramsJSON), stamp(now), errText); err != nil {
 		return err
 	}
-	message := ChatMessage{ID: uuid.NewString(), Role: "DataTug", QueryID: query.QueryID, CreatedAt: now}
+	message := ChatMessage{ID: uuid.NewString(), Role: "DataTug", QueryID: query.QueryID, HTTPResponseID: query.HTTPResponseID, CreatedAt: now}
 	if query.Err != nil {
 		message.Kind, message.Text = "error", errText
 	} else {
@@ -816,7 +1097,7 @@ func (s *SessionStore) appendQueryTx(ctx context.Context, tx *sql.Tx, sessionID,
 		if query.SourceID != "" {
 			databaseID = query.SourceID
 		}
-		payload, err := encodeResult(query.Result)
+		payload, err := encodeResultFn(query.Result)
 		if err != nil {
 			return fmt.Errorf("encode query result: %w", err)
 		}
@@ -824,16 +1105,16 @@ func (s *SessionStore) appendQueryTx(ctx context.Context, tx *sql.Tx, sessionID,
 		appliedJSON := []byte("[]")
 		if query.Lineage != nil {
 			parentID, candidateID = query.Lineage.ParentRecordSetID, string(query.Lineage.CandidateID)
-			if appliedJSON, err = json.Marshal(query.Lineage.AppliedEdges); err != nil {
+			if appliedJSON, err = jsonMarshalLineage(query.Lineage.AppliedEdges); err != nil {
 				return fmt.Errorf("encode JOIN lineage: %w", err)
 			}
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO recordsets (id, session_id, query_id, origin_message_id, title, dtql, source, environment, database_id, parameters_json, created_at, result_json, parent_recordset_id, join_candidate_id, join_applied_edges_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, query.RecordSetID, sessionID, query.QueryID, originID, query.Title, query.DTQL, source, s.info.Environment, databaseID, string(paramsJSON), stamp(now), payload, parentID, candidateID, string(appliedJSON)); err != nil {
+		if _, err := txExecContextFn(tx, ctx, `INSERT INTO recordsets (id, session_id, query_id, origin_message_id, title, tugql, source, environment, database_id, parameters_json, created_at, result_json, parent_recordset_id, join_candidate_id, join_applied_edges_json, http_response_id, refresh_parent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, query.RecordSetID, sessionID, query.QueryID, originID, query.Title, query.TugQL, source, s.info.Environment, databaseID, string(paramsJSON), stamp(now), payload, parentID, candidateID, string(appliedJSON), query.HTTPResponseID, query.RefreshParentID); err != nil {
 			return err
 		}
 		message.Kind, message.RecordSetID = "grid", query.RecordSetID
 	}
-	return insertMessage(ctx, tx, sessionID, message)
+	return insertMessageFn(ctx, tx, sessionID, message)
 }
 
 func (s *SessionStore) AppendTurn(ctx context.Context, sessionID, originID, source string, turn Turn) (Turn, error) {
@@ -847,7 +1128,16 @@ func (s *SessionStore) AppendTurn(ctx context.Context, sessionID, originID, sour
 	}
 	now := time.Now().UTC()
 	if turn.Text != "" {
-		if err := insertMessage(ctx, tx, sessionID, ChatMessage{ID: uuid.NewString(), Role: "DataTug", Kind: "text", Text: turn.Text, CreatedAt: now}); err != nil {
+		kind := "text"
+		if turn.TextFormat == "markdown" {
+			kind = "markdown"
+		}
+		if err := insertMessageFn(ctx, tx, sessionID, ChatMessage{ID: uuid.NewString(), Role: "DataTug", Kind: kind, Text: turn.Text, CreatedAt: now}); err != nil {
+			return Turn{}, err
+		}
+	}
+	if turn.Narrowing != nil {
+		if err := insertNarrowingFn(ctx, tx, sessionID, originID, *turn.Narrowing, now); err != nil {
 			return Turn{}, err
 		}
 	}
@@ -855,15 +1145,15 @@ func (s *SessionStore) AppendTurn(ctx context.Context, sessionID, originID, sour
 		query := &turn.Queries[i]
 		if query.QueryID != "" {
 			continue
-		} // already committed by run_dtql
-		if err := s.appendQueryTx(ctx, tx, sessionID, originID, source, query, now); err != nil {
+		} // already committed by run_tugql
+		if err := appendQueryTxFn(s, ctx, tx, sessionID, originID, source, query, now); err != nil {
 			return Turn{}, err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET updated_at = ? WHERE id = ?`, stamp(now), sessionID); err != nil {
+	if _, err := txExecContextFn(tx, ctx, `UPDATE sessions SET updated_at = ? WHERE id = ?`, stamp(now), sessionID); err != nil {
 		return Turn{}, err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := txCommitFn(tx); err != nil {
 		return Turn{}, err
 	}
 	return turn, nil
@@ -873,6 +1163,7 @@ func stamp(t time.Time) string { return t.Format(time.RFC3339Nano) }
 
 type storedResult struct {
 	Columns     []string                        `json:"columns"`
+	ColumnTypes map[string]string               `json:"columnTypes,omitempty"`
 	Rows        []storedRow                     `json:"rows"`
 	Statistics  *secureread.RecordSetStatistics `json:"statistics,omitempty"`
 	Limitations []secureread.Limitation         `json:"limitations,omitempty"`
@@ -894,7 +1185,7 @@ func encodeResult(result secureread.Result) ([]byte, error) {
 	if statistics.RowCount != len(result.Rows) || (len(statistics.Columns) == 0 && len(result.Columns) > 0) {
 		statisticsCollector = secureread.NewStatisticsCollector()
 	}
-	stored := storedResult{Columns: result.Columns, Statistics: &statistics, Limitations: result.Limitations, Collection: result.Collection, Provenance: result.Provenance, Rows: make([]storedRow, len(result.Rows))}
+	stored := storedResult{Columns: result.Columns, ColumnTypes: result.ColumnTypes, Statistics: &statistics, Limitations: result.Limitations, Collection: result.Collection, Provenance: result.Provenance, Rows: make([]storedRow, len(result.Rows))}
 	for i, row := range result.Rows {
 		stored.Rows[i] = storedRow{Key: row.Key, Data: make(map[string]storedValue, len(row.Data))}
 		for name, value := range row.Data {
@@ -952,7 +1243,7 @@ func decodeResult(payload []byte) (secureread.Result, error) {
 	if stored.Rows == nil {
 		return secureread.Result{}, errors.New("missing rows")
 	}
-	result := secureread.Result{Columns: stored.Columns, Limitations: stored.Limitations, Collection: stored.Collection, Provenance: stored.Provenance, Rows: make([]secureread.Row, len(stored.Rows))}
+	result := secureread.Result{Columns: stored.Columns, ColumnTypes: stored.ColumnTypes, Limitations: stored.Limitations, Collection: stored.Collection, Provenance: stored.Provenance, Rows: make([]secureread.Row, len(stored.Rows))}
 	var legacyStatistics *secureread.StatisticsCollector
 	if stored.Statistics == nil {
 		legacyStatistics = secureread.NewStatisticsCollector()
@@ -978,6 +1269,24 @@ func decodeResult(payload []byte) (secureread.Result, error) {
 		result.Statistics = legacyStatistics.Finalize(result.Columns)
 	}
 	return result, nil
+}
+
+// Parameter numbers remain exact across load, bookmark and derived execution.
+// Reject trailing data just as json.Unmarshal does.
+func decodeExactJSON(payload []byte, target any) error {
+	decoder := json.NewDecoder(strings.NewReader(string(payload)))
+	decoder.UseNumber()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return errors.New("unexpected trailing JSON value")
+		}
+		return err
+	}
+	return nil
 }
 
 func decodeValue(value storedValue) (any, error) {

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -11,9 +12,7 @@ import (
 	"charm.land/fang/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/datatug/datatug-cli/apps/datatugapp/commands"
-	"github.com/datatug/datatug-cli/apps/global"
 	"github.com/posthog/posthog-go"
-	"github.com/rivo/tview"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
@@ -31,6 +30,50 @@ func TestPreserveErrorTextCase(t *testing.T) {
 	preserveErrorTextCase(&output, styles, errors.New(`AI profile "deepseek" is invalid`))
 	assert.Contains(t, output.String(), `AI profile "deepseek" is invalid`)
 	assert.NotContains(t, output.String(), "Ai profile")
+}
+
+func TestPreserveErrorTextCaseRedactsSourceURLs(t *testing.T) {
+	var output bytes.Buffer
+	preserveErrorTextCase(&output, fang.Styles{ErrorText: lipgloss.NewStyle()}, errors.New(`open "postgres://alice:s3cr3t-DT01@db.example.com/shop": refused; password=s3cr3t-DT01`))
+	assert.NotContains(t, output.String(), "s3cr3t-DT01")
+	assert.Contains(t, output.String(), "postgres://alice:xxxxx@db.example.com/shop")
+}
+
+func TestMainPanicTextIsRedacted(t *testing.T) {
+	getCommandBackup, osExitBackup, osStderrBackup := getCommand, osExit, os.Stderr
+	enqueueBackup, startBackup := dtlogEnqueue, dtlogStart
+	defer func() {
+		getCommand, osExit, os.Stderr = getCommandBackup, osExitBackup, osStderrBackup
+		dtlogEnqueue, dtlogStart = enqueueBackup, startBackup
+	}()
+	var enqueued []string
+	dtlogEnqueue = func(message posthog.Message) {
+		enqueued = append(enqueued, fmt.Sprintf("%+v", message))
+	}
+	dtlogStart = func() {}
+	getCommand = func() (*cobra.Command, []fang.Option) {
+		panic("lost connection to postgres://alice:s3cr3t-DT01@db.example.com/shop")
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	var exitCode int
+	osExit = func(code int) { exitCode = code }
+
+	main()
+
+	_ = w.Close()
+	var stderr bytes.Buffer
+	_, _ = io.Copy(&stderr, r)
+	assert.Equal(t, 1, exitCode)
+	assert.NotContains(t, stderr.String(), "s3cr3t-DT01")
+	assert.Contains(t, stderr.String(), "postgres://alice:xxxxx@db.example.com/shop")
+	for _, event := range enqueued {
+		assert.NotContains(t, event, "s3cr3t-DT01")
+	}
+	assert.NotEmpty(t, enqueued, "the panic must still be reported")
 }
 
 func TestMainFunc(t *testing.T) {
@@ -71,28 +114,6 @@ func TestMainFunc(t *testing.T) {
 			_, _ = io.Copy(&buf, r)
 			assert.True(t, strings.Contains(buf.String(), "invalid memory address or nil pointer dereference"))
 		}
-	})
-	// Cover the global.App != nil branch: set App to a non-nil Application before
-	// calling main() with a panicking getCommand. tview.NewApplication().Stop() is
-	// safe when screen == nil (returns early without sending on any channel).
-	t.Run("panic_with_app_non_nil", func(t *testing.T) {
-		osExitBackup := osExit
-		appBackup := global.App
-		getCommandBackup := getCommand
-		defer func() {
-			osExit = osExitBackup
-			global.App = appBackup
-			getCommand = getCommandBackup
-		}()
-
-		global.App = tview.NewApplication()
-		getCommand = func() (*cobra.Command, []fang.Option) { return nil, nil }
-		var exitCode int
-		osExit = func(i int) { exitCode = i }
-
-		main()
-
-		assert.Equal(t, 1, exitCode)
 	})
 	// Cover the plain-error branch: getCommand returns a command whose RunE
 	// returns a non-ExitCoder error. main must exit 1 (matching every
@@ -334,4 +355,36 @@ func TestIsVersionJSONInvocation(t *testing.T) {
 			assert.Equal(t, c.want, isVersionJSONInvocation(root, c.args))
 		})
 	}
+}
+
+// TestMain_EnsuresDaemonAfterTheCommand pins the --client wrapper's place in main:
+// it runs after the command's own work, also when that work failed, and does
+// not change the exit code (spec/features/cli/daemon#req:client-ensures-daemon).
+func TestMain_EnsuresDaemonAfterTheCommand(t *testing.T) {
+	getCommandBackup, ensureBackup, osExitBackup := getCommand, ensureDaemon, osExit
+	dtlogEnqueueBackup, dtlogStartBackup := dtlogEnqueue, dtlogStart
+	defer func() {
+		getCommand, ensureDaemon, osExit = getCommandBackup, ensureBackup, osExitBackup
+		dtlogEnqueue, dtlogStart = dtlogEnqueueBackup, dtlogStartBackup
+	}()
+	dtlogEnqueue = func(posthog.Message) {}
+	dtlogStart = func() {}
+	var order []string
+	getCommand = func() (*cobra.Command, []fang.Option) {
+		return &cobra.Command{
+			Use: "datatug", SilenceUsage: true, SilenceErrors: true,
+			RunE: func(*cobra.Command, []string) error {
+				order = append(order, "command")
+				return commands.Exit("boom", 7)
+			},
+		}, nil
+	}
+	ensureDaemon = func(*cobra.Command, []string, io.Writer) { order = append(order, "ensure") }
+	exitCode := -1
+	osExit = func(code int) { exitCode = code }
+
+	main()
+
+	assert.Equal(t, []string{"command", "ensure"}, order)
+	assert.Equal(t, 7, exitCode)
 }

@@ -32,16 +32,16 @@ func (e *Executor) RunSnapshot(ctx context.Context, collection string, recordset
 	if strings.TrimSpace(collection) == "" {
 		return Result{}, fmt.Errorf("snapshot collection is required")
 	}
-	dir, err := os.MkdirTemp("", "datatug-snapshot-policy-")
+	dir, err := osMkdirTemp("", "datatug-snapshot-policy-")
 	if err != nil {
 		return Result{}, fmt.Errorf("create snapshot policy workspace: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
-	if err := os.Chmod(dir, 0o700); err != nil {
+	if err := osChmod(dir, 0o700); err != nil {
 		return Result{}, fmt.Errorf("secure snapshot policy workspace: %w", err)
 	}
 	dbPath := filepath.Join(dir, "snapshot.sqlite")
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sqlOpenSnapshot("sqlite", dbPath)
 	if err != nil {
 		return Result{}, err
 	}
@@ -49,10 +49,10 @@ func (e *Executor) RunSnapshot(ctx context.Context, collection string, recordset
 		_ = db.Close()
 		return Result{}, err
 	}
-	if err := db.Close(); err != nil {
+	if err := dbCloseSnapshot(db); err != nil {
 		return Result{}, err
 	}
-	if err := os.Chmod(dbPath, 0o600); err != nil {
+	if err := osChmod(dbPath, 0o600); err != nil {
 		return Result{}, err
 	}
 	query := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef(collection, ""))).SelectColumns()
@@ -127,7 +127,7 @@ func restoreSnapshotRecordset(original apicontract.Recordset, filtered Result) (
 		statistics.addObservedRow(values)
 	}
 	restored := apicontract.Recordset{Columns: columns, Rows: rows}
-	if err := restored.Validate(); err != nil {
+	if err := restoredValidate(&restored); err != nil {
 		return apicontract.Recordset{}, RecordSetStatistics{}, ErrSnapshotPolicyUnexpressible
 	}
 	return restored, statistics.finalize(columnNames), nil
@@ -212,12 +212,12 @@ func materializeSnapshot(ctx context.Context, db *sql.DB, collection string, rec
 		placeholders[i] = "?"
 	}
 	insert := "INSERT INTO " + quotedCollection + " VALUES(" + strings.Join(placeholders, ",") + ")"
-	tx, err := db.BeginTx(ctx, nil)
+	tx, err := beginTxSnapshot(ctx, db)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	stmt, err := tx.PrepareContext(ctx, insert)
+	stmt, err := prepareContextSnapshot(ctx, tx, insert)
 	if err != nil {
 		return err
 	}
@@ -231,7 +231,7 @@ func materializeSnapshot(ctx context.Context, db *sql.DB, collection string, rec
 			}
 			values[i] = converted
 		}
-		if _, err := stmt.ExecContext(ctx, values...); err != nil {
+		if _, err := stmtExecSnapshot(ctx, stmt, values...); err != nil {
 			return fmt.Errorf("insert snapshot policy row: %w", err)
 		}
 	}

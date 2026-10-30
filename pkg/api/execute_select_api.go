@@ -9,7 +9,6 @@ import (
 	"github.com/dal-go/dalgo/dal"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
-	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/strongo/validation"
 )
 
@@ -50,6 +49,17 @@ func (v SelectRequest) Validate() error {
 	if v.Database == "" {
 		return validation.NewErrRequestIsMissingRequiredField("database")
 	}
+	// The project store joins both into a path of its own (see ValidateIdentifier),
+	// so a request that holds anything but a plain name is refused before any lookup.
+	if err := ValidateProjectIdentifier("project", v.Project); err != nil {
+		return err
+	}
+	if err := ValidateIdentifier("environment", v.Environment); err != nil {
+		return err
+	}
+	if err := ValidateIdentifier("database", v.Database); err != nil {
+		return err
+	}
 	if v.Where != "" && !strings.Contains(v.Where, ":") {
 		return validation.NewErrBadRequestFieldValue("where", "should have : char to separate field from value")
 	}
@@ -72,15 +82,19 @@ func ExecuteSelect(ctx context.Context, storeID string, request SelectRequest) (
 	if !ok {
 		return QueryResultResponse{}, errors.New("exec/select: server has no policy-enforced session configured")
 	}
-	store, err := storage.NewDatatugStore(storeID)
+	// A project this process does not serve is refused before a project store is asked
+	// for it, with the answer of the routes that resolve the store of their project.
+	projDir, err := servedProjectDir(request.Project)
 	if err != nil {
 		return QueryResultResponse{}, err
 	}
-	projStore := store.GetProjectStore(request.Project)
-	projDir, _ := projectDir(request.Project)
-	sourceURL, driver, err := resolveSourceURL(ctx, projStore, request.Environment, request.Database, projDir)
+	projStore, err := projectStoreForID(storeID, request.Project)
 	if err != nil {
 		return QueryResultResponse{}, err
+	}
+	sourceURL, driver, err := resolveSourceURL(ctx, projStore, request.Environment, request.Database, projDir)
+	if err != nil {
+		return QueryResultResponse{}, sourceLookupAnswer(err)
 	}
 
 	var result secureread.Result
@@ -104,7 +118,9 @@ func ExecuteSelect(ctx context.Context, storeID string, request SelectRequest) (
 		}
 	}
 	if err != nil {
-		return QueryResultResponse{}, err
+		// A source that is not there or cannot be opened is answered by its ID: the text of the
+		// error holds the display form of the source (see SourceUnavailable).
+		return QueryResultResponse{}, sourceFailureAnswer(request.Database, err)
 	}
 	return resultToResponse(result, executionProfile, request.Database, collection), nil
 }

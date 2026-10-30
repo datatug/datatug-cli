@@ -7,6 +7,7 @@ import (
 )
 
 func TestBookmarkProjectionPreservesOnlySelectedRangeCells(t *testing.T) {
+	t.Parallel()
 	record := RecordSet{Result: secureread.Result{
 		Columns: []string{"CustomerId", "City"},
 		Rows: []secureread.Row{
@@ -56,6 +57,7 @@ func TestBookmarkProjectionPreservesOnlySelectedRangeCells(t *testing.T) {
 }
 
 func TestRangeProjectionRejectsMismatchedRowsOrColumns(t *testing.T) {
+	t.Parallel()
 	columns := []string{"CustomerId", "City"}
 	ranges := []CellRange{{FirstRow: 0, LastRow: 1, FirstCol: 0, LastCol: 1}}
 	for _, test := range []struct {

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/datatug/datatug-core/pkg/apicontract"
-	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/strongo/validation"
 )
 
@@ -46,6 +45,9 @@ func (v ExecuteCommandsRequest) Validate() error {
 	}
 	if len(v.Commands) == 0 {
 		return validation.NewErrRequestIsMissingRequiredField("commands")
+	}
+	if err := ValidateProjectIdentifier("project", v.Project); err != nil {
+		return err
 	}
 	for i, c := range v.Commands {
 		if err := c.Validate(); err != nil {
@@ -94,7 +96,12 @@ func (v ExecuteCommandRequest) Validate() error {
 	if v.DB == "" {
 		return validation.NewErrRequestIsMissingRequiredField("db")
 	}
-	return nil
+	// The project store joins both into a path of its own (see ValidateIdentifier),
+	// so a command that holds anything but a plain name is refused before any lookup.
+	if err := ValidateIdentifier("env", v.Env); err != nil {
+		return err
+	}
+	return ValidateIdentifier("db", v.DB)
 }
 
 // ExecuteCommandsResponse is POST /datatug/exec/execute_commands's response,
@@ -153,12 +160,16 @@ func ExecuteCommands(ctx context.Context, storeID string, request ExecuteCommand
 	if !ok {
 		return ExecuteCommandsResponse{}, errors.New("execute_commands: server has no policy-enforced session configured")
 	}
-	dtStore, err := storage.NewDatatugStore(storeID)
+	// A project this process does not serve is refused before a project store is asked
+	// for it, with the answer of the routes that resolve the store of their project.
+	projDir, err := servedProjectDir(request.Project)
 	if err != nil {
 		return ExecuteCommandsResponse{}, err
 	}
-	projStore := dtStore.GetProjectStore(request.Project)
-	projDir, _ := projectDir(request.Project)
+	projStore, err := projectStoreForID(storeID, request.Project)
+	if err != nil {
+		return ExecuteCommandsResponse{}, err
+	}
 
 	start := time.Now()
 	response := ExecuteCommandsResponse{Commands: make([]CommandExecutionResult, len(request.Commands))}
@@ -169,11 +180,12 @@ func ExecuteCommands(ctx context.Context, storeID string, request ExecuteCommand
 		}
 		sourceURL, _, err := resolveSourceURL(ctx, projStore, command.Env, command.DB, projDir)
 		if err != nil {
-			return ExecuteCommandsResponse{}, fmt.Errorf("command %d: %w", i, err)
+			return ExecuteCommandsResponse{}, fmt.Errorf("command %d: %w", i, sourceLookupAnswer(err))
 		}
 		result, err := executor.RunNativeSQL(ctx, sourceURL, command.Text)
 		if err != nil {
-			return ExecuteCommandsResponse{}, fmt.Errorf("command %d: %w", i, err)
+			// A source that is not there or cannot be opened is answered by its ID (see SourceUnavailable).
+			return ExecuteCommandsResponse{}, fmt.Errorf("command %d: %w", i, sourceFailureAnswer(command.DB, err))
 		}
 		commandID := command.ID
 		if commandID == "" {

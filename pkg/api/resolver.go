@@ -3,13 +3,15 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
-	"github.com/datatug/datatug-cli/pkg/httpsource"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/storage"
 )
@@ -89,7 +91,9 @@ func ResolveSource(ctx context.Context, projStore datatug.ProjectStore, projectD
 			return s, nil
 		}
 	}
-	return ResolvedSource{}, fmt.Errorf("%w: unknown source %q in environment %q", ErrSourceUnavailable, source, environment)
+	// source and environment are what a client sent: a client may send a whole
+	// source string where an ID belongs, so only a plain name is echoed.
+	return ResolvedSource{}, fmt.Errorf("%w: unknown source %q in environment %q", ErrSourceUnavailable, dbcopy.SourceIDDisplay(source), dbcopy.SourceIDDisplay(environment))
 }
 
 // ListSources enumerates every source this project's registry can resolve
@@ -132,9 +136,9 @@ func ListSources(ctx context.Context, projStore datatug.ProjectStore, projectDir
 }
 
 // catalogSources enumerates every catalog registered under environment
-// (SQL and inGitDB drivers only — the two schemes sourceURLFromCatalog
-// opens), each exposed under both its DbModel and its own catalog ID (see
-// ResolvedSource's doc comment).
+// whose driver sourceURLFromCatalog resolves (sqlite3, ingitdb, openvaultdb
+// and postgres), each exposed under both its DbModel and its own catalog ID
+// (see ResolvedSource's doc comment).
 //
 // It lists catalogs via ProjectStore.LoadEnvDbCatalogs rather than walking
 // env.DbServers[].Catalogs: datatug-core's filestore implementation
@@ -146,12 +150,17 @@ func ListSources(ctx context.Context, projStore datatug.ProjectStore, projectDir
 // finds nothing whenever an EnvDbServer record's own Catalogs list is
 // empty or stale, even though the catalog itself loads fine — verified
 // against this package's own resolver_test.go fixture. A catalog whose
-// driver sourceURLFromCatalog does not support (e.g. a future postgres3
-// catalog) is skipped rather than failing the whole listing.
+// driver sourceURLFromCatalog does not support (e.g. a future oracle
+// catalog), or whose path or environment variable does not resolve, is
+// skipped rather than failing the whole listing.
 func catalogSources(ctx context.Context, projStore datatug.ProjectStore, projectDir, environment string) ([]ResolvedSource, error) {
 	catalogs, err := projStore.LoadEnvDbCatalogs(ctx, environment)
 	if err != nil {
-		return nil, fmt.Errorf("resolver: list catalogs for environment %q: %w", environment, err)
+		// The store's error quotes the path it built from the project folder, which is no part
+		// of an answer: it goes to the log, and the answer names the environment (when it is a
+		// plain name).
+		log.Printf("resolver: list catalogs for environment %q: %s", dbcopy.SourceIDDisplay(environment), dbcopy.RedactText(err.Error()))
+		return nil, LookupError("could not list catalogs for environment %q", nil, environment)
 	}
 	seen := map[string]bool{}
 	var out []ResolvedSource
@@ -191,7 +200,7 @@ func sourceKey(kind SourceKind, id string) string { return string(kind) + "\x00"
 // inGitDB store directory (data/ingitdb) as a pkg/dbcopy-parseable
 // ingitdb:// URL.
 func semanticIngitdbPath(projectDir string) string {
-	return "ingitdb://" + filepath.Join(projectDir, storage.DataFolder, "ingitdb")
+	return dbcopy.LocalSourceURL("ingitdb", filepath.Join(projectDir, storage.DataFolder, "ingitdb"))
 }
 
 func dedupeNonEmpty(values ...string) []string {
@@ -207,10 +216,31 @@ func dedupeNonEmpty(values ...string) []string {
 	return out
 }
 
+// recordsetsNotListed is the answer for a project whose recordset definitions cannot be
+// listed, read or parsed: the cause quotes a path of the project folder, and goes to the log.
+const recordsetsNotListed = "the recordset definitions of the project could not be listed"
+
+// httpQueriesNotListed is the answer for a project whose HTTP query definitions cannot be
+// listed, read or parsed, with the same rule.
+const httpQueriesNotListed = "the HTTP query definitions of the project could not be listed"
+
+// recordsetsFailed logs the cause of a failed listing of the recordset definitions and
+// returns the answer for it.
+func recordsetsFailed(cause error) error {
+	log.Printf("resolver: %s: %s", recordsetsNotListed, dbcopy.RedactText(cause.Error()))
+	return errors.New(recordsetsNotListed)
+}
+
 // recordsetSources enumerates <projectDir>/recordsets/*.recordset.json
 // definitions as project-level inGitDB sources (top-level only — the same
 // non-recursive convention recordsetDefinitionPath already assumes),
 // sharing the project's one inGitDB store (semanticIngitdbPath).
+//
+// A source ID is joined into a path by the routes that read the definition, and the file is a
+// project file that may hold anything, so a definition is a source only when its source ID is a
+// plain source ID (see dbcopy.IsPlainSourceID): the ID it declares, or its file name when it
+// declares none. A file whose source ID is another is skipped, with one line in the log that
+// names the file and not the ID (which may be a source string).
 func recordsetSources(projectDir string) ([]ResolvedSource, error) {
 	dir := filepath.Join(projectDir, storage.RecordsetsFolder)
 	entries, err := os.ReadDir(dir)
@@ -218,7 +248,7 @@ func recordsetSources(projectDir string) ([]ResolvedSource, error) {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("resolver: list %s: %w", dir, err)
+		return nil, recordsetsFailed(err)
 	}
 	suffix := "." + storage.RecordsetFileSuffix + ".json"
 	url := semanticIngitdbPath(projectDir)
@@ -228,16 +258,20 @@ func recordsetSources(projectDir string) ([]ResolvedSource, error) {
 			continue
 		}
 		id := strings.TrimSuffix(entry.Name(), suffix)
-		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		data, err := readRecordsetFile(filepath.Join(dir, entry.Name()))
 		if err != nil {
-			return nil, fmt.Errorf("resolver: read %s: %w", entry.Name(), err)
+			return nil, recordsetsFailed(err)
 		}
 		var def datatug.RecordsetDefinition
 		if err := json.Unmarshal(data, &def); err != nil {
-			return nil, fmt.Errorf("resolver: parse %s: %w", entry.Name(), err)
+			return nil, recordsetsFailed(err)
 		}
 		if def.ID != "" {
 			id = def.ID
+		}
+		if !dbcopy.IsPlainSourceID(id) {
+			log.Printf("resolver: skipping the recordset definition file %q: its source ID is not a plain source ID", entry.Name())
+			continue
 		}
 		label := def.Title
 		if label == "" {
@@ -253,14 +287,16 @@ func recordsetSources(projectDir string) ([]ResolvedSource, error) {
 // QueryDef IS one dalgo2http collection (BuildCollection: "Name: def.ID"),
 // so ID/Collection are both the QueryDef's own ID.
 func httpQuerySources(projectDir string) ([]ResolvedSource, error) {
-	loaded, err := httpsource.LoadHTTPQueries(projectDir)
+	loaded, err := loadHTTPQueries(projectDir)
 	if err != nil {
-		return nil, fmt.Errorf("resolver: list HTTP query defs: %w", err)
+		// The cause quotes a path of the project folder, and goes to the log.
+		log.Printf("resolver: %s: %s", httpQueriesNotListed, dbcopy.RedactText(err.Error()))
+		return nil, errors.New(httpQueriesNotListed)
 	}
 	if len(loaded) == 0 {
 		return nil, nil
 	}
-	url := "http://" + projectDir
+	url := dbcopy.ProjectSourceURL(projectDir)
 	var out []ResolvedSource
 	for _, lq := range loaded {
 		if lq.Def == nil {
@@ -278,9 +314,9 @@ func httpQuerySources(projectDir string) ([]ResolvedSource, error) {
 // EligibleTargets returns the authorized ResolvedSource options a saved
 // query may run against within environment, per api-contract.md "Scope and
 // identity": an HTTP query's only eligible target is itself (its Targets
-// MUST be empty per datatug-core's own QueryDef.Validate); a SQL/DTQL query
+// MUST be empty per datatug-core's own QueryDef.Validate); a SQL/TugQL query
 // with declared Targets is filtered to catalogs whose (Driver, Catalog)
-// matches one of them; a SQL/DTQL query with NO declared Targets (every
+// matches one of them; a SQL/TugQL query with NO declared Targets (every
 // query in datatug-demo-projects/demo-project-1 today) is eligible against
 // every SQL/inGitDB catalog source in environment — a deliberate, documented
 // engineering default for Phase 1's single-catalog-per-environment demo,
@@ -306,18 +342,37 @@ func EligibleTargets(ctx context.Context, projStore datatug.ProjectStore, projec
 	if err != nil {
 		return nil, err
 	}
-	if len(queryDef.Targets) == 0 {
-		return dedupeSourcesByID(all), nil
+	return selectEligibleTargets(all, queryDef.Targets), nil
+}
+
+// selectEligibleTargets narrows catalogSources' entries to the catalogs
+// targets select. A target matches one alias (DbModel or catalog ID), but
+// selects the whole catalog: every alias sharing that catalog's URL is kept
+// so dedupeSourcesByID still reports the DbModel ID, the same one an
+// unpinned query resolves to.
+func selectEligibleTargets(all []ResolvedSource, targets []datatug.QueryDefTarget) []ResolvedSource {
+	if len(targets) == 0 {
+		return dedupeSourcesByID(all)
 	}
 	var eligible []ResolvedSource
-	for _, target := range queryDef.Targets {
+	for _, target := range targets {
 		for _, s := range all {
 			if catalogMatchesTarget(s, target) {
-				eligible = append(eligible, s)
+				eligible = append(eligible, catalogAliases(all, s.URL)...)
 			}
 		}
 	}
-	return dedupeSourcesByID(eligible), nil
+	return dedupeSourcesByID(eligible)
+}
+
+func catalogAliases(all []ResolvedSource, url string) []ResolvedSource {
+	var aliases []ResolvedSource
+	for _, s := range all {
+		if s.URL == url {
+			aliases = append(aliases, s)
+		}
+	}
+	return aliases
 }
 
 // catalogMatchesTarget reports whether s (a catalogSources entry) satisfies

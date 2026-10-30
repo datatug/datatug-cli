@@ -7,6 +7,7 @@ import (
 )
 
 func TestParseTableList(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		in   string
 		want []string
@@ -28,6 +29,7 @@ func TestParseTableList(t *testing.T) {
 }
 
 func TestDirectives_Validate_IncludeExcludeMutex(t *testing.T) {
+	t.Parallel()
 	d := &Directives{
 		IncludeTables: []string{"users"},
 		ExcludeTables: []string{"logs"},
@@ -42,6 +44,7 @@ func TestDirectives_Validate_IncludeExcludeMutex(t *testing.T) {
 }
 
 func TestDirectives_PreValidate_NilSafe(t *testing.T) {
+	t.Parallel()
 	var d *Directives
 	if err := d.PreValidate(); err != nil {
 		t.Fatalf("nil receiver should not error, got %v", err)
@@ -49,6 +52,7 @@ func TestDirectives_PreValidate_NilSafe(t *testing.T) {
 }
 
 func TestParseWhereFlag(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		in        string
 		wantTable string
@@ -85,6 +89,7 @@ func TestParseWhereFlag(t *testing.T) {
 }
 
 func TestParseTableList_AllEmpty(t *testing.T) {
+	t.Parallel()
 	// All segments trim to empty — should return nil (line 27-29 of cli.go).
 	got := ParseTableList(",  , ,")
 	if got != nil {
@@ -93,6 +98,7 @@ func TestParseTableList_AllEmpty(t *testing.T) {
 }
 
 func TestParseWhereFlag_EmptyTableOrField(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		in string
 	}{
@@ -114,6 +120,7 @@ func TestParseWhereFlag_EmptyTableOrField(t *testing.T) {
 }
 
 func TestParseLimitFlag(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		in        string
 		wantTable string

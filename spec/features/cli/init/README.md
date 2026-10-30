@@ -60,6 +60,12 @@ The created project file MUST record creation metadata in `Created` with at leas
 
 `datatug init` MUST use the single-project filestore (`filestore.NewSingleProjectStore`) so the resulting tree contains exactly one project. Multi-project bootstraps go through [`projects add`](../projects/add/README.md), not `init`.
 
+### Project folder that is a link
+
+#### REQ: project-folder-link
+
+When the last part of `projectPath` is a link (a symbolic link, or a Windows junction), `datatug init` MUST print the folder it leads to, name `--follow-project-link`, write nothing and exit non-zero; with `--follow-project-link` it MUST go on and write into the folder the link leads to. A command writes only plain files in plain folders of the project: it does not write through a link (the project file is saved through datatug-core's store, which has the same rule).
+
 ## Parameters
 
 | Position | Name | Type | Required | Description |
@@ -67,7 +73,9 @@ The created project file MUST record creation metadata in `Created` with at leas
 | 1 | `project` | string | yes | DataTug project ID. |
 | 2 | `projectPath` | string | yes | Directory in which to create the project. Created if missing. |
 
-The command currently accepts no flags. A future `--force` flag for clobbering, and a `--from` flag for cloning, are tracked under Outstanding Questions.
+| flag | `--follow-project-link` | bool | no | Write into the project folder even when the last part of `projectPath` is a link. Without it the command prints the folder the link leads to and stops. |
+
+The command accepts no other flags. A future `--force` flag for clobbering, and a `--from` flag for cloning, are tracked under Outstanding Questions.
 
 ## Exit codes
 
@@ -101,6 +109,12 @@ The command currently accepts no flags. A future `--force` flag for clobbering, 
 **Requirements:** init#req:refuse-existing-project
 
 Running `datatug init my-proj ./my-proj-dir` twice in a row exits non-zero on the second run, with a stderr message naming the path.
+
+### AC: stops-at-a-project-folder-that-is-a-link
+
+**Requirements:** init#req:project-folder-link
+
+`datatug init my-proj ./link`, where `./link` is a link to a folder, exits non-zero, prints the folder the link leads to and `--follow-project-link`, and writes nothing; with the flag it creates the project in the folder the link leads to. (`TestInitStopsAtAProjectFolderThatIsALink`.)
 
 ### AC: records-creation-timestamp
 

@@ -1,0 +1,225 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-10-23T23:48:01.957714Z",
+  "status": "passed",
+  "repository": "datatug/websites",
+  "target": "main",
+  "head": "f5fc8b1b7ea5a1b97c6f0b889a92c183e8809bc5",
+  "observed_head": "f5fc8b1b7ea5a1b97c6f0b889a92c183e8809bc5",
+  "observed_target_head": "f5fc8b1b7ea5a1b97c6f0b889a92c183e8809bc5",
+  "candidate_contains_target": true,
+  "target_contains_head": true,
+  "checks": [
+    {
+      "name": "check-run:check · build · test",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/websites/actions/runs/40039404538/job/120706662682",
+      "app_id": 15368,
+      "check_run_id": 120706662682
+    },
+    {
+      "name": "check-run:check · build · test",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/websites/actions/runs/40039404549/job/120706662865",
+      "app_id": 15368,
+      "check_run_id": 120706662865
+    },
+    {
+      "name": "check-run:check · build · test",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/websites/actions/runs/40039404583/job/120706662978",
+      "app_id": 15368,
+      "check_run_id": 120706662978
+    },
+    {
+      "name": "check-run:check · build · unit tests",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/websites/actions/runs/40039403748/job/120706660874",
+      "app_id": 15368,
+      "check_run_id": 120706660874
+    },
+    {
+      "name": "check-run:deploy / build · deploy",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/websites/actions/runs/40039404538/job/120706867960",
+      "app_id": 15368,
+      "check_run_id": 120706867960
+    },
+    {
+      "name": "check-run:deploy / build · deploy",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/websites/actions/runs/40039404549/job/120706858167",
+      "app_id": 15368,
+      "check_run_id": 120706858167
+    },
+    {
+      "name": "check-run:deploy / build · deploy",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/websites/actions/runs/40039404583/job/120706960171",
+      "app_id": 15368,
+      "check_run_id": 120706960171
+    },
+    {
+      "name": "check-run:e2e (component examples)",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/websites/actions/runs/40039403748/job/120706660866",
+      "app_id": 15368,
+      "check_run_id": 120706660866
+    },
+    {
+      "name": "check-run:e2e (fallback)",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/websites/actions/runs/40039403748/job/120706660878",
+      "app_id": 15368,
+      "check_run_id": 120706660878
+    },
+    {
+      "name": "check-run:e2e (launch (live, indexable))",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/websites/actions/runs/40039403748/job/120706660906",
+      "app_id": 15368,
+      "check_run_id": 120706660906
+    },
+    {
+      "name": "check-run:e2e (live demo)",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/websites/actions/runs/40039403748/job/120706660985",
+      "app_id": 15368,
+      "check_run_id": 120706660985
+    },
+    {
+      "name": "check-run:e2e (live demo, project chat)",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/websites/actions/runs/40039403748/job/120706660826",
+      "app_id": 15368,
+      "check_run_id": 120706660826
+    },
+    {
+      "name": "check-run:e2e datatug.app landing (fallback)",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/websites/actions/runs/40039403748/job/120706660899",
+      "app_id": 15368,
+      "check_run_id": 120706660899
+    },
+    {
+      "name": "check-run:e2e datatug.app landing (indexable)",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/websites/actions/runs/40039403748/job/120706660928",
+      "app_id": 15368,
+      "check_run_id": 120706660928
+    },
+    {
+      "name": "check-run:e2e datatug.app landing (live demo)",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/websites/actions/runs/40039403748/job/120706660822",
+      "app_id": 15368,
+      "check_run_id": 120706660822
+    },
+    {
+      "name": "check-run:e2e datatug.app landing (live demo, project chat)",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/websites/actions/runs/40039403748/job/120706661002",
+      "app_id": 15368,
+      "check_run_id": 120706661002
+    },
+    {
+      "name": "check-run:e2e datatug.app landing (pricing states)",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/websites/actions/runs/40039403748/job/120706660898",
+      "app_id": 15368,
+      "check_run_id": 120706660898
+    },
+    {
+      "name": "check-run:e2e datatug.app landing (pro checkout armed)",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/websites/actions/runs/40039403748/job/120706660767",
+      "app_id": 15368,
+      "check_run_id": 120706660767
+    },
+    {
+      "name": "check-run:e2e datatug.io (fallback)",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/websites/actions/runs/40039403748/job/120706660900",
+      "app_id": 15368,
+      "check_run_id": 120706660900
+    },
+    {
+      "name": "check-run:e2e datatug.io (live demo)",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/websites/actions/runs/40039403748/job/120706660790",
+      "app_id": 15368,
+      "check_run_id": 120706660790
+    },
+    {
+      "name": "check-run:e2e datatug.io (live demo, project chat)",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/websites/actions/runs/40039403748/job/120706660860",
+      "app_id": 15368,
+      "check_run_id": 120706660860
+    },
+    {
+      "name": "check-run:hand-off to the project chat (variable set)",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/websites/actions/runs/40039403748/job/120706660953",
+      "app_id": 15368,
+      "check_run_id": 120706660953
+    },
+    {
+      "name": "check-run:hand-off unchanged (variable unset)",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/websites/actions/runs/40039403748/job/120706660497",
+      "app_id": 15368,
+      "check_run_id": 120706660497
+    },
+    {
+      "name": "check-run:live demo confirmed",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/websites/actions/runs/40039404538/job/120706663019",
+      "app_id": 15368,
+      "check_run_id": 120706663019
+    },
+    {
+      "name": "check-run:the landing's pricing page is live",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/websites/actions/runs/40039404549/job/120706815177",
+      "app_id": 15368,
+      "check_run_id": 120706815177
+    },
+    {
+      "name": "check-run:workflows (actionlint)",
+      "bucket": "pass",
+      "conclusion": "success",
+      "link": "https://github.com/datatug/websites/actions/runs/40039403748/job/120706661073",
+      "app_id": 15368,
+      "check_run_id": 120706661073
+    }
+  ],
+  "required_checks_authority": "github-branch-protection+active-branch-rules",
+  "stable_observations": 2,
+  "reason": "GitHub's required-check policy was enumerated (possibly empty), every required check was present, and the exact remote target's observed check set stayed terminal across a bounded stable reread"
+}

@@ -5,10 +5,11 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 )
 
 func TestQueryParameters(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		doc     string
@@ -39,9 +40,9 @@ func TestQueryParameters(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			query, err := dtql.Deserialize([]byte(tt.doc))
+			query, err := tugql.Deserialize([]byte(tt.doc))
 			if err != nil {
-				t.Fatalf("test DTQL does not parse: %v", err)
+				t.Fatalf("test TugQL does not parse: %v", err)
 			}
 			got, err := QueryParameters(query)
 			if tt.wantErr {

@@ -9,7 +9,27 @@ import (
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
 	"github.com/sneat-co/sneat-go-core/apicore"
+	"github.com/strongo/validation"
 )
+
+// checkedDbServer is the body of dbserver-add: a datatug.ProjDbServer whose names are
+// checked before its own validation, which quotes the driver and the ID it refuses and
+// answers a server it refuses with a 500. A name that is refused is a 400 that names the
+// field and nothing of the value (see api.ValidateProjDbServerNames); the rest is the
+// server's own validation, as a 400.
+type checkedDbServer datatug.ProjDbServer
+
+// Validate implements apicore.RequestDTO.
+func (v *checkedDbServer) Validate() error {
+	server := datatug.ProjDbServer(*v)
+	if err := api.ValidateProjDbServerNames(server); err != nil {
+		return err
+	}
+	if err := server.Validate(); err != nil {
+		return validation.NewBadRequestError(err)
+	}
+	return nil
+}
 
 // addDbServer adds a new DB server to project
 func addDbServer(w http.ResponseWriter, r *http.Request) {
@@ -18,12 +38,13 @@ func addDbServer(w http.ResponseWriter, r *http.Request) {
 	saveFunc := func(ctx context.Context) (apicore.ResponseDTO, error) {
 		return projDbServer, api.AddDbServer(ctx, ref, projDbServer)
 	}
-	createProjectItem(w, r, &ref, &projDbServer, saveFunc)
+	createProjectItem(w, r, &ref, (*checkedDbServer)(&projDbServer), saveFunc)
 }
 
 // getDbServerSummary returns summary about environment
 func getDbServerSummary(w http.ResponseWriter, r *http.Request) {
-	log.Println(r.Method, r.RequestURI)
+	// The path only: the query string can hold a source string a client typed.
+	log.Println(r.Method, r.URL.Path)
 	q := r.URL.Query()
 	dbServer := datatug.ServerRef{
 		Driver: q.Get("driver"),
@@ -48,7 +69,8 @@ var deleteDbServerFunc = api.DeleteDbServer
 
 // deleteDbServer removes a DB server from project
 func deleteDbServer(w http.ResponseWriter, r *http.Request) {
-	log.Println(r.Method, r.RequestURI)
+	// The path only: the query string can hold a source string a client typed.
+	log.Println(r.Method, r.URL.Path)
 	q := r.URL.Query()
 	var err error
 	dbServer, err := newDbServerFromQueryParams(q)

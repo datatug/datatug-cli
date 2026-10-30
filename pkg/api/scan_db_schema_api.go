@@ -2,19 +2,19 @@ package api
 
 import (
 	"context"
-	"database/sql"
+	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"log"
-	"strings"
+	"net/url"
+	"os"
 	"time"
 
-	"github.com/datatug/datatug-cli/pkg/schemers/mssqlschema"
-	"github.com/datatug/datatug-cli/pkg/schemers/sqliteschema"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dbconnection"
+	"github.com/datatug/datatug-core/pkg/dto"
 	"github.com/datatug/datatug-core/pkg/parallel"
-	"github.com/datatug/datatug-core/pkg/schemer"
-	"github.com/strongo/random"
 	"github.com/strongo/slice"
 	"github.com/strongo/validation"
 )
@@ -27,10 +27,57 @@ type ProjectLoader interface {
 
 var _ ProjectLoader = (datatug.ProjectStore)(nil)
 
+// scanTargetLogger is what the connection parameters of a scan say about where they
+// connect, when they hold a connection URL: where the URL is read from, and nothing it
+// holds (not its host, port or database either).
+type scanTargetLogger interface {
+	LogTarget() string
+}
+
+// loggedTarget is the part of the scan's log line that says what the scan connects to.
+// For a driver whose connection is a URL held in an environment variable (PostgreSQL) it
+// is where the URL is read from, the name of the variable, and never a part of the URL: not
+// its user, password or query string, and not its host, port or database, which are the
+// operator's own connection and have no place in a log. For the others it is the server,
+// the port and the user of the connection parameters, flags the operator typed.
+func loggedTarget(params dbconnection.Params) string {
+	if logger, ok := params.(scanTargetLogger); ok {
+		return fmt.Sprintf("connecting; %s", logger.LogTarget())
+	}
+	return fmt.Sprintf("server=%v, port=%v, user=%v", params.Server(), params.Port(), params.User())
+}
+
+// serverHasHost is whether a project records the host and the port of a server of driver.
+// It does not for SQLite (the project model forbids them: the file path is carried on the
+// catalog instead) and not for PostgreSQL, whose host, port, user and password are in a
+// connection URL that stays in an environment variable: a project is pushed to places the
+// URL must never reach, so its server is the driver and nothing else.
+func serverHasHost(driver string) bool {
+	// CouchDB and PostgREST, like PostgreSQL, are reached through a connection
+	// descriptor: the project records the descriptor and the driver, never an
+	// endpoint. Non-secret host metadata may still be shown, but it must not become
+	// the bound source.
+	return driver != dbconnection.DriverSQLite3 && driver != DriverCouchDB && driver != DriverPostgREST && driver != DriverLibSQL && driver != DriverTypesense && !IsServerDriver(driver)
+}
+
+// ScannedServer is the server a scan of driver with dbConnParams reads, as the project
+// records it: for a driver with a host (see serverHasHost) the host and the port of the
+// connection parameters, and for the others the driver only.
+func ScannedServer(driver string, dbConnParams dbconnection.Params) datatug.ServerRef {
+	server := datatug.ServerRef{Driver: driver}
+	if serverHasHost(driver) {
+		server.Host = dbConnParams.Server()
+		server.Port = dbConnParams.Port()
+	}
+	return server
+}
+
 // UpdateDbSchema updates DB schema
 func UpdateDbSchema(ctx context.Context, projectLoader ProjectLoader, projectID, environment, driver, dbModelID string, dbConnParams dbconnection.Params) (project *datatug.Project, err error) {
-	log.Printf("Updating DB info for project=%v, env=%v, driver=%v, dbModelID=%v, dbCatalog=%v, connStr=%v",
-		projectID, environment, driver, dbModelID, dbConnParams.Catalog(), dbConnParams.String())
+	// dbConnParams.String() is the connection string, password included: log
+	// the parts that identify the target instead (see loggedTarget).
+	log.Printf("Updating DB info for project=%v, env=%v, driver=%v, dbModelID=%v, dbCatalog=%v, %s",
+		projectID, environment, driver, dbModelID, dbConnParams.Catalog(), loggedTarget(dbConnParams))
 
 	if dbConnParams.Catalog() == "" {
 		return nil, validation.NewErrRequestIsMissingRequiredField("dbConnParams.catalog")
@@ -51,36 +98,28 @@ func UpdateDbSchema(ctx context.Context, projectLoader ProjectLoader, projectID,
 	var (
 		dbCatalog *datatug.DbCatalog
 	)
-	var projFileErr error
+	var projFileErr, loadErr, scanErr error
 	getProjectSummaryWorker := func() error {
 		_, projFileErr = projectLoader.LoadProjectFile(ctx)
-		if err != nil {
+		if projFileErr != nil {
 			if datatug.ProjectDoesNotExist(projFileErr) {
 				return nil
 			}
-			return fmt.Errorf("failed to load project summary: %w", err)
+			loadErr = fmt.Errorf("failed to load project summary: %w", projFileErr)
+			return loadErr
 		}
 		return nil
 	}
-	// SQLite is file-based: the project model forbids host/port for sqlite3
-	// (the file path is carried on the catalog instead).
-	dbServer := datatug.ServerRef{Driver: driver}
-	if driver != dbconnection.DriverSQLite3 {
-		dbServer.Host = dbConnParams.Server()
-		dbServer.Port = dbConnParams.Port()
-	}
+	dbServer := ScannedServer(driver, dbConnParams)
 	scanDbWorker := func() error {
-		var scanErr error
-		if dbCatalog, scanErr = scanDbCatalog(dbServer, dbConnParams); err != nil {
-			return scanErr
-		}
+		dbCatalog, scanErr = scanDbCatalogSeam(ctx, dbServer, dbConnParams)
 		return scanErr
 	}
 	if err = parallel.Run(
 		getProjectSummaryWorker,
 		scanDbWorker,
 	); err != nil {
-		return project, err
+		return project, onlyFailure(err, loadErr, scanErr)
 	}
 
 	if dbCatalog.Path == "" {
@@ -89,14 +128,18 @@ func UpdateDbSchema(ctx context.Context, projectLoader ProjectLoader, projectID,
 		}
 	}
 
-	if dbCatalog.DbModel != "" {
-		dbCatalog.DbModel = dbModelID
-	} else if dbCatalog.DbModel == "" {
-		dbCatalog.DbModel = dbCatalog.ID
-	}
+	// The catalog is mapped onto the database model that was asked for, which the
+	// command defaults to the id of the database.
+	dbCatalog.DbModel = dbModelID
 	if datatug.ProjectDoesNotExist(projFileErr) {
 		log.Println("Creating a new DataTug project...")
-		if project, err = newProjectWithDatabase(environment, dbServer, dbCatalog); err != nil {
+		// The id of a new project is the one it was given (the command takes it from
+		// its --project flag, or else from the name of the project folder), is checked
+		// here, and is never made up: the project of a folder that exists has its own.
+		if err = dto.ValidateProjectID(projectID); err != nil {
+			return nil, fmt.Errorf("the id of the new project, %q, is not valid: %w. A new project is named by --project, or else by the name of its folder", projectID, err)
+		}
+		if project, err = newProjectWithDatabaseSeam(projectID, environment, dbServer, dbCatalog); err != nil {
 			return project, err
 		}
 	} else {
@@ -112,8 +155,9 @@ func UpdateDbSchema(ctx context.Context, projectLoader ProjectLoader, projectID,
 	}
 	dbModel := project.DbModels.GetByID(dbCatalog.DbModel)
 	if dbModel == nil {
-		err = fmt.Errorf("db model not found by ID: %v. there is %v db models in the project: %v", dbCatalog.DbModel, len(project.DbModels), strings.Join(project.DbModels.IDs(), ", "))
-		return
+		// A project that already holds another database has no model for this one.
+		dbModel = &datatug.DbModel{ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: dbCatalog.DbModel}}}
+		project.DbModels = append(project.DbModels, dbModel)
 	}
 	if err = updateDbModelWithDbCatalog(environment, dbModel, dbCatalog); err != nil {
 		err = fmt.Errorf("failed to update dbModel with database: %w", err)
@@ -122,11 +166,28 @@ func UpdateDbSchema(ctx context.Context, projectLoader ProjectLoader, projectID,
 	return project, err
 }
 
+// onlyFailure is what a scan says when the workers it ran at the same time did not all work: the
+// error of the one that failed, as it is, when exactly one did, and else runnerErr, which says how
+// many failed. The runner puts a count in front of the error of the first ("failed 1 out of 2
+// workers, 1st error: "), which tells the person nothing to act on when there is only one.
+func onlyFailure(runnerErr error, workerErrs ...error) error {
+	var failed []error
+	for _, err := range workerErrs {
+		if err != nil {
+			failed = append(failed, err)
+		}
+	}
+	if len(failed) == 1 {
+		return failed[0]
+	}
+	return runnerErr
+}
+
 func updateProjectWithDbCatalog(project *datatug.Project, envID string, dbServerRef datatug.ServerRef, dbCatalog *datatug.DbCatalog) (err error) {
 	if envID == "" {
 		return validation.NewErrRequestIsMissingRequiredField("envID")
 	}
-	if dbServerRef.Host == "" {
+	if serverHasHost(dbServerRef.Driver) && dbServerRef.Host == "" {
 		return validation.NewErrRequestIsMissingRequiredField("dbServerRef.Host")
 	}
 	if dbCatalog == nil {
@@ -147,29 +208,7 @@ func updateProjectWithDbCatalog(project *datatug.Project, envID string, dbServer
 		return fmt.Errorf("new db catalog is invalid: %w", err)
 	}
 	// Update environment
-	{
-		if environment := project.Environments.GetByID(envID); environment == nil {
-			environment = &datatug.Environment{
-				ProjectItem: datatug.ProjectItem{
-					ProjItemBrief: datatug.ProjItemBrief{ID: envID},
-				},
-				DbServers: datatug.EnvDbServers{
-					{
-						ServerRef: dbServerRef,
-						Catalogs:  []string{dbCatalog.ID},
-					},
-				},
-			}
-			project.Environments = append(project.Environments, environment)
-		} else if envDbServer := environment.DbServers.GetByServerRef(dbServerRef); envDbServer == nil {
-			environment.DbServers = append(environment.DbServers, &datatug.EnvDbServer{
-				ServerRef: dbServerRef,
-				Catalogs:  []string{dbCatalog.ID},
-			})
-		} else if i := slice.Index(envDbServer.Catalogs, dbCatalog.ID); i < 0 {
-			envDbServer.Catalogs = append(envDbServer.Catalogs, dbCatalog.ID)
-		}
-	}
+	addCatalogToEnvironments(&project.Environments, envID, dbServerRef, dbCatalog.ID)
 	// Update DB server
 	{
 		ctx := context.Background()
@@ -182,6 +221,7 @@ func updateProjectWithDbCatalog(project *datatug.Project, envID string, dbServer
 			if db == nil {
 				db = new(datatug.ProjDbDriver)
 				db.ID = dbServerRef.Driver
+				db.Title = driverTitle(dbServerRef.Driver)
 				project.DbDrivers = append(project.DbDrivers, db)
 			}
 			projDbServer = &datatug.ProjDbServer{
@@ -194,8 +234,12 @@ func updateProjectWithDbCatalog(project *datatug.Project, envID string, dbServer
 		updated := false
 		for j, db := range projDbServer.Catalogs {
 			if db.ID == dbCatalog.ID {
-				// restore path as path might be normalized if pointing to user's directory
-				dbCatalog.Path = projDbServer.Catalogs[j].Path
+				// restore path as path might be normalized if pointing to user's directory.
+				// A PostgreSQL, CouchDB or PostgREST catalog's path is the connection descriptor the scan is
+				// writing now: the catalog and the descriptor are updated together, never apart.
+				if !IsServerDriver(dbServerRef.Driver) && dbServerRef.Driver != DriverCouchDB && dbServerRef.Driver != DriverPostgREST && dbServerRef.Driver != DriverLibSQL && dbServerRef.Driver != DriverTypesense {
+					dbCatalog.Path = projDbServer.Catalogs[j].Path
+				}
 				// TODO: currently replaces catalog with new info, should merge to preserver comments
 				projDbServer.Catalogs[j] = dbCatalog
 				updated = true
@@ -209,13 +253,46 @@ func updateProjectWithDbCatalog(project *datatug.Project, envID string, dbServer
 	return nil
 }
 
-func newProjectWithDatabase(environment string, dbServer datatug.ServerRef, dbCatalog *datatug.DbCatalog) (project *datatug.Project, err error) {
+// addCatalogToEnvironments records, in the environment envID of envs, that the server dbServerRef
+// holds the catalog catalogID: the environment is made when envs has none of that id, the server
+// is added when the environment does not list it, and the catalog is added to the server when it
+// does not list it. It is how the environment file of a scan, and of `db add`, lists a database.
+func addCatalogToEnvironments(envs *datatug.Environments, envID string, dbServerRef datatug.ServerRef, catalogID string) {
+	environment := envs.GetByID(envID)
+	if environment == nil {
+		*envs = append(*envs, &datatug.Environment{
+			ProjectItem: datatug.ProjectItem{
+				ProjItemBrief: datatug.ProjItemBrief{ID: envID},
+			},
+			DbServers: datatug.EnvDbServers{
+				{
+					ServerRef: dbServerRef,
+					Catalogs:  []string{catalogID},
+				},
+			},
+		})
+		return
+	}
+	envDbServer := environment.DbServers.GetByServerRef(dbServerRef)
+	if envDbServer == nil {
+		environment.DbServers = append(environment.DbServers, &datatug.EnvDbServer{
+			ServerRef: dbServerRef,
+			Catalogs:  []string{catalogID},
+		})
+		return
+	}
+	if slice.Index(envDbServer.Catalogs, catalogID) < 0 {
+		envDbServer.Catalogs = append(envDbServer.Catalogs, catalogID)
+	}
+}
+
+func newProjectWithDatabase(projectID, environment string, dbServer datatug.ServerRef, dbCatalog *datatug.DbCatalog) (project *datatug.Project, err error) {
 	if dbCatalog.Driver == "" {
 		dbCatalog.Driver = dbServer.Driver
 	}
 	project = &datatug.Project{
 		ProjectItem: datatug.ProjectItem{
-			ProjItemBrief: datatug.ProjItemBrief{ID: random.ID(9)},
+			ProjItemBrief: datatug.ProjItemBrief{ID: projectID},
 			Access:        "private",
 		},
 		Created: &datatug.ProjectCreated{
@@ -241,7 +318,7 @@ func newProjectWithDatabase(environment string, dbServer datatug.ServerRef, dbCa
 		},
 		DbDrivers: datatug.ProjDbDrivers{
 			{
-				ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: dbServer.Driver}},
+				ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: dbServer.Driver, Title: driverTitle(dbServer.Driver)}},
 				Servers: datatug.ProjDbServers{
 					{
 						ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: dbServer.GetID()}},
@@ -258,37 +335,145 @@ func newProjectWithDatabase(environment string, dbServer datatug.ServerRef, dbCa
 	return project, err
 }
 
-func scanDbCatalog(server datatug.ServerRef, connectionParams dbconnection.Params) (dbCatalog *datatug.DbCatalog, err error) {
-	var db *sql.DB
-
-	if db, err = sql.Open(server.Driver, connectionParams.ConnectionString()); err != nil {
-		return nil, fmt.Errorf("failed to open SQL db: %w", err)
+// existingSQLiteFile is the path of the SQLite file connectionParams name, which
+// must be an existing file. A scan must not open a path that is not one: SQLite
+// creates an empty database there, and the scan of a mistyped path would succeed
+// with no tables.
+func existingSQLiteFile(connectionParams dbconnection.Params) (string, error) {
+	withPath, ok := connectionParams.(interface{ Path() string })
+	if !ok || withPath.Path() == "" {
+		return "", fmt.Errorf("a SQLite scan needs connection parameters that name the database file")
 	}
-
-	// Close the database connection pool after command executes
-	defer func() { _ = db.Close() }()
-
-	//informationSchema := schemer.NewInformationSchema(server, db)
-
-	var scanner schemer.Scanner
-	switch server.Driver {
-	case "sqlserver":
-		scanner = schemer.NewScanner(mssqlschema.NewSchemaProvider())
-	case dbconnection.DriverSQLite3:
-		scanner = schemer.NewScanner(sqliteschema.NewSchemaProvider(func() (*sql.DB, error) { return db, nil }))
-	default:
-		return nil, fmt.Errorf("unsupported DB driver: %v", server.Driver)
-	}
-
-	dbCatalog, err = scanner.ScanCatalog(context.Background(), connectionParams.Catalog())
+	path := withPath.Path()
+	info, err := os.Stat(path)
 	if err != nil {
-		return dbCatalog, fmt.Errorf("failed to get dbCatalog metadata: %w", err)
+		return "", fmt.Errorf("cannot scan SQLite database: %w", err)
 	}
-	dbCatalog.ID = connectionParams.Catalog()
-	//if database, err = informationSchema.GetDatabase(connectionParams.Database()); err != nil {
-	//	return nil, fmt.Errorf("failed to get database metadata: %w", err)
-	//}
-	return
+	if info.IsDir() {
+		return "", fmt.Errorf("cannot scan SQLite database: %s is a folder, not a database file", path)
+	}
+	return path, nil
+}
+
+// sqliteReadOnlyDSN is the connection string with which a scan opens the SQLite
+// file at path: read-only, so that nothing the scan runs can change the database
+// and a path is never created, and with the path escaped. The driver opens a
+// "file:" connection string as a URI, where "?", "#" and "%" are not part of the
+// file name, so a file named a#b.db would otherwise be read as a file named a, which
+// is created, empty, if it is not there. It is the path that existingSQLiteFile
+// checked that is opened.
+//
+// A database in WAL mode that nobody has open (see isIdleWALDatabase) is opened as
+// immutable as well, which is what stops SQLite creating a -wal and a -shm file beside
+// it: a read-only connection to a WAL database creates both unless it is told that the
+// file cannot change. Nothing is lost by it: no one has the database open, so there
+// is no WAL to read. Any other database is opened as it always was, and a WAL database
+// that is open is read with its WAL.
+func sqliteReadOnlyDSN(path string) string {
+	query := "mode=ro"
+	if isIdleWALDatabase(path) {
+		query += "&immutable=1"
+	}
+	uri := url.URL{Scheme: "file", OmitHost: true, Path: path, RawQuery: query}
+	return uri.String()
+}
+
+// sqliteHeaderSize is the part of a SQLite file that says whether it is in WAL mode:
+// the 16-byte magic string, the 2-byte page size, and the file format write and read
+// versions (bytes 18 and 19), which are 2 for a database in WAL mode and 1 otherwise.
+const sqliteHeaderSize = 20
+
+// isIdleWALDatabase is whether the file at path is a SQLite database in WAL mode that
+// no connection has open: its header says WAL, and it has no -wal and no -shm file,
+// which every connection to a WAL database keeps beside it (the last one to close
+// removes them). A file that cannot be read, or is not a SQLite file, is not one.
+func isIdleWALDatabase(path string) bool {
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = file.Close() }()
+	header := make([]byte, sqliteHeaderSize)
+	if _, err = io.ReadFull(file, header); err != nil {
+		return false
+	}
+	if string(header[:16]) != "SQLite format 3\x00" || header[18] != 2 || header[19] != 2 {
+		return false
+	}
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if _, err = os.Lstat(path + suffix); !errors.Is(err, fs.ErrNotExist) {
+			return false
+		}
+	}
+	return true
+}
+
+// driverTitle is the title of a driver item in a project. datatug-core refuses
+// to save a driver item without one, so every place that builds one gives it this.
+func driverTitle(driver string) string {
+	switch driver {
+	case dbconnection.DriverSQLite3:
+		return "SQLite"
+	case DriverSQLServer:
+		return "SQL Server"
+	case DriverPostgres:
+		return "PostgreSQL"
+	case DriverMySQL:
+		return "MySQL"
+	case DriverOracle:
+		return "Oracle"
+	case DriverCouchDB:
+		return "CouchDB"
+	case DriverPostgREST:
+		return "PostgREST"
+	case DriverLibSQL:
+		return "libSQL"
+	case DriverTypesense:
+		return "Typesense"
+	default:
+		return driver
+	}
+}
+
+// scanDbCatalog is scanCatalog with nothing said about what it leaves out.
+func scanDbCatalog(server datatug.ServerRef, connectionParams dbconnection.Params) (*datatug.DbCatalog, error) {
+	return scanCatalog(context.Background(), server, connectionParams)
+}
+
+// scanCatalog reads the catalog connectionParams name. What it leaves out of a
+// SQLite catalog, and why, is named on the warnings of ctx (see WithScanWarnings).
+func scanCatalog(ctx context.Context, server datatug.ServerRef, connectionParams dbconnection.Params) (*datatug.DbCatalog, error) {
+	if IsServerDriver(server.Driver) {
+		// PostgreSQL is read through DALgo's schema reader, and opened from an
+		// environment variable: there is no connection string to give database/sql.
+		return scanPostgresCatalog(ctx, server.Driver, connectionParams)
+	}
+	if server.Driver == DriverCouchDB {
+		// CouchDB is read through the same generic SchemaReader seam; the
+		// endpoint comes from an environment variable, never from a project.
+		return scanCouchDBCatalog(ctx, connectionParams)
+	}
+	if server.Driver == DriverPostgREST {
+		// PostgREST is read through the same generic SchemaReader seam; the API
+		// root comes from an environment variable, never from a project.
+		return scanPostgRESTCatalog(ctx, connectionParams)
+	}
+	if server.Driver == DriverLibSQL {
+		// libSQL is read through the same generic SchemaReader seam; the server
+		// base address comes from an environment variable, never from a project.
+		return scanLibSQLCatalog(ctx, connectionParams)
+	}
+	if server.Driver == DriverTypesense {
+		// Typesense is read through the same generic SchemaReader seam; the origin
+		// and the one collection come from an environment variable, never from a
+		// project, and the scoped key lives only in the operator's environment.
+		return scanTypesenseCatalog(ctx, connectionParams)
+	}
+	if server.Driver == dbconnection.DriverSQLite3 {
+		// SQLite is read through DALgo's schema reader too (dalgo2sqlite).
+		return scanSQLiteCatalog(ctx, connectionParams)
+	}
+	return nil, fmt.Errorf("unsupported DB driver: %v", server.Driver)
 }
 
 func updateDbModelWithDbCatalog(envID string, dbModel *datatug.DbModel, dbCatalog *datatug.DbCatalog) (err error) {
@@ -319,7 +504,7 @@ func updateDbModelWithDbCatalog(envID string, dbModel *datatug.DbModel, dbCatalo
 		}
 		dbModel.Schemas = append(dbModel.Schemas, schemaModel)
 	UpdateSchemaModel:
-		if err = updateSchemaModel(envID, schemaModel, schema); err != nil {
+		if err = updateSchemaModelSeam(envID, schemaModel, schema); err != nil {
 			return fmt.Errorf("faild to update DB schema model: %w", err)
 		}
 	}
@@ -327,21 +512,18 @@ func updateDbModelWithDbCatalog(envID string, dbModel *datatug.DbModel, dbCatalo
 }
 
 func updateSchemaModel(envID string, schema *datatug.Schema, dbSchema *datatug.DbSchema) (err error) {
-	updateTables := func(tables []*datatug.CollectionInfo) (result datatug.TableModels) {
+	updateTables := func(tables []*datatug.CollectionInfo) (result datatug.TableModels, err error) {
 		for _, table := range tables {
 			tableModel := schema.Tables.GetByKey(table.DBCollectionKey)
 			if tableModel == nil {
-				// datatug-core v0.17.0's datatug.TableModel (the persisted,
-				// git-tracked schema type) no longer carries PrimaryKey/
-				// ForeignKeys/ReferencedBy/Indexes/AlternateKeys - only the
-				// live-scanned datatug.CollectionInfo (table, above) does.
-				// The vendored copy this replaced kept those fields on
-				// TableModel and copied them here; that data is dropped on
-				// persist until datatug-core's TableModel carries it again
-				// (or a project-level decision accepts CollectionInfo/
-				// DbCatalog, re-derived by re-scanning, as the source of
-				// truth for it instead of the git-tracked DbModel). Flagged
-				// in the PR - not a scope call for this migration.
+				// datatug-core's datatug.TableModel (the git-tracked schema type)
+				// carries no keys, indexes or references, only the live-scanned
+				// datatug.CollectionInfo (table, above) does, so they are not in
+				// the model. Nor is anything else a scan found: SaveScannedProject
+				// saves the model as an id and its environments and writes the
+				// columns of each table as files of their own, in the layout
+				// that spec/features/cli/scan/README.md describes; keys are not
+				// stored in a project yet.
 				tableModel = &datatug.TableModel{
 					DBCollectionKey: table.DBCollectionKey,
 					ByEnv:           make(datatug.StateByEnv),
@@ -361,12 +543,14 @@ func updateSchemaModel(envID string, schema *datatug.Schema, dbSchema *datatug.D
 				}
 				result = append(result, tableModel)
 			} else {
-				panic(errNotImplementedYet)
+				return nil, fmt.Errorf("updating the table %q the db model already holds in schema %q: %w", table.Name(), dbSchema.ID, errNotImplementedYet)
 			}
 		}
 		return
 	}
-	schema.Tables = updateTables(dbSchema.Tables)
-	schema.Views = updateTables(dbSchema.Views)
-	return nil
+	if schema.Tables, err = updateTables(dbSchema.Tables); err != nil {
+		return err
+	}
+	schema.Views, err = updateTables(dbSchema.Views)
+	return err
 }

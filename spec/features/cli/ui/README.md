@@ -12,7 +12,7 @@ status: Implementing
 
 ## Summary
 
-`datatug ui` (and the bare `datatug` invocation) launches the terminal UI — a tview-based application that lets the user browse DataTug projects, viewers, settings, and the API service monitor. The TUI is the CLI's default surface for human users; scripts and CI workflows use the other commands.
+`datatug ui` (and the bare `datatug` invocation) launches the terminal UI — a Bubble Tea application that lets the user browse DataTug projects, viewers, settings, and the API service monitor. The TUI is the CLI's default surface for human users; scripts and CI workflows use the other commands.
 
 ## Synopsis
 
@@ -20,11 +20,12 @@ status: Implementing
 datatug
 datatug ui [--file <path>]
 datatug ui -f <path>
+datatug ui --result <id> [--as <user>] [--role <role>]... [--group <group>]...
 ```
 
 ## Problem
 
-A data-exploration tool that ships only a Web UI requires running a server, opening a browser, and switching context away from the terminal. A pure-CLI tool covers scripting but cannot show schema diagrams, paginated tables, or interactive forms. The TUI bridges both: it stays in the terminal, supports keyboard-driven navigation, and shows DataTug viewers (project, DB viewer, FileTug, cloud viewers) without spinning up a browser.
+A data-exploration tool that ships only a Web UI requires running a server, opening a browser, and switching context away from the terminal. A pure-CLI tool covers scripting but cannot show schema diagrams, paginated tables, or interactive forms. The TUI bridges both: it stays in the terminal, supports keyboard-driven navigation, and shows DataTug viewers (project, DB viewer, cloud viewers) without spinning up a browser.
 
 The TUI is also the default surface — running `datatug` with no arguments MUST open it. Users learn the tool by typing `datatug` and exploring; the surface-area docs are inside the TUI, not on the command line.
 
@@ -56,6 +57,12 @@ The `--file` flag opens a database file directly, bypassing the project selector
 
 `--file <path>` (alias `-f`) MUST open the file in the appropriate viewer. The current implementation supports SQLite files only and dispatches via `dtio.IsSQLite`. Non-SQLite paths MUST cause the TUI to exit with a clear stderr message and a non-zero exit code (`2` — InvalidArgs).
 
+### Opening a stored query result
+
+#### REQ: result-flag
+
+`datatug ui --result <id>` MUST open the unified workspace on a result written by `query run --result-id <id>` (see [query](../query/README.md)), as an immutable chat RecordSet: its rows come from `data.json`, its TugQL (or, for a saved query, the saved query's id and its text) and parameters from `meta.json`, and no query is run to open it. The project is the one `meta.json` names, found only as a project id of the user's project registry, at the absolute folder registered for it (never a folder of that name in the current directory, nor a relative or remote location), so the command works from any folder; the result appears as a new chat session of that project, under one line that says it was loaded from its files. Join candidates come from the source's schema metadata, as for any chat result; a later refresh, Related preview or JOIN is the person's explicit action through the existing secure executor. `--as`, `--role` and `--group` name the principal for a project with access policies. Opening a result leaves the saved last chat choices unchanged. A result whose `data.json` does not have the key column first and rows as long as its columns, or whose parameters are not each a scalar or a set, is incomplete. A missing, expired, incomplete or unknown-version result, and a project that is not registered on the machine, exit 3 with one line that names no path; a result whose database is not a source of a registered project, a malformed id and `--result` with `--file` exit 2.
+
 ### Terminal restoration on panic
 
 #### REQ: restore-terminal-on-panic
@@ -64,7 +71,7 @@ A panic anywhere in the TUI MUST result in `global.App.Stop()` being called from
 
 ### Module registration
 
-The TUI registers viewers (database, FileTug, GCloud, AWS, Azure), settings, and the API service monitor at startup.
+The TUI registers viewers (database, GCloud, AWS, Azure), settings, and the API service monitor at startup.
 
 #### REQ: module-registration
 
@@ -75,6 +82,8 @@ The TUI registers viewers (database, FileTug, GCloud, AWS, Azure), settings, and
 | Flag | Type | Default | Description |
 |---|---|---|---|
 | `--file`, `-f` | string | `""` | Path to a database file to open directly. Currently SQLite-only. |
+| `--result` | string | `""` | Id of a result of `query run --result-id` to open with its loaded rows. |
+| `--as`, `--role`, `--group` | string | `""` | Principal for a project with access policies (with `--result`). |
 | `--tui` (parent) | bool | `false` | Parent-level flag, reserved for forcing TUI mode from other commands. |
 
 ## Exit codes
@@ -82,7 +91,8 @@ The TUI registers viewers (database, FileTug, GCloud, AWS, Azure), settings, and
 | Exit code | Meaning |
 |---|---|
 | `0` | TUI exited cleanly |
-| `2` | Invalid `--file` value (e.g., non-SQLite file) |
+| `2` | Invalid `--file` value (e.g., non-SQLite file); with `--result`, a malformed id or a result outside a registered project |
+| `3` | With `--result`, the result is missing, expired, incomplete or of an unknown version, or its project is not registered |
 | `10` | Unhandled panic (caught by top-level recovery) |
 
 ## Interaction with Other Features
@@ -112,6 +122,12 @@ The TUI registers viewers (database, FileTug, GCloud, AWS, Azure), settings, and
 **Requirements:** ui#req:state-load-failure-non-fatal
 
 If `dtstate` cannot be read (missing file, corrupt YAML), the TUI still launches and shows the projects screen, with a non-fatal error logged.
+
+### AC: result-opens-the-loaded-records (verifies REQ:result-flag)
+
+**Given** a result written by `query run --db datatug://<project>/<db> --from Item --result-id t4`, after which the table's rows are deleted
+**When** the user runs `datatug ui --result t4` from a folder that is not a project
+**Then** the workspace opens on a session of that project holding the RecordSet with the two rows of the files and the result's TugQL, so no query ran; `datatug ui --result nope`, an expired result and an incomplete one exit 3, and a result of a database opened by path exits 2.
 
 ## Open Questions
 

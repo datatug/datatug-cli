@@ -4,14 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"sort"
 	"strings"
 
+	"github.com/dal-go/dalgo/condeval"
 	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/dal-go/dalgo2http"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/httpsource"
+	"github.com/datatug/datatug-cli/pkg/querybody"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/spf13/cobra"
@@ -30,6 +36,11 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		ctx = context.Background()
 	}
 	stderr := cmd.ErrOrStderr()
+	if !o.quiet {
+		ctx = secureread.WithFederatedProgress(ctx, func(item dal.FederatedProgress) {
+			_, _ = fmt.Fprintf(stderr, "query %s: %d rows %s\n", item.Phase, item.Rows, item.Database)
+		})
+	}
 
 	projectDir, projStore, err := resolveQueryProject(o.project)
 	if err != nil {
@@ -56,6 +67,13 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	if err != nil {
 		return Exit(fmt.Sprintf("load query %q: %v", canonicalID, err), exitCodeDatabase)
 	}
+	// A context variable ({SneatUserPersonalSpaceID}, @SneatUserID) is bound
+	// only by the DataTug web app for a signed-in user: refused here, before
+	// any session, executor or connection exists, rather than run with an
+	// empty value (backstage spec/features/my-data-project).
+	if err = queryDef.RefuseContextVariables(); err != nil {
+		return Exit(err.Error(), exitCodeUsage)
+	}
 
 	variables, err := accesspolicies.ParseVariables(o.vars)
 	if err != nil {
@@ -70,6 +88,15 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		_, _ = fmt.Fprintln(stderr, "access: running without access policies")
 	}
 	executor := secureread.NewExecutor(session)
+	if queryDef.Type == datatug.QueryTypeTugQL && (o.format == "jsonl" || o.format == "csv") {
+		streamed, streamErr := runStreamedSavedTugQL(ctx, cmd.OutOrStdout(), stderr, o, executor, projStore, projectDir, queryDef, variables)
+		if streamed {
+			if streamErr != nil {
+				return savedQueryFailure(streamErr)
+			}
+			return nil
+		}
+	}
 
 	var result secureread.Result
 	switch queryDef.Type {
@@ -77,13 +104,19 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		result, err = runHTTPSavedQuery(ctx, executor, projectDir, queryDef, variables)
 	case datatug.QueryTypeSQL:
 		result, err = runSQLSavedQuery(ctx, executor, projStore, projectDir, o.env, queryDef, variables)
-	case datatug.QueryTypeDTQL:
-		result, err = runDTQLSavedQuery(ctx, executor, projStore, projectDir, o.env, queryDef, variables)
+	case datatug.QueryTypeTugQL:
+		result, err = runTugQLSavedQuery(ctx, executor, projStore, projectDir, o.env, queryDef, variables)
 	default:
 		err = fmt.Errorf("query %q has type %q, which is not yet runnable through the policy-enforced path", o.query, queryDef.Type)
 	}
 	if err != nil {
 		return savedQueryFailure(err)
+	}
+	if queryDef.Federation != nil && len(queryDef.Federation.Lookups) != 0 {
+		result, err = applySavedQueryLookups(ctx, result, queryDef.Federation, stderr, o.quiet)
+		if err != nil {
+			return savedQueryFailure(err)
+		}
 	}
 
 	if !o.quiet {
@@ -100,6 +133,13 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	if result.Provenance != nil {
 		_, _ = fmt.Fprintln(stderr, provenanceLine(*result.Provenance))
 		provenance = newQueryProvenance(*result.Provenance)
+	}
+	if o.sink != nil {
+		o.sink.describeSaved(ctx, projStore, projectDir, o, canonicalID, queryDef, variables, result)
+		if result.Provenance != nil {
+			o.sink.meta.Provenance = resultProvenance(*result.Provenance)
+		}
+		return o.sink.writeSecureRows(cmd.OutOrStdout(), result.Columns, result.Rows)
 	}
 	if err := writeQueryRows(cmd.OutOrStdout(), o.format, result.Columns, secureRowsToQueryRows(result.Rows), provenance); err != nil {
 		return Exit(err.Error(), 1)
@@ -133,7 +173,7 @@ func resolveQueryProject(project string) (projectDir string, projStore datatug.P
 	return v.ProjectDir, v.store.GetProjectStore(v.projectID), nil
 }
 
-// resolveQueryEnvironment picks the environment a saved SQL/DTQL query runs
+// resolveQueryEnvironment picks the environment a saved SQL/TugQL query runs
 // against: envFlag (--env) if given, else the project's only environment -
 // this is REQ-shaped as "the query targets or the project single
 // environment" (datatug.QueryDefTarget carries no Environment field to read
@@ -157,28 +197,36 @@ func resolveQueryEnvironment(ctx context.Context, projStore datatug.ProjectStore
 	}
 }
 
-// resolveQueryDatabase picks the database catalog a saved SQL/DTQL query
+// resolveQueryDatabase picks the database catalog a saved SQL/TugQL query
 // runs against: the query's first declared target naming a Catalog, else
 // the resolved environment's only database catalog, erroring with the full
-// candidate list otherwise.
+// candidate list otherwise. envID is what --env was given, and a source string
+// can be typed there: it is refused before the environment's catalogs are read,
+// and each message shows it only when it is a plain name (see api.LookupError).
 func resolveQueryDatabase(ctx context.Context, projStore datatug.ProjectStore, envID string, queryDef *datatug.QueryDef) (string, error) {
 	for _, target := range queryDef.Targets {
 		if target.Catalog != "" {
 			return target.Catalog, nil
 		}
 	}
+	// A source string typed where an environment ID belongs is not an ID: it is
+	// refused before the environment is read, naming nothing of it. A plain name,
+	// and an unknown nonplain name, still take the catalog path below.
+	if isSourceString(envID) {
+		return "", api.LookupError("load database catalogs for environment %q: an environment ID must be a plain name, not a source URL or a path", nil, envID)
+	}
 	catalogs, err := projStore.LoadEnvDbCatalogs(ctx, envID)
 	if err != nil {
-		return "", fmt.Errorf("load database catalogs for environment %q: %w", envID, err)
+		return "", api.LookupError("load database catalogs for environment %q", err, envID)
 	}
 	switch len(catalogs) {
 	case 0:
-		return "", fmt.Errorf("environment %q has no database catalogs configured", envID)
+		return "", api.LookupError("environment %q has no database catalogs configured", nil, envID)
 	case 1:
 		return catalogs[0].GetID(), nil
 	default:
 		return "", fmt.Errorf("environment %q has %d database catalogs (%s); query %q does not declare which one to use (targets[].catalog)",
-			envID, len(catalogs), strings.Join(catalogs.IDs(), ", "), queryDef.ID)
+			dbcopy.SourceIDDisplay(envID), len(catalogs), strings.Join(catalogs.IDs(), ", "), queryDef.ID)
 	}
 }
 
@@ -195,7 +243,7 @@ func resolveQueryDatabase(ctx context.Context, projStore datatug.ProjectStore, e
 func resolveQuerySourceURL(ctx context.Context, projStore datatug.ProjectStore, projectDir, envID, database string) (string, error) {
 	env, err := projStore.LoadEnvironment(ctx, envID)
 	if err != nil {
-		return "", fmt.Errorf("load environment %q: %w", envID, err)
+		return "", api.LookupError("load environment %q", err, envID)
 	}
 	var lastErr error
 	for _, server := range env.DbServers {
@@ -209,10 +257,12 @@ func resolveQuerySourceURL(ctx context.Context, projStore datatug.ProjectStore, 
 		}
 		return querySourceURLFromCatalog(catalog, projectDir)
 	}
+	// database and envID are what the command was given, and a source string can
+	// be typed where an ID belongs: see api.LookupError.
 	if lastErr != nil {
-		return "", fmt.Errorf("database %q not found in environment %q: %w", database, envID, lastErr)
+		return "", api.LookupError("database %q not found in environment %q", lastErr, database, envID)
 	}
-	return "", fmt.Errorf("environment %q has no DB servers configured; cannot resolve database %q", envID, database)
+	return "", api.LookupError("environment %q has no DB servers configured; cannot resolve database %q", nil, envID, database)
 }
 
 func querySourceURLFromCatalog(catalog datatug.DbCatalog, projectDir string) (string, error) {
@@ -225,7 +275,7 @@ func querySourceURLFromCatalog(catalog datatug.DbCatalog, projectDir string) (st
 		if err != nil {
 			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
 		}
-		return "sqlite://" + path, nil
+		return api.LocalSQLiteSourceURL(path), nil
 	case "ingitdb":
 		if catalog.Path == "" {
 			return "", fmt.Errorf("catalog %q has no path configured for its ingitdb driver", catalog.ID)
@@ -234,9 +284,14 @@ func querySourceURLFromCatalog(catalog datatug.DbCatalog, projectDir string) (st
 		if err != nil {
 			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
 		}
-		return "ingitdb://" + path, nil
+		return dbcopy.LocalSourceURL("ingitdb", path), nil
+	case "firestore", api.DriverPostgres, api.DriverMySQL, api.DriverOracle, api.DriverSQLServer, api.DriverCouchDB, api.DriverPostgREST, api.DriverLibSQL, api.DriverTypesense:
+		// The catalog's path is a connection descriptor that names an operator
+		// environment variable; the source is a value pkg/api builds and validates,
+		// never an endpoint or a credential held by the project.
+		return api.ResolveCatalogSourceURL(catalog, projectDir)
 	default:
-		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3 or ingitdb)", catalog.Driver)
+		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3, ingitdb, postgres, mysql, oracle, sqlserver, firestore, couchdb, postgrest, libsql or typesense)", catalog.Driver)
 	}
 }
 
@@ -246,7 +301,7 @@ func querySourceURLFromCatalog(catalog datatug.DbCatalog, projectDir string) (st
 // database/sql driver — an "@ParamName" placeholder in sqlText binds by
 // name (dal-go/dalgo2sql v0.11.7+, see RunNativeSQL's doc comment).
 func runSQLSavedQuery(ctx context.Context, executor *secureread.Executor, projStore datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef, variables map[string]any) (secureread.Result, error) {
-	sourceURL, err := resolveSQLOrDTQLSourceURL(ctx, projStore, projectDir, envFlag, queryDef)
+	sourceURL, err := resolveSQLOrTugQLSourceURL(ctx, projStore, projectDir, envFlag, queryDef)
 	if err != nil {
 		return secureread.Result{}, err
 	}
@@ -257,18 +312,241 @@ func runSQLSavedQuery(ctx context.Context, executor *secureread.Executor, projSt
 	return executor.RunNativeSQL(ctx, sourceURL, queryDef.Text, args...)
 }
 
-// runDTQLSavedQuery resolves the DTQL query's environment+database and runs
-// it through Executor.RunDTQL, which resolves its "param:" nodes (and
+// runTugQLSavedQuery resolves the TugQL query's environment+database and runs
+// it through Executor.RunTugQL, which resolves its "param:" nodes (and
 // $currentUser) from variables the same way accesspolicies.Run always has.
-func runDTQLSavedQuery(ctx context.Context, executor *secureread.Executor, projStore datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef, variables map[string]any) (secureread.Result, error) {
-	sourceURL, err := resolveSQLOrDTQLSourceURL(ctx, projStore, projectDir, envFlag, queryDef)
+func runTugQLSavedQuery(ctx context.Context, executor *secureread.Executor, projStore datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef, variables map[string]any) (secureread.Result, error) {
+	document, err := querybody.Structured(queryDef)
 	if err != nil {
 		return secureread.Result{}, err
 	}
-	return executor.RunDTQL(ctx, sourceURL, []byte(queryDef.Text), variables)
+	urls, err := federatedTugQLURLs(ctx, projStore, projectDir, envFlag, queryDef)
+	if err != nil {
+		return secureread.Result{}, err
+	}
+	if len(urls) > 0 {
+		return executor.RunFederatedTugQL(ctx, []byte(document), urls, variables)
+	}
+	sourceURL, err := resolveSQLOrTugQLSourceURL(ctx, projStore, projectDir, envFlag, queryDef)
+	if err != nil {
+		return secureread.Result{}, err
+	}
+	return executor.RunTugQL(ctx, sourceURL, []byte(document), variables)
 }
 
-func resolveSQLOrDTQLSourceURL(ctx context.Context, projStore datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef) (string, error) {
+func federatedTugQLURLs(ctx context.Context, projStore datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef) (map[string]string, error) {
+	_, urls, err := parseFederatedTugQL(ctx, projStore, projectDir, envFlag, queryDef)
+	return urls, err
+}
+
+// parseFederatedTugQL parses the query once and resolves the source URL of each
+// named database it references, returning both so callers need not re-parse.
+func parseFederatedTugQL(ctx context.Context, projStore datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef) (dal.StructuredQuery, map[string]string, error) {
+	document, err := querybody.Structured(queryDef)
+	if err != nil {
+		return nil, nil, err
+	}
+	parsed, err := tugql.Deserialize([]byte(document))
+	if err != nil {
+		return nil, nil, err
+	}
+	databases := map[string]bool{}
+	collectFederatedDatabases(parsed.From(), databases)
+	if len(databases) > 0 {
+		envID, err := resolveQueryEnvironment(ctx, projStore, envFlag)
+		if err != nil {
+			return nil, nil, err
+		}
+		urls := make(map[string]string, len(databases))
+		for database := range databases {
+			url, err := resolveQuerySourceURL(ctx, projStore, projectDir, envID, database)
+			if err != nil {
+				return nil, nil, err
+			}
+			urls[database] = url
+		}
+		return parsed, urls, nil
+	}
+	return parsed, nil, nil
+}
+
+func collectFederatedDatabases(from dal.FromSource, databases map[string]bool) {
+	if ref, ok := from.Base().(dal.CollectionRef); ok && ref.Database() != "" {
+		databases[ref.Database()] = true
+	}
+	for _, joined := range from.Joins() {
+		if child := joined.From(); child != nil {
+			collectFederatedDatabases(child, databases)
+		} else {
+			collectFederatedDatabases(dal.From(joined.RecordsetSource), databases)
+		}
+	}
+}
+
+// runStreamedSavedTugQL handles named-database federated queries only. The
+// streaming contract keeps at most DALgo's bounded lookup batch in memory.
+func runStreamedSavedTugQL(ctx context.Context, out, progress io.Writer, o queryOptions, executor *secureread.Executor, store datatug.ProjectStore, projectDir string, queryDef *datatug.QueryDef, variables map[string]any) (bool, error) {
+	parsed, urls, err := parseFederatedTugQL(ctx, store, projectDir, o.env, queryDef)
+	if err != nil {
+		return true, err
+	}
+	if len(urls) == 0 {
+		return false, nil
+	}
+	if !isBoundedFederatedRowShape(parsed) {
+		return true, fmt.Errorf("streaming %s requires a direct single-source scan or one flat equality join without global ordering, aggregation, or subqueries; joins also require an explicit dimension scan with stable id orderBy and limit of 1..10000; use --format json for other shapes", o.format)
+	}
+	// The successful parse above already validated this explicit representation.
+	document, _ := querybody.Structured(queryDef)
+	stream, err := executor.StreamFederatedTugQL(ctx, []byte(document), urls, variables)
+	if err != nil {
+		return true, err
+	}
+	defer func() { _ = stream.Close() }()
+	columns := explicitStreamColumns(stream.Query)
+	if o.format == "csv" && len(columns) == 0 {
+		return true, fmt.Errorf("streaming CSV requires deterministic explicit TugQL columns; use --format jsonl")
+	}
+	if federation := queryDef.Federation; federation != nil {
+		for _, lookup := range federation.Lookups {
+			columns = appendLookupColumns(columns, lookup)
+		}
+	}
+	reader, err := streamSavedQueryLookups(ctx, stream.Reader, queryDef.Federation, progress, o.quiet)
+	if err != nil {
+		return true, err
+	}
+	if !o.quiet {
+		writeSavedQueryLimitations(progress, stream.Limitations())
+	}
+	return true, writeStreamedRows(ctx, out, o.format, columns, reader)
+}
+
+// DALgo's row stream keeps the joined dimension in memory and reads the fact
+// side incrementally for this shape. An explicit dimension scan limit caps the
+// hash index at 10000 rows. This never adds or changes a query limit: callers
+// choose that result semantics. Refuse generic fallback, which can collect
+// the large fact side before the first output row.
+func isBoundedFederatedRowShape(query dal.StructuredQuery) bool {
+	if query.From() == nil || dal.HasAggregation(query) || dal.HasSubquery(query) || len(query.OrderBy()) != 0 {
+		return false
+	}
+	if len(query.From().Joins()) == 0 {
+		root, ok := query.From().Base().(dal.CollectionRef)
+		return ok && root.Database() != "" && query.Where() == nil && len(query.Columns()) == 0 && query.Offset() == 0
+	}
+	if len(query.From().Joins()) != 1 {
+		return false
+	}
+	join := query.From().Joins()[0]
+	child := join.From()
+	if child == nil {
+		child = dal.From(join.RecordsetSource)
+	}
+	if child == nil || len(child.Joins()) != 0 || len(join.Algorithms()) != 0 {
+		return false
+	}
+	root, rootOK := query.From().Base().(dal.CollectionRef)
+	dimension, dimensionOK := child.Base().(dal.CollectionRef)
+	if !rootOK || !dimensionOK || root.Database() == "" || dimension.Database() == "" {
+		return false
+	}
+	if dimension.ScanLimit() < 1 || dimension.ScanLimit() > 10000 {
+		return false
+	}
+	stableOrder := false
+	for _, order := range dimension.ScanOrders() {
+		if field, ok := order.Expression().(dal.FieldRef); ok && field.Name() == "id" {
+			stableOrder = true
+			break
+		}
+	}
+	if !stableOrder {
+		return false
+	}
+	rootAlias, dimensionAlias := root.Alias(), dimension.Alias()
+	if rootAlias == "" {
+		rootAlias = root.Name()
+	}
+	if dimensionAlias == "" {
+		dimensionAlias = dimension.Name()
+	}
+	for _, condition := range join.On() {
+		comparison, ok := condition.(dal.Comparison)
+		if !ok || comparison.Operator != dal.Equal {
+			continue
+		}
+		left, leftOK := comparison.Left.(dal.FieldRef)
+		right, rightOK := comparison.Right.(dal.FieldRef)
+		if leftOK && rightOK && ((left.Source() == rootAlias && right.Source() == dimensionAlias) || (left.Source() == dimensionAlias && right.Source() == rootAlias)) {
+			return true
+		}
+	}
+	return false
+}
+
+func explicitStreamColumns(query dal.StructuredQuery) []string {
+	if len(query.Columns()) == 0 {
+		return nil
+	}
+	columns := make([]string, 0, len(query.Columns()))
+	for _, column := range query.Columns() {
+		name := column.Alias
+		if field, ok := column.Expression.(dal.FieldRef); ok && name == "" {
+			name = field.Name()
+		}
+		if name == "" {
+			return nil
+		}
+		columns = append(columns, name)
+	}
+	return columns
+}
+
+func writeStreamedRows(ctx context.Context, out io.Writer, format string, columns []string, reader dal.RecordsReader) error {
+	if format == "csv" {
+		if err := writeCSVHeader(out, columns); err != nil {
+			return err
+		}
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		rec, err := reader.Next()
+		if errors.Is(err, dal.ErrNoMoreRecords) || (err == nil && rec == nil) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		data, err := condeval.ToMap(rec.Data())
+		if err != nil {
+			return err
+		}
+		if _, found := data[keyColumn]; found {
+			return errReservedKeyField
+		}
+		row := queryRow{key: fmt.Sprint(rec.Key().ID), data: data}
+		if format == "jsonl" {
+			rowColumns := columns
+			if len(rowColumns) == 0 {
+				rowColumns = make([]string, 0, len(data))
+				for name := range data {
+					rowColumns = append(rowColumns, name)
+				}
+				sort.Strings(rowColumns)
+			}
+			if err := writeJSONRows(out, rowColumns, []queryRow{row}, false, nil); err != nil {
+				return err
+			}
+		} else if err := writeCSVDataRow(out, columns, row); err != nil {
+			return err
+		}
+	}
+}
+
+func resolveSQLOrTugQLSourceURL(ctx context.Context, projStore datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef) (string, error) {
 	envID, err := resolveQueryEnvironment(ctx, projStore, envFlag)
 	if err != nil {
 		return "", err
@@ -285,10 +563,10 @@ func resolveSQLOrDTQLSourceURL(ctx context.Context, projStore datatug.ProjectSto
 // every HTTP QueryDef under projectDir/queries/** as one dalgo2http
 // collection per query (Collection.Name = QueryDef.ID) -
 // Executor.RunStructured then runs a structured query against it through
-// the exact same access-policy path SQL/DTQL use; an HTTP query's
+// the exact same access-policy path SQL/TugQL use; an HTTP query's
 // parameters bind as literal WHERE-equality values (dal.WhereField),
 // matching pkg/httpsource's own tests, not through the "variables" resolution
-// DTQL's "param:" nodes use.
+// TugQL's "param:" nodes use.
 // runStructuredHTTPQuery calls executor.RunStructured; a package var so
 // this package's own tests can substitute
 // secureread.Executor.RunStructuredInsecureForTest (dal-go/dalgo2http
@@ -302,7 +580,7 @@ var runStructuredHTTPQuery = func(ctx context.Context, executor *secureread.Exec
 }
 
 func runHTTPSavedQuery(ctx context.Context, executor *secureread.Executor, projectDir string, queryDef *datatug.QueryDef, variables map[string]any) (secureread.Result, error) {
-	sourceURL := "http://" + projectDir
+	sourceURL := dbcopy.ProjectSourceURL(projectDir)
 	var builder dal.IQueryBuilder = dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef(queryDef.ID, "")))
 	var missing []string
 	for _, p := range queryDef.Parameters {

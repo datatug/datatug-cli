@@ -15,7 +15,7 @@ status: Implementing
 
 ## Summary
 
-`query` is the resource group the [CLI umbrella](../README.md) reserves for running queries; `query run` is its first verb. It runs one ad-hoc [DTQL](https://github.com/dal-go/dalgo/tree/main/dtql) query against a database URL exactly as a policy-secured application would for a chosen principal: through DALgo's declarative access policies, discovered from the user's `~/.datatug/policies/` directory, so a "global" policy written once applies to every query the user runs. The rows a real caller would receive go to stdout in the chosen format; the limitations the policies imposed — the deciding rule, the row condition, the field allow-list, the binding — go to stderr, so a pipeline consumes clean data while the operator sees why rows or fields are missing. The SQL `execute` command can later join the same verb behind a `--sql` flag.
+`query` is the resource group the [CLI umbrella](../README.md) reserves for running queries; `query run` is its first verb. It runs one ad-hoc [TugQL](https://github.com/dal-go/dalgo/tree/main/tugql) query against a database URL exactly as a policy-secured application would for a chosen principal: through DALgo's declarative access policies, discovered from the user's `~/.datatug/policies/` directory, so a "global" policy written once applies to every query the user runs. The rows a real caller would receive go to stdout in the chosen format; the limitations the policies imposed — the deciding rule, the row condition, the field allow-list, the binding — go to stderr, so a pipeline consumes clean data while the operator sees why rows or fields are missing. The SQL `execute` command can later join the same verb behind a `--sql` flag.
 
 This is the first consumer of `dalgo/access` row-level conditions, principal bindings and field patterns outside DALgo itself.
 
@@ -26,10 +26,17 @@ Policy authors have no way to see what a DALgo access policy will do to a real q
 ## Synopsis
 
 ```
-datatug query run --db <url> (-f <dtql-file>|--from <collection>) \
+datatug query run --db <url|datatug://<project>/<db>[?env=<ENV>]> (-f <tugql-file>|--from <collection> [--limit <n>] [--offset <n>]) \
   [--format grid|json|jsonl|yaml|csv] \
   [--as <user-id>] [--role <role>]... [--group <group>]... [--var <name>=<value>]... \
-  [--policy <file>]... [--policies-dir <dir>] [--no-policies] [-q|--quiet]
+  [--policy <file>]... [--policies-dir <dir>] [--no-policies] [-q|--quiet] \
+  [--result-id <id> [--result-rows <n>]]
+
+datatug query results locate --id <id> [--format json]
+datatug query results check [--format json]
+datatug query results prune [--all]
+datatug query results rm --id <id>
+datatug query results annotate --id <id> --prompt-stdin
 ```
 
 `-f/--file` is the input document, as on `entity add`; `--format` has no short alias on this command. `-q` is `--quiet`.
@@ -40,11 +47,23 @@ datatug query run --db <url> (-f <dtql-file>|--from <collection>) \
 
 #### REQ: query-input
 
-`query run` MUST accept the query either as a DTQL document (`-f <path>`, YAML or JSON; `-f -` reads stdin) or as `--from <collection>`, which selects every row and every field of one root collection. Exactly one of the two MUST be given; otherwise the command MUST exit 2 with a usage error. Parameters in the query document (`param:` nodes on the right-hand side of a `where` comparison) MUST be substituted from `--var` before execution; an unresolved query parameter MUST exit 2 naming `$name`. A parameter anywhere else (columns, the left-hand side, `orderBy`, `groupBy`, `having`) is not supported and MUST exit 2 naming it.
+`query run` MUST accept the query either as a TugQL document (`-f <path>`, YAML or JSON; `-f -` reads stdin) or as `--from <collection>`, which selects every row and every field of one root collection. Exactly one of the two MUST be given; otherwise the command MUST exit 2 with a usage error. Parameters in the query document (`param:` nodes on the right-hand side of a `where` comparison) MUST be substituted from `--var` before execution; an unresolved query parameter MUST exit 2 naming `$name`. A parameter anywhere else (columns, the left-hand side, `orderBy`, `groupBy`, `having`) is not supported and MUST exit 2 naming it.
+
+#### REQ: limit-flag
+
+`--limit <n>` MUST read at most `n` rows of a `--from` query (`n` > 0). With `-f` or a saved query it MUST exit 2, because those state their own limit; a negative value MUST exit 2. `0`, the default, means no limit.
+
+#### REQ: offset-flag
+
+`--offset <n>` MUST skip the first `n` rows of a `--from` query, with the same refusals as `--limit` (`-f` or saved query: exit 2; negative: exit 2). When `--limit` or `--offset` is given, rows MUST be ordered so that pages do not move: by the table's primary key columns (in key order) when it has one, otherwise by `rowid` for a SQLite table. A SQLite view and every other source (no primary key reported, or no way to describe it) keep the order the source gives, which is not guaranteed stable; callers paging such a source cannot rely on it.
 
 #### REQ: db-url
 
-`--db <url>` MUST be required and MUST accept the same URL schemes as `db copy` (`sqlite://`, `ingitdb://`, `postgres://`). A missing or unparsable URL MUST exit 2. A database that cannot be opened MUST exit 4.
+`--db <url>` MUST be required and MUST accept the same URL schemes as `db copy` (`sqlite://`, `ingitdb://`, `postgres://`). A missing or unparsable URL MUST exit 2. A database that cannot be opened MUST exit 4. A PostgreSQL source that cannot be reached, whether at the open or in the middle of the read, MUST exit 4 with one line on stderr: the sentence the adapter chose for the failure, then where the connection string is read from, by the name of the variable (`the PostgreSQL connection string is read from the environment variable NAME` for an `env:NAME` source) or of the flag (`from the --db flag` for a URL), and nothing of the connection: no host, port, database, user, password, text of a driver or path of the machine. (`TestQuery_APostgresSourceIsOpenedReadOnlyAndItsFailuresAreClassified`, `TestQuery_AReadThatLosesItsConnectionShowsOneFixedSentence`.) A query on a PostgreSQL source orders NULLs first when ascending and last when descending, as every other source does, including over a column whose not-null constraint is not validated (PostgreSQL 18), where an `orderBy` with a `limit` returns the same rows as on a column with no such constraint; the job `Journey (PostgreSQL <major>)` runs it against a real server of each major version, 17 and 18. (`TestPostgresQueryJourneyOrdersNullsByDALgosRule`.)
+
+#### REQ: db-project-reference
+
+`--db` MUST also accept `datatug://<project>/<db>[?env=<ENV>]` (or `datatug:///<db>` for the current project), a reference to a database that is a source of a registered project: the grammar, the resolution (one function shared with `db schema`, `db table`, `db column`, `db copy` and `db export`), the exit codes (`3` for a project, environment or database that is not there; `2` for a malformed reference, a database several environments list, or a source that cannot be opened) and the rule that no path, URL or variable value is shown are those of [`db schema` REQ: project-reference](../db/schema/README.md#req-project-reference). The query is otherwise an ad-hoc one: `-f` or `--from`, policies and `--no-policies` apply as for any `--db`; the saved-query form (`--project` with `--query`) is unchanged and is mutually exclusive with `--db`. A PostgreSQL source resolved this way keeps the PostgreSQL rules of [REQ: db-url](#req-db-url).
 
 ### Policies
 
@@ -82,6 +101,44 @@ When a policy denies the query — including a missing variable and a hidden-fie
 
 Exit codes: 0 success; 2 usage or invalid input (flags, undecodable query or policy file, bad `--var`, unresolved query parameter, missing explicit policies directory, no policies without `--no-policies`); 4 the database cannot be opened or refuses the query; 5 access denied by policy; 1 writing the output failed or any other failure.
 
+### Result files
+
+#### REQ: result-id
+
+`query run` MUST accept `--result-id <id>` on the ad-hoc and the saved form. With it the rows MUST NOT be printed: the result goes to `~/.datatug/query-results/<id>/data.json` (the rows) and `meta.json` (everything else a viewer needs). The root is fixed, with no environment override, so a shell, a terminal and the daemon of one user always find the same files. `<id>` MUST match `^[A-Za-z0-9_-]{1,128}$`; an id that is already used MUST exit 2 (`result-id-in-use`), so a result is never overwritten. `--format` MUST be absent or `json`. `--result-rows <n>` (1 to 10000, default 2000) MUST be refused without `--result-id`. `query run` MUST refuse positional arguments.
+
+#### REQ: result-store
+
+The root and each result directory MUST be 0700 and owned by the user, the files 0600. A root inside a Git working tree or a bare repository (`inside-git`), a symlinked root or result directory (`symlink`), one owned by another user (`owner`) or one that cannot be written (`results-store-unwritable`) MUST exit 2 with nothing written. The store is checked before the database is opened. Every store error is a reason code that names no path and no id.
+
+#### REQ: result-files-atomic
+
+Each file MUST be written as an `O_EXCL` 0600 temporary file in the result directory, synced and renamed into place, `data.json` first and `meta.json` last. `meta.json` records the byte length of `data.json`; a result with no `meta.json`, or whose `data.json` has another length, is incomplete. A run that fails removes its result directory.
+
+#### REQ: result-locator
+
+With `--result-id`, stdout MUST be one JSON line with no id, no path and no row: `{"resultFiles":{"version":1},"rowsKept":<n>,"hasMore":<bool>,"columns":<n>}`. Any failure after the flags were parsed MUST print `{"resultFiles":null,"reason":"<code>"}` instead, with the usual exit code; the reason is a store code or `query-failed`, whose details stay on stderr. `query results locate --id <id>` MUST print `{"resultFiles":{"version":1,"id":…,"root":…,"data":…,"meta":…}}` for a complete, unexpired result and `{"resultFiles":null,"reason":"not-found"|"incomplete"|"expired"}` (exit 0) otherwise; `query results check` MUST print `{"usable":true}` or `{"usable":false,"reason":"<code>"}`. Neither opens a database.
+
+#### REQ: result-data
+
+`data.json` is `{"format":"datatug.query-result.data","version":1,"id":…,"recordset":<apicontract.Recordset>}`, with `$key` first and then the result's columns in **source order**, which is not the order `stdout-rows` prints (stdout keeps its own documented order: request order, else the sorted union). Source order is: for a query that names columns (a TugQL `columns` list, `--from` never does), that list as written; for a query with no `columns` list or a wildcard (`--from <table>`, a TugQL `from` alone), the columns of each source relation in the order the table or view declares them (the project's scanned metadata, by `ordinalPosition`, when the project holds the relation, else the database's own description; a view's SELECT list), the root's first; for a saved or ad-hoc native SQL query, its SELECT list (read from the statement on the same read-only connection, no rows). A column the source order does not name (an alias, a computed value, a source that cannot be read) follows the named ones in sorted order, and a result whose source order is unknown is the sorted union as before. `$key` is the record key, never a field: it is kept in the data (as the first column of every row, holding the record's key, an opaque identifier supplied by the source reader) so readers that predate the marker keep working, and `meta.json` marks it `"internal": true` (see below); results written before source order existed keep their alphabetical columns and read the same. Every cell is a typed value: integers are kept exact as text, binary becomes `<binary N bytes>` and a nested value its JSON text (recorded as the column's `encoding`), and a column whose values have several kinds is a string column listing them in `observedTypes`. The ad-hoc form MUST stop reading after `--result-rows` + 1 records; a saved query keeps the first `--result-rows` rows of its collected result. A cell over 64 KiB is cut on a UTF-8 boundary (counted in `cutCells`), and rows stop before the file would pass 4,000,000 bytes (`truncatedBy: bytes`).
+
+#### REQ: result-meta
+
+`meta.json` is `{"format":"datatug.query-result.meta","version":1,…}` with `id`, `createdAt`, `expiresAt`, `cliVersion`, `dataBytes`; `db` (`ref`, `project`, `env`, `source`: the full `datatug://<project>/<db>?env=<env>` reference of a source of a registered project, else `null`; and `driver`); `query` (`kind` `from`|`tugql`|`saved`, `tugql` as given or the equivalent document of `--from`, `from`, `savedQueryId` and `savedQueryType` for a saved query, typed `parameters`, and `policy` `none`|`discovered`|`dir`|`explicit`|`project`; and the editor-ready members `text`, `language`, `dbRef` and `params`: `text` is the canonical text the query editor accepts (the TugQL of an ad-hoc or `--from`/`--limit` run; for a saved query, the TugQL or native SQL it holds, which is the person's own saved text and is now copied here; none for a saved HTTP query), `language` is `tugql`|`sql`|`http`, `dbRef` is the `db.ref` reference (absent when the run was not against a registered project source; never a path, connection string or credential) and `params` are the run's own parameters as `[{name, value}]` sorted by name, `value` a typed scalar or set exactly as in `parameters`; `kind` stays `from`|`tugql`|`saved`, and a saved native SQL query is `kind: saved`, `language: sql`); `rows` (`kept`, `hasMore`, `truncatedBy`); `provenance` (`mode` and `observedAt` of an HTTP source, else `null`); `prompt` (`text`, `truncated`, `at`; absent until `query results annotate`, see `result-prompt`); and `columns` (`name`, `type`, `declaredType`, `nullable`, `pk`, `source`, `foreignKeys`, `encoding`, `cutCells`, `observedTypes`, and `internal`: a boolean written only as `true`, today only on `$key`, meaning "bookkeeping, not a field: a consumer that shows fields hides it"; absent in results written before it existed, whose `$key` consumers still hide by name; the recordset column descriptors in `data.json` keep the contract shape `{name, type}`), in the same order as `data.json`, `participants` and `related` (see `result-sources`). It MUST hold no row value, connection string, path, host, user, password, environment variable or policy path. `tugql` and `parameters` past 256 KiB together are dropped (`unavailable.query: too-large`); `text` and `params` have their own 256 KiB bound, past which only those two are dropped and `unavailable.editor: too-large` is set (a consumer can tell dropped from absent; `unavailable.query` keeps meaning the legacy members, whose `parameters` stay so the parameters remain recoverable; results written before the flag lack it and read the same); at most 400 columns are described (`unavailable.columns: too-many`); the file stays within 1 MiB.
+
+#### REQ: result-sources
+
+`participants` MUST come from the query's own tree: one per source occurrence of the TugQL (for `--from`, its one-collection document), with `instance` (`root` or the join path), `schema`, `relation`, `alias`, `kind` (`table`|`view`|`unknown`), `role` (`from`|`join`), the `join` type and its `on` field pairs, and for a federated saved query each participant's own `db` reference. A saved native SQL query has none (`unavailable.participants` and `related`: `native-sql`); a saved HTTP query has one, its collection. `related` MUST come from the chat's join-candidate discovery over the foreign keys that DALgo's engine-neutral schema calls (`dbschema.ListCollections` and `DescribeCollection`, shared with the chat in `pkg/joinmeta`) report for each participant's database: `candidateId`, `fromInstance`, `target` (`schema`, `relation`, `kind`), `constraintId`, `direction`, `cardinality`, the ordered `fields` pairs and `evidence: foreign-key`. A relationship the query already joins is not listed. Nothing is filtered by permission. A provider without schema metadata, or a database that declares no foreign keys, gives `related: []` with `unavailable.related: no-relationship-metadata`; a schema that cannot be read gives `schema-unreadable`; over 500 collections gives `too-many`. A column that reads one source's field directly gets that field's `source`, portable `declaredType`, `nullable`, primary-key position and foreign keys, and its data type follows the declared type when every value fits it; where the definition cannot be read they stay `null` with `unavailable.declaredTypes`. At most 32 participants and 200 related are kept (`too-many`). Reading this metadata reads no row of any table.
+
+#### REQ: result-prompt
+
+`query results annotate --id <id> --prompt-stdin` MUST read UTF-8 text from stdin only (`--prompt-stdin` is required; the text is never an argument) and store it as `prompt: {text, truncated, at}` in the result's `meta.json`. It MUST drop control characters other than newline and tab and the Unicode format characters that can disguise text (bidi controls U+202A-202E and U+2066-2069, zero-width U+200B-200D, U+2060, U+FEFF, and the rest of category Cf) and U+2028/2029, replace invalid UTF-8 with U+FFFD, trim surrounding white space, and keep at most 8 KiB, cut on a character boundary (`truncated: true`; input past 1 MiB is also flagged). `at` is RFC 3339 in UTC. It MUST check the id before reading stdin: an id outside the grammar exits 2, an unknown id exits 3 whatever stdin holds, and a store that cannot be used or a result that is expired or incomplete exits 2 with a reason code. It MUST then refuse stdin that is an interactive terminal (exit 2, "pipe the text on stdin") without waiting for input, and empty text (exit 2). It MUST refuse a `meta.json` whose format or version it does not know (exit 2, `unsupported-version`) like every reader. It MUST replace `meta.json` atomically (private temporary file, sync, rename), leave the value of every other member as it was (the members are rewritten in alphabetical key order), overwrite an earlier prompt, and keep `meta.json` within its 1 MiB bound (room is reserved for the prompt when `meta.json` is first written). Nothing locks across processes: two annotations racing leave the last one, and one racing `rm` may exit 2; a failure to sync the directory after the rename is not reported. Its stdout is `{"id":…,"truncated":<bool>,"bytes":<n>}`; it MUST NOT print, log or put the text in an error. The prompt counts in the store's byte accounting, expires with the result, and `results rm` and `prune` remove it with the rest.
+
+#### REQ: result-lifetime
+
+A result lives 7 days. Every `--result-id` write MUST prune expired results, result directories without `meta.json` older than one hour, and then the oldest results while more than 200 results or 512 MiB are kept. `query results prune [--all]` prunes on demand (all results with `--all`) and `query results rm --id <id>` removes one (exit 3 when it is not there). Only directories whose name follows the id grammar are touched, after the symlink and owner checks; a link is never followed.
+
 ## Acceptance Criteria
 
 ### AC: query-from-collection (verifies REQ:query-input)
@@ -90,9 +147,21 @@ Exit codes: 0 success; 2 usage or invalid input (flags, undecodable query or pol
 **When** the user runs `datatug query run --db ingitdb://<dir> --from products --format json --no-policies`
 **Then** stdout is a JSON array of three objects each carrying `$key` and the record's fields, and the exit code is 0.
 
+### AC: limit-caps-rows (verifies REQ:limit-flag)
+
+**Given** a collection of three or more rows
+**When** the user runs `datatug query run --db <url> --from <collection> --limit 2 --no-policies --format jsonl`
+**Then** stdout holds exactly two rows; with `-f`, `--limit` exits 2.
+
+### AC: offset-pages-rows (verifies REQ:offset-flag)
+
+**Given** a SQLite table of five rows with primary key `id`
+**When** the user runs `--from t --limit 2 --offset 2 --no-policies --format jsonl`
+**Then** stdout holds the rows with `id` 3 and 4, in that order; a table with no primary key pages by `rowid`.
+
 ### AC: query-file-stdin (verifies REQ:query-input)
 
-**Given** a DTQL document on stdin selecting `name` from `products` where `price >= 10`
+**Given** a TugQL document on stdin selecting `name` from `products` where `price >= 10`
 **When** the user runs `datatug query run --db ingitdb://<dir> -f - --format json --no-policies`
 **Then** stdout contains only the matching products with `$key` and `name`, and the exit code is 0.
 
@@ -104,7 +173,7 @@ Exit codes: 0 success; 2 usage or invalid input (flags, undecodable query or pol
 
 ### AC: query-param-substituted (verifies REQ:query-input)
 
-**Given** a DTQL document whose `where` compares `price` with `{ param: minPrice }`
+**Given** a TugQL document whose `where` compares `price` with `{ param: minPrice }`
 **When** the user runs it with `--var minPrice=10 --no-policies`, and again without `--var`
 **Then** the first run returns the two products priced 10 or more, and the second exits 2 naming `$minPrice`.
 
@@ -113,6 +182,12 @@ Exit codes: 0 success; 2 usage or invalid input (flags, undecodable query or pol
 **Given** no `--db` flag
 **When** the user runs `datatug query run --from products`
 **Then** the command exits 2 saying `--db` is required.
+
+### AC: db-project-reference (verifies REQ:db-project-reference)
+
+**Given** a registered project `shop` whose environment `local` lists the SQLite source `crm`
+**When** the user runs `datatug query run --db datatug://shop/crm --from customers --no-policies`
+**Then** the rows of `customers` are printed, as for `--db sqlite://<that file>`, and neither stdout nor stderr holds the path of the file; `--db datatug://nope/crm` exits 3.
 
 ### AC: db-scheme-unsupported (verifies REQ:db-url)
 
@@ -188,25 +263,25 @@ Exit codes: 0 success; 2 usage or invalid input (flags, undecodable query or pol
 
 ### AC: hidden-field-filter-denied (verifies REQ:secured-execution)
 
-**Given** the same policy and a DTQL document whose `where` is `passwordHash == "h1"`
+**Given** the same policy and a TugQL document whose `where` is `passwordHash == "h1"`
 **When** the user runs it as alice
 **Then** stdout is empty, stderr names `passwordHash`, and the exit code is 5.
 
 ### AC: hidden-field-select-denied (verifies REQ:secured-execution)
 
-**Given** the same policy and a DTQL document selecting `name` and `passwordHash`
+**Given** the same policy and a TugQL document selecting `name` and `passwordHash`
 **When** the user runs it as alice
 **Then** stdout is empty, stderr names `passwordHash`, and the exit code is 5.
 
 ### AC: alias-refused-under-field-lists (verifies REQ:secured-execution)
 
-**Given** the same policy and a DTQL document selecting `passwordHash` as `public_hash`
+**Given** the same policy and a TugQL document selecting `passwordHash` as `public_hash`
 **When** the user runs it as alice
 **Then** stdout is empty, stderr names `public_hash`, and the exit code is 2.
 
 ### AC: param-outside-where-exit-2 (verifies REQ:query-input)
 
-**Given** a DTQL document whose `orderBy` is `{ param: col }`
+**Given** a TugQL document whose `orderBy` is `{ param: col }`
 **When** the user runs it with `--var col=name`
 **Then** the command exits 2 naming `$col`.
 
@@ -248,7 +323,7 @@ Exit codes: 0 success; 2 usage or invalid input (flags, undecodable query or pol
 
 ### AC: header-follows-request-order (verifies REQ:stdout-rows)
 
-**Given** the global policy and a DTQL document selecting `name` then `email` from `customers`
+**Given** the global policy and a TugQL document selecting `name` then `email` from `customers`
 **When** the user runs it as alice with `--format csv`
 **Then** the header is `$key,name,email` (request order, not the sorted union) and no `passwordHash` column appears.
 
@@ -264,6 +339,48 @@ Exit codes: 0 success; 2 usage or invalid input (flags, undecodable query or pol
 **When** the user runs `--from products --no-policies`
 **Then** stdout is empty and the exit code is 4.
 
+### AC: result-files-written (verifies REQ:result-id, REQ:result-store, REQ:result-files-atomic, REQ:result-locator, REQ:result-data)
+
+**Given** the Chinook SQLite fixture and an empty home directory
+**When** the user runs `datatug query run --db sqlite://<chinook> --from Invoice --no-policies --result-id t1`
+**Then** stdout is exactly the path-free locator line with `rowsKept` 412, `~/.datatug/query-results/t1/` is 0700 and holds 0600 `data.json` (412 typed rows) and `meta.json`, `query results locate --id t1` prints the paths and `query results check` answers `usable: true`. The same command again exits 2 with `result-id-in-use`; `--result-id ../x`, `--format csv`, a symlinked root and a home that is a Git working tree each exit 2 and write nothing, and the Git case is refused before the database is opened.
+
+### AC: result-columns-in-source-order (verifies REQ:result-data, REQ:result-meta, REQ:stdout-rows)
+
+**Given** a table `Pet` declared `(id, zone, name, age, breed)`, a composite-key table `LineItem(orderId, lineNo, sku, qty)`, a view over `Pet`, and a saved native SQL query `SELECT name, id FROM Item`
+**When** the user runs each with `--result-id`, and `--from Pet --format csv` without it
+**Then** the stored columns are `$key, id, zone, name, age, breed`, `$key, orderId, lineNo, sku, qty`, the view's SELECT list, and `$key, name, id`; `meta.json` lists the same order and marks only `$key` `"internal": true`; every row still holds `$key` first; and the CSV header stays `$key,age,breed,id,name,zone`.
+
+### AC: result-rows-capped (verifies REQ:result-data)
+
+**Given** a source of 1,000,000 records and a table with a 70 KiB text cell
+**When** the result is collected with the default `--result-rows`, and `--result-rows 5` is run on the table
+**Then** the reader is asked for exactly 2001 records and 2000 are kept with `hasMore`; the table result keeps 5 rows, `truncatedBy: rows`, and the long cell is cut to 64 KiB with `cutCells: 1`.
+
+### AC: result-meta-describes-the-run (verifies REQ:result-meta)
+
+**Given** a TugQL file with a parameter, a `datatug://` reference of a registered project, an HTTP source and saved TugQL, SQL and HTTP queries
+**When** each runs with `--result-id`
+**Then** `meta.json` holds the query text, the typed parameters and the policy mode (never the policy path), the full reference with project, environment and source for the reference (and `null` for a path or an unregistered project), the provenance mode of the HTTP source (never its URL), and `kind: saved` with `savedQueryId`, `savedQueryType` and `policy: project` for the saved queries.
+
+### AC: result-prompt-annotated (verifies REQ:result-prompt, REQ:result-meta)
+
+**Given** a stored result and, for the old-reader case, one whose `meta.json` has no `text`, `language`, `dbRef`, `params` or `prompt`
+**When** `printf '…' | datatug query results annotate --id t1 --prompt-stdin` runs, then again with 4000 three-byte characters, and with empty stdin, an unknown id and a bad id
+**Then** the first answers `{"id":"t1","truncated":false,"bytes":<n>}` and `meta.json` gains `prompt` with every other member unchanged and mode 0600; the second keeps 8190 bytes with `truncated: true`; the others exit 2, 3 and 2; no output holds the text; the old `meta.json` still loads and `GET /datatug/results/<id>` answers its `query` and, when annotated, the `prompt` as text.
+
+### AC: result-sources-and-related (verifies REQ:result-sources)
+
+**Given** the Chinook SQLite fixture and the same tables on a PostgreSQL server
+**When** `--from Invoice` and the TugQL `Invoice JOIN Customer ON Invoice.CustomerId = Customer.CustomerId` run with `--result-id`
+**Then** `--from Invoice` relates `Customer` (outgoing, many-to-one) and `InvoiceLine` (incoming, one-to-many); the join lists `Invoice` (from) and `Customer` (join, with its `on` pair) and relates `InvoiceLine` and `Employee` (outgoing from Customer by `SupportRepId`), never the Invoice-Customer key it already joins; PostgreSQL gives the same lists; an HTTP source gives `related: []` with `no-relationship-metadata`; a saved native SQL query gives `native-sql`; a federated saved query's participants carry their databases' references; and no `meta.json` holds a row value, the database path, or the PostgreSQL user, host or password.
+
+### AC: results-pruned-and-removed (verifies REQ:result-lifetime)
+
+**Given** results that are fresh, expired, incomplete for over an hour, incomplete for a minute, more than 200, a link and a directory named outside the grammar
+**When** `query results prune`, `prune --all` and `rm --id` run
+**Then** expired and stale incomplete results and the oldest past the bounds are removed, the recent incomplete one, the link (and what it points to) and the other directory stay, and `rm` removes only the result named.
+
 ## Architecture
 
 - `pkg/accesspolicies` is the reusable core, so the TUI and `serve` can adopt it without the cobra layer:
@@ -271,7 +388,8 @@ Exit codes: 0 success; 2 usage or invalid input (flags, undecodable query or pol
   - `ParseVariables` (name grammar, reserved names, YAML scalar or sequence values).
   - `Run(ctx, session, query, Options) (Result, error)`: principal and variables on the context, query-parameter placement and substitution (`condeval.Substitute` + `dal.WithWhere`), the alias refusal and the hidden-field reference check over columns and clauses against every field list DALgo's decisions expose (`Decision.Writes`, mirroring DALgo's pattern matcher), `access.SecureReadSession`, and `Result{Reader, Lines}`; running with no policies requires `Options.Unrestricted`.
   - `Line{Policy, Source, Resource, Rule, Allowed, Condition, Bindings, FieldLists, Via, Explanation}` with `String()` rendering the pinned report format; `Explain` produces the lines from one `Decide` per policy.
-- `apps/datatugapp/commands/cmd_query.go`: the `query` group (help only) and `run`: flags, DTQL/`--from` query construction, `pkg/dbcopy` URL backend, exit-code mapping, and row formatting (`query_output.go`: rows normalised to JSON-shaped maps; `grid`, `json`, `jsonl`, `yaml`, `csv`).
+- `apps/datatugapp/commands/cmd_query.go`: the `query` group (help only) and `run`: flags, TugQL/`--from` query construction, `pkg/dbcopy` URL backend, exit-code mapping, and row formatting (`query_output.go`: rows normalised to JSON-shaped maps; `grid`, `json`, `jsonl`, `yaml`, `csv`).
+- `pkg/queryresults`: the result store (root checks, atomic writes, locate, prune, remove), the collector that builds `data.json` within its bounds, and the `meta.json` types; `apps/datatugapp/commands/query_result_files.go` connects it to both forms of `query run`, and `cmd_query_results.go` is `query results`. The Git checks are `pkg/gitpath`, shared with `pkg/executionstore`.
 - `~/.datatug/` sits beside the umbrella's proposed `~/.datatug.yaml`; `DATATUG_POLICIES_DIR` follows its `DATATUG_*` naming.
 - No change to DALgo.
 
@@ -280,7 +398,7 @@ Exit codes: 0 success; 2 usage or invalid input (flags, undecodable query or pol
 - Undecodable query or policy document, unsupported document kind, bad `--var`, unresolved query parameter, missing explicit policies directory, zero policies without `--no-policies`, `--no-policies` with `--policy`: exit 2, naming the file, variable or directory.
 - Denied by policy, including a missing variable, a hidden-field reference or a query the check cannot classify: exit 5; stdout stays empty because the denial is raised before any row is written.
 - Column alias under a field-restricted policy, or a parameter outside a where right-hand side: exit 2.
-- Database cannot be opened, or the adapter refuses the rewritten query (unsupported operator): exit 4 with the adapter's error.
+- Database cannot be opened: exit 4, naming the source as it is displayed (scheme, host, port and path, never a user name, a password or a query string) and a fixed reason; the driver's own text is never shown, because a driver can quote the connection string. A PostgreSQL source is the exception: it is not named by its display form (that holds the host and the port) and the line is the adapter's sentence and where the connection string is read from (see the `--db` requirement above). The adapter refuses the rewritten query (unsupported operator): exit 4 with the adapter's error.
 - A data field named `$key`, or a write to stdout failing: exit 1.
 
 ## Rehearse Integration
@@ -298,7 +416,7 @@ Deferred — no `specscore rehearse` scenarios yet; the command tests below are 
 - Writing data through policies (the command is read-only).
 - Project-scoped policies (`<project>/policies/`) and policy management verbs (`datatug policy list|check`).
 - Pagination and cursors; the query runs once and the rows are buffered before output.
-- Joins: DTQL documents do not express them, so the report covers the base collection only.
+- Joins: TugQL documents do not express them, so the report covers the base collection only.
 
 ## Open Questions
 

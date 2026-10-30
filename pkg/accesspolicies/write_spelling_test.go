@@ -39,6 +39,7 @@ var writeOperations = []access.Operations{access.Insert, access.Set, access.Upda
 // policy author used and whatever spelling a request uses, one query gets
 // one decision.
 func TestAuthorizeWrite_EquivalentSpellingsShareOneDecision(t *testing.T) {
+	t.Parallel()
 	const nfc, nfd = "café", "café"
 	families := []struct {
 		name     string
@@ -77,6 +78,7 @@ func TestAuthorizeWrite_EquivalentSpellingsShareOneDecision(t *testing.T) {
 // A literal grant is canonicalized the same way as a deny: it covers every
 // spelling of its query, and only that query.
 func TestAuthorizeWrite_LiteralGrantCoversEverySpelling(t *testing.T) {
+	t.Parallel()
 	const grant = `apiVersion: dalgo.io/access/v1
 kind: AccessPolicy
 metadata:
@@ -104,6 +106,7 @@ scopes:
 
 // Every nesting depth and every rule set is rewritten.
 func TestAuthorizeWrite_CanonicalizesNestedScopesAndRuleSets(t *testing.T) {
+	t.Parallel()
 	const doc = `apiVersion: dalgo.io/access/v1
 kind: AccessPolicy
 metadata:
@@ -136,6 +139,7 @@ bindings:
 }
 
 func TestDecodeLoaded_JSONDocument(t *testing.T) {
+	t.Parallel()
 	const doc = `{"apiVersion":"dalgo.io/access/v1","kind":"AccessPolicy","metadata":{"name":"deny-json"},"default":"deny",
 "scopes":[{"path":"/**","rules":[{"id":"all","effect":"allow","operations":["readwrite"]}]},
 {"path":"/datatug_projects/*/queries/Revenue","rules":[{"id":"protect","effect":"deny","operations":["write"]}]}]}`
@@ -150,12 +154,14 @@ func TestDecodeLoaded_JSONDocument(t *testing.T) {
 }
 
 func TestDecodeLoaded_RejectsAnInvalidDocument(t *testing.T) {
+	t.Parallel()
 	if _, err := DecodeLoaded([]byte("kind: nothing\n"), access.YAMLCodec{}, "x.yaml"); err == nil {
 		t.Fatal("expected an invalid document to be rejected")
 	}
 }
 
 func TestAuthorizeWrite_RefusesAPolicyWithoutItsDocument(t *testing.T) {
+	t.Parallel()
 	policy, err := access.DecodePolicy(strings.NewReader(denyQueryDoc("/datatug_projects/*/queries/other")), access.YAMLCodec{})
 	if err != nil {
 		t.Fatal(err)
@@ -175,6 +181,7 @@ func TestAuthorizeWrite_RefusesAPolicyWithoutItsDocument(t *testing.T) {
 // already the value it names. A document that cannot be decoded at all
 // fails closed.
 func TestAuthorizeWrite_CanonicalizesAliasedScopes(t *testing.T) {
+	t.Parallel()
 	const aliased = `apiVersion: dalgo.io/access/v1
 kind: AccessPolicy
 metadata:

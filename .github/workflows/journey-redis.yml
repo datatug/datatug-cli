@@ -1,0 +1,32 @@
+name: Journey (Redis)
+on:
+  pull_request:
+    paths: ['apps/datatugapp/commands/cmd_query*.go', 'go.mod', 'go.sum', '.github/workflows/journey-redis.yml']
+  push:
+    branches: [main]
+    paths: ['apps/datatugapp/commands/cmd_query*.go', 'go.mod', 'go.sum', '.github/workflows/journey-redis.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  redis:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      redis:
+        image: redis:8.10-alpine
+        ports: ['6379:6379']
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Authenticate private Core dependency
+        uses: ./.github/actions/private-core
+        with:
+          private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Wired Cobra Redis journey and write refusal
+        run: go test -race ./apps/datatugapp/commands -run '^TestQueryRedis' -count=1 -v
+        env:
+          REDIS_TEST_URL: redis://localhost:6379/0

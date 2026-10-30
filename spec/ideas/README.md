@@ -15,9 +15,12 @@ The Idea format follows [SpecScore](https://specscore.md/idea-specification).
 | [cross-engine-db-copy](cross-engine-db-copy.md) | Approved | 2026-05-12 | alex | — |
 | [db-copy-filtering](db-copy-filtering.md) | Approved | 2026-05-14 | alex | — |
 | [db-snapshot-command](db-snapshot-command.md) | Approved | 2026-05-14 | alex | — |
+| [mcp-apps-adapter](mcp-apps-adapter.md) | Implemented | 2026-10-23 | alex | mcp-apps-adapter |
 | [mutation-git-integration](mutation-git-integration.md) | Implemented | 2026-06-04 | alex | mutation-git-integration |
 | [semantic-metadata-cli](semantic-metadata-cli.md) | Implemented | 2026-06-04 | alex | cli/entity |
 | [shared-module-system](shared-module-system.md) | Approved | 2026-06-04 | alex | — |
+| [terminal-chat-ux-acceptance](terminal-chat-ux-acceptance.md) | Draft | 2026-09-23 | alex | — |
+| [tview-to-bubbletea-migration](tview-to-bubbletea-migration.md) | Draft | 2026-09-29 | alex | — |
 
 ## Open Questions
 

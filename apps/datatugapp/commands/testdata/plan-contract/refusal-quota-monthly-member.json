@@ -1,0 +1,23 @@
+{
+  "error": {
+    "code": "quota",
+    "message": "A full sentence for a person: what happened and what to do."
+  },
+  "limit": {
+    "v": 1,
+    "reason": "monthly",
+    "capped": false,
+    "unit": "questions",
+    "payer": "organisation",
+    "accountId": "t4Bq9",
+    "accountTitle": "Example Team",
+    "plan": "team",
+    "used": 13,
+    "limit": 13,
+    "left": 0,
+    "resetsAt": "2026-04-01T00:00:00Z",
+    "ownKeyWorks": true,
+    "canUpgrade": false,
+    "upgradeUrl": "https://example.com/pricing"
+  }
+}

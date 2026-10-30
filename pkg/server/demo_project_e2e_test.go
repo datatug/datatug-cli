@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/api"
@@ -26,15 +27,9 @@ const (
 	demoProjectDirEnvVar  = "DATATUG_DEMO_PROJECT_DIR"
 	demoProjectID         = "datatug-demo-project"
 	demoProjectEnv        = "local"
-	// demoProjectSource is the "chinook" DbModel/source id
-	// datatug-demo-projects/demo-project-1's own environments/local/
-	// catalogs/chinook-local/chinook-local.db.json declares
-	// (dbModel:"chinook") and its entities/Customer/Customer.entity.json
-	// maps Customer.ID's Mappings to (source:"chinook", ...) — see
-	// pkg/api/resolver.go's ResolvedSource doc comment for why the stable
-	// DbModel, not the environment-specific catalog id "chinook-local", is
-	// the appendix's SourceRef.source.
-	demoProjectSource = "chinook"
+	// Query requests name the authorized catalog target in this environment.
+	// The catalog's DbModel and entity mappings separately use "chinook".
+	demoProjectSource = "chinook-local"
 )
 
 // resolveDemoProjectDir returns the real demo-project-1 checkout to copy
@@ -82,6 +77,20 @@ func copyDemoProjectToTempDir(t *testing.T, srcDir string) string {
 		if readErr != nil {
 			return readErr
 		}
+		if strings.HasSuffix(rel, ".query.json") {
+			var definition map[string]json.RawMessage
+			if err := json.Unmarshal(data, &definition); err != nil {
+				return err
+			}
+			if _, exists := definition["createdAt"]; !exists {
+				// This historic demo fixture predates mandatory creation metadata.
+				definition["createdAt"] = json.RawMessage(`"2026-01-01T00:00:00Z"`)
+				data, err = json.Marshal(definition)
+				if err != nil {
+					return err
+				}
+			}
+		}
 		return os.WriteFile(filepath.Join(dstDir, rel), data, 0o644)
 	})
 	if err != nil {
@@ -90,12 +99,62 @@ func copyDemoProjectToTempDir(t *testing.T, srcDir string) string {
 	return dstDir
 }
 
+// chinookFixturePath is the real Chinook data pkg/dbcopy's own tests already
+// commit to the repo (byte-identical to a `datatug demo`-fetched
+// ~/datatug/dbs/chinook-local.sqlite — verified while building this fixture
+// wiring: both files hash to 9ebece0dad4a7ee91b9ce97a12c04e26). Every
+// invoice ID and genre/track number this file's tests assert against
+// (TestDemoProject_RunQuery_RealParameterEffect's disjoint InvoiceId sets,
+// TestDemoProject_RunQuery_SQL_RealParameterEffect_WithGrant's Rock
+// TracksPurchased counts) came from querying this exact fixture, not a
+// `datatug demo` download — so using it here keeps these two tests exactly
+// as "real dataset, real driver" as they were, without depending on
+// anything under a real developer's home directory.
+const chinookFixturePath = "../dbcopy/testdata/chinook.db"
+
+// installLocalChinookFixture points projectDir's local-environment chinook
+// catalog at a private copy of chinookFixturePath instead of the
+// "~/datatug/dbs/chinook-local.sqlite" committed demo-project-1 ships with
+// (a path meant for a real user who has run `datatug demo`; resolving it
+// through a temp HOME, as every hermetic test in this module now does,
+// finds nothing there). Both tests in this file only exercise the "local"
+// environment (demoProjectEnv), so the "prod" catalog is left untouched.
+func installLocalChinookFixture(t *testing.T, projectDir string) {
+	t.Helper()
+	src, err := os.ReadFile(chinookFixturePath)
+	if err != nil {
+		t.Fatalf("read committed chinook fixture %s: %v", chinookFixturePath, err)
+	}
+	fixtureDir := filepath.Join(projectDir, "fixtures")
+	if err := os.MkdirAll(fixtureDir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", fixtureDir, err)
+	}
+	fixturePath := filepath.Join(fixtureDir, "chinook-local.sqlite")
+	if err := os.WriteFile(fixturePath, src, 0o644); err != nil {
+		t.Fatalf("write chinook fixture copy: %v", err)
+	}
+
+	catalogPath := filepath.Join(projectDir, "environments", "local", "catalogs", "chinook-local", "chinook-local.db.json")
+	catalog := struct {
+		Driver  string `json:"driver"`
+		Path    string `json:"path"`
+		DbModel string `json:"dbModel"`
+	}{Driver: "sqlite3", Path: fixturePath, DbModel: "chinook"}
+	encoded, err := json.MarshalIndent(catalog, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal chinook-local.db.json: %v", err)
+	}
+	if err := os.WriteFile(catalogPath, append(encoded, '\n'), 0o644); err != nil {
+		t.Fatalf("rewrite %s: %v", catalogPath, err)
+	}
+}
+
 // TestDemoProject_RunQuery_RealParameterEffect is AC:real-transport-and-
 // parameter-effect's own required proof (S64 brief item 4): "two different
 // Customer.ID values give different rows through exec/run_query against
 // the demo project, driver-bound, never textual substitution." It runs the
-// real customer-invoices DTQL query (queries/customers/customer-invoices.
-// query.dtql) through the real, rewritten POST /datatug/exec/run_query
+// real customer-invoices TugQL query (queries/customers/customer-invoices.
+// query.tugql) through the real, rewritten POST /datatug/exec/run_query
 // against a temp copy of the real demo-project-1 and its real
 // ~/datatug/dbs/chinook-local.sqlite Chinook data (resolved through the
 // project's real environments/local/catalogs/chinook-local record — the
@@ -112,6 +171,7 @@ func copyDemoProjectToTempDir(t *testing.T, srcDir string) string {
 func TestDemoProject_RunQuery_RealParameterEffect(t *testing.T) {
 	srcDir := resolveDemoProjectDir(t)
 	projectDir := copyDemoProjectToTempDir(t, srcDir)
+	installLocalChinookFixture(t, projectDir)
 
 	session, err := secureread.NewSession(secureread.SessionOptions{
 		As: "admin", Roles: []string{"admin"}, PoliciesDir: filepath.Join(projectDir, "policies"),
@@ -174,7 +234,7 @@ func TestDemoProject_RunQuery_RealParameterEffect(t *testing.T) {
 	if invoiceIDColumn < 0 {
 		t.Fatalf("customer-invoices recordset has no InvoiceId column; got %+v", resultOne.Recordset.Columns)
 	}
-	// InvoiceId comes through this real DTQL/structured-query path typed
+	// InvoiceId comes through this real TugQL/structured-query path typed
 	// "number" (a float64 driver value), not "integer": dalgo2sqlite's
 	// structured-query row scan does not preserve SQLite's declared INTEGER
 	// column affinity distinctly from REAL through condeval.ToMap — see
@@ -222,7 +282,7 @@ func TestDemoProject_RunQuery_RealParameterEffect(t *testing.T) {
 		t.Fatalf("Provenance.Source = %q, want %q", resultOne.Provenance.Source, demoProjectSource)
 	}
 	if resultOne.Provenance.ExecutionProfile != apicontract.ExecutionProfileProtected {
-		t.Fatalf("Provenance.ExecutionProfile = %q, want protected (DTQL through the policy path)", resultOne.Provenance.ExecutionProfile)
+		t.Fatalf("Provenance.ExecutionProfile = %q, want protected (TugQL through the policy path)", resultOne.Provenance.ExecutionProfile)
 	}
 }
 
@@ -263,6 +323,7 @@ func typedValueKey(v apicontract.TypedValue) string {
 func TestDemoProject_RunQuery_SQL_RealParameterEffect_WithGrant(t *testing.T) {
 	srcDir := resolveDemoProjectDir(t)
 	projectDir := copyDemoProjectToTempDir(t, srcDir)
+	installLocalChinookFixture(t, projectDir)
 
 	session, err := secureread.NewSession(secureread.SessionOptions{
 		As: "admin", Roles: []string{"admin"}, PoliciesDir: filepath.Join(projectDir, "policies"),

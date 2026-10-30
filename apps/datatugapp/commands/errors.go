@@ -1,6 +1,8 @@
 package commands
 
-import "errors"
+import (
+	"errors"
+)
 
 var (
 	//ErrUnknownProjectName signals an unknown project was requested/referred
@@ -30,6 +32,13 @@ func (e *exitError) ExitCode() int { return e.code }
 // Exit returns an error that carries a specific process exit code. Returning
 // it from a command's RunE propagates up to main, which exits with code —
 // the same contract github.com/urfave/cli/v3's cli.Exit provided.
+//
+// The message is shown as it is. A message that names a source builds the name
+// with dbcopy.SourceDisplay (or takes it from a BackendRef, whose Raw and String
+// are that), and an error from a parser or a driver is classified by dbcopy and
+// never quoted, so there is no password in the text for a redactor to find. The
+// top-level error handler in main.go still runs the text through
+// dbcopy.RedactText, as a last line of defence that nothing relies on.
 func Exit(message string, code int) error {
 	return &exitError{msg: message, code: code}
 }

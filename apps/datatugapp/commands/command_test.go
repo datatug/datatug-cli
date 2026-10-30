@@ -3,6 +3,7 @@ package commands
 import (
 	"testing"
 
+	"github.com/datatug/datatug-cli/pkg/dtlog"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -15,4 +16,12 @@ func TestWhoamiCommandIsRegistered(t *testing.T) {
 	cmd, _, err := DatatugCommand().Find([]string{"whoami"})
 	assert.NoError(t, err)
 	assert.Equal(t, "whoami", cmd.Name())
+}
+
+// `datatug --help` names the variables that turn telemetry off.
+func TestRootHelpNamesTheTelemetrySwitches(t *testing.T) {
+	help := DatatugCommand().Long
+	for _, name := range []string{dtlog.EnvTelemetry + "=0", dtlog.EnvDoNotTrack + "=1", dtlog.EnvCI + "=true", "#telemetry", "other than 1, true, on, yes"} {
+		assert.Contains(t, help, name)
+	}
 }

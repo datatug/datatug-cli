@@ -1,0 +1,41 @@
+name: Private Core dependency
+description: Mint contents-read access for the exact private Core Go dependency
+inputs:
+  private-key:
+    description: SneatReleaser App private key
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Mint exact Core read token
+      id: core
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      with:
+        client-id: Iv23li26w131Kv6u3IdM
+        private-key: ${{ inputs.private-key }}
+        owner: datatug
+        repositories: datatug-core
+        permission-contents: read
+    - name: Configure exact Core Git credential
+      shell: bash
+      env:
+        CORE_READ_TOKEN: ${{ steps.core.outputs.token }}
+      run: |
+        set -euo pipefail
+        test -n "$CORE_READ_TOKEN"
+        umask 077
+        credential_root="$RUNNER_TEMP"
+        if [ "${RUNNER_OS:-}" = Windows ]; then
+          credential_root=$(cygpath -m "$credential_root")
+        fi
+        credential_file="$credential_root/core-${GITHUB_JOB}.credentials"
+        git_config_global="$credential_root/core-${GITHUB_JOB}.gitconfig"
+        touch "$git_config_global"
+        : > "$credential_file"
+        export GIT_CONFIG_GLOBAL="$git_config_global"
+        echo "GIT_CONFIG_GLOBAL=$git_config_global" >> "$GITHUB_ENV"
+        for path in datatug/datatug-core datatug/datatug-core.git; do
+          printf 'protocol=https\nhost=github.com\npath=%s\nusername=x-access-token\npassword=%s\n\n' "$path" "$CORE_READ_TOKEN" | git credential-store --file "$credential_file" store
+        done
+        git config --global credential.https://github.com.useHttpPath true
+        git config --global --add credential.helper "store --file=\"$credential_file\""

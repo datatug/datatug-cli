@@ -15,7 +15,6 @@ All seams are package-level `var` overrides in `datatug_state.go`:
 | `filePathFn` | `datatug_state.go` | direct `getFilePath()` calls in `GetDatatugState` and `SaveState` |
 | `osOpen` | `datatug_state.go` | `os.Open(filePath)` in `GetDatatugState` |
 | `goAsync` | `datatug_state.go` | `go func()` launch in `BumpRecentProject` |
-| `appStop` | `datatug_state.go` | `global.App.Stop()` calls in `SaveCurrentScreePathSync` and `SaveState` panic guards |
 
 ## Documented gaps
 

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -80,7 +81,7 @@ func TestCompareCommandJSONAndHumanUseRealServer(t *testing.T) {
 			Columns: []apicontract.Column{{Name: "id", Type: "integer"}, {Name: "status", Type: "string"}},
 			Rows:    rows,
 		}
-		executedAt := time.Date(2026, 9, 14, 8, 0, 0, 0, time.UTC)
+		executedAt := time.Now().UTC().Add(-time.Hour)
 		snapshotRef, stored, err := store.PutSnapshot(context.Background(), ref, recordset, executedAt)
 		require.NoError(t, err)
 		require.True(t, stored)
@@ -158,14 +159,20 @@ func TestCompareCommandJSONAndHumanUseRealServer(t *testing.T) {
 	})
 }
 
+// compareProjectRuns numbers the projects of TestCompareCommandInfersLiveMappedKeyThroughRealServer.
+var compareProjectRuns atomic.Int64
+
 func TestCompareCommandInfersLiveMappedKeyThroughRealServer(t *testing.T) {
-	const projectID = "shipping"
+	// filestore.SetProjectPath keeps the folder of a project for the life of the process and
+	// panics when a project ID is given another folder, so every run of the test (under
+	// -count) is a project of its own.
+	projectID := fmt.Sprintf("shipping-%d", compareProjectRuns.Add(1))
 	projectDir := t.TempDir()
 	filestore.SetProjectPath(projectID, projectDir)
 	queryDir := filepath.Join(projectDir, "queries")
 	require.NoError(t, os.MkdirAll(queryDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(queryDir, "shipping-rate-config.query.json"), []byte(`{
-      "id":"shipping-rate-config","title":"Shipping rates","type":"DTQL",
+      "createdAt":"2026-01-01T00:00:00Z","id":"shipping-rate-config","title":"Shipping rates","type":"TugQL",
       "recordsets":[{
         "id":"rates","title":"Rates","type":"recordset",
         "primaryKey":{"name":"PK_Rate","columns":["id"]},
@@ -176,7 +183,7 @@ func TestCompareCommandInfersLiveMappedKeyThroughRealServer(t *testing.T) {
         ]
       }]
     }`), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(queryDir, "shipping-rate-config.query.dtql"), []byte("from:\n  name: Rate\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(queryDir, "shipping-rate-config.query.tugql.yaml"), []byte("from:\n  name: Rate\n"), 0o600))
 	projectStore := filestore.NewProjectStore(projectID, projectDir)
 	registerEnvironment := func(environment string, rows [][3]any) {
 		t.Helper()
@@ -217,10 +224,15 @@ func TestCompareCommandInfersLiveMappedKeyThroughRealServer(t *testing.T) {
 	api.ConfigureSecureSession(session, map[string]string{projectID: projectDir}, api.Capabilities{SnapshotPolicies: map[string]api.SnapshotProjectPolicy{
 		projectID: {Sources: map[string]api.SnapshotSourcePolicy{"shipping-rates": {Allow: true}}},
 	}})
+	// The store factory is the one of the process: the next test is given its own back.
+	previousStore := storage.NewDatatugStore
 	storage.NewDatatugStore = func(string) (storage.Store, error) {
 		return filestore.NewStore("files", map[string]string{projectID: projectDir})
 	}
-	t.Cleanup(func() { api.ConfigureSecureSession(secureread.Session{}, nil, api.Capabilities{}) })
+	t.Cleanup(func() {
+		storage.NewDatatugStore = previousStore
+		api.ConfigureSecureSession(secureread.Session{}, nil, api.Capabilities{})
+	})
 	require.NoError(t, api.ConfigureExecutionEvidence(map[string]string{projectID: projectDir}, nil, executionstore.Options{PrivateDir: t.TempDir()}))
 	t.Cleanup(func() { require.NoError(t, api.CloseExecutionEvidence()) })
 

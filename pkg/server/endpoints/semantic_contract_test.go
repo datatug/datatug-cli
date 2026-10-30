@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -206,8 +207,12 @@ func TestSemanticColumns_MissingSourceFile_SourceUnavailable(t *testing.T) {
 	if !isContractErrorCode(err, apicontract.ErrCodeSourceUnavailable, &ce) {
 		t.Fatalf("err = %v, want *contractError{Code: %s}", err, apicontract.ErrCodeSourceUnavailable)
 	}
-	if !strings.Contains(ce.Message, "chinook.sqlite") {
-		t.Errorf("message = %q, want it to name the missing path (chinook.sqlite)", ce.Message)
+	// An answer names a source by its ID only: the path of the data file is in the log.
+	if want := fmt.Sprintf("source %q", semanticTestSource); !strings.Contains(ce.Message, want) {
+		t.Errorf("message = %q, want it to name the source by its ID (%s)", ce.Message, want)
+	}
+	if strings.Contains(ce.Message, "chinook.sqlite") || strings.Contains(ce.Message, projectDir) || strings.Contains(ce.Message, string(filepath.Separator)) {
+		t.Errorf("message = %q, names the path of the data file", ce.Message)
 	}
 	if !strings.Contains(ce.Message, "datatug demo") {
 		t.Errorf("message = %q, want the `datatug demo` recovery hint", ce.Message)

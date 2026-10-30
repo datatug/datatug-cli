@@ -7,6 +7,8 @@ import (
 	"github.com/dal-go/dalgo/dbschema"
 )
 
+var coerceValueSeam = CoerceValue
+
 // CompileWhereForTable validates each predicate in group against def
 // and returns the dal.Condition slice ready to pass to QueryBuilder.Where.
 //
@@ -33,7 +35,7 @@ func CompileWhereForTable(table string, group *PredicateGroup, def *dbschema.Col
 		col := findColumn(def, p.Field)
 		// Every MVP operator takes a value (REQ:operator-vocabulary defers
 		// the null-test operators); coerce unconditionally.
-		value, err := CoerceValue(p.Value, col.Type)
+		value, err := coerceValueSeam(p.Value, col.Type)
 		if err != nil {
 			return nil, fmt.Errorf("compile --where %s.%s: %w", table, p.Field, err)
 		}

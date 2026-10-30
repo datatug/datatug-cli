@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
@@ -34,11 +35,11 @@ import (
 // compute function, so decodeContractBody's own decode path stays
 // exercised too.
 
-// runQueryTestCustomerByIDDTQL selects Customer rows by CustomerId — the
-// same "from/where" DTQL shape security_matrix_test.go's own
-// customerByIDDTQL uses (pkg/server/security_matrix_test.go), reused here
+// runQueryTestCustomerByIDTugQL selects Customer rows by CustomerId — the
+// same "from/where" TugQL shape security_matrix_test.go's own
+// customerByIDTugQL uses (pkg/server/security_matrix_test.go), reused here
 // verbatim rather than reinvented.
-const runQueryTestCustomerByIDDTQL = `from:
+const runQueryTestCustomerByIDTugQL = `from:
   name: Customer
 where:
   op: "=="
@@ -54,9 +55,9 @@ where:
 // with exactly one registered source (a copy of dbcopy's checked-in Chinook
 // SQLite fixture, under the stable source id semanticTestSource, reusing
 // copyChinookDB/registerChinookEnvironment from semantic_fixture_test.go
-// unchanged) and one real, executable saved DTQL query,
+// unchanged) and one real, executable saved TugQL query,
 // "customers/customer-invoices" (CustomerId:integer, required) — written
-// with BOTH its "<id>.query.json" metadata and "<id>.query.dtql" text
+// with BOTH its "<id>.query.json" metadata and "<id>.query.tugql.yaml" text
 // sidecar (api.LoadQueryDocument reads the sidecar directly off disk; see
 // security_matrix_test.go's own saveQuery helper for why a bare
 // datatug.ProjectStore.SaveQuery call would not be enough).
@@ -78,14 +79,14 @@ func writeRunQueryTestProject(t *testing.T) (projectDir, projectID string) {
 	queriesDir := filepath.Join(dir, "queries", "customers")
 	mustMkdirAll(t, queriesDir)
 	mustWriteFile(t, filepath.Join(queriesDir, "customer-invoices.query.json"), `{
-		"id": "customer-invoices",
+		"createdAt":"2026-01-01T00:00:00Z","id": "customer-invoices",
 		"title": "Customer invoices",
-		"type": "DTQL",
+		"type": "TugQL",
 		"parameters": [
 			{"id": "CustomerId", "type": "integer", "isRequired": true}
 		]
 	}`)
-	mustWriteFile(t, filepath.Join(queriesDir, "customer-invoices.query.dtql"), runQueryTestCustomerByIDDTQL)
+	mustWriteFile(t, filepath.Join(queriesDir, "customer-invoices.query.tugql.yaml"), runQueryTestCustomerByIDTugQL)
 
 	return dir, projectID
 }
@@ -95,8 +96,8 @@ func writeRunQueryTestProject(t *testing.T) (projectDir, projectID string) {
 func TestExecRunQuery_AdhocFixture_DecodesAndExecutes(t *testing.T) {
 	var req apicontract.ExecutionRequest
 	decodeRequestFixture(t, "execution_request_adhoc.json", &req)
-	if req.DTQL == "" {
-		t.Fatalf("fixture execution_request_adhoc.json has no dtql")
+	if req.TugQL == "" {
+		t.Fatalf("fixture execution_request_adhoc.json has no tugql")
 	}
 
 	projectDir, projectID := writeRunQueryTestProject(t)
@@ -107,16 +108,16 @@ func TestExecRunQuery_AdhocFixture_DecodesAndExecutes(t *testing.T) {
 	// catalog is semanticTestSource ("chinook"). Only the source id is
 	// substituted for execution.
 	req.Source = semanticTestSource
-	// The fixture's own dtql text used to be "select:\n  from: Customer\n" —
-	// YAML-shaped prose dal-go/dalgo's own dtql.Deserialize
-	// (pkg/secureread/executor.go's RunDTQL) rejected outright ("field select
-	// not found in type dtql.document"), a real wire-compatibility gap this
+	// The fixture's own tugql text used to be "select:\n  from: Customer\n" —
+	// YAML-shaped prose dal-go/dalgo's own tugql.Deserialize
+	// (pkg/secureread/executor.go's RunTugQL) rejected outright ("field select
+	// not found in type tugql.document"), a real wire-compatibility gap this
 	// stream's report surfaced against datatug-core v0.27.0. datatug-core
-	// v0.27.3 (datatug-core#316) replaced it with a real DTQL document — a
+	// v0.27.3 (datatug-core#316) replaced it with a real TugQL document — a
 	// Customer selection (CustomerId/FirstName/LastName/Email) filtered by a
 	// Customer.ID-named param bound "from selection", parameters/bindingOrigins
 	// populated to match — so it now parses and executes unmodified: no
-	// substitution is needed here any more, and the fixture's own dtql,
+	// substitution is needed here any more, and the fixture's own tugql,
 	// parameters and bindingOrigins all flow into computeRunQuery untouched.
 
 	result, err := computeRunQuery(context.Background(), req)
@@ -139,13 +140,10 @@ func TestExecRunQuery_AdhocFixture_DecodesAndExecutes(t *testing.T) {
 		return -1
 	}
 	row := result.Recordset.Rows[0]
-	// The Chinook SQLite driver reports CustomerId as a numeric column
-	// (fromGoValue's float64 branch, typed_value_convert.go), unlike the
-	// fixture's own declared parameter type ("integer") — the recordset
-	// column carries the driver's own observed type, not the request
-	// parameter's declared one, so this checks .Num rather than .Str.
-	if got := row[colIndex("CustomerId")].Num; got != 5 {
-		t.Errorf("CustomerId = %v, want %v", got, 5)
+	// Native SQLite integers retain their exact type through row collection
+	// and wire conversion, independently of the request parameter's type.
+	if got, want := row[colIndex("CustomerId")], apicontract.NewIntegerValue("5"); got != want {
+		t.Errorf("CustomerId = %+v, want %+v", got, want)
 	}
 	if got := row[colIndex("FirstName")].Str; got != "František" {
 		t.Errorf("FirstName = %q, want %q", got, "František")
@@ -159,7 +157,7 @@ func TestExecRunQuery_AdhocFixture_DecodesAndExecutes(t *testing.T) {
 
 	// bindingsApplied must echo the fixture's own "from selection" origin
 	// (bindingOrigins: [{parameterId: "Customer.ID", origin: "selection",
-	// factId: "f1"}]) for the one parameter it actually applied — ad-hoc DTQL
+	// factId: "f1"}]) for the one parameter it actually applied — ad-hoc TugQL
 	// has no queryDef to narrow against, so every supplied parameter is
 	// reported (bindingsApplied's own doc comment, exec_run_query.go).
 	if len(result.BindingsApplied) != 1 {
@@ -192,7 +190,7 @@ func TestExecRunQuery_SavedFixture_DecodesAndExecutes(t *testing.T) {
 	req.Project, req.Environment, req.SecurityContextID = scope.Project, scope.Environment, scope.SecurityContextID
 	// The fixture's own queryId ("customers/customer-purchases-by-genre")
 	// is a placeholder this test project does not define; substituted with
-	// its own real saved DTQL query — the same CustomerId:integer parameter
+	// its own real saved TugQL query — the same CustomerId:integer parameter
 	// shape the fixture's own parameters/bindingOrigins already supply
 	// (CustomerId=5, origin selection), left untouched.
 	req.QueryID = "customers/customer-invoices"
@@ -225,9 +223,9 @@ func TestExecRunQueryRejectsUnresolvedSourceStoreID(t *testing.T) {
 func TestExecRunQueryRejectsClientClaimedDefaultThatDoesNotMatchQuery(t *testing.T) {
 	projectDir, projectID := writeRunQueryTestProject(t)
 	mustWriteFile(t, filepath.Join(projectDir, "queries", "customers", "customer-invoices.query.json"), `{
-		"id": "customer-invoices",
+		"createdAt":"2026-01-01T00:00:00Z","id": "customer-invoices",
 		"title": "Customer invoices",
-		"type": "DTQL",
+		"type": "TugQL",
 		"parameters": [
 			{"id": "CustomerId", "type": "integer", "defaultValue": 5, "isRequired": true}
 		]
@@ -257,7 +255,11 @@ func TestRecordedSavedQueryUsesPreDispatchRevisionAndDocument(t *testing.T) {
 	req.Project, req.Environment, req.SecurityContextID = scope.Project, scope.Environment, scope.SecurityContextID
 	req.QueryID, req.Record = "customers/customer-invoices", true
 
-	result, err := computeRunQuery(context.Background(), req)
+	admitted, err := detectiveQueryRevisionLookup(projectID)(context.Background(), req.QueryID)
+	if err != nil || admitted == "" {
+		t.Fatalf("admit saved query revision: %q, %v", admitted, err)
+	}
+	result, err := computeRunQueryWithOptions(context.Background(), req, runQueryOptions{expectedQueryRevision: admitted})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,8 +271,8 @@ func TestRecordedSavedQueryUsesPreDispatchRevisionAndDocument(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.QueryRevision == "" {
-		t.Fatal("recorded saved query has no pre-dispatch revision")
+	if record.QueryRevision != admitted {
+		t.Fatalf("recorded revision %q differs from admitted %q", record.QueryRevision, admitted)
 	}
 
 	projectStore, err := api.ProjectStoreFor(projectID)
@@ -282,13 +284,51 @@ func TestRecordedSavedQueryUsesPreDispatchRevisionAndDocument(t *testing.T) {
 		t.Fatal(err)
 	}
 	original := stored.Query.Text
-	mustWriteFile(t, filepath.Join(projectDir, "queries", "customers", "customer-invoices.query.dtql"), "from:\n  name: Invoice\n")
+	mustWriteFile(t, filepath.Join(projectDir, "queries", "customers", "customer-invoices.query.tugql.yaml"), "from:\n  name: Invoice\n")
 	document, err := executionQueryDocument(projectID, req.QueryID, &stored.Query.QueryDef, string(stored.Revision))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if document != original {
 		t.Fatalf("revisioned execution document changed after load: %q, want %q", document, original)
+	}
+}
+
+func TestDetectivePinnedQueryRejectsEditBetweenAdmissionAndExecution(t *testing.T) {
+	var req apicontract.ExecutionRequest
+	decodeRequestFixture(t, "execution_request_saved.json", &req)
+	projectDir, projectID := writeRunQueryTestProject(t)
+	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
+	req.Project, req.Environment, req.SecurityContextID = scope.Project, scope.Environment, scope.SecurityContextID
+	req.QueryID, req.Record = "customers/customer-invoices", true
+	admitted, err := detectiveQueryRevisionLookup(projectID)(context.Background(), req.QueryID)
+	if err != nil || admitted == "" {
+		t.Fatalf("admission revision = %q, %v", admitted, err)
+	}
+	mustWriteFile(t, filepath.Join(projectDir, "queries", "customers", "customer-invoices.query.tugql.yaml"), "from:\n  name: Invoice\n")
+	current, err := detectiveQueryRevisionLookup(projectID)(context.Background(), req.QueryID)
+	if err != nil || current == admitted {
+		t.Fatalf("fixture edit did not change query revision: %q, %v", current, err)
+	}
+	called := false
+	original := runTugQLHook
+	runTugQLHook = func(*secureread.Executor, context.Context, string, []byte, map[string]any) (secureread.Result, error) {
+		called = true
+		return secureread.Result{}, nil
+	}
+	t.Cleanup(func() { runTugQLHook = original })
+	_, err = computeRunQueryWithOptions(context.Background(), req, runQueryOptions{expectedQueryRevision: admitted})
+	var contract *contractError
+	if !errors.As(err, &contract) || contract.Code != codeRevisionConflict || called {
+		t.Fatalf("changed query executed or lacked revision conflict: %v, dispatch=%v", err, called)
+	}
+}
+
+func TestDetectivePinnedQueryRequiresRecordedSavedQuery(t *testing.T) {
+	_, err := computeRunQueryWithOptions(context.Background(), apicontract.ExecutionRequest{QueryID: "q"}, runQueryOptions{expectedQueryRevision: "reviewed"})
+	var contract *contractError
+	if !errors.As(err, &contract) || contract.Code != apicontract.ErrCodeInvalidRequest || contract.Field != "queryId" {
+		t.Fatalf("unrecorded revision pin = %v", err)
 	}
 }
 
@@ -339,7 +379,7 @@ func postRunQuery(t *testing.T, req apicontract.ExecutionRequest) (status int, e
 
 // TestExecRunQuery_InvalidRequestBodies_StatusAndCode is the brief's
 // "hand-built invalid bodies for each error code" table: every case starts
-// from a minimal valid ad-hoc-DTQL request (base()) and perturbs exactly
+// from a minimal valid ad-hoc-TugQL request (base()) and perturbs exactly
 // one field, so each failure is attributable to the one field named in
 // wantField. Several cases exist specifically to document a genuine
 // classification change from adopting req.Validate() + requestValidationError
@@ -354,7 +394,7 @@ func TestExecRunQuery_InvalidRequestBodies_StatusAndCode(t *testing.T) {
 	base := func() apicontract.ExecutionRequest {
 		return apicontract.ExecutionRequest{
 			Project: scope.Project, Environment: scope.Environment, SecurityContextID: scope.SecurityContextID,
-			Source: semanticTestSource, DTQL: runQueryTestCustomerByIDDTQL,
+			Source: semanticTestSource, TugQL: runQueryTestCustomerByIDTugQL,
 			Parameters: map[string]apicontract.TypedValueOrSet{}, BindingOrigins: []apicontract.BindingOriginEntry{},
 			Mode: apicontract.ProvenanceModeLive,
 		}
@@ -415,25 +455,25 @@ func TestExecRunQuery_InvalidRequestBodies_StatusAndCode(t *testing.T) {
 			wantStatus: http.StatusBadRequest, wantCode: apicontract.ErrCodeMissingParameter, wantField: "snapshotId",
 		},
 		{
-			name: "neither queryId nor dtql (exclusivity violation now classifies MISSING_PARAMETER, not the deleted check's INVALID_REQUEST)",
+			name: "neither queryId nor tugql (exclusivity violation now classifies MISSING_PARAMETER, not the deleted check's INVALID_REQUEST)",
 			build: func() apicontract.ExecutionRequest {
 				req := base()
-				req.DTQL = ""
+				req.TugQL = ""
 				return req
 			},
-			wantStatus: http.StatusBadRequest, wantCode: apicontract.ErrCodeMissingParameter, wantField: "queryId/dtql",
+			wantStatus: http.StatusBadRequest, wantCode: apicontract.ErrCodeMissingParameter, wantField: "queryId/tugql",
 		},
 		{
-			name: "both queryId and dtql set (same exclusivity message, same classification)",
+			name: "both queryId and tugql set (same exclusivity message, same classification)",
 			build: func() apicontract.ExecutionRequest {
 				req := base()
 				req.QueryID = "customers/customer-invoices"
 				return req
 			},
-			wantStatus: http.StatusBadRequest, wantCode: apicontract.ErrCodeMissingParameter, wantField: "queryId/dtql",
+			wantStatus: http.StatusBadRequest, wantCode: apicontract.ErrCodeMissingParameter, wantField: "queryId/tugql",
 		},
 		{
-			name: "dtql set with an empty source (now INVALID_REQUEST, was MISSING_PARAMETER from the deleted resolveExecutionSource check)",
+			name: "tugql set with an empty source (now INVALID_REQUEST, was MISSING_PARAMETER from the deleted resolveExecutionSource check)",
 			build: func() apicontract.ExecutionRequest {
 				req := base()
 				req.Source = ""
@@ -563,7 +603,7 @@ func writeQueryIDConventionTestProject(t *testing.T) (projectDir, projectID stri
 	writeMinimalQuery := func(folder string) {
 		queriesDir := filepath.Join(dir, "queries", folder)
 		mustMkdirAll(t, queriesDir)
-		mustWriteFile(t, filepath.Join(queriesDir, "q.query.json"), `{"id":"q","type":"DTQL"}`)
+		mustWriteFile(t, filepath.Join(queriesDir, "q.query.json"), `{"createdAt":"2026-01-01T00:00:00Z","id":"q","type":"TugQL"}`)
 	}
 	writeMinimalQuery("x")
 	writeMinimalQuery("y")

@@ -21,8 +21,13 @@ type ContextReference struct {
 }
 
 type ProjectObject struct {
-	Reference ContextReference
-	Columns   []string
+	Reference   ContextReference
+	Columns     []string
+	ColumnTypes map[string]string
+	PrimaryKey  []string // authoritative physical key columns in key order
+	QueryType   string   // saved query metadata, shown locally in Project explorer
+	QueryText   string   // loaded query document, not included in model context
+	Issue       string   // local metadata load error; never included in agent context
 }
 
 type ProjectCatalog struct {
@@ -74,6 +79,7 @@ type WorkspaceState struct {
 	Docks              []Dock                   `json:"docks,omitempty"`
 	CurrentSelectionID string                   `json:"currentSelectionId,omitempty"`
 	ActiveTab          string                   `json:"activeTab,omitempty"`
+	ExportBucket       []string                 `json:"exportBucket,omitempty"`
 }
 
 type WorkspaceAction struct {
@@ -109,6 +115,28 @@ func (w WorkspaceState) apply(session ChatSession, catalog ProjectCatalog, a Wor
 		w.Selections = map[string]Selection{}
 	}
 	switch a.Kind {
+	case "bucket_add":
+		if _, ok := session.RecordSets[a.RecordSetID]; !ok {
+			return w, ContextReference{}, fmt.Errorf("RecordSet is not in this session")
+		}
+		for _, id := range w.ExportBucket {
+			if id == a.RecordSetID {
+				return w, ContextReference{}, nil
+			}
+		}
+		w.ExportBucket = append(w.ExportBucket, a.RecordSetID)
+		return w, ContextReference{}, nil
+	case "bucket_remove":
+		for i, id := range w.ExportBucket {
+			if id == a.RecordSetID {
+				w.ExportBucket = append(w.ExportBucket[:i:i], w.ExportBucket[i+1:]...)
+				return w, ContextReference{}, nil
+			}
+		}
+		return w, ContextReference{}, fmt.Errorf("RecordSet is not in the export bucket")
+	case "bucket_clear":
+		w.ExportBucket = nil
+		return w, ContextReference{}, nil
 	case "select":
 		return w.selectRows(session, a)
 	case "sort_view":
@@ -172,6 +200,9 @@ func (w WorkspaceState) apply(session ChatSession, catalog ProjectCatalog, a Wor
 			}
 		}
 		return w, ContextReference{}, fmt.Errorf("%s is not attached", a.Reference.Title)
+	case "detach_all":
+		w.Attachments = nil
+		return w, ContextReference{}, nil
 	case "dock":
 		if a.Reference.ObjectID == "" && w.CurrentSelectionID != "" {
 			if selection, ok := w.Selections[w.CurrentSelectionID]; ok {

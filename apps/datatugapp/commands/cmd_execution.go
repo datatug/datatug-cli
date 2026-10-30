@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/datatug/datatug-cli/pkg/agentaccess"
 	"io"
 	"net/http"
 	"net/url"
@@ -13,7 +14,6 @@ import (
 	"time"
 
 	"github.com/datatug/datatug-core/pkg/apicontract"
-	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/spf13/cobra"
 )
 
@@ -114,7 +114,7 @@ func executionShowCommand() *cobra.Command {
 			}
 			identity := record.QueryID
 			if identity == "" {
-				identity = "ad-hoc DTQL " + record.DTQLHash
+				identity = "ad-hoc TugQL " + record.TugQLHash
 			}
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "execution %s\n%s\n%s / %s\nrows: %d\nfingerprint: %s\n", record.Ref.ExecutionID, identity, record.Scope.Project, record.Scope.Environment, record.RowCount, record.ResultFingerprint)
 			return nil
@@ -144,7 +144,7 @@ type executionClient struct {
 func newExecutionClient(cmd *cobra.Command) (executionClient, executionScope, error) {
 	agent, _ := cmd.Flags().GetString(executionAgentFlag)
 	if agent == "" {
-		settings, err := dtconfig.GetSettings()
+		settings, err := agentLoadSettings()
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return executionClient{}, executionScope{}, err
 		}
@@ -176,6 +176,7 @@ func (c executionClient) get(ctx context.Context, path string, target any) ([]by
 	if err != nil {
 		return nil, err
 	}
+	agentaccess.Apply(request)
 	response, err := c.client.Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("DataTug agent request: %w", err)

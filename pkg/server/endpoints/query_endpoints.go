@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"sort"
 	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/personalqueries"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
@@ -17,6 +19,7 @@ import (
 )
 
 var getQuery = api.GetQuery
+var loadModuleQueriesHook = loadModuleQueries
 
 // getQueriesHandler is GET /datatug/queries/all_queries — restored on top of
 // the current datatug-core v0.27.3 QueryDef/QueriesFolder models (Task 17,
@@ -116,7 +119,8 @@ func parseQueriesRoot(q url.Values) (string, error) {
 	case queriesRootShared, queriesRootPersonal:
 		return root, nil
 	default:
-		return "", fmt.Errorf("%w: must be %q or %q, got %q", ErrInvalidQueriesRoot, queriesRootShared, queriesRootPersonal, root)
+		// The value is not quoted: it is what the client wrote.
+		return "", fmt.Errorf("%w: must be %q or %q", ErrInvalidQueriesRoot, queriesRootShared, queriesRootPersonal)
 	}
 }
 
@@ -126,19 +130,33 @@ func parseQueriesRoot(q url.Values) (string, error) {
 // business-logic functions' signatures (e.g. computeSemanticApplicable) —
 // loadModuleQueries itself does no I/O that needs cancellation (a plain
 // filepath.WalkDir), so it is not threaded through further.
-func getAllQueries(_ context.Context, ref dto.ProjectRef) (*datatug.QueriesFolder, error) {
+func getAllQueries(ctx context.Context, ref dto.ProjectRef) (*datatug.QueriesFolder, error) {
 	if err := ref.Validate(); err != nil {
 		return nil, err
 	}
 	projectDir, ok := api.ProjectDir(ref.ProjectID)
 	if !ok {
-		return nil, fmt.Errorf("%w: unknown project %q", api.ErrQueryNotFound, ref.ProjectID)
+		return nil, fmt.Errorf("%w: unknown project %q", api.ErrQueryNotFound, dbcopy.SourceIDDisplay(ref.ProjectID))
 	}
-	queries, canonicalIDs, err := loadModuleQueries(projectDir)
+	queries, canonicalIDs, err := loadModuleQueriesHook(projectDir)
 	if err != nil {
-		return nil, err
+		return nil, queriesNotLoaded(ref.ProjectID, err)
 	}
-	return buildQueriesFolderTree(queries, canonicalIDs, datatug.RootSharedFolderName), nil
+	declared, err := api.DeclaredProjectQueryFolders(ctx, ref)
+	if err != nil {
+		return nil, queriesNotLoaded(ref.ProjectID, err)
+	}
+	return buildQueriesFolderTree(queries, canonicalIDs, datatug.RootSharedFolderName, declared...), nil
+}
+
+// queriesNotLoaded is the answer for the queries of a project that cannot be loaded (listed,
+// read or parsed): one sentence built from the ID of the project, as it may be shown (see
+// dbcopy.SourceIDDisplay), and from nothing the cause said, which quotes the path of a folder
+// of queries. The cause goes to the log of the server.
+func queriesNotLoaded(projectID string, cause error) error {
+	shown := dbcopy.SourceIDDisplay(projectID)
+	log.Printf("queries of project %q could not be loaded: %s", shown, dbcopy.RedactText(cause.Error()))
+	return fmt.Errorf("queries of project %q could not be loaded", shown)
 }
 
 // getPersonalQueries loads the serving principal's own personal root
@@ -179,7 +197,7 @@ func getPersonalQueries(_ context.Context, ref dto.ProjectRef) (*datatug.Queries
 	// opened is 404 for root=personal too (not an empty folder read from
 	// whatever ~/.datatug/projects/<id>/ happens to hold), whoever asks.
 	if _, ok := api.ProjectDir(ref.ProjectID); !ok {
-		return nil, fmt.Errorf("%w: unknown project %q", api.ErrQueryNotFound, ref.ProjectID)
+		return nil, fmt.Errorf("%w: unknown project %q", api.ErrQueryNotFound, dbcopy.SourceIDDisplay(ref.ProjectID))
 	}
 	principalID := api.SecurePrincipalID()
 	rootID := datatug.RootUserFolderPrefix + principalID
@@ -196,9 +214,9 @@ func getPersonalQueries(_ context.Context, ref dto.ProjectRef) (*datatug.Queries
 	if err != nil {
 		return nil, err
 	}
-	queries, canonicalIDs, err := loadModuleQueries(personalProjectDir)
+	queries, canonicalIDs, err := loadModuleQueriesHook(personalProjectDir)
 	if err != nil {
-		return nil, err
+		return nil, queriesNotLoaded(ref.ProjectID, err)
 	}
 	return buildQueriesFolderTree(queries, canonicalIDs, rootID), nil
 }
@@ -212,7 +230,7 @@ func getPersonalQueries(_ context.Context, ref dto.ProjectRef) (*datatug.Queries
 // — datatug.RootSharedFolderName ("~") for getAllQueries' shared tree, or
 // a personal root's "user:<principalID>" for getPersonalQueries; every
 // other (sub)folder's ID is its own directory name.
-func buildQueriesFolderTree(queries []*datatug.QueryDef, canonicalIDs map[*datatug.QueryDef]string, rootID string) *datatug.QueriesFolder {
+func buildQueriesFolderTree(queries []*datatug.QueryDef, canonicalIDs map[*datatug.QueryDef]string, rootID string, declared ...string) *datatug.QueriesFolder {
 	root := &datatug.QueriesFolder{ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: rootID}}}
 	folders := map[string]*datatug.QueriesFolder{"": root}
 	var ensureFolder func(path string) *datatug.QueriesFolder
@@ -234,6 +252,9 @@ func buildQueriesFolderTree(queries []*datatug.QueryDef, canonicalIDs map[*datat
 		folderPath, _ := splitCanonicalQueryID(canonicalIDs[q])
 		f := ensureFolder(folderPath)
 		f.Items = append(f.Items, q)
+	}
+	for _, folder := range declared {
+		ensureFolder(folder)
 	}
 	sortQueriesFolderTree(root)
 	return root
@@ -297,9 +318,6 @@ func updateQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	saveProjectItem(lw, r, &ref, &request, saveFunc)
 }
-
-// deleteQuery handles delete query endpoint
-var deleteQuery = legacyQueryDelete(api.DeleteQuery)
 
 // legacyQueryDelete is deleteProjItem(del) answering through
 // legacyQueryWriteResponse.

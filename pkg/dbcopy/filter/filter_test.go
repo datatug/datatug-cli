@@ -8,6 +8,7 @@ import (
 )
 
 func TestDirectives_IsEmpty(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		d    *Directives
@@ -31,8 +32,26 @@ func TestDirectives_IsEmpty(t *testing.T) {
 	}
 }
 
+func TestDirectives_HasRowFilters(t *testing.T) {
+	t.Parallel()
+	var nilDir *Directives
+	if nilDir.HasRowFilters() {
+		t.Fatal("nil Directives should not have row filters")
+	}
+	if (&Directives{IncludeTables: []string{"users"}}).HasRowFilters() {
+		t.Fatal("IncludeTables-only Directives should not have row filters")
+	}
+	if !(&Directives{Where: map[string]*PredicateGroup{"users": {}}}).HasRowFilters() {
+		t.Fatal("Where Directives should have row filters")
+	}
+	if !(&Directives{LimitsByTable: map[string]int{"users": 5}}).HasRowFilters() {
+		t.Fatal("LimitsByTable Directives should have row filters")
+	}
+}
+
 // TestPreValidate_PerTableColumns covers the PerTableColumns mutex loop.
 func TestPreValidate_PerTableColumns(t *testing.T) {
+	t.Parallel()
 	t.Run("nil rule is skipped", func(t *testing.T) {
 		d := &Directives{PerTableColumns: map[string]*ColumnRule{"t": nil}}
 		if err := d.PreValidate(); err != nil {
@@ -71,6 +90,7 @@ func refs(names ...string) []dal.CollectionRef {
 
 // TestApplyTableFilter covers all branches of ApplyTableFilter.
 func TestApplyTableFilter(t *testing.T) {
+	t.Parallel()
 	t.Run("empty directives fast-path", func(t *testing.T) {
 		in := refs("users", "orders")
 		got, err := ApplyTableFilter(in, &Directives{})

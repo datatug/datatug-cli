@@ -1,28 +1,14 @@
+// Package awsui is the Amazon Web Services viewer.
 package awsui
 
 import (
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers/clouds"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 )
 
 const viewerID dtviewers.ViewerID = "aws"
 
-// registerViewer is a seam so tests can intercept viewer registration.
-var registerViewer = dtviewers.RegisterViewer
-
-func RegisterAsViewer() {
-	registerViewer(dtviewers.Viewer{
-		ID:          viewerID,
-		Name:        "Amazon Web Services",
-		Description: "(not implemented yet)",
-		Shortcut:    'a',
-		Action: func(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
-			return goAwsHome(&clouds.CloudContext{TUI: tui}, focusTo)
-		},
-	})
-}
-
-func goAwsHome(cContext *AwsContext, focusTo sneatnav.FocusTo) error {
-	return clouds.GoCloudPlaceholderHome(cContext, viewerID, "Amazon Web Services", "AWS is not implemented yet.", focusTo)
+// Viewer returns the AWS viewer of the Viewers list.
+func Viewer() dtviewers.Viewer {
+	return clouds.PlaceholderViewer(viewerID, "Amazon Web Services", 'a', "AWS is not implemented yet.")
 }

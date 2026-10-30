@@ -3,9 +3,9 @@ package commands
 import (
 	"errors"
 	"fmt"
+	"github.com/datatug/datatug-cli/pkg/agentaccess"
 	"log"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -22,19 +22,22 @@ import (
 )
 
 const (
-	serveHostFlag              = "host"
-	servePortFlag              = "port"
-	serveProjectFlag           = "project"
-	serveAsFlag                = "as"
-	serveRoleFlag              = "role"
-	serveGroupFlag             = "group"
-	serveAllowWritesFlag       = "allow-writes"
-	serveAllowOpaqueSQLFlag    = "allow-opaque-sql"
-	serveHTTPOfflineFlag       = "http-offline"
-	serveExecTimeoutFlag       = "exec-timeout"
-	serveEvidenceDirFlag       = "evidence-dir"
-	serveSnapshotByteCapFlag   = "snapshot-byte-cap"
-	serveSnapshotRetentionFlag = "snapshot-retention"
+	serveHostFlag               = "host"
+	servePortFlag               = "port"
+	serveProjectFlag            = "project"
+	serveAsFlag                 = "as"
+	serveRoleFlag               = "role"
+	serveGroupFlag              = "group"
+	serveAllowWritesFlag        = "allow-writes"
+	serveAllowOpaqueSQLFlag     = "allow-opaque-sql"
+	serveAllowLiveConnsFlag     = "allow-live-connections"
+	serveHTTPOfflineFlag        = "http-offline"
+	serveExecTimeoutFlag        = "exec-timeout"
+	serveEvidenceDirFlag        = "evidence-dir"
+	serveSnapshotByteCapFlag    = "snapshot-byte-cap"
+	serveSnapshotRetentionFlag  = "snapshot-retention"
+	serveDetectiveAIProfileFlag = "detective-ai-profile"
+	serveIdleTimeoutFlag        = "idle-timeout"
 )
 
 // ServeCommand executes serve consoleCommand
@@ -46,20 +49,23 @@ const serveOpenBrowserFlag = "open-browser"
 // --as/--role/--group fix the principal every policy-enforced read in this
 // process runs as (REQ:principal-selection) — see resolveServeSession.
 type serveFlags struct {
-	openBrowser       bool
-	host              string
-	port              int
-	projectDir        string
-	as                string
-	roles             []string
-	groups            []string
-	allowWrites       bool
-	allowOpaqueSQL    bool
-	httpOffline       bool
-	execTimeout       time.Duration
-	evidenceDir       string
-	snapshotByteCap   int
-	snapshotRetention time.Duration
+	openBrowser        bool
+	host               string
+	port               int
+	projectDir         string
+	as                 string
+	roles              []string
+	groups             []string
+	allowWrites        bool
+	allowOpaqueSQL     bool
+	allowLiveConns     bool
+	httpOffline        bool
+	execTimeout        time.Duration
+	evidenceDir        string
+	snapshotByteCap    int
+	snapshotRetention  time.Duration
+	detectiveAIProfile string
+	idleTimeout        time.Duration
 }
 
 func readServeFlags(cmd *cobra.Command) (serveFlags, error) {
@@ -93,6 +99,9 @@ func readServeFlags(cmd *cobra.Command) (serveFlags, error) {
 	if f.allowOpaqueSQL, err = flags.GetBool(serveAllowOpaqueSQLFlag); err != nil {
 		return f, err
 	}
+	if f.allowLiveConns, err = flags.GetBool(serveAllowLiveConnsFlag); err != nil {
+		return f, err
+	}
 	if f.httpOffline, err = flags.GetBool(serveHTTPOfflineFlag); err != nil {
 		return f, err
 	}
@@ -106,6 +115,12 @@ func readServeFlags(cmd *cobra.Command) (serveFlags, error) {
 		return f, err
 	}
 	if f.snapshotRetention, err = flags.GetDuration(serveSnapshotRetentionFlag); err != nil {
+		return f, err
+	}
+	if f.detectiveAIProfile, err = flags.GetString(serveDetectiveAIProfileFlag); err != nil {
+		return f, err
+	}
+	if f.idleTimeout, err = flags.GetDuration(serveIdleTimeoutFlag); err != nil {
 		return f, err
 	}
 	return f, nil
@@ -150,13 +165,7 @@ func resolveServeAddr(host string, port int, config dtconfig.Settings) (string, 
 // at all runs Unrestricted, defaulting the reported principal to "admin"
 // unless the caller named one explicitly.
 func resolveServeSession(projectDir string, flags serveFlags) (secureread.Session, error) {
-	policiesDir := ""
-	if projectDir != "" {
-		candidate := filepath.Join(projectDir, "policies")
-		if info, statErr := os.Stat(candidate); statErr == nil && info.IsDir() {
-			policiesDir = candidate
-		}
-	}
+	policiesDir := accesspolicies.ServePoliciesDir(projectDir)
 	hasPrincipal := flags.as != "" || len(flags.roles) > 0 || len(flags.groups) > 0
 
 	_, err := accesspolicies.Load(accesspolicies.LoadOptions{Dir: policiesDir})
@@ -181,6 +190,28 @@ func resolveServeSession(projectDir string, flags serveFlags) (secureread.Sessio
 	}
 }
 
+// unrestrictedServeLog is the startup line when no policy files were found. It names the
+// principal the session really runs as, never the (possibly empty) --as flag.
+func unrestrictedServeLog(session secureread.Session) string {
+	id := ""
+	if session.Principal != nil {
+		id, _ = session.Principal.ID.(string)
+	}
+	if id == "" {
+		id = "(roles/groups only)"
+	}
+	return "serve: no access policy files found; serving as the unrestricted principal " + id
+}
+
+// serveOpenURL and serveStartHTTP are test seams: they default to the real
+// browser opener and the real (blocking) HTTP server start.
+var (
+	serveOpenURL   = browser.OpenURL
+	serveStartHTTP = (*server.HttpServer).ServeHTTP
+	serveStateDir  = agentaccess.StateDir
+	serveWriteKey  = agentaccess.WriteKey
+)
+
 func serveCommandAction(cmd *cobra.Command, _ []string) error {
 	flags, err := readServeFlags(cmd)
 	if err != nil {
@@ -192,7 +223,7 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 		return Exit(err.Error(), exitCodeUsage)
 	}
 	if session.Unrestricted {
-		log.Printf("serve: running without access policy enforcement (principal=%v)", flags.as)
+		log.Print(unrestrictedServeLog(session))
 	} else {
 		log.Printf("serve: %d access policy document(s) loaded; serving as principal %+v", len(session.Policies), session.Principal)
 	}
@@ -227,31 +258,69 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 
 	agentURL, url := serveAgentURLs(bannerAddr(host, flags.host), port)
 
+	// Every route but a preflight and the exchange of a one-time code needs the session token.
+	// The secret lives in the state directory (mode 0600) for the CLI's own clients and for
+	// `datatug daemon url`, which mints codes from it; the link below carries one.
+	secret, err := agentaccess.NewSecret()
+	if err == nil {
+		err = serveWriteKey(serveStateDir(), port, secret)
+	}
+	if err != nil {
+		return Exit("cannot create the access key of this agent", exitCodeDatabase)
+	}
+	defer agentaccess.RemoveKey(serveStateDir(), port)
+	code, _ := agentaccess.MintCode(secret, time.Now()) // NewSecret just drew from the same source
+	if flags.idleTimeout == 0 {
+		// A hand-started server prints a link that opens. The daemon (--idle-timeout) writes its
+		// output to daemon.log, which never holds a code: `datatug daemon url` mints its links.
+		url += "#code=" + code
+	}
+
 	// Founder ruling 2026-09-09: serve never opens a browser by default; it
 	// prints the link and opens a browser only with --open-browser.
 	fmt.Printf("DataTug agent API: %s/datatug\nDataTug web UI for this agent: %s\n", agentURL, url)
 	if flags.openBrowser {
-		if err := browser.OpenURL(url); err != nil {
+		if err := serveOpenURL(url); err != nil {
 			_, _ = fmt.Printf("failed to open browser with URL=%v: %v\n", url, err)
 		}
 	}
 	httpServer := server.NewHttpServer()
+	httpServer.IdleTimeout = flags.idleTimeout
 	caps := api.Capabilities{
-		AllowWrites:        flags.allowWrites,
-		AllowOpaqueSQL:     flags.allowOpaqueSQL,
-		HTTPOffline:        flags.httpOffline,
-		ExecTimeout:        flags.execTimeout,
-		IncidentStores:     runtimeSettings.Server.IncidentStores,
-		EvidencePrivateDir: firstNonEmpty(flags.evidenceDir, runtimeSettings.Server.EvidenceDir),
-		EvidenceByteCap:    firstNonZero(flags.snapshotByteCap, runtimeSettings.Server.SnapshotByteCap),
-		EvidenceRetention:  firstNonZeroDuration(flags.snapshotRetention, runtimeSettings.Server.SnapshotRetention),
-		SnapshotPolicies:   runtimeSettings.Server.SnapshotPolicies,
+		NativeSessionDetective:      nativeContextFixtureEnabled,
+		Access:                      agentaccess.New(secret),
+		AllowWrites:                 flags.allowWrites,
+		AllowOpaqueSQL:              flags.allowOpaqueSQL,
+		AllowLiveConnections:        flags.allowLiveConns,
+		HTTPOffline:                 flags.httpOffline,
+		ExecTimeout:                 flags.execTimeout,
+		IncidentStores:              runtimeSettings.Server.IncidentStores,
+		EvidencePrivateDir:          firstNonEmpty(flags.evidenceDir, runtimeSettings.Server.EvidenceDir),
+		EvidenceByteCap:             firstNonZero(flags.snapshotByteCap, runtimeSettings.Server.SnapshotByteCap),
+		EvidenceRetention:           firstNonZeroDuration(flags.snapshotRetention, runtimeSettings.Server.SnapshotRetention),
+		SnapshotPolicies:            runtimeSettings.Server.SnapshotPolicies,
+		EnvironmentMetadataPolicies: runtimeSettings.Server.EnvironmentMetadataPolicies,
+		EnvironmentPrivateDir:       runtimeSettings.Server.EnvironmentPrivateDir,
+		EnvironmentAuthorityID:      runtimeSettings.Server.EnvironmentAuthorityID,
+	}
+	if flags.detectiveAIProfile != "" {
+		if config.AI == nil {
+			return Exit("Detective AI profile is not configured", exitCodeUsage)
+		}
+		profile, ok := config.AI.Profiles[flags.detectiveAIProfile]
+		if !ok || strings.TrimSpace(profile.Model) == "" {
+			return Exit("Detective AI profile is unknown or has no model", exitCodeUsage)
+		}
+		caps.DetectiveAIProfile = &profile
 	}
 	if caps.AllowWrites {
 		log.Printf("serve: --allow-writes set; project-mutation routes are enabled")
 	}
 	if caps.AllowOpaqueSQL {
 		log.Printf("serve: --allow-opaque-sql set; native SQL executes with opaque-privileged provenance (no row/column enforcement)")
+	}
+	if caps.AllowLiveConnections {
+		log.Printf("serve: --allow-live-connections set; routes that connect to a db server recorded in the project (the list of its databases) connect under the identity of the person who runs this server")
 	}
 	if caps.HTTPOffline {
 		log.Printf("serve: --http-offline set; every HTTP-typed saved query's live fetch fails as SOURCE_UNAVAILABLE without touching the network")
@@ -263,7 +332,7 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 		log.Printf("serve: execution snapshot sidecars use %s (default is ~/%s; override with --%s or $%s)", caps.EvidencePrivateDir, executionstore.DefaultDir, serveEvidenceDirFlag, executionstore.DirEnv)
 	}
 	// TODO: implement graceful shutdown
-	return httpServer.ServeHTTP(pathsByID, host, port, session, caps)
+	return serveStartHTTP(&httpServer, pathsByID, host, port, session, caps)
 }
 
 // serveAgentURLs returns the plain-HTTP base URL the agent listens on and the
@@ -329,10 +398,13 @@ func serveCommandArgs() *cobra.Command {
 	flags.StringArray(serveGroupFlag, nil, "Principal group, repeatable")
 	flags.Bool(serveAllowWritesFlag, false, "Enable project-mutation routes (create/save/delete project, query, board, entity, recordset rows); refused by default (api-contract.md: writes need an explicit capability)")
 	flags.Bool(serveAllowOpaqueSQLFlag, false, "Allow native SQL execution with opaque-privileged provenance (no row/column enforcement); refused by default (REQ:opaque-sql-limitation)")
+	flags.Bool(serveAllowLiveConnsFlag, false, "Allow the routes that connect to a db server recorded in the served project (GET /datatug/dbserver-databases lists the databases of a SQL Server server) to open that connection, under the identity of the person who runs this server; refused with 403 by default")
 	flags.Bool(serveHTTPOfflineFlag, false, "Make every HTTP-typed saved query's live fetch fail as SOURCE_UNAVAILABLE without touching the network, so an explicit mode:snapshot request is the only way to get rows (offline demos); off by default")
 	flags.Duration(serveExecTimeoutFlag, 0, "Per-request execution timeout for exec/run_query (default 10s, api-contract.md's configured upper bound is 30s; values above it are clamped down)")
 	flags.String(serveEvidenceDirFlag, "", "Server-private execution snapshot directory (default $"+executionstore.DirEnv+" or ~/"+executionstore.DefaultDir+")")
 	flags.Int(serveSnapshotByteCapFlag, 0, "Maximum canonical bytes retained per execution snapshot (default 2 MiB)")
 	flags.Duration(serveSnapshotRetentionFlag, 0, "Execution snapshot retention before bytes are expired (default 30 days)")
+	flags.String(serveDetectiveAIProfileFlag, "", "Named AI profile for Detective proposals; credentials remain in its configured environment variable")
+	flags.Duration(serveIdleTimeoutFlag, 0, "Exit gracefully after this long with no HTTP request (0 serves until stopped); datatug daemon uses 2h")
 	return cmd
 }

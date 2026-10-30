@@ -10,7 +10,7 @@ import (
 // queryCaptureStore is the narrow slice of datatug-core's
 // datatug.RevisionedQueriesStore (Phase 2 task 2 storage) that
 // queries/capture needs: one conditional, atomic write of a query's
-// "<id>.query.json" / "<id>.query.dtql" pair.
+// "<id>.query.json" / "<id>.query.tugql.yaml" pair.
 //
 // It is declared here in this package's own terms to keep the endpoint
 // coupled to only the released revisioned-store behavior it needs.
@@ -81,10 +81,12 @@ func (e *captureStoreError) Error() string {
 var errCaptureStoreUnavailable = errors.New("this agent build has no revisioned query store, so queries/capture cannot save; " +
 	"it needs a datatug-core release with RevisionedQueriesStore")
 
+var projectStoreFor = api.ProjectStoreFor
+
 // captureStoreFor resolves projectID's capture store. It is a variable so
 // tests can install a fake.
 var captureStoreFor = func(projectID string) (queryCaptureStore, error) {
-	projStore, err := api.ProjectStoreFor(projectID)
+	projStore, err := projectStoreFor(projectID)
 	if err != nil {
 		return nil, err
 	}

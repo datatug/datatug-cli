@@ -7,3 +7,11 @@ spec/tasks/README.md merge=specscore-index
 spec/lessons/README.md merge=specscore-index
 spec/decisions/README.md merge=specscore-index
 spec/decisions/archived/README.md merge=specscore-index
+
+.github/workflows/*.lock.yml linguist-generated=true
+
+# Module tidiness is a byte comparison; preserve LF on native Windows runners.
+go.mod text eol=lf
+go.sum text eol=lf
+*.py text eol=lf
+*.parquet binary

@@ -21,13 +21,15 @@ import (
 
 func TestExecutionCommandUsesRealAgentEndpoints(t *testing.T) {
 	const projectID = "payments"
+	fixtureTime := time.Date(2026, 9, 13, 10, 0, 0, 0, time.UTC)
 	projectDir := t.TempDir()
 	session, err := secureread.NewSession(secureread.SessionOptions{As: "alice", NoPolicies: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	api.ConfigureSecureSession(session, map[string]string{projectID: projectDir}, api.Capabilities{})
-	if err := api.ConfigureExecutionEvidence(map[string]string{projectID: projectDir}, nil, executionstore.Options{PrivateDir: t.TempDir()}); err != nil {
+	// Keep retention checks on the same clock as the stored fixture.
+	if err := api.ConfigureExecutionEvidence(map[string]string{projectID: projectDir}, nil, executionstore.Options{PrivateDir: t.TempDir(), Now: func() time.Time { return fixtureTime }}); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = api.CloseExecutionEvidence() })
@@ -40,7 +42,7 @@ func TestExecutionCommandUsesRealAgentEndpoints(t *testing.T) {
 		Columns: []apicontract.Column{{Name: "id", Type: "integer"}},
 		Rows:    [][]apicontract.TypedValue{{apicontract.NewIntegerValue("7")}},
 	}
-	snapshotRef, stored, err := store.PutSnapshot(context.Background(), ref, recordset, time.Date(2026, 9, 13, 10, 0, 0, 0, time.UTC))
+	snapshotRef, stored, err := store.PutSnapshot(context.Background(), ref, recordset, fixtureTime)
 	if err != nil || !stored {
 		t.Fatalf("PutSnapshot: stored=%v err=%v", stored, err)
 	}
@@ -50,10 +52,10 @@ func TestExecutionCommandUsesRealAgentEndpoints(t *testing.T) {
 	}
 	record := apicontract.ExecutionRecord{
 		Ref: ref, Scope: apicontract.ExecutionRecordScope{StoreID: projectID, Project: projectID, Environment: "prod"},
-		DTQLHash: strings.Repeat("1", 64), Parameters: map[string]apicontract.TypedValueOrSet{}, BindingsApplied: []apicontract.Binding{},
+		TugQLHash: strings.Repeat("1", 64), Parameters: map[string]apicontract.TypedValueOrSet{}, BindingsApplied: []apicontract.Binding{},
 		Principal: apicontract.ExecutionPrincipal{ID: "alice", Roles: []string{}, Groups: []string{}}, PolicyFingerprint: api.SecurePolicyFingerprint(),
-		ExecutedAt: "2026-09-13T10:00:00Z", Limitations: []apicontract.Limitation{},
-		Provenance:       apicontract.Provenance{Source: "sales", Collection: "orders", Mode: apicontract.ProvenanceModeLive, ObservedAt: "2026-09-13T10:00:00Z", ExecutionProfile: apicontract.ExecutionProfileProtected},
+		ExecutedAt: fixtureTime.Format(time.RFC3339), Limitations: []apicontract.Limitation{},
+		Provenance:       apicontract.Provenance{Source: "sales", Collection: "orders", Mode: apicontract.ProvenanceModeLive, ObservedAt: fixtureTime.Format(time.RFC3339), ExecutionProfile: apicontract.ExecutionProfileProtected},
 		AuthorizedFields: []apicontract.FieldAccessRef{{StoreID: projectID, Project: projectID, Environment: "prod", Source: "sales", Collection: "orders", Column: "id"}},
 		RowCount:         1, ResultFingerprint: fingerprint, SnapshotRef: snapshotRef, Measurements: []apicontract.ScalarMeasurement{},
 	}

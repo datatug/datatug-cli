@@ -4,13 +4,58 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo2sql"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 
-	_ "modernc.org/sqlite" // register the "sqlite" driver — the same one dalgo2sqlite uses
+	"modernc.org/sqlite"
 )
+
+const nativeReadOnlyDriver = "datatug-sqlite-readonly"
+
+func init() {
+	driver := &sqlite.Driver{}
+	driver.RegisterConnectionHook(installReadOnlyAuthorizer)
+	sql.Register(nativeReadOnlyDriver, driver)
+}
+
+// Every physical connection, including a replacement after cancellation, gets
+// this policy. Unlike query_only alone, SQL cannot turn the authorizer off.
+func installReadOnlyAuthorizer(conn sqlite.ExecQuerierContext, _ string) error {
+	registerer, ok := conn.(sqlite.AuthorizerRegisterer)
+	if !ok {
+		return fmt.Errorf("SQLite driver has no read-only authorizer")
+	}
+	return registerer.RegisterAuthorizer(authorizeReadOnlySQL)
+}
+
+func authorizeReadOnlySQL(action sqlite.AuthorizerActionCode, arg1, arg2, _, _ string) sqlite.AuthorizerReturnCode {
+	switch action {
+	case sqlite.AuthRead, sqlite.AuthSelect, sqlite.AuthRecursive, sqlite.AuthTransaction, sqlite.AuthSavepoint:
+		return sqlite.AuthorizerOK
+	case sqlite.AuthFunction:
+		switch strings.ToLower(arg2) {
+		case "load_extension", "writefile":
+			return sqlite.AuthorizerDeny
+		default:
+			return sqlite.AuthorizerOK
+		}
+	case sqlite.AuthPragma:
+		switch strings.ToLower(arg1) {
+		case "table_info", "table_xinfo", "index_list", "index_info", "index_xinfo", "foreign_key_list":
+			return sqlite.AuthorizerOK
+		case "query_only":
+			if arg2 == "" || strings.EqualFold(arg2, "ON") || arg2 == "1" {
+				return sqlite.AuthorizerOK
+			}
+		}
+	}
+	// Includes all writes, ATTACH, DETACH, VACUUM INTO's internal attachment,
+	// schema changes and unknown future actions.
+	return sqlite.AuthorizerDeny
+}
 
 // nativeSQLLimitation is appended to every RunNativeSQL Result the session's
 // policies govern (REQ:opaque-sql-limitation): row and column rules never
@@ -51,19 +96,17 @@ var nativeSQLLimitation = Limitation{
 // not string substitution into sqlText, so a value can never be mistaken
 // for SQL syntax).
 //
-// The SQLite session is pinned read-only at the engine level with
-// PRAGMA query_only on a dedicated, single-connection database handle, so
-// even a multi-statement injection inside sqlText cannot write — this is
-// stronger than the access-denied-by-default posture the ACL check alone
-// gives a syntactically valid but policy-forbidden write attempt.
+// SQLite opens its main file with mode=ro, retains PRAGMA query_only, and
+// installs a connection authorizer that rejects writes, attachments and
+// disabling query_only. Multi-statement SQL cannot weaken this boundary.
 //
-// Only sqlite:// sources support native SQL today: dalgo2ingitdb executes
-// only dal.StructuredQuery ("only StructuredQuery is supported"), and
-// postgres:// is not wired at all (dbcopy.ErrPostgresNotWired). A source
-// without a SQL-text execution surface fails with ErrNativeSQLUnsupported.
-// A future SQL-capable adapter for another scheme should add a read-only
-// dal.DB.RunReadonlyTransaction branch alongside this PRAGMA one, per the
-// brief's "PRAGMA query_only for SQLite; read-only tx elsewhere" design.
+// PostgreSQL, MySQL, Oracle and SQL Server sources run native SQL through
+// runServerNativeSQL. DuckDB accepts a single SELECT, opens file databases
+// read-only and initializes every physical connection with a read-only
+// transaction. Because DuckDB SELECTs can read external files and URLs,
+// native DuckDB queries require an unrestricted session. SQLite uses the
+// connection authorizer described above. Other sources without SQL text
+// execution fail with ErrNativeSQLUnsupported.
 func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, args ...dal.QueryArg) (Result, error) {
 	if !e.session.Unrestricted && !e.session.AllowOpaqueSQL {
 		return Result{}, ErrOpaqueSQLNotGranted
@@ -71,6 +114,12 @@ func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, 
 	ref, err := dbcopy.Parse(sourceURL)
 	if err != nil {
 		return Result{}, err
+	}
+	if dbcopy.IsServerScheme(ref.Scheme) {
+		return e.runServerNativeSQL(ctx, sourceURL, ref, sqlText, args)
+	}
+	if ref.Scheme == "duckdb" {
+		return e.runDuckDBNativeSQL(ctx, ref, sqlText, args)
 	}
 	if ref.Scheme != "sqlite" {
 		return Result{}, fmt.Errorf("%w: scheme %q", ErrNativeSQLUnsupported, ref.Scheme)
@@ -80,12 +129,14 @@ func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, 
 	// existence check to surface dbcopy.ErrSourceFileMissing the same way
 	// Open's sqlite branch does — see pkg/server/endpoints/exec_run_query.go
 	// and util_error_handling.go for where that maps to SOURCE_UNAVAILABLE.
-	if err := dbcopy.CheckSourceFile(ref.Path); err != nil {
+	if err := ref.CheckFile(); err != nil {
 		return Result{}, err
 	}
-	db, closeDB, err := openReadOnlySQLite(ctx, ref.Path)
+	db, sqlDB, closeDB, err := openReadOnlySQLiteDB(ctx, ref.Path)
 	if err != nil {
-		return Result{}, err
+		// The driver's own text can quote the DSN: say which source failed and
+		// keep the cause for errors.Is and errors.As (see BackendRef.OpenFailure).
+		return Result{}, ref.OpenFailure(err)
 	}
 	defer closeDB()
 
@@ -97,7 +148,32 @@ func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, 
 	if !e.session.Unrestricted {
 		result.Limitations = append(result.Limitations, nativeSQLLimitation)
 	}
+	result.ColumnOrder = selectListOrder(ctx, sqlDB, sqlText, args)
 	return result, nil
+}
+
+// selectListOrder is the column names of a SELECT in the order its select list
+// gives them. The reader hands each row over as a map, which has no order, so
+// the statement is asked once for its columns with no rows (LIMIT 0 over it,
+// on the same read-only connection). It answers nil when the text is not a
+// single query that can be wrapped (a PRAGMA, several statements); Columns
+// stays the sorted union either way.
+func selectListOrder(ctx context.Context, db *sql.DB, sqlText string, args []dal.QueryArg) []string {
+	text := strings.TrimRight(strings.TrimSpace(sqlText), "; \t\r\n")
+	bound := make([]any, len(args))
+	for i, arg := range args {
+		bound[i] = arg.Value
+		if arg.Name != "" {
+			bound[i] = sql.Named(arg.Name, arg.Value)
+		}
+	}
+	rows, err := db.QueryContext(ctx, "SELECT * FROM ("+text+") LIMIT 0", bound...)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = rows.Close() }()
+	names, _ := rows.Columns() // nil when the rows are unusable
+	return names
 }
 
 // openReadOnlySQLite opens a dedicated, single-connection *sql.DB against
@@ -109,26 +185,66 @@ func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, 
 // adapter dalgo2sqlite itself composes) reuses its tested TextQuery
 // execution and row-to-record conversion rather than re-implementing it.
 func openReadOnlySQLite(ctx context.Context, path string) (dal.DB, func(), error) {
-	sqlDB, err := sql.Open("sqlite", path)
+	db, _, closeDB, err := openReadOnlySQLiteDB(ctx, path)
+	return db, closeDB, err
+}
+
+// openReadOnlySQLiteDB is openReadOnlySQLite that also answers the raw
+// connection the dal.DB wraps.
+func openReadOnlySQLiteDB(ctx context.Context, path string) (dal.DB, *sql.DB, func(), error) {
+	// The path is handed over as a "file:" URI: a bare path with a "?" in it is read by the
+	// driver as the file before it and its parameters (see dbcopy.SQLiteFileURI).
+	sqlDB, err := sqlOpenNative(nativeReadOnlyDriver, dbcopy.SQLiteFileURIMode(path, dbcopy.SQLiteReadOnly))
 	if err != nil {
-		return nil, nil, fmt.Errorf("secureread: open sqlite %q: %w", path, err)
+		return nil, nil, nil, fmt.Errorf("secureread: open sqlite: %w", err)
 	}
 	sqlDB.SetMaxOpenConns(1) // one physical connection: PRAGMA query_only must stick to the connection every query reuses
 	if pingErr := sqlDB.PingContext(ctx); pingErr != nil {
 		_ = sqlDB.Close()
-		return nil, nil, fmt.Errorf("secureread: open sqlite %q: %w", path, pingErr)
+		return nil, nil, nil, fmt.Errorf("secureread: open sqlite: %w", pingErr)
 	}
-	if _, execErr := sqlDB.ExecContext(ctx, "PRAGMA query_only = ON"); execErr != nil {
+	if execErr := pragmaQueryOnly(ctx, sqlDB); execErr != nil {
 		_ = sqlDB.Close()
-		return nil, nil, fmt.Errorf("secureread: enable read-only session on %q: %w", path, execErr)
+		return nil, nil, nil, fmt.Errorf("secureread: enable read-only session: %w", execErr)
 	}
-	// DbOptions{} deliberately leaves StructuredQueryDialect unset:
-	// dalgo2sql's "sqlite" dialect (opted in elsewhere for protected
-	// structured reads — see dbcopy.BackendRef.OpenProtected's doc comment)
-	// only changes how a dal.StructuredQuery compiles
-	// (getReaderBaseWithDialect), and RunNativeSQL — this connection's only
-	// caller — always executes a dal.TextQuery (see RunNativeSQL above), so
-	// the option would be a no-op here even if set.
-	db := dalgo2sql.NewDatabase(sqlDB, dal.NewSchema(nil, nil), dalgo2sql.DbOptions{})
-	return db, func() { _ = sqlDB.Close() }, nil
+	// The sqlite structured-query dialect is set like on every other SQLite
+	// open in this CLI, so no structured read can reach dalgo2sql's legacy
+	// text emitter. RunNativeSQL — this connection's only caller — always
+	// executes a dal.TextQuery, which the dialect does not touch.
+	db := newNativeSQLDatabase(sqlDB, dal.NewSchema(nil, nil), dalgo2sql.DbOptions{StructuredQueryDialect: "sqlite"})
+	return db, sqlDB, func() { _ = sqlDB.Close() }, nil
+}
+
+// DuckDB native SQL uses a read-only transaction. File databases are opened
+// read-only too; in-memory sessions still allow Parquet SELECTs.
+func (e *Executor) runDuckDBNativeSQL(ctx context.Context, ref dbcopy.BackendRef, text string, args []dal.QueryArg) (Result, error) {
+	// DuckDB queries can read external files and URLs. A policy on a database
+	// cannot bound those resources, so only an operator's unrestricted session
+	// may use this native surface.
+	if !e.session.Unrestricted {
+		return Result{}, fmt.Errorf("DuckDB native SQL requires an unrestricted session because queries can read external files and URLs")
+	}
+	if ref.Path != "" {
+		if err := dbcopy.CheckSourceFile(ref.Path); err != nil {
+			return Result{}, err
+		}
+	}
+	path := ref.Path
+	if path != "" {
+		path += "?access_mode=read_only"
+	}
+	db, err := dbcopy.OpenReadOnlyDuckDB(path)
+	if err != nil {
+		return Result{}, ref.OpenFailure(err)
+	}
+	defer func() { _ = db.Close() }()
+	if err = db.ValidateReadQuery(ctx, text); err != nil {
+		return Result{}, err
+	}
+	result, err := e.runThroughPolicies(ctx, db, dal.NewTextQuery(text, nil, args...), nil)
+	if err != nil {
+		return Result{}, err
+	}
+	result.ColumnOrder = selectListOrder(ctx, db.SQLDB(), text, args)
+	return result, nil
 }

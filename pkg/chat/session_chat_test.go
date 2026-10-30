@@ -10,11 +10,11 @@ import (
 	"time"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
-	"google.golang.org/adk/v2/model"
-	"google.golang.org/genai"
+	"github.com/strongo/aichat/ai"
 )
 
 func TestFriendlyAgentErrorDoesNotExposeProviderPayload(t *testing.T) {
+	t.Parallel()
 	if got := friendlyAgentError(fmt.Errorf("chat: agent turn: %w", context.DeadlineExceeded)); got != "The AI request timed out. Please try again." {
 		t.Fatalf("timeout message = %q", got)
 	}
@@ -37,10 +37,11 @@ func (s *contextualStub) AskWithContext(_ context.Context, _, prior string) (Tur
 }
 
 func TestSessionChatRebuildsContextAfterRestartAndSwitch(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
-	firstAgent := &contextualStub{turns: []Turn{{Queries: []QueryResult{{Title: "Orders", DTQL: "from: {name: Invoice}\nlimit: 2", Result: secureread.Result{
+	firstAgent := &contextualStub{turns: []Turn{{Queries: []QueryResult{{Title: "Orders", TugQL: "from: {name: Invoice}\nlimit: 2", Result: secureread.Result{
 		Columns: []string{"InvoiceId", "CustomerId"},
 		Rows: []secureread.Row{
 			{Data: map[string]any{"InvoiceId": 412, "CustomerId": 58}},
@@ -111,6 +112,7 @@ func TestSessionChatRebuildsContextAfterRestartAndSwitch(t *testing.T) {
 }
 
 func TestSwitchIsRestoredAsMostRecentlyActiveSession(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
@@ -148,25 +150,36 @@ type blockingFinalLLM struct {
 
 func (m *blockingFinalLLM) Name() string { return "blocking-final" }
 
-func (m *blockingFinalLLM) GenerateContent(_ context.Context, _ *model.LLMRequest, _ bool) iter.Seq2[*model.LLMResponse, error] {
-	return func(yield func(*model.LLMResponse, error) bool) {
+func (m *blockingFinalLLM) Stream(_ context.Context, _ ai.ChatRequest) iter.Seq2[ai.Event, error] {
+	return func(yield func(ai.Event, error) bool) {
 		m.calls++
+		if !yield(ai.Event{Type: ai.EventStarted}, nil) {
+			return
+		}
 		if m.calls == 1 {
-			yield(&model.LLMResponse{Content: genai.NewContentFromFunctionCall("run_dtql", map[string]any{"title": "One customer", "dtql": "from: {name: Customer}\nlimit: 1"}, genai.RoleModel)}, nil)
+			call := ai.ToolCall{ID: "1", Name: toolRunTugQL, Arguments: mustJSON(map[string]any{"title": "One customer", "tugql": "from: {name: Customer}\nlimit: 1"})}
+			if !yield(ai.Event{Type: ai.EventToolCall, ToolCall: &call}, nil) {
+				return
+			}
+			yield(ai.Event{Type: ai.EventCompleted, StopReason: ai.StopReasonToolCalls}, nil)
 			return
 		}
 		close(m.entered)
 		<-m.release
-		yield(&model.LLMResponse{Content: genai.NewContentFromText("Done", genai.RoleModel)}, nil)
+		if !yield(ai.Event{Type: ai.EventTextDelta, Text: "Done"}, nil) {
+			return
+		}
+		yield(ai.Event{Type: ai.EventCompleted, StopReason: ai.StopReasonEnd}, nil)
 	}
 }
 
 func TestSuccessfulQueryIsDurableBeforeModelFinishes(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	llm := &blockingFinalLLM{entered: make(chan struct{}), release: make(chan struct{})}
 	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 5}}}}}
-	agent, err := NewADKConversation(llm, executor, "sqlite:///chinook.db", "- Customer: CustomerId")
+	agent, err := NewAIConversation(llm, executor, "sqlite:///chinook.db", "- Customer: CustomerId")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,16 +215,17 @@ func TestSuccessfulQueryIsDurableBeforeModelFinishes(t *testing.T) {
 	}
 }
 
-func TestRepeatedSuccessfulDTQLExecutionsHaveDistinctSnapshots(t *testing.T) {
+func TestRepeatedSuccessfulTugQLExecutionsHaveDistinctSnapshots(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	doc := "from: {name: Customer}\nlimit: 1"
-	call := func() *model.LLMResponse {
-		return &model.LLMResponse{Content: genai.NewContentFromFunctionCall("run_dtql", map[string]any{"dtql": doc}, genai.RoleModel)}
+	step := func(id string) scriptedStep {
+		return scriptedStep{toolCalls: []ai.ToolCall{toolCall(id, toolRunTugQL, map[string]any{"tugql": doc})}}
 	}
-	llm := &scriptedLLM{responses: []*model.LLMResponse{call(), call(), {Content: genai.NewContentFromText("Done", genai.RoleModel)}}}
+	llm := &scriptedProvider{steps: []scriptedStep{step("1"), step("2"), {text: "Done"}}}
 	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 5}}}}}
-	agent, err := NewADKConversation(llm, executor, "sqlite:///chinook.db", "- Customer: CustomerId")
+	agent, err := NewAIConversation(llm, executor, "sqlite:///chinook.db", "- Customer: CustomerId")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,8 +246,9 @@ func TestRepeatedSuccessfulDTQLExecutionsHaveDistinctSnapshots(t *testing.T) {
 }
 
 func TestSessionContextHasHardSizeLimit(t *testing.T) {
+	t.Parallel()
 	large := strings.Repeat("x", 40000)
-	record := RecordSet{ID: "rs", DTQL: large, Result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": large}}}}}
+	record := RecordSet{ID: "rs", TugQL: large, Result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": large}}}}}
 	session := ChatSession{RecordSets: map[string]RecordSet{"rs": record}, Messages: []ChatMessage{{Role: "You", Kind: "text", Text: large}, {Kind: "grid", RecordSetID: "rs"}}}
 	contextText := buildSessionContext(session)
 	if len(contextText) > maxContextChars || !strings.Contains(contextText, "truncated") {
@@ -241,15 +256,23 @@ func TestSessionContextHasHardSizeLimit(t *testing.T) {
 	}
 }
 
-func TestEmptyToolResultRestoresAsGrid(t *testing.T) {
+// TestSessionChatStreamAskPersistsSameAsAsk drives a real AIConversation
+// (StreamingConversation) through SessionChat.StreamAsk and checks the
+// persisted session -- the user message, the executed query/RecordSet, and
+// the final Turn returned by the drain func -- matches what SessionChat.Ask
+// would have committed for the same scripted turn.
+func TestSessionChatStreamAskPersistsSameAsAsk(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	path := testStorePath(t)
-	store := openTestStore(t, path, testScope())
-	llm := &scriptedLLM{responses: []*model.LLMResponse{
-		{Content: genai.NewContentFromFunctionCall("run_dtql", map[string]any{"dtql": "from: {name: Customer}\nlimit: 1"}, genai.RoleModel)},
-		{Content: genai.NewContentFromText("No matching rows", genai.RoleModel)},
+	store := openTestStore(t, testStorePath(t), testScope())
+	defer func() { _ = store.Close() }()
+	doc := "from: {name: Customer}\nlimit: 1\n"
+	llm := &scriptedProvider{steps: []scriptedStep{
+		{toolCalls: []ai.ToolCall{toolCall("1", toolRunTugQL, map[string]any{"title": "Customers", "tugql": doc})}},
+		{text: "Here you go."},
 	}}
-	agent, err := NewADKConversation(llm, &fakeExecutor{result: secureread.Result{}}, "sqlite:///chinook.db", "- Customer")
+	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 1}}}}}
+	agent, err := NewAIConversation(llm, executor, "sqlite:///chinook.db", "- Customer: CustomerId")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,20 +280,74 @@ func TestEmptyToolResultRestoresAsGrid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := chat.Ask(ctx, "Show no matches"); err != nil {
-		t.Fatal(err)
+	seq, drain := chat.StreamAsk(ctx, "show one customer")
+	var gotToolResult, gotCompleted bool
+	for event, streamErr := range seq {
+		if streamErr != nil {
+			t.Fatalf("unexpected stream error: %v", streamErr)
+		}
+		switch event.Type {
+		case ai.EventToolResult:
+			gotToolResult = true
+		case ai.EventCompleted:
+			gotCompleted = true
+		}
 	}
-	_ = store.Close()
-	reloaded := openTestStore(t, path, testScope())
-	chat, err = NewSessionChat(ctx, reloaded, &contextualStub{}, "sqlite:///chinook.db")
+	if !gotToolResult || !gotCompleted {
+		t.Fatalf("stream did not forward tool-result/completed events: toolResult=%v completed=%v", gotToolResult, gotCompleted)
+	}
+	turn, drainErr := drain()
+	if drainErr != nil {
+		t.Fatalf("drain: %v", drainErr)
+	}
+	if executor.calls != 1 || len(turn.Queries) != 1 || turn.Queries[0].Err != nil {
+		t.Fatalf("streamed turn = %+v, executor calls = %d", turn, executor.calls)
+	}
+	snapshot, err := chat.Snapshot(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	u, err := NewSessionUI(ctx, chat, "fake-model")
+	if len(snapshot.Messages) != 2 || len(snapshot.RecordSets) != 1 {
+		t.Fatalf("StreamAsk did not persist through the same path as Ask: %+v", snapshot)
+	}
+	if snapshot.Messages[0].Role != "You" || snapshot.Messages[0].Text != "show one customer" {
+		t.Fatalf("user message not persisted: %+v", snapshot.Messages[0])
+	}
+}
+
+// TestSessionChatStreamAskFallsBackForNonStreamingAgent checks that a
+// ContextualConversation which doesn't implement StreamingConversation still
+// works through StreamAsk, replaying its buffered Turn as one synthetic
+// EventTextDelta + EventCompleted pair.
+func TestSessionChatStreamAskFallsBackForNonStreamingAgent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	defer func() { _ = store.Close() }()
+	stub := &contextualStub{turns: []Turn{{Text: "buffered answer"}}}
+	chat, err := NewSessionChat(ctx, store, stub, "sqlite:///chinook.db")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(u.View().Content, "No rows returned.") {
-		t.Fatal("empty persisted grid was not rendered")
+	seq, drain := chat.StreamAsk(ctx, "hello")
+	var texts []string
+	var sawCompleted bool
+	for event, streamErr := range seq {
+		if streamErr != nil {
+			t.Fatalf("unexpected stream error: %v", streamErr)
+		}
+		if event.Type == ai.EventTextDelta {
+			texts = append(texts, event.Text)
+		}
+		if event.Type == ai.EventCompleted {
+			sawCompleted = true
+		}
+	}
+	if !sawCompleted || len(texts) != 1 || texts[0] != "buffered answer" {
+		t.Fatalf("fallback stream = texts=%v completed=%v", texts, sawCompleted)
+	}
+	turn, drainErr := drain()
+	if drainErr != nil || turn.Text != "buffered answer" {
+		t.Fatalf("drain = %+v, %v", turn, drainErr)
 	}
 }

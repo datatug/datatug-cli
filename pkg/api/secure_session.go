@@ -1,9 +1,9 @@
 package api
 
 import (
-	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"github.com/datatug/datatug-cli/pkg/agentaccess"
 	"sync"
 	"time"
 
@@ -11,7 +11,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/incidentstore"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
-	"github.com/datatug/datatug-core/pkg/storage"
+	"github.com/datatug/datatug-core/pkg/dtconfig"
 )
 
 // secureMu guards the package-level state ConfigureSecureSession sets once,
@@ -41,8 +41,24 @@ var (
 // such grant". Both default false: Phase 1's read journey is safe-by-default
 // unless an operator explicitly opts a serve process into either capability.
 type Capabilities struct {
-	AllowWrites    bool
-	AllowOpaqueSQL bool
+	// EnvironmentMetadataPolicies explicitly grants the fixed principal project metadata access.
+	EnvironmentMetadataPolicies map[string]EnvironmentMetadataPolicy
+	EnvironmentPrivateDir       string
+	EnvironmentAuthorityID      string
+
+	// Access, when set, is the agent's shared-token access: every route but a preflight and the
+	// exchange of a one-time code requires its session token (pkg/agentaccess). `datatug serve`
+	// always sets it.
+	Access      *agentaccess.Access
+	AllowWrites bool
+	// NativeSessionDetective remains opt-in until local and hosted conformance are proven.
+	NativeSessionDetective bool
+	AllowOpaqueSQL         bool
+	// AllowLiveConnections is `datatug serve --allow-live-connections`: the routes that connect
+	// to a database server that the served project records (dbserver-databases) answer 403
+	// without it. It is off by default: such a connection is made under the identity of the
+	// person who runs the server.
+	AllowLiveConnections bool
 	// HTTPOffline is `datatug serve --http-offline` (Phase 1 Task 14, item
 	// 7): when true, every HTTP-typed saved query's LIVE fetch fails as
 	// SOURCE_UNAVAILABLE without ever touching the network (see
@@ -65,13 +81,16 @@ type Capabilities struct {
 	EvidenceByteCap    int
 	EvidenceRetention  time.Duration
 	SnapshotPolicies   map[string]SnapshotProjectPolicy
+	// DetectiveAIProfile is operator-selected at serve startup. It contains
+	// only an environment-variable name for the credential, never a key.
+	DetectiveAIProfile *dtconfig.AIProfile
 }
 
 // ConfigureSecureSession wires the fixed secureread.Session `datatug serve`
 // builds once for its whole process lifetime (REQ:principal-selection) into
 // every request this process handles, and records the project-id ->
 // filesystem-directory map serve already resolved (pathsByID) so a saved
-// query's SQL/DTQL sidecar file can be located — pkg/datatug-core's
+// query's SQL/TugQL sidecar file can be located — pkg/datatug-core's
 // LoadQuery does not hydrate QueryDef.Text back from that file yet (that
 // lands with the datatug-core sidecar-read story; see loadQueryDocument).
 //
@@ -121,7 +140,7 @@ func SecurePolicyFingerprint() string {
 // credentials or identify another session").
 func newSecurityContextID() string {
 	buf := make([]byte, 16)
-	if _, err := rand.Read(buf); err != nil {
+	if _, err := randRead(buf); err != nil {
 		return "securitycontext-unavailable"
 	}
 	return hex.EncodeToString(buf)
@@ -235,13 +254,22 @@ func ProjectDir(projectID string) (string, bool) {
 	return projectDir(projectID)
 }
 
+// sessionConfigured reports whether ConfigureSecureSession has been given the set of
+// projects this process serves: a nil set is the state of a process that has not been
+// configured (a handler under test, or a command that does not serve), and an empty one is
+// a session that serves no project. Only a configured session can say which projects are
+// not served.
+func sessionConfigured() bool {
+	secureMu.RLock()
+	defer secureMu.RUnlock()
+	return projectDirs != nil
+}
+
 // ProjectStoreFor returns the datatug.ProjectStore for projectID, over the
 // same storeID convention RunQuery/ExecuteSelect already use
-// (storage.NewDatatugStore("")), for resolver calls that need one.
+// (storage.NewDatatugStore("")), for resolver calls that need one. It is
+// projectStoreForID with that store ID: a project this process does not serve is
+// refused whenever a session is configured.
 func ProjectStoreFor(projectID string) (datatug.ProjectStore, error) {
-	store, err := storage.NewDatatugStore("")
-	if err != nil {
-		return nil, err
-	}
-	return store.GetProjectStore(projectID), nil
+	return projectStoreForID("", projectID)
 }

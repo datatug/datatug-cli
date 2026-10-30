@@ -8,6 +8,7 @@ import (
 )
 
 func TestCoerceValue(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		raw     string

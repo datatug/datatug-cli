@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"io"
 	"log"
 	"net/http"
@@ -18,10 +19,12 @@ import (
 	"github.com/datatug/datatug-core/pkg/apicontract"
 )
 
+var authorizeProjectQueryWrite = api.AuthorizeProjectQueryWrite
+
 // POST queries/capture - "Save as project query" (hub datatug/datatug
 // executable-knowledge-library REQ:capture-from-exploration, Phase 2 plan
 // task 2). The browser saves a lookup it already ran as an ordinary project
-// query: a "<id>.query.json" / "<id>.query.dtql" pair, left as an
+// query: a "<id>.query.json" / "<id>.query.tugql.yaml" pair, left as an
 // uncommitted Git change, with its purpose, typed parameters and
 // source/binding provenance. No Git commit is made and no hosted team grant
 // is implied.
@@ -48,7 +51,7 @@ type capturedQuery struct {
 	Title          string                 `json:"title"`
 	Purpose        string                 `json:"purpose"`
 	Source         string                 `json:"source"`
-	DTQL           string                 `json:"dtql"`
+	TugQL          string                 `json:"tugql"`
 	Parameters     []capturedParameter    `json:"parameters"`
 	BindingOrigins []captureBindingOrigin `json:"bindingOrigins"`
 }
@@ -157,7 +160,7 @@ func rejectTrailingJSON(body []byte) error {
 //     409 STALE_CONTEXT).
 //  2. Exactly one condition, ifNoneMatch or ifMatch (400).
 //  3. The query itself (validateCapturedQuery; 400): safe folder/id,
-//     title, purpose, a registered-source-shaped id, DTQL that parses,
+//     title, purpose, a registered-source-shaped id, TugQL that parses,
 //     reads one collection and uses exactly its declared typed
 //     parameters, binding origins, no credential anywhere.
 //  4. The project is served here (404).
@@ -185,13 +188,13 @@ func computeCaptureQuery(ctx context.Context, req captureQueryRequest) (captureQ
 
 	projectDir, ok := api.ProjectDir(req.Project)
 	if !ok {
-		return captureQueryResponse{}, 0, newNotFound(fmt.Sprintf("unknown project %q", req.Project))
+		return captureQueryResponse{}, 0, newNotFound(fmt.Sprintf("unknown project %q", dbcopy.SourceIDDisplay(req.Project)))
 	}
 	operation := access.Update
 	if condition.IfNoneMatch {
 		operation = access.Insert
 	}
-	if err := api.AuthorizeProjectQueryWrite(ctx, req.Project, queryID, operation); err != nil {
+	if err := authorizeProjectQueryWrite(ctx, req.Project, queryID, operation); err != nil {
 		if errors.Is(err, secureread.ErrAccessDenied) {
 			return captureQueryResponse{}, 0, captureAccessDenied(err)
 		}
@@ -316,7 +319,7 @@ func captureAccessDenied(err error) *contractError {
 		return newAccessDenied(captureAccessDeniedMessage + ": " + denied.Reason)
 	}
 	ce := newAccessDenied(captureAccessDeniedMessage)
-	log.Printf("queries/capture: request %s: answered 403 ACCESS_DENIED: %v", ce.RequestID, err)
+	log.Printf("queries/capture: request %s: answered 403 ACCESS_DENIED: %v", ce.RequestID, dbcopy.RedactError(err))
 	return ce
 }
 
@@ -329,6 +332,6 @@ func captureInternal(err error) *contractError {
 		return newContractError(codeInternal, errCaptureStoreUnavailable.Error(), "")
 	}
 	ce := newContractError(codeInternal, "the query could not be saved; the agent log has the details", "")
-	log.Printf("queries/capture: request %s: %v", ce.RequestID, err)
+	log.Printf("queries/capture: request %s: %v", ce.RequestID, dbcopy.RedactError(err))
 	return ce
 }

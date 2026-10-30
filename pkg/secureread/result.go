@@ -62,8 +62,16 @@ type Row struct {
 // principal is allowed to see, and the limitations that applied to produce
 // them.
 type Result struct {
-	Columns     []string
+	Columns []string
+	// ColumnTypes is optional executor-owned output metadata. Derived values
+	// have types without asserting physical entity or key provenance.
+	ColumnTypes map[string]string
 	Rows        []Row
+	// ColumnOrder is the columns of a native SQL result in the order of its
+	// SELECT list, where the executor could read it; nil otherwise. Columns
+	// keeps its own order (the sorted union), which stdout documents; only
+	// the stored result files follow ColumnOrder.
+	ColumnOrder []string
 	Statistics  RecordSetStatistics
 	Limitations []Limitation
 	// Collection is the base collection a structured query actually read.

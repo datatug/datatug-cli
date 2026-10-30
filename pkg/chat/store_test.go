@@ -37,6 +37,7 @@ func testStorePath(t *testing.T) string {
 }
 
 func TestSessionStoreLifecycleAndIsolation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
@@ -95,6 +96,7 @@ func TestSessionStoreLifecycleAndIsolation(t *testing.T) {
 }
 
 func TestSessionStoreSeparatesReconfiguredSources(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	original := testScope()
@@ -108,7 +110,7 @@ func TestSessionStoreSeparatesReconfiguredSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := store.AppendTurn(ctx, session.ID, user.ID, original.Sources[original.Database], Turn{Queries: []QueryResult{{
-		DTQL:   "from: {name: Customer}\nlimit: 1",
+		TugQL:  "from: {name: Customer}\nlimit: 1",
 		Result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 5}}}},
 	}}}); err != nil {
 		t.Fatal(err)
@@ -135,6 +137,7 @@ func TestSessionStoreSeparatesReconfiguredSources(t *testing.T) {
 }
 
 func TestLegacyChatScopeMigratesOnlyMatchingSource(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	scope := testScope()
@@ -153,7 +156,7 @@ func TestLegacyChatScopeMigratesOnlyMatchingSource(t *testing.T) {
 			t.Fatal(err)
 		}
 		if _, err := store.AppendTurn(ctx, item.id, user.ID, item.source, Turn{Queries: []QueryResult{{
-			DTQL:   "from: {name: Customer}\nlimit: 1",
+			TugQL:  "from: {name: Customer}\nlimit: 1",
 			Result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 5}}}},
 		}}}); err != nil {
 			t.Fatal(err)
@@ -184,6 +187,7 @@ func TestLegacyChatScopeMigratesOnlyMatchingSource(t *testing.T) {
 }
 
 func TestRecordSetSnapshotRestoresTypedRowsWithoutQueryRerun(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
@@ -198,7 +202,7 @@ func TestRecordSetSnapshotRestoresTypedRowsWithoutQueryRerun(t *testing.T) {
 	date := time.Date(2013, 12, 22, 0, 0, 0, 0, time.UTC)
 	original := secureread.Result{Columns: []string{"InvoiceId", "InvoiceDate", "Total", "Note", "Binary"}, Rows: []secureread.Row{{Key: "k1", Data: map[string]any{"InvoiceId": int64(412), "InvoiceDate": date, "Total": 1.99, "Note": nil, "Binary": []byte{0, 255}}}}, Collection: "main.Invoice", Limitations: []secureread.Limitation{{Kind: secureread.LimitationPolicy, Note: "admin"}}}
 	doc := "from: {name: main.Invoice}\nlimit: 1"
-	turn, err := store.AppendTurn(ctx, session.ID, user.ID, "sqlite:///chinook.db", Turn{Queries: []QueryResult{{Title: "Newest invoice", DTQL: doc, Result: original}}})
+	turn, err := store.AppendTurn(ctx, session.ID, user.ID, "sqlite:///chinook.db", Turn{Queries: []QueryResult{{Title: "Newest invoice", TugQL: doc, Result: original}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,14 +217,14 @@ func TestRecordSetSnapshotRestoresTypedRowsWithoutQueryRerun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(saved.Queries) != 1 || saved.Queries[0].DTQL != doc || saved.Queries[0].OriginMessageID != user.ID {
+	if len(saved.Queries) != 1 || saved.Queries[0].TugQL != doc || saved.Queries[0].OriginMessageID != user.ID {
 		t.Fatalf("queries = %+v", saved.Queries)
 	}
 	if len(saved.Messages) != 2 || saved.Messages[1].RecordSetID != turn.Queries[0].RecordSetID {
 		t.Fatalf("messages = %+v", saved.Messages)
 	}
 	rs := saved.RecordSets[turn.Queries[0].RecordSetID]
-	if rs.DTQL != doc || rs.Source != "sqlite:///chinook.db" || rs.Database != "chinook" || rs.Environment != "local" || rs.OriginMessageID != user.ID {
+	if rs.TugQL != doc || rs.Source != "sqlite:///chinook.db" || rs.Database != "chinook" || rs.Environment != "local" || rs.OriginMessageID != user.ID {
 		t.Fatalf("provenance = %+v", rs)
 	}
 	if got := rs.Result.Rows[0].Data["InvoiceId"]; got != int64(412) {
@@ -240,7 +244,7 @@ func TestRecordSetSnapshotRestoresTypedRowsWithoutQueryRerun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := reloaded.AppendTurn(ctx, session.ID, user2.ID, "sqlite:///chinook.db", Turn{Queries: []QueryResult{{DTQL: doc, Result: original}}})
+	second, err := reloaded.AppendTurn(ctx, session.ID, user2.ID, "sqlite:///chinook.db", Turn{Queries: []QueryResult{{TugQL: doc, Result: original}}})
 	if err != nil || second.Queries[0].RecordSetID == rs.ID {
 		t.Fatalf("second ID = %+v, %v", second, err)
 	}
@@ -251,6 +255,7 @@ func TestRecordSetSnapshotRestoresTypedRowsWithoutQueryRerun(t *testing.T) {
 }
 
 func TestResultCodecPersistsStatisticsAndDerivesLegacyStatistics(t *testing.T) {
+	t.Parallel()
 	result := secureread.Result{
 		Columns: []string{"day", "total", "status"},
 		Rows: []secureread.Row{
@@ -290,6 +295,7 @@ func TestResultCodecPersistsStatisticsAndDerivesLegacyStatistics(t *testing.T) {
 }
 
 func TestResultCodecDerivesStatisticsForManualResultsWhileEncodingRows(t *testing.T) {
+	t.Parallel()
 	result := secureread.Result{
 		Columns: []string{"InvoiceDate", "Total"},
 		Rows:    []secureread.Row{{Data: map[string]any{"InvoiceDate": "2013-12-22", "Total": 1.99}}},
@@ -308,6 +314,7 @@ func TestResultCodecDerivesStatisticsForManualResultsWhileEncodingRows(t *testin
 }
 
 func TestResultCodecMarksOverflowedDateNumericSumsIncomplete(t *testing.T) {
+	t.Parallel()
 	result := secureread.Result{Columns: []string{"Timestamp", "Total"}, Rows: []secureread.Row{
 		{Data: map[string]any{"Timestamp": time.Date(2026, 9, 21, 10, 0, 0, 0, time.UTC), "Total": math.MaxFloat64}},
 		{Data: map[string]any{"Timestamp": time.Date(2026, 9, 21, 10, 0, 0, 0, time.UTC), "Total": math.MaxFloat64}},
@@ -326,6 +333,7 @@ func TestResultCodecMarksOverflowedDateNumericSumsIncomplete(t *testing.T) {
 }
 
 func TestStoreEmptyResultAndRecoveryErrors(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
@@ -337,7 +345,7 @@ func TestStoreEmptyResultAndRecoveryErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := store.AppendTurn(ctx, session.ID, user.ID, "sqlite:///test.db", Turn{Queries: []QueryResult{{DTQL: "from: {name: Customer}\nlimit: 1", Result: secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{}}}}})
+	turn, err := store.AppendTurn(ctx, session.ID, user.ID, "sqlite:///test.db", Turn{Queries: []QueryResult{{TugQL: "from: {name: Customer}\nlimit: 1", Result: secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -360,6 +368,7 @@ func TestStoreEmptyResultAndRecoveryErrors(t *testing.T) {
 }
 
 func TestStoreRestoresRealEmptyResultShape(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	session, err := store.Create(ctx, "Empty from DALgo")
@@ -370,7 +379,7 @@ func TestStoreRestoresRealEmptyResultShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := store.AppendTurn(ctx, session.ID, user.ID, "sqlite:///test.db", Turn{Queries: []QueryResult{{DTQL: "from: {name: Customer}\nlimit: 1", Result: secureread.Result{}}}})
+	turn, err := store.AppendTurn(ctx, session.ID, user.ID, "sqlite:///test.db", Turn{Queries: []QueryResult{{TugQL: "from: {name: Customer}\nlimit: 1", Result: secureread.Result{}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -384,6 +393,7 @@ func TestStoreRestoresRealEmptyResultShape(t *testing.T) {
 }
 
 func TestStoreAccessScopeAndPrivateFile(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	admin := openTestStore(t, path, testScope())
@@ -408,6 +418,7 @@ func TestStoreAccessScopeAndPrivateFile(t *testing.T) {
 }
 
 func TestInterruptedTurnRollsBackQueryAndSnapshot(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	session, err := store.Create(ctx, "Interrupted")
@@ -418,7 +429,7 @@ func TestInterruptedTurnRollsBackQueryAndSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.AppendTurn(ctx, session.ID, user.ID, "sqlite:///test.db", Turn{Queries: []QueryResult{{DTQL: "from: {name: Customer}\nlimit: 1", Result: secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": func() {}}}}}}}})
+	_, err = store.AppendTurn(ctx, session.ID, user.ID, "sqlite:///test.db", Turn{Queries: []QueryResult{{TugQL: "from: {name: Customer}\nlimit: 1", Result: secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": func() {}}}}}}}})
 	if err == nil {
 		t.Fatal("expected result serialization error")
 	}
@@ -432,6 +443,7 @@ func TestInterruptedTurnRollsBackQueryAndSnapshot(t *testing.T) {
 }
 
 func TestCorruptSnapshotPayloadIsReported(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	session, err := store.Create(ctx, "Corrupt")
@@ -442,7 +454,7 @@ func TestCorruptSnapshotPayloadIsReported(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := store.AppendTurn(ctx, session.ID, user.ID, "sqlite:///test.db", Turn{Queries: []QueryResult{{DTQL: "from: {name: Customer}\nlimit: 1", Result: secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{}}}}})
+	turn, err := store.AppendTurn(ctx, session.ID, user.ID, "sqlite:///test.db", Turn{Queries: []QueryResult{{TugQL: "from: {name: Customer}\nlimit: 1", Result: secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -467,7 +479,7 @@ func bookmarkableSelection(t *testing.T, store *SessionStore) (ChatSession, Cont
 	}
 	when := time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)
 	turn, err := store.AppendTurn(ctx, session.ID, user.ID, "sqlite:///private.db?token=secret", Turn{Queries: []QueryResult{{
-		Title: "Invoices", DTQL: "from: {name: Invoice}", SourceID: "private",
+		Title: "Invoices", TugQL: "from: {name: Invoice}", SourceID: "private",
 		Result: secureread.Result{Columns: []string{"ID", "When", "Total"}, Rows: []secureread.Row{
 			{Key: "a", Data: map[string]any{"ID": int64(1), "When": when, "Total": 1.25}},
 			{Key: "b", Data: map[string]any{"ID": int64(2), "When": when.AddDate(0, 0, 1), "Total": 2.5}},
@@ -486,6 +498,7 @@ func bookmarkableSelection(t *testing.T, store *SessionStore) (ChatSession, Cont
 }
 
 func TestBookmarkMigrationFromV2IsAtomicAndIdempotent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
@@ -504,7 +517,7 @@ func TestBookmarkMigrationFromV2IsAtomicAndIdempotent(t *testing.T) {
 	}
 	migrated := openTestStore(t, path, testScope())
 	var version int
-	if err := migrated.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil || version != 5 {
+	if err := migrated.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil || version != 9 {
 		t.Fatalf("schema version = %d, %v", version, err)
 	}
 	if _, err := migrated.db.ExecContext(ctx, `INSERT INTO bookmarks (id, project_id, scope, title, tags_json, target_kind, created_at, updated_at, snapshot_json) VALUES ('bad', ?, ?, 'bad', '[]', 'recordset', ?, ?, '{}')`, testScope().ProjectID, migrated.scope, stamp(time.Now().UTC()), stamp(time.Now().UTC())); err != nil {
@@ -513,14 +526,61 @@ func TestBookmarkMigrationFromV2IsAtomicAndIdempotent(t *testing.T) {
 	if err := migrated.Close(); err != nil {
 		t.Fatal(err)
 	}
-	// A second v5 open does not rerun or corrupt the completed migration.
+	// A second v6 open does not rerun or corrupt the completed migration.
 	reopened := openTestStore(t, path, testScope())
 	if _, err := reopened.ListBookmarks(ctx); err == nil || !strings.Contains(err.Error(), "corrupt bookmark") {
 		t.Fatalf("invalid v3 snapshot was not rejected after restart: %v", err)
 	}
 }
 
+func TestTableStylePreferenceMigratesFromV5AndSpansSessions(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := testStorePath(t)
+	store := openTestStore(t, path, testScope())
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DROP TABLE chat_preferences; PRAGMA user_version = 5`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	migrated := openTestStore(t, path, testScope())
+	first, err := migrated.Create(ctx, "First")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := migrated.SetTableStyle(ctx, "Minimal"); err != nil {
+		t.Fatal(err)
+	}
+	second, err := migrated.Create(ctx, "Second")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ID == second.ID {
+		t.Fatal("fixture sessions were not distinct")
+	}
+	if err := migrated.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened := openTestStore(t, path, testScope())
+	defer func() { _ = reopened.Close() }()
+	if style, err := reopened.TableStyle(ctx); err != nil || style != "Minimal" {
+		t.Fatalf("shared style after migration/restart = %q, %v", style, err)
+	}
+	if err := reopened.SetTableStyle(ctx, "unknown"); err == nil {
+		t.Fatal("invalid style was stored")
+	}
+}
+
 func TestJoinLineageMigrationFromV4AddsAppliedEdges(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
@@ -540,7 +600,7 @@ func TestJoinLineageMigrationFromV4AddsAppliedEdges(t *testing.T) {
 	migrated := openTestStore(t, path, testScope())
 	defer func() { _ = migrated.Close() }()
 	var version int
-	if err := migrated.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil || version != 5 {
+	if err := migrated.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil || version != 9 {
 		t.Fatalf("migrated schema version = %d, %v", version, err)
 	}
 	session, err := migrated.Create(ctx, "Join migration")
@@ -552,7 +612,7 @@ func TestJoinLineageMigrationFromV4AddsAppliedEdges(t *testing.T) {
 		t.Fatal(err)
 	}
 	edge := AppliedJoinEdge{JoinPath: "root/0", SourcePath: "root", ConstraintID: "fk_invoice_customer", Direction: "outgoing", CandidateID: "candidate", Fields: []JoinFieldPair{{"CustomerId", "CustomerId"}}}
-	query, err := migrated.AppendQuery(ctx, session.ID, user.ID, "sqlite:///fixture.db", QueryResult{Title: "Joined", DTQL: "from: {name: Invoice}\nlimit: 1", Result: secureread.Result{Columns: []string{"InvoiceId"}}, Lineage: &JoinLineage{ParentRecordSetID: "parent", CandidateID: edge.CandidateID, AppliedEdges: []AppliedJoinEdge{edge}}})
+	query, err := migrated.AppendQuery(ctx, session.ID, user.ID, "sqlite:///fixture.db", QueryResult{Title: "Joined", TugQL: "from: {name: Invoice}\nlimit: 1", Result: secureread.Result{Columns: []string{"InvoiceId"}}, Lineage: &JoinLineage{ParentRecordSetID: "parent", CandidateID: edge.CandidateID, AppliedEdges: []AppliedJoinEdge{edge}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -562,7 +622,34 @@ func TestJoinLineageMigrationFromV4AddsAppliedEdges(t *testing.T) {
 	}
 }
 
+func TestV6PreferencesMigrateWithDefaultResultVersions(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := testStorePath(t)
+	store := openTestStore(t, path, testScope())
+	if err := store.SetTableStyle(ctx, "Minimal"); err != nil {
+		t.Fatal(err)
+	}
+	_ = store.Close()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`ALTER TABLE chat_preferences DROP COLUMN result_versions_to_keep; PRAGMA user_version = 6`); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	migrated := openTestStore(t, path, testScope())
+	if count, err := migrated.ResultVersionsToKeep(ctx); err != nil || count != 2 {
+		t.Fatalf("migrated default = %d, %v", count, err)
+	}
+	if style, err := migrated.TableStyle(ctx); err != nil || style != "Minimal" {
+		t.Fatalf("existing style lost: %q, %v", style, err)
+	}
+}
+
 func TestBookmarkSelectionSurvivesOriginDeletionAndRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
@@ -613,6 +700,7 @@ func TestBookmarkSelectionSurvivesOriginDeletionAndRestart(t *testing.T) {
 }
 
 func TestBookmarkTagsAndProjectScopeIsolation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
@@ -658,6 +746,7 @@ func TestBookmarkTagsAndProjectScopeIsolation(t *testing.T) {
 }
 
 func TestBookmarkDeleteBlocksPersistedReferencesAndSaveValidatesThem(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	origin, ref := bookmarkableSelection(t, store)
@@ -684,5 +773,37 @@ func TestBookmarkDeleteBlocksPersistedReferencesAndSaveValidatesThem(t *testing.
 	}
 	if err := store.SaveWorkspace(ctx, consumer.ID, WorkspaceState{Attachments: []ContextReference{{Kind: "bookmark", ObjectID: bookmark.ID}}}); err == nil || !strings.Contains(err.Error(), "unavailable") {
 		t.Fatalf("saving deleted bookmark reference = %v", err)
+	}
+}
+
+func TestV8HTTPResponsesMigrateRequestMethod(t *testing.T) {
+	t.Parallel()
+	path := testStorePath(t)
+	store := openTestStore(t, path, testScope())
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`ALTER TABLE http_responses DROP COLUMN method; ALTER TABLE http_responses DROP COLUMN request_headers_json; PRAGMA user_version = 8`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	migrated := openTestStore(t, path, testScope())
+	defer func() { _ = migrated.Close() }()
+	var version int
+	if err := migrated.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != 9 {
+		t.Fatalf("migrated version = %d, %v", version, err)
+	}
+	var found int
+	if err := migrated.db.QueryRow(`SELECT count(*) FROM pragma_table_info('http_responses') WHERE name='method'`).Scan(&found); err != nil || found != 1 {
+		t.Fatalf("HTTP method column = %d, %v", found, err)
+	}
+	if err := migrated.db.QueryRow(`SELECT count(*) FROM pragma_table_info('http_responses') WHERE name='request_headers_json'`).Scan(&found); err != nil || found != 1 {
+		t.Fatalf("HTTP request headers column = %d, %v", found, err)
 	}
 }

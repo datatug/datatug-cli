@@ -1,0 +1,320 @@
+package dbcopy
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"net/url"
+	"os"
+	"strconv"
+	"strings"
+)
+
+// PostgresTarget is the part of a PostgreSQL connection URL that says where it
+// points. It never holds the password.
+type PostgresTarget struct {
+	Host string
+	// Port is 0 when the URL names none.
+	Port     int
+	Database string
+	User     string
+}
+
+// defaultPostgresPort is the port a PostgreSQL URL without one connects to.
+const defaultPostgresPort = 5432
+
+var (
+	errUnreadablePostgresURL = errors.New("the PostgreSQL URL cannot be read as host, port, database and user")
+
+	// errSplitPostgresPassword names the shape and the fix and quotes none of the
+	// URL: the text after the split is part of the password.
+	errSplitPostgresPassword = errors.New("the PostgreSQL URL holds a literal '@' after its host, so it is read differently from how it was written (a password that holds '/', '?' or '#' ends the host early): percent-encode '@', '/', '?' and '#' in the user name and the password, for example '/' as %2F")
+
+	// errPostgresUserHoldsColon names the shape and the fix and quotes none of the
+	// URL: the user name it refuses is most likely the user and the password
+	// joined by an encoded colon.
+	errPostgresUserHoldsColon = errors.New("the PostgreSQL URL has a user name that holds a colon (a percent-encoded ':' between the user and the password joins them into one name): write user:password with a literal colon between them")
+
+	// errPostgresUserHoldsPercent names the shape and the fix and quotes none of the
+	// URL: a user name that still holds a percent sign after the URL was decoded
+	// was encoded twice, and "alice%253Apw" decodes to "alice%3Apw", the user and the
+	// password joined by a colon that a second decoding would read.
+	errPostgresUserHoldsPercent = errors.New("the PostgreSQL URL has a user name that holds a percent sign after it is decoded (a user name or a password encoded twice, such as a percent-encoded ':' between them, joins them into one name): percent-encode the user name and the password once")
+)
+
+// queryKeysThatOverrideTheTarget are the keys of the query of a PostgreSQL URL that replace the
+// host, the port or the database that its authority and its path name (pgx applies the query after
+// them, and ParsePostgresTarget does the same; the user is replaced the same way, and is never
+// named by the line that names a source). The line that names what a command connects to is built
+// from the authority and the path, so a URL that sets one of these would name a place the command
+// does not connect to: parseURL refuses it (see targetOverrideRefusals).
+var queryKeysThatOverrideTheTarget = []string{"host", "port", "dbname", "database"}
+
+// targetOverrideRefusals holds, for each of queryKeysThatOverrideTheTarget, the refusal of a URL that
+// sets it. Each is a fixed sentence that names the key and nothing of the URL (the value is part
+// of it).
+var targetOverrideRefusals = func() map[string]error {
+	refusals := make(map[string]error, len(queryKeysThatOverrideTheTarget))
+	for _, key := range queryKeysThatOverrideTheTarget {
+		refusals[key] = errors.New("the PostgreSQL URL sets " + strconv.Quote(key) + " in its query, which the connection uses in place of the host, port or database the rest of the URL names: write the host and port in the authority and the database in the path")
+	}
+	return refusals
+}()
+
+// targetOverrideRefusal returns the refusal for the first of queryKeysThatOverrideTheTarget that
+// query sets, or nil when it sets none.
+func targetOverrideRefusal(query url.Values) error {
+	for _, key := range queryKeysThatOverrideTheTarget {
+		if query.Has(key) {
+			return targetOverrideRefusals[key]
+		}
+	}
+	return nil
+}
+
+// postgresURLRefusals are the errors parseURL returns for a URL it will not read: each a fixed
+// sentence that says what is wrong and quotes none of the URL.
+var postgresURLRefusals = func() []error {
+	refusals := []error{errSplitPostgresPassword, errPostgresUserHoldsColon, errPostgresUserHoldsPercent, errUnreadablePostgresURL}
+	for _, key := range queryKeysThatOverrideTheTarget {
+		refusals = append(refusals, targetOverrideRefusals[key])
+	}
+	return refusals
+}()
+
+// postgresURLRefusal returns the refusal of postgresURLRefusals that err is or wraps, or nil
+// when err is another error. A caller that must not show err itself (it may be about a variable's
+// value) shows the refusal.
+func postgresURLRefusal(err error) error {
+	for _, refusal := range postgresURLRefusals {
+		if errors.Is(err, refusal) {
+			return refusal
+		}
+	}
+	return nil
+}
+
+// atSignAfterAuthority reports whether rawURL holds an "@" after the end of its
+// authority, the part up to the first "/", "?" or "#". In a well-formed URL the
+// only "@" is the one that ends the userinfo, inside the authority. Another one
+// means a password whose "/", "?" or "#" ended the authority early: net/url and
+// pgx then read the front of the password as the host and a port, and the rest of
+// it as the database, the query or the fragment, which a driver error quotes.
+func atSignAfterAuthority(rawURL string) bool {
+	rest := rawURL
+	if i := strings.Index(rest, "://"); i >= 0 {
+		rest = rest[i+len("://"):]
+	}
+	end := strings.IndexAny(rest, "/?#")
+	return end >= 0 && strings.Contains(rest[end:], "@")
+}
+
+// ParsePostgresTarget reads the destination a postgres:// or postgresql:// URL
+// states: the host, port, user and database of the URL, each replaced by the
+// query parameter of the same name (host, port, user, dbname or database) when
+// there is one, as pgx applies them. It reads the URL only: what pgx takes from
+// the PG* environment variables or a service file for a part the URL leaves out
+// is not here.
+//
+// It refuses a URL with a literal "@" after the authority (see
+// atSignAfterAuthority): such a URL is not read the way it was written, and
+// refusing it is the only way to keep the rest of a password out of the host,
+// database and scope that are printed or hashed. It also refuses a user name
+// that holds a colon, however the URL spells it (see errPostgresUserHoldsColon):
+// "alice%3Apw@host" has no literal colon, so net/url reads the user "alice:pw"
+// and no password, and the password would be printed as the user, where no
+// redactor looks for a secret; and one that still holds a percent sign once it is
+// decoded (see errPostgresUserHoldsPercent), which a doubly encoded colon leaves
+// behind. No error quotes the URL, which holds the password. Parse applies the
+// same checks to every postgres source, so a source Parse accepts passes them.
+func ParsePostgresTarget(rawURL string) (PostgresTarget, error) {
+	target, _, err := parsePostgresURL(rawURL)
+	return target, err
+}
+
+// parsePostgresURL is ParsePostgresTarget that also returns the query of the URL.
+func parsePostgresURL(rawURL string) (PostgresTarget, url.Values, error) {
+	if atSignAfterAuthority(rawURL) {
+		return PostgresTarget{}, nil, errSplitPostgresPassword
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return PostgresTarget{}, nil, errUnreadablePostgresURL
+	}
+	target := PostgresTarget{
+		Host:     parsed.Hostname(),
+		Database: strings.TrimPrefix(parsed.Path, "/"),
+		User:     parsed.User.Username(),
+	}
+	query := parsed.Query()
+	for _, override := range []struct {
+		key  string
+		into *string
+	}{{"host", &target.Host}, {"user", &target.User}, {"dbname", &target.Database}, {"database", &target.Database}} {
+		if value := query.Get(override.key); value != "" {
+			*override.into = value
+		}
+	}
+	if strings.Contains(target.User, ":") {
+		return PostgresTarget{}, nil, errPostgresUserHoldsColon
+	}
+	if strings.Contains(target.User, "%") {
+		return PostgresTarget{}, nil, errPostgresUserHoldsPercent
+	}
+	port := parsed.Port()
+	if value := query.Get("port"); value != "" {
+		port = value
+	}
+	if port != "" {
+		if target.Port, err = strconv.Atoi(port); err != nil {
+			return PostgresTarget{}, nil, errUnreadablePostgresURL
+		}
+	}
+	return target, query, nil
+}
+
+// SourceScopeIdentity returns the text that stands for source in a persisted
+// scope identity, such as the key of a chat session store. It is never the display
+// form alone (SourceDisplay): that drops the user name and the query of a URL and
+// cuts a path at its "?" and "#", so two sources that are different places would
+// share a scope. And it never holds a password.
+//
+// An "env:NAME" source names a variable, and the variable can be repointed at
+// another database while its name stays: under the name alone, record sets read
+// from the old database would stay reachable in the new one. So the identity of
+// an env source is the name plus a hash of where the variable points now: for a
+// PostgreSQL URL its host, port, database and user, never the password. The
+// hash is the same for the same destination, whatever the password or the
+// connection options, and differs for any other. A part the URL leaves out is
+// what libpq's environment variables give it (PGHOST, PGPORT, PGDATABASE,
+// PGUSER and PGSERVICE), and the database is the user when nothing names one, as
+// pgx resolves them; the contents of a connection service file and the operating
+// system's user name are not part of the identity. A variable that cannot be
+// resolved is its own scope.
+//
+// A literal PostgreSQL URL is identified the same way: "postgres" and the hash of
+// where it points and as whom, so two roles on one host and database are two
+// scopes, and the spelling of the URL (the postgresql alias, the case of the host,
+// the default port) is not part of it.
+//
+// A file or a directory is identified by its whole path, with the "?" and "#"
+// the display form cuts off (a sqlite URL's query holds driver options, which can
+// include a key, and is not part of its path). When that is not the display form,
+// the identity is the display form and a hash of the whole path, so the text holds
+// nothing the display form does not. A source that Parse refuses can hold
+// credentials: its identity is its display form.
+func SourceScopeIdentity(source string) string {
+	return sourceScopeIdentity(source, os.LookupEnv)
+}
+
+func sourceScopeIdentity(source string, lookupEnv func(string) (string, bool)) string {
+	if source == "" {
+		return ""
+	}
+	ref, err := parseSource(source, lookupEnv)
+	if strings.HasPrefix(source, envPrefix) {
+		if err != nil {
+			return source + "#unresolved"
+		}
+		return source + "#" + identityDigest(destinationParts(ref, lookupEnv))
+	}
+	switch {
+	case err != nil:
+		return SourceDisplay(source)
+	case ref.Scheme == "postgres":
+		return ref.Scheme + "#" + identityDigest(destinationParts(ref, lookupEnv))
+	}
+	whole := ref.Scheme + "://" + wholeLocalPath(ref)
+	if whole == ref.Raw {
+		return whole
+	}
+	return ref.Raw + "#" + identityDigest([]string{whole})
+}
+
+// identityDigest is the hash of parts that an identity carries: 96 bits are
+// enough to tell two destinations apart.
+func identityDigest(parts []string) string {
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	return hex.EncodeToString(sum[:12])
+}
+
+// wholeLocalPath is the path ref names, as Parse kept it: a sqlite DSN is the file
+// and, after a "?", the options of the driver, which are not part of the identity.
+func wholeLocalPath(ref BackendRef) string {
+	if ref.Scheme == "sqlite" {
+		path, _, _ := strings.Cut(ref.Path, "?")
+		return path
+	}
+	return ref.Path
+}
+
+// destinationParts lists what a resolved env source points at, with no secret.
+func destinationParts(ref BackendRef, lookupEnv func(string) (string, bool)) []string {
+	if ref.Scheme == "postgres" {
+		if target, query, err := parsePostgresURL(ref.Path); err == nil {
+			return append([]string{ref.Scheme}, resolvedPostgresParts(target, query, lookupEnv)...)
+		}
+	}
+	if ref.Scheme == "postgres" {
+		// A URL that cannot be read is not known to hold a user and a password
+		// apart (a password may be the user name), so the whole userinfo is left
+		// out: the identity binds to where the URL points, never to who.
+		return []string{ref.Scheme, RedactSourceURL(maskPostgresUserinfo(ref.Path))}
+	}
+	// Whatever else the variable holds, bind to its URL with the secrets redacted.
+	return []string{ref.Scheme, RedactSourceURL(ref.Path)}
+}
+
+// maskPostgresUserinfo returns rawURL with everything in front of the last "@"
+// replaced by the redaction marker, as RedactSourceURL finds the end of a
+// userinfo (a password may hold an unescaped "@", "/" or "?"). A text with no
+// scheme or no "@" comes back unchanged.
+func maskPostgresUserinfo(rawURL string) string {
+	location := schemePrefix.FindStringIndex(rawURL)
+	if location == nil {
+		return rawURL
+	}
+	prefix, rest := rawURL[:location[1]], rawURL[location[1]:]
+	at := strings.LastIndexByte(rest, '@')
+	if at < 0 {
+		return rawURL
+	}
+	return prefix + redactedMarker + rest[at:]
+}
+
+// resolvedPostgresParts lists the host, port, database, user and service a
+// PostgreSQL URL connects to: the URL's own, or else what libpq's environment
+// variable of that part says, or else libpq's default.
+func resolvedPostgresParts(target PostgresTarget, query url.Values, lookupEnv func(string) (string, bool)) []string {
+	fromEnv := func(name string) string {
+		value, _ := lookupEnv(name)
+		return strings.TrimSpace(value)
+	}
+	host := target.Host
+	if host == "" {
+		host = fromEnv("PGHOST")
+	}
+	port := target.Port
+	if port == 0 {
+		if fromEnvPort, err := strconv.Atoi(fromEnv("PGPORT")); err == nil && fromEnvPort > 0 {
+			port = fromEnvPort
+		} else {
+			port = defaultPostgresPort
+		}
+	}
+	user := target.User
+	if user == "" {
+		user = fromEnv("PGUSER")
+	}
+	database := target.Database
+	if database == "" {
+		if database = fromEnv("PGDATABASE"); database == "" {
+			database = user
+		}
+	}
+	service := query.Get("service")
+	if service == "" {
+		service = fromEnv("PGSERVICE")
+	}
+	return []string{strings.ToLower(host), strconv.Itoa(port), database, user, service}
+}

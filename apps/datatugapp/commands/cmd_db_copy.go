@@ -1,28 +1,49 @@
 package commands
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"strings"
 
+	"github.com/dal-go/dalgo/dal"
+	bqwriter "github.com/dal-go/dalgo2bigquery"
+	"github.com/dal-go/dalgo2postgres"
+	"github.com/datatug/datatug-cli/internal/strictjson"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/dbcopy/filter"
 	"github.com/spf13/cobra"
+	"golang.org/x/oauth2/google"
 )
 
+var bqGoogleDefaultClient = google.DefaultClient
+
 // dbCopyCommand wires `datatug db copy --from <url> --to <url>` per
-// spec/features/cli/db/copy/README.md. The first slice is schema-only;
-// see the engine package doc and the upstream issues for the row-CRUD
-// follow-up.
+// spec/features/cli/db/copy/README.md.
 func dbCopyCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "copy",
-		Short: "Copy a database from one DALgo URL to another (schema-only first slice).",
-		Long:  "Replicates the source schema (collections, primary keys, indexes) to the target. Row data is not yet copied; see docs/upstream-issues/.",
-		RunE:  dbCopyAction,
+		Short: "Copy a database from one DALgo URL to another.",
+		Long: "Between SQLite and PostgreSQL (and SQLite to SQLite) the copy is faithful: tables, columns, declared types, primary keys, foreign keys with their actions, unique constraints, indexes, check constraints, defaults and auto-increment counters are carried, and every value is copied exactly (a date stays the text it was). Anything an engine cannot carry - views across engines, triggers, expression indexes, collations, a check the target does not accept - is never dropped silently: it is listed as a warning, with --json as a machine-readable summary, and with --fail-on-warning as exit code 3. --dry-run prints the plan and changes nothing. A missing SQLite target file is created. The source is read as one snapshot and the target is written in one transaction: the copy either completes or leaves the target as it was. --where, --limit, --include and --exclude copy some rows or tables, and --overwrite=reload empties the target tables and loads them again (keeping their schema) in the same transaction. A value is never changed silently (a DECIMAL_TEXT is numeric, and the values numeric spells differently are counted in a warning; --decimals=text keeps the text): a column whose values do not fit the type its declaration suggests is carried in a type that holds them, and says so. See docs/db-copy.md.\n\n" +
+			"Other pairs copy source collections and rows through DALgo adapters. A BigQuery destination uses the authenticated Google identity configured on this machine and requires an explicit dataset location. Existing BigQuery tables are never replaced. An ingitdb:// destination that does not exist yet is written as a complete native inGitDB project, staged and published only after every collection succeeded (also available as `datatug db export`); it takes ?records-format=json|jsonl|ingr|csv|yaml, --include, --exclude, --where, --limit, --dry-run, --json and --fail-on-warning. An ingitdb:// destination that exists is copied into.\n\n" +
+			"A sqlscript:///PATH.sql?dialect=mysql (or dialect=mssql, a SQL Server script run with sqlcmd, or dialect=oracle, an Oracle 23ai script run with SQL*Plus) destination (a SQLite --from only) writes a deterministic script instead of copying into a database: the same tables, keys, indexes, checks, defaults and values, every value written as a safe literal, and the same warnings, --json report, --dry-run, --fail-on-warning, --include and --exclude; it refuses to replace an existing file unless --overwrite=recreate. See docs/db-copy.md.\n\n" +
+			"A PostgreSQL (postgres://) --from is read through a read-only session, " +
+			"and a --from URL that turns the session's default_transaction_read_only off is refused. --to is the only place a PostgreSQL database is opened for writing.",
+		RunE: dbCopyAction,
 	}
 	flags := cmd.Flags()
-	flags.String("from", "", "Source DALgo URL (sqlite://, ingitdb://). Required.")
-	flags.String("to", "", "Target DALgo URL (sqlite://, ingitdb://). Required.")
+	flags.String("from", "", "Source URL (sqlite://, ingitdb://, postgres:// read-only, http(s):// DataTug project, openvaultdb://). Required.")
+	flags.String("from-schema", "", "PostgreSQL source schema to read; defaults to public.")
+	flags.String("to", "", "Target DALgo URL (sqlite://, ingitdb://, postgres://: the only way DataTug opens PostgreSQL for writing; bigquery://PROJECT/DATASET?location=LOCATION; sqlscript:///path/out.sql?dialect=mysql|mssql|oracle writes a SQL script file). Required.")
+	flags.String("to-schema", "", "PostgreSQL target schema (SQLite <-> PostgreSQL copies); defaults to public. Created when missing.")
+	flags.Bool("json", false, "SQLite <-> PostgreSQL copies: print a machine-readable summary (tables, rows, created keys and indexes, warnings, exit code) on stdout.")
+	flags.Bool("dry-run", false, "SQLite <-> PostgreSQL copies: print the plan (DDL, row counts, every warning) and change nothing; the target is not opened.")
+	flags.Bool("fail-on-warning", false, "SQLite <-> PostgreSQL copies: exit 3 when anything could not be carried exactly (the copy itself is still made).")
+	flags.String("decimals", "numeric", "SQLite -> PostgreSQL copies: how a DECIMAL_TEXT column whose texts numeric would spell differently (.0000, -0.00, 1.5 for 1.50) is carried: numeric (default; the new spelling is a warning that counts the values) or text (byte-exact).")
+	flags.String("recover-job-ref", "", "Recover the same uncertain BigQuery load job using the credential-free JSON reference printed by an interrupted `db copy`; requires --to and does not resubmit source rows.")
 	flags.String("overwrite", "", "Conflict policy when target already contains source-named collections. One of: recreate, reload.")
 	flags.Int("parallel-streams", 0, "Maximum number of source tables copied concurrently. Capped to 1 when either driver advertises no concurrency.")
 	flags.Bool("progress", false, "Emit per-table progress lines on stderr.")
@@ -34,7 +55,6 @@ func dbCopyCommand() *cobra.Command {
 	flags.StringArray("where", nil, "Row predicate: <table>:<field>:<op>:<value>. Repeatable; multiple on the same table AND-compose. Operators: =, <, <=, >, >=, in.")
 	flags.StringArray("limit", nil, "Per-table row limit: <table>:<N> (positive integer). Repeatable; one per table.")
 	flags.String("filter-config", "", "Path to a YAML filter config file. Mutually exclusive with any other filter flag.")
-	_ = cmd.MarkFlagRequired("from")
 	_ = cmd.MarkFlagRequired("to")
 	return cmd
 }
@@ -42,7 +62,34 @@ func dbCopyCommand() *cobra.Command {
 func dbCopyAction(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 	fromURL, _ := cmd.Flags().GetString("from")
+	fromSchema, _ := cmd.Flags().GetString("from-schema")
 	toURL, _ := cmd.Flags().GetString("to")
+	recoverRefJSON, _ := cmd.Flags().GetString("recover-job-ref")
+	errWriter := cmd.ErrOrStderr()
+	if recoverRefJSON != "" {
+		if fromURL != "" || copyOnlyFlagChanged(cmd) {
+			return Exit("--recover-job-ref cannot be combined with --from or copy, filter, overwrite, or progress options", 2)
+		}
+		target, err := dbcopy.Parse(toURL)
+		if err != nil || target.Scheme != "bigquery" {
+			return Exit("--recover-job-ref requires --to bigquery://PROJECT/DATASET?location=LOCATION", 2)
+		}
+		ref, err := decodeBigQueryLoadJobRef(recoverRefJSON)
+		if err != nil {
+			return Exit("invalid --recover-job-ref: expected one JSON object with known fields and unique keys", 2)
+		}
+		if ref.ProjectID != target.ProjectID || ref.DatasetID != target.DatasetID || ref.Location != target.Location {
+			return Exit("--recover-job-ref destination does not match --to", 2)
+		}
+		client, err := bqGoogleDefaultClient(ctx, bqwriter.BigqueryScope)
+		if err != nil {
+			return Exit("open Google credentials from the local application default credentials", 4)
+		}
+		return dbCopyRecoverBigQuery(ctx, target, ref, client, errWriter)
+	}
+	if fromURL == "" {
+		return Exit("required flag(s) \"from\" not set", 2)
+	}
 
 	// Validate --overwrite (REQ:overwrite-values).
 	overwrite, _ := cmd.Flags().GetString("overwrite")
@@ -56,26 +103,66 @@ func dbCopyAction(cmd *cobra.Command, _ []string) error {
 		)
 	}
 
-	// Parse both URLs first (REQ:unknown-scheme-rejected, REQ:ingitdb-url-local-only,
-	// REQ:required-flags) — fail with exit 2 before any connection attempt.
-	srcRef, err := dbcopy.Parse(fromURL)
-	if err != nil {
-		return Exit(fmt.Sprintf("--from: %v", err), 2)
-	}
-	tgtRef, err := dbcopy.Parse(toURL)
-	if err != nil {
-		return Exit(fmt.Sprintf("--to: %v", err), 2)
+	// A sqlscript:// destination writes a SQL script file (see cmd_db_copy_sqlscript.go).
+	if isSQLScriptTarget(toURL) {
+		return dbCopySQLScript(cmd, fromURL, toURL, overwrite)
 	}
 
-	// Open both backends (REQ:exit-codes — 4 for connection failures).
-	src, err := srcRef.Open(ctx)
+	// An ingitdb:// destination may carry ?records-format=... (used when it is a new project).
+	toURL, recordsFormat, optionsErr := splitInGitDBOptions(toURL)
+	if optionsErr != nil {
+		return Exit(fmt.Sprintf("--to: %v", optionsErr), 2)
+	}
+
+	// Parse both URLs first (REQ:unknown-scheme-rejected, REQ:ingitdb-url-local-only,
+	// REQ:required-flags) — fail with exit 2 before any connection attempt.
+	srcRef, _, err := parseSourceArg(ctx, fromURL)
+	if err != nil {
+		return keepExit(err, func(err error) error { return Exit(fmt.Sprintf("--from: %v", err), 2) })
+	}
+	tgtRef, _, err := parseSourceArg(ctx, toURL)
+	if err != nil {
+		return keepExit(err, func(err error) error { return Exit(fmt.Sprintf("--to: %v", err), 2) })
+	}
+	// A failure of a PostgreSQL side says which flag its connection string is read from (or its variable).
+	srcRef, tgtRef = srcRef.WithFlag("--from"), tgtRef.WithFlag("--to")
+	if fromSchema != "" && srcRef.Scheme != "postgres" {
+		return Exit("--from-schema is supported only for PostgreSQL sources", 2)
+	}
+	if tgtRef.Scheme == "bigquery" && overwrite != "" {
+		return Exit("BigQuery destinations never replace existing tables; omit --overwrite and choose a new dataset or table names", 2)
+	}
+
+	// An ingitdb:// destination that does not exist yet is a new native inGitDB project: the engine of
+	// `datatug db export` (staged, then published whole). One that exists is copied into below.
+	if isNewInGitDBTarget(tgtRef) {
+		return dbCopyToNewInGitDB(cmd, fromURL, srcRef, tgtRef, fromSchema, recordsFormat)
+	}
+	if recordsFormat != "" {
+		return Exit("?records-format applies only to an ingitdb:// destination that does not exist yet: it makes a new native project", 2)
+	}
+
+	// SQLite <-> PostgreSQL keeps keys, indexes, constraints and exact values: its own engine.
+	if faithfulEligible(srcRef, tgtRef) {
+		return dbCopyFaithful(cmd, srcRef, tgtRef, fromSchema, overwrite)
+	}
+	for _, name := range []string{"json", "dry-run", "fail-on-warning", "to-schema", "decimals"} {
+		if cmd.Flags().Changed(name) {
+			return Exit(fmt.Sprintf("--%s is supported only for SQLite <-> PostgreSQL copies", name), 2)
+		}
+	}
+
+	// Open both backends (REQ:exit-codes — 4 for connection failures). The source is opened as a
+	// read; the target is the one open that is written through, so a PostgreSQL target is not
+	// opened read-only.
+	src, err := openCopySource(ctx, srcRef, fromSchema)
 	if err != nil {
 		return Exit(fmt.Sprintf("open --from: %v", err), 4)
 	}
-	tgt, err := tgtRef.Open(ctx)
-	if err != nil {
-		return Exit(fmt.Sprintf("open --to: %v", err), 4)
-	}
+	// This command owns both handles it opens, and the copy engine owns neither:
+	// release the source on every path from here, including the BigQuery
+	// destination, which opens no target.
+	defer dbcopy.SourceCloser(src)()
 
 	directives, err := buildDirectivesFromFlags(cmd)
 	if err != nil {
@@ -83,7 +170,6 @@ func dbCopyAction(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Run the copy.
-	errWriter := cmd.ErrOrStderr()
 	parallelStreams, _ := cmd.Flags().GetInt("parallel-streams")
 	opts := dbcopy.CopyOpts{
 		Overwrite:       overwrite,
@@ -94,9 +180,24 @@ func dbCopyAction(cmd *cobra.Command, _ []string) error {
 	if progress, _ := cmd.Flags().GetBool("progress"); progress {
 		opts.Progress = dbcopy.NewProgressWriter(errWriter, true)
 	}
+	if tgtRef.Scheme == "bigquery" {
+		return dbCopyToBigQuery(ctx, src, srcRef, fromSchema, tgtRef, opts, errWriter)
+	}
+	tgt, err := openCopyTarget(ctx, tgtRef)
+	if err != nil {
+		return Exit(fmt.Sprintf("open --to: %v", err), 4)
+	}
+	defer dbcopy.SourceCloser(tgt)()
 
-	summary, err := dbcopy.Copy(ctx, src, tgt, opts)
+	summary, err := dbCopyRunner(ctx, src, tgt, opts)
 	if errors.Is(err, dbcopy.ErrSourceHasNoTables) {
+		if srcRef.Scheme == "postgres" {
+			schema := fromSchema
+			if schema == "" {
+				schema = dalgo2postgres.DefaultSchema
+			}
+			return Exit(fmt.Sprintf("PostgreSQL source schema %q has no tables; specify another schema with --from-schema", schema), 1)
+		}
 		// REQ:source-introspection-failure: exit 0 with stderr note.
 		_, _ = fmt.Fprintln(errWriter, "source has no tables; nothing to copy")
 		return nil
@@ -117,8 +218,136 @@ func dbCopyAction(cmd *cobra.Command, _ []string) error {
 			"db copy: replicated schema for %d/%d collections (%d skipped), copied %d rows\n",
 			summary.Created, summary.Tables, len(summary.Skipped), summary.RowsCopied,
 		)
+		dbcopy.WriteSkippedIndexes(errWriter, summary)
+		for _, warning := range summary.Warnings {
+			_, _ = fmt.Fprintf(errWriter, "db copy warning: %s\n", warning)
+		}
 	}
 	return nil
+}
+
+func dbCopyToBigQuery(ctx context.Context, source dal.DB, sourceRef dbcopy.BackendRef, sourceSchema string, target dbcopy.BackendRef, opts dbcopy.CopyOpts, errWriter io.Writer) error {
+	client, err := bqGoogleDefaultClient(ctx, bqwriter.BigqueryScope)
+	if err != nil {
+		return Exit("open Google credentials from the local application default credentials", 4)
+	}
+	writer, err := bqwriter.NewLoadWriter(ctx, bqwriter.LoadConfig{
+		ProjectID: target.ProjectID, DatasetID: target.DatasetID,
+		Location: target.Location, HTTPClient: client,
+	})
+	if err != nil {
+		return Exit("configure BigQuery destination", 2)
+	}
+	summary, err := dbCopyToSinkRunner(ctx, source, dbcopy.BigQueryCopySink{Writer: writer}, opts)
+	if errors.Is(err, dbcopy.ErrSourceHasNoTables) {
+		if sourceRef.Scheme == "postgres" {
+			if sourceSchema == "" {
+				sourceSchema = dalgo2postgres.DefaultSchema
+			}
+			return Exit(fmt.Sprintf("PostgreSQL source schema %q has no tables; specify another schema with --from-schema", sourceSchema), 1)
+		}
+		_, _ = fmt.Fprintln(errWriter, "source has no tables; nothing to copy")
+		return nil
+	}
+	if err != nil {
+		var uncertain *bqwriter.LoadOutcomeUnknownError
+		if errors.As(err, &uncertain) {
+			return Exit(bigQueryCopyRecoveryMessage(target, uncertain.Job, err), 1)
+		}
+		return Exit(err.Error(), 1)
+	}
+	if summary.Tables > 0 {
+		_, _ = fmt.Fprintf(errWriter, "db copy: loaded %d/%d collections, copied %d rows to BigQuery %s/%s in %s\n",
+			summary.Created, summary.Tables, summary.RowsCopied, target.ProjectID, target.DatasetID, target.Location)
+		for _, warning := range summary.Warnings {
+			_, _ = fmt.Fprintf(errWriter, "db copy warning: %s\n", warning)
+		}
+	}
+	return nil
+}
+
+func copyOnlyFlagChanged(cmd *cobra.Command) bool {
+	for _, name := range []string{"from-schema", "to-schema", "json", "dry-run", "fail-on-warning", "overwrite", "parallel-streams", "progress", "decimals", "include", "exclude", "where", "limit", "filter-config"} {
+		if cmd.Flags().Changed(name) {
+			return true
+		}
+	}
+	return false
+}
+
+func decodeBigQueryLoadJobRef(referenceJSON string) (bqwriter.LoadJobRef, error) {
+	var ref bqwriter.LoadJobRef
+	if len(referenceJSON) > 4096 {
+		return ref, errors.New("BigQuery recovery reference is too large")
+	}
+	if err := strictjson.DecodeObject([]byte(referenceJSON), nil); err != nil {
+		return ref, err
+	}
+	decoder := json.NewDecoder(strings.NewReader(referenceJSON))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&ref); err != nil {
+		return bqwriter.LoadJobRef{}, err
+	}
+	return ref, nil
+}
+
+func dbCopyRecoverBigQuery(ctx context.Context, target dbcopy.BackendRef, ref bqwriter.LoadJobRef, client *http.Client, errWriter io.Writer) error {
+	if target.Scheme != "bigquery" || client == nil {
+		return Exit("BigQuery recovery requires a BigQuery target and local credentials", 2)
+	}
+	if ref.ProjectID != target.ProjectID || ref.DatasetID != target.DatasetID || ref.Location != target.Location {
+		return Exit("--recover-job-ref destination does not match --to", 2)
+	}
+	writer, err := bqwriter.NewLoadWriter(ctx, bqwriter.LoadConfig{
+		ProjectID: target.ProjectID, DatasetID: target.DatasetID,
+		Location: target.Location, HTTPClient: client,
+	})
+	if err != nil {
+		return Exit("configure BigQuery destination", 2)
+	}
+	receipt, err := writer.RecoverLoad(ctx, ref)
+	if err != nil {
+		var uncertain *bqwriter.LoadOutcomeUnknownError
+		if errors.As(err, &uncertain) {
+			return Exit("BigQuery load is still unresolved; keep the same --recover-job-ref and retry recovery when service access is available", 1)
+		}
+		return Exit(err.Error(), 1)
+	}
+	_, _ = fmt.Fprintf(errWriter, "db copy: recovered BigQuery load job %s for %s/%s.%s in %s; verified %d rows\n",
+		receipt.JobID, receipt.ProjectID, receipt.DatasetID, receipt.TableID, receipt.Location, receipt.Rows)
+	return nil
+}
+
+var (
+	dbCopyRunner       = dbcopy.Copy
+	dbCopyToSinkRunner = dbcopy.CopyToSink
+	bqRecoveryMarshal  = json.Marshal
+	// openCopySource and openCopyTarget are the two opens dbCopyAction owns;
+	// package vars so tests can observe that each is released on every path.
+	openCopySource = func(ctx context.Context, ref dbcopy.BackendRef, schema string) (dal.DB, error) {
+		return ref.OpenForCopy(ctx, schema)
+	}
+	openCopyTarget = func(ctx context.Context, ref dbcopy.BackendRef) (dal.DB, error) {
+		return ref.OpenForWrite(ctx)
+	}
+)
+
+func bigQueryRecoveryHint(target dbcopy.BackendRef, ref bqwriter.LoadJobRef) string {
+	data, err := bqRecoveryMarshal(ref)
+	if err != nil {
+		return "BigQuery load outcome is uncertain; do not rerun the copy until the existing load job has been checked."
+	}
+	destination := fmt.Sprintf("bigquery://%s/%s?location=%s", target.ProjectID, target.DatasetID, target.Location)
+	return fmt.Sprintf("BigQuery load outcome is uncertain. Do not rerun this copy; recover the same job with:\n  datatug db copy --to '%s' --recover-job-ref '%s'",
+		destination, string(data))
+}
+
+func bigQueryCopyRecoveryMessage(target dbcopy.BackendRef, ref bqwriter.LoadJobRef, copyErr error) string {
+	message := bigQueryRecoveryHint(target, ref)
+	if errors.Is(copyErr, dbcopy.ErrStagingCleanup) {
+		message += "\nWarning: local staging cleanup failed; staged source data may remain in temporary storage."
+	}
+	return message
 }
 
 // buildDirectivesFromFlags constructs a *filter.Directives from the

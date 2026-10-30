@@ -32,6 +32,38 @@ func nativeBoardDefinition() datatug.Board {
 	return datatug.Board{ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "new-board", Title: "Native board", Folder: "~"}}}
 }
 
+func TestNativeBoardCreateRejectsMalformedIdentifiersBeforeOpeningAProvider(t *testing.T) {
+	previous := storage.NewDatatugStore
+	t.Cleanup(func() { storage.NewDatatugStore = previous })
+	opened := 0
+	storage.NewDatatugStore = func(string) (storage.Store, error) {
+		opened++
+		return nil, errors.New("unexpected provider resolution")
+	}
+	for _, tc := range []struct {
+		name, projectID, boardID, field string
+	}{
+		{"project traversal", "../outside", "new-board", "project"},
+		{"board traversal", "project", "../outside", boardIDField},
+		{"missing board ID", "project", "", boardIDField},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			definition := nativeBoardDefinition()
+			definition.ID = tc.boardID
+			board, err := CreateLocalProjectBoard(context.Background(), dto.ProjectRef{
+				StoreID: LocalStoreID, ProjectID: tc.projectID,
+			}, "main", definition)
+			require.Nil(t, board)
+			unsafe := tc.boardID
+			if tc.field == "project" {
+				unsafe = tc.projectID
+			}
+			assertRefusal(t, tc.name, tc.field, unsafe, err)
+			require.Zero(t, opened, "malformed identifiers must be refused before any provider resolution")
+		})
+	}
+}
+
 func TestNativeBoardCreateRechecksAuthorityAfterEveryOwnedWait(t *testing.T) {
 	for _, boundary := range []string{"project lock", "board mutex"} {
 		for _, drift := range []string{"writes", "unrestricted", "generation", "principal", "missing principal", "cancel", "valid"} {

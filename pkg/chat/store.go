@@ -67,7 +67,7 @@ type ExecutedQuery struct {
 	ID              string
 	OriginMessageID string
 	Title           string
-	DTQL            string
+	TugQL           string
 	Source          string
 	Parameters      map[string]any
 	ExecutedAt      time.Time
@@ -82,7 +82,7 @@ type RecordSet struct {
 	QueryID         string
 	OriginMessageID string
 	Title           string
-	DTQL            string
+	TugQL           string
 	Source          string
 	Environment     string
 	Database        string
@@ -133,7 +133,7 @@ type JoinLineage struct {
 }
 
 // AppliedJoinEdge ties an FK constraint to the exact joined relation path in
-// immutable DTQL. It distinguishes duplicate constraints with identical ON
+// immutable TugQL. It distinguishes duplicate constraints with identical ON
 // field pairs; older RecordSets without it use conservative ON matching.
 type AppliedJoinEdge struct {
 	JoinPath     RelationInstanceID `json:"joinPath"`
@@ -286,7 +286,7 @@ func OpenSessionStore(path string, scope ChatScope) (*SessionStore, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS session_archives (session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE, archived_at TEXT NOT NULL)`); err != nil {
+	if _, err = dbExec(db, `CREATE TABLE IF NOT EXISTS session_archives (session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE, archived_at TEXT NOT NULL)`); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("initialize session archives: %w", err)
 	}
@@ -456,8 +456,8 @@ func initChatSchema(db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS sessions_scope_recent ON sessions(scope, updated_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, role TEXT NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL, query_id TEXT NOT NULL DEFAULT '', recordset_id TEXT NOT NULL DEFAULT '', http_response_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)`,
 		`CREATE INDEX IF NOT EXISTS messages_session_order ON messages(session_id)`,
-		`CREATE TABLE IF NOT EXISTS queries (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, origin_message_id TEXT NOT NULL, title TEXT NOT NULL, dtql TEXT NOT NULL, source TEXT NOT NULL, parameters_json TEXT NOT NULL, executed_at TEXT NOT NULL, error TEXT NOT NULL)`,
-		`CREATE TABLE IF NOT EXISTS recordsets (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, query_id TEXT NOT NULL REFERENCES queries(id) ON DELETE CASCADE, origin_message_id TEXT NOT NULL, title TEXT NOT NULL, dtql TEXT NOT NULL, source TEXT NOT NULL, environment TEXT NOT NULL, database_id TEXT NOT NULL, parameters_json TEXT NOT NULL, created_at TEXT NOT NULL, result_json BLOB NOT NULL, parent_recordset_id TEXT NOT NULL DEFAULT '', join_candidate_id TEXT NOT NULL DEFAULT '', join_applied_edges_json TEXT NOT NULL DEFAULT '[]', http_response_id TEXT NOT NULL DEFAULT '', refresh_parent_id TEXT NOT NULL DEFAULT '')`,
+		`CREATE TABLE IF NOT EXISTS queries (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, origin_message_id TEXT NOT NULL, title TEXT NOT NULL, tugql TEXT NOT NULL, source TEXT NOT NULL, parameters_json TEXT NOT NULL, executed_at TEXT NOT NULL, error TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS recordsets (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, query_id TEXT NOT NULL REFERENCES queries(id) ON DELETE CASCADE, origin_message_id TEXT NOT NULL, title TEXT NOT NULL, tugql TEXT NOT NULL, source TEXT NOT NULL, environment TEXT NOT NULL, database_id TEXT NOT NULL, parameters_json TEXT NOT NULL, created_at TEXT NOT NULL, result_json BLOB NOT NULL, parent_recordset_id TEXT NOT NULL DEFAULT '', join_candidate_id TEXT NOT NULL DEFAULT '', join_applied_edges_json TEXT NOT NULL DEFAULT '[]', http_response_id TEXT NOT NULL DEFAULT '', refresh_parent_id TEXT NOT NULL DEFAULT '')`,
 		`CREATE TABLE IF NOT EXISTS http_responses (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, origin_message_id TEXT NOT NULL, method TEXT NOT NULL DEFAULT 'GET', url TEXT NOT NULL, status_code INTEGER NOT NULL, content_type TEXT NOT NULL, headers_json TEXT NOT NULL DEFAULT '{}', request_headers_json TEXT NOT NULL DEFAULT '{}', response_nanos INTEGER NOT NULL DEFAULT 0, download_nanos INTEGER NOT NULL DEFAULT 0, final_url TEXT NOT NULL DEFAULT '', redirects_json TEXT NOT NULL DEFAULT '[]', request_has_query INTEGER NOT NULL, body BLOB NOT NULL, refresh_parent_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS session_workspace (session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE, state_json TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS chat_preferences (scope TEXT PRIMARY KEY, table_style TEXT NOT NULL, result_versions_to_keep INTEGER NOT NULL DEFAULT 2)`,
@@ -884,7 +884,7 @@ func (s *SessionStore) loadMessages(ctx context.Context, item *ChatSession) erro
 }
 
 func (s *SessionStore) loadQueries(ctx context.Context, item *ChatSession) error {
-	rows, err := dbQueryContextFn(s.db, ctx, `SELECT id, origin_message_id, title, dtql, source, parameters_json, executed_at, error FROM queries WHERE session_id = ? ORDER BY rowid`, item.ID)
+	rows, err := dbQueryContextFn(s.db, ctx, `SELECT id, origin_message_id, title, tugql, source, parameters_json, executed_at, error FROM queries WHERE session_id = ? ORDER BY rowid`, item.ID)
 	if err != nil {
 		return err
 	}
@@ -892,7 +892,7 @@ func (s *SessionStore) loadQueries(ctx context.Context, item *ChatSession) error
 	for rows.Next() {
 		var query ExecutedQuery
 		var params, executed string
-		if err := rows.Scan(&query.ID, &query.OriginMessageID, &query.Title, &query.DTQL, &query.Source, &params, &executed, &query.Error); err != nil {
+		if err := rows.Scan(&query.ID, &query.OriginMessageID, &query.Title, &query.TugQL, &query.Source, &params, &executed, &query.Error); err != nil {
 			return err
 		}
 		if err := decodeExactJSON([]byte(params), &query.Parameters); err != nil {
@@ -907,7 +907,7 @@ func (s *SessionStore) loadQueries(ctx context.Context, item *ChatSession) error
 }
 
 func (s *SessionStore) loadRecordSets(ctx context.Context, item *ChatSession) error {
-	rows, err := dbQueryContextFn(s.db, ctx, `SELECT id, query_id, origin_message_id, title, dtql, source, environment, database_id, parameters_json, created_at, result_json, parent_recordset_id, join_candidate_id, join_applied_edges_json, http_response_id, refresh_parent_id FROM recordsets WHERE session_id = ? ORDER BY rowid`, item.ID)
+	rows, err := dbQueryContextFn(s.db, ctx, `SELECT id, query_id, origin_message_id, title, tugql, source, environment, database_id, parameters_json, created_at, result_json, parent_recordset_id, join_candidate_id, join_applied_edges_json, http_response_id, refresh_parent_id FROM recordsets WHERE session_id = ? ORDER BY rowid`, item.ID)
 	if err != nil {
 		return err
 	}
@@ -917,7 +917,7 @@ func (s *SessionStore) loadRecordSets(ctx context.Context, item *ChatSession) er
 		var params, created string
 		var payload []byte
 		var parentID, candidateID, appliedJSON string
-		if err := rows.Scan(&record.ID, &record.QueryID, &record.OriginMessageID, &record.Title, &record.DTQL, &record.Source, &record.Environment, &record.Database, &params, &created, &payload, &parentID, &candidateID, &appliedJSON, &record.HTTPResponseID, &record.RefreshParentID); err != nil {
+		if err := rows.Scan(&record.ID, &record.QueryID, &record.OriginMessageID, &record.Title, &record.TugQL, &record.Source, &record.Environment, &record.Database, &params, &created, &payload, &parentID, &candidateID, &appliedJSON, &record.HTTPResponseID, &record.RefreshParentID); err != nil {
 			return err
 		}
 		record.SessionID = item.ID
@@ -1029,7 +1029,7 @@ func insertMessage(ctx context.Context, tx *sql.Tx, sessionID string, message Ch
 
 // AppendQuery commits a successful execution at the tool boundary, before
 // the model's final response. Each invocation gets a new immutable snapshot,
-// including repeated executions of identical DTQL.
+// including repeated executions of identical TugQL.
 func (s *SessionStore) AppendQuery(ctx context.Context, sessionID, originID, source string, query QueryResult) (QueryResult, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -1085,7 +1085,7 @@ func (s *SessionStore) appendQueryTx(ctx context.Context, tx *sql.Tx, sessionID,
 	if query.Err != nil {
 		errText = publicQueryError(query.Err, query.Parameters)
 	}
-	if _, err := txExecContextFn(tx, ctx, `INSERT INTO queries (id, session_id, origin_message_id, title, dtql, source, parameters_json, executed_at, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, query.QueryID, sessionID, originID, query.Title, query.DTQL, source, string(paramsJSON), stamp(now), errText); err != nil {
+	if _, err := txExecContextFn(tx, ctx, `INSERT INTO queries (id, session_id, origin_message_id, title, tugql, source, parameters_json, executed_at, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, query.QueryID, sessionID, originID, query.Title, query.TugQL, source, string(paramsJSON), stamp(now), errText); err != nil {
 		return err
 	}
 	message := ChatMessage{ID: uuid.NewString(), Role: "DataTug", QueryID: query.QueryID, HTTPResponseID: query.HTTPResponseID, CreatedAt: now}
@@ -1109,7 +1109,7 @@ func (s *SessionStore) appendQueryTx(ctx context.Context, tx *sql.Tx, sessionID,
 				return fmt.Errorf("encode JOIN lineage: %w", err)
 			}
 		}
-		if _, err := txExecContextFn(tx, ctx, `INSERT INTO recordsets (id, session_id, query_id, origin_message_id, title, dtql, source, environment, database_id, parameters_json, created_at, result_json, parent_recordset_id, join_candidate_id, join_applied_edges_json, http_response_id, refresh_parent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, query.RecordSetID, sessionID, query.QueryID, originID, query.Title, query.DTQL, source, s.info.Environment, databaseID, string(paramsJSON), stamp(now), payload, parentID, candidateID, string(appliedJSON), query.HTTPResponseID, query.RefreshParentID); err != nil {
+		if _, err := txExecContextFn(tx, ctx, `INSERT INTO recordsets (id, session_id, query_id, origin_message_id, title, tugql, source, environment, database_id, parameters_json, created_at, result_json, parent_recordset_id, join_candidate_id, join_applied_edges_json, http_response_id, refresh_parent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, query.RecordSetID, sessionID, query.QueryID, originID, query.Title, query.TugQL, source, s.info.Environment, databaseID, string(paramsJSON), stamp(now), payload, parentID, candidateID, string(appliedJSON), query.HTTPResponseID, query.RefreshParentID); err != nil {
 			return err
 		}
 		message.Kind, message.RecordSetID = "grid", query.RecordSetID
@@ -1145,7 +1145,7 @@ func (s *SessionStore) AppendTurn(ctx context.Context, sessionID, originID, sour
 		query := &turn.Queries[i]
 		if query.QueryID != "" {
 			continue
-		} // already committed by run_dtql
+		} // already committed by run_tugql
 		if err := appendQueryTxFn(s, ctx, tx, sessionID, originID, source, query, now); err != nil {
 			return Turn{}, err
 		}

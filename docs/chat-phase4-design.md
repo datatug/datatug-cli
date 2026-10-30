@@ -10,10 +10,10 @@ This design records the Phase 3 boundary and the reviewed Phase 4 cut.
    selections retain an exact selected-cell mask, not a rows-by-columns guess.
 2. Bookmark the selection, give it a title, and add two tags. The Bookmarks tab
    lists one durable project item with that title, tags, target kind, row count,
-   source, snapshot time, and DTQL provenance. No query is rerun.
+   source, snapshot time, and TugQL provenance. No query is rerun.
 3. Open Session B. Search/filter the bookmark by both tags, open its frozen grid,
    attach it, and dock it. The attached context exposes column/parameter names
-   to the agent; DataTug binds typed values locally for a follow-up DTQL query.
+   to the agent; DataTug binds typed values locally for a follow-up TugQL query.
 4. Clear and delete Session A. Its messages, session RecordSets, Views, Selections,
    and docks disappear. The bookmark still opens with precisely its saved data.
 5. Quit and restart DataTug. The bookmark, tags, attachment/dock in Session B,

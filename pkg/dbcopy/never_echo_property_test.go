@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo2postgres"
+	"github.com/dal-go/dalgo2sql"
 	"github.com/datatug/datatug-cli/internal/sourcecases"
 )
 
@@ -33,6 +35,15 @@ import (
 func TestProperty_NothingThisPackageShowsHoldsASecret(t *testing.T) {
 	cases := sourcecases.All()
 	accepted := 0
+	// Every server source opens through a stand-in whose failure quotes the whole DSN it was given.
+	stubPostgresOpener(t, func(dsn string, _ dal.Schema, _ dalgo2sql.DbOptions, _ ...dalgo2postgres.Option) (*dalgo2postgres.Database, error) {
+		return nil, quotingDriverError(dsn)
+	})
+	t.Cleanup(SetServerOpenersForTest(ServerOpeners{
+		MySQL:     func(dsn string) (SchemaScanDB, error) { return nil, quotingDriverError(dsn) },
+		Oracle:    func(_ context.Context, dsn string) (SchemaScanDB, error) { return nil, quotingDriverError(dsn) },
+		SQLServer: func(_ context.Context, dsn string) (SchemaScanDB, error) { return nil, quotingDriverError(dsn) },
+	}))
 	for _, c := range cases {
 		texts := []string{SourceDisplay(c.Source), SourceIDDisplay(c.Source)}
 		add := func(err error) {

@@ -15,7 +15,10 @@ import (
 	"time"
 
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/privateadmission"
+	"github.com/datatug/datatug-core/pkg/datatug"
 	core "github.com/datatug/datatug-core/pkg/detective"
+	"github.com/datatug/datatug-core/pkg/sessioncontext"
 	"github.com/gofrs/flock"
 )
 
@@ -33,38 +36,86 @@ type AuditStore interface {
 	Append(context.Context, AuditEvent) error
 }
 
+type fileLocker interface {
+	TryLockContext(ctx context.Context, retryDelay time.Duration) (bool, error)
+	Unlock() error
+}
+
+type tempFile interface {
+	Chmod(mode os.FileMode) error
+	Write(b []byte) (n int, err error)
+	Sync() error
+	Close() error
+	Name() string
+}
+
+type syncCloserWriter interface {
+	Write(p []byte) (n int, err error)
+	Sync() error
+	Close() error
+}
+
+var (
+	newFlock            = func(path string) fileLocker { return flock.New(path) }
+	storeAbs            = filepath.Abs
+	storeEvalSymlinks   = filepath.EvalSymlinks
+	storeResolveQueryID = api.ResolveQueryID
+	storeLstat          = os.Lstat
+	storeStat           = os.Stat
+	storeRename         = os.Rename
+	runEntryInfo        = func(e os.DirEntry) (os.FileInfo, error) { return e.Info() }
+	stateMarshal        = json.Marshal
+	auditMarshal        = json.Marshal
+	auditOpenFile       = func(path string, flag int, perm os.FileMode) (syncCloserWriter, error) {
+		return os.OpenFile(path, flag, perm)
+	}
+	writeItemSyncDir    = syncPrivateDirectory
+	writeItemCreateTemp = func(dir, pattern string) (tempFile, error) {
+		return os.CreateTemp(dir, pattern)
+	}
+)
+
 type localJSONLAudit struct{ path string }
 
 // LocalStore keeps reviewable definitions in the project and sensitive case,
 // run and audit material in a separate server-private directory.
 type LocalStore struct {
-	projectDir string
-	privateDir string
-	projectID  string
-	lock       *flock.Flock
-	audit      AuditStore
+	projectDir  string
+	privateDir  string
+	projectID   string
+	lock        fileLocker
+	audit       AuditStore
+	nativeFence func(context.Context, sessioncontext.DetectiveFence) error
 }
 
 func NewLocalStore(projectID, projectDir, privateBase string) (*LocalStore, error) {
 	if !validServedProjectID(projectID) || projectDir == "" || privateBase == "" {
 		return nil, ErrInvalid
 	}
-	project, err := filepath.Abs(projectDir)
+	project, err := storeAbs(projectDir)
 	if err != nil {
 		return nil, err
 	}
-	project, err = filepath.EvalSymlinks(project)
+	project, err = storeEvalSymlinks(project)
 	if err != nil {
 		return nil, err
 	}
-	base, err := filepath.Abs(privateBase)
+	base, err := storeAbs(privateBase)
 	if err != nil {
 		return nil, err
 	}
 	if err := os.MkdirAll(base, 0700); err != nil {
 		return nil, err
 	}
-	base, err = filepath.EvalSymlinks(base)
+	base, err = storeEvalSymlinks(base)
+	if err != nil {
+		return nil, err
+	}
+	project, err = privateadmission.PhysicalDirectory(project)
+	if err != nil {
+		return nil, err
+	}
+	base, err = privateadmission.PhysicalDirectory(base)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +139,7 @@ func NewLocalStore(projectID, projectDir, privateBase string) (*LocalStore, erro
 	if err := ensureAbsentOrRegular(auditPath); err != nil {
 		return nil, err
 	}
-	store := &LocalStore{projectDir: project, privateDir: private, projectID: projectID, lock: flock.New(lockPath), audit: localJSONLAudit{path: auditPath}}
+	store := &LocalStore{projectDir: project, privateDir: private, projectID: projectID, lock: newFlock(lockPath), audit: localJSONLAudit{path: auditPath}}
 	// The private directory predates per-project receipts and is keyed by the
 	// physical checkout. Bind it to its first served project ID under the same
 	// lock, including when upgrading an existing directory, so two logical
@@ -136,7 +187,7 @@ func within(parent, child string) bool {
 }
 
 func ensureNoSymlink(path string) error {
-	info, err := os.Lstat(path)
+	info, err := storeLstat(path)
 	if err != nil {
 		return err
 	}
@@ -151,7 +202,7 @@ func ensureDir(path string) error {
 	if err != nil && !errors.Is(err, os.ErrExist) {
 		return err
 	}
-	info, err := os.Lstat(path)
+	info, err := storeLstat(path)
 	if err != nil {
 		return err
 	}
@@ -162,7 +213,7 @@ func ensureDir(path string) error {
 }
 
 func ensureAbsentOrRegular(path string) error {
-	info, err := os.Lstat(path)
+	info, err := storeLstat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -197,7 +248,7 @@ func safeReadFile(dir, id string) ([]byte, error) {
 }
 
 func ensureDirIfExists(path string) error {
-	info, err := os.Lstat(path)
+	info, err := storeLstat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -211,15 +262,17 @@ func ensureDirIfExists(path string) error {
 }
 
 func (s *LocalStore) withLock(ctx context.Context, fn func() error) error {
-	ok, err := s.lock.TryLockContext(ctx, 50*time.Millisecond)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return context.DeadlineExceeded
-	}
-	defer func() { _ = s.lock.Unlock() }()
-	return fn()
+	return privateadmission.Local(ctx, filepath.Join(s.privateDir, "store.lock"), func() error {
+		ok, err := s.lock.TryLockContext(ctx, 50*time.Millisecond)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return context.DeadlineExceeded
+		}
+		defer func() { _ = s.lock.Unlock() }()
+		return fn()
+	})
 }
 
 func (s *LocalStore) definitionDir(kind string) string  { return filepath.Join(s.projectDir, kind) }
@@ -268,6 +321,16 @@ func readItems[T any](dir string) ([]T, error) {
 }
 
 func writeItem(dir, id string, item any) error {
+	return writeItemDurability(dir, id, item, false)
+}
+
+// writeDurableItem acknowledges journal acceptance only after both the file
+// rename and directory entries are durable on supported bridge platforms.
+func writeDurableItem(dir, id string, item any) error {
+	return writeItemDurability(dir, id, item, true)
+}
+
+func writeItemDurability(dir, id string, item any, syncDirectory bool) error {
 	if !validSlug(id) {
 		return ErrInvalid
 	}
@@ -278,7 +341,7 @@ func writeItem(dir, id string, item any) error {
 		return err
 	}
 	path := filepath.Join(dir, id+".json")
-	if _, err := os.Lstat(path); err == nil {
+	if _, err := storeLstat(path); err == nil {
 		if err := ensureNoSymlink(path); err != nil {
 			return err
 		}
@@ -292,7 +355,7 @@ func writeItem(dir, id string, item any) error {
 	if len(data) > 1<<20 {
 		return ErrInvalid
 	}
-	tmp, err := os.CreateTemp(dir, ".detective-*.tmp")
+	tmp, err := writeItemCreateTemp(dir, ".detective-*.tmp")
 	if err != nil {
 		return err
 	}
@@ -312,7 +375,16 @@ func writeItem(dir, id string, item any) error {
 	if err = tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	if err = storeRename(tmp.Name(), path); err != nil {
+		return err
+	}
+	if !syncDirectory {
+		return nil
+	}
+	if err = writeItemSyncDir(dir); err != nil {
+		return err
+	}
+	return writeItemSyncDir(filepath.Dir(dir))
 }
 
 func (s *LocalStore) State(ctx context.Context) (State, error) { return s.StatePage(ctx, "") }
@@ -366,7 +438,7 @@ func (s *LocalStore) statePageLocked(cursor string) (State, error) {
 	sort.Slice(state.Runs, func(i, j int) bool { return state.Runs[i].StartedAt.After(state.Runs[j].StartedAt) })
 	sort.Slice(state.Scenarios, func(i, j int) bool { return state.Scenarios[i].ID < state.Scenarios[j].ID })
 	state.Capabilities = Capabilities{LocalOnly: true, CanRead: true, CanWrite: true, CanRun: true, MaxRows: 500, MaxFanout: core.MaxFanout}
-	encoded, err := json.Marshal(state)
+	encoded, err := stateMarshal(state)
 	if err != nil {
 		return State{}, err
 	}
@@ -410,7 +482,7 @@ func readRunPage(dir, cursor string) ([]CheckRun, bool, string, error) {
 		if err := ensureNoSymlink(path); err != nil {
 			return nil, false, "", err
 		}
-		info, err := entry.Info()
+		info, err := runEntryInfo(entry)
 		if err != nil {
 			return nil, false, "", err
 		}
@@ -442,6 +514,21 @@ func readRunPage(dir, cursor string) ([]CheckRun, bool, string, error) {
 		next = file.cursor
 	}
 	return runs, hasMore, next, nil
+}
+
+// resolveCreatedAt is the one creation-date rule for checks and scenarios,
+// shared by SaveCheck/SaveScenario, action apply and AI confirm. A true create
+// takes the caller's (already validated) date, else now. An update keeps the
+// stored value as is, so a legacy undated file is never backfilled and a
+// caller cannot backdate.
+func resolveCreatedAt(caller, stored string, exists bool, now time.Time) string {
+	if exists {
+		return stored
+	}
+	if caller != "" {
+		return caller
+	}
+	return datatug.NewCreatedAt(now)
 }
 
 func (s *LocalStore) getCheck(id string) (Check, error) {
@@ -491,11 +578,13 @@ func (s *LocalStore) SaveCheck(ctx context.Context, check Check, actor string) (
 				return ErrConflict
 			}
 			check.Version++
+			check.CreatedAt = resolveCreatedAt(check.CreatedAt, old.CreatedAt, true, time.Now())
 		} else if errors.Is(err, ErrNotFound) {
 			if check.Version != 0 {
 				return ErrConflict
 			}
 			check.Version = 1
+			check.CreatedAt = resolveCreatedAt(check.CreatedAt, "", false, time.Now())
 		} else {
 			return err
 		}
@@ -680,7 +769,7 @@ func (s *LocalStore) SaveRun(ctx context.Context, run CheckRun) error {
 		if !validSlug(run.ID) {
 			return ErrInvalid
 		}
-		if _, err := os.Stat(filepath.Join(s.privateItemDir("runs"), run.ID+".json")); err == nil {
+		if _, err := storeStat(filepath.Join(s.privateItemDir("runs"), run.ID+".json")); err == nil {
 			return ErrConflict
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return err
@@ -723,6 +812,7 @@ func (s *LocalStore) SaveScenario(ctx context.Context, scenario Scenario, actor 
 				return ErrConflict
 			}
 			scenario.Version++
+			scenario.CreatedAt = resolveCreatedAt(scenario.CreatedAt, old.CreatedAt, true, time.Now())
 		} else if errors.Is(err, os.ErrNotExist) {
 			if scenario.Version != 0 {
 				return ErrConflict
@@ -735,6 +825,7 @@ func (s *LocalStore) SaveScenario(ctx context.Context, scenario Scenario, actor 
 				return ErrCapacity
 			}
 			scenario.Version = 1
+			scenario.CreatedAt = resolveCreatedAt(scenario.CreatedAt, "", false, time.Now())
 		} else {
 			return err
 		}
@@ -820,7 +911,7 @@ func (s *LocalStore) resolveQueryRef(id string) (string, error) {
 	if !validQueryRef(id) {
 		return "", ErrInvalid
 	}
-	canonical, err := api.ResolveQueryID(s.projectDir, id)
+	canonical, err := storeResolveQueryID(s.projectDir, id)
 	if err != nil {
 		return "", ErrNotFound
 	}
@@ -962,12 +1053,12 @@ func (a localJSONLAudit) Append(_ context.Context, event AuditEvent) error {
 	if err := ensureAbsentOrRegular(path); err != nil {
 		return err
 	}
-	data, err := json.Marshal(event)
+	data, err := auditMarshal(event)
 	if err != nil {
 		return err
 	}
 	data = append(data, '\n')
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	f, err := auditOpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		return fmt.Errorf("audit: %w", err)
 	}

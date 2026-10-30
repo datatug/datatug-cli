@@ -9,6 +9,7 @@ import (
 )
 
 func TestValidateWhere_UnknownFieldWithSuggestion(t *testing.T) {
+	t.Parallel()
 	def := &dbschema.CollectionDef{
 		Name: "Customer",
 		Fields: []dbschema.FieldDef{
@@ -31,6 +32,7 @@ func TestValidateWhere_UnknownFieldWithSuggestion(t *testing.T) {
 }
 
 func TestValidateWhere_TypeMismatch(t *testing.T) {
+	t.Parallel()
 	def := &dbschema.CollectionDef{
 		Name: "Invoice",
 		Fields: []dbschema.FieldDef{
@@ -52,6 +54,7 @@ func TestValidateWhere_TypeMismatch(t *testing.T) {
 // TestValidateWhere_UnknownFieldSuggestion covers the Levenshtein-suggestion branch (lines 22-27)
 // where the typo is within distance 2 of a known column name.
 func TestValidateWhere_UnknownFieldSuggestion(t *testing.T) {
+	t.Parallel()
 	def := &dbschema.CollectionDef{
 		Name: "T",
 		Fields: []dbschema.FieldDef{
@@ -75,6 +78,7 @@ func TestValidateWhere_UnknownFieldSuggestion(t *testing.T) {
 // TestValidateWhere_UnknownFieldNoColumns covers the bare-error branch (line 34)
 // when the collection has no fields at all.
 func TestValidateWhere_UnknownFieldNoColumns(t *testing.T) {
+	t.Parallel()
 	def := &dbschema.CollectionDef{Name: "Empty"}
 	pred := Predicate{Field: "x", Operator: OpEqual, Value: "v"}
 	err := ValidateWhereAgainstSchema("Empty", pred, def)
@@ -92,6 +96,7 @@ func TestValidateWhere_UnknownFieldNoColumns(t *testing.T) {
 // TestValidateWhere_UnknownFieldKnownList covers the known-fields-list fallback (lines 28-33)
 // when no column name is within Levenshtein distance 2 of the typo.
 func TestValidateWhere_UnknownFieldKnownList(t *testing.T) {
+	t.Parallel()
 	def := &dbschema.CollectionDef{
 		Name: "T",
 		Fields: []dbschema.FieldDef{
@@ -115,6 +120,7 @@ func TestValidateWhere_UnknownFieldKnownList(t *testing.T) {
 
 // TestFindColumn_NilDef covers the nil-def guard in findColumn (line 47-49).
 func TestFindColumn_NilDef(t *testing.T) {
+	t.Parallel()
 	if got := findColumn(nil, "x"); got != nil {
 		t.Fatalf("findColumn(nil, ...) = %v, want nil", got)
 	}
@@ -122,6 +128,7 @@ func TestFindColumn_NilDef(t *testing.T) {
 
 // TestKnownColumnNames_NilDef covers the nil-def guard in knownColumnNames (line 64-66).
 func TestKnownColumnNames_NilDef(t *testing.T) {
+	t.Parallel()
 	if got := knownColumnNames(nil); got != nil {
 		t.Fatalf("knownColumnNames(nil) = %v, want nil", got)
 	}
@@ -129,6 +136,7 @@ func TestKnownColumnNames_NilDef(t *testing.T) {
 
 // TestClosestColumnName_NilDef covers the nil-def guard in closestColumnName (line 77-79).
 func TestClosestColumnName_NilDef(t *testing.T) {
+	t.Parallel()
 	if got := closestColumnName(nil, "x"); got != "" {
 		t.Fatalf("closestColumnName(nil, ...) = %q, want empty", got)
 	}
@@ -137,6 +145,7 @@ func TestClosestColumnName_NilDef(t *testing.T) {
 // TestClosestColumnName_NearMiss covers the best-update body (line 85) where a column
 // name is within Levenshtein distance 2 of the query.
 func TestClosestColumnName_NearMiss(t *testing.T) {
+	t.Parallel()
 	def := &dbschema.CollectionDef{
 		Fields: []dbschema.FieldDef{
 			{Name: dal.FieldName("name")},

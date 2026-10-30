@@ -1,0 +1,297 @@
+{
+  "feature": "mcp-apps-adapter",
+  "base": "3488863e4381a1d94e387f12cfcf8e46ae9a1d90",
+  "reviewedHead": "1d28aed057ee4a5000c1d5d9ad3ec835304baf45",
+  "files": [
+    {
+      "path": ".claude/skills/datatug-release/SKILL.md",
+      "bytes": 4790,
+      "sha256": "690a1ebabb6bb51c77890be4aceb6dda05ff882a54becea4a877418c62f0c48e"
+    },
+    {
+      "path": ".github/workflows/golangci.yml",
+      "bytes": 14308,
+      "sha256": "5e635840c89331ccd2dcd5c2e6c1061e94b91b6d507004d2c503293725fb7d0f"
+    },
+    {
+      "path": ".specscore/events.jsonl",
+      "bytes": 31802,
+      "sha256": "40bbcf474d0f45291be165d1182cebb4c05602f7a8fd180f6543cad94ae9781e"
+    },
+    {
+      "path": "THIRD_PARTY_NOTICES.md",
+      "bytes": 46158,
+      "sha256": "431e407cf8e73a6f0e86d2ea2b413f1e5d9d0e847dba894475dc3c30381d5947"
+    },
+    {
+      "path": "pkg/mcpserver/app/.gitignore",
+      "bytes": 14,
+      "sha256": "4d56952b0fb13bf8f9b6c13a6d4c34a075bac3af447636a1df4335d7576e2f97"
+    },
+    {
+      "path": "pkg/mcpserver/app/README.md",
+      "bytes": 9119,
+      "sha256": "c1839858aa1b470930b13d35cca9d0328f78bafe93decdcc61d68f21a29c18d1"
+    },
+    {
+      "path": "pkg/mcpserver/app/THIRD_PARTY_NOTICES.md",
+      "bytes": 43687,
+      "sha256": "18325dbfc3b20555e5f1057736c188bdc8446652c74b8c88ee052b1c0e1f710d"
+    },
+    {
+      "path": "pkg/mcpserver/app/build-manifest.json",
+      "bytes": 3585,
+      "sha256": "8169fa81e63dad8e08345587d0c1ce3e474bbb92ca68d6ddfcbf75bd9201500a"
+    },
+    {
+      "path": "pkg/mcpserver/app/index.html",
+      "bytes": 658297,
+      "sha256": "8a9b9d77b710e2c4430436c5784627083c07a1bc1f83dd7b37b6ee0821f541ab"
+    },
+    {
+      "path": "pkg/mcpserver/app/main.mjs",
+      "bytes": 13857,
+      "sha256": "afb159e711c576cd5402d0ebb936527ccefa7552b07097cd5028e70eb8d2bcfa"
+    },
+    {
+      "path": "pkg/mcpserver/app/package-lock.json",
+      "bytes": 22179,
+      "sha256": "7a1ee3a1ed3fa51f04fe29a042d43e98563c467a3abd62a41bbadb9fc8b8097a"
+    },
+    {
+      "path": "pkg/mcpserver/app/package.json",
+      "bytes": 600,
+      "sha256": "d70891f9a302970c06ae9c8f629f0ee6eb5fadb90a9ae9625ddfae6e25b48040"
+    },
+    {
+      "path": "pkg/mcpserver/app/scripts/browser-acceptance.mjs",
+      "bytes": 3562,
+      "sha256": "c39d3d6a7d603e1d071e458133fc2bd5734ac08fb5961eb2031d781fc697ac08"
+    },
+    {
+      "path": "pkg/mcpserver/app/scripts/build.mjs",
+      "bytes": 5060,
+      "sha256": "df068c3e83f35a213b73858a42df4f8141bcbf2929152cdf9176e11a1c68eb96"
+    },
+    {
+      "path": "pkg/mcpserver/app/scripts/parity-upstream.mjs",
+      "bytes": 1850,
+      "sha256": "dfc193b40b114b1518fb0ca864e48a8b6722d0fa7b754c1535434551d6649bc3"
+    },
+    {
+      "path": "pkg/mcpserver/app/scripts/refresh-vendor.mjs",
+      "bytes": 1170,
+      "sha256": "9198a1bdebadf626029aaacb444dfe7dd41e5d6dc1a8669de0e95157965a0c38"
+    },
+    {
+      "path": "pkg/mcpserver/app/state.mjs",
+      "bytes": 8480,
+      "sha256": "ab0490ea08acf388fee8282eea5022f94a5f67ee8208153210c024bd80d05244"
+    },
+    {
+      "path": "pkg/mcpserver/app/style.css",
+      "bytes": 2917,
+      "sha256": "f749dc2d832f3ae72863ca0bdc1938e33016777f2d2d7b75635973b81cdcd52f"
+    },
+    {
+      "path": "pkg/mcpserver/app/template.html",
+      "bytes": 1747,
+      "sha256": "472372cd9b30f5f3be02848d02f2ab2c0fb4bba656939de48e9ac6272e2e6321"
+    },
+    {
+      "path": "pkg/mcpserver/app/test/asset.test.mjs",
+      "bytes": 679,
+      "sha256": "28b2382f348da213302c10d483fee62c10d81ea778683d323ddf34e2a0f508f3"
+    },
+    {
+      "path": "pkg/mcpserver/app/test/browser-diagnostics.mjs",
+      "bytes": 1004,
+      "sha256": "23c1c4499f0e65c23edad57820c15d1f451dbe7c10e009ca51af95d10b7eb123"
+    },
+    {
+      "path": "pkg/mcpserver/app/test/browser-diagnostics.test.mjs",
+      "bytes": 1344,
+      "sha256": "e563ee2b570b7b938260dac53f9cb9f87dc6b5c39ad273f7c8d0a36ae1561572"
+    },
+    {
+      "path": "pkg/mcpserver/app/test/browser-driver.mjs",
+      "bytes": 22917,
+      "sha256": "8a52fe8c12178b3c7bf49567e73b7b0f187c9abe7594ed4d090da927b7f9232c"
+    },
+    {
+      "path": "pkg/mcpserver/app/test/browser-fixture.json",
+      "bytes": 301,
+      "sha256": "8425049cd75d1c60bc9e0c08b581f702933f594467d63f14c18cba25411c7c5f"
+    },
+    {
+      "path": "pkg/mcpserver/app/test/browser-host.mjs",
+      "bytes": 3743,
+      "sha256": "861ee0c26c2ac1a53192cd4c3ebff2aa3abc813f4dde6b6926a81336c56b10e1"
+    },
+    {
+      "path": "pkg/mcpserver/app/test/mixed-result.json",
+      "bytes": 2315,
+      "sha256": "b968063532d617db6c999966ad6ca5ab1557e90a2fd17e8f64c2ca5a174e7218"
+    },
+    {
+      "path": "pkg/mcpserver/app/test/official-sandbox/LICENSE",
+      "bytes": 12227,
+      "sha256": "0382b0057770ca05e9c350a50aa3b1c1fea84da0bc81d723bf00b9aa841be58a"
+    },
+    {
+      "path": "pkg/mcpserver/app/test/official-sandbox/sandbox.html",
+      "bytes": 1033,
+      "sha256": "97c0b4a0e9097d5a01d5d1c63b48f27bd6f8e636ddc5bd5052cc7e1a934ea87a"
+    },
+    {
+      "path": "pkg/mcpserver/app/test/official-sandbox/sandbox.ts",
+      "bytes": 5487,
+      "sha256": "41badf3e939ff62e952d30ebe3a5731d7f8c54f2f6021f47ef759ea857d0d88a"
+    },
+    {
+      "path": "pkg/mcpserver/app/test/official-sandbox/upstream.json",
+      "bytes": 663,
+      "sha256": "6f675772807a339c730bc15571d4a8134db54c5f5297381a49fb042dbaeec6b1"
+    },
+    {
+      "path": "pkg/mcpserver/app/test/state.test.mjs",
+      "bytes": 9427,
+      "sha256": "53db9f5282a6a7705ad773a9646454b45010d326f39c9df07b86e4ae38e54311"
+    },
+    {
+      "path": "pkg/mcpserver/app/test/typed-result.json",
+      "bytes": 2076,
+      "sha256": "a335eb5a78e1d70c8a6e122733849cad3379fd29debc5718da606c9f143b77fb"
+    },
+    {
+      "path": "pkg/mcpserver/app/vendor/LICENSE",
+      "bytes": 1064,
+      "sha256": "91336f7b140d8793f0ff3c7f02f3068ca99a9ffb2516c3ff6a57be0759d4a801"
+    },
+    {
+      "path": "pkg/mcpserver/app/vendor/rows.js",
+      "bytes": 6622,
+      "sha256": "380bf4d2f986e1faf451a0e0051dfa4d84dcba16ed057752fb7ae56231fd19b6"
+    },
+    {
+      "path": "pkg/mcpserver/app/vendor/upstream.json",
+      "bytes": 285,
+      "sha256": "09ebd3dd6a4280f5868d4bb49e04cfdb8762e0653895aef9963e9b72b77e5b0d"
+    },
+    {
+      "path": "pkg/mcpserver/apps.go",
+      "bytes": 8025,
+      "sha256": "d01d8da5bd7468404747f3e83d8164e2ed4f56c31985d0c08a0282629984a12f"
+    },
+    {
+      "path": "pkg/mcpserver/apps_assets_test.go",
+      "bytes": 4164,
+      "sha256": "d5060604a00aff0558e370fc57a4015dee7d121b6027d51946ba2563d9f9d0f7"
+    },
+    {
+      "path": "pkg/mcpserver/apps_failure_test.go",
+      "bytes": 10837,
+      "sha256": "1138c454ff82ce547d400222b3977ee2a78142f2b27bb1f9a6232c2b18791dce"
+    },
+    {
+      "path": "pkg/mcpserver/apps_registry.go",
+      "bytes": 9531,
+      "sha256": "9ced2e7f1b4491ff2995e89e3f432359554ea850e9b46cb6d57e5d5bd8fa551c"
+    },
+    {
+      "path": "pkg/mcpserver/apps_registry_test.go",
+      "bytes": 13653,
+      "sha256": "1f03edb7d57bea94e77607922109b1721102fe5fc4bd2ee205c4361c7172e7cf"
+    },
+    {
+      "path": "pkg/mcpserver/apps_test.go",
+      "bytes": 4991,
+      "sha256": "a69ed244fd1aafdd41acb241d90f36797bf0a0f12d3a2436d1d23059d0c64fb6"
+    },
+    {
+      "path": "pkg/mcpserver/defaults_test.go",
+      "bytes": 2398,
+      "sha256": "a8d891ec93ba3eb6d4bd7ae0f7e4a08f3e144ea01017e43be721656766d6820b"
+    },
+    {
+      "path": "pkg/mcpserver/server.go",
+      "bytes": 4289,
+      "sha256": "f28f7c4d08112ed46f5cbbf22e9e734b51585ae1f2f7282a0f96cc380f76a7f6"
+    },
+    {
+      "path": "pkg/mcpserver/tools.go",
+      "bytes": 18681,
+      "sha256": "2f6bd5f0652f1cba9e4599705dcfacb2238bade43cb8ec5ebc00c20f117743c3"
+    },
+    {
+      "path": "pkg/queryparams/defaults.go",
+      "bytes": 1721,
+      "sha256": "a4d438941cc93ef07034d3dddd753308f053894afd52f599845a216c8fb3d34a"
+    },
+    {
+      "path": "pkg/queryparams/defaults_test.go",
+      "bytes": 2045,
+      "sha256": "7c13fa95de89dc89b172c872bd3944649db28e082261736fbbedf30bb8c04053"
+    },
+    {
+      "path": "pkg/server/endpoints/defaults_test.go",
+      "bytes": 1156,
+      "sha256": "09a77cb824d22e077d5b19e97d0552f3c32d9bcbf492d9ca9e6ed9e1f5b5aba9"
+    },
+    {
+      "path": "pkg/server/endpoints/exec_run_query.go",
+      "bytes": 38175,
+      "sha256": "38175a6eab4b01ab464e27c4eead8f48cdd752a60731318270dbf2302a1a2768"
+    },
+    {
+      "path": "pkg/server/mcp_apps_browser_test.go",
+      "bytes": 18189,
+      "sha256": "6efe5e374091ad9ce60acb49f12f88c8f3aef83db8e22705b29fe3f8f6f29161"
+    },
+    {
+      "path": "spec/features/README.md",
+      "bytes": 5369,
+      "sha256": "e6fc28a8feef63aa41d278f5234b130780324b9d846beba16fc486277c629315"
+    },
+    {
+      "path": "spec/features/mcp-apps-adapter/README.md",
+      "bytes": 14415,
+      "sha256": "e64ff4f47924e17a7499d2a5975108da4ced3cb93d83a2aacbdb04b940808c71"
+    },
+    {
+      "path": "spec/ideas/README.md",
+      "bytes": 1420,
+      "sha256": "eed6ab1e0f789e17dda2832dbba30b56155a2259afab563dc378e145fed88afd"
+    },
+    {
+      "path": "spec/ideas/mcp-apps-adapter.md",
+      "bytes": 17113,
+      "sha256": "a12e519876f0289f5aef847ccd75265fbad934f575c0255450bee71a9ca0427b"
+    },
+    {
+      "path": "spec/plans/mcp-apps-adapter/README.md",
+      "bytes": 5418,
+      "sha256": "fcacd2b897f312f65aeb38ec2d7f9b4fe3fd9e12e6e06115011802127b0db49c"
+    }
+  ],
+  "finalStageReviews": [
+    {
+      "path": "/private/tmp/mcp-apps-review-task5-source-r2-20261023.md",
+      "sha256": "4aa31f2c1d155c8f565c717728f323ab4920fd2b58974512f5398d24ef3625a0"
+    },
+    {
+      "path": "/private/tmp/mcp-apps-review-task5-head-29b72f3.md",
+      "sha256": "5f5fe9ba8955c6a343782fea94aca1aa805f097fa8f4846eec0153fb0a61e519"
+    },
+    {
+      "path": "/private/tmp/mcp-apps-review-lint-repair-r1-20261023.md",
+      "sha256": "575dbad99ea6ad05e11a3c4860eca7e203545248f7eb3f69b08dbaacad4d6411"
+    },
+    {
+      "path": "/private/tmp/mcp-apps-review-task5-head-1d28aed0.md",
+      "sha256": "a00db7d3f27fd5903cfdba77b1f8866827432d3ace68b2d778229d4f12756f2b"
+    }
+  ],
+  "embeddedHTMLSHA256": "8a9b9d77b710e2c4430436c5784627083c07a1bc1f83dd7b37b6ee0821f541ab",
+  "status": "Exact source reviewed; CI and public-artifact acceptance pending"
+}

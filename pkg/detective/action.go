@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/datatug/datatug-core/pkg/apicontract"
+	"github.com/datatug/datatug-core/pkg/datatug"
 	core "github.com/datatug/datatug-core/pkg/detective"
 	ai "github.com/datatug/datatug-core/pkg/detectiveai"
 )
@@ -21,23 +22,29 @@ import (
 // receipt. Its accepted state is durable before any query or LLM network call.
 // An accepted run without a produced result is intentionally uncertain.
 type actionOperation struct {
-	Receipt           core.OperationReceipt `json:"receipt"`
-	Response          ActionResponse        `json:"response,omitempty"`
-	Kind              string                `json:"kind"`
-	ID                string                `json:"id,omitempty"`
-	Before            json.RawMessage       `json:"before,omitempty"`
-	After             json.RawMessage       `json:"after,omitempty"`
-	Audit             AuditEvent            `json:"audit,omitempty"`
-	RunAudit          *AuditEvent           `json:"runAudit,omitempty"`
-	CaseID            string                `json:"caseId,omitempty"`
-	CaseContextDigest string                `json:"caseContextDigest,omitempty"`
-	QueryRevisions    map[string]string     `json:"queryRevisions,omitempty"`
-	CaseLinkStatus    string                `json:"caseLinkStatus,omitempty"`
-	Produced          bool                  `json:"produced"`
-	Done              bool                  `json:"done"`
+	Native            *nativeActionAuthority `json:"native,omitempty"`
+	Receipt           core.OperationReceipt  `json:"receipt"`
+	Response          ActionResponse         `json:"response,omitempty"`
+	Kind              string                 `json:"kind"`
+	ID                string                 `json:"id,omitempty"`
+	Before            json.RawMessage        `json:"before,omitempty"`
+	After             json.RawMessage        `json:"after,omitempty"`
+	Audit             AuditEvent             `json:"audit,omitempty"`
+	RunAudit          *AuditEvent            `json:"runAudit,omitempty"`
+	CaseID            string                 `json:"caseId,omitempty"`
+	CaseContextDigest string                 `json:"caseContextDigest,omitempty"`
+	QueryRevisions    map[string]string      `json:"queryRevisions,omitempty"`
+	CaseLinkStatus    string                 `json:"caseLinkStatus,omitempty"`
+	Produced          bool                   `json:"produced"`
+	Done              bool                   `json:"done"`
 }
 
-func caseContextDigest(values map[string]InputValue) (string, error) {
+var caseContextDigest = defaultCaseContextDigest
+var actionNewOperationReceipt = core.NewOperationReceipt
+var actionReaddirnames = (*os.File).Readdirnames
+var actionSafeReadFile = safeReadFile
+
+func defaultCaseContextDigest(values map[string]InputValue) (string, error) {
 	if values == nil {
 		values = map[string]InputValue{}
 	}
@@ -93,6 +100,7 @@ func actionResourceID(req ActionRequest) string {
 		if req.Case != nil {
 			return req.Case.ID
 		}
+		return req.CaseID
 	case "run-check":
 		return req.CheckID
 	case "run-query-validators":
@@ -135,7 +143,7 @@ func (s *LocalStore) reconcilePendingActions(ctx context.Context, collection, re
 	if collection == "" || resourceID == "" {
 		return nil
 	}
-	if err := s.reconcilePendingOther(ctx, collection, resourceID); err != nil {
+	if err := s.reconcilePendingOther(ctx, collection, resourceID, exceptID); err != nil {
 		return err
 	}
 	dir := s.privateItemDir("action-operations")
@@ -151,7 +159,7 @@ func (s *LocalStore) reconcilePendingActions(ctx context.Context, collection, re
 	}
 	defer func() { _ = f.Close() }()
 	for {
-		names, err := f.Readdirnames(128)
+		names, err := actionReaddirnames(f, 128)
 		if err != nil && !errors.Is(err, io.EOF) {
 			return err
 		}
@@ -216,6 +224,9 @@ func (s *LocalStore) ExecuteAction(ctx context.Context, operationID, actor strin
 	if err != nil {
 		return empty, err
 	}
+	if req.Type == "update-case" && req.Case != nil && req.Case.Status == "archived" {
+		return empty, datatug.ErrProjectUsageIncomplete
+	}
 	var prior actionOperation
 	err = s.withLock(ctx, func() error {
 		collection, resourceID := actionResourceTarget(req)
@@ -255,7 +266,7 @@ func (s *LocalStore) ExecuteAction(ctx context.Context, operationID, actor strin
 	}
 	var op actionOperation
 	err = s.withLock(ctx, func() error {
-		data, e := safeReadFile(s.privateItemDir("action-operations"), operationID)
+		data, e := actionSafeReadFile(s.privateItemDir("action-operations"), operationID)
 		if e == nil {
 			if json.Unmarshal(data, &op) != nil || core.CheckOperationReplay(op.Receipt, binding) != nil {
 				return ErrConflict
@@ -274,12 +285,12 @@ func (s *LocalStore) ExecuteAction(ctx context.Context, operationID, actor strin
 			return prepErr
 		}
 		version := actionResponseVersion(op.Response)
-		op.Receipt, prepErr = core.NewOperationReceipt(operationID, binding, version, time.Now().UTC())
+		op.Receipt, prepErr = actionNewOperationReceipt(operationID, binding, version, time.Now().UTC())
 		if prepErr != nil {
 			return prepErr
 		}
 		op.Produced = true
-		if e := writeItem(s.privateItemDir("action-operations"), operationID, op); e != nil {
+		if e := writeDurableItem(s.privateItemDir("action-operations"), operationID, op); e != nil {
 			return e
 		}
 		return s.finishAction(ctx, operationID, &op)
@@ -322,7 +333,7 @@ func (s *LocalStore) executeRunAction(ctx context.Context, id, actor string, req
 	var admittedRevisions map[string]string
 	effectiveInputs := req.Inputs
 	runID := actionRunID(s.projectID, actor, id)
-	accepted, err := core.NewOperationReceipt(id, binding, 0, time.Now().UTC())
+	accepted, err := actionNewOperationReceipt(id, binding, 0, time.Now().UTC())
 	if err != nil {
 		return empty, err
 	}
@@ -362,6 +373,9 @@ func (s *LocalStore) executeRunAction(ctx context.Context, id, actor string, req
 		if e != nil {
 			return e
 		}
+		if e = checkWatchCatalog(ctx, catalog, checkID, op.QueryRevisions); e != nil {
+			return e
+		}
 		admittedRevisions = op.QueryRevisions
 		if checkID != "" {
 			if req.CaseID != "" {
@@ -375,7 +389,7 @@ func (s *LocalStore) executeRunAction(ctx context.Context, id, actor string, req
 		if e != nil {
 			return e
 		}
-		return writeItem(s.privateItemDir("action-operations"), id, op)
+		return writeDurableItem(s.privateItemDir("action-operations"), id, op)
 	})
 	if err != nil {
 		return empty, err
@@ -410,7 +424,7 @@ func (s *LocalStore) executeRunAction(ctx context.Context, id, actor string, req
 		op.RunAudit = &audit
 		op.CaseID = req.CaseID
 		op.Produced = true
-		if e := writeItem(s.privateItemDir("action-operations"), id, op); e != nil {
+		if e := writeDurableItem(s.privateItemDir("action-operations"), id, op); e != nil {
 			return e
 		}
 		return s.finishAction(ctx, id, &op)
@@ -422,6 +436,11 @@ func (s *LocalStore) executeRunAction(ctx context.Context, id, actor string, req
 }
 
 func (s *LocalStore) finishAction(ctx context.Context, id string, op *actionOperation) error {
+	if op.Native != nil {
+		if err := s.checkNativeAction(ctx, id, op); err != nil {
+			return err
+		}
+	}
 	if !op.Produced || core.CheckOperationReplay(op.Receipt, core.OperationBinding{Project: op.Receipt.Project, Actor: op.Receipt.Actor, Action: op.Receipt.Action, ResourceID: op.Receipt.ResourceID, PayloadDigest: op.Receipt.PayloadDigest}) != nil {
 		return ErrInvalid
 	}
@@ -434,7 +453,7 @@ func (s *LocalStore) finishAction(ctx context.Context, id string, op *actionOper
 				return err
 			}
 		}
-		if err := s.finishActionFile(s.privateItemDir("runs"), op.ID, nil, op.Response.Run); err != nil {
+		if err := s.finishNativeActionFile(op, s.privateItemDir("runs"), op.ID, nil, op.Response.Run); err != nil {
 			return err
 		}
 		if err := s.appendAuditOnce(ctx, *op.RunAudit); err != nil {
@@ -483,7 +502,7 @@ func (s *LocalStore) finishAction(ctx context.Context, id string, op *actionOper
 					}
 				}
 			}
-			if err := writeItem(s.privateItemDir("action-operations"), id, op); err != nil {
+			if err := writeDurableItem(s.privateItemDir("action-operations"), id, op); err != nil {
 				return err
 			}
 		}
@@ -499,15 +518,41 @@ func (s *LocalStore) finishAction(ctx context.Context, id string, op *actionOper
 		if collection == "checks" || collection == "validators" || collection == "query-validators" || collection == "scenarios" {
 			dir = s.definitionDir(collection)
 		}
-		if err := s.finishActionFile(dir, resourceID, op.Before, json.RawMessage(op.After)); err != nil {
+		// Older versions could prepare an archive before losing its acknowledgement.
+		// Recovery may finish its audit only when that exact image already exists;
+		// it must not materialize an unreviewed lifecycle transition now.
+		if collection == "cases" {
+			var after Case
+			if err := json.Unmarshal(op.After, &after); err != nil {
+				return ErrInvalid
+			}
+			if after.Status == "archived" {
+				current, err := actionSafeReadFile(dir, resourceID)
+				if errors.Is(err, os.ErrNotExist) {
+					return datatug.ErrProjectUsageIncomplete
+				}
+				if err != nil {
+					return err
+				}
+				if !jsonSame(current, op.After) {
+					return datatug.ErrProjectUsageIncomplete
+				}
+			}
+		}
+		if err := s.finishNativeActionFile(op, dir, resourceID, op.Before, json.RawMessage(op.After)); err != nil {
 			return err
 		}
 		if err := s.appendAuditOnce(ctx, op.Audit); err != nil {
 			return err
 		}
 	}
+	if op.Native != nil {
+		if err := s.finishNativeEvidence(ctx, id, op); err != nil {
+			return err
+		}
+	}
 	op.Done = true
-	if err := writeItem(s.privateItemDir("action-operations"), id, op); err != nil {
+	if err := writeDurableItem(s.privateItemDir("action-operations"), id, op); err != nil {
 		return ErrOutcomeUncertain
 	}
 	return nil

@@ -25,14 +25,16 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/gorilla/websocket"
 )
 
 func TestChatUIBrowserBridgeSharesSessionWithTerminal(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
-	agent := &contextualStub{turns: []Turn{{Text: "Three matching rows.", Queries: []QueryResult{{Title: "Count", DTQL: "from: {name: Customer}\nlimit: 1", Result: secureread.Result{Columns: []string{"Count"}, Rows: []secureread.Row{{Data: map[string]any{"Count": 3}}}}}}}, {Text: "Another browser reply."}, {Text: "Terminal reply."}}}
+	agent := &contextualStub{turns: []Turn{{Text: "Three matching rows.", Queries: []QueryResult{{Title: "Count", TugQL: "from: {name: Customer}\nlimit: 1", Result: secureread.Result{Columns: []string{"Count"}, Rows: []secureread.Row{{Data: map[string]any{"Count": 3}}}}}}}, {Text: "Another browser reply."}, {Text: "Terminal reply."}}}
 	sessions, err := NewSessionChat(ctx, store, agent, "sqlite:///chinook.db", ProjectCatalog{ID: "demo-project-1"})
 	if err != nil {
 		t.Fatal(err)
@@ -190,6 +192,7 @@ func (erroringConversation) AskWithContext(context.Context, string, string) (Tur
 // bound (a second local chat running), it falls back to an ephemeral port
 // instead of failing.
 func TestBrowserBridgeListenerFallsBackWhenDefaultPortIsTaken(t *testing.T) {
+	t.Parallel()
 	occupied, err := net.Listen("tcp", "127.0.0.1:3284")
 	if err != nil {
 		t.Skipf("port 3284 unavailable for the test itself: %v", err)
@@ -232,6 +235,7 @@ func TestBrowserBridgeListenerFallsBackWhenDefaultPortIsTaken(t *testing.T) {
 // TestChatUIBrowserBridgeSharesSessionWithTerminal's happy-path walk
 // exercises.
 func TestBrowserBridgeEndpointErrorBranches(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	agent := &erroringConversation{}
@@ -331,6 +335,7 @@ func TestBrowserBridgeEndpointErrorBranches(t *testing.T) {
 // own sessions.Snapshot error branch, forced by closing the underlying
 // store.
 func TestBrowserBridgeChatSessionSnapshotErrorSurfaces(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{turns: []Turn{{Text: "ok"}}}, "sqlite:///chinook.db")
@@ -374,6 +379,7 @@ func TestBrowserBridgeChatSessionSnapshotErrorSurfaces(t *testing.T) {
 // must stop its select loop (and drop the connection from bridge.connections)
 // once the client closes its end, rather than blocking forever.
 func TestBrowserBridgeEventsLoopDetectsClientDisconnect(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{turns: []Turn{{Text: "ok"}}}, "sqlite:///chinook.db")
@@ -425,6 +431,7 @@ func TestBrowserBridgeEventsLoopDetectsClientDisconnect(t *testing.T) {
 // handler's own websocket-Upgrade-error branch: a request that passes
 // auth/subprotocol but never asks for a protocol upgrade at all.
 func TestBrowserBridgeEventsUpgradeFailureIsHandled(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{turns: []Turn{{Text: "ok"}}}, "sqlite:///chinook.db")
@@ -467,6 +474,7 @@ func TestBrowserBridgeEventsUpgradeFailureIsHandled(t *testing.T) {
 // connections-map loop: closing the bridge while a websocket connection is
 // still open must close that connection too, not just the listener.
 func TestBrowserBridgeCloseClosesLiveConnections(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{turns: []Turn{{Text: "ok"}}}, "sqlite:///chinook.db")
@@ -513,6 +521,7 @@ func TestBrowserBridgeCloseClosesLiveConnections(t *testing.T) {
 // Host-mismatch branch directly: an allowed Origin with a Host header that
 // names neither the listener's address nor its localhost:port form.
 func TestBrowserBridgeAllowedRequestHostMismatch(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{turns: []Turn{{Text: "ok"}}}, "sqlite:///chinook.db")
@@ -536,6 +545,7 @@ func TestBrowserBridgeAllowedRequestHostMismatch(t *testing.T) {
 }
 
 func TestChatUIBrowserBridgeContinuesWhileDialogsAreOpen(t *testing.T) {
+	t.Parallel()
 	// Ported from bridge_test.go's TestBrowserBridgeContinuesWhileDialogsAreOpen.
 	// ui.go tracked each dialog as its own nilable field that bridgeTickMsg's
 	// handler had to route around; ChatUI/chatshell replaced all of that
@@ -562,7 +572,19 @@ func TestChatUIBrowserBridgeContinuesWhileDialogsAreOpen(t *testing.T) {
 			drainCmd(t, u, open(u))
 			before := u.shell.View().Content
 			_ = u.OnMsg(bridgeTickMsg{}) // must not panic with an overlay open
-			if after := u.shell.View().Content; after != before {
+			after := u.shell.View().Content
+			// The header line reflects live apimonitor.Default state which
+			// may change concurrently under parallel test execution; compare
+			// the rest of the view to verify the overlay was not disturbed.
+			beforeOverlay := ansi.Strip(before)
+			if idx := strings.Index(beforeOverlay, "\n"); idx >= 0 {
+				beforeOverlay = beforeOverlay[idx+1:]
+			}
+			afterOverlay := ansi.Strip(after)
+			if idx := strings.Index(afterOverlay, "\n"); idx >= 0 {
+				afterOverlay = afterOverlay[idx+1:]
+			}
+			if afterOverlay != beforeOverlay {
 				t.Fatalf("bridge tick changed the open %s dialog's view:\nbefore:\n%s\nafter:\n%s", names[i], before, after)
 			}
 		})

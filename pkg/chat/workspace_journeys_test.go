@@ -15,10 +15,11 @@ import (
 )
 
 func TestUnifiedWorkspaceRelationshipsIncomingCompositeAndPolicySlots(t *testing.T) {
+	t.Parallel()
 	snapshot := joinSnapshot()
 	executor := &joinExecutorStub{}
 	a := ForeignKeyJoinApplication{Source: snapshot.Source, Snapshot: snapshot, Executor: executor}
-	record := RecordSet{Source: a.Source, DTQL: "from: {schema: main, name: Location}\nlimit: 5\n"}
+	record := RecordSet{Source: a.Source, TugQL: "from: {schema: main, name: Location}\nlimit: 5\n"}
 	items, err := a.PreviewRelationships(context.Background(), record, map[string]any{"main.location.country": "NZ", "main.location.code": "AKL"})
 	if err != nil || len(items) != 1 || !items[0].incoming || items[0].target().Relation != "Order" || items[0].err != nil {
 		t.Fatalf("incoming preview: %+v, %v", items, err)
@@ -45,9 +46,10 @@ func TestUnifiedWorkspaceRelationshipsIncomingCompositeAndPolicySlots(t *testing
 }
 
 func TestUnifiedWorkspaceInspectionUsesDeclaredCompositeIdentity(t *testing.T) {
-	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Widgets", DTQL: "from: {schema: main, name: Widgets}\nlimit: 5\n", Result: secureread.Result{Columns: []string{"Id", "Name"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 1, "Name": "Alpha"}}}}})
+	t.Parallel()
+	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Widgets", TugQL: "from: {schema: main, name: Widgets}\nlimit: 5\n", Result: secureread.Result{Columns: []string{"Id", "Name"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 1, "Name": "Alpha"}}}}})
 	g, record, _ := u.activeGrid()
-	record.DTQL = "from: {schema: main, name: Widgets}\nlimit: 5\n"
+	record.TugQL = "from: {schema: main, name: Widgets}\nlimit: 5\n"
 	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "table", ObjectID: "main.Widgets", SourceID: record.Database, Title: "Widgets"}, Columns: []string{"Id", "Name"}, PrimaryKey: []string{"Id", "Name"}}}}
 	if got := u.inspectionIdentity(g, record); got != "Widgets / Id=1 / Name=Alpha" {
 		t.Fatalf("identity=%q", got)
@@ -63,6 +65,7 @@ func TestUnifiedWorkspaceInspectionUsesDeclaredCompositeIdentity(t *testing.T) {
 }
 
 func TestUnifiedWorkspaceRelatedIgnoresLateGenerationAndCancelledRequests(t *testing.T) {
+	t.Parallel()
 	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Widgets", Result: secureread.Result{Columns: []string{"Id"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 1}}}}})
 	p := u.workspace
 	g, r, _ := u.activeGrid()
@@ -85,6 +88,7 @@ func TestUnifiedWorkspaceRelatedIgnoresLateGenerationAndCancelledRequests(t *tes
 }
 
 func TestUnifiedWorkspaceExplorerActionsAndEditableQueryPreserveDraft(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	catalog := workspaceTestCatalog()
@@ -174,6 +178,7 @@ func TestUnifiedWorkspaceExplorerActionsAndEditableQueryPreserveDraft(t *testing
 }
 
 func TestUnifiedWorkspaceJoinCtrlJAndStalePickerCannotExecute(t *testing.T) {
+	t.Parallel()
 	u := focusedGridTestUI(t)
 	o := &joinPickerOverlay{ui: u, sessionID: u.sessionID, generation: u.workspaceGeneration, candidates: []JoinCandidate{{ID: "candidate"}}}
 	_, cmd, done := o.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModCtrl})
@@ -187,6 +192,7 @@ func TestUnifiedWorkspaceJoinCtrlJAndStalePickerCannotExecute(t *testing.T) {
 }
 
 func TestUnifiedWorkspaceRelatedViewNeverShowsPreviousRowRelations(t *testing.T) {
+	t.Parallel()
 	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Invoice", Result: secureread.Result{Columns: []string{"Id"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 1}}, {Data: map[string]any{"Id": 2}}}}})
 	g, record, _ := u.activeGrid()
 	p := u.workspace
@@ -205,6 +211,7 @@ func TestUnifiedWorkspaceRelatedViewNeverShowsPreviousRowRelations(t *testing.T)
 }
 
 func TestUnifiedWorkspaceTextSelectionAnchorCopyAndLineMovement(t *testing.T) {
+	t.Parallel()
 	u := focusedGridTestUI(t)
 	p := &workspaceQueryEditor{ui: u}
 	s := &queryTextSelection{editor: p, text: []rune("abc\ndefgh\nijk"), anchor: 1, cursor: 1}
@@ -251,6 +258,7 @@ func gridActionJourney(t *testing.T, u *ChatUI, label string) {
 	}
 }
 func TestUnifiedWorkspaceGoldTitleAndHelpFitActualWidth(t *testing.T) {
+	t.Parallel()
 	u := focusedGridTestUI(t)
 	title, _, _ := u.topBarInfo(150)
 	if !strings.Contains(title, "38;2;255;215;0") || !strings.Contains(title, "DataTug") {
@@ -267,7 +275,8 @@ func TestUnifiedWorkspaceGoldTitleAndHelpFitActualWidth(t *testing.T) {
 }
 
 func TestUnifiedWorkspaceLocalOperationsStableSelectionFilteringAndReset(t *testing.T) {
-	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Widgets", DTQL: "from: {schema: main, name: Widgets}\nlimit: 2\n", Result: secureread.Result{Columns: []string{"Id", "Name"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 2, "Name": "same"}}, {Data: map[string]any{"Id": 1, "Name": "same"}}}}})
+	t.Parallel()
+	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Widgets", TugQL: "from: {schema: main, name: Widgets}\nlimit: 2\n", Result: secureread.Result{Columns: []string{"Id", "Name"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 2, "Name": "same"}}, {Data: map[string]any{"Id": 1, "Name": "same"}}}}})
 	g, record, _ := u.activeGrid()
 	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "table", ObjectID: "main.Widgets", SourceID: record.Database}, Columns: []string{"Id", "Name"}, ColumnTypes: map[string]string{"Id": "INTEGER", "Name": "TEXT"}}}}
 	executor := &joinExecutorStub{}
@@ -336,6 +345,7 @@ func TestUnifiedWorkspaceLocalOperationsStableSelectionFilteringAndReset(t *test
 }
 
 func TestUnifiedWorkspaceRelatedOpenPersistsOnceAndReturnsExactOrigin(t *testing.T) {
+	t.Parallel()
 	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Parent", Result: secureread.Result{Columns: []string{"Id"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 1}}, {Data: map[string]any{"Id": 2}}}}})
 	g, record, _ := u.activeGrid()
 	g.SelectRow(1)

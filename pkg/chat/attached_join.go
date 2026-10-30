@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 )
 
 // joinAttachedQuery extends a fresh model-authored single-table query through
@@ -18,7 +18,7 @@ func (c *SessionChat) joinAttachedQuery(ctx context.Context, session ChatSession
 	if !ok || query.Source != c.source {
 		return query, false, nil
 	}
-	parsed, err := dtql.Deserialize([]byte(query.DTQL))
+	parsed, err := tugql.Deserialize([]byte(query.TugQL))
 	if err != nil {
 		return query, false, err
 	}
@@ -48,7 +48,7 @@ func (c *SessionChat) joinAttachedQuery(ctx context.Context, session ChatSession
 	if len(targets) == 0 {
 		return query, false, nil
 	}
-	current := RecordSet{Title: query.Title, DTQL: query.DTQL, Source: query.Source, Parameters: query.Parameters}
+	current := RecordSet{Title: query.Title, TugQL: query.TugQL, Source: query.Source, Parameters: query.Parameters}
 	applied := false
 	for _, target := range targets {
 		candidates, candidateErr := application.Candidates(ctx, current)
@@ -87,7 +87,7 @@ func (c *SessionChat) joinAttachedQuery(ctx context.Context, session ChatSession
 		if applyErr != nil {
 			return query, false, applyErr
 		}
-		current.Title, current.DTQL, current.Lineage = joined.Title, joined.DTQL, joined.Lineage
+		current.Title, current.TugQL, current.Lineage = joined.Title, joined.TugQL, joined.Lineage
 		query = joined
 		applied = true
 	}

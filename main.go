@@ -14,7 +14,7 @@ import (
 	"github.com/datatug/datatug-cli/apps/datatugapp/commands"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/dtlog"
-	_ "github.com/denisenkom/go-mssqldb"
+	_ "github.com/microsoft/go-mssqldb"
 	"github.com/spf13/cobra"
 	"github.com/strongo/buildinfo"
 	"github.com/strongo/buildinfo/fangcmd"
@@ -121,7 +121,11 @@ func main() {
 		dtlogEnqueue(dtlog.StartedEvent())
 	}
 
-	if err := fang.Execute(context.Background(), root, fangOpts...); err != nil {
+	err := fang.Execute(context.Background(), root, fangOpts...)
+	// --client <caller>: after the command's own work (success or failure), make sure the
+	// local API daemon runs. Stderr only; never the command's stdout or exit code.
+	ensureDaemon(root, args, os.Stderr)
+	if err != nil {
 		// fang.Execute has already printed err (styled, or bare on a
 		// non-terminal stderr — see charm.land/fang/v2's DefaultErrorHandler).
 		// Resolve only the process exit code here: an ExitCoder (this
@@ -136,6 +140,9 @@ func main() {
 		osExit(1)
 	}
 }
+
+// ensureDaemon is a seam over the --client wrapper (spec/features/cli/daemon).
+var ensureDaemon = commands.EnsureDaemonForCaller
 
 var getCommand = func() (*cobra.Command, []fang.Option) {
 	root := commands.DatatugCommand()

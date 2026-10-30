@@ -120,7 +120,7 @@ func TestContextSessionSendRecoversLostACKWithoutProviderRedispatch(t *testing.T
 			providerCalls := 0
 			sessionInterpretDetailed = func(context.Context, chat.InterpretRequest) (chat.InterpretResult, error) {
 				providerCalls++
-				return chat.InterpretResult{DTQL: "from:\n  name: Invoice\n"}, nil
+				return chat.InterpretResult{TugQL: "from:\n  name: Invoice\n"}, nil
 			}
 			execute := func(input string, args ...string) (string, error) {
 				cmd := sessionCommand()
@@ -152,7 +152,7 @@ func TestContextSessionSendRecoversLostACKWithoutProviderRedispatch(t *testing.T
 				t.Fatalf("recovery response %s err=%v", out, err)
 			}
 			if test.commit {
-				if err != nil || response.Run.State != "completed" || response.Interpretation == nil || response.Interpretation.DTQL != "from:\n  name: Invoice\n" {
+				if err != nil || response.Run.State != "completed" || response.Interpretation == nil || response.Interpretation.TugQL != "from:\n  name: Invoice\n" {
 					t.Fatalf("completed recovery %+v %v", response, err)
 				}
 				// The printed report receipt is also a read-only recovery identity.
@@ -286,7 +286,7 @@ func TestContextSessionTerminalDurableComposerAndDashboard(t *testing.T) {
 		if request.Provider.APIKey != "private-model-key" || !strings.Contains(request.Schema, entry.CurrentRevisionID) {
 			t.Fatal("runtime did not receive explicit pinned inputs")
 		}
-		return chat.InterpretResult{DTQL: "from:\n  name: InvoiceLine\n"}, nil
+		return chat.InterpretResult{TugQL: "from:\n  name: InvoiceLine\n"}, nil
 	}
 	message, _ := json.Marshal(map[string]any{"text": "Show this invoice's lines", "schema": "Invoice(InvoiceId integer); InvoiceLine(InvoiceId integer)", "attachments": []sessioncontext.EntryRef{{EntryID: entry.ID, RevisionID: entry.CurrentRevisionID}}})
 	out, _, err = execute(string(message), "send", "s1", "--ai", "test")
@@ -306,6 +306,17 @@ func TestContextSessionTerminalDurableComposerAndDashboard(t *testing.T) {
 
 	t.Run("PinnedChinookFixture", func(t *testing.T) {
 		fixture := os.Getenv("DATATUG_TEST_CHINOOK_FIXTURE")
+		if fixture == "" {
+			for _, candidate := range []string{
+				"/Users/alex/projects/demo-db/chinook/artifacts/data/chinook.sqlite",
+				"../../../../../../projects/demo-db/chinook/artifacts/data/chinook.sqlite",
+			} {
+				if _, err := os.Stat(candidate); err == nil {
+					fixture = candidate
+					break
+				}
+			}
+		}
 		if fixture == "" {
 			t.Skip("DATATUG_TEST_CHINOOK_FIXTURE is required for the real pinned fixture journey")
 		}

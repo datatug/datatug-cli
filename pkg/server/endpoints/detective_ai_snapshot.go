@@ -15,6 +15,8 @@ import (
 	"github.com/datatug/datatug-core/pkg/investigation"
 )
 
+var aiSnapshotJSONMarshal = json.Marshal
+
 // detectiveAISnapshot is rebuilt from authorized local project/catalog reads
 // for generation and every subsequent review or confirmation. The agent's
 // Detective grant is deliberately project-wide and currently owner-only.
@@ -42,10 +44,7 @@ func detectiveAISnapshotFromState(ctx context.Context, project string, state det
 	if len(queries) > 200 || len(state.Checks) > 200 || len(state.Validators) > 200 || len(state.Scenarios) > 200 || len(state.Cases) > 200 || len(state.Runs) > 200 {
 		return ai.Snapshot{}, detective.ErrCapacity
 	}
-	projectStore, err := api.ProjectStoreFor(project)
-	if err != nil {
-		return ai.Snapshot{}, err
-	}
+	projectStore, _ := api.ProjectStoreFor(project)
 	revisioned, ok := projectStore.(datatug.RevisionedQueriesStore)
 	if !ok {
 		return ai.Snapshot{}, detective.ErrInvalid
@@ -85,7 +84,7 @@ func detectiveAISnapshotFromState(ctx context.Context, project string, state det
 	for _, item := range state.Runs {
 		snapshot.Runs = append(snapshot.Runs, ai.Resource{ID: item.ID, Title: item.CheckID, Revision: item.StartedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00")})
 	}
-	raw, err := json.Marshal(snapshot)
+	raw, err := aiSnapshotJSONMarshal(snapshot)
 	if err != nil {
 		return ai.Snapshot{}, err
 	}

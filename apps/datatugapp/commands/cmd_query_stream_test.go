@@ -14,13 +14,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	_ "modernc.org/sqlite"
 )
 
-const streamingJoinDTQL = `from:
+const streamingJoinTugQL = `from:
   database: orders
   name: Invoice
   alias: o
@@ -32,7 +32,7 @@ columns:
   - {field: name, source: c, as: countryName}
 `
 
-const streamingLookupDTQL = `from:
+const streamingLookupTugQL = `from:
   database: orders
   name: Invoice
   alias: o
@@ -92,7 +92,7 @@ func TestStreamedFederatedJSONLWithHTTPAndCSV(t *testing.T) {
 	defer server.Close()
 	federation := &datatug.QueryFederation{OVDBBaseURL: server.URL, Lookups: []datatug.QueryHTTPLookup{{Database: "extra", Collection: "Country", FromColumn: "invoiceId", Concurrency: 8, Fields: []datatug.QueryLookupField{{Source: "region", Target: "region"}}}}}
 	ctx := context.Background()
-	stream, err := secureread.NewExecutor(secureread.Session{Unrestricted: true}).StreamFederatedDTQL(ctx, []byte(streamingJoinDTQL), urls, nil)
+	stream, err := secureread.NewExecutor(secureread.Session{Unrestricted: true}).StreamFederatedTugQL(ctx, []byte(streamingJoinTugQL), urls, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestStreamedFederatedJSONLWithHTTPAndCSV(t *testing.T) {
 		t.Fatalf("progress tail: %s", progress.String()[max(0, len(progress.String())-250):])
 	}
 	// A second read proves deterministic CSV columns and header without buffering.
-	csvStream, err := secureread.NewExecutor(secureread.Session{Unrestricted: true}).StreamFederatedDTQL(ctx, []byte(streamingJoinDTQL), urls, nil)
+	csvStream, err := secureread.NewExecutor(secureread.Session{Unrestricted: true}).StreamFederatedTugQL(ctx, []byte(streamingJoinTugQL), urls, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestStreamedSingleSourceJSONLWithHTTPLookup(t *testing.T) {
 		_, _ = io.WriteString(w, `{"data":{"region":"Europe"}}`)
 	}))
 	defer server.Close()
-	query, err := dtql.Deserialize([]byte(streamingLookupDTQL))
+	query, err := tugql.Deserialize([]byte(streamingLookupTugQL))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestStreamedSingleSourceJSONLWithHTTPLookup(t *testing.T) {
 		t.Fatal("direct source with HTTP lookup rejected")
 	}
 	ctx := context.Background()
-	stream, err := secureread.NewExecutor(secureread.Session{Unrestricted: true}).StreamFederatedDTQL(ctx, []byte(streamingLookupDTQL), urls, nil)
+	stream, err := secureread.NewExecutor(secureread.Session{Unrestricted: true}).StreamFederatedTugQL(ctx, []byte(streamingLookupTugQL), urls, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestStreamedFederatedCancellationAndOutputError(t *testing.T) {
 	urls := streamFixture(t, 5)
 	executor := secureread.NewExecutor(secureread.Session{Unrestricted: true})
 	ctx, cancel := context.WithCancel(context.Background())
-	stream, err := executor.StreamFederatedDTQL(ctx, []byte(streamingJoinDTQL), urls, nil)
+	stream, err := executor.StreamFederatedTugQL(ctx, []byte(streamingJoinTugQL), urls, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +191,7 @@ func TestStreamedFederatedCancellationAndOutputError(t *testing.T) {
 	if err := writeStreamedRows(ctx, io.Discard, "jsonl", nil, stream.Reader); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancel: %v", err)
 	}
-	stream2, err := executor.StreamFederatedDTQL(context.Background(), []byte(streamingJoinDTQL), urls, nil)
+	stream2, err := executor.StreamFederatedTugQL(context.Background(), []byte(streamingJoinTugQL), urls, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,21 +202,21 @@ func TestStreamedFederatedCancellationAndOutputError(t *testing.T) {
 }
 
 func TestStreamingShapeAndColumns(t *testing.T) {
-	query, err := dtql.Deserialize([]byte(streamingJoinDTQL))
+	query, err := tugql.Deserialize([]byte(streamingJoinTugQL))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !isBoundedFederatedRowShape(query) {
 		t.Fatal("flat join rejected")
 	}
-	withoutCap, err := dtql.Deserialize([]byte(strings.Replace(streamingJoinDTQL, ", scan: {orderBy: [{field: id}], limit: 10000}", "", 1)))
+	withoutCap, err := tugql.Deserialize([]byte(strings.Replace(streamingJoinTugQL, ", scan: {orderBy: [{field: id}], limit: 10000}", "", 1)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if isBoundedFederatedRowShape(withoutCap) {
 		t.Fatal("uncapped dimension accepted")
 	}
-	withoutStableOrder, err := dtql.Deserialize([]byte(strings.Replace(streamingJoinDTQL, "orderBy: [{field: id}]", "orderBy: [{field: name}]", 1)))
+	withoutStableOrder, err := tugql.Deserialize([]byte(strings.Replace(streamingJoinTugQL, "orderBy: [{field: id}]", "orderBy: [{field: name}]", 1)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ func TestStreamingShapeAndColumns(t *testing.T) {
 	if got := explicitStreamColumns(query); len(got) != 2 || got[0] != "invoiceId" || got[1] != "countryName" {
 		t.Fatalf("columns: %v", got)
 	}
-	ordered, err := dtql.Deserialize([]byte(streamingJoinDTQL + "orderBy: [{field: id, source: o}]\n"))
+	ordered, err := tugql.Deserialize([]byte(streamingJoinTugQL + "orderBy: [{field: id, source: o}]\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,10 +291,10 @@ columns:
   - {aggregate: {function: sum, args: [{field: amount, source: o}]}, as: totalSales}
   - {binary: {op: '/', left: {aggregate: {function: sum, args: [{field: amount, source: o}]}}, right: {field: population, source: c}}, as: salesPerCapita}
 `
-	write("queries/sales/money.query.json", `{"id":"money","type":"DTQL"}`)
-	write("queries/sales/money.query.dtql", moneyDoc)
-	write("queries/sales/rows.query.json", `{"id":"rows","type":"DTQL"}`)
-	write("queries/sales/rows.query.dtql", streamingJoinDTQL)
+	write("queries/sales/money.query.json", `{"createdAt":"2026-01-01T00:00:00Z","id":"money","type":"TugQL"}`)
+	write("queries/sales/money.query.tugql.yaml", moneyDoc)
+	write("queries/sales/rows.query.json", `{"createdAt":"2026-01-01T00:00:00Z","id":"rows","type":"TugQL"}`)
+	write("queries/sales/rows.query.tugql.yaml", streamingJoinTugQL)
 	stdout, stderr, code := runQuery(t, "", "--project", dir, "--query", "sales/money", "--env", "local", "--format", "json")
 	if code != 0 {
 		t.Fatalf("money exit=%d stderr=%s", code, stderr)

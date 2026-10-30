@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/datatug/datatug-cli/pkg/agentaccess"
 	"io"
 	"net/http"
 	"net/url"
@@ -42,7 +43,7 @@ func sessionCommand() *cobra.Command {
 	cmd.PersistentFlags().String("identity-domain", "", "Explicit identity domain when an environment has multiple domains")
 	cmd.PersistentFlags().String("op", "", "Operation ID for this command; use operation to recover an uncertain response")
 	cmd.AddCommand(sessionReadCommand("capabilities"), sessionReadCommand("list"), sessionReadCommand("show"), sessionReadCommand("operation"), sessionReadCommand("runs"), sessionReadCommand("messages"), sessionReadCommand("input"), sessionReadCommand("run"), sessionReadCommand("revisions"), sessionPinCommand(false), sessionPinCommand(true), sessionCreateCommand(), sessionBagCommand(), sessionPutCommand(), sessionApplyCommand(), sessionClearCommand(), sessionRawCommand())
-	cmd.AddCommand(sessionQueryCommand(), sessionDashboardCommand(), sessionResultCommand(), sessionImportCommand(), sessionRenameCommand(false), sessionRenameCommand(true))
+	cmd.AddCommand(sessionDetectiveCommand(), sessionQueryCommand(), sessionDashboardCommand(), sessionResultCommand(), sessionImportCommand(), sessionRenameCommand(false), sessionRenameCommand(true))
 	for _, transition := range []string{"start", "stop", "archive", "restore", "delete"} {
 		cmd.AddCommand(sessionTransitionCommand(transition))
 	}
@@ -50,6 +51,10 @@ func sessionCommand() *cobra.Command {
 }
 
 func newSessionCLI(cmd *cobra.Command) (sessionCLI, error) {
+	return newSessionTransport(cmd, true)
+}
+
+func newSessionTransport(cmd *cobra.Command, capabilities bool) (sessionCLI, error) {
 	base, _ := cmd.Flags().GetString("agent")
 	parsed, err := url.Parse(base)
 	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
@@ -75,6 +80,9 @@ func newSessionCLI(cmd *cobra.Command) (sessionCLI, error) {
 	}
 	if cli.query.Get("project") == "" {
 		return cli, errors.New("--project is required")
+	}
+	if !capabilities {
+		return cli, nil
 	}
 	if _, err = cli.request(cmd.Context(), http.MethodGet, "/capabilities", nil, &cli.caps); err != nil {
 		return cli, err
@@ -103,6 +111,7 @@ func (c sessionCLI) request(ctx context.Context, method, suffix string, body any
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
+	agentaccess.Apply(req) // a local agent needs its session token; a hosted token set above is kept
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -562,7 +571,7 @@ func sessionPinCommand(isChat bool) *cobra.Command {
 			interpretation.Schema += "\nExplicit attachment snapshot " + pin.InputSnapshotID + ":\n" + string(attachments)
 		}
 		response, providerErr := sessionInterpretDetailed(cmd.Context(), interpretation)
-		report := sessioncontext.Command{OpID: uuid.NewString(), Action: "reportClientRun", Kind: "chat", SessionID: args[0], RunID: pin.RunID, ExpectedRunVersion: 1, RunState: "completed", Text: response.DTQL}
+		report := sessioncontext.Command{OpID: uuid.NewString(), Action: "reportClientRun", Kind: "chat", SessionID: args[0], RunID: pin.RunID, ExpectedRunVersion: 1, RunState: "completed", Text: response.TugQL}
 		if providerErr != nil {
 			report.RunState = "failed"
 			report.ErrorCode = "PROVIDER_UNAVAILABLE"

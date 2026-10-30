@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/dal-go/dalgo2sql"
 	"github.com/dal-go/dalgo2sqlite"
 )
@@ -56,13 +56,13 @@ INSERT INTO Sales VALUES
 
 func executeRecursivePreview(t *testing.T, db *dalgo2sqlite.Database, preview Preview) []map[string]any {
 	t.Helper()
-	query, err := dtql.Deserialize([]byte(preview.DTQL))
+	query, err := tugql.Deserialize([]byte(preview.TugQL))
 	if err != nil {
-		t.Fatalf("deserialize preview: %v\n%s", err, preview.DTQL)
+		t.Fatalf("deserialize preview: %v\n%s", err, preview.TugQL)
 	}
 	reader, err := dal.ExecuteRecursiveQuery(context.Background(), db, query)
 	if err != nil {
-		t.Fatalf("execute preview (scope %d): %v\n%s", preview.Scope, err, preview.DTQL)
+		t.Fatalf("execute preview (scope %d): %v\n%s", preview.Scope, err, preview.TugQL)
 	}
 	defer func() { _ = reader.Close() }()
 	var result []map[string]any
@@ -91,9 +91,10 @@ func fieldStrings(rows []map[string]any, field string) []string {
 }
 
 func TestRecursiveSQLiteGroupingAndSortingRespectScopePredicatesAndOffset(t *testing.T) {
+	t.Parallel()
 	db := newRecursiveSQLite(t)
 	allSix := strings.Replace(recursiveSalesQuery, "limit: 2", "limit: 6", 1)
-	matchedRows := executeRecursivePreview(t, db, Preview{DTQL: allSix, Scope: MatchingSource})
+	matchedRows := executeRecursivePreview(t, db, Preview{TugQL: allSix, Scope: MatchingSource})
 	if len(matchedRows) != 6 {
 		t.Fatalf("joined/filtered source returned %d rows, want six before captured-output bound", len(matchedRows))
 	}
@@ -161,6 +162,7 @@ func TestRecursiveSQLiteGroupingAndSortingRespectScopePredicatesAndOffset(t *tes
 }
 
 func TestRecursiveSQLiteOriginalOutputGroupingKeepsHavingAndAggregation(t *testing.T) {
+	t.Parallel()
 	db := newRecursiveSQLite(t)
 	aggregated := `from: {name: Sales, alias: s, joins: [{from: {name: Parents, alias: p}, on: [{left: {field: parentId, source: s}, op: '==', right: {field: id, source: p}}]}]}
 where: {and: [{op: '<=', left: {field: id, source: s}, right: {value: 9}}, {op: '==', left: {field: active, source: p}, right: {value: 1}}]}
@@ -178,7 +180,7 @@ columns: [{field: category, source: s, as: category}, {aggregate: {function: cou
 	if len(rows) != 1 || rows[0]["category"] != "B" || fmt.Sprint(rows[0]["count"]) != "1" {
 		t.Fatalf("original-output aggregate/HAVING result = %+v, want B with outer count 1", rows)
 	}
-	if !strings.Contains(preview.DTQL, "having:") {
-		t.Fatalf("recursive preview lost inner HAVING:\n%s", preview.DTQL)
+	if !strings.Contains(preview.TugQL, "having:") {
+		t.Fatalf("recursive preview lost inner HAVING:\n%s", preview.TugQL)
 	}
 }

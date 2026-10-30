@@ -95,7 +95,7 @@ func TestRecordedRunQueryListShowAndSnapshotJourney(t *testing.T) {
 		Scope: apicontract.Scope{StoreID: projectID, Project: projectID, Environment: req.Environment, SecurityContextID: scope.SecurityContextID},
 		Partition: apicontract.ExecutionSeriesPartition{
 			EvidenceStoreID: projectID, SourceScope: record.Scope, Source: record.Provenance.Source,
-			PolicyFingerprint: record.PolicyFingerprint, DTQLHash: record.DTQLHash,
+			PolicyFingerprint: record.PolicyFingerprint, TugQLHash: record.TugQLHash,
 			BindingsApplied: record.BindingsApplied, Projection: record.Measurements[0].Projection,
 		},
 	}
@@ -165,8 +165,8 @@ func TestRecordedRunQueryListShowAndSnapshotJourney(t *testing.T) {
 func TestRecordedRunQueryPersistsArbitraryLimitAsIncomplete(t *testing.T) {
 	projectDir, projectID := writeRunQueryTestProject(t)
 	queryDir := filepath.Join(projectDir, "queries", "customers")
-	mustWriteFile(t, filepath.Join(queryDir, "customer-invoices.query.json"), `{"id":"customer-invoices","type":"DTQL"}`)
-	mustWriteFile(t, filepath.Join(queryDir, "customer-invoices.query.dtql"), "from:\n  name: Invoice\n")
+	mustWriteFile(t, filepath.Join(queryDir, "customer-invoices.query.json"), `{"createdAt":"2026-01-01T00:00:00Z","id":"customer-invoices","type":"TugQL"}`)
+	mustWriteFile(t, filepath.Join(queryDir, "customer-invoices.query.tugql.yaml"), "from:\n  name: Invoice\n")
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
 	configureExecutionEvidence(t, projectID, projectDir)
 	limit := 100
@@ -445,7 +445,7 @@ func TestRelatedRowsRecordingReturnsQualifiedExecution(t *testing.T) {
 	if err != nil || len(records) != 2 {
 		t.Fatalf("records = %+v, err=%v", records, err)
 	}
-	if records[0].DTQLHash == records[1].DTQLHash {
+	if records[0].TugQLHash == records[1].TugQLHash {
 		t.Fatal("related-row execution identity ignored the requested value")
 	}
 }

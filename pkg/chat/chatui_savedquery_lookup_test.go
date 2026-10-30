@@ -2,7 +2,7 @@ package chat
 
 // Ported from saved_query_lookup_test.go's 8 cases that built a legacy &UI{}
 // directly (the other 5 — pure DiscoverSavedQueryLookup/
-// DiscoverSavedQueryParameterLookup(WithMode)/direct DTQL execution tests —
+// DiscoverSavedQueryParameterLookup(WithMode)/direct TugQL execution tests —
 // never touched UI/ChatUI and stay in saved_query_lookup_test.go unchanged).
 //
 // Ported onto queryParametersOverlay/parameterLookupOverlay
@@ -50,6 +50,7 @@ func openLookup(t *testing.T, d *queryParametersOverlay) *parameterLookupOverlay
 }
 
 func TestChatUISavedQueryLookupFirstHundredBoundaryAndManualKey(t *testing.T) {
+	t.Parallel()
 	result := secureread.Result{Columns: []string{"CustomerId"}}
 	for i := 1; i <= savedQueryLookupLimit; i++ {
 		result.Rows = append(result.Rows, secureread.Row{Data: map[string]any{"CustomerId": i}})
@@ -75,6 +76,7 @@ func TestChatUISavedQueryLookupFirstHundredBoundaryAndManualKey(t *testing.T) {
 }
 
 func TestChatUISavedQueryMultiFKPickerPreservesSelectionAcrossFilter(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	service := parameterLookupStub{result: &SavedQueryLookup{Key: "CustomerId", Multi: true, Result: secureread.Result{Columns: []string{"CustomerId", "Name"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": int64(5), "Name": "Alice"}}, {Data: map[string]any{"CustomerId": int64(6), "Name": "Bob"}}}}}}
 	if err := u.SetSavedQueryService(service); err != nil {
@@ -112,6 +114,7 @@ func TestChatUISavedQueryMultiFKPickerPreservesSelectionAcrossFilter(t *testing.
 }
 
 func TestChatUISavedQueryMultiFKPickerQuotesStringKeys(t *testing.T) {
+	t.Parallel()
 	value := "x,] \\\"quoted\\\""
 	u, _ := newTestChatUI(t, nil, Turn{})
 	service := parameterLookupStub{result: &SavedQueryLookup{Key: "Code", Multi: true, Result: secureread.Result{Columns: []string{"Code"}, Rows: []secureread.Row{{Data: map[string]any{"Code": value}}}}}}
@@ -132,6 +135,7 @@ func TestChatUISavedQueryMultiFKPickerQuotesStringKeys(t *testing.T) {
 }
 
 func TestChatUISavedQueryScalarFKPickerPreservesStringKey(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	service := parameterLookupStub{result: &SavedQueryLookup{Key: "Code", Result: secureread.Result{Columns: []string{"Code"}, Rows: []secureread.Row{{Data: map[string]any{"Code": "001"}}}}}}
 	if err := u.SetSavedQueryService(service); err != nil {
@@ -150,6 +154,7 @@ func TestChatUISavedQueryScalarFKPickerPreservesStringKey(t *testing.T) {
 }
 
 func TestChatUISavedQueryMultiFKPolicyErrorKeepsManualInput(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	service := parameterLookupStub{err: errors.New("policy denied secret")}
 	if err := u.SetSavedQueryService(service); err != nil {
@@ -169,6 +174,7 @@ func TestChatUISavedQueryMultiFKPolicyErrorKeepsManualInput(t *testing.T) {
 }
 
 func TestChatUISavedQueryFKLookupFilterAndSelect(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	service := parameterLookupStub{result: &SavedQueryLookup{Key: "CustomerId", Result: secureread.Result{Columns: []string{"CustomerId", "Name"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 5, "Name": "Alice"}}, {Data: map[string]any{"CustomerId": 6, "Name": "Bob"}}}}}}
 	if err := u.SetSavedQueryService(service); err != nil {
@@ -192,6 +198,7 @@ func TestChatUISavedQueryFKLookupFilterAndSelect(t *testing.T) {
 }
 
 func TestChatUISavedQueryFKLookupPolicyErrorKeepsManualInput(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	service := parameterLookupStub{err: errors.New("policy denied private field")}
 	if err := u.SetSavedQueryService(service); err != nil {
@@ -207,6 +214,7 @@ func TestChatUISavedQueryFKLookupPolicyErrorKeepsManualInput(t *testing.T) {
 }
 
 func TestChatUISavedQueryFKLookupNoFKFallsBackToManualInput(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	service := parameterLookupStub{}
 	if err := u.SetSavedQueryService(service); err != nil {

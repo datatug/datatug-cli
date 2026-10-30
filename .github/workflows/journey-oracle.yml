@@ -1,0 +1,83 @@
+name: Journey (Oracle)
+
+# NOT a required check, and deliberately separate from golangci.yml ("Go CI"): that workflow's checks are
+# required by branch protection and gate releases, so it runs on every change and cannot take `paths:` filters.
+# This one can, and it does: it only runs when the SQL-script export, its verifier or its journey changes.
+#
+# It loads the scripts of `datatug db copy --to sqlscript:...?dialect=oracle` into a real Oracle Database Free (SQL*Plus
+# inside the server's container, as the script's header says) for the edge-case fixture, the hostile-value fixture, a
+# fixture of random foreign key graphs and the pinned demo databases, and runs the cross-engine verifier
+# (internal/crossverify) over every one. See scripts/check-journey-oracle.sh.
+on:
+  pull_request:
+    paths:
+      - 'pkg/dbcopy/**'
+      - 'internal/crossverify/**'
+      - 'apps/datatugapp/commands/cmd_db_copy*.go'
+      - 'scripts/check-journey-oracle.sh'
+      - 'apps/datatugapp/commands/cmd_scan_db.go'
+      - 'apps/datatugapp/commands/cmd_query*.go'
+      - 'apps/datatugapp/commands/server_journey_*_real_test.go'
+      - 'pkg/api/**'
+      - 'pkg/secureread/**'
+      - 'scripts/lib/source-journey.sh'
+      - 'scripts/journey-datasets.txt'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/journey-oracle.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'pkg/dbcopy/**'
+      - 'internal/crossverify/**'
+      - 'apps/datatugapp/commands/cmd_db_copy*.go'
+      - 'scripts/check-journey-oracle.sh'
+      - 'apps/datatugapp/commands/cmd_scan_db.go'
+      - 'apps/datatugapp/commands/cmd_query*.go'
+      - 'apps/datatugapp/commands/server_journey_*_real_test.go'
+      - 'pkg/api/**'
+      - 'pkg/secureread/**'
+      - 'scripts/lib/source-journey.sh'
+      - 'scripts/journey-datasets.txt'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/journey-oracle.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  journey-oracle:
+    name: Journey (Oracle Database Free)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # The server image, pinned by the digest of its multi-architecture index (gvenzl/oracle-free:23-slim, Oracle AI
+      # Database 26ai Free 23.26.3, on 2026-10-16). A bot that updates the digest must also re-run this journey.
+      #
+      # LICENCE: the database in this image is Oracle Database Free, used under the Oracle Free Use Terms and Conditions,
+      # which allow development and testing use. The founder decided on 2026-10-16 (decision D10) that CI may run it for
+      # AUTOMATED TESTING ONLY: the image is pulled and thrown away with the runner; it is never redistributed,
+      # republished or copied into a release. (The Apache-2.0 label of the gvenzl image covers its build scripts only.)
+      ORACLE_IMAGE: gvenzl/oracle-free:23-slim@sha256:6d61d267a3b978c24c5ac1790e62e927416a0aec446bd86e4b3a1527562757bd
+    steps:
+      - uses: actions/checkout@v7
+      - name: Authenticate private Core dependency
+        uses: ./.github/actions/private-core
+        with:
+          private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
+      - uses: actions/setup-go@v7
+        with:
+          # Must be >= go.mod's `go` directive, same constraint as release.yml.
+          go-version: '1.27.3'
+          cache: true
+      - name: Oracle journey
+        env:
+          CGO_ENABLED: '1'
+        run: ./scripts/check-journey-oracle.sh

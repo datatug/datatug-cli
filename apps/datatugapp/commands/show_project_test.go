@@ -50,12 +50,19 @@ func showExitCodeOf(t *testing.T, err error) int {
 // shop-project, and returns the folder.
 func scannedJourneyProject(t *testing.T) string {
 	t.Helper()
+	dir, _ := scannedJourneyProjectWithDB(t)
+	return dir
+}
+
+// scannedJourneyProjectWithDB is scannedJourneyProject that also returns the database file the scan read.
+func scannedJourneyProjectWithDB(t *testing.T) (string, string) {
+	t.Helper()
 	projectDir := filepath.Join(t.TempDir(), "shop-project")
 	dbPath := filepath.Join(t.TempDir(), "shop.db")
 	writeJourneyDB(t, dbPath)
 	_, err := runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", dbPath, "--db", "shop", "--env", "local")
 	require.NoError(t, err)
-	return projectDir
+	return projectDir, dbPath
 }
 
 const showJourneySQLite = `Project shop-project
@@ -72,10 +79,14 @@ Environment local
         customer_id INTEGER
         sku TEXT
         qty INTEGER
+        ForeignKey FK_order_line_0 (customer_id) -> main.Customer (CustomerId)
       View customer_names
         CustomerId INTEGER
         full_name -
 `
+
+// showJourneySQLiteForeignKey is the line of showJourneySQLite that the foreign keys file of the scan adds.
+const showJourneySQLiteForeignKey = "        ForeignKey FK_order_line_0 (customer_id) -> main.Customer (CustomerId)\n"
 
 // What a scan wrote is what `show -d` lists: the project, each environment, each source with
 // its driver, each schema, each table and view with its columns, their types and key positions.
@@ -98,7 +109,7 @@ func TestShowListsWhatAScanWrote(t *testing.T) {
 
 // --format json is the same document as one JSON value.
 func TestShowFormatJSON(t *testing.T) {
-	projectDir := scannedJourneyProject(t)
+	projectDir, dbPath := scannedJourneyProjectWithDB(t)
 
 	stdout, _, err := runShowCommand(t, "-d", projectDir, "--format", "json")
 	require.NoError(t, err)
@@ -112,26 +123,32 @@ func TestShowFormatJSON(t *testing.T) {
 			"sources": []any{map[string]any{
 				"id":     "shop",
 				"driver": "sqlite3",
+				"path":   dbPath,
 				"schemas": []any{map[string]any{
 					"name": "main",
 					"tables": []any{
 						map[string]any{"name": "Customer", "columns": []any{
-							map[string]any{"name": "CustomerId", "type": "INTEGER", "primaryKeyPosition": float64(1)},
-							map[string]any{"name": "FirstName", "type": "TEXT"},
-							map[string]any{"name": "LastName", "type": "TEXT"},
+							map[string]any{"name": "CustomerId", "type": "INTEGER", "primaryKeyPosition": float64(1), "nullable": false},
+							map[string]any{"name": "FirstName", "type": "TEXT", "nullable": false},
+							map[string]any{"name": "LastName", "type": "TEXT", "nullable": true},
 						}},
 						map[string]any{"name": "order_line", "columns": []any{
-							map[string]any{"name": "order_id", "type": "INTEGER", "primaryKeyPosition": float64(2)},
-							map[string]any{"name": "line_no", "type": "INTEGER", "primaryKeyPosition": float64(1)},
-							map[string]any{"name": "customer_id", "type": "INTEGER"},
-							map[string]any{"name": "sku", "type": "TEXT"},
-							map[string]any{"name": "qty", "type": "INTEGER"},
-						}},
+							map[string]any{"name": "order_id", "type": "INTEGER", "primaryKeyPosition": float64(2), "nullable": false},
+							map[string]any{"name": "line_no", "type": "INTEGER", "primaryKeyPosition": float64(1), "nullable": false},
+							map[string]any{"name": "customer_id", "type": "INTEGER", "nullable": true},
+							map[string]any{"name": "sku", "type": "TEXT", "nullable": true},
+							map[string]any{"name": "qty", "type": "INTEGER", "nullable": true},
+						}, "foreignKeys": []any{map[string]any{ // what the scan saved in the refs file
+							"name":       "FK_order_line_0",
+							"columns":    []any{"customer_id"},
+							"refTable":   map[string]any{"schema": "main", "name": "Customer"},
+							"refColumns": []any{"CustomerId"},
+						}}},
 					},
 					"views": []any{
 						map[string]any{"name": "customer_names", "columns": []any{
-							map[string]any{"name": "CustomerId", "type": "INTEGER"},
-							map[string]any{"name": "full_name"},
+							map[string]any{"name": "CustomerId", "type": "INTEGER", "nullable": true},
+							map[string]any{"name": "full_name", "nullable": true},
 						}},
 					},
 				}},
@@ -167,6 +184,7 @@ Environment local
         customer_id int
         sku string
         qty int
+        ForeignKey fk_order_line_customer (customer_id) -> public.Customer (CustomerId)
       View customer_names
         CustomerId int
         full_name string
@@ -401,14 +419,15 @@ func TestShowListsNoSourceForAnEnvironmentWithoutCatalogs(t *testing.T) {
 // of a source that was never scanned: the model of its catalog has no file (its folder was removed), as it
 // has none for a database with no table.
 func TestShowSaysSoForAScannedSourceWithNoTableOrView(t *testing.T) {
-	projectDir := scannedJourneyProject(t)
+	projectDir, dbPath := scannedJourneyProjectWithDB(t)
 	require.NoError(t, os.RemoveAll(filepath.Join(projectDir, "dbmodels")))
 	stdout, _, err := runShowCommand(t, "-d", projectDir)
 	require.NoError(t, err)
 	assert.Equal(t, "Project shop-project\nEnvironment local\n  Source shop (sqlite3)\n    no tables or views\n", stdout)
 	stdout, _, err = runShowCommand(t, "-d", projectDir, "--format", "json")
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"project":"shop-project","access":"private","environments":[{"id":"local","sources":[{"id":"shop","driver":"sqlite3","empty":true,"schemas":[]}]}]}`, stdout)
+	pathJSON, _ := json.Marshal(dbPath)
+	assert.JSONEq(t, `{"project":"shop-project","access":"private","environments":[{"id":"local","sources":[{"id":"shop","driver":"sqlite3","path":`+string(pathJSON)+`,"empty":true,"schemas":[]}]}]}`, stdout)
 
 	// A source that is not scanned is said to be that, and not to be empty; a source with tables is neither.
 	stdout, _, err = runShowCommand(t, "-d", demoShapedProject(t))
@@ -545,7 +564,8 @@ Environment local
 	require.Len(t, doc.Environments, 2)
 	require.Len(t, doc.Environments[1].Sources, 4)
 	orders := doc.Environments[1].Sources[2]
-	assert.Equal(t, showSource{ID: "orders", Driver: "sqlite3", NotScanned: true, Schemas: []showSchema{}}, orders)
+	assert.True(t, filepath.IsAbs(orders.Path), "a SQLite source carries the file its path resolves to")
+	assert.Equal(t, showSource{ID: "orders", Driver: "sqlite3", Path: orders.Path, NotScanned: true, Schemas: []showSchema{}}, orders)
 	assert.Contains(t, stdout, `"notScanned": true`)
 	assert.Contains(t, stdout, `"schemas": []`)
 }
@@ -782,7 +802,15 @@ func TestShowDepthTrimsTheText(t *testing.T) {
 }
 
 func TestShowDepthTrimsTheJSON(t *testing.T) {
-	projectDir := scannedJourneyProject(t)
+	projectDir, dbPath := scannedJourneyProjectWithDB(t)
+	pathLine := func(expected string) string {
+		quoted, _ := json.Marshal(dbPath)
+		line := "          \"path\": " + string(quoted)
+		if strings.Contains(expected, "\"driver\": \"sqlite3\",\n") {
+			return strings.Replace(expected, "\"driver\": \"sqlite3\",\n", "\"driver\": \"sqlite3\",\n"+line+",\n", 1)
+		}
+		return strings.Replace(expected, "\"driver\": \"sqlite3\"\n", "\"driver\": \"sqlite3\",\n"+line+"\n", 1)
+	}
 	plain, _, err := runShowCommand(t, "-d", projectDir, "--format", "json")
 	require.NoError(t, err)
 	explicit, _, err := runShowCommand(t, "-d", projectDir, "--format", "json", "--depth", "columns")
@@ -791,7 +819,7 @@ func TestShowDepthTrimsTheJSON(t *testing.T) {
 
 	tables, _, err := runShowCommand(t, "-d", projectDir, "--format", "json", "--depth", "tables")
 	require.NoError(t, err)
-	assert.Equal(t, `{
+	assert.Equal(t, pathLine(`{
   "project": "shop-project",
   "access": "private",
   "environments": [
@@ -824,14 +852,14 @@ func TestShowDepthTrimsTheJSON(t *testing.T) {
     }
   ]
 }
-`, tables)
+`), tables)
 	tablesAgain, _, err := runShowCommand(t, "-d", projectDir, "--format", "json", "--depth", "tables")
 	require.NoError(t, err)
 	assert.Equal(t, tables, tablesAgain)
 
 	sources, _, err := runShowCommand(t, "-d", projectDir, "--format", "json", "--depth", "sources")
 	require.NoError(t, err)
-	assert.Equal(t, `{
+	assert.Equal(t, pathLine(`{
   "project": "shop-project",
   "access": "private",
   "environments": [
@@ -846,7 +874,7 @@ func TestShowDepthTrimsTheJSON(t *testing.T) {
     }
   ]
 }
-`, sources)
+`), sources)
 	sourcesAgain, _, err := runShowCommand(t, "-d", projectDir, "--format", "json", "--depth", "sources")
 	require.NoError(t, err)
 	assert.Equal(t, sources, sourcesAgain)
@@ -909,4 +937,187 @@ func TestShowRefusesAnUnknownDepth(t *testing.T) {
 	}
 	_, _, err := runShowCommand(t, "-d", t.TempDir(), "--depth", "rows")
 	assert.Equal(t, 2, showExitCodeOf(t, err), "the depth is checked before the project is read")
+}
+
+const journeyRefsFile = `{
+	"version": 1,
+	"foreignKeys": [
+		{
+			"name": "FK_order_line_Customer",
+			"table": {"schema": "main", "name": "order_line"},
+			"columns": ["customer_id"],
+			"refTable": {"schema": "main", "name": "Customer"},
+			"refColumns": ["CustomerId"]
+		},
+		{
+			"name": "FK_a b",
+			"table": {"schema": "main", "name": "order_line"},
+			"columns": ["customer_id", "sku"],
+			"refTable": {"name": "Other"},
+			"refColumns": ["x", "y"]
+		}
+	]
+}
+`
+
+// A table lists the foreign keys its model's foreign keys file holds, below its columns; a table with none
+// and a view list none; the depth "tables" lists none.
+func TestShowListsTheForeignKeysOfATable(t *testing.T) {
+	projectDir := scannedJourneyProject(t)
+	writeProjectFiles(t, projectDir, map[string]string{"dbmodels/shop/shop.refs.json": journeyRefsFile})
+
+	stdout, _, err := runShowCommand(t, "-d", projectDir)
+	require.NoError(t, err)
+	assert.Contains(t, stdout, `        qty INTEGER
+        ForeignKey "FK_a b" (customer_id, sku) -> Other (x, y)
+        ForeignKey FK_order_line_Customer (customer_id) -> main.Customer (CustomerId)
+      View customer_names
+`)
+	assert.Equal(t, 2, strings.Count(stdout, "ForeignKey "))
+
+	stdout, _, err = runShowCommand(t, "-d", projectDir, "--format", "json")
+	require.NoError(t, err)
+	var doc showDocument
+	require.NoError(t, json.Unmarshal([]byte(stdout), &doc), stdout)
+	schema := doc.Environments[0].Sources[0].Schemas[0]
+	assert.Empty(t, schema.Tables[0].ForeignKeys, "Customer holds no key")
+	assert.Empty(t, schema.Views[0].ForeignKeys)
+	assert.Equal(t, []showForeignKey{
+		{Name: "FK_a b", Columns: []string{"customer_id", "sku"}, RefTable: showTableRef{Name: "Other"}, RefColumns: []string{"x", "y"}},
+		{Name: "FK_order_line_Customer", Columns: []string{"customer_id"}, RefTable: showTableRef{Schema: "main", Name: "Customer"}, RefColumns: []string{"CustomerId"}},
+	}, schema.Tables[1].ForeignKeys)
+	assert.Contains(t, stdout, `                      "refTable": {
+                        "schema": "main",
+                        "name": "Customer"
+                      },`)
+	assert.Equal(t, 1, strings.Count(stdout, `"foreignKeys"`), "only the table that holds keys has the member")
+
+	for _, depth := range []string{"tables", "sources"} {
+		stdout, _, err = runShowCommand(t, "-d", projectDir, "--format", "json", "--depth", depth)
+		require.NoError(t, err)
+		assert.NotContains(t, stdout, "foreignKeys", depth)
+		stdout, _, err = runShowCommand(t, "-d", projectDir, "--depth", depth)
+		require.NoError(t, err)
+		assert.NotContains(t, stdout, "ForeignKey", depth)
+	}
+}
+
+// A model with no foreign keys file lists no key: the same bytes as before the requirement.
+func TestShowListsNoForeignKeysWithoutTheFile(t *testing.T) {
+	projectDir := scannedJourneyProject(t)
+	// The scan now saves the foreign keys of the database in the refs file; this test is about a
+	// model that has none, so the file the scan wrote is removed.
+	refsFile := filepath.Join(projectDir, "dbmodels", "shop", "shop.refs.json")
+	require.FileExists(t, refsFile, "the scan saved the foreign keys")
+	require.NoError(t, os.Remove(refsFile))
+
+	stdout, _, err := runShowCommand(t, "-d", projectDir)
+	require.NoError(t, err)
+	assert.Contains(t, showJourneySQLite, showJourneySQLiteForeignKey)
+	assert.Equal(t, strings.Replace(showJourneySQLite, showJourneySQLiteForeignKey, "", 1), stdout)
+	assert.NotContains(t, stdout, "ForeignKey")
+}
+
+// A foreign keys file that cannot be read is a failure that names the source and the environment, and no path.
+func TestShowFailsWhenTheForeignKeysFileCannotBeRead(t *testing.T) {
+	projectDir := scannedJourneyProject(t)
+	writeProjectFiles(t, projectDir, map[string]string{"dbmodels/shop/shop.refs.json": `{"version": 99, "foreignKeys": []}`})
+	stdout, _, err := runShowCommand(t, "-d", projectDir)
+	assert.Equal(t, 1, showExitCodeOf(t, err))
+	assert.EqualError(t, err, `source "shop" in environment "local": its foreign keys file cannot be read`)
+	assert.Empty(t, stdout)
+}
+
+// A column carries nullable where the driver reports it (SQLite), and no key where it does not (the
+// catalogs of the shape of the demo, of drivers that say nothing); the text does not change.
+func TestShowReportsNullabilityForTheDriversThatKnowIt(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "n.db")
+	db, err := sql.Open("sqlite", dbPath)
+	require.NoError(t, err)
+	_, err = db.Exec(`CREATE TABLE t (id INTEGER NOT NULL, note TEXT)`)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+	projectDir := filepath.Join(t.TempDir(), "n-project")
+	_, err = runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", dbPath, "--db", "n", "--env", "local")
+	require.NoError(t, err)
+
+	stdout, _, err := runShowCommand(t, "-d", projectDir, "--format", "json")
+	require.NoError(t, err)
+	var doc showDocument
+	require.NoError(t, json.Unmarshal([]byte(stdout), &doc), stdout)
+	columns := doc.Environments[0].Sources[0].Schemas[0].Tables[0].Columns
+	require.Len(t, columns, 2)
+	require.NotNil(t, columns[0].Nullable)
+	require.NotNil(t, columns[1].Nullable)
+	assert.False(t, *columns[0].Nullable, "NOT NULL")
+	assert.True(t, *columns[1].Nullable)
+	assert.Contains(t, stdout, `"nullable": false`)
+
+	text, _, err := runShowCommand(t, "-d", projectDir)
+	require.NoError(t, err)
+	assert.NotContains(t, text, "nullable")
+
+	// a driver that does not report it: the columns file holds false, which is not a fact
+	other := demoShapedProject(t)
+	writeProjectFiles(t, other, map[string]string{
+		"environments/local/catalogs/geo/geo.db.json": `{"driver":"ingitdb","path":"data/geo","dbModel":"chinook"}`,
+	})
+	stdout, _, err = runShowCommand(t, "-d", other, "--format", "json")
+	require.NoError(t, err)
+	var otherDoc showDocument
+	require.NoError(t, json.Unmarshal([]byte(stdout), &otherDoc), stdout)
+	var geo *showSource
+	for i, source := range otherDoc.Environments[1].Sources {
+		if source.ID == "geo" {
+			geo = &otherDoc.Environments[1].Sources[i]
+		}
+	}
+	require.NotNil(t, geo)
+	require.NotEmpty(t, geo.Schemas)
+	assert.Nil(t, geo.Schemas[0].Tables[0].Columns[0].Nullable)
+	assert.Equal(t, 4, strings.Count(stdout, `"nullable"`), "only the two sqlite3 catalogs (two columns each) carry it")
+}
+
+func TestShowRelativeProjectRootMustBeLocatedBeforeReading(t *testing.T) {
+	projectDir := scannedJourneyProject(t)
+	t.Chdir(filepath.Dir(projectDir))
+	original := showDirectoryAbs
+	t.Cleanup(func() { showDirectoryAbs = original })
+	cause := errors.New("working directory unavailable")
+	showDirectoryAbs = func(string) (string, error) { return "", cause }
+	stdout, _, err := runShowCommand(t, "-d", filepath.Base(projectDir))
+	require.ErrorIs(t, err, cause)
+	assert.Empty(t, stdout)
+
+	// Invalid folders keep their existing diagnostic before normalization.
+	_, _, err = runShowCommand(t, "-d", "missing-project")
+	assert.Equal(t, 3, showExitCodeOf(t, err))
+	assert.NotErrorIs(t, err, cause)
+}
+
+func TestShowRelativeAndAbsoluteRootsReadTheSameScannedProject(t *testing.T) {
+	projectDir := scannedJourneyProject(t)
+	absolute, _, err := runShowCommand(t, "-d", projectDir)
+	require.NoError(t, err)
+	t.Chdir(filepath.Dir(projectDir))
+	relative, _, err := runShowCommand(t, "-d", filepath.Base(projectDir))
+	require.NoError(t, err)
+	assert.Equal(t, absolute, relative)
+}
+
+// Read-only show has always accepted a project-root link; normalization must
+// preserve that contract rather than resolve the link into a trusted write root.
+func TestShowKeepsReadOnlyProjectRootLinkBehavior(t *testing.T) {
+	projectDir := scannedJourneyProject(t)
+	want, _, err := runShowCommand(t, "-d", projectDir)
+	require.NoError(t, err)
+	parent := t.TempDir()
+	link := filepath.Join(parent, "project-link")
+	require.NoError(t, os.Symlink(projectDir, link))
+	t.Chdir(parent)
+	for _, root := range []string{link, "project-link"} {
+		got, _, err := runShowCommand(t, "-d", root)
+		require.NoError(t, err)
+		assert.Equal(t, want, got)
+	}
 }

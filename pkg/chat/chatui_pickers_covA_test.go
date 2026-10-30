@@ -24,6 +24,7 @@ func secureReadResult() secureread.Result {
 }
 
 func TestGlobalKeysF4WithoutSessionsIsANoop(t *testing.T) {
+	t.Parallel()
 	u := NewChatUI(context.Background(), nil, "fake-model")
 	cmd, handled := u.globalKeys(tea.KeyPressMsg{Code: tea.KeyF4, Text: "f4"})
 	if cmd != nil || !handled {
@@ -32,6 +33,7 @@ func TestGlobalKeysF4WithoutSessionsIsANoop(t *testing.T) {
 }
 
 func TestGlobalKeysF3WithoutChoicesIsANoop(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	cmd, handled := u.globalKeys(tea.KeyPressMsg{Code: tea.KeyF3, Text: "f3"})
 	if cmd != nil || !handled {
@@ -40,6 +42,7 @@ func TestGlobalKeysF3WithoutChoicesIsANoop(t *testing.T) {
 }
 
 func TestGlobalKeysF3PushesProjectPicker(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.SetProjectChoices([]ProjectChoice{{Key: "a", Title: "My Project"}})
 	// PushOverlay's own tea.Cmd is legitimately nil (no init command needed
@@ -54,6 +57,7 @@ func TestGlobalKeysF3PushesProjectPicker(t *testing.T) {
 }
 
 func TestGlobalKeysCtrlGWithAndWithoutLastGrid(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	// No lastGridEntryID yet: still handled, just a no-op FocusEntry call.
 	if cmd, handled := u.globalKeys(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl}); cmd != nil || !handled {
@@ -66,6 +70,7 @@ func TestGlobalKeysCtrlGWithAndWithoutLastGrid(t *testing.T) {
 }
 
 func TestGlobalKeysCtrlRDelegatesToRefresh(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	// sessions is set (newTestChatUI uses NewSessionChatUI), but there's no
 	// active/last grid, so refreshLastRecordSet's own recordSetID=="" guard
@@ -76,6 +81,7 @@ func TestGlobalKeysCtrlRDelegatesToRefresh(t *testing.T) {
 }
 
 func TestGlobalKeysAltSCyclesTableStyle(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	before := u.tableStyle.Name
 	if _, handled := u.globalKeys(tea.KeyPressMsg{Code: 'S', Mod: tea.ModAlt}); handled {
@@ -95,6 +101,7 @@ func TestGlobalKeysAltSCyclesTableStyle(t *testing.T) {
 }
 
 func TestGlobalKeysF2TogglesMouse(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	before := u.shell.MouseEnabled()
 	cmd, handled := u.globalKeys(tea.KeyPressMsg{Code: tea.KeyF2, Text: "f2"})
@@ -107,6 +114,7 @@ func TestGlobalKeysF2TogglesMouse(t *testing.T) {
 }
 
 func TestGlobalKeysF5Branches(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	// No browserURL yet: a no-op.
 	if cmd, handled := u.globalKeys(tea.KeyPressMsg{Code: tea.KeyF5, Text: "f5"}); cmd != nil || !handled {
@@ -142,6 +150,7 @@ func TestGlobalKeysF5Branches(t *testing.T) {
 }
 
 func TestGlobalKeysEscBranches(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	// Esc while the web link is NOT visible: unhandled, falls through to
 	// chatshell's own Esc handling.
@@ -155,6 +164,7 @@ func TestGlobalKeysEscBranches(t *testing.T) {
 }
 
 func TestGlobalKeysUnmatchedKeyIsUnhandled(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	if cmd, handled := u.globalKeys(tea.KeyPressMsg{Code: 'z', Text: "z"}); cmd != nil || handled {
 		t.Fatalf("an unmatched key: cmd=%v handled=%v, want nil/false", cmd, handled)
@@ -164,6 +174,7 @@ func TestGlobalKeysUnmatchedKeyIsUnhandled(t *testing.T) {
 // --- refreshLastRecordSet ---------------------------------------------
 
 func TestRefreshLastRecordSetGuardBranches(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	// sessions.store is non-nil normally; force the sessions==nil guard.
 	u.sessions = nil
@@ -185,7 +196,8 @@ func TestRefreshLastRecordSetGuardBranches(t *testing.T) {
 }
 
 func TestRefreshLastRecordSetPlainResultCannotBeRefreshed(t *testing.T) {
-	// A RecordSet with neither an HTTPResponseID nor a DTQL (e.g. a saved
+	t.Parallel()
+	// A RecordSet with neither an HTTPResponseID nor a TugQL (e.g. a saved
 	// project query result) reports the "cannot be refreshed" message.
 	turn := Turn{Text: "Found one.", Queries: []QueryResult{{Title: "Customers", RecordSetID: "rs1", Result: secureReadResult()}}}
 	u, sessions := newTestChatUI(t, nil, turn)
@@ -204,15 +216,16 @@ func TestRefreshLastRecordSetPlainResultCannotBeRefreshed(t *testing.T) {
 	}
 	u.lastGridRecordSetID = recordSetID
 	if cmd := u.refreshLastRecordSet(); cmd != nil {
-		t.Fatal("a plain RecordSet with no DTQL/HTTPResponseID should not be refreshable")
+		t.Fatal("a plain RecordSet with no TugQL/HTTPResponseID should not be refreshable")
 	}
 	if !strings.Contains(flattenView(u.shell.View().Content), "cannot be refreshed here") {
 		t.Fatalf("expected the 'cannot be refreshed' message to appear:\n%s", u.shell.View().Content)
 	}
 }
 
-func TestRefreshLastRecordSetQueuesDTQLRefresh(t *testing.T) {
-	turn := Turn{Text: "Found one.", Queries: []QueryResult{{Title: "Customers", RecordSetID: "rs1", DTQL: "from: {name: Customer}\nlimit: 1", Result: secureReadResult()}}}
+func TestRefreshLastRecordSetQueuesTugQLRefresh(t *testing.T) {
+	t.Parallel()
+	turn := Turn{Text: "Found one.", Queries: []QueryResult{{Title: "Customers", RecordSetID: "rs1", TugQL: "from: {name: Customer}\nlimit: 1", Result: secureReadResult()}}}
 	u, sessions := newTestChatUI(t, nil, turn)
 	drainCmd(t, u, u.Submit("Show a customer"))
 	snapshot, err := sessions.Snapshot(u.ctx)
@@ -222,17 +235,17 @@ func TestRefreshLastRecordSetQueuesDTQLRefresh(t *testing.T) {
 	u.loadSession(snapshot)
 	var recordSetID string
 	for id, rs := range u.snapshot.RecordSets {
-		if rs.DTQL != "" {
+		if rs.TugQL != "" {
 			recordSetID = id
 		}
 	}
 	if recordSetID == "" {
-		t.Fatal("expected a persisted RecordSet with a DTQL")
+		t.Fatal("expected a persisted RecordSet with a TugQL")
 	}
 	u.lastGridRecordSetID = recordSetID
 	cmd := u.refreshLastRecordSet()
 	if cmd == nil {
-		t.Fatal("expected a refresh command for a DTQL RecordSet")
+		t.Fatal("expected a refresh command for a TugQL RecordSet")
 	}
 	msg := cmd()
 	if batch, ok := msg.(tea.BatchMsg); ok {
@@ -254,6 +267,7 @@ func TestRefreshLastRecordSetQueuesDTQLRefresh(t *testing.T) {
 // --- openSessionPicker / sessionPickerOverlay --------------------------
 
 func TestOpenSessionPickerReportsListError(t *testing.T) {
+	t.Parallel()
 	u, sessions := newTestChatUI(t, nil, Turn{})
 	if err := sessions.store.Close(); err != nil {
 		t.Fatal(err)
@@ -267,6 +281,7 @@ func TestOpenSessionPickerReportsListError(t *testing.T) {
 }
 
 func TestSessionPickerOverlayViewNoSessions(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	o := &sessionPickerOverlay{ui: u}
 	view := o.View(40, 5)
@@ -276,6 +291,7 @@ func TestSessionPickerOverlayViewNoSessions(t *testing.T) {
 }
 
 func TestSessionPickerOverlayViewTruncatesToHeight(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	sessions := make([]ChatSession, 10)
 	for i := range sessions {
@@ -289,6 +305,7 @@ func TestSessionPickerOverlayViewTruncatesToHeight(t *testing.T) {
 }
 
 func TestSessionPickerOverlayUpdateBranches(t *testing.T) {
+	t.Parallel()
 	u, sessions := newTestChatUI(t, nil, Turn{})
 	// A single fresh session isn't enough to exercise multi-step up/down
 	// navigation meaningfully -- create two more first.
@@ -360,6 +377,7 @@ func TestSessionPickerOverlayUpdateBranches(t *testing.T) {
 }
 
 func TestSessionPickerOverlayEnterAndNAppendErrorReports(t *testing.T) {
+	t.Parallel()
 	u, sessions := newTestChatUI(t, nil, Turn{})
 	second, err := sessions.Create(u.ctx)
 	if err != nil {
@@ -399,6 +417,7 @@ func TestSessionPickerOverlayEnterAndNAppendErrorReports(t *testing.T) {
 // --- projectPickerOverlay ------------------------------------------------
 
 func TestProjectPickerOverlayViewShowsDetailAndTruncates(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	choices := []ProjectChoice{{Key: "a", Title: "Alpha", Detail: "/path/a"}, {Key: "b", Title: "Beta"}}
 	o := newProjectPickerOverlay(u, choices)
@@ -413,6 +432,7 @@ func TestProjectPickerOverlayViewShowsDetailAndTruncates(t *testing.T) {
 }
 
 func TestProjectPickerOverlayUpdateBranches(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	choices := []ProjectChoice{{Key: "a", Title: "Alpha"}, {Key: "b", Title: "Beta"}}
 	o := newProjectPickerOverlay(u, choices)

@@ -1,0 +1,7 @@
+{
+  "repository": "https://github.com/datatug/datatug-demo-project",
+  "commit": "08cc4d367e33cca82269bff54dc8a35b242e9937",
+  "projectPath": "demo-project-1",
+  "databasePath": "pkg/dbcopy/testdata/chinook.db",
+  "databaseSHA256": "f82efedb6c5c40734609e168bc5be5616a2eca6b90ed0048451a8674625e03a3"
+}

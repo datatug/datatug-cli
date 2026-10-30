@@ -16,9 +16,10 @@ import (
 
 // cov100eResult is a canned result set served by the fake SQL driver.
 type cov100eResult struct {
-	cols  []string
-	types []string
-	data  [][]driver.Value
+	cols    []string
+	types   []string
+	data    [][]driver.Value
+	nextErr error
 }
 
 var (
@@ -53,7 +54,16 @@ func (cov100eConn) Close() error {
 	}
 	return nil
 }
-func (cov100eConn) Begin() (driver.Tx, error) { return nil, errors.New("no tx") }
+func (cov100eConn) Begin() (driver.Tx, error) { return cov100eTx{}, nil }
+
+type cov100eTx struct{}
+
+func (cov100eTx) Commit() error   { return nil }
+func (cov100eTx) Rollback() error { return nil }
+
+func (cov100eConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
+	return cov100eTx{}, nil
+}
 
 type cov100eStmt struct{ q string }
 
@@ -79,6 +89,9 @@ func (r *cov100eRows) Close() error {
 	return nil
 }
 func (r *cov100eRows) Next(dest []driver.Value) error {
+	if r.res.nextErr != nil {
+		return r.res.nextErr
+	}
 	if r.i >= len(r.res.data) {
 		return io.EOF
 	}

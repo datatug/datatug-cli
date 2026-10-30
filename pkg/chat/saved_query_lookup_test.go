@@ -25,6 +25,7 @@ func (s parameterLookupStub) LookupParameter(context.Context, string, string) (*
 }
 
 func TestSavedQueryFKLookupDiscovery(t *testing.T) {
+	t.Parallel()
 	snapshot := joinSnapshot()
 	plan := DiscoverSavedQueryLookup(snapshot, "Invoice", "CustomerId")
 	if plan == nil || plan.Relation != "Customer" || plan.Key != "CustomerId" || !strings.Contains(string(plan.Document()), "limit: 100") {
@@ -37,7 +38,8 @@ func TestSavedQueryFKLookupDiscovery(t *testing.T) {
 	}
 }
 
-func TestSavedQueryFKLookupReferencedMetaAndDTQLBinding(t *testing.T) {
+func TestSavedQueryFKLookupReferencedMetaAndTugQLBinding(t *testing.T) {
+	t.Parallel()
 	path, err := filepath.Abs(filepath.Join("..", "dbcopy", "testdata", "chinook.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -68,6 +70,7 @@ func TestSavedQueryFKLookupReferencedMetaAndDTQLBinding(t *testing.T) {
 }
 
 func TestSavedQueryMultiFKBindingRequiresDeclarationAndOperator(t *testing.T) {
+	t.Parallel()
 	snapshot := joinSnapshot()
 	for _, op := range []string{"In", "NotIn"} {
 		doc := []byte("from: {name: Invoice}\nwhere: {op: " + op + ", left: {field: CustomerId}, right: {param: CustomerIds}}\n")
@@ -88,13 +91,14 @@ func TestSavedQueryMultiFKBindingRequiresDeclarationAndOperator(t *testing.T) {
 }
 
 func TestSavedQueryMultiFKInExecutesChinook(t *testing.T) {
+	t.Parallel()
 	path, err := filepath.Abs(filepath.Join("..", "dbcopy", "testdata", "chinook.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	source := "sqlite://" + path
 	doc := []byte("from: {name: Invoice}\ncolumns:\n  - field: InvoiceId\n  - field: CustomerId\nwhere: {op: In, left: {field: CustomerId}, right: {param: CustomerIds}}\nlimit: 20\n")
-	result, err := secureread.NewExecutor(secureread.Session{Unrestricted: true}).RunDTQL(context.Background(), source, doc, map[string]any{"CustomerIds": []any{1, 2}})
+	result, err := secureread.NewExecutor(secureread.Session{Unrestricted: true}).RunTugQL(context.Background(), source, doc, map[string]any{"CustomerIds": []any{1, 2}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,13 +114,14 @@ func TestSavedQueryMultiFKInExecutesChinook(t *testing.T) {
 }
 
 func TestSavedQueryMultiFKNotInExecutesChinook(t *testing.T) {
+	t.Parallel()
 	path, err := filepath.Abs(filepath.Join("..", "dbcopy", "testdata", "chinook.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	source := "sqlite://" + path
 	doc := []byte("from: {name: Invoice}\ncolumns:\n  - field: InvoiceId\n  - field: CustomerId\nwhere: {op: NotIn, left: {field: CustomerId}, right: {param: CustomerIds}}\nlimit: 20\n")
-	result, err := secureread.NewExecutor(secureread.Session{Unrestricted: true}).RunDTQL(context.Background(), source, doc, map[string]any{"CustomerIds": []any{1, 2}})
+	result, err := secureread.NewExecutor(secureread.Session{Unrestricted: true}).RunTugQL(context.Background(), source, doc, map[string]any{"CustomerIds": []any{1, 2}})
 	if err != nil {
 		t.Fatal(err)
 	}

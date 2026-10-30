@@ -97,6 +97,7 @@ func principalWithRoles(id string, roles ...string) *access.Principal {
 }
 
 func TestProjectQueryResource(t *testing.T) {
+	t.Parallel()
 	got := ProjectQueryResource("demo-project-1", "customers/customer-invoices").String()
 	if !strings.HasPrefix(got, "/"+ProjectsCollection+"/demo-project-1/"+ProjectQueriesCollection+"/") {
 		t.Errorf("ProjectQueryResource = %q, want it under /%s/demo-project-1/%s/", got, ProjectsCollection, ProjectQueriesCollection)
@@ -107,6 +108,7 @@ func TestProjectQueryResource(t *testing.T) {
 }
 
 func TestAuthorizeWrite(t *testing.T) {
+	t.Parallel()
 	policies := []Loaded{decodeLoaded(t, "project-write.yaml", projectWritePolicy)}
 	resource := ProjectQueryResource("demo-project-1", "customers/customer-invoices")
 	tests := []struct {
@@ -158,6 +160,7 @@ func TestAuthorizeWrite(t *testing.T) {
 }
 
 func TestAuthorizeWrite_DenyByDefaultWithoutPolicies(t *testing.T) {
+	t.Parallel()
 	err := AuthorizeWrite(context.Background(), WriteOptions{Principal: principalWithRoles("admin", "admin")}, access.Insert,
 		ProjectQueryResource("p", "q"))
 	var denied *WriteDeniedError
@@ -170,12 +173,14 @@ func TestAuthorizeWrite_DenyByDefaultWithoutPolicies(t *testing.T) {
 }
 
 func TestAuthorizeWrite_UnrestrictedSessionIsTheLocalOwner(t *testing.T) {
+	t.Parallel()
 	if err := AuthorizeWrite(context.Background(), WriteOptions{Unrestricted: true}, access.Insert, ProjectQueryResource("p", "q")); err != nil {
 		t.Fatalf("an unrestricted (--no-policies) session must be allowed to write, got %v", err)
 	}
 }
 
 func TestAuthorizeWrite_EveryPolicyMustAllow(t *testing.T) {
+	t.Parallel()
 	policies := []Loaded{
 		decodeLoaded(t, "project-write.yaml", projectWritePolicy),
 		decodeLoaded(t, "customers-only.yaml", customersOnlyPolicy),
@@ -192,6 +197,7 @@ func TestAuthorizeWrite_EveryPolicyMustAllow(t *testing.T) {
 }
 
 func TestAuthorizeWrite_RejectsNonWriteOperations(t *testing.T) {
+	t.Parallel()
 	for _, op := range []access.Operations{access.Query, access.Get, access.Write, 0} {
 		err := AuthorizeWrite(context.Background(), WriteOptions{Unrestricted: true}, op, ProjectQueryResource("p", "q"))
 		if err == nil {
@@ -201,6 +207,7 @@ func TestAuthorizeWrite_RejectsNonWriteOperations(t *testing.T) {
 }
 
 func TestWriteDeniedError_Error(t *testing.T) {
+	t.Parallel()
 	err := &WriteDeniedError{Policy: "demo", Operation: access.Insert, Resource: "/datatug_projects/p/queries/q", Reason: "no rule allows it"}
 	got := err.Error()
 	for _, want := range []string{`"demo"`, "insert", "/datatug_projects/p/queries/q", "no rule allows it"} {
@@ -217,6 +224,7 @@ func TestWriteDeniedError_Error(t *testing.T) {
 // TestConstrainedWrite drives every branch of the check that refuses a
 // grant a project file cannot enforce.
 func TestConstrainedWrite(t *testing.T) {
+	t.Parallel()
 	var condition dal.Condition = fakeCondition{}
 	writes := func(w *access.WriteResidual) []*access.WriteResidual { return []*access.WriteResidual{w} }
 	tests := []struct {

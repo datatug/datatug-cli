@@ -203,6 +203,7 @@ default: deny
 // compiles from the document as loaded, one for one, with every query id
 // canonicalized - so no document form can hide a rule from the rewrite.
 func TestPrepareProjectWrites_RewritesEveryRuleDALgoEvaluates(t *testing.T) {
+	t.Parallel()
 	for _, policy := range policyCorpus() {
 		t.Run(policy.name, func(t *testing.T) {
 			loaded, err := DecodeLoaded([]byte(policy.doc), policy.codec, serverPolicyDir+"corpus")
@@ -228,6 +229,7 @@ func TestPrepareProjectWrites_RewritesEveryRuleDALgoEvaluates(t *testing.T) {
 // written in, its deny rule holds for every spelling of the query it
 // names, and an unrelated query stays writable.
 func TestPrepareProjectWrites_EveryCorpusFormDeniesEverySpelling(t *testing.T) {
+	t.Parallel()
 	for _, policy := range policyCorpus() {
 		t.Run(policy.name, func(t *testing.T) {
 			loaded, err := DecodeLoaded([]byte(policy.doc), policy.codec, serverPolicyDir+"corpus")
@@ -252,6 +254,7 @@ func TestPrepareProjectWrites_EveryCorpusFormDeniesEverySpelling(t *testing.T) {
 // A stream with a second document is refused at load, by DALgo itself, so
 // no half-read document can reach the project-write rewrite.
 func TestDecodeLoaded_RefusesASecondDocument(t *testing.T) {
+	t.Parallel()
 	doc := corpusHeader + "scopes:" + corpusAllowAndDeny + "---\n" + corpusHeader + "scopes:" + corpusAllowAndDeny
 	if _, err := DecodeLoaded([]byte(doc), access.YAMLCodec{}, "two.yaml"); err == nil {
 		t.Fatal("a two-document stream must not load")
@@ -262,6 +265,7 @@ func TestDecodeLoaded_RefusesASecondDocument(t *testing.T) {
 // every project query write rather than decide one from rules that are not
 // the policy's own.
 func TestPrepareProjectWrites_RefusesWhatItCannotReproduce(t *testing.T) {
+	t.Parallel()
 	// An empty fields list on an allow rule means "no field", which
 	// omitempty cannot re-encode; the write view refuses instead of
 	// silently widening the rule to every field.
@@ -290,6 +294,7 @@ func TestPrepareProjectWrites_RefusesWhatItCannotReproduce(t *testing.T) {
 // never apply. Rather than let it silently not apply, the policy refuses
 // every project query write and names the rule.
 func TestPrepareProjectWrites_RefusesAQueryIDNoWriteCanUse(t *testing.T) {
+	t.Parallel()
 	refused := map[string]string{
 		"/datatug_projects/*/queries/Rev*":             "must not contain any of",
 		"/datatug_projects/demo/queries/reports.":      `must not end with "." or a space`,

@@ -70,7 +70,7 @@ func TestRequestGuard_Rule(t *testing.T) {
 
 		// The pages of the web.
 		{name: "a page of the app, cross-site", host: "127.0.0.1:8989", port: 8989, origin: listed, fetchSite: "cross-site", allowed: true},
-		{name: "a page of localhost", host: "127.0.0.1:8989", port: 8989, origin: "http://localhost:4200", fetchSite: "same-site", allowed: true},
+		{name: "a page of localhost", host: "127.0.0.1:8989", port: 8989, origin: "http://datatug.localhost:4200", fetchSite: "same-site", allowed: true},
 		{name: "same-origin with no Origin", host: "localhost:8989", port: 8989, fetchSite: "same-origin", allowed: true},
 		{name: "a typed address (none)", host: "localhost:8989", port: 8989, fetchSite: "none", allowed: true},
 		{name: "a listed Origin and no Sec-Fetch-Site", host: "localhost:8989", port: 8989, origin: listed, allowed: true},
@@ -273,19 +273,29 @@ func TestRoutes_EveryRouteServesARequestThatIsItsOwnAsBefore(t *testing.T) {
 			return guardRequest(method, path, "localhost:8989", "https://datatug.app", "cross-site")
 		},
 		"a page of localhost": func(method, path string) *http.Request {
-			return guardRequest(method, path, "127.0.0.1:8989", "http://localhost:4200", "same-site")
+			return guardRequest(method, path, "127.0.0.1:8989", "http://datatug.localhost:4200", "same-site")
 		},
 	}
 	for i, route := range guarded {
 		require.Equal(t, reference[i].method+" "+reference[i].path, route.method+" "+route.path)
 		for name, build := range allowed {
 			t.Run(route.method+" "+route.path+" / "+name, func(t *testing.T) {
-				want := serveRecorded(reference[i].handler, build(route.method, route.path))
+				// As before, plus the CORS headers that the guard gives every answer it lets through.
+				want := serveRecorded(withCORSOrigin(reference[i].handler), build(route.method, route.path))
 				got := serveRecorded(route.handler, build(route.method, route.path))
 				assert.Equal(t, want, got)
 				assert.NotContains(t, got, requestRefusedMessage)
 			})
 		}
+	}
+}
+
+// withCORSOrigin is handler with the CORS headers of writeCORSOrigin set first, as the guard
+// sets them for every request it lets through.
+func withCORSOrigin(handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		writeCORSOrigin(w, r)
+		handler(w, r)
 	}
 }
 

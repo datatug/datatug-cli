@@ -361,6 +361,21 @@ func TestGetConstraints_Errors(t *testing.T) {
 		_, err = constraints.NextConstraint()
 		assert.NoError(t, err, "the foreign keys still come from the description")
 	})
+	t.Run("index listing is optional", func(t *testing.T) {
+		// PostgREST's OpenAPI document exposes no index metadata: the reader says so,
+		// and a scan reports no indexes instead of failing on the tables it did read.
+		reader := shopReader()
+		reader.errs = map[string]error{"ListIndexes": &dbschema.NotSupportedError{Op: "ListIndexes", Backend: "postgrest"}}
+		provider := newShopProvider(reader, nil)
+		indexes, err := provider.GetIndexes(ctx, "shop", "public", "Order")
+		require.NoError(t, err)
+		_, err = indexes.NextIndex()
+		assert.ErrorIs(t, err, io.EOF)
+		constraints, err := provider.GetConstraints(ctx, "shop", "public", "Order")
+		require.NoError(t, err)
+		_, err = constraints.NextConstraint()
+		assert.NoError(t, err, "the foreign keys still come from the description")
+	})
 	t.Run("constraint listing fails", func(t *testing.T) {
 		reader := shopReader()
 		reader.errs = map[string]error{"ListConstraints": boom}

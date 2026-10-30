@@ -20,6 +20,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var detectiveJSONMarshal = json.Marshal
+
 // These commands open native Bubble Tea workspaces. They use the same agent
 // session and action endpoint as the web UI; they never execute Checks locally.
 func detectiveUICommand(name string) *cobra.Command {
@@ -232,7 +234,7 @@ func (s detectiveUIService) IncidentAction(ctx context.Context, action detective
 	// response. The server additionally binds that identity to actor and scope.
 	operationPayload := request
 	operationPayload.SecurityContextID = ""
-	encoded, err := json.Marshal(operationPayload)
+	encoded, err := detectiveJSONMarshal(operationPayload)
 	if err != nil {
 		return detectiveui.IncidentResponse{}, err
 	}
@@ -277,7 +279,7 @@ func (s detectiveUIService) KnowledgeAction(ctx context.Context, action detectiv
 		ReviewNote  string                         `json:"reviewNote,omitempty"`
 		Target      *detectiveui.KnowledgeTarget   `json:"target,omitempty"`
 	}{Storage: "local", Project: s.project, Type: action.Type, IfMatch: action.IfMatch, Proposal: action.Proposal, ProposalID: action.ProposalID, ReviewNote: action.ReviewNote, Target: action.Target}
-	encoded, err := json.Marshal(request)
+	encoded, err := detectiveJSONMarshal(request)
 	if err != nil {
 		return detectiveui.KnowledgeResponse{}, err
 	}
@@ -314,7 +316,7 @@ func (s detectiveUIService) AIProposals(ctx context.Context, after string) (dete
 	return page, nil
 }
 func (s detectiveUIService) GenerateAI(ctx context.Context, request detectiveui.AIGenerate) (ai.Response, error) {
-	intent, err := json.Marshal(request)
+	intent, err := detectiveJSONMarshal(request)
 	if err != nil {
 		return ai.Response{}, err
 	}

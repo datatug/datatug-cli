@@ -9,6 +9,7 @@ import (
 )
 
 func TestPadAnsiLineZeroOrNegativeWidthIsEmpty(t *testing.T) {
+	t.Parallel()
 	if got := padAnsiLine("hello", 0); got != "" {
 		t.Fatalf("width 0 = %q, want empty", got)
 	}
@@ -18,6 +19,7 @@ func TestPadAnsiLineZeroOrNegativeWidthIsEmpty(t *testing.T) {
 }
 
 func TestNextTableStyleZeroValueStartsAtSoft(t *testing.T) {
+	t.Parallel()
 	next := nextTableStyle(grid.Style{})
 	if next.Name != grid.StyleSoft.Name {
 		t.Fatalf("zero-value style advanced to %q, want %q", next.Name, grid.StyleSoft.Name)
@@ -25,6 +27,7 @@ func TestNextTableStyleZeroValueStartsAtSoft(t *testing.T) {
 }
 
 func TestNextTableStyleUnknownNameFallsBackToFirst(t *testing.T) {
+	t.Parallel()
 	next := nextTableStyle(grid.Style{Name: "not-a-real-style"})
 	if next.Name != grid.Styles[0].Name {
 		t.Fatalf("unknown style fell back to %q, want %q", next.Name, grid.Styles[0].Name)
@@ -32,12 +35,14 @@ func TestNextTableStyleUnknownNameFallsBackToFirst(t *testing.T) {
 }
 
 func TestConciseErrorNilIsEmpty(t *testing.T) {
+	t.Parallel()
 	if got := conciseError(nil); got != "" {
 		t.Fatalf("conciseError(nil) = %q, want empty", got)
 	}
 }
 
 func TestConciseErrorTruncatesLongMessages(t *testing.T) {
+	t.Parallel()
 	long := strings.Repeat("x", 300)
 	got := conciseError(errors.New(long))
 	if len(got) != 240 || !strings.HasSuffix(got, "...") {

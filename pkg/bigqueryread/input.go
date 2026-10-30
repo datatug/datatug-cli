@@ -9,15 +9,19 @@ import (
 	"reflect"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	bigquery "github.com/dal-go/dalgo2bigquery"
 )
 
 const MaxInputBytes = 256 << 10
 
-var ErrInput = errors.New("invalid BigQuery input: expected bounded typed JSON")
+var (
+	ErrInput         = errors.New("invalid BigQuery input: expected bounded typed JSON")
+	jsonMarshal      = json.Marshal
+	tugqlDeserialize = tugql.Deserialize
+)
 
-// Input is an explicit scalar DTQL query and reviewed native source profile.
+// Input is an explicit scalar TugQL query and reviewed native source profile.
 // QueryShape intentionally excludes SQL, joins, subqueries, aliases and offsets.
 type Input struct {
 	Profile bigquery.SourceProfile `json:"profile"`
@@ -130,11 +134,11 @@ func (in Input) DALQuery() (dal.Query, error) {
 	if err := visit(in.Query.Where, 0); err != nil {
 		return nil, err
 	}
-	raw, err := json.Marshal(in.Query)
+	raw, err := jsonMarshal(in.Query)
 	if err != nil {
 		return nil, ErrInput
 	}
-	q, err := dtql.Deserialize(raw)
+	q, err := tugqlDeserialize(raw)
 	if err != nil {
 		return nil, ErrInput
 	}

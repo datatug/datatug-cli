@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/datatug/datatug-cli/pkg/querybody"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/storage"
 )
@@ -123,48 +124,216 @@ func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, er
 			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
 		}
 		return dbcopy.LocalSourceURL("ingitdb", path), nil
-	case DriverPostgres:
+	case DriverCouchDB:
+		// A CouchDB catalog records a connection descriptor (a project file that
+		// names an environment variable and nothing else), exactly as a PostgreSQL
+		// catalog does. The endpoint itself comes only from the operator's
+		// environment, so a project cannot point the operator's CouchDB credentials
+		// at a host of its own choosing; a project that records a literal endpoint
+		// is refused before anything is opened.
+		source, err := couchDBDescriptorSource(catalog, projDir)
+		if err != nil {
+			return "", err
+		}
+		// Resolving the variable refuses one that is not set, and the scheme check
+		// refuses a variable that holds another engine: a catalog labelled couchdb
+		// whose variable held a postgres or http source would otherwise be opened as
+		// that engine while policy naming still used the couchdb label. No error
+		// names the value, only the variable and the scheme.
+		ref, err := dbcopyParse(source)
+		if err != nil {
+			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
+		}
+		if !dbcopy.IsCouchDBScheme(ref.Scheme) {
+			return "", fmt.Errorf("catalog %q: environment variable %s must hold a couchdb:// URL, not a %s source", catalog.ID, strings.TrimPrefix(source, "env:"), ref.Scheme)
+		}
+		return source, nil
+	case DriverPostgREST:
+		// A PostgREST catalog records a connection descriptor (a project file that
+		// names an environment variable and nothing else), exactly as a PostgreSQL
+		// or CouchDB catalog does. The API root comes only from the operator's
+		// environment, so a project cannot point the operator's PostgREST credentials
+		// at a host of its own choosing; a project that records a literal API root is
+		// refused before anything is opened.
+		source, err := postgrestDescriptorSource(catalog, projDir)
+		if err != nil {
+			return "", err
+		}
+		// Resolving the variable refuses one that is not set, and the scheme check
+		// refuses a variable that holds another engine: a catalog labelled postgrest
+		// whose variable held a postgres or http source would otherwise be opened as
+		// that engine while policy naming still used the postgrest label. No error
+		// names the value, only the variable and the scheme.
+		ref, err := dbcopyParse(source)
+		if err != nil {
+			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
+		}
+		if !dbcopy.IsPostgRESTScheme(ref.Scheme) {
+			return "", fmt.Errorf("catalog %q: environment variable %s must hold a postgrest:// URL, not a %s source", catalog.ID, strings.TrimPrefix(source, "env:"), ref.Scheme)
+		}
+		return source, nil
+	case DriverLibSQL:
+		// A libSQL catalog records a connection descriptor (a project file that
+		// names an environment variable and nothing else), exactly as a PostgreSQL or
+		// PostgREST catalog does. The server base address comes only from the
+		// operator's environment, so a project cannot point the operator's libSQL
+		// token at a host of its own choosing; a project that records a literal
+		// endpoint is refused before anything is opened.
+		source, err := libSQLDescriptorSource(catalog, projDir)
+		if err != nil {
+			return "", err
+		}
+		// Resolving the variable refuses one that is not set, and the scheme check
+		// refuses a variable that holds another engine: a catalog labelled libsql
+		// whose variable held a postgres or http source would otherwise be opened as
+		// that engine while policy naming still used the libsql label. No error
+		// names the value, only the variable and the scheme.
+		ref, err := dbcopyParse(source)
+		if err != nil {
+			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
+		}
+		if !dbcopy.IsLibSQLScheme(ref.Scheme) {
+			return "", fmt.Errorf("catalog %q: environment variable %s must hold a libsql:// URL, not a %s source", catalog.ID, strings.TrimPrefix(source, "env:"), ref.Scheme)
+		}
+		return source, nil
+	case DriverTypesense:
+		// A Typesense catalog records a connection descriptor (a project file that
+		// names an environment variable and nothing else), exactly as a PostgreSQL,
+		// CouchDB, PostgREST or libSQL catalog does. The origin and the one collection
+		// come only from the operator's environment, so a project cannot point the
+		// operator's scoped Typesense key at a host of its own choosing; a project
+		// that records a literal endpoint is refused before anything is opened.
+		source, err := typesenseDescriptorSource(catalog, projDir)
+		if err != nil {
+			return "", err
+		}
+		// Resolving the variable refuses one that is not set, and the scheme check
+		// refuses a variable that holds another engine: a catalog labelled typesense
+		// whose variable held a postgres or http source would otherwise be opened as
+		// that engine while policy naming still used the typesense label. No error
+		// names the value, only the variable and the scheme.
+		ref, err := dbcopyParse(source)
+		if err != nil {
+			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
+		}
+		if !dbcopy.IsTypesenseScheme(ref.Scheme) {
+			return "", fmt.Errorf("catalog %q: environment variable %s must hold a typesense:// URL, not a %s source", catalog.ID, strings.TrimPrefix(source, "env:"), ref.Scheme)
+		}
+		return source, nil
+	case "firestore", DriverPostgres, DriverMySQL, DriverOracle, DriverSQLServer:
 		// The catalog's path names a connection descriptor, a project file that
 		// names an environment variable and nothing else; the variable holds the
 		// connection URL, password included. The source is "env:NAME", so no
 		// project file and no message ever holds the URL. The descriptor must be a
 		// file inside the project folder (ResolveDescriptorPath): a project file is
 		// not trusted to point a reader at any other file of the machine.
-		if catalog.Path == "" {
-			return "", fmt.Errorf("catalog %q has no connection descriptor path configured for its postgres driver", catalog.ID)
-		}
-		path, err := ResolveDescriptorPath(projDir, catalog.Path)
+		source, err := postgresDescriptorSource(catalog, projDir)
 		if err != nil {
-			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
+			return "", err
 		}
-		descriptor, err := dbcopy.ReadPostgresDescriptor(path)
-		if err != nil {
-			// A descriptor that is not there, is a folder or cannot be read fails with the
-			// text of the operating system, which quotes the path of the file in the served
-			// project: the answer for a client is built from the ID of the catalog.
-			var pathErr *fs.PathError
-			if errors.As(err, &pathErr) {
-				return "", sourceLookupFailed("catalog %q: the PostgreSQL connection descriptor cannot be read", "catalog %q", err, catalog.ID)
-			}
-			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
-		}
-		// The variable must hold a postgres URL: a catalog labelled postgres whose
-		// variable held a sqlite or http source would otherwise be opened as that
-		// engine while policy naming still used the postgres label. Resolving it
+		// The variable must hold a URL of the catalog's driver: a catalog labelled
+		// postgres whose variable held a sqlite or http source would otherwise be
+		// opened as that engine while policy naming still used the postgres label. Resolving it
 		// also refuses a variable that is not set. No error names the value, only
 		// the variable and the scheme.
-		source := descriptor.SourceURL()
 		ref, err := dbcopyParse(source)
 		if err != nil {
 			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
 		}
-		if ref.Scheme != DriverPostgres {
-			return "", fmt.Errorf("catalog %q: environment variable %s must hold a postgres:// URL, not a %s source", catalog.ID, descriptor.DSNEnv, ref.Scheme)
+		if ref.Scheme != catalog.Driver {
+			return "", fmt.Errorf("catalog %q: environment variable %s must hold a %s:// URL, not a %s source", catalog.ID, strings.TrimPrefix(source, "env:"), catalog.Driver, ref.Scheme)
 		}
 		return source, nil
 	default:
-		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3, ingitdb, openvaultdb or postgres)", catalog.Driver)
+		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3, ingitdb, openvaultdb, postgres, mysql, oracle, sqlserver, firestore, couchdb, postgrest, libsql or typesense)", catalog.Driver)
 	}
+}
+
+// postgresDescriptorSource is the source "env:NAME" that the connection descriptor of a PostgreSQL
+// catalog names: the catalog's path is a descriptor inside the project folder (ResolveDescriptorPath),
+// a project file that names an environment variable and nothing else. The variable is not read, so
+// the source is returned for a variable that is not set (opening it says so).
+func postgresDescriptorSource(catalog datatug.DbCatalog, projDir string) (string, error) {
+	if catalog.Path == "" {
+		return "", fmt.Errorf("catalog %q has no connection descriptor path configured for its %s driver", catalog.ID, catalog.Driver)
+	}
+	path, err := ResolveDescriptorPath(projDir, catalog.Path)
+	if err != nil {
+		return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
+	}
+	descriptor, err := dbcopy.ReadPostgresDescriptor(path)
+	if err != nil {
+		// A descriptor that is not there, is a folder or cannot be read fails with the
+		// text of the operating system, which quotes the path of the file in the served
+		// project: the answer for a client is built from the ID of the catalog.
+		var pathErr *fs.PathError
+		if errors.As(err, &pathErr) {
+			return "", sourceLookupFailed("catalog %q: the "+dbcopy.ServerTitle(catalog.Driver)+" connection descriptor cannot be read", "catalog %q", err, catalog.ID)
+		}
+		return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
+	}
+	return descriptor.SourceURL(), nil
+}
+
+// couchDBDescriptorSource is the source "env:NAME" that the connection descriptor of a CouchDB
+// catalog names: the catalog's path is a descriptor inside the project folder
+// (ResolveDescriptorPath), a project file that names an environment variable and nothing else. The
+// endpoint is read from that variable only when the source is opened; the project can neither hold
+// a literal endpoint nor pick an arbitrary variable (CheckDescriptorEnvName). The variable is not
+// read here, so the source is returned for a variable that is not set (opening it says so).
+func couchDBDescriptorSource(catalog datatug.DbCatalog, projDir string) (string, error) {
+	return descriptorSource(catalog, projDir, "CouchDB", dbcopy.ReadCouchDBDescriptor)
+}
+
+// libSQLDescriptorSource is couchDBDescriptorSource for a libSQL catalog: the catalog's path is a
+// descriptor inside the project folder, the descriptor names the operator's variable, and the server
+// base address is read from that variable only when the source is opened. The project can neither
+// hold a literal base address nor pick an arbitrary variable (CheckDescriptorEnvName). The token is
+// not in the descriptor at all: it comes from DATATUG_LIBSQL_BEARER for each request.
+func libSQLDescriptorSource(catalog datatug.DbCatalog, projDir string) (string, error) {
+	return descriptorSource(catalog, projDir, "libSQL", dbcopy.ReadLibSQLDescriptor)
+}
+
+// postgrestDescriptorSource is couchDBDescriptorSource for a PostgREST catalog: the catalog's
+// path is a descriptor inside the project folder, the descriptor names the operator's variable, and
+// the API root is read from that variable only when the source is opened. The project can neither
+// hold a literal API root nor pick an arbitrary variable (CheckDescriptorEnvName).
+func postgrestDescriptorSource(catalog datatug.DbCatalog, projDir string) (string, error) {
+	return descriptorSource(catalog, projDir, "PostgREST", dbcopy.ReadPostgRESTDescriptor)
+}
+
+// typesenseDescriptorSource is couchDBDescriptorSource for a Typesense catalog: the catalog's path is
+// a descriptor inside the project folder, the descriptor names the operator's variable, and the
+// origin and the one collection are read from that variable only when the source is opened. The
+// project can neither hold a literal endpoint nor pick an arbitrary variable
+// (CheckDescriptorEnvName). The scoped API key is not in the descriptor at all: it comes from
+// DATATUG_TYPESENSE_API_KEY for each request.
+func typesenseDescriptorSource(catalog datatug.DbCatalog, projDir string) (string, error) {
+	return descriptorSource(catalog, projDir, "Typesense", dbcopy.ReadTypesenseDescriptor)
+}
+
+// descriptorSource is the source "env:NAME" a catalog's connection descriptor names. title is the
+// source name an error uses ("CouchDB", "PostgREST"); read is that source's strict reader.
+func descriptorSource(catalog datatug.DbCatalog, projDir, title string, read func(string) (dbcopy.ConnectionDescriptor, error)) (string, error) {
+	if catalog.Path == "" {
+		return "", fmt.Errorf("catalog %q has no connection descriptor path configured for its %s driver", catalog.ID, catalog.Driver)
+	}
+	path, err := ResolveDescriptorPath(projDir, catalog.Path)
+	if err != nil {
+		return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
+	}
+	descriptor, err := read(path)
+	if err != nil {
+		// A descriptor that is not there, is a folder or cannot be read fails with the
+		// text of the operating system, which quotes the path of the file in the served
+		// project: the answer for a client is built from the ID of the catalog.
+		var pathErr *fs.PathError
+		if errors.As(err, &pathErr) {
+			return "", sourceLookupFailed("catalog %q: the "+title+" connection descriptor cannot be read", "catalog %q", err, catalog.ID)
+		}
+		return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
+	}
+	return descriptor.SourceURL(), nil
 }
 
 // ResolveCatalogSourceURL maps one resolved project catalog to the DALgo
@@ -212,7 +381,7 @@ func escapeSQLitePath(path string) string {
 // "<id>.query.json", the same convention filestore's saveQuery already
 // writes with (store_queries_saver.go). It exists because
 // fsQueriesStore.LoadQuery does not hydrate QueryDef.Text back from that
-// file (the read-back half of REQ:dtql-query-type's sidecar rule lands with
+// file (the read-back half of REQ:tugql-query-type's sidecar rule lands with
 // datatug-core PR #302 / the S1b module swap — see this stream's PR body).
 // LoadQueryDocument exports loadQueryDocument for pkg/server/endpoints'
 // exec/run_query rewrite (Task 12), which needs the same sidecar-text read
@@ -225,6 +394,21 @@ func loadQueryDocument(projectID, queryID string, queryType datatug.QueryType) (
 	dir, ok := projectDir(projectID)
 	if !ok || dir == "" {
 		return "", fmt.Errorf("no project directory configured for project %q", dbcopy.SourceIDDisplay(projectID))
+	}
+	if queryType == datatug.QueryTypeTugQL {
+		store, err := projectStoreForID(LocalStoreID, projectID)
+		if err != nil {
+			return "", err
+		}
+		query, err := store.LoadQuery(context.Background(), queryID)
+		if err != nil {
+			return "", fmt.Errorf("read query document %s: %w", queryID, err)
+		}
+		if query.Text == "" {
+			base := filepath.Join(dir, storage.QueriesFolder, filepath.FromSlash(queryID)+".query.")
+			return "", fmt.Errorf("read query document %s or %s: body is missing or empty", base+"tugql", base+"tugql.yaml")
+		}
+		return querybody.Structured(query)
 	}
 	folder, id := queryFolderAndID(queryID)
 	fileName := fmt.Sprintf("%s.%s.%s", id, storage.QueryFileSuffix, strings.ToLower(string(queryType)))

@@ -13,7 +13,7 @@ import (
 // that needs applyJoinCandidate to reach its post-Apply store calls.
 func joinCandidateQueryResult() QueryResult {
 	return QueryResult{
-		Title: "Joined", DTQL: "from: {name: Invoice}\nlimit: 1",
+		Title: "Joined", TugQL: "from: {name: Invoice}\nlimit: 1",
 		Result: secureread.Result{Columns: []string{"InvoiceId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 1}}}},
 	}
 }
@@ -24,6 +24,7 @@ func joinCandidateQueryResult() QueryResult {
 // whose originMessageID is always "", forcing the AppendUser branch, after
 // joinApplication.Apply already succeeded on the same real store.
 func TestApplyJoinCandidateAppendUserOverrideFails(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	chat, store := newTestSessionChat(t)
 	recordSetID := workspaceTestRecord(t, store, chat.activeID)
@@ -43,6 +44,7 @@ func TestApplyJoinCandidateAppendUserOverrideFails(t *testing.T) {
 // (already covered above) so this test isolates AppendQuery's own failure
 // after the earlier real Load and joinApplication.Apply calls succeeded.
 func TestApplyJoinCandidateAppendQueryOverrideFails(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	chat, store := newTestSessionChat(t)
 	recordSetID := workspaceTestRecord(t, store, chat.activeID)
@@ -65,6 +67,7 @@ func TestApplyJoinCandidateAppendQueryOverrideFails(t *testing.T) {
 // the earlier real Load, joinApplication.Apply, and AppendQuery all
 // succeeded.
 func TestApplyJoinCandidateFinalLoadOverrideFails(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	chat, store := newTestSessionChat(t)
 	recordSetID := workspaceTestRecord(t, store, chat.activeID)
@@ -84,6 +87,7 @@ func TestApplyJoinCandidateFinalLoadOverrideFails(t *testing.T) {
 // applyWorkspaceAction's SaveWorkspace error branch, after its own Load at
 // the top of the function already succeeded on the same real store.
 func TestApplyWorkspaceActionSaveWorkspaceOverrideFails(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	chat, store := newTestSessionChat(t)
 	recordSetID := workspaceTestRecord(t, store, chat.activeID)
@@ -98,6 +102,7 @@ func TestApplyWorkspaceActionSaveWorkspaceOverrideFails(t *testing.T) {
 // first of two Load calls in Switch), after the List call above it already
 // succeeded on the same real store.
 func TestSwitchLoadOverrideFails(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	chat, _ := newTestSessionChat(t)
 	first, err := chat.Snapshot(ctx)
@@ -115,6 +120,7 @@ func TestSwitchLoadOverrideFails(t *testing.T) {
 // branch, after its own List and (first) Load calls above it already
 // succeeded on the same real store.
 func TestSwitchActivateOverrideFails(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	chat, _ := newTestSessionChat(t)
 	first, err := chat.Snapshot(ctx)
@@ -132,6 +138,7 @@ func TestSwitchActivateOverrideFails(t *testing.T) {
 // Delete's own store.Delete call above it already succeeded on the same
 // real store.
 func TestDeleteListOverrideFails(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	chat, _ := newTestSessionChat(t)
 	injected := errors.New("injected List failure")
@@ -146,6 +153,7 @@ func TestDeleteListOverrideFails(t *testing.T) {
 // store call, not overridden), so Delete's own fallback store.Create call
 // is what the override fails.
 func TestDeleteCreateOverrideFails(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	chat, _ := newTestSessionChat(t)
 	injected := errors.New("injected Create failure")
@@ -163,6 +171,7 @@ func TestDeleteCreateOverrideFails(t *testing.T) {
 // TestBridgeMessagesHandlerAskActiveStoreErrorSurfaces for that HTTP-level
 // coverage of the same branch.
 func TestPrepareTurnAppendUserOverrideFails(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	chat, _ := newTestSessionChat(t)
 	injected := errors.New("injected AppendUser failure")
@@ -179,6 +188,7 @@ func TestPrepareTurnAppendUserOverrideFails(t *testing.T) {
 // prior messages) reaches the rename call after AppendUser above it already
 // succeeded on the same real store.
 func TestPrepareTurnRenameOverrideFails(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	chat, _ := newTestSessionChat(t)
 	snapshot, err := chat.Snapshot(ctx)
@@ -199,6 +209,7 @@ func TestPrepareTurnRenameOverrideFails(t *testing.T) {
 // nil, so a freshly constructed SessionChat always exercises the real
 // *SessionStore unless a test explicitly opts in.
 func TestStoreOverridesNilByDefault(t *testing.T) {
+	t.Parallel()
 	chat, _ := newTestSessionChat(t)
 	if chat.storeAppendUserOverride != nil || chat.storeAppendQueryOverride != nil || chat.storeLoadOverride != nil ||
 		chat.storeSaveWorkspaceOverride != nil || chat.storeActivateOverride != nil || chat.storeListOverride != nil ||

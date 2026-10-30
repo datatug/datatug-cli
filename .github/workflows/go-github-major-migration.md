@@ -6,7 +6,7 @@ on:
   pull_request:
     types: [opened, reopened, synchronize]
 if: >-
-  github.event.pull_request.user.login == 'app/renovate' &&
+  github.event.pull_request.user.login == 'renovate[bot]' &&
   contains(github.event.pull_request.body, 'github.com/google/go-github')
 permissions:
   contents: read
@@ -16,7 +16,7 @@ checkout:
   fetch-depth: 0
 safe-outputs:
   create-pull-request:
-    title-prefix: "[go-github major] "
+    title-prefix: "fix(deps): [go-github major] "
     draft: false
     auto-merge: squash
     auto-close-issue: false
@@ -39,7 +39,7 @@ Before changing files, independently inspect the triggering PR through GitHub
 and compare its head with the default branch. Continue only if all of these
 conditions hold:
 
-1. The PR author is exactly `app/renovate`.
+1. The PR author is exactly `renovate[bot]`.
 2. Its dependency change is a real semantic-major upgrade of the Go module
    `github.com/google/go-github/vN` from one positive major `N` to a different
    positive major.
@@ -69,7 +69,7 @@ workflow files, agent instructions, release configuration, or unrelated
 dependencies.
 
 Only after all verification passes, create exactly one non-draft PR against the
-default branch. Its title must start with `[go-github major] ` and its body must
+default branch. Its title must start with `fix(deps): [go-github major] ` and its body must
 identify the triggering Renovate PR, the old and new go-github majors, adapted
 APIs, and exact commands/results. Do not request reviewers. The configured
 safe output enables squash auto-merge; GitHub may merge it only after all

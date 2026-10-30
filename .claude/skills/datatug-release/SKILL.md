@@ -40,7 +40,7 @@ change repository configuration merely to trigger another release.
    separate release-classification verification; never assume `specscore.yaml`
    is bookkeeping. Confirmation creates no release and installs no update.
 2. Require successful **Go CI for the exact release commit** and successful
-   automatic release/promotion. `release.yml` delegates to strongo/cicd v1.21.2,
+   automatic release/promotion. `release.yml` delegates to strongo/cicd v1.22.0,
    requires `Go CI`, caps pre-1.0 major bumps and requests notarized macOS builds.
    Inspect authoritative run/check results; a queued/running job is not success.
 3. Verify the release is public, download its platform archive and checksum file,

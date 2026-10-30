@@ -15,6 +15,7 @@ import (
 // TestCurrentRowContentNoRows — since DataTug no longer has that function;
 // it renders via grid.CardView.)
 func TestChooseGridLayoutBoundary(t *testing.T) {
+	t.Parallel()
 	for _, view := range []grid.View{gridViewCharts, gridViewCurrentRow} {
 		for _, tc := range []struct {
 			width int

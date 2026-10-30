@@ -9,7 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/queryops"
 	"github.com/datatug/datatug-cli/pkg/resultops"
 	"github.com/datatug/datatug-cli/pkg/secureread"
@@ -24,15 +24,15 @@ type derivedOperation struct {
 	Sort       []queryops.SortTerm
 	Scope      queryops.Scope
 }
-type recursiveDTQLExecutor interface {
-	RunRecursiveDTQL(context.Context, string, []byte, map[string]any) (secureread.Result, error)
+type recursiveTugQLExecutor interface {
+	RunRecursiveTugQL(context.Context, string, []byte, map[string]any) (secureread.Result, error)
 }
-type exactAggregateDTQLExecutor interface {
-	RunExactAggregateDTQL(context.Context, string, []byte, []byte, map[string]any, []resultops.Column) (secureread.ExactAggregateResult, error)
+type exactAggregateTugQLExecutor interface {
+	RunExactAggregateTugQL(context.Context, string, []byte, []byte, map[string]any, []resultops.Column) (secureread.ExactAggregateResult, error)
 }
 
 func exactAggregateColumns(catalog ProjectCatalog, record RecordSet) ([]resultops.Column, error) {
-	query, err := dtql.Deserialize([]byte(record.DTQL))
+	query, err := tugqlDeserialize([]byte(record.TugQL))
 	if err != nil {
 		return nil, fmt.Errorf("original query is unavailable")
 	}
@@ -104,9 +104,9 @@ func deterministicOriginal(catalog ProjectCatalog, record RecordSet, query dal.S
 }
 
 func deriveResultPreview(catalog ProjectCatalog, record RecordSet, operation derivedOperation) (queryops.Preview, error) {
-	query, err := dtql.Deserialize([]byte(record.DTQL))
+	query, err := tugql.Deserialize([]byte(record.TugQL))
 	if err != nil {
-		return queryops.Preview{}, fmt.Errorf("original DTQL is unavailable")
+		return queryops.Preview{}, fmt.Errorf("original TugQL is unavailable")
 	}
 	if query.Limit() > maxRows {
 		return queryops.Preview{}, fmt.Errorf("original query exceeds the %d row execution budget", maxRows)
@@ -120,14 +120,14 @@ func deriveResultPreview(catalog ProjectCatalog, record RecordSet, operation der
 		for i, term := range operation.Aggregates {
 			terms[i] = queryops.AggregateTerm{Column: term.Column, Function: term.Function, Alias: term.Alias}
 		}
-		preview, err = queryops.DeriveGroupAggregates(record.DTQL, operation.Columns, operation.Count, terms, operation.Scope)
+		preview, err = queryops.DeriveGroupAggregates(record.TugQL, operation.Columns, operation.Count, terms, operation.Scope)
 	} else {
-		preview, err = queryops.DeriveSort(record.DTQL, operation.Sort, operation.Scope)
+		preview, err = queryops.DeriveSort(record.TugQL, operation.Sort, operation.Scope)
 	}
 	if err != nil {
 		return preview, err
 	}
-	derived, err := dtql.Deserialize([]byte(preview.DTQL))
+	derived, err := tugqlDeserialize([]byte(preview.TugQL))
 	if err != nil || derived.Limit() < 1 || derived.Limit() > maxRows {
 		return queryops.Preview{}, fmt.Errorf("derived query exceeds the bounded execution budget")
 	}
@@ -152,7 +152,7 @@ func (c *SessionChat) executeDerivedResult(ctx context.Context, sessionID, paren
 	if err != nil {
 		return ChatSession{}, QueryResult{}, err
 	}
-	if preview.DTQL != expectedDocument {
+	if preview.TugQL != expectedDocument {
 		return ChatSession{}, QueryResult{}, fmt.Errorf("query preview changed; review it again")
 	}
 	live, ok := c.store.info.Sources[parent.Database]
@@ -164,7 +164,7 @@ func (c *SessionChat) executeDerivedResult(ctx context.Context, sessionID, paren
 	}
 	var result secureread.Result
 	if operation.Group && len(operation.Aggregates) > 0 {
-		executor, ok := c.queryExecutor.(exactAggregateDTQLExecutor)
+		executor, ok := c.queryExecutor.(exactAggregateTugQLExecutor)
 		if !ok {
 			return ChatSession{}, QueryResult{}, fmt.Errorf("this executor cannot run exact server aggregates")
 		}
@@ -172,17 +172,17 @@ func (c *SessionChat) executeDerivedResult(ctx context.Context, sessionID, paren
 		if columnErr != nil {
 			return ChatSession{}, QueryResult{}, columnErr
 		}
-		exact, exactErr := executor.RunExactAggregateDTQL(ctx, live, []byte(parent.DTQL), []byte(preview.DTQL), parent.Parameters, columns)
+		exact, exactErr := executor.RunExactAggregateTugQL(ctx, live, []byte(parent.TugQL), []byte(preview.TugQL), parent.Parameters, columns)
 		result, err = exact.Result, exactErr
 		result.ColumnTypes = exact.ColumnTypes
 	} else if operation.Scope == queryops.OriginalOutput {
-		executor, ok := c.queryExecutor.(recursiveDTQLExecutor)
+		executor, ok := c.queryExecutor.(recursiveTugQLExecutor)
 		if !ok {
 			return ChatSession{}, QueryResult{}, fmt.Errorf("this executor cannot safely run Original query output")
 		}
-		result, err = executor.RunRecursiveDTQL(ctx, live, []byte(preview.DTQL), parent.Parameters)
+		result, err = executor.RunRecursiveTugQL(ctx, live, []byte(preview.TugQL), parent.Parameters)
 	} else {
-		result, err = c.queryExecutor.RunDTQL(ctx, live, []byte(preview.DTQL), parent.Parameters)
+		result, err = c.queryExecutor.RunTugQL(ctx, live, []byte(preview.TugQL), parent.Parameters)
 	}
 	if err != nil {
 		return ChatSession{}, QueryResult{}, fmt.Errorf("derived query failed: %s", publicQueryError(err, parent.Parameters))
@@ -198,7 +198,7 @@ func (c *SessionChat) executeDerivedResult(ctx context.Context, sessionID, paren
 	if err != nil {
 		return ChatSession{}, QueryResult{}, err
 	}
-	query, err := c.store.AppendQuery(ctx, sessionID, origin.ID, live, QueryResult{Title: action + ": " + parent.Title, DTQL: preview.DTQL, Source: live, SourceID: parent.Database, Parameters: parent.Parameters, Result: result, Lineage: &JoinLineage{ParentRecordSetID: parent.ID, AppliedEdges: append([]AppliedJoinEdge(nil), appliedEdges(parent)...)}})
+	query, err := c.store.AppendQuery(ctx, sessionID, origin.ID, live, QueryResult{Title: action + ": " + parent.Title, TugQL: preview.TugQL, Source: live, SourceID: parent.Database, Parameters: parent.Parameters, Result: result, Lineage: &JoinLineage{ParentRecordSetID: parent.ID, AppliedEdges: append([]AppliedJoinEdge(nil), appliedEdges(parent)...)}})
 	if err != nil {
 		return ChatSession{}, QueryResult{}, err
 	}
@@ -232,7 +232,7 @@ func (o *resultOperationOverlay) serverPreview() (queryops.Preview, error) {
 		return queryops.Preview{}, fmt.Errorf("no policy executor is configured")
 	}
 	if o.group && len(o.aggregateTerms()) > 0 {
-		if _, ok := o.ui.sessions.queryExecutor.(exactAggregateDTQLExecutor); !ok {
+		if _, ok := o.ui.sessions.queryExecutor.(exactAggregateTugQLExecutor); !ok {
 			return queryops.Preview{}, fmt.Errorf("executor cannot run exact server aggregates")
 		}
 		if _, err := exactAggregateColumns(o.ui.catalog, o.record); err != nil {
@@ -240,13 +240,13 @@ func (o *resultOperationOverlay) serverPreview() (queryops.Preview, error) {
 		}
 	}
 	if o.originalOutput {
-		if _, ok := o.ui.sessions.queryExecutor.(recursiveDTQLExecutor); !ok {
+		if _, ok := o.ui.sessions.queryExecutor.(recursiveTugQLExecutor); !ok {
 			return queryops.Preview{}, fmt.Errorf("executor cannot safely run Original query output")
 		}
 	}
 	preview, err := deriveResultPreview(o.ui.catalog, o.record, o.operation())
 	if err == nil && o.originalOutput && (!o.group || len(o.aggregateTerms()) <= 0) {
-		query, parseErr := dtql.Deserialize([]byte(preview.DTQL))
+		query, parseErr := tugqlDeserialize([]byte(preview.TugQL))
 		if parseErr != nil {
 			return queryops.Preview{}, parseErr
 		}
@@ -260,7 +260,7 @@ func (o *resultOperationOverlay) reviewServer() tea.Cmd {
 		o.err = sanitizeTerminalText(err.Error())
 		return nil
 	}
-	query, _ := dtql.Deserialize([]byte(o.record.DTQL))
+	query, _ := tugql.Deserialize([]byte(o.record.TugQL))
 	scope := "Matching source rows · input count unknown\nSource, joins, WHERE and parameters retained; original ordering replaced.\nOriginal LIMIT is the new output cap; OFFSET applies after this operation."
 	if o.originalOutput {
 		scope = "Original query output · input count unknown\nOriginal projection, LIMIT, OFFSET, GROUP BY, aggregates and HAVING remain inside the subquery.\nThis operation transforms those output rows, including aggregate rows."
@@ -272,7 +272,7 @@ func (o *resultOperationOverlay) reviewServer() tea.Cmd {
 	if o.group && len(o.aggregateTerms()) > 0 {
 		ordering = "The bounded typed aggregator reads only policy-admitted rows. INTEGER/DECIMAL sums are exact; finite FLOAT sums use sequential IEEE754 arithmetic. COUNT ignores null cells; missing/unsupported values refuse execution. Group order follows first occurrence."
 	}
-	text := fmt.Sprintf("%s\nOriginal LIMIT: %d · OFFSET: %d · GROUP BY keys: %d · HAVING: %t\n%s\n\nExact DTQL submitted:\n%s", scope, query.Limit(), query.Offset(), len(query.GroupBy()), query.Having() != nil, ordering, preview.DTQL)
+	text := fmt.Sprintf("%s\nOriginal LIMIT: %d · OFFSET: %d · GROUP BY keys: %d · HAVING: %t\n%s\n\nExact TugQL submitted:\n%s", scope, query.Limit(), query.Offset(), len(query.GroupBy()), query.Having() != nil, ordering, preview.TugQL)
 	p := &resultServerPreviewOverlay{operation: o, preview: preview, viewport: viewport.New(), text: text}
 	return o.ui.shell.PushOverlay(p)
 }
@@ -317,7 +317,7 @@ func (p *resultServerPreviewOverlay) Update(msg tea.Msg) (chatshell.Overlay, tea
 		case "shift+enter":
 			o := p.operation
 			current, err := o.serverPreview()
-			if err != nil || current.DTQL != p.preview.DTQL {
+			if err != nil || current.TugQL != p.preview.TugQL {
 				p.err = "Context or query changed; return to choices and review again."
 				return p, nil, false
 			}
@@ -327,7 +327,7 @@ func (p *resultServerPreviewOverlay) Update(msg tea.Msg) (chatshell.Overlay, tea
 			}
 			o.ui.workspaceMutationPending = true
 			sessionID, generation, parentID, rowKey, entryID := o.sessionID, o.generation, o.record.ID, o.grid.sourceRowKey(), o.grid.entryID
-			sessions, operation, document := o.ui.sessions, o.operation(), p.preview.DTQL
+			sessions, operation, document := o.ui.sessions, o.operation(), p.preview.TugQL
 			interaction := o.ui.workspaceInteraction
 			operationID, ctx := o.ui.beginOperation("Server " + map[bool]string{true: "Group", false: "Sort"}[o.group])
 			return p, func() tea.Msg {

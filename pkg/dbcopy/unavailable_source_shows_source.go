@@ -17,5 +17,5 @@ func UnavailableSourceShowsSource(err error) bool {
 		failed  *openError
 		missing *missingSourceFileError
 	)
-	return (errors.As(err, &failed) && !failed.postgres) || errors.As(err, &missing)
+	return (errors.As(err, &failed) && !failed.server) || errors.As(err, &missing)
 }

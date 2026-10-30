@@ -49,6 +49,7 @@ func newTestSessionChat(t *testing.T) (*SessionChat, *SessionStore) {
 // JoinCandidates, applyJoinCandidate (via ApplyJoinCandidate), Switch,
 // Rename, Clear, Delete, and NewSessionChat's own LatestOrCreate.
 func TestSessionChatStoreErrorsPropagate(t *testing.T) {
+	t.Parallel()
 	chat, store := newTestSessionChat(t)
 	chat.ConfigureJoinApplication(stubJoinApplication{})
 	if err := store.Close(); err != nil {
@@ -83,6 +84,7 @@ func TestSessionChatStoreErrorsPropagate(t *testing.T) {
 // guards (already covered by TestNewAIConversationRejectsMissingDependencies-
 // style tests elsewhere for the agent-side equivalent).
 func TestNewSessionChatLatestOrCreateErrorPropagates(t *testing.T) {
+	t.Parallel()
 	store := openTestStore(t, testStorePath(t), testScope())
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
@@ -95,6 +97,7 @@ func TestNewSessionChatLatestOrCreateErrorPropagates(t *testing.T) {
 // TestNewSessionChatRequiresStoreAndAgent covers NewSessionChat's own
 // store==nil/agent==nil guard.
 func TestNewSessionChatRequiresStoreAndAgent(t *testing.T) {
+	t.Parallel()
 	store := openTestStore(t, testStorePath(t), testScope())
 	if _, err := NewSessionChat(context.Background(), nil, &contextualStub{}, "sqlite:///x"); err == nil {
 		t.Fatal("expected an error for a nil store")
@@ -110,6 +113,7 @@ func TestNewSessionChatRequiresStoreAndAgent(t *testing.T) {
 // JoinApplication, the joinApplication.Apply error, a query.Err result, and
 // query.Source defaulting to c.source when the application leaves it empty.
 func TestJoinCandidatesRecordSetNotFound(t *testing.T) {
+	t.Parallel()
 	chat, _ := newTestSessionChat(t)
 	chat.ConfigureJoinApplication(stubJoinApplication{})
 	if _, err := chat.JoinCandidates(context.Background(), "does-not-exist"); err == nil {
@@ -118,6 +122,7 @@ func TestJoinCandidatesRecordSetNotFound(t *testing.T) {
 }
 
 func TestApplyJoinCandidateGuardBranches(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	chat, store := newTestSessionChat(t)
 	// No JoinApplication configured at all.
@@ -145,7 +150,7 @@ func TestApplyJoinCandidateGuardBranches(t *testing.T) {
 	// query.Source left empty: applyJoinCandidate must default it to
 	// c.source before persisting, rather than leave a query with no source.
 	chat.ConfigureJoinApplication(stubJoinApplication{applyResult: QueryResult{
-		Title: "Joined", DTQL: "from: {name: Invoice}\nlimit: 1",
+		Title: "Joined", TugQL: "from: {name: Invoice}\nlimit: 1",
 		Result: secureread.Result{Columns: []string{"InvoiceId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 1}}}},
 	}})
 	record, err := chat.ApplyJoinCandidate(ctx, recordSetID, "c1")
@@ -166,6 +171,7 @@ func TestApplyJoinCandidateGuardBranches(t *testing.T) {
 // lastBookmarkID/implicitBookmarkID-clearing branches, and the unknown-kind
 // default case.
 func TestApplyBookmarkActionBranches(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	chat, store := newTestSessionChat(t)
 	workspaceTestRecord(t, store, chat.activeID)
@@ -227,6 +233,7 @@ func TestApplyBookmarkActionBranches(t *testing.T) {
 // own current-selection fallback branch, distinct from the most-recent-
 // RecordSet fallback exercised above.
 func TestApplyBookmarkActionCreateFromCurrentSelection(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	chat, store := newTestSessionChat(t)
 	recordSetID := workspaceTestRecord(t, store, chat.activeID)
@@ -249,6 +256,7 @@ func TestApplyBookmarkActionCreateFromCurrentSelection(t *testing.T) {
 // TestSwitchAmbiguousPrefix covers Switch's own match-count guard: zero and
 // multiple matching sessions.
 func TestSwitchAmbiguousPrefix(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	chat, _ := newTestSessionChat(t)
 	if _, err := chat.Switch(ctx, "zzz-does-not-match-anything"); err == nil {
@@ -264,6 +272,7 @@ func TestSwitchAmbiguousPrefix(t *testing.T) {
 
 // TestRenameRejectsBlankTitle covers Rename's own blank-title guard.
 func TestRenameRejectsBlankTitle(t *testing.T) {
+	t.Parallel()
 	chat, _ := newTestSessionChat(t)
 	if _, err := chat.Rename(context.Background(), "   "); err == nil {
 		t.Fatal("expected an error for a blank title")
@@ -273,6 +282,7 @@ func TestRenameRejectsBlankTitle(t *testing.T) {
 // TestAskRejectsEmptyPromptViaPrepareTurn covers ask()'s own prepareTurn
 // error branch (via the blank-prompt guard, the simplest way to reach it).
 func TestAskRejectsEmptyPromptViaPrepareTurn(t *testing.T) {
+	t.Parallel()
 	chat, _ := newTestSessionChat(t)
 	if _, err := chat.Ask(context.Background(), "   "); err == nil {
 		t.Fatal("expected an error for a blank prompt")
@@ -282,6 +292,7 @@ func TestAskRejectsEmptyPromptViaPrepareTurn(t *testing.T) {
 // TestFinalizeTurnAgentErrorBecomesFriendlyText covers finalizeTurn's own
 // agentErr!=nil branch through a real Ask call against a failing agent.
 func TestFinalizeTurnAgentErrorBecomesFriendlyText(t *testing.T) {
+	t.Parallel()
 	store := openTestStore(t, testStorePath(t), testScope())
 	chat, err := NewSessionChat(context.Background(), store, erroringConversation{}, "sqlite:///chinook.db")
 	if err != nil {
@@ -299,9 +310,11 @@ func TestFinalizeTurnAgentErrorBecomesFriendlyText(t *testing.T) {
 // TestStreamAskActiveDelegatesToStreamAsk covers StreamAskActive's own
 // (currently untested) wrapper.
 func TestStreamAskActiveDelegatesToStreamAsk(t *testing.T) {
+	t.Parallel()
 	chat, _ := newTestSessionChat(t)
 	seq, result := chat.StreamAskActive(context.Background(), "", "hello")
-	for range seq {
+	for _, streamErr := range seq {
+		_ = streamErr // The result callback or consumer-stop assertion below owns the terminal outcome.
 	}
 	if turn, err := result(); err != nil || turn.Text == "" {
 		t.Fatalf("StreamAskActive result = %+v, %v", turn, err)
@@ -312,6 +325,7 @@ func TestStreamAskActiveDelegatesToStreamAsk(t *testing.T) {
 // non-streaming-agent fallback error branch (contextualStub does not
 // implement StreamingConversation).
 func TestStreamAskNonStreamingAgentErrorBranch(t *testing.T) {
+	t.Parallel()
 	chat, _ := newTestSessionChat(t)
 	seq, result := chat.StreamAsk(context.Background(), "   ")
 	var gotErrEvent bool
@@ -333,9 +347,11 @@ func TestStreamAskNonStreamingAgentErrorBranch(t *testing.T) {
 // consumer-stopped-ranging branch (both the non-streaming-fallback and the
 // real-streaming-agent code paths).
 func TestStreamAskConsumerBreaksEarly(t *testing.T) {
+	t.Parallel()
 	chat, _ := newTestSessionChat(t)
 	seq, _ := chat.StreamAsk(context.Background(), "hello")
-	for range seq {
+	for _, streamErr := range seq {
+		_ = streamErr // The result callback or consumer-stop assertion below owns the terminal outcome.
 		break
 	}
 
@@ -348,7 +364,8 @@ func TestStreamAskConsumerBreaksEarly(t *testing.T) {
 	}
 	streamingChat.agent = streamingAgent
 	streamSeq, _ := streamingChat.StreamAsk(context.Background(), "hello")
-	for range streamSeq {
+	for _, streamErr := range streamSeq {
+		_ = streamErr // This test intentionally stops the consumer before completion.
 		break
 	}
 }
@@ -357,6 +374,7 @@ func TestStreamAskConsumerBreaksEarly(t *testing.T) {
 // prepareTurn-error branch on the real-streaming-agent code path (distinct
 // from TestStreamAskNonStreamingAgentErrorBranch's non-streaming fallback).
 func TestStreamAskStreamingAgentPrepareTurnError(t *testing.T) {
+	t.Parallel()
 	chat, _ := newTestSessionChat(t)
 	streamingAgent, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///chinook.db", "schema")
 	if err != nil {
@@ -382,6 +400,7 @@ func TestStreamAskStreamingAgentPrepareTurnError(t *testing.T) {
 // own "fatal stream error, nothing usable captured" branch: the agent's
 // stream ends in an error and never produced a query or action.
 func TestStreamAskStreamingAgentFatalErrorWithNoUsableResult(t *testing.T) {
+	t.Parallel()
 	chat, _ := newTestSessionChat(t)
 	llm := &scriptedProvider{steps: []scriptedStep{{err: &ai.Error{Code: ai.ErrCodeUpstream, Message: "provider exploded"}}}}
 	streamingAgent, err := NewAIConversation(llm, &fakeExecutor{}, "sqlite:///chinook.db", "schema")
@@ -390,7 +409,8 @@ func TestStreamAskStreamingAgentFatalErrorWithNoUsableResult(t *testing.T) {
 	}
 	chat.agent = streamingAgent
 	seq, result := chat.StreamAsk(context.Background(), "hello")
-	for range seq {
+	for _, streamErr := range seq {
+		_ = streamErr // The result callback or consumer-stop assertion below owns the terminal outcome.
 	}
 	turn, err := result()
 	if err != nil {
@@ -405,6 +425,7 @@ func TestStreamAskStreamingAgentFatalErrorWithNoUsableResult(t *testing.T) {
 // own guard branches directly: no JoinApplication, an unknown RecordSetID,
 // a Candidates error, and a stale/unknown candidateID.
 func TestValidateAgentJoinChoiceGuardBranches(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	chat, store := newTestSessionChat(t)
 	session, err := chat.Snapshot(ctx)
@@ -437,6 +458,7 @@ func TestValidateAgentJoinChoiceGuardBranches(t *testing.T) {
 // context.Canceled branch (the DeadlineExceeded and default branches are
 // already covered by TestFriendlyAgentErrorDoesNotExposeProviderPayload).
 func TestFriendlyAgentErrorCancelled(t *testing.T) {
+	t.Parallel()
 	if got := friendlyAgentError(context.Canceled); got != "The request was cancelled." {
 		t.Fatalf("friendlyAgentError(Canceled) = %q", got)
 	}
@@ -447,6 +469,7 @@ func TestFriendlyAgentErrorCancelled(t *testing.T) {
 // RecordSetID" skip branch, exercised as a pure function with a
 // hand-built ChatSession (no store needed).
 func TestBuildSessionContextSkipsGridMessageWithMissingRecordSet(t *testing.T) {
+	t.Parallel()
 	session := ChatSession{
 		Messages: []ChatMessage{
 			{Kind: "grid", RecordSetID: "does-not-exist"},
@@ -464,6 +487,7 @@ func TestBuildSessionContextSkipsGridMessageWithMissingRecordSet(t *testing.T) {
 // call site already gates on c.joinApplication != nil before calling it, so
 // this branch is otherwise unreachable through the public API.
 func TestJoinCandidateContextWithoutJoinApplication(t *testing.T) {
+	t.Parallel()
 	chat, _ := newTestSessionChat(t)
 	if got := chat.joinCandidateContext(context.Background(), ChatSession{}); got != "" {
 		t.Fatalf("joinCandidateContext with no JoinApplication = %q, want empty", got)
@@ -475,6 +499,7 @@ func TestJoinCandidateContextWithoutJoinApplication(t *testing.T) {
 // RecordSetID isn't in session.RecordSets, and a RecordSet whose
 // Candidates() call errors.
 func TestJoinCandidateContextSkipsMissingRecordSetAndCandidatesError(t *testing.T) {
+	t.Parallel()
 	chat, _ := newTestSessionChat(t)
 	chat.ConfigureJoinApplication(stubJoinApplication{candErr: errors.New("boom")})
 	session := ChatSession{
@@ -494,6 +519,7 @@ func TestJoinCandidateContextSkipsMissingRecordSetAndCandidatesError(t *testing.
 // natural store-level "not found" error (an unknown bookmarkID), not a
 // broken store.
 func TestApplyBookmarkActionStoreLevelErrorPropagates(t *testing.T) {
+	t.Parallel()
 	chat, _ := newTestSessionChat(t)
 	if _, err := chat.ApplyWorkspaceAction(context.Background(), WorkspaceAction{Kind: "bookmark_rename", BookmarkID: "does-not-exist", Title: "x"}); err == nil {
 		t.Fatal("expected RenameBookmark's not-found error to propagate")
@@ -506,6 +532,7 @@ func TestApplyBookmarkActionStoreLevelErrorPropagates(t *testing.T) {
 // expectedSessionID and so can't reach the Load call with a mismatch
 // already ruled out).
 func TestPrepareTurnSessionMismatchAndLoadError(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	chat, store := newTestSessionChat(t)
 	if _, err := chat.AskActive(ctx, "not-the-active-session", "hello"); err == nil {
@@ -521,10 +548,11 @@ func TestPrepareTurnSessionMismatchAndLoadError(t *testing.T) {
 
 // TestPrepareTurnQueryObserverDefaultsEmptySource covers prepareTurn's own
 // withQueryObserver closure's source-defaulting branch: AIConversation's
-// real runDTQL always sets QueryResult.Source itself before capturing, so
+// real runTugQL always sets QueryResult.Source itself before capturing, so
 // this only fires for a ContextualConversation implementation that
 // doesn't -- exercised here by calling the installed observer directly.
 func TestPrepareTurnQueryObserverDefaultsEmptySource(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	chat, _ := newTestSessionChat(t)
 	prepared, cleanup, err := chat.prepareTurn(ctx, "", "hello")
@@ -536,7 +564,7 @@ func TestPrepareTurnQueryObserverDefaultsEmptySource(t *testing.T) {
 	if !ok {
 		t.Fatal("prepareTurn did not install a query observer")
 	}
-	result, err := observer(QueryResult{Title: "Untitled", DTQL: "from: {name: Invoice}\nlimit: 1"})
+	result, err := observer(QueryResult{Title: "Untitled", TugQL: "from: {name: Invoice}\nlimit: 1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -558,6 +586,7 @@ func TestPrepareTurnQueryObserverDefaultsEmptySource(t *testing.T) {
 // own withSelectionParameters closure's Load-error branch, forced by
 // closing the store after prepareTurn's own setup already succeeded.
 func TestPrepareTurnSelectionParametersResolverLoadError(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	chat, store := newTestSessionChat(t)
 	prepared, cleanup, err := chat.prepareTurn(ctx, "", "hello")
@@ -579,6 +608,7 @@ func TestPrepareTurnSelectionParametersResolverLoadError(t *testing.T) {
 
 // TestJoinChoiceTokens covers joinChoiceTokens directly.
 func TestJoinChoiceTokens(t *testing.T) {
+	t.Parallel()
 	tokens := joinChoiceTokens(JoinCandidate{
 		Source: RelationInstance{Alias: "inv"},
 		Fields: []JoinFieldPair{{SourceField: "BillingCustomerId"}},

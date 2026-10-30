@@ -97,7 +97,7 @@ func fileSourceRoutes(t *testing.T, scope apicontract.Scope) map[string]fileSour
 		"exec/run_query": {semanticTestSource, func() routeAnswer {
 			payload, err := json.Marshal(apicontract.ExecutionRequest{
 				Project: scope.Project, Environment: scope.Environment, SecurityContextID: scope.SecurityContextID,
-				Source: semanticTestSource, DTQL: "from: {name: Customer}\n", Mode: apicontract.ProvenanceModeLive,
+				Source: semanticTestSource, TugQL: "from: {name: Customer}\n", Mode: apicontract.ProvenanceModeLive,
 			})
 			require.NoError(t, err)
 			rec := httptest.NewRecorder()
@@ -160,7 +160,6 @@ func TestRoutes_AFileSourceIsAnsweredByItsIDAndNeverByItsPath(t *testing.T) {
 // the hint of where its connection string is read from (the variable here), which name no host, port, database, user or
 // password. The answer and the log say the same.
 func TestRoutes_APostgresSourceThatCannotBeOpenedIsAnsweredWithTheSentenceAndTheHint(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	standInOpener(t, func() (*dalgo2postgres.Database, error) {
 		return nil, &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork, Host: "db.example.com", Port: "5433", Database: "shop"}
 	})
@@ -195,12 +194,11 @@ func TestRoutes_RelatedRowsOfAFileSourceThatCannotBeOpenedAreAnsweredByItsID(t *
 	assert.NotContains(t, ce.Message, projectDir)
 }
 
-// The fixed sentences that name no source are answered as they are, with the PostgreSQL preview off.
+// The fixed sentences that name no source are answered as they are, here the one of a PostgreSQL URL that turns the read-only session off.
 func TestRoutes_ARefusalThatNamesNoSourceIsAnsweredAsItIs(t *testing.T) {
-	t.Setenv(dbcopy.PostgresPreviewEnv, "")
-	status, env, _ := getSemanticColumns(t, pgRouteSource)
+	status, env, _ := getSemanticColumns(t, pgRouteSource+"&default_transaction_read_only=off")
 	assert.Equal(t, http.StatusServiceUnavailable, status)
-	assert.Equal(t, dbcopy.ErrPostgresPreview.Error(), env.Error.Message)
+	assert.Contains(t, env.Error.Message, "turns the read-only session off (default_transaction_read_only)")
 }
 
 // An error of a missing data file that did not come through a route that knows its source is

@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
 	"github.com/datatug/datatug-cli/pkg/chat"
+	"github.com/spf13/cobra"
 	"github.com/strongo/aichat/tui/chatshell"
 	"github.com/tuigoff/tuigoff/pkg/nav"
 )
@@ -22,9 +23,31 @@ type workspaceStart struct {
 // runUnifiedApp is the default and `ui` entry to the same chat workspace.
 // Preparation errors keep project/setup navigation and the composer usable.
 func runUnifiedApp(modules []datatugui.Module, opts datatugui.Options, programOptions ...tea.ProgramOption) error {
+	cmd, options := workspaceOptions(modules, opts, programOptions)
+	return runWorkspaceLoop(cmd, options)
+}
+
+// workspaceOptions are the chat options the workspace starts with: the
+// defaults, then the person's last chat choices.
+func workspaceOptions(modules []datatugui.Module, opts datatugui.Options, programOptions []tea.ProgramOption) (*cobra.Command, chatOptions) {
 	cmd := chatCommand()
 	options := chatOptions{project: ".", env: "local", model: defaultChatModel, thinking: "low", workspace: &workspaceStart{modules: modules, options: opts, programOptions: programOptions}}
 	_ = applyLastChatOptions(cmd, &options)
+	return cmd, options
+}
+
+// switchChatProject points options at another project, whose environment
+// choices and cloud choices are its own.
+func switchChatProject(options *chatOptions, project string) {
+	options.project = project
+	options.database = ""
+	options.cloudDecision = ""
+	options.cloudModel = ""
+	options.cloudProject = ""
+}
+
+func runWorkspaceLoop(cmd *cobra.Command, options chatOptions) error {
+	programOptions := options.workspace.programOptions
 	for {
 		if options.ai != "" {
 			if err := resolveChatAIProfile(&options, cmd); err != nil {
@@ -53,11 +76,7 @@ func runUnifiedApp(modules []datatugui.Module, opts datatugui.Options, programOp
 		if next == "" || next == options.project {
 			return nil
 		}
-		options.project = next
-		options.database = ""
-		options.cloudDecision = ""
-		options.cloudModel = ""
-		options.cloudProject = ""
+		switchChatProject(&options, next)
 	}
 }
 

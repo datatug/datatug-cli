@@ -398,8 +398,8 @@ func StartBrowserBridge(sessions *SessionChat) (*BrowserBridge, error) {
 		}
 		var err error
 		switch request.Action {
-		case "run_dtql":
-			err = sessions.RunSavedDTQLActive(r.Context(), request.SessionID, request.QueryID, request.Variables)
+		case "run_tugql":
+			err = sessions.RunSavedTugQLActive(r.Context(), request.SessionID, request.QueryID, request.Variables)
 		case "run_http":
 			err = sessions.RunSavedHTTPActive(r.Context(), request.SessionID, request.QueryID, request.Variables)
 		case "save":

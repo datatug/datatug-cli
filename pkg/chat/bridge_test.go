@@ -29,6 +29,7 @@ import (
 )
 
 func TestBridgeHTTPUsesConfiguredHeadersAndCookies(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -111,6 +112,7 @@ func TestBridgeHTTPUsesConfiguredHeadersAndCookies(t *testing.T) {
 }
 
 func TestBrowserExportBufferRejectsOversizedWrite(t *testing.T) {
+	t.Parallel()
 	var output browserExportBuffer
 	if _, err := output.Write(bytes.Repeat([]byte{'x'}, 16<<20)); err != nil {
 		t.Fatal(err)
@@ -124,6 +126,7 @@ func TestBrowserExportBufferRejectsOversizedWrite(t *testing.T) {
 // crypto/rand.Read error branch via the readRandom seam: the OS entropy
 // source failing is not reproducible for real, so this overrides the var.
 func TestStartBrowserBridgeRandomFailure(t *testing.T) {
+	// Not parallel: mutates package-level readRandom seam.
 	restore := readRandom
 	t.Cleanup(func() { readRandom = restore })
 	injected := errors.New("injected rand failure")
@@ -141,6 +144,7 @@ func TestStartBrowserBridgeRandomFailure(t *testing.T) {
 }
 
 func TestBridgeBrowserClearDeleteAndExport(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -153,7 +157,7 @@ func TestBridgeBrowserClearDeleteAndExport(t *testing.T) {
 		t.Fatal(err)
 	}
 	recordID := workspaceTestRecord(t, store, before.ID)
-	queryService := &savedQueryStub{queries: []SavedQuery{{ID: "customers", Title: "Customers", Type: "DTQL"}}}
+	queryService := &savedQueryStub{queries: []SavedQuery{{ID: "customers", Title: "Customers", Type: "TugQL"}}}
 	sessions.ConfigureSavedQueryService(queryService)
 	if _, err := sessions.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "bucket_add", RecordSetID: recordID}); err != nil {
 		t.Fatal(err)
@@ -214,10 +218,10 @@ func TestBridgeBrowserClearDeleteAndExport(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || len(queries) != 1 {
 		t.Fatalf("queries: %d %#v", resp.StatusCode, queries)
 	}
-	resp = request(http.MethodPost, "/v1/chat/queries", `{"sessionId":"`+before.ID+`","action":"run_dtql","queryId":"customers"}`, "")
+	resp = request(http.MethodPost, "/v1/chat/queries", `{"sessionId":"`+before.ID+`","action":"run_tugql","queryId":"customers"}`, "")
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusNoContent || queryService.ranID != "customers" {
-		t.Fatalf("run DTQL: %d %q", resp.StatusCode, queryService.ranID)
+		t.Fatalf("run TugQL: %d %q", resp.StatusCode, queryService.ranID)
 	}
 	queryService.queries = append(queryService.queries, SavedQuery{ID: "http-query", Type: "HTTP"})
 	resp = request(http.MethodPost, "/v1/chat/queries", `{"sessionId":"`+before.ID+`","action":"run_http","queryId":"http-query"}`, "")
@@ -225,12 +229,12 @@ func TestBridgeBrowserClearDeleteAndExport(t *testing.T) {
 	if resp.StatusCode != http.StatusNoContent || queryService.ranID != "http-query" {
 		t.Fatalf("run saved HTTP: %d %q", resp.StatusCode, queryService.ranID)
 	}
-	resp = request(http.MethodPost, "/v1/chat/queries", `{"sessionId":"`+before.ID+`","action":"run_dtql","queryId":"http-query"}`, "")
+	resp = request(http.MethodPost, "/v1/chat/queries", `{"sessionId":"`+before.ID+`","action":"run_tugql","queryId":"http-query"}`, "")
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest || queryService.ranID != "http-query" {
 		t.Fatalf("HTTP query execution was exposed: %d %q", resp.StatusCode, queryService.ranID)
 	}
-	resp = request(http.MethodPost, "/v1/chat/queries", `{"sessionId":"`+before.ID+`","action":"save","save":{"Title":"From browser","Type":"DTQL","Text":"from: customers"}}`, "")
+	resp = request(http.MethodPost, "/v1/chat/queries", `{"sessionId":"`+before.ID+`","action":"save","save":{"Title":"From browser","Type":"TugQL","Text":"from: customers"}}`, "")
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusNoContent || queryService.saved.Title != "From browser" {
 		t.Fatalf("save query: %d %#v", resp.StatusCode, queryService.saved)
@@ -282,6 +286,7 @@ func TestBridgeBrowserClearDeleteAndExport(t *testing.T) {
 // forced to fail too via the netListenTCP seam -- an OS-assigned port
 // itself failing is not reproducible for real.
 func TestStartBrowserBridgeBothListenCallsFail(t *testing.T) {
+	// Not parallel: mutates package-level netListenTCP seam.
 	occupied, err := net.Listen("tcp", "127.0.0.1:3284")
 	if err != nil {
 		t.Skipf("port 3284 unavailable for the test setup: %v", err)
@@ -325,6 +330,7 @@ func bridgeToken(t *testing.T, bridgeURL string) (address, token string) {
 }
 
 func TestBridgeWorkspaceSharesStateAndRejectsStaleSession(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -485,6 +491,7 @@ func TestBridgeWorkspaceSharesStateAndRejectsStaleSession(t *testing.T) {
 // undocumented, per the founder directive that new code seams for
 // coverage instead of leaving branches untested.
 func TestBridgeMessagesHandlerAskActiveStoreErrorSurfaces(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -520,7 +527,11 @@ func TestBridgeMessagesHandlerAskActiveStoreErrorSurfaces(t *testing.T) {
 	req.Header.Set("Origin", "https://datatug.app")
 	req.Header.Set("X-DataTug-Chat-Capability", token)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	// Other parallel bridge tests can release and reuse the preferred port.
+	// Keep this POST off their shared pool of connections to closing bridges.
+	client := &http.Client{Transport: &http.Transport{}}
+	t.Cleanup(client.CloseIdleConnections)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -553,6 +564,7 @@ func dialBridgeEvents(t *testing.T, bridge *BrowserBridge) *websocket.Conn {
 // handler's background connection goroutine, which is what this test
 // originally did) is both ineffective and a genuine data race.
 func TestBridgeEventsHandlerInitialWriteJSONFailure(t *testing.T) {
+	// Not parallel: mutates package-level wsWriteJSON seam.
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -593,6 +605,7 @@ func TestBridgeEventsHandlerInitialWriteJSONFailure(t *testing.T) {
 // first (post-Upgrade) write through for real via `restore` and only fails
 // the second write, the one triggered by a later SessionChat.notifyChanged.
 func TestBridgeEventsHandlerChangesWriteJSONFailure(t *testing.T) {
+	// Not parallel: mutates package-level wsWriteJSON seam.
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -644,6 +657,7 @@ func TestBridgeEventsHandlerChangesWriteJSONFailure(t *testing.T) {
 // instead exercise the disconnected case -- forces the server to notice
 // via r.Context() rather than a client-initiated close.
 func TestBridgeEventsHandlerContextDoneReturns(t *testing.T) {
+	// Not parallel: mutates package-level bridgeBaseContext seam.
 	base, cancel := context.WithCancel(context.Background())
 	restore := bridgeBaseContext
 	t.Cleanup(func() { bridgeBaseContext = restore })
@@ -689,6 +703,7 @@ func TestBridgeEventsHandlerContextDoneReturns(t *testing.T) {
 // the real SubscribeChanges/stop() pairing can never do from outside this
 // one handler invocation.
 func TestBridgeEventsHandlerChangesChannelClosedEarlyReturns(t *testing.T) {
+	// Not parallel: mutates package-level bridgeSubscribeChanges seam.
 	fakeChanges := make(chan struct{})
 	restore := bridgeSubscribeChanges
 	t.Cleanup(func() { bridgeSubscribeChanges = restore })

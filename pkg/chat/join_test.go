@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
 
@@ -28,26 +28,27 @@ func joinSnapshot() ForeignKeySnapshot {
 }
 
 func TestAttachedCustomerJoinsFreshInvoiceQueryWithoutAnIntermediateGrid(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	executor := &joinExecutorStub{}
 	chat := &SessionChat{source: "sqlite:///fixture.db", joinApplication: ForeignKeyJoinApplication{Source: "sqlite:///fixture.db", Snapshot: joinSnapshot(), Executor: executor}}
 	catalog := workspaceTestCatalog()
 	chat.catalog = catalog
 	session := ChatSession{Workspace: WorkspaceState{Attachments: []ContextReference{catalog.Objects[2].Reference}}}
-	base := QueryResult{Title: "Invoices", Source: "sqlite:///fixture.db", DTQL: "from: {schema: main, name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 5\n"}
+	base := QueryResult{Title: "Invoices", Source: "sqlite:///fixture.db", TugQL: "from: {schema: main, name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 5\n"}
 	joined, applied, err := chat.joinAttachedQuery(ctx, session, "Show invoices", base)
-	if err != nil || !applied || !strings.Contains(joined.DTQL, "joins:") || !strings.Contains(joined.DTQL, "Customer") || !strings.Contains(executor.doc, "limit: 5") {
+	if err != nil || !applied || !strings.Contains(joined.TugQL, "joins:") || !strings.Contains(joined.TugQL, "Customer") || !strings.Contains(executor.doc, "limit: 5") {
 		t.Fatalf("attached JOIN = applied %v, err %v, result %+v, executed %q", applied, err, joined, executor.doc)
 	}
-	parsed, err := dtql.Deserialize([]byte(joined.DTQL))
+	parsed, err := tugql.Deserialize([]byte(joined.TugQL))
 	if err != nil || len(parsed.From().Joins()) != 1 || parsed.From().Joins()[0].JoinType() != dal.JoinLeft {
-		t.Fatalf("automatic attached JOIN must preserve nullable root rows: %q, %v", joined.DTQL, err)
+		t.Fatalf("automatic attached JOIN must preserve nullable root rows: %q, %v", joined.TugQL, err)
 	}
 	if joined.Lineage != nil {
 		t.Fatalf("fresh query has no parent RecordSet: %+v", joined.Lineage)
 	}
 	executor.doc = ""
-	base.DTQL = "from: {schema: main, name: Customer}\nlimit: 5\n"
+	base.TugQL = "from: {schema: main, name: Customer}\nlimit: 5\n"
 	_, applied, err = chat.joinAttachedQuery(ctx, session, "Top 5 rows", base)
 	if err != nil || applied || executor.doc != "" {
 		t.Fatalf("single attached table was joined: applied %v, err %v, doc %q", applied, err, executor.doc)
@@ -55,17 +56,18 @@ func TestAttachedCustomerJoinsFreshInvoiceQueryWithoutAnIntermediateGrid(t *test
 }
 
 func TestAttachedJoinDoesNotChangeAggregateOrImplicitOneToManyQuery(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	executor := &joinExecutorStub{}
 	chat := &SessionChat{source: "sqlite:///fixture.db", joinApplication: ForeignKeyJoinApplication{Source: "sqlite:///fixture.db", Snapshot: joinSnapshot(), Executor: executor}}
 	customer := ContextReference{Kind: "table", SourceID: "local", ObjectID: "main.Customer", Title: "Customer"}
 	invoice := ContextReference{Kind: "table", SourceID: "local", ObjectID: "main.Invoice", Title: "Invoice"}
-	aggregate := QueryResult{Title: "Invoice count", Source: chat.source, DTQL: "from: {schema: main, name: Invoice}\ncolumns: [{aggregate: {function: COUNT, args: [{star: true}]}, as: Count}]\nlimit: 5\n"}
+	aggregate := QueryResult{Title: "Invoice count", Source: chat.source, TugQL: "from: {schema: main, name: Invoice}\ncolumns: [{aggregate: {function: COUNT, args: [{star: true}]}, as: Count}]\nlimit: 5\n"}
 	_, applied, err := chat.joinAttachedQuery(ctx, ChatSession{Workspace: WorkspaceState{Attachments: []ContextReference{customer}}}, "Count invoices", aggregate)
 	if err != nil || applied || executor.doc != "" {
 		t.Fatalf("aggregate should remain a valid root query: applied=%v err=%v doc=%q", applied, err, executor.doc)
 	}
-	base := QueryResult{Title: "Customers", Source: chat.source, DTQL: "from: {schema: main, name: Customer}\nlimit: 5\n"}
+	base := QueryResult{Title: "Customers", Source: chat.source, TugQL: "from: {schema: main, name: Customer}\nlimit: 5\n"}
 	_, applied, err = chat.joinAttachedQuery(ctx, ChatSession{Workspace: WorkspaceState{Attachments: []ContextReference{invoice}}}, "Top 5 customers", base)
 	if err != nil || applied || executor.doc != "" {
 		t.Fatalf("implicit one-to-many JOIN changed customer rows: applied=%v err=%v doc=%q", applied, err, executor.doc)
@@ -74,9 +76,9 @@ func TestAttachedJoinDoesNotChangeAggregateOrImplicitOneToManyQuery(t *testing.T
 	if err == nil || applied || executor.doc != "" || !strings.Contains(err.Error(), "multiply rows") {
 		t.Fatalf("limited one-to-many JOIN changed root meaning: applied=%v err=%v doc=%q", applied, err, executor.doc)
 	}
-	base.DTQL = "from: {schema: main, name: Customer}\n"
+	base.TugQL = "from: {schema: main, name: Customer}\n"
 	joined, applied, err := chat.joinAttachedQuery(ctx, ChatSession{Workspace: WorkspaceState{Attachments: []ContextReference{invoice}}}, "Show customer invoices", base)
-	if err != nil || !applied || !strings.Contains(joined.DTQL, "Invoice") {
+	if err != nil || !applied || !strings.Contains(joined.TugQL, "Invoice") {
 		t.Fatalf("explicit one-to-many JOIN was not applied: applied=%v err=%v doc=%q", applied, err, executor.doc)
 	}
 	executor.doc = ""
@@ -94,6 +96,7 @@ func TestAttachedJoinDoesNotChangeAggregateOrImplicitOneToManyQuery(t *testing.T
 }
 
 func TestAttachedJoinAsksWhenRelationshipsAmbiguous(t *testing.T) {
+	t.Parallel()
 	snapshot := ForeignKeySnapshot{Source: "sqlite:///fixture.db", Columns: map[string][]string{
 		"main.order": {"OrderId", "BillingAddressId", "ShippingAddressId"}, "main.address": {"AddressId", "City"},
 	}, Keys: []ForeignKey{
@@ -103,16 +106,16 @@ func TestAttachedJoinAsksWhenRelationshipsAmbiguous(t *testing.T) {
 	executor := &joinExecutorStub{}
 	chat := &SessionChat{source: snapshot.Source, joinApplication: ForeignKeyJoinApplication{Source: snapshot.Source, Snapshot: snapshot, Executor: executor}}
 	session := ChatSession{Workspace: WorkspaceState{Attachments: []ContextReference{{Kind: "table", SourceID: "local", ObjectID: "main.Address", Title: "Address"}}}}
-	base := QueryResult{Title: "Orders", Source: snapshot.Source, DTQL: "from: {schema: main, name: Order}\nlimit: 5\n"}
+	base := QueryResult{Title: "Orders", Source: snapshot.Source, TugQL: "from: {schema: main, name: Order}\nlimit: 5\n"}
 	if _, _, err := chat.joinAttachedQuery(context.Background(), session, "Show orders", base); err == nil || !strings.Contains(err.Error(), "Which relationship") || executor.doc != "" {
 		t.Fatalf("ambiguous JOIN was not held for clarification: %v, doc %q", err, executor.doc)
 	}
 	joined, applied, err := chat.joinAttachedQuery(context.Background(), session, "Show orders with billing addresses", base)
-	if err != nil || !applied || !strings.Contains(joined.DTQL, "BillingAddressId") {
-		t.Fatalf("explicit billing relationship was not applied: applied %v, err %v, dtql %q", applied, err, joined.DTQL)
+	if err != nil || !applied || !strings.Contains(joined.TugQL, "BillingAddressId") {
+		t.Fatalf("explicit billing relationship was not applied: applied %v, err %v, tugql %q", applied, err, joined.TugQL)
 	}
 	executor.doc = ""
-	addressRoot := QueryResult{Title: "Addresses", Source: snapshot.Source, DTQL: "from: {schema: main, name: Address}\nlimit: 5\n"}
+	addressRoot := QueryResult{Title: "Addresses", Source: snapshot.Source, TugQL: "from: {schema: main, name: Address}\nlimit: 5\n"}
 	ordersAttached := ChatSession{Workspace: WorkspaceState{Attachments: []ContextReference{{Kind: "table", SourceID: "local", ObjectID: "main.Order", Title: "Order"}}}}
 	_, applied, err = chat.joinAttachedQuery(context.Background(), ordersAttached, "Top 5 addresses", addressRoot)
 	if err != nil || applied || executor.doc != "" {
@@ -129,6 +132,7 @@ func (a ambiguousAttachedJoinAgent) AskWithContext(ctx context.Context, _, _ str
 }
 
 func TestAmbiguousAttachedJoinBecomesClarificationNotFailedQuery(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -138,7 +142,7 @@ func TestAmbiguousAttachedJoinBecomesClarificationNotFailedQuery(t *testing.T) {
 		{ConstraintID: "billing", Schema: "main", FromRelation: "Order", FromFields: []string{"BillingAddressId"}, ToSchema: "main", ToRelation: "Address", ToFields: []string{"AddressId"}},
 		{ConstraintID: "shipping", Schema: "main", FromRelation: "Order", FromFields: []string{"ShippingAddressId"}, ToSchema: "main", ToRelation: "Address", ToFields: []string{"AddressId"}},
 	}}
-	base := QueryResult{Source: snapshot.Source, SourceID: "local", DTQL: "from: {schema: main, name: Order}\nlimit: 5\n"}
+	base := QueryResult{Source: snapshot.Source, SourceID: "local", TugQL: "from: {schema: main, name: Order}\nlimit: 5\n"}
 	chat, err := NewSessionChat(ctx, store, ambiguousAttachedJoinAgent{base}, snapshot.Source,
 		ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "table", SourceID: "local", ObjectID: "main.Address", Title: "Address"}}}})
 	if err != nil {
@@ -155,6 +159,7 @@ func TestAmbiguousAttachedJoinBecomesClarificationNotFailedQuery(t *testing.T) {
 }
 
 func TestChinookInvoiceCustomerJoinThroughDALgo(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path, err := filepath.Abs(filepath.Join("..", "dbcopy", "testdata", "chinook.db"))
 	if err != nil {
@@ -185,14 +190,14 @@ func TestChinookInvoiceCustomerJoinThroughDALgo(t *testing.T) {
 	if customer.ID == "" {
 		t.Fatalf("Invoice to Customer FK not discovered: %#v", candidates)
 	}
-	doc, _, err := DeriveJoinDTQL(parent, snapshot, customer.ID)
+	doc, _, err := DeriveJoinTugQL(parent, snapshot, customer.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	executor := secureread.NewExecutor(secureread.Session{Unrestricted: true})
-	result, err := executor.RunDTQL(ctx, source, doc, nil)
+	result, err := executor.RunTugQL(ctx, source, doc, nil)
 	if err != nil {
-		t.Fatalf("DALgo rejected derived DTQL:\n%s\n%v", doc, err)
+		t.Fatalf("DALgo rejected derived TugQL:\n%s\n%v", doc, err)
 	}
 	if len(result.Rows) != 20 {
 		t.Fatalf("joined rows = %d, want 20", len(result.Rows))
@@ -229,13 +234,13 @@ func TestChinookInvoiceCustomerJoinThroughDALgo(t *testing.T) {
 		if candidate.Source.Relation != "Customer" || candidate.Target.Relation != "Employee" || candidate.Direction != "outgoing" {
 			continue
 		}
-		second, _, err := DeriveJoinDTQL(doc, snapshot, candidate.ID)
+		second, _, err := DeriveJoinTugQL(doc, snapshot, candidate.ID)
 		if err != nil {
 			t.Fatalf("derive chained JOIN: %v", err)
 		}
-		chainedResult, err := executor.RunDTQL(ctx, source, second, nil)
+		chainedResult, err := executor.RunTugQL(ctx, source, second, nil)
 		if err != nil {
-			t.Fatalf("DALgo rejected chained DTQL:\n%s\n%v", second, err)
+			t.Fatalf("DALgo rejected chained TugQL:\n%s\n%v", second, err)
 		}
 		if len(chainedResult.Rows) != 20 || chainedResult.Rows[0].Data["Employee_FirstName"] == nil {
 			t.Fatalf("chained Employee results = %#v", chainedResult.Rows)
@@ -246,6 +251,7 @@ func TestChinookInvoiceCustomerJoinThroughDALgo(t *testing.T) {
 }
 
 func TestChinookFreshAttachedCustomerUsesLeftJoinThroughDALgo(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path, err := filepath.Abs(filepath.Join("..", "dbcopy", "testdata", "chinook.db"))
 	if err != nil {
@@ -263,10 +269,10 @@ func TestChinookFreshAttachedCustomerUsesLeftJoinThroughDALgo(t *testing.T) {
 	}
 	chat := &SessionChat{source: source, joinApplication: ForeignKeyJoinApplication{Source: source, Snapshot: snapshot, Executor: secureread.NewExecutor(secureread.Session{Unrestricted: true})}}
 	session := ChatSession{Workspace: WorkspaceState{Attachments: []ContextReference{{Kind: "table", SourceID: "local", ObjectID: "main.Customer", Title: "Customer"}}}}
-	base := QueryResult{Title: "Newest invoices", Source: source, DTQL: "from: {name: Invoice}\norderBy: [{field: InvoiceId, desc: true}]\nlimit: 5\n"}
+	base := QueryResult{Title: "Newest invoices", Source: source, TugQL: "from: {name: Invoice}\norderBy: [{field: InvoiceId, desc: true}]\nlimit: 5\n"}
 	joined, applied, err := chat.joinAttachedQuery(ctx, session, "Show 5 newest invoices", base)
-	if err != nil || !applied || len(joined.Result.Rows) != 5 || !strings.Contains(joined.DTQL, "type: left") {
-		t.Fatalf("real Chinook attached LEFT JOIN = applied %v rows %d dtql %q err %v", applied, len(joined.Result.Rows), joined.DTQL, err)
+	if err != nil || !applied || len(joined.Result.Rows) != 5 || !strings.Contains(joined.TugQL, "type: left") {
+		t.Fatalf("real Chinook attached LEFT JOIN = applied %v rows %d tugql %q err %v", applied, len(joined.Result.Rows), joined.TugQL, err)
 	}
 	if got := joined.Result.Rows[0].Data["InvoiceId"]; fmt.Sprint(got) != "412" {
 		t.Fatalf("newest invoice changed after attached JOIN: %#v", got)
@@ -274,6 +280,7 @@ func TestChinookFreshAttachedCustomerUsesLeftJoinThroughDALgo(t *testing.T) {
 }
 
 func TestDiscoverJoinCandidatesKeepsCompositeAndSelfDirections(t *testing.T) {
+	t.Parallel()
 	candidates, err := DiscoverJoinCandidates([]byte("from:\n  schema: main\n  name: Employee\n  alias: e\n  joins:\n    - from: {schema: main, name: Invoice, alias: i}\n      on: [{left: {field: EmployeeId, source: e}, op: '==', right: {field: CustomerId, source: i}}]\n"), joinSnapshot())
 	if err != nil {
 		t.Fatal(err)
@@ -303,6 +310,7 @@ func TestDiscoverJoinCandidatesKeepsCompositeAndSelfDirections(t *testing.T) {
 }
 
 func TestJoinCandidatesSuppressOnlyExactActiveInstanceEdge(t *testing.T) {
+	t.Parallel()
 	query := []byte(`from:
   name: Invoice
   alias: purchase
@@ -337,6 +345,7 @@ limit: 5
 }
 
 func TestCompositeJoinSuppressionIgnoresPredicateOrder(t *testing.T) {
+	t.Parallel()
 	query := []byte(`from:
   name: Order
   alias: o
@@ -357,20 +366,21 @@ func TestCompositeJoinSuppressionIgnoresPredicateOrder(t *testing.T) {
 	}
 }
 
-func TestDeriveJoinDTQLUsesCollisionSafeAliasAndPreservesLimit(t *testing.T) {
+func TestDeriveJoinTugQLUsesCollisionSafeAliasAndPreservesLimit(t *testing.T) {
+	t.Parallel()
 	parent := []byte("from: {schema: main, name: Invoice, alias: Customer}\nlimit: 7\n")
 	candidates, err := DiscoverJoinCandidates(parent, joinSnapshot())
 	if err != nil || len(candidates) != 1 {
 		t.Fatalf("candidates: %#v, %v", candidates, err)
 	}
-	derived, candidate, err := DeriveJoinDTQL(parent, joinSnapshot(), candidates[0].ID)
+	derived, candidate, err := DeriveJoinTugQL(parent, joinSnapshot(), candidates[0].ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(derived)
 	for _, want := range []string{"name: Invoice", "name: Customer", "alias: Customer2", "limit: 7", "source: Customer"} {
 		if !strings.Contains(text, want) {
-			t.Fatalf("derived DTQL missing %q:\n%s", want, text)
+			t.Fatalf("derived TugQL missing %q:\n%s", want, text)
 		}
 	}
 	if candidate.ConstraintID != "fk_invoice_customer" {
@@ -378,7 +388,8 @@ func TestDeriveJoinDTQLUsesCollisionSafeAliasAndPreservesLimit(t *testing.T) {
 	}
 }
 
-func TestDeriveJoinDTQLQualifiesAndExpandsProjection(t *testing.T) {
+func TestDeriveJoinTugQLQualifiesAndExpandsProjection(t *testing.T) {
+	t.Parallel()
 	parent := []byte(`from: {name: Invoice}
 columns:
   - wildcard: {exclude: [Total]}
@@ -392,14 +403,14 @@ limit: 10
 	if err != nil || len(candidates) != 1 {
 		t.Fatalf("candidates = %#v, %v", candidates, err)
 	}
-	derived, _, err := DeriveJoinDTQL(parent, joinSnapshot(), candidates[0].ID)
+	derived, _, err := DeriveJoinTugQL(parent, joinSnapshot(), candidates[0].ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(derived)
 	for _, want := range []string{"source: Invoice", "field: InvoiceId", "field: CustomerId", "field: InvoiceDate", "Customer_FirstName", "limit: 10"} {
 		if !strings.Contains(text, want) {
-			t.Fatalf("derived DTQL missing %q:\n%s", want, text)
+			t.Fatalf("derived TugQL missing %q:\n%s", want, text)
 		}
 	}
 	if strings.Contains(text, "field: Total") || strings.Contains(text, "wildcard:") {
@@ -407,7 +418,8 @@ limit: 10
 	}
 }
 
-func TestDeriveJoinDTQLRefusesAggregateWithoutGuessing(t *testing.T) {
+func TestDeriveJoinTugQLRefusesAggregateWithoutGuessing(t *testing.T) {
+	t.Parallel()
 	parent := []byte(`from: {name: Invoice}
 columns:
   - aggregate: {function: COUNT, args: [{star: true}]}
@@ -418,12 +430,13 @@ limit: 10
 	if err != nil || len(candidates) != 1 {
 		t.Fatalf("candidates = %#v, %v", candidates, err)
 	}
-	if _, _, err := DeriveJoinDTQL(parent, joinSnapshot(), candidates[0].ID); err == nil || !strings.Contains(err.Error(), "aggregate") {
+	if _, _, err := DeriveJoinTugQL(parent, joinSnapshot(), candidates[0].ID); err == nil || !strings.Contains(err.Error(), "aggregate") {
 		t.Fatalf("aggregate JOIN should refuse clearly: %v", err)
 	}
 }
 
-func TestDeriveJoinDTQLRefusesImplicitMultiRelationWildcard(t *testing.T) {
+func TestDeriveJoinTugQLRefusesImplicitMultiRelationWildcard(t *testing.T) {
+	t.Parallel()
 	snapshot := joinSnapshot()
 	snapshot.Keys = append(snapshot.Keys, ForeignKey{ConstraintID: "fk_customer_employee", Schema: "main", FromRelation: "Customer", FromFields: []string{"EmployeeId"}, ToSchema: "main", ToRelation: "Employee", ToFields: []string{"EmployeeId"}})
 	doc := []byte(`from:
@@ -440,7 +453,7 @@ limit: 5
 	}
 	for _, candidate := range candidates {
 		if candidate.Source.Relation == "Customer" && candidate.Target.Relation == "Employee" {
-			if _, _, err := DeriveJoinDTQL(doc, snapshot, candidate.ID); err == nil || !strings.Contains(err.Error(), "implicit wildcard") {
+			if _, _, err := DeriveJoinTugQL(doc, snapshot, candidate.ID); err == nil || !strings.Contains(err.Error(), "implicit wildcard") {
 				t.Fatalf("multi-relation wildcard must not lose Customer columns: %v", err)
 			}
 			return
@@ -450,10 +463,11 @@ limit: 5
 }
 
 func TestDuplicateIdenticalForeignKeysKeepUnappliedCandidate(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	snapshot := joinSnapshot()
 	snapshot.Keys = append(snapshot.Keys, ForeignKey{ConstraintID: "fk_invoice_customer_duplicate", Schema: "main", FromRelation: "Invoice", FromFields: []string{"CustomerId"}, ToSchema: "main", ToRelation: "Customer", ToFields: []string{"CustomerId"}})
-	parent := RecordSet{ID: "base", Source: snapshot.Source, Title: "Invoices", DTQL: "from: {name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 5\n"}
+	parent := RecordSet{ID: "base", Source: snapshot.Source, Title: "Invoices", TugQL: "from: {name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 5\n"}
 	app := ForeignKeyJoinApplication{Source: snapshot.Source, Snapshot: snapshot, Executor: &joinExecutorStub{}}
 	candidates, err := app.Candidates(ctx, parent)
 	if err != nil || len(candidates) != 2 {
@@ -463,7 +477,7 @@ func TestDuplicateIdenticalForeignKeysKeepUnappliedCandidate(t *testing.T) {
 	if err != nil || result.Lineage == nil || len(result.Lineage.AppliedEdges) != 1 {
 		t.Fatalf("applied duplicate FK = %+v, %v", result.Lineage, err)
 	}
-	joined := RecordSet{ID: "joined", Source: snapshot.Source, DTQL: result.DTQL, Lineage: result.Lineage}
+	joined := RecordSet{ID: "joined", Source: snapshot.Source, TugQL: result.TugQL, Lineage: result.Lineage}
 	next, err := app.Candidates(ctx, joined)
 	if err != nil {
 		t.Fatal(err)
@@ -480,7 +494,8 @@ func TestDuplicateIdenticalForeignKeysKeepUnappliedCandidate(t *testing.T) {
 }
 
 func TestRestrictedBaseDoesNotAdvertiseUnexecutableJoin(t *testing.T) {
-	parent := RecordSet{ID: "base", Source: "sqlite:///fixture.db", DTQL: "from: {name: Invoice}\nlimit: 5\n"}
+	t.Parallel()
+	parent := RecordSet{ID: "base", Source: "sqlite:///fixture.db", TugQL: "from: {name: Invoice}\nlimit: 5\n"}
 	executor := &joinExecutorStub{}
 	app := ForeignKeyJoinApplication{Source: parent.Source, Snapshot: joinSnapshot(), Executor: executor, Secure: true,
 		CanReadTarget: func(_ context.Context, target RelationInstance) error {
@@ -501,12 +516,13 @@ func TestRestrictedBaseDoesNotAdvertiseUnexecutableJoin(t *testing.T) {
 
 type joinExecutorStub struct{ doc string }
 
-func (s *joinExecutorStub) RunDTQL(_ context.Context, _ string, doc []byte, _ map[string]any) (secureread.Result, error) {
+func (s *joinExecutorStub) RunTugQL(_ context.Context, _ string, doc []byte, _ map[string]any) (secureread.Result, error) {
 	s.doc = string(doc)
 	return secureread.Result{Columns: []string{"InvoiceId", "Customer_CustomerId"}}, nil
 }
 
 func TestSessionChatApplyJoinCandidatePersistsLineage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -518,7 +534,7 @@ func TestSessionChatApplyJoinCandidatePersistsLineage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base, err := store.AppendQuery(ctx, chat.activeID, user.ID, "sqlite:///fixture.db", QueryResult{Title: "Invoices", DTQL: "from: {schema: main, name: Invoice}\n", Result: secureread.Result{Columns: []string{"InvoiceId"}}})
+	base, err := store.AppendQuery(ctx, chat.activeID, user.ID, "sqlite:///fixture.db", QueryResult{Title: "Invoices", TugQL: "from: {schema: main, name: Invoice}\n", Result: secureread.Result{Columns: []string{"InvoiceId"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -536,7 +552,7 @@ func TestSessionChatApplyJoinCandidatePersistsLineage(t *testing.T) {
 		t.Fatalf("lineage: %#v", joined.Lineage)
 	}
 	if !strings.Contains(executor.doc, "name: Customer") {
-		t.Fatalf("executor did not receive derived DTQL: %s", executor.doc)
+		t.Fatalf("executor did not receive derived TugQL: %s", executor.doc)
 	}
 	reopened, err := store.Load(ctx, chat.activeID)
 	if err != nil || reopened.RecordSets[joined.ID].Lineage == nil || len(reopened.RecordSets[joined.ID].Lineage.AppliedEdges) != 1 {

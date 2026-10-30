@@ -15,6 +15,7 @@ import (
 )
 
 func TestChatUIRunRequiresConversation(t *testing.T) {
+	t.Parallel()
 	u := NewChatUI(context.Background(), nil, "fake-model")
 	if err := u.Run(); err == nil || err.Error() != "chat UI requires a conversation" {
 		t.Fatalf("Run() with no conversation = %v, want a conversation-required error", err)
@@ -22,6 +23,7 @@ func TestChatUIRunRequiresConversation(t *testing.T) {
 }
 
 func TestChatUIRunReturnsProgramError(t *testing.T) {
+	// Not parallel: mutates package-level runTeaProgram seam.
 	wantErr := errors.New("boom")
 	var gotProgram *tea.Program
 	t.Cleanup(SetRunTeaProgramForTest(func(p *tea.Program) (tea.Model, error) {
@@ -50,6 +52,7 @@ func TestChatUIRunReturnsProgramError(t *testing.T) {
 // waits on it) to get real coverage of the forwarding statement without
 // reimplementing tea.Program.
 func TestChatUIRunForwardsBridgeEventsAndStopsBridge(t *testing.T) {
+	// Not parallel: mutates package-level runTeaProgram seam.
 	t.Cleanup(SetRunTeaProgramForTest(func(p *tea.Program) (tea.Model, error) { return nil, nil }))
 
 	events := make(chan struct{}, 1)
@@ -86,6 +89,7 @@ func (quitOnInitModel) View() tea.View                      { return tea.NewView
 // input/output to an empty reader/io.Discard keeps this hermetic: no real
 // TTY is touched, and quitOnInitModel makes Run() return immediately.
 func TestRunTeaProgramCallsRealRun(t *testing.T) {
+	// Not parallel: mutates package-level runTeaProgram seam.
 	p := tea.NewProgram(quitOnInitModel{}, tea.WithInput(strings.NewReader("")), tea.WithOutput(io.Discard), tea.WithoutSignals(), tea.WithoutRenderer())
 	if _, err := runTeaProgram(p); err != nil {
 		t.Fatalf("runTeaProgram(real program) = %v, want nil", err)
@@ -93,6 +97,7 @@ func TestRunTeaProgramCallsRealRun(t *testing.T) {
 }
 
 func TestChatUIRunWithoutBridgeNeverCallsBridgeStop(t *testing.T) {
+	// Not parallel: mutates package-level runTeaProgram seam.
 	t.Cleanup(SetRunTeaProgramForTest(func(p *tea.Program) (tea.Model, error) { return nil, nil }))
 
 	u, _ := newTestChatUI(t, nil, Turn{})

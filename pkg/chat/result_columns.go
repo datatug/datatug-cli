@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
 
@@ -29,7 +28,7 @@ type ResultColumnRow struct {
 }
 
 type ResultColumnsPreview struct {
-	DTQL        string   `json:"-"`
+	TugQL       string   `json:"-"`
 	Fingerprint string   `json:"fingerprint"`
 	Fields      []string `json:"fields"`
 	Proof       string   `json:"proof"`
@@ -61,12 +60,12 @@ func resultColumnRows(record *RecordSet) []ResultColumnRow {
 }
 
 func columnCandidateID(record RecordSet, relation, field, edge string) string {
-	h := sha256.Sum256([]byte(record.ID + "\x00" + record.DTQL + "\x00" + relation + "\x00" + field + "\x00" + edge))
+	h := sha256.Sum256([]byte(record.ID + "\x00" + record.TugQL + "\x00" + relation + "\x00" + field + "\x00" + edge))
 	return hex.EncodeToString(h[:12])
 }
 
 func resultColumnQuery(record RecordSet) (dal.StructuredQuery, RelationInstance, error) {
-	q, err := dtql.Deserialize([]byte(record.DTQL))
+	q, err := tugqlDeserialize([]byte(record.TugQL))
 	if err != nil {
 		return nil, RelationInstance{}, fmt.Errorf("the executed query cannot be parsed")
 	}
@@ -347,10 +346,7 @@ func planResultColumns(record RecordSet, metadata resultColumnMetadata, admitted
 		if col.Wildcard != nil {
 			return ResultColumnsPreview{}, fmt.Errorf("explicit wildcards must be expanded before enrichment")
 		}
-		col.Expression, err = qualifyJoinExpression(col.Expression, source, true)
-		if err != nil {
-			return ResultColumnsPreview{}, err
-		}
+		col.Expression, _ = qualifyJoinExpression(col.Expression, source, true)
 		out.columns = append(out.columns, col)
 	}
 	if len(q.Columns()) == 0 {
@@ -359,10 +355,7 @@ func planResultColumns(record RecordSet, metadata resultColumnMetadata, admitted
 		}
 	}
 	for i, e := range out.groups {
-		out.groups[i], err = qualifyJoinExpression(e, source, true)
-		if err != nil {
-			return ResultColumnsPreview{}, err
-		}
+		out.groups[i], _ = qualifyJoinExpression(e, source, true)
 	}
 	out.where, err = qualifyJoinCondition(out.where, source, true)
 	if err != nil {
@@ -446,11 +439,11 @@ func planResultColumns(record RecordSet, metadata resultColumnMetadata, admitted
 	if len(selected) > 0 {
 		return ResultColumnsPreview{}, fmt.Errorf("column metadata changed; reopen the choices")
 	}
-	doc, err := dtql.Serialize(out)
+	doc, err := tugqlSerialize(out)
 	if err != nil {
 		return ResultColumnsPreview{}, err
 	}
-	if _, err = dtql.Deserialize(doc); err != nil {
+	if _, err = tugqlDeserialize(doc); err != nil {
 		return ResultColumnsPreview{}, err
 	}
 	proof := "Direct physical projection; existing clauses and parameters preserved."
@@ -468,8 +461,8 @@ func planResultColumns(record RecordSet, metadata resultColumnMetadata, admitted
 		FK      ForeignKeySnapshot
 		Columns []ResultColumnRow
 	}{metadata.fk, rows})
-	h := sha256.Sum256(append(append(append([]byte(record.ID+"\x00"+record.Source+"\x00"+record.DTQL+"\x00"+string(doc)+"\x00"+proof), bind...), meta...), []byte(strings.Join(fields, "\x00"))...))
-	return ResultColumnsPreview{DTQL: string(doc), Fingerprint: hex.EncodeToString(h[:]), Fields: fields, Proof: proof}, nil
+	h := sha256.Sum256(append(append(append([]byte(record.ID+"\x00"+record.Source+"\x00"+record.TugQL+"\x00"+string(doc)+"\x00"+proof), bind...), meta...), []byte(strings.Join(fields, "\x00"))...))
+	return ResultColumnsPreview{TugQL: string(doc), Fingerprint: hex.EncodeToString(h[:]), Fields: fields, Proof: proof}, nil
 }
 
 func (c *SessionChat) resultColumnEvidence(ctx context.Context, record RecordSet) (resultColumnMetadata, map[string]bool, error) {
@@ -560,7 +553,7 @@ func (c *SessionChat) executeResultColumns(ctx context.Context, sessionID, paren
 	if err = ctx.Err(); err != nil {
 		return ChatSession{}, QueryResult{}, err
 	}
-	result, err := c.queryExecutor.RunDTQL(ctx, parent.Source, []byte(preview.DTQL), parent.Parameters)
+	result, err := c.queryExecutor.RunTugQL(ctx, parent.Source, []byte(preview.TugQL), parent.Parameters)
 	if err != nil {
 		return ChatSession{}, QueryResult{}, fmt.Errorf("column query failed: %s", publicQueryError(err, parent.Parameters))
 	}
@@ -579,7 +572,7 @@ func (c *SessionChat) executeResultColumns(ctx context.Context, sessionID, paren
 		}
 		originID = origin.ID
 	}
-	query, err := c.store.AppendQuery(ctx, sessionID, originID, parent.Source, QueryResult{Title: action + parent.Title, DTQL: preview.DTQL, Source: parent.Source, SourceID: parent.Database, Parameters: parent.Parameters, Result: result, Lineage: &JoinLineage{ParentRecordSetID: parent.ID, AppliedEdges: append([]AppliedJoinEdge(nil), appliedEdges(parent)...)}})
+	query, err := c.store.AppendQuery(ctx, sessionID, originID, parent.Source, QueryResult{Title: action + parent.Title, TugQL: preview.TugQL, Source: parent.Source, SourceID: parent.Database, Parameters: parent.Parameters, Result: result, Lineage: &JoinLineage{ParentRecordSetID: parent.ID, AppliedEdges: append([]AppliedJoinEdge(nil), appliedEdges(parent)...)}})
 	if err != nil {
 		return ChatSession{}, QueryResult{}, err
 	}

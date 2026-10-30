@@ -21,7 +21,9 @@ import (
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/dbconnection"
 	"github.com/datatug/datatug-core/pkg/storage"
+	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -68,6 +70,9 @@ type showProjectCommand struct {
 	projectBaseCommand
 }
 
+// showDirectoryAbs preserves path spelling without resolving project-root links.
+var showDirectoryAbs = filepath.Abs
+
 func showCommandAction(cmd *cobra.Command, _ []string) error {
 	flags := cmd.Flags()
 	v := &showProjectCommand{}
@@ -87,26 +92,22 @@ func showCommandAction(cmd *cobra.Command, _ []string) error {
 	if v.ProjectName == "" && v.ProjectDir == "" {
 		v.ProjectDir = "." // the folder it runs in
 	}
-	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
-		// A person who has registered no project has no settings file: no project of that name either.
-		if errors.Is(err, ErrUnknownProjectName) || (v.ProjectName != "" && errors.Is(err, fs.ErrNotExist)) {
-			return Exit(fmt.Sprintf("unknown project %q: it is not in the list of `datatug projects`", v.ProjectName), exitCodeNotFound)
-		}
+	base, err := openProjectForRead(v.ProjectName, v.ProjectDir)
+	if err != nil {
 		return err
 	}
-	if strings.Contains(v.ProjectDir, "://") {
-		return Exit(fmt.Sprintf("%q is an address, not a folder on this machine: show reads a project from a folder", v.ProjectDir), exitCodeUsage)
+	v.projectBaseCommand = *base
+	if !filepath.IsAbs(v.ProjectDir) {
+		absoluteDir, err := showDirectoryAbs(v.ProjectDir)
+		if err != nil {
+			return fmt.Errorf("could not locate project directory: %w", err)
+		}
+		v.ProjectDir = absoluteDir
+		v.store, v.projectID = filestore.NewSingleProjectStore(v.ProjectDir, v.projectID)
 	}
 	ctx := cmd.Context()
 	if ctx == nil {
 		ctx = context.Background()
-	}
-	// A folder with no project file is not a project (and a project that lacks one of its other files is a
-	// project that cannot be loaded, which is another failure). A path that is a file, not a folder, has no
-	// project file in it either.
-	_, err := os.Stat(filepath.Join(v.ProjectDir, storage.ProjectSummaryFileName))
-	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
-		return Exit(notAProjectSentence(v.ProjectDir), exitCodeNotFound)
 	}
 	projectStore := v.store.GetProjectStore(v.projectID)
 	project, err := projectStore.LoadProject(ctx)
@@ -122,6 +123,33 @@ func showCommandAction(cmd *cobra.Command, _ []string) error {
 		return writeShowJSON(cmd.OutOrStdout(), doc)
 	}
 	return writeShowText(cmd.OutOrStdout(), doc)
+}
+
+// openProjectForRead resolves the project a command that only reads it works on: the registered
+// project name, or else the folder dir. It is the one place `show` and the commands that take
+// --project resolve it: a name that is not among the registered projects, and a folder with no
+// project file in it, are exit 3 (not found); a project that lives at an address is exit 2.
+func openProjectForRead(name, dir string) (*projectBaseCommand, error) {
+	v := &projectBaseCommand{}
+	v.ProjectName, v.ProjectDir = name, dir
+	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
+		// A person who has registered no project has no settings file: no project of that name either.
+		if errors.Is(err, ErrUnknownProjectName) || (v.ProjectName != "" && errors.Is(err, fs.ErrNotExist)) {
+			return nil, Exit(fmt.Sprintf("unknown project %q: it is not in the list of `datatug projects`", v.ProjectName), exitCodeNotFound)
+		}
+		return nil, err
+	}
+	if strings.Contains(v.ProjectDir, "://") {
+		return nil, Exit(fmt.Sprintf("%q is an address, not a folder on this machine: a project is read from a folder", v.ProjectDir), exitCodeUsage)
+	}
+	// A folder with no project file is not a project (and a project that lacks one of its other files is a
+	// project that cannot be loaded, which is another failure). A path that is a file, not a folder, has no
+	// project file in it either.
+	_, err := os.Stat(filepath.Join(v.ProjectDir, storage.ProjectSummaryFileName))
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+		return nil, Exit(notAProjectSentence(v.ProjectDir), exitCodeNotFound)
+	}
+	return v, nil
 }
 
 // notAProjectSentence is the one sentence of a folder that holds no project: it names the folder and the command
@@ -164,6 +192,10 @@ type showSource struct {
 	ID     string `json:"id"`
 	Driver string `json:"driver"`
 	DSNEnv string `json:"dsnEnv,omitempty"`
+	// Path is, for a SQLite source, the file its catalog's path resolves to (api.ResolveCatalogPath), the file
+	// `db add` compares a database with. It is left out for a source of another driver, and for a SQLite source
+	// whose path does not resolve (a URL, which is never shown).
+	Path string `json:"path,omitempty"`
 	// NotScanned is true for a source the project records and no scan has described (its catalog has no
 	// dbModel): it has no schemas to list.
 	NotScanned bool `json:"notScanned,omitempty"`
@@ -185,6 +217,23 @@ type showRelation struct {
 	Name string `json:"name"`
 	// Columns is nil at the depths "sources" and "tables" (and then has no key in JSON), and empty, never nil, otherwise.
 	Columns []showColumn `json:"columns,omitzero"`
+	// ForeignKeys are the keys a table holds (never a view), in the order of the foreign keys file. It is nil
+	// at the depths "sources" and "tables", and for a table that holds none (and then has no key in JSON).
+	ForeignKeys []showForeignKey `json:"foreignKeys,omitzero"`
+}
+
+// showForeignKey is a foreign key as the project's foreign keys file holds it.
+type showForeignKey struct {
+	Name       string       `json:"name"`
+	Columns    []string     `json:"columns"`
+	RefTable   showTableRef `json:"refTable"`
+	RefColumns []string     `json:"refColumns"`
+}
+
+// showTableRef names the referenced table; the schema is left out for a source that reports none.
+type showTableRef struct {
+	Schema string `json:"schema,omitempty"`
+	Name   string `json:"name"`
 }
 
 // showColumn is a column as the scan stored it. PrimaryKeyPosition is its 1-based place in the primary
@@ -193,7 +242,13 @@ type showColumn struct {
 	Name               string `json:"name"`
 	Type               string `json:"type,omitempty"`
 	PrimaryKeyPosition int    `json:"primaryKeyPosition,omitempty"`
+	// Nullable is nil (and has no key in JSON) for a source whose driver does not report nullability.
+	Nullable *bool `json:"nullable,omitempty"`
 }
+
+// showNullabilityDrivers are the drivers whose scan reports nullability, so that isNullable of the columns
+// file is a fact and not the false of a driver that said nothing.
+var showNullabilityDrivers = map[string]bool{dbconnection.DriverSQLite3: true, "sqlserver": true, api.DriverPostgres: true}
 
 // showUnknownDriver is what is printed in place of a driver that is not a plain name: the catalog file is
 // read from a project that may have come from anywhere, and a driver there can hold anything (a URL with a
@@ -261,6 +316,11 @@ func readShowSource(projectDir, envID string, catalog *datatug.DbCatalog) (showS
 			return showSource{}, fmt.Errorf("source %q in environment %q: %s", dbcopy.SourceIDDisplay(catalog.ID), dbcopy.SourceIDDisplay(envID), err.Error())
 		}
 	}
+	if catalog.Driver == dbconnection.DriverSQLite3 || catalog.Driver == "sqlite" {
+		if path, err := api.ResolveCatalogPath(projectDir, catalog.Path); err == nil {
+			source.Path = path
+		}
+	}
 	if catalog.DbModel == "" {
 		source.NotScanned = true
 		return source, nil
@@ -268,6 +328,11 @@ func readShowSource(projectDir, envID string, catalog *datatug.DbCatalog) (showS
 	schema, err := api.GetCatalogSchema(projectDir, envID, catalog.ID)
 	if err != nil {
 		return showSource{}, err
+	}
+	foreignKeys, err := loadShowForeignKeys(projectDir, catalog.DbModel)
+	if err != nil {
+		// The loader's text names a file of the project: the answer names the source and the environment only.
+		return showSource{}, fmt.Errorf("source %q in environment %q: its foreign keys file cannot be read", dbcopy.SourceIDDisplay(catalog.ID), dbcopy.SourceIDDisplay(envID))
 	}
 	source.Empty = len(schema.Relations) == 0
 	// The relations are in the order of their schema and name: the relations of one schema are together.
@@ -278,15 +343,44 @@ func readShowSource(projectDir, envID string, catalog *datatug.DbCatalog) (showS
 		shown := showRelation{Name: relation.Name, Columns: make([]showColumn, len(relation.Columns))}
 		for i, column := range relation.Columns {
 			shown.Columns[i] = showColumn{Name: column.Name, Type: column.DbType, PrimaryKeyPosition: column.PrimaryKeyPosition}
+			if showNullabilityDrivers[catalog.Driver] {
+				nullable := column.IsNullable
+				shown.Columns[i].Nullable = &nullable
+			}
 		}
 		current := &source.Schemas[len(source.Schemas)-1]
 		if relation.DbType == "VIEW" {
 			current.Views = append(current.Views, shown)
 		} else {
+			shown.ForeignKeys = foreignKeys[showTableKey{relation.Schema, relation.Name}]
 			current.Tables = append(current.Tables, shown)
 		}
 	}
 	return source, nil
+}
+
+type showTableKey struct{ schema, name string }
+
+// loadShowForeignKeys reads the foreign keys of a model through datatug-core's loader of the foreign keys file
+// (the one reader of it), by the table that holds them. A model with no file has none.
+func loadShowForeignKeys(projectDir, modelID string) (map[showTableKey][]showForeignKey, error) {
+	tables, err := filestore.LoadModelForeignKeys(projectDir, modelID)
+	if err != nil {
+		return nil, err
+	}
+	byTable := make(map[showTableKey][]showForeignKey, len(tables))
+	for _, table := range tables {
+		key := showTableKey{table.Table.Schema(), table.Table.Name()}
+		for _, fk := range table.ForeignKeys {
+			byTable[key] = append(byTable[key], showForeignKey{
+				Name:       fk.Name,
+				Columns:    fk.Columns,
+				RefTable:   showTableRef{Schema: fk.RefTable.Schema(), Name: fk.RefTable.Name()},
+				RefColumns: fk.RefColumns,
+			})
+		}
+	}
+	return byTable, nil
 }
 
 // trimShowDocument cuts the document at the depth: the one place the depth is applied, so that the two writers
@@ -307,6 +401,7 @@ func trimShowDocument(doc *showDocument, depth string) {
 				for _, relations := range [][]showRelation{schema.Tables, schema.Views} {
 					for j := range relations {
 						relations[j].Columns = nil
+						relations[j].ForeignKeys = nil
 					}
 				}
 			}
@@ -398,6 +493,7 @@ func writeShowText(w io.Writer, doc *showDocument) error {
 					for _, relation := range kind.relations {
 						line(3, "%s %s", kind.label, showText(relation.Name))
 						writeShowColumns(line, relation)
+						writeShowForeignKeys(line, relation)
 					}
 				}
 			}
@@ -434,6 +530,24 @@ func writeShowColumns(line func(depth int, format string, args ...any), relation
 		default:
 			line(4, "%s %s pk %d", name, dbType, column.PrimaryKeyPosition)
 		}
+	}
+}
+
+// writeShowForeignKeys prints the foreign keys of a table below its columns, one line each.
+func writeShowForeignKeys(line func(depth int, format string, args ...any), relation showRelation) {
+	names := func(names []string) string {
+		shown := make([]string, len(names))
+		for i, name := range names {
+			shown[i] = showText(name)
+		}
+		return strings.Join(shown, ", ")
+	}
+	for _, fk := range relation.ForeignKeys {
+		target := showText(fk.RefTable.Name)
+		if fk.RefTable.Schema != "" {
+			target = showText(fk.RefTable.Schema) + "." + target
+		}
+		line(4, "ForeignKey %s (%s) -> %s (%s)", showText(fk.Name), names(fk.Columns), target, names(fk.RefColumns))
 	}
 }
 

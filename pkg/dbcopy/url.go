@@ -9,9 +9,8 @@
 //   - sqlite://         fully wired via dalgo2sqlite
 //   - ingitdb://        fully wired via dalgo2ingitdb; local-paths-only
 //     (REQ:ingitdb-url-local-only)
-//   - postgres://       fully wired via dal-go/dalgo2postgres, behind the
-//     preview switch (see PostgresPreviewEnv): a read-only session
-//     unless the person says otherwise (see postgresConnectionString)
+//   - postgres://       fully wired via dal-go/dalgo2postgres: a read-only
+//     session unless the person says otherwise (see postgresConnectionString)
 //   - env:NAME          resolves the environment variable NAME, which holds
 //     any other supported URL (the way to give PostgreSQL its password
 //     without writing it in a project file or on a command line); see
@@ -19,6 +18,27 @@
 //   - http:// https://  fully wired via dal-go/dalgo2http (pkg/httpsource);
 //     local-paths-only, same convention as ingitdb:// — see
 //     parseHTTPSource
+//   - couchdb://        one existing CouchDB database read as one logical
+//     collection via dal-go/dalgo2couchdb; HTTPS unless
+//     couchdb+http:// names a loopback endpoint. Credentials
+//     come from DATATUG_COUCHDB_* environment variables, never
+//     from the URL — see couchdb_source.go
+//   - postgrest://      one existing PostgREST API root read as native
+//     PostgreSQL relations via dal-go/dalgo2postgrest; HTTPS
+//     unless postgrest+http:// names a loopback endpoint. The
+//     API path may include /rest/v1 (Supabase). Credentials
+//     come from DATATUG_POSTGREST_* environment variables,
+//     never from the URL — see postgrest_source.go
+//   - libsql://         one existing libSQL database read through
+//     dal-go/dalgo2libsql as SQLite relations; HTTPS unless
+//     libsql+http:// names a loopback endpoint. The token comes
+//     from DATATUG_LIBSQL_BEARER for each request, never from
+//     the URL — see libsql_source.go
+//   - typesense://      one existing Typesense collection read through
+//     dal-go/dalgo2typesense; HTTPS unless typesense+http://
+//     names a loopback endpoint. The scoped API key comes from
+//     DATATUG_TYPESENSE_API_KEY for each request, never from
+//     the URL — see typesense_source.go
 package dbcopy
 
 import (
@@ -34,7 +54,6 @@ import (
 	"github.com/dal-go/dalgo2sql"
 	"github.com/dal-go/dalgo2sqlite"
 	"github.com/datatug/datatug-cli/pkg/httpsource"
-	"github.com/datatug/datatug-cli/pkg/openvaultdb"
 	"github.com/ingitdb/dalgo2ingitdb"
 	"github.com/ingitdb/ingitdb-go/ingitdb/validator"
 	"github.com/xo/dburl"
@@ -42,7 +61,7 @@ import (
 
 // supportedSchemes is the MVP-supported scheme list, used both for dispatch
 // and to construct the error message for REQ:unknown-scheme-rejected.
-var supportedSchemes = []string{"sqlite", "ingitdb", "postgres", "http", "https", "openvaultdb", "bigquery"}
+var supportedSchemes = []string{"duckdb", "sqlite", "ingitdb", "postgres", "mysql", "oracle", "sqlserver", "http", "https", "openvaultdb", "bigquery", "mongodb", "mongodb+srv", "firestore", CouchDBScheme, CouchDBHTTPSScheme, CouchDBHTTPScheme, PostgRESTScheme, PostgRESTHTTPSScheme, PostgRESTHTTPScheme, LibSQLScheme, LibSQLHTTPSScheme, LibSQLHTTPScheme, TypesenseScheme, TypesenseHTTPSScheme, TypesenseHTTPScheme}
 
 // SupportedSchemes returns the exact schemes Parse/Open dispatch, in
 // dispatch order. It is the single source of truth other packages should
@@ -149,7 +168,37 @@ type BackendRef struct {
 	//                pkg/httpsource) — same local-path convention as ingitdb,
 	//                NOT a literal remote endpoint; the project's own query
 	//                definitions name the actual remote endpoints.
+	// - couchdb:     "host[:port]/database", the endpoint without a scheme or
+	//                credentials (see CouchDBHost and CouchDBDatabase).
 	Path string
+	// CouchDB endpoint selectors: one existing database, read as one logical
+	// collection. Credentials are never here; they are read from the
+	// DATATUG_COUCHDB_* variables for each request.
+	CouchDBHost              string
+	CouchDBDatabase          string
+	CouchDBAllowLoopbackHTTP bool
+	// PostgREST endpoint selectors: one existing API root, whose relations are
+	// read as native PostgreSQL tables and views. The API path may include
+	// /rest/v1 (Supabase). Schema and IDColumn are the two explicit non-secret
+	// options of the URL; credentials are never here and are read from the
+	// DATATUG_POSTGREST_* variables for each request.
+	PostgRESTHost              string
+	PostgRESTAPIPath           string
+	PostgRESTSchema            string
+	PostgRESTIDColumn          string
+	PostgRESTAllowLoopbackHTTP bool
+	// libSQL endpoint selectors: one existing libSQL database, whose tables and
+	// views are read as SQLite relations. The base address holds no credentials;
+	// the token is read from DATATUG_LIBSQL_BEARER for each request.
+	LibSQLHost              string
+	LibSQLBasePath          string
+	LibSQLAllowLoopbackHTTP bool
+	// Typesense endpoint selectors: one existing Typesense collection. The
+	// endpoint is the server origin and holds no credentials; the scoped API key
+	// is read from DATATUG_TYPESENSE_API_KEY for each request.
+	TypesenseHost              string
+	TypesenseCollection        string
+	TypesenseAllowLoopbackHTTP bool
 	// BigQuery destination selectors. Credentials are never accepted in the URL;
 	// callers provide local Google credentials separately.
 	ProjectID string
@@ -216,6 +265,11 @@ func parseEnvSource(rawURL string, lookupEnv func(string) (string, bool)) (Backe
 	}
 	ref, err := parseURL(value)
 	if err != nil {
+		var serverRefusal *serverURLRefusal
+		if errors.As(err, &serverRefusal) {
+			// The same for a MySQL, Oracle or SQL Server URL: a fixed sentence that quotes none of it.
+			return BackendRef{}, fmt.Errorf("environment variable %s does not hold a usable connection URL: %w", name, serverRefusal)
+		}
 		if refusal := postgresURLRefusal(err); refusal != nil {
 			// A fixed sentence about the shape of the URL that quotes none of it, so the
 			// variable's value stays out of the message and the person is still told what to fix.
@@ -249,6 +303,18 @@ func parseURL(rawURL string) (BackendRef, error) {
 	}
 	display := SourceDisplay(rawURL)
 	switch scheme {
+	case "mongodb", "mongodb+srv":
+		return parseMongoDB(rawURL, display)
+	case CouchDBScheme, CouchDBHTTPSScheme, CouchDBHTTPScheme:
+		return parseCouchDBSource(scheme, rest, display)
+	case PostgRESTScheme, PostgRESTHTTPSScheme, PostgRESTHTTPScheme:
+		return parsePostgRESTSource(scheme, rest, display)
+	case LibSQLScheme, LibSQLHTTPSScheme, LibSQLHTTPScheme:
+		return parseLibSQLSource(scheme, rest, display)
+	case TypesenseScheme, TypesenseHTTPSScheme, TypesenseHTTPScheme:
+		return parseTypesenseSource(scheme, rest, display)
+	case "firestore":
+		return parseFirestoreSource(rest, display)
 	case "openvaultdb":
 		if rest == "" {
 			return BackendRef{}, fmt.Errorf("OpenVaultDB connection descriptor path is required")
@@ -290,6 +356,24 @@ func parseURL(rawURL string) (BackendRef, error) {
 			return BackendRef{}, fmt.Errorf("invalid postgres URL: %w", err)
 		}
 		return BackendRef{Scheme: "postgres", Path: path, Raw: display}, nil
+	case "mysql", "oracle", "sqlserver":
+		engine, _ := serverEngineOf(scheme)
+		return parseServerSource(engine, rest, display)
+	case "duckdb":
+		if err := refuseUserinfo(scheme, display, rest); err != nil {
+			return BackendRef{}, err
+		}
+		if strings.ContainsAny(rest, "?#") {
+			return BackendRef{}, fmt.Errorf("duckdb URL accepts a database path only")
+		}
+		path, err := url.PathUnescape(rest)
+		if err != nil || strings.ContainsAny(path, "?#") {
+			return BackendRef{}, fmt.Errorf("invalid duckdb path encoding or unsupported path delimiter")
+		}
+		if path == ":memory:" {
+			path = ""
+		}
+		return BackendRef{Scheme: scheme, Path: path, Raw: display}, nil
 	case "sqlite":
 		return parseSQLite(rawURL, scheme+separator+rest, rest, true)
 	}
@@ -505,8 +589,7 @@ func LocalSourceURL(scheme, path string) string {
 //   - sqlite:      opens via dalgo2sqlite.NewDatabase.
 //   - ingitdb:     opens via dalgo2ingitdb.NewDatabase with the default
 //     validator-backed CollectionsReader.
-//   - postgres:    opens via dalgo2postgres.NewDatabaseWithOptions, only while
-//     the preview switch is on (see PostgresPreviewEnv), read-only
+//   - postgres:    opens via dalgo2postgres.NewDatabaseWithOptions, read-only
 //     (see postgresConnectionString), and one handle for the
 //     process per connection string (see handleCache).
 //   - http/https:  opens via httpsource.Open, translating every HTTP
@@ -611,11 +694,11 @@ func (r BackendRef) OpenForTest(ctx context.Context) (dal.DB, error) {
 // structured-query compilation): dal-go/dalgo2sql#179 added FROM-source
 // alias support to compileStructuredSQL, which used to unconditionally
 // reject any structured query whose FROM source carried an alias — this
-// project's own demo query (queries/customers/customer-invoices.query.dtql,
+// project's own demo query (queries/customers/customer-invoices.query.tugql.yaml,
 // `from: {name: Invoice, alias: i}`) uses exactly that shape, and used to
 // turn into a hard error the moment this dialect was enabled. With #179
-// fixed, existing non-aggregate DTQL queries (see dalgo2sql's own
-// dtql_datatug_inventory_test.go) compile cleanly, so protected reads now
+// fixed, existing non-aggregate TugQL queries (see dalgo2sql's own
+// tugql_datatug_inventory_test.go) compile cleanly, so protected reads now
 // get the dialect's real guarantees: every dal.Constant value becomes a
 // genuine `?` placeholder + bound arg (not a quoted-string literal), and
 // unsupported shapes (such as joins and cursors) fail closed. GROUP BY and
@@ -682,10 +765,41 @@ func (r BackendRef) CheckFile() error {
 
 func (r BackendRef) openSource(ctx context.Context, mode openMode) (dal.DB, error) {
 	switch r.Scheme {
+	case "mongodb", "mongodb+srv":
+		return openMongoDB(ctx, r, mode)
+	case CouchDBScheme, CouchDBHTTPSScheme, CouchDBHTTPScheme:
+		return openCouchDB(ctx, r, mode)
+	case PostgRESTScheme, PostgRESTHTTPSScheme, PostgRESTHTTPScheme:
+		return openPostgREST(ctx, r, mode)
+	case LibSQLScheme, LibSQLHTTPSScheme, LibSQLHTTPScheme:
+		return openLibSQL(ctx, r, mode)
+	case TypesenseScheme, TypesenseHTTPSScheme, TypesenseHTTPScheme:
+		return openTypesense(ctx, r, mode)
+	case "firestore":
+		return r.openFirestore(ctx, mode)
+	case "duckdb":
+		if !mode.forWrite && r.Path != "" {
+			if err := CheckSourceFile(r.Path); err != nil {
+				return nil, err
+			}
+		}
+		path := r.Path
+		if !mode.forWrite && path != "" {
+			path += "?access_mode=read_only"
+		}
+		return newDuckDBDatabase(path)
 	case "openvaultdb":
-		return openvaultdb.OpenSource(r.Path)
+		return OpenOpenVaultDBSource(r.Path)
 	case "sqlite":
-		if err := r.CheckFile(); err != nil {
+		// A SQLite file that is written (the target of `db copy`) is created when it is missing;
+		// one that is read must exist.
+		fileMode := SQLiteReadWrite
+		if mode.forWrite {
+			if err := r.prepareNewSQLiteFile(); err != nil {
+				return nil, err
+			}
+			fileMode = "rwc"
+		} else if err := r.CheckFile(); err != nil {
 			return nil, err
 		}
 		// Every SQLite open, protected or not, compiles structured reads
@@ -698,7 +812,7 @@ func (r BackendRef) openSource(ctx context.Context, mode openMode) (dal.DB, erro
 		opts := dalgo2sql.DbOptions{StructuredQueryDialect: "sqlite"}
 		// The driver is given the path as a "file:" URI (see SQLiteFileURI): a bare path
 		// with a "?" in it is read as the file before it and its parameters.
-		db, err := newSQLiteDatabaseWithOptions(SQLiteFileURI(r.Path), dal.NewSchema(nil, nil), opts)
+		db, err := newSQLiteDatabaseWithOptions(SQLiteFileURIMode(r.Path, fileMode), dal.NewSchema(nil, nil), opts)
 		if err != nil {
 			return nil, err
 		}
@@ -721,8 +835,11 @@ func (r BackendRef) openSource(ctx context.Context, mode openMode) (dal.DB, erro
 		return db, nil
 
 	case "postgres":
-		// The preview switch is asked first, inside openPostgres.
 		return r.openPostgres(ctx, mode)
+
+	case "mysql", "oracle", "sqlserver":
+		engine, _ := serverEngineOf(r.Scheme)
+		return r.openServer(ctx, engine, mode)
 
 	case "http", "https":
 		var opts []httpsource.Option

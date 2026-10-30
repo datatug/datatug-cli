@@ -386,9 +386,6 @@ func openCompareSource(ctx context.Context, sourceURL, schema, expectedStorage s
 	if schema != "" && ref.Scheme != "postgres" {
 		return nil, "", errors.New("schema selection is supported only for PostgreSQL sources")
 	}
-	if err := dbcopy.CheckPostgresRead(ref, 0); err != nil {
-		return nil, "", err
-	}
 	db, err := ref.OpenForCopy(ctx, schema)
 	if err != nil {
 		return nil, "", dbcopy.RedactErrorWithSecrets(err, sourceURL)
@@ -432,22 +429,10 @@ func resolveCompareSourceBinding(binding string) (string, error) {
 	if err != nil {
 		return "", errors.New("explicit source binding is not a supported DALgo source URL")
 	}
-	if !containsSourceScheme(dbcopy.SupportedSchemes(), ref.Scheme) {
-		return "", errors.New("explicit source binding uses an unsupported DALgo provider")
-	}
 	if ref.Scheme == "postgres" && !fromEnv {
 		return "", errors.New("PostgreSQL source bindings must use env:VARIABLE so credentials stay out of command history")
 	}
 	return binding, nil
-}
-
-func containsSourceScheme(schemes []string, scheme string) bool {
-	for _, supported := range schemes {
-		if supported == scheme {
-			return true
-		}
-	}
-	return false
 }
 
 func compareCatalogSourceURL(catalog datatug.DbCatalog, projectDir string) (string, error) {
@@ -490,9 +475,7 @@ func openBigQueryCompareDatabase(ref dbcopy.BackendRef) (dal.DB, error) {
 }
 
 func closeCompareDB(db dal.DB) {
-	if closer, ok := db.(io.Closer); ok {
-		_ = closer.Close()
-	}
+	dbcopy.CloseSource(db)
 }
 
 func writeDatabaseCompareText(w io.Writer, report dbcompare.Report, details bool) error {

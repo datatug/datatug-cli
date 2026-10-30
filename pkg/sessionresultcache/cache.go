@@ -68,58 +68,46 @@ func (c *Cache) path(binding Binding) (string, error) {
 	if binding.Authority == "" || binding.Actor == "" || binding.DatabaseID == "" || binding.ProjectID == "" || binding.SessionID == "" || binding.RunID == "" || binding.InputSnapshotID == "" || binding.Scope.EnvironmentID == "" || binding.Scope.IdentityDomain == "" || len(binding.DefinitionDigest) != 64 {
 		return "", ErrUnavailable
 	}
-	encoded, err := json.Marshal(binding)
-	if err != nil {
-		return "", ErrUnavailable
-	}
+	encoded, _ := json.Marshal(binding)
 	return filepath.Join(c.root, payloadDigest(encoded)+".json"), nil
 }
-func (c *Cache) Put(binding Binding, payload json.RawMessage) error {
-	path, err := c.path(binding)
-	if err != nil || !json.Valid(payload) {
-		return ErrUnavailable
+func syncDirectory(root string) error {
+	dir, err := os.Open(root)
+	if err != nil {
+		return err
 	}
+	defer func() { _ = dir.Close() }()
+	return dir.Sync()
+}
+func (c *Cache) Put(binding Binding, payload json.RawMessage) error {
 	var compact bytes.Buffer
-	if json.Compact(&compact, payload) != nil {
+	path, err := c.path(binding)
+	if err != nil || !json.Valid(payload) || json.Compact(&compact, payload) != nil {
 		return ErrUnavailable
 	}
 	payload = compact.Bytes()
-	encoded, err := json.Marshal(entry{SchemaVersion: 1, Binding: binding, PayloadDigest: payloadDigest(payload), Payload: payload})
-	if err != nil || len(encoded) > MaxBytes {
+	encoded, _ := json.Marshal(entry{SchemaVersion: 1, Binding: binding, PayloadDigest: payloadDigest(payload), Payload: payload})
+	if len(encoded) > MaxBytes {
 		return ErrUnavailable
 	}
 	resolved, err := sessionstore.ResolvePrivateDirectory(c.root)
 	if err != nil || resolved != c.root {
 		return ErrUnavailable
 	}
-	if os.MkdirAll(c.root, 0700) != nil || os.Chmod(c.root, 0700) != nil {
-		return ErrUnavailable
+	var f *os.File
+	if err = os.MkdirAll(c.root, 0700); err == nil {
+		if err = os.Chmod(c.root, 0700); err == nil {
+			f, err = os.CreateTemp(c.root, ".dashboard-*.tmp")
+		}
 	}
-	f, err := os.CreateTemp(c.root, ".dashboard-*.tmp")
 	if err != nil {
 		return ErrUnavailable
 	}
 	defer func() { _ = os.Remove(f.Name()) }()
-	if _, err = f.Write(encoded); err != nil {
-		_ = f.Close()
-		return ErrUnavailable
-	}
-	if err = f.Sync(); err != nil {
-		_ = f.Close()
-		return ErrUnavailable
-	}
-	if err = f.Close(); err != nil {
-		return ErrUnavailable
-	}
-	if err = os.Rename(f.Name(), path); err != nil {
-		return ErrUnavailable
-	}
-	dir, err := os.Open(c.root)
-	if err != nil {
-		return ErrUnavailable
-	}
-	defer func() { _ = dir.Close() }()
-	if dir.Sync() != nil {
+	_, wErr := f.Write(encoded)
+	sErr := f.Sync()
+	cErr := f.Close()
+	if errors.Join(wErr, sErr, cErr) != nil || os.Rename(f.Name(), path) != nil || syncDirectory(c.root) != nil {
 		return ErrUnavailable
 	}
 	return nil

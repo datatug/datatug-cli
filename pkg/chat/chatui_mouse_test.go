@@ -17,6 +17,7 @@ import (
 // (globalKeys, chatui_pickers.go) toggles it via SetMouseEnabled, and the
 // status bar's mouseHint (chatui.go's statusBar) names what a press does.
 func TestChatUIF2TogglesMouseModeAndStatusHint(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 
 	if got := u.shell.View().MouseMode; got != tea.MouseModeCellMotion {

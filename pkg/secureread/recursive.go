@@ -5,24 +5,26 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dal-go/dalgo/condeval"
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 )
 
-// RunRecursiveDTQL evaluates a derived query over one explicitly selected
+// RunRecursiveTugQL evaluates a derived query over one explicitly selected
 // source. Every nested leaf passes through the same policy session and bound
 // variables. Named databases are refused: they require a routing executor.
-func (e *Executor) RunRecursiveDTQL(ctx context.Context, sourceURL string, document []byte, variables map[string]any) (Result, error) {
+func (e *Executor) RunRecursiveTugQL(ctx context.Context, sourceURL string, document []byte, variables map[string]any) (Result, error) {
+	if err := refuseContextVariables(document); err != nil {
+		return Result{}, err
+	}
 	variables, err := accesspolicies.ExactVariables(variables)
 	if err != nil {
 		return Result{}, err
 	}
-	query, err := dtql.Deserialize(document)
+	query, err := tugql.Deserialize(document)
 	if err != nil {
-		return Result{}, fmt.Errorf("parse recursive DTQL: %w", err)
+		return Result{}, fmt.Errorf("parse recursive TugQL: %w", err)
 	}
 	if err = ValidateRecursiveQuery(query); err != nil {
 		return Result{}, err
@@ -31,18 +33,18 @@ func (e *Executor) RunRecursiveDTQL(ctx context.Context, sourceURL string, docum
 	if err != nil {
 		return Result{}, err
 	}
-	db, closeSource, err := openSource(ctx, sourceURL, false, len(e.session.Policies))
+	db, closeSource, err := openSourceFn(ctx, sourceURL, false, len(e.session.Policies))
 	if err != nil {
 		return Result{}, err
 	}
 	defer closeSource()
 	var limitations []Limitation
 	leaf := singleSourceSecuredLeaf{securedLeaf: securedLeaf{db: db, session: e.session, variables: variables, limitations: &limitations}, guardAggregation: recursiveAggregation(query)}
-	reader, err := dal.ExecuteRecursiveQuery(ctx, leaf, query)
+	reader, err := dalExecuteRecursiveQuery(ctx, leaf, query)
 	if err != nil {
 		return Result{}, err
 	}
-	rows, statistics, err := collectRows(reader)
+	rows, statistics, err := collectRowsFn(reader)
 	if err != nil {
 		return Result{}, err
 	}
@@ -65,7 +67,7 @@ func bindRecursiveParameters(query dal.StructuredQuery, variables map[string]any
 		return nil, err
 	}
 	if len(parameters) > 0 {
-		where, err := condeval.Substitute(query.Where(), func(name string) (any, bool) { value, ok := variables[name]; return value, ok })
+		where, err := condevalSubstitute(query.Where(), func(name string) (any, bool) { value, ok := variables[name]; return value, ok })
 		if err != nil {
 			return nil, err
 		}

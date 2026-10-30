@@ -1003,8 +1003,8 @@ func (p *workspacePanel) bookmarksView(width, height int) string {
 		when = bookmark.Snapshot.RecordSet.CreatedAt.UTC().Format("2006-01-02 15:04 UTC")
 	}
 	lines = append(lines, "Source: "+sanitizeTerminalText(bookmark.SourceID)+" · snapshot: "+when)
-	if doc := strings.Join(strings.Fields(sanitizeTerminalText(bookmark.Snapshot.RecordSet.DTQL)), " "); doc != "" {
-		lines = append(lines, "DTQL: "+ansi.Truncate(doc, max(1, width-7), "…"))
+	if doc := strings.Join(strings.Fields(sanitizeTerminalText(bookmark.Snapshot.RecordSet.TugQL)), " "); doc != "" {
+		lines = append(lines, "TugQL: "+ansi.Truncate(doc, max(1, width-7), "…"))
 	}
 	if p.focused {
 		lines = append(lines, "", theme.WorkspaceKeyHint("Enter")+" grid · "+theme.WorkspaceKeyHint("Ctrl+P")+" Actions / search")
@@ -1237,11 +1237,7 @@ func (p *workspacePanel) updateKey(msg tea.KeyPressMsg) tea.Cmd {
 	if p == p.ui.explorer && p.explorerSearchFocused {
 		switch msg.String() {
 		case "esc":
-			if p.explorerSearch != "" {
-				p.explorerSearch = ""
-			} else {
-				p.explorerSearchFocused = false
-			}
+			p.explorerSearchFocused = false
 		case "enter", "down":
 			p.explorerSearchFocused = false
 		case "backspace":

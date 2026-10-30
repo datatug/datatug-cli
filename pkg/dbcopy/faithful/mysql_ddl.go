@@ -1,0 +1,650 @@
+package faithful
+
+import (
+	"fmt"
+	"sort"
+	"strconv"
+	"strings"
+	"unicode"
+	"unicode/utf8"
+)
+
+// MySQLMarkerTable is the table the script creates first (it fails when the table is there, so a second
+// load into the same database stops at once) and fills last (a row means the load completed).
+const MySQLMarkerTable = "_demodb_import"
+
+func (d mysqlDialect) CreateTable(t *ScriptTable) string {
+	var parts []string
+	for _, c := range t.Columns {
+		def := d.QuoteIdent(c.Name) + " " + c.Choice.Type
+		if c.NotNull {
+			def += " NOT NULL"
+		}
+		if c.AutoInc {
+			def += " AUTO_INCREMENT"
+		}
+		if c.Default != "" {
+			def += " DEFAULT " + c.Default
+		}
+		parts = append(parts, def)
+	}
+	if len(t.PK) > 0 {
+		parts = append(parts, "PRIMARY KEY ("+d.quoteList(t.PK)+")")
+	}
+	for _, u := range t.Uniques {
+		s := "UNIQUE KEY "
+		if u.Name != "" {
+			s += d.QuoteIdent(u.Name) + " "
+		}
+		parts = append(parts, s+"("+d.quoteList(u.Columns)+")")
+	}
+	return "CREATE TABLE " + d.QuoteIdent(t.Name) + " (\n  " + strings.Join(parts, ",\n  ") + "\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"
+}
+
+func (d mysqlDialect) IndexSQL(t *ScriptTable, ix Index) string {
+	cols := make([]string, len(ix.Columns))
+	for i, c := range ix.Columns {
+		cols[i] = d.QuoteIdent(c.Name)
+		if c.Desc {
+			cols[i] += " DESC"
+		}
+	}
+	s := "CREATE "
+	if ix.Unique {
+		s += "UNIQUE "
+	}
+	return s + "INDEX " + d.QuoteIdent(ix.Name) + " ON " + d.QuoteIdent(t.Name) + " (" + strings.Join(cols, ", ") + ");"
+}
+
+func (d mysqlDialect) CheckSQL(t *ScriptTable, ck Check) string {
+	s := "ALTER TABLE " + d.QuoteIdent(t.Name) + " ADD "
+	if ck.Name != "" {
+		s += "CONSTRAINT " + d.QuoteIdent(ck.Name) + " "
+	}
+	return s + "CHECK (" + ck.Expr + ");"
+}
+
+func (d mysqlDialect) FKSQL(p *ScriptPlan, t *ScriptTable, fk ForeignKey) string {
+	s := "ALTER TABLE " + d.QuoteIdent(t.Name) + " ADD "
+	if fk.Name != "" {
+		s += "CONSTRAINT " + d.QuoteIdent(fk.Name) + " "
+	}
+	s += "FOREIGN KEY (" + d.quoteList(fk.Columns) + ") REFERENCES " + d.QuoteIdent(fk.RefTable) + " (" + d.quoteList(fk.RefColumns) + ")"
+	if fk.OnUpdate != "" && fk.OnUpdate != "NO ACTION" {
+		s += " ON UPDATE " + fk.OnUpdate
+	}
+	if fk.OnDelete != "" && fk.OnDelete != "NO ACTION" {
+		s += " ON DELETE " + fk.OnDelete
+	}
+	return s + ";"
+}
+
+func (d mysqlDialect) CounterSQL(t *ScriptTable, c *ScriptColumn, next int64) string {
+	return "ALTER TABLE " + d.QuoteIdent(t.Name) + " AUTO_INCREMENT = " + strconv.FormatInt(next, 10) + ";"
+}
+
+func (d mysqlDialect) InsertHead(t *ScriptTable) string {
+	names := make([]string, len(t.Columns))
+	for i, c := range t.Columns {
+		names[i] = c.Name
+	}
+	return "INSERT INTO " + d.QuoteIdent(t.Name) + " (" + d.quoteList(names) + ") VALUES"
+}
+
+func (mysqlDialect) BatchLimits() (int, int) { return 1000, 1 << 20 }
+
+func (mysqlDialect) BeginData(*ScriptTable) []string { return []string{"START TRANSACTION;"} }
+
+func (mysqlDialect) EndData(*ScriptTable) []string { return []string{"COMMIT;"} }
+
+// headerLineMax is the most bytes of a header comment line; a longer one is cut (see commentText).
+const headerLineMax = 400
+
+// normalizeComment makes text safe for a "-- " comment line: no control or line-break character survives and runs of
+// blanks are one space. It does not shorten the text.
+func normalizeComment(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if unicode.IsControl(r) || r == 0x2028 || r == 0x2029 || r == utf8.RuneError {
+			r = ' '
+		}
+		b.WriteRune(r)
+	}
+	return strings.Join(strings.Fields(b.String()), " ")
+}
+
+// commentText makes text safe for a "-- " comment line: no control or line-break character survives, and a line over
+// headerLineMax bytes is cut there and ends in "...". The value of a header field (name, edition, licence, attribution)
+// is never cut: ValidateHeaderLines refuses a request that would, so only a machine-made line (a warning, the list of
+// tables) can be shortened.
+func commentText(s string) string {
+	out := normalizeComment(s)
+	if len(out) > headerLineMax {
+		out = out[:headerLineMax]
+		for !utf8.ValidString(out) {
+			out = out[:len(out)-1]
+		}
+		out += "..."
+	}
+	return out
+}
+
+// ValidateHeaderLines refuses a name, edition, licence or attribution whose header line would be cut at headerLineMax
+// bytes: a licence or attribution that the licence requires must not be shortened silently. The long text of a licence
+// belongs in a notice file, which is written whole.
+func ValidateHeaderLines(h Header) error {
+	for _, f := range []struct{ param, prefix, value string }{
+		{"name", "Dataset: ", h.Name}, {"edition", "", h.Edition}, {"license", "Licence: ", h.License}, {"attribution", "Attribution: ", h.Attribution},
+	} {
+		if n := len(normalizeComment(f.prefix + f.value)); n > headerLineMax {
+			return fmt.Errorf("the %s would be cut in the script header: its header line is %d bytes (blank runs counted as one space) and a line holds at most %d; "+
+				"shorten it, and put a long text (a licence, an attribution) in a notice file (notice-file=PATH, up to %d bytes, written whole)",
+				f.param, n, headerLineMax, MaxNoticeBytes)
+		}
+	}
+	return nil
+}
+
+func (d mysqlDialect) Header(p *ScriptPlan, h Header) []string {
+	var l []string
+	add := func(format string, args ...any) {
+		l = append(l, strings.TrimRight("-- "+commentText(fmt.Sprintf(format, args...)), " "))
+	}
+	raw := func(s string) { l = append(l, strings.TrimRight("-- "+s, " ")) }
+	name := h.Name
+	if name == "" {
+		name = "database"
+	}
+	if h.Edition != "" {
+		add("%s", h.Edition)
+	}
+	add("Dataset: %s", name)
+	add("Generated by datatug %s (datatug db copy --to sqlscript:///<file>.sql?dialect=mysql) from a SQLite file with SHA-256 %s", h.Version, h.SourceSHA256)
+	if h.License != "" {
+		add("Licence: %s", h.License)
+	}
+	if h.Attribution != "" {
+		add("Attribution: %s", h.Attribution)
+	}
+	if h.Notice != "" {
+		raw("")
+		l = append(l, NoticeLines("-- ", h.Notice, nil)...)
+	}
+	raw("")
+	raw("Requires MySQL 8.0.16 or later (CHECK constraints are enforced from there). Verified on MySQL 8.4 LTS.")
+	raw("Load it into an EMPTY database with the mysql client; the script stops at the first error:")
+	raw("  mysql --default-character-set=utf8mb4 --skip-commands --skip-system-command --database <name> < <file>.sql")
+	raw("(--skip-commands needs mysql 8.4.6 or later; without it the client still reads this file as plain statements,")
+	raw("because no data in it can start a line.) Do not load it with the \"source\" command of an untrusted file.")
+	raw("A blob is written in hex, twice its size: one value over about 8 MB is more than the client's default max_allowed_packet of 16 MB; add --max-allowed-packet=1G.")
+	raw("MySQL commits DDL, so a failed load is not rolled back: drop the database or the tables listed below and load again.")
+	raw("The first statement creates the table " + MySQLMarkerTable + " and fails when it exists; the last one fills it: a row there means the load completed.")
+	raw("DROP TABLE " + MySQLMarkerTable + " removes the marker once you no longer need it.")
+	raw("Text comparison in MySQL is case- and accent-insensitive by default, unlike SQLite's exact comparison: keys that differ only by case or accents in SQLite are duplicates here and stop the load.")
+	raw("The export warns about the key values it finds that collide that way (key-values-collide); it cannot find every kind of collision MySQL's collation makes.")
+	tables := make([]string, len(p.Tables))
+	for i, t := range p.Tables {
+		tables[i] = t.Name
+	}
+	add("Tables (%d): %s", len(tables), strings.Join(tables, ", "))
+	if len(p.Warnings) > 0 {
+		raw("")
+		add("%d thing(s) are not carried exactly:", len(p.Warnings))
+		for _, w := range p.Warnings {
+			add("  [%s] %s: %s", w.Kind, w.Object, w.Message)
+		}
+	}
+	return l
+}
+
+func (d mysqlDialect) Prelude(p *ScriptPlan, h Header) []string {
+	return []string{
+		"SET NAMES utf8mb4;",
+		"SET SESSION sql_mode = 'STRICT_ALL_TABLES,NO_AUTO_VALUE_ON_ZERO,NO_ENGINE_SUBSTITUTION,NO_ZERO_DATE,NO_ZERO_IN_DATE';",
+		"CREATE TABLE " + d.QuoteIdent(MySQLMarkerTable) + " (`dataset` VARCHAR(255) NOT NULL, `edition` VARCHAR(255) NOT NULL, `source_sha256` CHAR(64) NOT NULL, `datatug_version` VARCHAR(64) NOT NULL, `tables_count` INT NOT NULL, `rows_count` BIGINT NOT NULL, PRIMARY KEY (`dataset`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+	}
+}
+
+// Widths of the columns of the marker table.
+const (
+	markerDatasetLen = 255
+	markerEditionLen = 255
+	markerVersionLen = 64
+)
+
+// markerVersion is the version as the marker's VARCHAR(64) holds it; the header comment has it whole.
+func markerVersion(v string) string {
+	if utf8.RuneCountInString(v) <= markerVersionLen {
+		return v
+	}
+	return string([]rune(v)[:markerVersionLen])
+}
+
+// ValidateHeader refuses a dataset name or edition the marker row cannot hold. The row is the last statement of the
+// script: left alone, a value that is too long fails it after every row is loaded.
+func (mysqlDialect) ValidateHeader(h Header) error {
+	for _, f := range []struct {
+		what, value string
+		limit       int
+	}{{"name", h.Name, markerDatasetLen}, {"edition", h.Edition, markerEditionLen}} {
+		switch n := utf8.RuneCountInString(f.value); {
+		case !utf8.ValidString(f.value):
+			return fmt.Errorf("the %s is not valid UTF-8, which the marker table of the script cannot hold", f.what)
+		case strings.IndexByte(f.value, 0) >= 0:
+			return fmt.Errorf("the %s holds a NUL character, which the marker table of the script cannot hold", f.what)
+		case n > f.limit:
+			return fmt.Errorf("the %s is %d characters and the marker table of the script holds at most %d (the script would load every row and then fail on its last statement); shorten it", f.what, n, f.limit)
+		}
+	}
+	return nil
+}
+
+func (d mysqlDialect) Epilogue(p *ScriptPlan, h Header) []string {
+	var rows int64
+	for _, t := range p.Tables {
+		rows += t.Rows
+	}
+	name := h.Name
+	return []string{
+		fmt.Sprintf("INSERT INTO %s VALUES (%s, %s, %s, %s, %d, %d);", d.QuoteIdent(MySQLMarkerTable),
+			mysqlTextLiteral(name), mysqlTextLiteral(h.Edition), mysqlTextLiteral(h.SourceSHA256), mysqlTextLiteral(markerVersion(h.Version)), len(p.Tables), rows),
+		"-- end of script",
+	}
+}
+
+// ---- whole-plan rules ----
+
+func columnKeyBytes(c Choice) int {
+	switch c.Family {
+	case "int":
+		return c.Bits / 8
+	case "bool":
+		return 1
+	case "decimal":
+		return (c.Prec+8)/9*4 + 1
+	case "date":
+		return 3
+	case "datetime":
+		return 5 + (c.Fsp+1)/2
+	case "time":
+		return 3 + (c.Fsp+1)/2
+	case "text":
+		return 4 * c.Len
+	case "bytes":
+		return c.Len
+	}
+	return 8 // float
+}
+
+func columnRowBytes(c Choice) int {
+	switch c.Family {
+	case "text":
+		if c.Len == 0 {
+			return 10
+		}
+		return 4*c.Len + 2
+	case "bytes":
+		if c.Len == 0 {
+			return 10
+		}
+		return c.Len + 2
+	}
+	return columnKeyBytes(c)
+}
+
+type fkClass struct{ members []*ScriptColumn }
+
+func (d mysqlDialect) Adjust(p *ScriptPlan) error {
+	d.dropUnsupportedFKs(p)
+	classes := d.unifyFKClasses(p)
+	if err := d.fitKeys(p, classes); err != nil {
+		return err
+	}
+	return d.fitRows(p)
+}
+
+func fkLabel(t *ScriptTable, fk ForeignKey) string {
+	if fk.Name != "" {
+		return t.Name + "." + fk.Name
+	}
+	return t.Name + "(" + strings.Join(fk.Columns, ",") + ")"
+}
+
+func sameCols(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// parentKeys are the column lists a foreign key may reference: MySQL (with restrict_fk_on_non_standard_key)
+// takes only a primary key or a unique key.
+func parentKeys(t *ScriptTable) [][]string {
+	keys := [][]string{}
+	if len(t.PK) > 0 {
+		keys = append(keys, t.PK)
+	}
+	for _, u := range t.Uniques {
+		keys = append(keys, u.Columns)
+	}
+	for _, ix := range t.Indexes {
+		if ix.Unique && ix.Where == "" {
+			names := make([]string, len(ix.Columns))
+			for i, c := range ix.Columns {
+				names[i] = c.Name
+			}
+			keys = append(keys, names)
+		}
+	}
+	return keys
+}
+
+func (d mysqlDialect) dropUnsupportedFKs(p *ScriptPlan) {
+	for _, t := range p.Tables {
+		var keep []ForeignKey
+		for _, fk := range t.FKs {
+			label := fkLabel(t, fk)
+			parent := p.Table(fk.RefTable)
+			if parent == nil {
+				p.warn(WarnFKNotCarried, label, "the referenced table %q is not part of the script", fk.RefTable)
+				continue
+			}
+			ok := false
+			for _, k := range parentKeys(parent) {
+				if sameCols(k, fk.RefColumns) {
+					ok = true
+				}
+			}
+			if !ok {
+				p.warn(WarnFKNotCarried, label, "the referenced columns (%s) of %s are no primary key or unique key, which MySQL requires", strings.Join(fk.RefColumns, ", "), parent.Name)
+				continue
+			}
+			fix := func(action, which string) string {
+				switch action {
+				case "SET DEFAULT":
+					p.warn(WarnFKActionNotCarried, label, "ON %s SET DEFAULT is not supported by InnoDB: the key is carried with NO ACTION", which)
+					return "NO ACTION"
+				case "SET NULL":
+					for _, c := range fk.Columns {
+						if t.Col(c).NotNull {
+							p.warn(WarnFKActionNotCarried, label, "ON %s SET NULL needs nullable columns and %s is NOT NULL: the key is carried with NO ACTION", which, c)
+							return "NO ACTION"
+						}
+					}
+				}
+				return action
+			}
+			fk.OnUpdate, fk.OnDelete = fix(fk.OnUpdate, "UPDATE"), fix(fk.OnDelete, "DELETE")
+			if fk.Deferrable {
+				p.warn(WarnFKActionNotCarried, label, "DEFERRABLE is not supported by MySQL: the key is checked at once")
+				fk.Deferrable, fk.Deferred = false, false
+			}
+			keep = append(keep, fk)
+		}
+		t.FKs = keep
+	}
+}
+
+// unifyFKClasses gives every column of a foreign key equivalence class (the child columns and the parent
+// columns they reference, transitively) one type: MySQL refuses a key between columns of different types.
+func (d mysqlDialect) unifyFKClasses(p *ScriptPlan) []*fkClass {
+	parent := map[*ScriptColumn]*ScriptColumn{}
+	var find func(c *ScriptColumn) *ScriptColumn
+	find = func(c *ScriptColumn) *ScriptColumn {
+		if parent[c] == nil || parent[c] == c {
+			parent[c] = c
+			return c
+		}
+		parent[c] = find(parent[c])
+		return parent[c]
+	}
+	for _, t := range p.Tables {
+		for _, fk := range t.FKs {
+			pt := p.Table(fk.RefTable)
+			for i, cn := range fk.Columns {
+				a, b := find(t.Col(cn)), find(pt.Col(fk.RefColumns[i]))
+				if a != b {
+					parent[a] = b
+				}
+			}
+		}
+	}
+	byRoot := map[*ScriptColumn]*fkClass{}
+	var classes []*fkClass
+	for _, t := range p.Tables {
+		for _, c := range t.Columns {
+			if !c.Use.Keyed() {
+				continue
+			}
+			r := find(c)
+			if byRoot[r] == nil {
+				byRoot[r] = &fkClass{}
+				classes = append(classes, byRoot[r])
+			}
+			byRoot[r].members = append(byRoot[r].members, c)
+		}
+	}
+	for _, cl := range classes {
+		if len(cl.members) > 1 {
+			d.mergeClass(p, cl)
+		}
+	}
+	return classes
+}
+
+func (d mysqlDialect) mergeClass(p *ScriptPlan, cl *fkClass) {
+	same := true
+	fam := cl.members[0].Choice.Family
+	for _, m := range cl.members {
+		if m.Choice.Family != fam {
+			same = false
+		}
+	}
+	before := make([]string, len(cl.members))
+	for i, m := range cl.members {
+		before[i] = m.Choice.Type
+	}
+	merged := cl.members[0].Choice
+	switch {
+	case !same:
+		hasBytes := false
+		need := 255
+		for _, m := range cl.members {
+			hasBytes = hasBytes || m.Choice.Family == "bytes"
+			need = max(need, m.Choice.Len, 40)
+		}
+		merged = Choice{Kind: KindText, Family: "text", Len: need, Bounded: true, Tight: need}
+		if hasBytes {
+			merged = Choice{Kind: KindBytes, Family: "bytes", Len: need, Bounded: true, Tight: need}
+		}
+	default:
+		for _, m := range cl.members[1:] {
+			c := m.Choice
+			merged.Bits = max(merged.Bits, c.Bits)
+			merged.Len = max(merged.Len, c.Len)
+			merged.Tight = max(merged.Tight, c.Tight)
+			merged.Fsp = max(merged.Fsp, c.Fsp)
+			merged.Scale = max(merged.Scale, c.Scale)
+			merged.Bounded = merged.Bounded || c.Bounded
+		}
+		if fam == "decimal" {
+			intDigits := 0
+			for _, m := range cl.members {
+				intDigits = max(intDigits, m.Choice.Prec-m.Choice.Scale)
+			}
+			merged.Prec = min(intDigits+merged.Scale, 65)
+		}
+	}
+	for i, m := range cl.members {
+		n, ex, note, bounded := m.Choice.Normalized, m.Choice.Example, m.Choice.Note, m.Choice.Bounded
+		ch := merged
+		ch.Normalized, ch.Example, ch.Note, ch.Kind = n, ex, note, merged.Kind
+		if !same || m.Choice.Kind == KindBool {
+			ch.Bounded = bounded
+		}
+		ch.MaxSize = m.Choice.MaxSize
+		ch.render()
+		m.Choice = ch
+		if ch.Type != before[i] {
+			p.warn(WarnTypeWidened, m.Object, "declared %q and carried as %s, but it joins the columns of its foreign keys, which MySQL requires to have one type: carried as %s", strings.TrimSpace(m.Src.SourceType), before[i], ch.Type)
+		}
+	}
+}
+
+func (t *ScriptTable) keySets() (sets [][]*ScriptColumn, kinds []string) {
+	add := func(kind string, names []string) {
+		cols := make([]*ScriptColumn, len(names))
+		for i, n := range names {
+			cols[i] = t.Col(n)
+		}
+		sets, kinds = append(sets, cols), append(kinds, kind)
+	}
+	if len(t.PK) > 0 {
+		add("primary key", t.PK)
+	}
+	for _, u := range t.Uniques {
+		add("unique key", u.Columns)
+	}
+	for _, ix := range t.Indexes {
+		names := make([]string, len(ix.Columns))
+		for i, c := range ix.Columns {
+			names[i] = c.Name
+		}
+		kind := "index " + ix.Name
+		if ix.Unique {
+			kind = "unique index " + ix.Name
+		}
+		add(kind, names)
+	}
+	for _, fk := range t.FKs {
+		add("foreign key", fk.Columns)
+	}
+	return
+}
+
+func keyCost(cols []*ScriptColumn) int {
+	n := 0
+	for _, c := range cols {
+		n += columnKeyBytes(c.Choice)
+	}
+	return n
+}
+
+// fitKeys makes every key fit InnoDB's 3,072 byte limit. A text or binary key column gets a bounded type: a
+// generous one first (VARCHAR(255) for a column that declares no length), the length of its longest
+// value when the key is too long otherwise.
+func (d mysqlDialect) fitKeys(p *ScriptPlan, classes []*fkClass) error {
+	classOf := map[*ScriptColumn]*fkClass{}
+	for _, cl := range classes {
+		for _, m := range cl.members {
+			classOf[m] = cl
+		}
+	}
+	set := func(cl *fkClass, length int) {
+		for _, m := range cl.members {
+			m.Choice.Len = length
+			m.Choice.render()
+		}
+	}
+	for _, cl := range classes {
+		c0 := cl.members[0].Choice
+		if (c0.Family == "text" || c0.Family == "bytes") && c0.Bounded && c0.Len < 255 && c0.Family == "text" {
+			set(cl, 255)
+		}
+	}
+	for _, t := range p.Tables {
+		sets, kinds := t.keySets()
+		for i := 0; i < len(sets); i++ {
+			if keyCost(sets[i]) <= mysqlMaxKeyBytes && len(sets[i]) <= 16 {
+				continue
+			}
+			for _, c := range sets[i] {
+				if cl := classOf[c]; cl != nil && (c.Choice.Family == "text" || c.Choice.Family == "bytes") {
+					tight := 1
+					for _, m := range cl.members {
+						tight = max(tight, m.Choice.Tight)
+					}
+					set(cl, tight)
+					for _, m := range cl.members {
+						m.Choice.Bounded = true
+					}
+				}
+			}
+			if keyCost(sets[i]) <= mysqlMaxKeyBytes && len(sets[i]) <= 16 {
+				continue
+			}
+			if strings.HasPrefix(kinds[i], "index ") {
+				name := strings.TrimPrefix(kinds[i], "index ")
+				p.warn(WarnIndexNotCarried, t.Name+"."+name, "the key is longer than the 3072 bytes InnoDB allows even with every column at the length of its longest value")
+				var keep []Index
+				for _, ix := range t.Indexes {
+					if ix.Name != name {
+						keep = append(keep, ix)
+					}
+				}
+				t.Indexes = keep
+				sets, kinds = t.keySets()
+				i = -1
+				continue
+			}
+			return fmt.Errorf("%s of table %q is longer than the 3072 bytes InnoDB allows (%d), even with every column at the length of its longest value; MySQL cannot carry it", kinds[i], t.Name, keyCost(sets[i]))
+		}
+	}
+	for _, t := range p.Tables {
+		for _, c := range t.Columns {
+			if c.Use.Keyed() && c.Choice.Bounded && (c.Choice.Family == "text" || c.Choice.Family == "bytes") {
+				p.warn(WarnKeyTypeBounded, c.Object, "a key column is carried as %s (declared %q): MySQL cannot index an unbounded type; its longest value is %d", c.Choice.Type, strings.TrimSpace(c.Src.SourceType), longestValue(c))
+			}
+		}
+	}
+	return nil
+}
+
+// fitRows makes every row fit MySQL's 65,535 byte limit by carrying the widest unkeyed VARCHAR columns as TEXT.
+func (d mysqlDialect) fitRows(p *ScriptPlan) error {
+	for _, t := range p.Tables {
+		total := func() int {
+			n := (len(t.Columns)+7)/8 + 1
+			for _, c := range t.Columns {
+				n += columnRowBytes(c.Choice)
+			}
+			return n
+		}
+		if total() <= mysqlMaxRowBytes {
+			continue
+		}
+		var cands []*ScriptColumn
+		for _, c := range t.Columns {
+			if c.Choice.Family == "text" && c.Choice.Len > 0 && !c.Use.Keyed() {
+				cands = append(cands, c)
+			}
+		}
+		sort.SliceStable(cands, func(i, j int) bool { return cands[i].Choice.Len > cands[j].Choice.Len })
+		for _, c := range cands {
+			if total() <= mysqlMaxRowBytes {
+				break
+			}
+			was := c.Choice.Type
+			c.Choice.Len = 0
+			c.Choice.render()
+			p.warn(WarnRowSizeBounded, t.Name+"."+c.Name, "%s is carried as %s so a row fits MySQL's 65,535 byte row size limit", was, c.Choice.Type)
+		}
+		if total() > mysqlMaxRowBytes {
+			return fmt.Errorf("a row of table %q is longer than the 65,535 bytes MySQL allows even with every text column as TEXT; MySQL cannot carry it", t.Name)
+		}
+	}
+	return nil
+}
+
+// longestValue is the length of the longest value of a text column in characters, of a binary column in bytes.
+func longestValue(c *ScriptColumn) int {
+	if c.Choice.Family == "bytes" {
+		return max(c.Stats.MaxBlob, c.Stats.MaxBytes)
+	}
+	return c.Stats.maxLen
+}

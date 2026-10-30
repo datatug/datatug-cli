@@ -6,6 +6,11 @@ import (
 	"runtime"
 )
 
+var (
+	browserGOOS       = runtime.GOOS
+	browserCommandRun = func(c *exec.Cmd) error { return c.Run() }
+)
+
 // launchAuthBrowser owns the OS opener process for the consent flow. CommandContext
 // kills it on cancellation and Run waits for it; there is no abandoned launcher
 // goroutine. No opener output (which can include the URL) enters diagnostics.
@@ -14,7 +19,7 @@ func launchAuthBrowser(ctx context.Context, url string) error {
 		return err
 	}
 	var command *exec.Cmd
-	switch runtime.GOOS {
+	switch browserGOOS {
 	case "darwin":
 		command = exec.CommandContext(ctx, "/usr/bin/open", url)
 	case "windows":
@@ -23,5 +28,5 @@ func launchAuthBrowser(ctx context.Context, url string) error {
 		command = exec.CommandContext(ctx, "xdg-open", url)
 	}
 	command.WaitDelay = authDrainTimeout
-	return command.Run()
+	return browserCommandRun(command)
 }

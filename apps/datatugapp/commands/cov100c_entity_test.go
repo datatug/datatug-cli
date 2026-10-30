@@ -98,7 +98,7 @@ func TestCov100cEntityShow(t *testing.T) {
 		_, _, err := runEntity(t, "entity", "show", "A", "-d", dir)
 		require.Error(t, err)
 	})
-	t.Run("flat layout has no nested file to repair tables from", func(t *testing.T) {
+	t.Run("flat layout loads canonical tables through Core", func(t *testing.T) {
 		dir := t.TempDir()
 		require.NoError(t, os.MkdirAll(filepath.Join(dir, "entities"), 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "entities", "A.entity.json"), []byte(cov100cEntityA), 0o600))
@@ -106,11 +106,11 @@ func TestCov100cEntityShow(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, out.String(), "Entity A")
 	})
-	t.Run("unparsable tables are tolerated", func(t *testing.T) {
+	t.Run("unparsable tables are refused", func(t *testing.T) {
 		dir := t.TempDir()
 		cov100cSeedEntity(t, dir, "A", `{"id":"A","tables":[{"name":5}]}`)
 		_, _, err := runEntity(t, "entity", "show", "A", "-d", dir)
-		require.NoError(t, err)
+		require.ErrorContains(t, err, "invalid entity table identity")
 	})
 	t.Run("render failure", func(t *testing.T) {
 		dir := t.TempDir()

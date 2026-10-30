@@ -21,6 +21,8 @@ type aiCatalogOperation struct {
 	Done    bool            `json:"done"`
 }
 
+var aiCatalogJSONMarshal = json.Marshal
+
 // ConfirmCatalog journals the already-reviewed shared Core draft, the exact
 // previous definition and an audit intent before replacing a project file.
 // A crash between any two writes can be reconciled by the same operation ID.
@@ -131,11 +133,13 @@ func (s LocalAIStore) prepareAICatalog(command ai.Command) (string, json.RawMess
 			}
 			before = data
 			item.Version++
+			item.CreatedAt = resolveCreatedAt(item.CreatedAt, old.CreatedAt, true, time.Now())
 		} else if errors.Is(err, os.ErrNotExist) {
 			if item.Version != 0 {
 				return bad(ErrConflict)
 			}
 			item.Version = 1
+			item.CreatedAt = resolveCreatedAt(item.CreatedAt, "", false, time.Now())
 		} else {
 			return bad(err)
 		}
@@ -270,6 +274,7 @@ func (s LocalAIStore) prepareAICatalog(command ai.Command) (string, json.RawMess
 			}
 			before = data
 			item.Version++
+			item.CreatedAt = resolveCreatedAt(item.CreatedAt, old.CreatedAt, true, time.Now())
 		} else if errors.Is(err, os.ErrNotExist) {
 			if item.Version != 0 {
 				return bad(ErrConflict)
@@ -282,6 +287,7 @@ func (s LocalAIStore) prepareAICatalog(command ai.Command) (string, json.RawMess
 				return bad(ErrCapacity)
 			}
 			item.Version = 1
+			item.CreatedAt = resolveCreatedAt(item.CreatedAt, "", false, time.Now())
 		} else {
 			return bad(err)
 		}
@@ -290,7 +296,7 @@ func (s LocalAIStore) prepareAICatalog(command ai.Command) (string, json.RawMess
 	if !validSlug(resourceID) || version < 1 {
 		return bad(ErrInvalid)
 	}
-	encoded, err := json.Marshal(value)
+	encoded, err := aiCatalogJSONMarshal(value)
 	if err != nil {
 		return bad(err)
 	}

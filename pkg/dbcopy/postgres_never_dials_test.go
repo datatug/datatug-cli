@@ -45,9 +45,8 @@ func TestTheConstructorsOfThisTestBinaryAreTheOnesThatStopTheRun(t *testing.T) {
 }
 
 // A test that opens a source with no stand-in is stopped by the run itself, whichever way in it
-// takes: Open reaches the constructor only when the preview is on.
+// takes: Open reaches the constructor.
 func TestAnOpenWithNoStandInStopsTheRun(t *testing.T) {
-	previewOn(t)
 	_, err := Parse("postgres://alice:" + markerPassword + "@h:notaport/db")
 	assert.Error(t, err, "a URL pgx cannot read is refused by Parse already")
 	ref, err := Parse("postgres://alice:" + markerPassword + "@db.example.com/shop")
@@ -56,15 +55,9 @@ func TestAnOpenWithNoStandInStopsTheRun(t *testing.T) {
 	assert.Panics(t, func() { _, _ = ref.OpenSchemaScan(t.Context()) })
 }
 
-// The switch of the developer's shell does not reach a test: TestMain clears it.
-func TestThePreviewSwitchIsOffUnlessATestTurnsItOn(t *testing.T) {
-	assert.ErrorIs(t, CheckPostgresPreview(), ErrPostgresPreview)
-}
-
 // The hook that the tests of other packages use puts a stand-in in place of the constructor, forgets the
 // handles of the process, and puts everything back.
 func TestSetPostgresOpenerForTest_ReplacesTheConstructorForTheLengthOfATest(t *testing.T) {
-	previewOn(t)
 	ref, err := Parse("postgres://alice:" + markerPassword + "@db.example.com/shop")
 	assert.NoError(t, err)
 	fake := &fakeOpener{}

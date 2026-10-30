@@ -21,9 +21,15 @@ status: Implemented
 - `DATETIME` / `NUMERIC(p,s)` SQLite types are recognized as `dbschema.Time` and `dbschema.Decimal` respectively (fixed upstream in `dalgo2sqlite`). `dbschema.Decimal` and `dbschema.Bytes` map to inGitDB's `Float` and `String` column types respectively — lossy carriers documented in `dalgo2ingitdb/type_mapping.go`.
 - Composite-PK tables are copied with each row's target record ID as the `__`-joined `fmt.Sprintf("%v", v)` of every PK column (in the order `DescribeCollection` reports them); for example `PlaylistTrack`'s `(PlaylistId=1, TrackId=3402)` lands at `<projectPath>/PlaylistTrack/$records/1__3402.yaml`.
 - inGitDB → SQLite row streaming works through `dalgo2sql` accepting `map[string]any` Record data alongside the existing struct path (fixed upstream). End-to-end reverse-direction E2E is not yet wired in tests; the building blocks are in place.
-- PostgreSQL remains preview-gated by `DATATUG_PREVIEW_POSTGRES=1`. A `--from` is read through a read-only session; `--to` is the only place DataTug opens PostgreSQL for writing. The real-server CI journey also exercises PostgreSQL-to-BigQuery source-row encoding through an offline capture sink. The `ingitdb://` URL scheme dispatches to the inGitDB driver against a local-filesystem path.
+- PostgreSQL is not behind a preview switch (removed 2026-10-23). A `--from` is read through a read-only session; `--to` is the only place DataTug opens PostgreSQL for writing. The real-server CI journey also exercises PostgreSQL-to-BigQuery source-row encoding through an offline capture sink. The `ingitdb://` URL scheme dispatches to the inGitDB driver against a local-filesystem path.
 
 The command currently dispatches the registered URL schemes above; it does not accept every DALgo adapter automatically. BigQuery table creation omits source primary and foreign key declarations because BigQuery does not enforce them and this copy path does not independently validate uniqueness or referential integrity across staged rows. The command reports each omitted source constraint. A `--parallel-streams` flag governs per-table parallelism with a safety cap derived from the DALgo `ConcurrencyAware` capability. SQL targets require explicit `--overwrite=recreate` (drop tables and recreate from source schema) or `--overwrite=reload` (truncate tables and reload data, preserving schema) when destination tables already exist. BigQuery always refuses existing tables; choose a new dataset or table names.
+
+**Between SQLite and PostgreSQL (and SQLite to SQLite) the copy is faithful** (amended 2026-10-15, see [SQLite and PostgreSQL copies](#sqlite-and-postgresql-copies)): tables, columns with their declared types, primary keys, foreign keys with their actions, unique constraints, indexes, check constraints, defaults, auto-number counters and every value are carried, in one transaction on a snapshot of the source; whatever an engine cannot carry is a warning, never a silent loss. The other pairs keep the DALgo path described below.
+
+**SQL script destination** (added 2026-10-16, founder direction: not a second command): `--to 'sqlscript:///path/out.sql?dialect=mysql'` (or `dialect=mssql`, a SQL Server script, or `dialect=oracle`, an Oracle script) writes a deterministic script from a SQLite `--from` instead of copying into a database, with the same warnings, `--json`, `--dry-run`, `--fail-on-warning`, `--include` and `--exclude` (see [SQL script destinations](#sql-script-destinations)). `datatug db export` is unchanged.
+
+**Native inGitDB destination and `datatug db export`** (added 2026-10-16, founder decision): `datatug db export` is a shortcut for `datatug db copy --to ingitdb://<folder>`: one engine, with a plain folder path and a default folder name added (see [Native inGitDB destination](#native-ingitdb-destination-and-datatug-db-export)).
 
 ## Contents
 
@@ -38,6 +44,9 @@ datatug db copy --from <source-url> --to <target-url>
                 [--parallel-streams=N]
                 [--overwrite=recreate|reload]
                 [--progress]
+                [--from-schema=NAME] [--to-schema=NAME]   # PostgreSQL sides
+                [--json] [--dry-run] [--fail-on-warning]  # SQLite / PostgreSQL copies
+                [--decimals=numeric|text]                 # SQLite -> PostgreSQL
 
 datatug db copy --to bigquery://PROJECT/DATASET?location=LOCATION
                 --recover-job-ref '<credential-free JSON reference>'
@@ -62,6 +71,7 @@ The command MUST accept the following optional flags:
 - `--parallel-streams <N>` — positive integer; default `runtime.NumCPU() - 1` (minimum `1`). Governs per-table parallelism, subject to the cap-to-1 rule in REQ:concurrency-cap.
 - `--overwrite <recreate|reload>` — value MUST be exactly one of `recreate` or `reload`. A bare `--overwrite` (with no value) MUST be rejected with exit `2`. Omitting the flag means "require empty target" per REQ:empty-target-check.
 - `--progress` — boolean; when present, enables per-table progress lines on stderr (see REQ:progress-reporting). Default off (silent).
+- `--from-schema <name>`, `--to-schema <name>`, `--json`, `--dry-run`, `--fail-on-warning` and `--decimals <numeric|text>` apply to SQLite and PostgreSQL copies only (see REQ:faithful-reporting) and, except `--from-schema`, `--to-schema` and `--decimals`, to a `sqlscript://` destination (see REQ:sqlscript-flags); any other pair MUST reject them with exit `2`.
 
 ### URL scheme dispatch
 
@@ -73,12 +83,13 @@ The MVP URL parser MUST accept these schemes:
 |---|---|---|---|
 | `sqlite` | `sqlite:///absolute/path.db` or `sqlite://./relative/path.db` | `dalgo2sqlite` (lives in `dal-go/dalgo2sqlite`) | E2E-tested |
 | `ingitdb` | `ingitdb://./path-to-project` (local-filesystem path) | `dalgo2ingitdb` (lives in `ingitdb/ingitdb-cli`) | E2E-tested |
-| `postgres` | `postgres://user:pw@host:port/dbname?sslmode=...` | `dalgo2postgres` (lives in `dal-go/dalgo2postgres`) | **Preview** — while `DATATUG_PREVIEW_POSTGRES` is not `1`, opening MUST exit `4` with one fixed sentence that says PostgreSQL sources are a preview and names the variable, before the URL is read any further and without a connection. A URL on either side whose query sets `host`, `port`, `dbname` or `database` is refused by the URL parser with exit `2` whether the variable is set or not, because `db copy` parses both URLs before it opens anything. With it set, `--from` opens through a read-only session (a `--from` URL that turns `default_transaction_read_only` off is refused, and so is one whose query sets `service` or `servicefile`) and `--to` opens for writing. Not in the MVP E2E bar. |
+| `postgres` | `postgres://user:pw@host:port/dbname?sslmode=...` | `dalgo2postgres` (lives in `dal-go/dalgo2postgres`) | Supported. A URL on either side whose query sets `host`, `port`, `dbname` or `database` is refused by the URL parser with exit `2` whether the variable is set or not, because `db copy` parses both URLs before it opens anything. With it set, `--from` opens through a read-only session (a `--from` URL that turns `default_transaction_read_only` off is refused, and so is one whose query sets `service` or `servicefile`) and `--to` opens for writing. Not in the MVP E2E bar. |
+| `sqlscript` | `sqlscript:///abs/path.sql?dialect=mysql` or `sqlscript:rel/path.sql?dialect=mysql` | none: a file writer in `pkg/dbcopy/faithful` | **Destination only**, from a `sqlite://` source; `dialect=mysql`, `dialect=mssql` and `dialect=oracle` are implemented (see [SQL script destinations](#sql-script-destinations)) |
 | `bigquery` | `bigquery://PROJECT/DATASET?location=LOCATION` | `dalgo2bigquery` load writer | Supported destination; uses local Google Application Default Credentials with BigQuery write scope. The project is the billing project. Location is mandatory. Existing tables are never replaced, and `--overwrite` is rejected. |
 
 #### REQ: bigquery-destination-transfer
 
-BigQuery is a destination for provider-neutral copies from DALgo sources, including SQLite, inGitDB, and preview-gated PostgreSQL. The CLI MUST stage and validate all selected source rows before creating the BigQuery dataset or tables. It MUST preserve physical source rows even when a table has no primary key, and MUST fail before destination mutation when a schema or value has no safe BigQuery representation. The destination writer MUST use explicit schema and location, `CREATE_NEVER`, `WRITE_EMPTY`, `maxBadRecords=0`, and `ignoreUnknownValues=false`; it MUST NOT overwrite existing tables. Credentials come from local Application Default Credentials and MUST NOT be accepted in the URL or printed. BigQuery PK/FK declarations are omitted because they are unenforced and this path does not validate all staged key semantics; each omitted source key is reported as a warning. Source secondary indexes and referential actions are not reproduced and are reported as warnings. Date-only text found in a declared `DATETIME` column is encoded at midnight so the original date remains exact in BigQuery's required date-time representation. BigQuery load jobs are atomic per table, but a multi-table copy is not one transaction: a provider/network failure after target preparation can leave tables already created or loaded.
+BigQuery is a destination for provider-neutral copies from DALgo sources, including SQLite, inGitDB, and PostgreSQL. The CLI MUST stage and validate all selected source rows before creating the BigQuery dataset or tables. It MUST preserve physical source rows even when a table has no primary key, and MUST fail before destination mutation when a schema or value has no safe BigQuery representation. The destination writer MUST use explicit schema and location, `CREATE_NEVER`, `WRITE_EMPTY`, `maxBadRecords=0`, and `ignoreUnknownValues=false`; it MUST NOT overwrite existing tables. Credentials come from local Application Default Credentials and MUST NOT be accepted in the URL or printed. BigQuery PK/FK declarations are omitted because they are unenforced and this path does not validate all staged key semantics; each omitted source key is reported as a warning. Source secondary indexes and referential actions are not reproduced and are reported as warnings. Date-only text found in a declared `DATETIME` column is encoded at midnight so the original date remains exact in BigQuery's required date-time representation. BigQuery load jobs are atomic per table, but a multi-table copy is not one transaction: a provider/network failure after target preparation can leave tables already created or loaded.
 
 When a load outcome is uncertain, the command MUST print a credential-free `LoadJobRef` and a recovery invocation. The user MUST NOT rerun the copy while that job is unresolved. `--recover-job-ref` accepts the printed JSON reference with `--to`; recovery MUST poll only that same job and MUST NOT submit rows again. It MUST verify that the reference's project, dataset, and location match `--to` and MUST reject source, filter, overwrite, or progress flags in recovery mode.
 
@@ -96,6 +107,8 @@ A URL whose scheme is not in the supported list MUST be rejected before any conn
 
 The command MUST introspect the source schema via the DALgo `dbschema` package (shipped in `dal-go/dalgo/dbschema`). Specifically, it calls `Adapter.ListTables(ctx)` to enumerate tables and `Adapter.DescribeTable(ctx, name)` for each table's column definitions, primary key, and indexes. The command MUST NOT hand-roll engine-specific introspection queries (e.g. `SELECT … FROM sqlite_master`); the DALgo dbschema adapter is the single seam.
 
+**Exception (2026-10-15).** A copy between SQLite and PostgreSQL, and one between two SQLite files, reads each engine's own catalog (`PRAGMA` tables and `sqlite_master`; `pg_catalog`) instead, as REQ:faithful-pairs says: `dbschema.Type` has no place for a declared type text, a check constraint, a default expression or a constraint name, and a copy that must keep them cannot be built on it.
+
 #### REQ: source-introspection-failure
 
 If the source URL parses cleanly but the source backend cannot be opened (file missing, connection refused, auth failure), the command MUST exit `4` (connection failure) with stderr naming the source as it is displayed (scheme, host, port and path, never a user name, a password or a query string) and a fixed reason: the file or directory does not exist, permission denied, the attempt timed out or was cancelled, or the connection was refused; for any other cause, a sentence saying the driver could not open the source. The driver's own text MUST NOT be shown, because a driver can quote the connection string, which holds the password. A PostgreSQL side is not named by its display form (that holds the host): the line after `open --from:` or `open --to:` is the sentence the adapter chose for the failure and where the connection string is read from (`the PostgreSQL connection string is read from the --to flag`, or the variable of an `env:NAME` side), the same text a call that fails later gives. (`TestDBCopy_OnlyTheTargetIsOpenedForWriting`.)
@@ -108,11 +121,15 @@ If introspection succeeds in opening the source but `ListTables` returns an empt
 
 The command MUST create target tables (and primary-key declarations) via the DALgo DDL surface (`dal-go/dalgo/ddl`). Per source table, it builds a `ddl.CreateTable` operation from the introspected `TableDef` and applies it through the target's `dal.Adapter`. The command MUST NOT hand-roll engine-specific `CREATE TABLE` SQL.
 
+**Exception (2026-10-15).** For the pairs of REQ:faithful-pairs the command writes the `CREATE TABLE`, index, check and foreign-key statements of the target engine itself, from the catalog it read: the DDL surface does not express declared types, checks, defaults, deferrable keys or key actions exactly.
+
 For indexes, the command MUST apply each non-primary index via `ddl.CreateIndex` after the table is created and BEFORE row data is loaded for that table. The order is: `CreateTable` → `CreateIndex` (×N) → row stream. This order is engine-agnostic; per-engine performance hints (e.g. "drop indexes, bulk-load, recreate indexes") are out of scope for MVP.
 
 #### REQ: names-checked-before-writes
 
 For a PostgreSQL target, the command MUST check every source table name and every name in a definition it will write (table, column, primary-key column, index and index column) before the first target change. It MUST use the adapter's rule: a plain identifier of at most 63 UTF-8 bytes after lower-casing. A refused name MUST leave the target unchanged, name its source object, say how to rename or exclude it, and exit `1`.
+
+**Exception (2026-10-15).** A SQLite or PostgreSQL copy of REQ:faithful-pairs keeps names exactly as they are (it writes quoted identifiers and never lower-cases). It refuses a table or column name longer than 63 bytes (or holding a NUL byte) for a PostgreSQL target before the first change, and shortens an index name or leaves a constraint without its name when that name is too long, with a warning (`index-renamed`, `constraint-name-not-carried`).
 
 #### REQ: index-not-recreated
 
@@ -147,6 +164,8 @@ Target row writes MUST go through the DALgo `dal.ReadwriteTransaction.InsertMult
 Before launching workers, the command MUST query both the source and target adapters for the DALgo `ConcurrencyAware` capability (`dal-go/dalgo`'s `ConcurrencyAware` interface, shipped via the concurrency-capability Feature). If EITHER adapter advertises `Concurrency() == 1` (or equivalent "single-writer / single-reader" signal), the effective `--parallel-streams` value MUST be silently capped at `1`. When the cap reduces the user's requested value, a single stderr warning line MUST be emitted naming the constraining driver (e.g. `"warning: sqlite (target) requires serial writes; ignoring --parallel-streams=8, using 1"`).
 
 When the user did not pass `--parallel-streams` and the default `runtime.NumCPU() - 1` is capped to 1 by this rule, NO warning is emitted — the default is implicit and the cap is the expected behavior.
+
+**SQLite and PostgreSQL copies (2026-10-15).** They write the target in one transaction, one table after the other, so the effective value is always `1`: an explicit `--parallel-streams` above `1` prints `warning: a <source> to <target> copy writes the target in one transaction, one table after the other; ignoring --parallel-streams=N, using 1` on stderr; a value below `1` exits `2`.
 
 ### Overwrite policy
 
@@ -185,13 +204,15 @@ If the check identifies a non-empty target, the command MUST exit `1` BEFORE any
 
 Without `--progress`, the command MUST be silent on stdout/stderr during a successful run. Errors, warnings (per REQ:concurrency-cap), and exit messages are NOT suppressed by the silent default.
 
-With `--progress`, the command MUST emit, per table, one stderr line when copy starts (`"copying <table> (est. <N> rows)…"` where the row count comes from the source's count query if available, else the literal `?`) and one when copy finishes (`"copied <table>: <M> rows in <duration>"`). stdout remains silent so the tool composes in pipelines.
+With `--progress`, the command MUST emit, per table, one stderr line when copy starts (`"copying <table> (est. <N> rows)…"` where the row count comes from the source's count query if available, else the literal `?`) and one when copy finishes (`"copied <table>: <M> rows in <duration>"`). stdout remains silent so the tool composes in pipelines. The SQLite and PostgreSQL copies print exactly these lines (`--json` prints its report on stdout and is the one exception to the silent stdout).
 
 ### Failure semantics
 
 #### REQ: partial-failure-leaves-state
 
 If a copy fails midway (mid-stream insert error, target connection drop, source read error), the command MUST exit `1` with stderr naming the failing table. Tables already copied at the time of failure stay copied. The failing table is left in whatever state the failure produced (some rows inserted, some not). Tables not yet started never start. The user reruns with `--overwrite=recreate` or `--overwrite=reload` to retry.
+
+**Exception (2026-10-15).** A copy between SQLite and PostgreSQL (REQ:faithful-pairs) is atomic: it runs in one transaction on the target, so a failure leaves the target exactly as it was (a SQLite file that the command created, and the folders it made for it, are removed again), and the source is read in one snapshot (REQ:faithful-snapshot). The rest of this REQ (exit `1`, naming the failing table) holds.
 
 #### REQ: exit-codes
 
@@ -200,7 +221,122 @@ If a copy fails midway (mid-stream insert error, target connection drop, source 
 | `0` | All source tables copied successfully (or source had no tables) |
 | `1` | Generic runtime error (mid-copy failure, a name refused by a PostgreSQL target, schema mismatch on reload, non-empty target without overwrite, type-mapping gap) |
 | `2` | Invalid flags (missing required, unsupported `--overwrite` value, unknown scheme, remote `ingitdb://`) |
+| `3` | A SQLite or PostgreSQL copy finished but carried something inexactly, and `--fail-on-warning` was given (the copy is made; see REQ:faithful-reporting) |
 | `4` | Could not connect to source or target |
+
+### SQLite and PostgreSQL copies
+
+Added 2026-10-15 (founder direction: a copy between SQLite and PostgreSQL must keep what the engines can both express, and say what they cannot). The package is `pkg/dbcopy/faithful`; the user guide is `docs/db-copy.md`. PostgreSQL is no longer behind a preview switch (removed 2026-10-23).
+
+#### REQ: faithful-pairs
+
+A copy whose source and target are each SQLite or PostgreSQL (SQLite to PostgreSQL, PostgreSQL to SQLite, SQLite to SQLite; not PostgreSQL to PostgreSQL) MUST be done by the faithful engine, which reads each engine's own catalog. It carries tables, columns with nullability, defaults and declared types, primary keys (composite too), foreign keys (composite too, with their ON DELETE / ON UPDATE actions and deferrability), unique constraints, indexes (descending, partial), check constraints, auto-number columns and their counters, and every row. Every other pair keeps the DALgo path of this Feature. All the REQs about flags, `--include` / `--exclude`, `--overwrite`, empty-target detection and progress apply to these pairs unchanged unless a REQ of this section says otherwise.
+
+*Rationale (2026-10-15).* The DALgo `dbschema` model cannot hold a declared type text, a check constraint, a default expression or a constraint name, and the first versions of the pair lost them silently. Moving the model into DALgo is a larger change that is tracked as a follow-up; until it lands the catalog engine lives here.
+
+#### REQ: faithful-reporting
+
+Whatever an engine cannot carry MUST be reported, per object, as a warning with a stable `kind` (views and triggers across engines, expression indexes, a check the target does not accept, a column whose type had to be widened, a value that was rewritten or lost, a default that was translated, a sequence's step, a foreign key created NOT VALID, …). `--json` MUST print the whole report (`status`, `totals`, per-table counts, `warnings`, `plan` for a dry run, `exitCode`, `error`) on stdout, also for a failure that comes before any copy. `--dry-run` MUST print the plan and change nothing on either side (it opens no target). `--fail-on-warning` MUST exit `3`, after the copy is made, when there is any warning. A PostgreSQL target MUST be refused while the preview switch is off, a dry run included (exit `4`).
+
+#### REQ: faithful-exact-values
+
+A copy MUST NOT change a value without saying so. A column whose values do not fit the type its declaration maps to (a `FLOAT4` holding a double a 4-byte real cannot hold, a `JSONB_TEXT` that jsonb would write differently, a `TIMESTAMPTZ` text with an offset other than `+00`, a text holding a NUL byte) MUST be carried in a type that holds every value, with a `type-widened` warning that names the column and the reason. A value that the target engine cannot hold (NaN, a negative zero in SQLite) MUST be counted in a `values-normalized` warning; a `numeric` NaN that SQLite keeps as its text in a column of numeric affinity is counted too (the value stays exact). A `DECIMAL_TEXT` column is carried as `numeric`; the texts that numeric spells differently (a leading dot or zeros, a negative zero, fewer decimals than the scale) MUST be counted per column in a `values-normalized` warning with the first one as an example, and a text default MUST be reported as the numeric default it became; `--decimals=text` keeps such a column as `text` with a `type-widened` warning (founder decision 2026-10-15: numeric by default, exactness opt-in). An empty blob is an empty blob, never NULL. The text a PostgreSQL source prints (dates, intervals, floats) MUST NOT depend on the settings of the server: the session pins `DateStyle`, `IntervalStyle`, `extra_float_digits`, the time zone and `standard_conforming_strings`, and removes the statement timeout. A `TIME` or `TIMESTAMPTZ` text that PostgreSQL would refuse or write as another instant (a leap second `23:59:60`, an hour `24`, a day that is not there) makes the column `text`; a value in a SQLite column of numeric affinity is never passed through a double when it is an integer.
+
+#### REQ: faithful-snapshot
+
+The source MUST be read in one transaction (REPEATABLE READ on PostgreSQL; one read transaction on SQLite, which in WAL mode lets writers commit and in rollback-journal mode holds a shared lock), so that every table of the copy is of one moment. The rows read of an unfiltered table MUST equal the count taken in that snapshot, else the copy fails.
+
+#### REQ: faithful-atomic
+
+The target MUST be written in one transaction. Indexes, checks and foreign keys that follow the data are tried under a savepoint: a statement that fails because of the data or its spelling (SQLSTATE class 22, 23 or 42 on PostgreSQL) becomes a warning that carries the server's own reason, and a foreign key that existing rows violate (23503) is created NOT VALID and reported (`fk-not-validated`); any other failure (a timeout, a lock, a lost connection) fails the copy. Row counts of the target MUST be verified against what was written before the commit.
+
+#### REQ: faithful-reload
+
+`--overwrite=reload` MUST empty the target tables of the copy (PostgreSQL: one `TRUNCATE … RESTART IDENTITY`; SQLite: `DELETE`) and load the source rows into them in the same transaction as the load, keeping the schema of the target. Before anything is written each target table MUST be checked as REQ:reload-schema-match says (extra target columns are allowed when they can be left to their defaults; the key must be the same; a column must be of a kind the source values fit); a mismatch exits `1` and changes nothing. On PostgreSQL the foreign keys among the reloaded tables are dropped before the rows are emptied and added again after the load (so the order of the tables, a cycle of keys, and a key created NOT VALID cannot stop the reload); a key that the loaded rows violate (23503) is created NOT VALID and reported as REQ:faithful-filters says, a key the rows satisfy is validated again; a key comes back with the definition the server had given it (match type, SET NULL column list, deferral, enforcement, comment). A key to a table that is not reloaded stays enforced, so a source row without its parent fails the reload (nothing changes). A table that is not on the target is created. Views and triggers of a SQLite source are replaced by the source's.
+
+#### REQ: faithful-filters
+
+`--where`, `--limit` (and `--filter-config`) MUST be applied in the source `SELECT` (REQ:push-down-only in the [filtering sub-feature](filtering/README.md)): values are checked and coerced as that Feature says, a value of `in` is a comma list whose elements are checked one by one, and `--limit` is applied after `--where` in primary-key order. The report counts the rows written. A foreign key that a filter leaves without its parent rows is reported as such (`fk-not-validated` on PostgreSQL, `fk-violations-in-source` on SQLite) and the message names the filter.
+
+### SQL script destinations
+
+Added 2026-10-16 (founder direction: the script is a destination of `db copy`, not a flag of `db export`). The package is `pkg/dbcopy/faithful` (`PlanSQLiteTo`, `WriteScript`, the `Dialect` interface and the `mysql`, `mssql` and `oracle` dialects); the user guide is `docs/db-copy.md`; the cross-engine verifier is the internal package `internal/crossverify`.
+
+#### REQ: sqlscript-destination
+
+A `--to` whose scheme is `sqlscript` MUST write a SQL script file from a `sqlite://` `--from` (any other source is rejected with exit `2`). The URL carries the file path and the query parameters `dialect` (required; `mysql`, `mssql` and `oracle` are implemented, any other name MUST be refused with exit `2` and the list of implemented dialects), `name`, `edition`, `license` and `attribution` (header text) and `notice-file` (the multi-line licence notice, see `sqlscript-licence-notice`); any other parameter, a parameter given twice, a query that cannot be parsed (a `;` in a value, which a lenient parser would drop silently from the header, licence attribution included), a host, user information or a fragment MUST be rejected with exit `2`; a `name` or `edition` the marker row cannot hold (over 255 characters for MySQL, not valid UTF-8, with a NUL) MUST be rejected with exit `2` before anything is written. A header comment line holds at most 400 bytes; a `license`, `attribution`, `edition` or `name` whose line (its label, `Licence: `, `Attribution: ` or `Dataset: `, included, control characters as spaces and runs of blanks as one space) would be longer MUST be rejected with exit `2` in every dialect before anything is written, with a message that names the parameter and points at `notice-file`, and MUST NOT be cut silently; a value whose line fits MUST be written exactly as before. The script MUST be written from the SQLite file alone (no server is opened), MUST be the same bytes on every run of one datatug version, and MUST be put in place only when complete (a failure leaves no file and no temporary file).
+
+#### REQ: sqlscript-licence-notice
+
+The licence a dataset is published under often demands more than one line, and a script travels without the website that carries it: the script header MUST be able to hold the whole notice (for MIT the copyright line, the permission notice and the disclaimer; for BSD-3-Clause the copyright line, the three conditions and the disclaimer; for CC BY-SA 3.0 the licence name and link, the copyright notice, the authors, the title, the source link and the adaptation statement). The query parameter `notice-file=<path>` names a regular file (an absolute path, or one relative to the current folder, percent-encoded in the URL like any value) whose text the header carries after the `license` and `attribution` lines. The file MUST be UTF-8 without a NUL, at most 16 KiB (16384 bytes, not counting one leading byte order mark, which is dropped) and hold text (a file of only blanks, byte order marks and control characters is empty, judged on the comment lines the header would carry); the file MUST be opened first, without blocking, and the open handle checked to be a regular file (a path swapped for a FIFO between a check and the open MUST NOT hang the command); a file that is missing, not a regular file, too large, not valid UTF-8, holding a NUL or empty, and an empty `notice-file=`, MUST be rejected with exit `2` and a message that does not repeat the text, before anything is written. The notice is written as comment lines and nothing it holds may start a script line or end a comment, in every dialect: every line end (LF, CR, CR LF, VT, FF, the information separators U+001C to U+001F, U+0085, U+2028, U+2029) ends one comment line which starts with the dialect's comment introducer (`-- ` with its space for MySQL, SQL Server and Oracle); every other control character, the byte order mark, a bidirectional control and an invalid byte becomes a space; a tab becomes four spaces; `/` and `*` next to each other (`*/` and `/*`) are parted by a space; the dialect may add its own rule for a line (SQL Server breaks `$(`, Oracle follows an `&` by a space because the header comes before `SET DEFINE OFF`); trailing spaces and the blank lines at both ends are dropped. The text is otherwise verbatim, and the notice is part of the deterministic output. A script written without `notice-file` MUST be byte for byte what it was before this parameter existed. In the URL a `+` is read as a space (write `%20` for a space and `%2B` for a `+` in the path), and the text of whatever readable text file the path names is copied into the script (an untrusted `--to` URL can read any text file up to 16 KiB), which the documentation MUST say. A dialect writes the notice through `faithful.NoticeLines` from its `Header`; `ExportScript` validates it (`faithful.ValidateNotice`) once for every dialect.
+
+#### REQ: sqlscript-flags
+
+`--json`, `--dry-run`, `--fail-on-warning`, `--include` and `--exclude` MUST work as for a SQLite and PostgreSQL copy (the report has the same shape; `--dry-run` writes no file and creates no folder; `--fail-on-warning` exits `3` after the script is written). `--where`, `--limit`, `--filter-config`, `--from-schema`, `--to-schema`, `--decimals`, `--parallel-streams` and `--progress` MUST be rejected with exit `2` naming the flag. `--from` and `--to` naming one file, and an `--include` or `--exclude` naming a table the source lacks, MUST be exit `2`. An existing destination file MUST be refused with exit `1` unless `--overwrite=recreate` is given; `--overwrite=reload` MUST be rejected with exit `2`. A new file MUST have the mode of a new file under the user's umask and a replaced file keeps its mode; without `--overwrite=recreate` the file MUST be put in place without replacing anything, with a hard link or, where the file system has none, an exclusive (`O_EXCL`) create.
+
+#### REQ: sqlscript-no-data-starts-a-line
+
+No literal of a script MAY contain a raw CR or LF in any dialect, and no value MAY start a line of a script: every line starts with a token the generator wrote. A text with a line break, another control character, a Unicode line or paragraph separator, a NUL byte or a backslash (the mysql client reads a backslash as an escape in every quoted string) MUST be written as a hex literal; for SQL Server, which has no escape, a text with a control character or line separator MUST be written in pieces (`CAST(N'a' AS NVARCHAR(MAX))+NCHAR(13)+NCHAR(10)+N'b'`, the first piece `NVARCHAR(MAX)`), or as the hex of its UTF-16 code units when it has many or a NUL, and a `$(` MUST be broken (a `sqlcmd` variable). The header MUST recommend the safe client flags (`mysql --skip-commands`; `sqlcmd -X -x -b -f 65001 -i <file>`; `NLS_LANG=.AL32UTF8 sqlplus -L -S user/password@service @<file>`). An Oracle script MUST be UTF-8 without a byte order mark and MUST write every non-ASCII control or line-break character as `UNISTR` escapes and every ASCII control character as `CHR()`; it MUST say `SET DEFINE OFF` first and MUST keep every line under SQL*Plus's line limit (2,300 characters), so an `&`, a lone `/`, an `@` or a long value cannot be read as a command. A SQL Server script MUST be UTF-8 with a byte order mark, and its header MUST say to load it with `-i` (a redirect passes the mark to the server). A name that holds a control or line-break character MUST be renamed with a warning (REQ:sqlscript-names).
+
+#### REQ: sqlscript-marker
+
+The first statement that creates anything MUST create the marker table `_demodb_import`, failing when it exists, and the last statement MUST insert its row (dataset, label, source SHA-256, version, table and row counts). A source table with that name MUST be refused.
+
+#### REQ: sqlscript-names
+
+Table, column and index names MUST be written byte for byte as one quoted identifier, including spaces, dots, the quote character (doubled: a backtick for MySQL, `]` for SQL Server), reserved words, Unicode and names of up to the engine's limit (64 characters for MySQL, 128 UTF-16 code units for SQL Server). A name the engine cannot store (empty, ending in a space, longer than the limit, with a control or line-break character, outside the Basic Multilingual Plane for MySQL, `$(` for SQL Server, or a column or (SQL Server) table that differs from another only by what the engine ignores: case for MySQL columns, never accents (`e` and `é` stay apart), case and trailing spaces for SQL Server) MUST be the only reason to change one, MUST be changed to a name derived from the original and a hash of it, and MUST be a `name-renamed` (`index-renamed` for an index) warning. Table names that differ only by case MUST be a `name-case-collision` warning on MySQL (whose table names are case-sensitive on Linux) and MUST be renamed on SQL Server (whose are not under the default collation).
+
+#### REQ: sqlscript-types
+
+Types MUST be chosen from the declared type and every value, as for PostgreSQL: a column whose values do not fit its declared type MUST be carried in a type that holds them, with a `type-widened` warning; text that a utf8mb4 column cannot hold (a NUL byte, invalid UTF-8) MUST make the column bytes. A text or blob in a key MUST get a bounded type (`key-type-bounded`). The columns of a foreign key equivalence class MUST have one type before any statement is written. A row over the engine's row size MUST fall back to TEXT columns (`row-size-bounded`), and a key over the engine's key size MUST be refused (primary, unique, foreign) or dropped with a warning (plain index). A REAL value of a column the script carries as text or bytes MUST be written as the text the source engine itself makes of it (SQLite `CAST(x AS TEXT)`), read from the engine, never as the spelling of the host language. The REAL values of a column carried as DECIMAL MUST be a `values-normalized` warning. A unique key whose text values collide under the engine's default collation MUST be a `key-values-collide` warning at export time, within the limits the documentation lists.
+
+#### REQ: sqlscript-oracle-guard
+
+An Oracle script MUST stop at the first error (`WHENEVER SQLERROR EXIT FAILURE ROLLBACK`), MUST check the database version (ORA-20001), the database character set (ORA-20002) and the client character set (ORA-20003) before it creates anything, and, because Oracle DDL commits, MUST be atomic by guard: the marker table `_demodb_import` is created first (a second load stops at it), and the block that writes the marker row MUST first count, for every table, its rows and, in the catalog, its keys (primary, unique and foreign, enabled and validated), its check and NOT NULL constraints and its indexes, and raise ORA-20000 when one is short, so a client that continued after an error or skipped a line never writes the marker row (the marker does not compare the text of a default or of a check). Every statement MUST be wrapped at a safe place (after a comma or before a keyword, quoted name, literal or number, outside quotes) so no line is over the line limit and every continuation line starts with a token the generator wrote, and the writer MUST refuse the export when a line cannot be wrapped or when a line outside a `--` comment ends in a hyphen (SQL*Plus joins it with the next line, so the wrapper MUST NOT cut after a minus). A key whose Oracle form needs more than 32 index column references MUST be an `index-not-carried` warning, and a date or timestamp from 1582-10-05 to 1582-10-14 MUST make its column text (`type-widened`). An empty text MUST be written as NULL (Oracle has no empty string) with a `values-normalized` warning, a `NOT NULL` column that holds one MUST be relaxed, and the verifier MUST model it. A foreign key action other than `CASCADE`, `SET NULL` or `NO ACTION` MUST be a counted `fk-action-not-carried` warning. Identifiers MUST be quoted, case-preserving and at most 128 bytes. Oracle Database Free in the test image is used under the Oracle Free Use Terms for automated testing only (founder decision D10, 2026-10-16) and the image MUST NOT be redistributed.
+
+#### REQ: sqlscript-mssql-transaction
+
+A SQL Server script MUST be one transaction (`SET XACT_ABORT ON`, `BEGIN TRANSACTION`, one statement per batch ended by a `GO` line the generator wrote, `COMMIT TRANSACTION` last). Every batch after `BEGIN TRANSACTION` MUST start with `IF @@TRANCOUNT=0 SET NOEXEC ON`, so a client that continues after an error runs nothing outside the rolled-back transaction, and a batch before the commit MUST check that every table holds the rows written. No batch holds more than 1,000 rows of one `INSERT ... VALUES`.
+
+#### REQ: sqlscript-mssql-cascades
+
+A SQL Server script MUST NOT contain a foreign key action that makes a cycle or a second cascade path (error 1785). The actions that would MUST be downgraded to `NO ACTION` by a deterministic static analysis of the whole plan, each a counted `fk-action-not-carried` warning with the reason; T-SQL's missing `RESTRICT` MUST be `NO ACTION` with the same warning. A unique key whose nullable columns hold more than one NULL MUST be written as a unique index filtered to the rows without NULL (`unique-filtered`). SQL Server's `ACCEPT_EULA=Y` for the Developer-edition test image is accepted for automated testing only (founder decision D10, 2026-10-16) and the image MUST NOT be redistributed.
+
+#### REQ: sqlscript-verified
+
+Each dialect MUST be proved by loading its script with the engine's own client in a container of a digest-pinned image and comparing the result with the SQLite source (tables, columns, default values, keys, indexes without the ones the engine creates for itself, check expressions, row counts, every value through the engine's Go driver). A default and a check MUST be compared with what the SQLite source means, not with the plan's own translation. The journey workflow MUST NOT be a required check and MUST NOT be added to the required `Go CI` workflow.
+
+### Native inGitDB destination and `datatug db export`
+
+Added 2026-10-16 (founder decision: `export` is an ergonomic local backup, not a second implementation). The engine is `dbcopy.ExportInGitDBReport` (`pkg/dbcopy/export_ingitdb.go`, `export_report.go`); the commands are `apps/datatugapp/commands/cmd_db_copy_ingitdb.go` (the shared run) and `cmd_db_export.go` (the shortcut).
+
+#### REQ: ingitdb-new-destination
+
+A `--to ingitdb://<folder>` whose folder does not exist MUST write a complete native inGitDB project: every collection of the source (or those the filters select), in a staging folder beside the destination that becomes the destination only after every collection succeeded, so a failed copy leaves no destination and no staging folder. A `--to ingitdb://<folder>` that exists is copied into as before (the generic engine).
+
+#### REQ: ingitdb-records-format
+
+The destination URL MAY carry `?records-format=json|jsonl|ingr|csv|yaml` (default `json`), which sets the records file format of every collection. Any other query key together with it MUST be refused with exit `2`. The option on a destination that already exists MUST be refused with exit `2`. `export --records-format` is the same option; both given and different MUST be refused with exit `2`.
+
+#### REQ: ingitdb-flags
+
+`--include`, `--exclude`, `--where`, `--limit`, `--filter-config`, `--from-schema`, `--dry-run`, `--json` and `--fail-on-warning` MUST work for a new native destination as for the other destinations, with the same report (`command`, `status`, `from`, `to`, `tables`, `totals`, `warnings`, `exitCode`). `--overwrite`, `--to-schema`, `--decimals`, `--parallel-streams`, `--progress` and `--recover-job-ref` MUST be refused with exit `2` and the reason, before the source is opened (with `--json` the refusal is a `failed` report). `--dry-run` MUST read and check every row and write nothing: no destination, no staging folder in the destination's parent, and the same counts a real run reports.
+
+#### REQ: ingitdb-warnings
+
+Nothing MAY be dropped silently. A foreign key whose target collection `--include`/`--exclude` leaves out MUST be left out of the project and reported as a `foreign-key-dropped` warning; a kept foreign key whose target has its rows narrowed by `--where` or `--limit` MUST be reported as a `filtered-parent` warning. `--fail-on-warning` MUST exit `3` after the project is published. A `--where` or `--limit` that names a collection the project does not hold MUST fail with exit `1` before anything is written.
+
+#### REQ: export-is-a-shortcut
+
+`datatug db export --from <url> [--to <folder|ingitdb://folder>]` MUST behave as `datatug db copy --from <url> --to ingitdb://<folder>` for a folder that does not exist, with these differences only: the report's `command` is `db export`; a folder that exists is refused with exit `1`; a source with no collection to write is exit `1` (copy: a note and exit `0`); `--to` may be a plain path, relative or absolute (the shell expands `~`), where a value that starts with a scheme and a colon is a URL; and without `--to` the folder is `./<name>.ingitdb`; a `?` in a plain path MUST be exit `2` and point at the `ingitdb://FOLDER?records-format=` form (`ingitdb://DIR?records-format=jsonl` creates `DIR` in jsonl: it used to create a folder named with the query, the one change to earlier output); the destination's folder MUST exist for `--dry-run` as for a real run (exit `1`); SIGINT and SIGTERM MUST stop the export through its return path, remove the staging folder (a dry run's too), publish nothing and exit `1`. An invocation `export --to ingitdb://<folder> [--records-format F]` MUST write the same bytes, print the same line on stderr (`db export: exported N collections and M rows to <destination>`) and exit with the same code as it did before it became a shortcut.
+
+#### REQ: export-default-folder
+
+The default folder name MUST be derived from `--from` only and be the same on every run: the SQLite file name without its extension, the PostgreSQL database name (never the host, the user, the password or the query), or the file or folder name of an inGitDB, HTTP project or OpenVaultDB source; every character that is not a letter, a digit, `.`, `_` or `-` is written `_`, the ends are stripped of `.`, `_` and `-`, the name is cut to 100 characters and to 247 bytes (a file system takes 255 bytes of a name with its `.ingitdb`), on a character boundary, a name Windows reserves for a device (`CON`, `PRN`, `AUX`, `NUL`, `COM1`-`COM9`, `LPT1`-`LPT9`, in any case, with or without an extension) gets a `_` in front, and for an `ingitdb://` source the name is that of the absolute folder (`ingitdb://.` run inside a project is named after it). When no name is left (an in-memory SQLite, a PostgreSQL URL with no database, an unsupported source) the command MUST exit `2` and say that `--to` is required. The folder is created in the working folder and, like any destination, MUST NOT exist.
+
+#### REQ: export-local-only
+
+`export` and the native destination write a local folder. A backup to the cloud or to another server MUST NOT be added to them: it is `db copy --to <destination>` where `copy` reaches one, or the planned `backup` command family.
 
 ## Architecture
 
@@ -249,7 +385,7 @@ If a copy fails midway (mid-stream insert error, target connection drop, source 
 - **DALgo `ConcurrencyAware`** — `dal-go/dalgo` — **Implemented**.
 - **`dalgo2ingitdb`** — `ingitdb/ingitdb-cli/pkg/dalgo2ingitdb` — **Ready** (implements `dbschema.SchemaReader`, `ddl.SchemaModifier`, embeds `dal.ConcurrencyAvailable`).
 - **`dalgo2sqlite`** — `dal-go/dalgo2sqlite` — **Ready** (implements `dbschema.SchemaReader`, `ddl.SchemaModifier`, embeds `dal.NoConcurrency`).
-- **PostgreSQL driver** — `dalgo2postgres` exposes the three capability interfaces and the CLI opens it, behind the preview switch `DATATUG_PREVIEW_POSTGRES`; see the MVP-status column in REQ:supported-schemes.
+- **PostgreSQL driver** — `dalgo2postgres` exposes the three capability interfaces and the CLI opens it; see the MVP-status column in REQ:supported-schemes.
 - **URL parser** — `github.com/xo/dburl` is the existing parser used by `datatug db <url>` (the viewer Feature). The `ingitdb://` scheme MUST be registered with `dburl` (either via `dburl.Register` if available or via a small wrapper in `pkg/dbcopy/url.go`).
 
 ## Testing Strategy
@@ -278,11 +414,13 @@ All ACs are testable via `go test ./...` plus shell-driven E2E runs invoking the
 Inherited from the source Idea, reinforced at Feature-spec time:
 
 - **`project export` / `project import` wrappers** — discarded. The source Idea originally floated these as stretch goals; the design conversation concluded they don't earn the surface area. `db copy --from <project-url> --to <other-url>` and the reverse suffice.
-- **Incremental / delta sync** — MVP is one-shot full copy. Delta sync is a separate future Idea.
+- **Incremental / delta sync** — MVP is one-shot full copy. Incremental, additive history of a database, and every remote or cloud destination, belong to [`datatug backup`](../../backup/README.md) (Draft), which runs this command's source side and adds the destination policy.
 - **In-flight row filters, column mappings, anonymization** — separate concern. `db copy` is structural; transformations live in a follow-up command.
 - **Conflict resolution on a non-empty target beyond `--overwrite=recreate|reload`** — no `--overwrite=merge`, no row-level upsert. MVP requires the user to choose drop-and-rebuild or truncate-and-reload.
 - **All DALgo backends** — only SQLite, inGitDB, and PostgreSQL are E2E-tested. Other DALgo backends (e.g. Datastore, Firestore) MAY work through the abstraction but are not guaranteed by this Feature.
 - **Schema diffing / migration** — target schema is auto-created from source. There is no contract for reconciling an existing target schema with the source schema beyond the strict REQ:reload-schema-match rule.
+- **Cloud or remote backup** — `db export` writes a local folder only. A backup to a bucket, another server or a schedule belongs to the planned `backup` command family, or to `copy --to` for a destination `copy` already reaches (PostgreSQL, BigQuery, a SQLite file).
+- **A public comparison command for the script journey** — no: `internal/crossverify` stays internal; its long-term home is a `datatug compare` extension once compare's known defects are fixed.
 - **A bespoke dump-file format** — inGitDB serves as the canonical inspectable, versionable intermediate. `db copy --to ingitdb://./snap` followed by `db copy --from ingitdb://./snap --to <other>` is the "dump and load" workflow.
 - **Resumability after partial failure** — per REQ:partial-failure-leaves-state, the user reruns with `--overwrite`. There is no checkpoint/resume protocol.
 - **Per-engine bulk-load optimizations** — `COPY FROM STDIN` (PostgreSQL), prepared-statement batching with explicit transactions for throughput, drop-indexes-bulk-load-recreate dance. Correctness via DALgo abstractions is the MVP bar; performance work is a follow-up.
@@ -492,6 +630,118 @@ A SQLite or inGitDB target accepts source names under its existing rules, includ
 **Given** a source with three tables `a`, `b`, `c` where the row insert into `b` is configured to fail mid-stream (e.g. a NOT NULL violation injected by a fault-injection harness)
 **When** the user runs `datatug db copy --from ... --to ...`
 **Then** the command exits `1`; on the target after exit, `a` is fully copied (every source row present); `b` exists (table created) and has between 0 and len(`b`)-1 rows (the partial state at the moment of failure); `c` does NOT exist on the target (its worker never started).
+
+### AC: faithful-roundtrip-keeps-every-value
+
+**Requirements:** copy#req:faithful-pairs, copy#req:faithful-exact-values
+
+**Given** a SQLite database holding an empty blob, a number a 4-byte real cannot hold, json that jsonb would rewrite, a `TIMESTAMPTZ` text with offset `+02`, a decimal text `-0.00` with the default `'0.00'`, and an AUTOINCREMENT counter at 100
+**When** the user copies it to PostgreSQL and back to a new SQLite file
+**Then** both copies exit `0`; every column reads back with the same storage class and value but the decimal text, the default is still the text `'0.00'`, the counter is still 100, and the widened columns are named in `type-widened` warnings.
+
+### AC: faithful-reload-is-one-transaction
+
+**Requirements:** copy#req:faithful-reload, copy#req:faithful-atomic
+
+**Given** a target that holds the tables of the source, one with an extra column that has a default and a CHECK of its own, and a source row that the CHECK refuses
+**When** the user runs `datatug db copy --overwrite=reload`
+**Then** the command exits `1` naming the check, and every target table holds the rows it held before and keeps its foreign keys. A source row that only lacks a parent is no failure when the parent table is reloaded too: the key is created NOT VALID and reported; when the parent is not part of the reload the key of the target stays enforced and the reload fails with nothing changed.
+
+### AC: faithful-filters-are-pushed-down
+
+**Requirements:** copy#req:faithful-filters
+
+**Given** two SQLite files and a source with `Artist(ArtistId)` and `Album`
+**When** the user runs `datatug db copy --where Artist:ArtistId:<:10 --limit Album:5`
+**Then** the target holds the artists below 10 and 5 albums, the report counts those rows, and a filter that names an unknown table, field or operator exits `2` before anything is written.
+
+### AC: faithful-warnings-are-not-silent
+
+**Requirements:** copy#req:faithful-reporting
+
+**Given** a source with a view and an expression index
+**When** the user runs the copy to PostgreSQL with `--json --fail-on-warning`
+**Then** stdout holds the report with `view-not-carried` and `index-not-carried` warnings and the command exits `3` after the target is written.
+
+### AC: sqlscript-writes-a-deterministic-script
+
+**Requirements:** copy#req:sqlscript-destination, copy#req:sqlscript-no-data-starts-a-line, copy#req:sqlscript-marker
+
+**Given** a SQLite file with a text value `"\nGO"`, a backslash and a name with a space
+**When** the user runs `datatug db copy --from sqlite://x.sqlite --to 'sqlscript:///out.sql?dialect=mysql'` twice
+**Then** the two files are the same bytes, no line of either starts with a value, the names are quoted as they are, and the first statement creates `_demodb_import` and the last one fills it.
+
+### AC: sqlscript-licence-notice-is-comment-only
+
+**Requirements:** copy#req:sqlscript-licence-notice, copy#req:sqlscript-no-data-starts-a-line, copy#req:sqlscript-destination
+
+**Given** a notice file of several lines with CR LF line ends, U+2028, a byte order mark, `GO`, `\! cmd` and `source x` lines, a `/` line and `*/`, and the edge-case and fuzz fixtures
+**When** the user runs `datatug db copy --from sqlite://x.sqlite --to 'sqlscript:///out.sql?dialect=mysql&notice-file=/abs/NOTICE.txt'` (and with `dialect=mssql`), twice
+**Then** the two files are the same bytes, every line of the notice is a comment line starting with the dialect's introducer, the script differs from the one written without the notice by those comment lines only, the script loads with the real engine's client (with and without `--skip-commands` for MySQL, without `-X -x` for SQL Server fuzz) and verifies, no client command of the notice ran, and a notice file that is missing, too large, not UTF-8 or holding a NUL exits `2`.
+
+### AC: sqlscript-refuses-a-file-and-flags-that-do-not-apply
+
+**Requirements:** copy#req:sqlscript-flags
+
+**Given** an existing `out.sql`
+**When** the user runs the copy with the same destination
+**Then** the command exits `1` and the file is untouched; with `--overwrite=recreate` it is replaced; with `--where` it exits `2`.
+
+### AC: sqlscript-loads-into-sql-server-and-verifies
+
+**Requirements:** copy#req:sqlscript-verified, copy#req:sqlscript-mssql-transaction, copy#req:sqlscript-mssql-cascades, copy#req:sqlscript-names, copy#req:sqlscript-types, copy#req:sqlscript-no-data-starts-a-line
+
+**Given** the SQL Server edge-case fixture, the fuzz fixture, a fixture of random foreign key graphs and the six pinned demo databases
+**When** `scripts/check-journey-mssql.sh` loads each script into SQL Server 2022 with `sqlcmd -X -x -b -f 65001 -i` and runs the verifier
+**Then** every dataset passes with no difference, a second load stops at the marker table, a script with a failing batch loaded without `-b` leaves no table behind, and the fuzz script also loads without `-X` and `-x`.
+
+### AC: sqlscript-loads-into-oracle-and-verifies
+
+**Requirements:** copy#req:sqlscript-verified, copy#req:sqlscript-oracle-guard, copy#req:sqlscript-names, copy#req:sqlscript-types, copy#req:sqlscript-no-data-starts-a-line
+
+**Given** the Oracle edge-case fixture, the fuzz fixture, a fixture of random foreign key graphs and the six pinned demo databases
+**When** `scripts/check-journey-oracle.sh` loads each script into Oracle Database Free 23ai or later with `NLS_LANG=.AL32UTF8 sqlplus -L -S` and runs the verifier
+**Then** every dataset passes with no difference, a second load stops at the marker table, a client in another character set stops with no table, a client that continues after an error writes no marker row, and the fuzz script fails without `SET DEFINE OFF`.
+
+### AC: sqlscript-loads-into-mysql-and-verifies
+
+**Requirements:** copy#req:sqlscript-verified, copy#req:sqlscript-names, copy#req:sqlscript-types
+
+**Given** the edge-case fixture, the fuzz fixture and the six pinned demo databases
+**When** `scripts/check-journey-mysql.sh` loads each script into MySQL 8.4 and runs the verifier
+**Then** every dataset passes with no difference, and a second load of a script stops at the marker table.
+
+### AC: export-is-a-shortcut-over-copy
+
+**Requirements:** copy#req:export-is-a-shortcut, copy#req:ingitdb-new-destination, copy#req:ingitdb-flags
+
+**Given** a SQLite file `shop.db`
+**When** the user runs `datatug db export --from sqlite://shop.db --json`, `datatug db export --from sqlite://shop.db --to backup --json` and `datatug db copy --from sqlite://shop.db --to ingitdb://backup2 --json` (each with `--include`, `--where` and `--limit` variations)
+**Then** the three folders have the same bytes, the three reports are the same except `command` and `to`, `shop.ingitdb` is the first folder, and `--dry-run` writes none.
+
+### AC: export-old-invocation-is-byte-identical
+
+**Requirements:** copy#req:export-is-a-shortcut
+
+**Given** `chinook.db` and the binary built before `export` became a shortcut
+**When** `datatug db export --from sqlite://chinook.db --to ingitdb://DIR --records-format F` runs for each of the five formats
+**Then** the tree of every run has the digest the earlier binary produced (checked in `cmd_db_export_shortcut_test.go`), stderr ends with the same `db export: exported 11 collections and 15607 rows to ingitdb://DIR` line, and a second run into `DIR` exits `1` with `destination already exists`.
+
+### AC: export-default-folder-is-safe
+
+**Requirements:** copy#req:export-default-folder
+
+**Given** `postgres://alice:secret@db.internal/shop?sslmode=disable`, `sqlite://:memory:` and `sqlite:///data/my shop.db`
+**When** the user runs `datatug db export --from <url>` without `--to`
+**Then** the folders are `shop.ingitdb` and `my_shop.ingitdb` (no host, user or secret in either), and the in-memory source exits `2` saying `--to` is required.
+
+### AC: ingitdb-warns-about-what-it-drops
+
+**Requirements:** copy#req:ingitdb-warnings
+
+**Given** a table `c` with a foreign key to `p`
+**When** the user exports with `--include c`, and again with `--fail-on-warning`
+**Then** the project holds `c` without the key, stderr and `--json` report a `foreign-key-dropped` warning, and the second run exits `3` with the project published.
 
 ## Open Questions
 

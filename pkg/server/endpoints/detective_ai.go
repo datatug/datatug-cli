@@ -92,15 +92,11 @@ func detectiveAIProposalsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	scope := localAIScope(request.Project, actor)
 	local := detective.LocalAIStore{Store: store, Scope: scope}
-	binding, err := core.BindOperation(scope.Key, actor, "ai-generate", request.OperationID, struct {
+	binding, _ := core.BindOperation(scope.Key, actor, "ai-generate", request.OperationID, struct {
 		Text           string
 		CaseID         string
 		ExpectedCounts map[string]int
 	}{request.Text, request.CaseID, request.ExpectedCounts})
-	if err != nil {
-		writeContractError(w, r, detectiveError(err))
-		return
-	}
 	profile := api.GetCapabilities().DetectiveAIProfile
 	if profile == nil {
 		writeContractError(w, r, newInvalidRequest("ai", "Detective AI profile is not configured on this agent"))

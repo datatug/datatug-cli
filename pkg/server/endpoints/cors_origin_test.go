@@ -43,7 +43,7 @@ func TestAnswers_NameAnOriginOnlyWhenItIsOnTheList(t *testing.T) {
 			write(w, r)
 			assert.Empty(t, w.Header().Values("Access-Control-Allow-Origin"), "%s answers an origin that is not on the list: %q", name, origin)
 		}
-		for _, origin := range []string{"https://datatug.app", "http://localhost:4200", "https://app.datatug.app", "http://127.0.0.1:8100"} {
+		for _, origin := range []string{"https://datatug.app", "http://datatug.localhost:4200", "https://datatug.localhost"} {
 			r := httptest.NewRequest(method, "/x", nil)
 			r.Header.Set("Origin", origin)
 			w := httptest.NewRecorder()
@@ -58,13 +58,13 @@ func TestAnswers_NameAnOriginOnlyWhenItIsOnTheList(t *testing.T) {
 
 func TestCORSOriginPreservesVaryAndRejectsAmbiguousOrigin(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
-	r.Header.Set("Origin", "http://localhost:4200")
+	r.Header.Set("Origin", "http://datatug.localhost:4200")
 	w := httptest.NewRecorder()
 	w.Header().Set("Vary", "Accept-Encoding")
 	writeCORSOrigin(w, r)
 	writeCORSOrigin(w, r)
 	assert.Equal(t, []string{"Accept-Encoding", "Origin"}, w.Header().Values("Vary"))
-	assert.Equal(t, "http://localhost:4200", w.Header().Get("Access-Control-Allow-Origin"))
+	assert.Equal(t, "http://datatug.localhost:4200", w.Header().Get("Access-Control-Allow-Origin"))
 	r.Header.Add("Origin", "https://foreign.example")
 	w = httptest.NewRecorder()
 	writeCORSOrigin(w, r)

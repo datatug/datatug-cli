@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/datatug/datatug-cli/pkg/api"
@@ -43,13 +44,17 @@ const (
 )
 
 var (
-	filestoreNewStore = filestore.NewStore
-	listenAndServeFn  = func(s *http.Server) error { return s.ListenAndServe() }
+	filestoreNewStore       = filestore.NewStore
+	listenAndServeFn        = func(s *http.Server) error { return s.ListenAndServe() }
+	configureCompareCacheFn = api.ConfigureCompareCache
 )
 
 type HttpServer struct {
 	s       *http.Server
 	monitor *apimonitor.Monitor
+	// IdleTimeout, when positive, makes ServeHTTP return nil after that long
+	// without a request. Zero (the default) serves until stopped.
+	IdleTimeout time.Duration
 }
 
 func NewHttpServer() HttpServer {
@@ -141,7 +146,7 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 		return fmt.Errorf("configure execution evidence: %w", err)
 	}
 	defer func() { _ = api.CloseExecutionEvidence() }()
-	if err := api.ConfigureCompareCache(comparecache.Options{PrivateDir: caps.EvidencePrivateDir}); err != nil {
+	if err := configureCompareCacheFn(comparecache.Options{PrivateDir: caps.EvidencePrivateDir}); err != nil {
 		api.LogCompareCacheSkip("configure", err)
 	}
 	defer func() { _ = api.CloseCompareCache() }()
@@ -176,21 +181,34 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 		AllowLiveConnections: caps.AllowLiveConnections,
 		ServedHost:           agentHost,
 		ServedPort:           agentPort,
+		Access:               caps.Access,
 	}
 	guard := endpointCaps.RequestGuard()
 	router := httprouter.New()
 	router.GlobalOPTIONS = http.HandlerFunc(guard.Wrap(globalOptionsHandler))
+	// What the router answers by itself (unknown path, wrong method) is behind the guard too, so
+	// an unauthenticated caller cannot tell which routes exist.
+	router.NotFound = http.HandlerFunc(guard.Wrap(notFound))
+	router.MethodNotAllowed = http.HandlerFunc(guard.Wrap(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+	}))
 	router.HandlerFunc(http.MethodGet, "/", guard.Wrap(root))
 	endpoints.RegisterDatatugHandlersWithCapabilities("", router, endpoints.RegisterAllHandlers, logRequests, func(r *http.Request) (context.Context, error) {
 		return r.Context(), nil
 	}, apicore.Execute, endpointCaps)
 
+	handler := s.monitor.Wrap(router)
+	var idle *idleWatcher
+	if s.IdleTimeout > 0 {
+		idle = newIdleWatcher(s.IdleTimeout, time.Now)
+		handler = idle.wrap(handler)
+	}
 	s.s = &http.Server{
 		Addr:           fmt.Sprintf("%v:%v", agentHost, agentPort),
 		ReadTimeout:    requestReadTimeout,
 		WriteTimeout:   responseWriteTimeout,
 		MaxHeaderBytes: 1 << 16,
-		Handler:        s.monitor.Wrap(router),
+		Handler:        handler,
 		BaseContext: func(listener net.Listener) context.Context {
 			s.monitor.Live("http://" + listener.Addr().String())
 			return context.Background()
@@ -198,11 +216,37 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 	}
 	log.Printf("Serving on: http://%v:%v", agentHost, agentPort)
 
+	if idle != nil {
+		done := make(chan struct{})
+		defer close(done)
+		ticker := time.NewTicker(idleCheckInterval)
+		defer ticker.Stop()
+		srv := s.s
+		go idle.watch(done, ticker.C, func() {
+			log.Printf("serve: no request for %s; shutting down", s.IdleTimeout)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = srv.Shutdown(ctx)
+		})
+	}
 	err = listenAndServeFn(s.s)
 	if errors.Is(err, http.ErrServerClosed) {
 		err = nil
 	}
 	return err
+}
+
+// notFound answers a path that no route serves. A preflight of such a path is answered as the
+// preflight of any other path (globalOptionsHandler): the router hands an OPTIONS request to
+// GlobalOPTIONS only for a path some route serves, and a refused preflight makes the browser drop
+// the real request, so the page would see a network failure (status 0) instead of the 404 that
+// the real request gets.
+func notFound(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		globalOptionsHandler(w, r)
+		return
+	}
+	http.NotFound(w, r)
 }
 
 func root(writer http.ResponseWriter, _ *http.Request) {
@@ -239,6 +283,18 @@ func root(writer http.ResponseWriter, _ *http.Request) {
 `, filestore.GetProjectPath(storage.SingleProjectID))
 }
 
+// resultsPathSegment is where a stored result's id is in a request path.
+const resultsPathSegment = "/datatug/results/"
+
+// loggedPath is path as the log shows it: a stored result's id is replaced by
+// :id, so the log never holds one.
+func loggedPath(path string) string {
+	if i := strings.Index(path, resultsPathSegment); i >= 0 {
+		return path[:i+len(resultsPathSegment)] + ":id"
+	}
+	return path
+}
+
 // logRequests logs the method, the length of the body and the path of every request
 // but the agent-info poll, then runs handler. The query string is not logged: a
 // client can put a source string in it (an environment, a database, a source), and
@@ -246,7 +302,7 @@ func root(writer http.ResponseWriter, _ *http.Request) {
 func logRequests(handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/agent-info" {
-			log.Println(r.Method, r.ContentLength, r.URL.Path)
+			log.Println(r.Method, r.ContentLength, loggedPath(r.URL.Path))
 		}
 		handler(w, r)
 	}

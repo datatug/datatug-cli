@@ -1,0 +1,23 @@
+{
+  "format": "datatug-demo-connections/v1",
+  "connections": [
+    {"id":"chinook-sqlite","dataset":"chinook","storage":"sqlite","readiness":"public-api","source":"https://demodb.dev/ovdb/v1/databases/chinook","fixtureSha256":"7651ba378ac2fcd0dfc3c66fb101f7a7eed3ba39a612ec642b96e20702061f15","browserFixture":{"url":"/assets/showcase/chinook.sqlite","bytes":1007616}},
+    {"id":"chinook-postgresql","dataset":"chinook","storage":"postgresql","readiness":"public-api","source":"https://cloud.openvaultdb.com/v1/databases/chinook-postgresql"},
+    {"id":"chinook-ingitdb","dataset":"chinook","storage":"ingitdb","readiness":"hosted-repository","source":"https://github.com/demo-db/chinook/tree/411cb7aead96a0b4314f3068c0a0455f869dfdee/ingitdb"},
+    {"id":"northwind-sqlite","dataset":"northwind","storage":"sqlite","readiness":"public-api","source":"https://demodb.dev/ovdb/v1/databases/northwind","fixtureSha256":"279b34136771aee75d802094b3329515a2b01da65d2a20a4a9e3b58c29b4fd20","browserFixture":{"url":"/assets/showcase/northwind.sqlite","bytes":602112}},
+    {"id":"northwind-postgresql","dataset":"northwind","storage":"postgresql","readiness":"public-api","source":"https://cloud.openvaultdb.com/v1/databases/northwind-postgresql"},
+    {"id":"northwind-ingitdb","dataset":"northwind","storage":"ingitdb","readiness":"hosted-repository","source":"https://github.com/demo-db/northwind/tree/adb71d17af9aa457d19326d0d275f7b924267659/ingitdb"},
+    {"id":"pubs-sqlite","dataset":"pubs","storage":"sqlite","readiness":"public-api","source":"https://demodb.dev/ovdb/v1/databases/pubs","fixtureSha256":"b45b08b7c06441cc0b138b031ea5bd32bd5866aebf874c89d2ebf7fc6abb3691"},
+    {"id":"pubs-postgresql","dataset":"pubs","storage":"postgresql","readiness":"public-api","source":"https://cloud.openvaultdb.com/v1/databases/pubs-postgresql"},
+    {"id":"pubs-ingitdb","dataset":"pubs","storage":"ingitdb","readiness":"hosted-repository","source":"https://github.com/demo-db/pubs/tree/3e37e01e28f610f1d65c9e809a79ab6522928ad2/ingitdb"},
+    {"id":"sakila-sqlite","dataset":"sakila","storage":"sqlite","readiness":"public-api","source":"https://demodb.dev/ovdb/v1/databases/sakila","fixtureSha256":"9bebeee50fecb1fee115c206a4f380f2f6d1f009e7796b18b8a8cfba7c810454"},
+    {"id":"sakila-postgresql","dataset":"sakila","storage":"postgresql","readiness":"public-api","source":"https://cloud.openvaultdb.com/v1/databases/sakila-postgresql"},
+    {"id":"sakila-ingitdb","dataset":"sakila","storage":"ingitdb","readiness":"hosted-repository","source":"https://github.com/demo-db/sakila/tree/7e7de96d904dedc130165691e59a8268ce5fb6d2/ingitdb"},
+    {"id":"adventureworks-sqlite","dataset":"adventureworks","storage":"sqlite","readiness":"public-api","source":"https://demodb.dev/ovdb/v1/databases/adventureworks","fixtureSha256":"6a105e1982becfe003fc7a307d7cad9d738390cedd79d166c2167fd817168109"},
+    {"id":"adventureworks-postgresql","dataset":"adventureworks","storage":"postgresql","readiness":"public-api","source":"https://cloud.openvaultdb.com/v1/databases/adventureworks-postgresql"},
+    {"id":"adventureworks-ingitdb","dataset":"adventureworks","storage":"ingitdb","readiness":"hosted-repository","source":"https://github.com/demo-db/adventureworks/tree/b4f6a9909c0de58767663dce9006c7ac522ce6a7/ingitdb"},
+    {"id":"employees-sqlite","dataset":"employees","storage":"sqlite","readiness":"public-api","source":"https://demodb.dev/ovdb/v1/databases/employees","fixtureSha256":"46b49dd0e141cd8db66d57680a10febfccc15e6f54dc7b8f3c2316b55e11c5f0"},
+    {"id":"employees-postgresql","dataset":"employees","storage":"postgresql","readiness":"public-api","source":"https://cloud.openvaultdb.com/v1/databases/employees-postgresql"},
+    {"id":"employees-ingitdb","dataset":"employees","storage":"ingitdb","readiness":"hosted-repository","source":"https://github.com/demo-db/employees/tree/397f3e32cb970e55bc4a528bb255c41272f6103f/ingitdb"}
+  ]
+}

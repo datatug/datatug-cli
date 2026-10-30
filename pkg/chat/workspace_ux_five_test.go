@@ -41,6 +41,7 @@ func uxSearchAction(t *testing.T, u *ChatUI, search string) {
 }
 
 func TestWorkspaceUXScopeLocalServerAndRetainedTrail(t *testing.T) {
+	t.Parallel()
 	u, parent := uxUI(t)
 	g := u.gridsByRecordSetID[parent.ID]
 	if view := ansi.Strip(g.View(80, true)); !strings.Contains(view, "Server · 2 rows") || !strings.Contains(view, "run "+parent.CreatedAt.Local().Format("15:04:05")) {
@@ -120,12 +121,13 @@ type uxDelayedExecutor struct {
 	release chan struct{}
 }
 
-func (e *uxDelayedExecutor) RunDTQL(ctx context.Context, _ string, _ []byte, _ map[string]any) (secureread.Result, error) {
+func (e *uxDelayedExecutor) RunTugQL(ctx context.Context, _ string, _ []byte, _ map[string]any) (secureread.Result, error) {
 	e.started <- ctx
 	<-e.release
 	return secureread.Result{Columns: []string{"Id", "Category", "Value"}, Rows: []secureread.Row{{Data: map[string]any{"Id": int64(2), "Category": "A", "Value": int64(20)}}}}, nil
 }
 func TestWorkspaceUXRunningCancelLateResponseAndContext(t *testing.T) {
+	t.Parallel()
 	for _, viaActions := range []bool{false, true} {
 		t.Run(fmt.Sprint(viaActions), func(t *testing.T) {
 			u, parent := uxUI(t)
@@ -184,6 +186,7 @@ func TestWorkspaceUXRunningCancelLateResponseAndContext(t *testing.T) {
 	}
 }
 func TestWorkspaceUXActionsDiagnosticAndEditorIsolation(t *testing.T) {
+	t.Parallel()
 	u, parent := uxUI(t)
 	uxKey(t, u, "f4")
 	u.shell.SetComposerText("p/t Ω unchanged")
@@ -233,6 +236,7 @@ func TestWorkspaceUXActionsDiagnosticAndEditorIsolation(t *testing.T) {
 	}
 }
 func TestWorkspaceUXTrailBranchPreservesGridSearchScrollAndReconcile(t *testing.T) {
+	t.Parallel()
 	names := []string{"Id", "Name"}
 	for i := range 8 {
 		names = append(names, fmt.Sprintf("WideColumn%d", i))
@@ -245,7 +249,7 @@ func TestWorkspaceUXTrailBranchPreservesGridSearchScrollAndReconcile(t *testing.
 		}
 		rows[i] = secureread.Row{Data: data}
 	}
-	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Origin", DTQL: "from: {name: Item}\nlimit: 35", Result: secureread.Result{Columns: names, Rows: rows}})
+	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Origin", TugQL: "from: {name: Item}\nlimit: 35", Result: secureread.Result{Columns: names, Rows: rows}})
 	origin := u.activeRecordSetID()
 	g := u.gridsByRecordSetID[origin]
 	for range len(names) - 1 {
@@ -270,7 +274,7 @@ func TestWorkspaceUXTrailBranchPreservesGridSearchScrollAndReconcile(t *testing.
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = u.sessions.store.AppendQuery(t.Context(), u.sessionID, m.ID, "sqlite:///fixture.db", QueryResult{Title: label, DTQL: "from: {name: Item}\nlimit: 1", Result: secureread.Result{Columns: []string{"Id"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 1}}}}, Lineage: &JoinLineage{ParentRecordSetID: origin}})
+		_, err = u.sessions.store.AppendQuery(t.Context(), u.sessionID, m.ID, "sqlite:///fixture.db", QueryResult{Title: label, TugQL: "from: {name: Item}\nlimit: 1", Result: secureread.Result{Columns: []string{"Id"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 1}}}}, Lineage: &JoinLineage{ParentRecordSetID: origin}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -316,8 +320,9 @@ func TestWorkspaceUXTrailBranchPreservesGridSearchScrollAndReconcile(t *testing.
 }
 
 func TestWorkspaceUXAggregateExplanationsFollowSchemaAndOverrides(t *testing.T) {
+	t.Parallel()
 	names := []string{"Key", "Customer", "Quantity", "Total", "Unknown"}
-	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Measures", DTQL: "from: {schema: main, name: Item}\ncolumns: [{field: Key},{field: Customer},{field: Quantity},{field: Total},{field: Unknown}]\nlimit: 1", Result: secureread.Result{Columns: names, Rows: []secureread.Row{{Data: map[string]any{"Key": 1, "Customer": 2, "Quantity": 3, "Total": 1.5, "Unknown": 4}}}}})
+	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Measures", TugQL: "from: {schema: main, name: Item}\ncolumns: [{field: Key},{field: Customer},{field: Quantity},{field: Total},{field: Unknown}]\nlimit: 1", Result: secureread.Result{Columns: names, Rows: []secureread.Row{{Data: map[string]any{"Key": 1, "Customer": 2, "Quantity": 3, "Total": 1.5, "Unknown": 4}}}}})
 	_, record, _ := u.activeGrid()
 	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "table", SourceID: record.Database, ObjectID: "main.Item"}, Columns: names, PrimaryKey: []string{"Key"}, ColumnTypes: map[string]string{"Key": "INTEGER", "Customer": "INTEGER", "Quantity": "INTEGER", "Total": "REAL", "Unknown": "INTEGER"}}}}
 	u.sessions.ConfigureJoinApplication(ForeignKeyJoinApplication{Source: record.Source, Snapshot: ForeignKeySnapshot{Source: record.Source, Columns: map[string][]string{"main.item": names}, Keys: []ForeignKey{{Schema: "main", FromRelation: "Item", FromFields: []string{"Customer"}}}}})
@@ -368,7 +373,7 @@ func (*uxIgnoringJoin) Candidates(context.Context, RecordSet) ([]JoinCandidate, 
 func (a *uxIgnoringJoin) Apply(_ context.Context, r RecordSet, _ JoinCandidateID) (QueryResult, error) {
 	close(a.started)
 	<-a.release
-	return QueryResult{Title: r.Title + " + Customer", DTQL: r.DTQL, Source: r.Source, Result: r.Result, Lineage: &JoinLineage{ParentRecordSetID: r.ID, CandidateID: "x"}}, nil
+	return QueryResult{Title: r.Title + " + Customer", TugQL: r.TugQL, Source: r.Source, Result: r.Result, Lineage: &JoinLineage{ParentRecordSetID: r.ID, CandidateID: "x"}}, nil
 }
 
 type uxDelayedSaved struct {
@@ -380,7 +385,7 @@ type uxDelayedSaved struct {
 func (s *uxDelayedSaved) Run(ctx context.Context, _ string) (QueryResult, error) {
 	s.started <- ctx
 	<-s.release
-	return QueryResult{Title: "Saved", DTQL: "from: {name: Item}\nlimit: 1", Source: "sqlite:///fixture.db", Result: secureread.Result{Columns: []string{"Id"}}}, nil
+	return QueryResult{Title: "Saved", TugQL: "from: {name: Item}\nlimit: 1", Source: "sqlite:///fixture.db", Result: secureread.Result{Columns: []string{"Id"}}}, nil
 }
 func uxAsyncResult(cmd tea.Cmd) tea.Msg {
 	msg := cmd()
@@ -390,6 +395,7 @@ func uxAsyncResult(cmd tea.Cmd) tea.Msg {
 	return msg
 }
 func TestWorkspaceUXExistingQueryPathsCancelBeforePersistence(t *testing.T) {
+	t.Parallel()
 	for _, path := range []string{"editor", "refresh", "saved", "join"} {
 		t.Run(path, func(t *testing.T) {
 			u, parent := uxUI(t)
@@ -460,6 +466,7 @@ func TestWorkspaceUXExistingQueryPathsCancelBeforePersistence(t *testing.T) {
 }
 
 func TestWorkspaceUXCanceledCompletionCannotClearNewOperation(t *testing.T) {
+	t.Parallel()
 	u, parent := uxUI(t)
 	executor := &uxDelayedExecutor{make(chan context.Context, 1), make(chan struct{})}
 	u.sessions.ConfigureQueryExecutor(executor)
@@ -498,6 +505,7 @@ func TestWorkspaceUXCanceledCompletionCannotClearNewOperation(t *testing.T) {
 }
 
 func TestWorkspaceUXRelatedCancelAndCompactHiddenToolbar(t *testing.T) {
+	t.Parallel()
 	u := reviewJoinUI(t)
 	_, record, _ := u.activeGrid()
 	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "table", SourceID: record.Database, ObjectID: "main.Invoice"}, Columns: record.Result.Columns, ColumnTypes: map[string]string{"InvoiceId": "INTEGER", "CustomerId": "INTEGER"}, PrimaryKey: []string{"InvoiceId"}}}}
@@ -547,6 +555,7 @@ func TestWorkspaceUXRelatedCancelAndCompactHiddenToolbar(t *testing.T) {
 }
 
 func TestWorkspaceUXLocalPanelToolbarAndActionsOwnVisibleContext(t *testing.T) {
+	t.Parallel()
 	u, parent := uxUI(t)
 	uxSearchAction(t, u, "Group loaded")
 	uxKey(t, u, "2")
@@ -574,6 +583,7 @@ func TestWorkspaceUXLocalPanelToolbarAndActionsOwnVisibleContext(t *testing.T) {
 }
 
 func TestWorkspaceUXUnprovenImportedSnapshotStaysLoaded(t *testing.T) {
+	t.Parallel()
 	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Imported snapshot", Result: secureread.Result{Columns: []string{"Id"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 1}}}}})
 	_, record, _ := u.activeGrid()
 	if record.CreatedAt.IsZero() {
@@ -603,6 +613,7 @@ func uxResponsive(t *testing.T, label string, fn func()) {
 	}
 }
 func TestWorkspaceUXReviewBackendFenceBeforeAndAfterCancel(t *testing.T) {
+	t.Parallel()
 	u, parent := uxUI(t)
 	executor := &uxDelayedExecutor{make(chan context.Context, 1), make(chan struct{})}
 	u.sessions.ConfigureQueryExecutor(executor)
@@ -660,6 +671,7 @@ func TestWorkspaceUXReviewBackendFenceBeforeAndAfterCancel(t *testing.T) {
 }
 
 func TestWorkspaceUXReviewComposerEditingDuringBackendAndCancel(t *testing.T) {
+	t.Parallel()
 	u, parent := uxUI(t)
 	executor := &uxDelayedExecutor{make(chan context.Context, 1), make(chan struct{})}
 	u.sessions.ConfigureQueryExecutor(executor)
@@ -725,6 +737,7 @@ func TestWorkspaceUXReviewComposerEditingDuringBackendAndCancel(t *testing.T) {
 }
 
 func TestWorkspaceUXReviewBridgeRetriesContendedNotification(t *testing.T) {
+	t.Parallel()
 	for _, tracked := range []bool{false, true} {
 		t.Run(fmt.Sprintf("tracked=%v", tracked), func(t *testing.T) {
 			u, parent := uxUI(t)
@@ -750,7 +763,7 @@ func TestWorkspaceUXReviewBridgeRetriesContendedNotification(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			query, err := u.sessions.store.AppendQuery(t.Context(), u.sessionID, message.ID, parent.Source, QueryResult{Title: "External child", DTQL: parent.DTQL, Result: parent.Result})
+			query, err := u.sessions.store.AppendQuery(t.Context(), u.sessionID, message.ID, parent.Source, QueryResult{Title: "External child", TugQL: parent.TugQL, Result: parent.Result})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -786,6 +799,7 @@ func TestWorkspaceUXReviewBridgeRetriesContendedNotification(t *testing.T) {
 	}
 }
 func TestWorkspaceUXReviewMouseOnlyBackgroundSuccessEntersTrail(t *testing.T) {
+	t.Parallel()
 	for _, path := range []string{"query", "derived", "saved", "refresh"} {
 		t.Run(path, func(t *testing.T) {
 			u, parent := uxUI(t)
@@ -869,6 +883,7 @@ func TestWorkspaceUXReviewMouseOnlyBackgroundSuccessEntersTrail(t *testing.T) {
 	}
 }
 func TestWorkspaceUXReviewLocalDirectActionsAndRepeatedEsc(t *testing.T) {
+	t.Parallel()
 	u, parent := uxUI(t)
 	executor := &fakeExecutor{}
 	u.sessions.ConfigureQueryExecutor(executor)
@@ -926,6 +941,7 @@ func TestWorkspaceUXReviewLocalDirectActionsAndRepeatedEsc(t *testing.T) {
 }
 
 func TestWorkspaceUXReviewHTTPMouseSuccessAndJoinBackgroundTrail(t *testing.T) {
+	t.Parallel()
 	t.Run("HTTP mouse", func(t *testing.T) {
 		u, parent := uxUI(t)
 		u.shell.SetComposerText("http mouse retained")
@@ -1021,10 +1037,11 @@ func TestWorkspaceUXReviewHTTPMouseSuccessAndJoinBackgroundTrail(t *testing.T) {
 }
 
 func TestWorkspaceUXNativeSQLExecutionAndEmptyResultScope(t *testing.T) {
+	t.Parallel()
 	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Native SQL", Source: "sqlite:///fixture.db", Result: secureread.Result{Columns: []string{"Id"}}})
 	id := u.activeRecordSetID()
 	record := u.snapshot.RecordSets[id]
-	if id == "" || record.DTQL != "" || record.QueryID == "" {
+	if id == "" || record.TugQL != "" || record.QueryID == "" {
 		t.Fatal("native SQL fixture lacks empty-result execution provenance")
 	}
 	view := ansi.Strip(u.shell.View().Content)
@@ -1043,6 +1060,7 @@ func TestWorkspaceUXNativeSQLExecutionAndEmptyResultScope(t *testing.T) {
 }
 
 func TestWorkspaceUXReviewLoadedRelatedCannotReplaceRefresh(t *testing.T) {
+	t.Parallel()
 	u, parent := uxUI(t)
 	g := u.gridsByRecordSetID[parent.ID]
 	p := u.workspace

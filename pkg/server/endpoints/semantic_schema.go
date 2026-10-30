@@ -23,6 +23,9 @@ var recordsetUnmarshalJSON = json.Unmarshal
 var dalAsSchemaReader = dal.As[dbschema.SchemaReader]
 var dbcopyParse = dbcopy.Parse
 
+// closeSchemaDB releases a source opened to read a schema (a no-op for a backend with no Close).
+var closeSchemaDB = dbcopy.CloseSource
+
 // recordsetDefinitionPath is the project's declared shape for a
 // non-SQL (inGitDB-backed) collection: recordsets/<source>.recordset.json,
 // per recordsets/README.md's own documented convention in
@@ -38,6 +41,9 @@ type resolvedSource struct {
 	URL     string
 	Columns []semantic.Column
 	Schema  semantic.TableSchema
+	// ForeignKeys are the outgoing foreign keys of the table as the live schema of the source
+	// reports them (nil for a source that has none or cannot report them).
+	ForeignKeys []dbschema.ForeignKeyDef
 }
 
 // resolveSource resolves (environment, source, collection) to a
@@ -125,14 +131,17 @@ func resolveSQLSourceURL(ctx context.Context, sourceID, sourceURL, collection st
 	// a source URL must never reach an error, a log or a client.
 	shown := ref.String()
 	db, err := ref.Open(ctx)
+	if err == nil {
+		// The handle is only used to describe the collection: it is closed with the request.
+		defer closeSchemaDB(db)
+	}
 	if err != nil {
 		// A source that is refused, whose data file is not there or that cannot be opened is
 		// unavailable. A file source is named in the answer by its ID: Open's own error holds the
 		// display form of the source (the path of a file), and goes to the log. A PostgreSQL source
 		// names no source in its text: the adapter's sentence for the failure and where its
 		// connection string is read from (the variable), no host, port or database; so do its fixed
-		// refusals (dbcopy.ErrPostgresPreview while the preview is off, and the refusal of a URL that
-		// turns the read-only session off). They are answered, and logged, as they are.
+		// refusal (of a URL that turns the read-only session off). They are answered, and logged, as they are.
 		return resolvedSource{}, unavailableOr(sourceID, err, err)
 	}
 	reader, ok := dalAsSchemaReader(db)
@@ -174,7 +183,7 @@ func resolveSQLSourceURL(ctx context.Context, sourceID, sourceURL, collection st
 			}},
 		})
 	}
-	// ForeignKeys (this collection's own OUTGOING foreign keys) is left
+	// semantic.TableSchema.ForeignKeys (this collection's own OUTGOING foreign keys) is left
 	// empty: dbschema.ConstraintDef (Tier 1) reports that a "foreign-key"
 	// constraint exists by name only, with no referenced-table/columns —
 	// there is nothing here to build a valid semantic.Lookup target from.
@@ -189,6 +198,7 @@ func resolveSQLSourceURL(ctx context.Context, sourceID, sourceURL, collection st
 			PrimaryKey:   primaryKey,
 			ReferencedBy: referencedBy,
 		},
+		ForeignKeys: def.ForeignKeys,
 	}, nil
 }
 

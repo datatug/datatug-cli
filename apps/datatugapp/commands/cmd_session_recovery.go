@@ -51,7 +51,7 @@ func (c sessionCLI) recoverClientRun(cmd *cobra.Command, operationID, sessionID,
 		if readErr != nil {
 			return true, readErr
 		}
-		interpretation = &chat.InterpretResult{DTQL: text}
+		interpretation = &chat.InterpretResult{TugQL: text}
 	}
 	response := struct {
 		Receipt        sessioncontext.Receipt `json:"receipt"`

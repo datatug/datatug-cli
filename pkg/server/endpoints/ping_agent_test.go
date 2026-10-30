@@ -37,9 +37,9 @@ func TestAgentInfo(t *testing.T) {
 func TestAgentInfo_SuccessCarriesCORSOrigin(t *testing.T) {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/agent-info", nil)
-	r.Header.Set("Origin", "http://localhost:4200")
+	r.Header.Set("Origin", "http://datatug.localhost:4200")
 	AgentInfo(w, r)
-	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:4200" {
-		t.Errorf("Access-Control-Allow-Origin = %q, want %q", got, "http://localhost:4200")
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "http://datatug.localhost:4200" {
+		t.Errorf("Access-Control-Allow-Origin = %q, want %q", got, "http://datatug.localhost:4200")
 	}
 }

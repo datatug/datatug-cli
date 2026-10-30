@@ -52,7 +52,7 @@ func TestExecutionCommandUsesRealAgentEndpoints(t *testing.T) {
 	}
 	record := apicontract.ExecutionRecord{
 		Ref: ref, Scope: apicontract.ExecutionRecordScope{StoreID: projectID, Project: projectID, Environment: "prod"},
-		DTQLHash: strings.Repeat("1", 64), Parameters: map[string]apicontract.TypedValueOrSet{}, BindingsApplied: []apicontract.Binding{},
+		TugQLHash: strings.Repeat("1", 64), Parameters: map[string]apicontract.TypedValueOrSet{}, BindingsApplied: []apicontract.Binding{},
 		Principal: apicontract.ExecutionPrincipal{ID: "alice", Roles: []string{}, Groups: []string{}}, PolicyFingerprint: api.SecurePolicyFingerprint(),
 		ExecutedAt: fixtureTime.Format(time.RFC3339), Limitations: []apicontract.Limitation{},
 		Provenance:       apicontract.Provenance{Source: "sales", Collection: "orders", Mode: apicontract.ProvenanceModeLive, ObservedAt: fixtureTime.Format(time.RFC3339), ExecutionProfile: apicontract.ExecutionProfileProtected},

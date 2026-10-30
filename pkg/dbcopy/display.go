@@ -65,7 +65,7 @@ var (
 // `datatug db <url>` viewer command takes.
 var localSchemes = sync.OnceValue(func() map[string]bool {
 	local := map[string]bool{
-		"sqlite": true, "ingitdb": true, "openvaultdb": true, "http": true, "https": true, unavailableScheme: true,
+		"duckdb": true, "sqlite": true, "ingitdb": true, "openvaultdb": true, "http": true, "https": true, unavailableScheme: true,
 	}
 	for _, scheme := range dburl.BaseSchemes() {
 		if !scheme.Opaque {
@@ -153,6 +153,13 @@ func isLocalScheme(scheme string) bool {
 // because it names a variable and holds no value. A string that is not led by a
 // known scheme yields UnparsableSource.
 func SourceDisplay(raw string) string {
+	if IsDatatugRef(raw) {
+		// A reference to a source of a project holds only names: it is shown as it is when it is well formed.
+		if ref, err := ParseDatatugRef(raw); err == nil {
+			return ref.String()
+		}
+		return UnparsableSource
+	}
 	if name, isEnv := strings.CutPrefix(raw, envPrefix); isEnv {
 		if ValidEnvName(name) {
 			return raw
@@ -190,6 +197,15 @@ func displayAfterScheme(scheme, rest string) (string, bool) {
 		return inner + "://" + hostPortPath(rest[len(prefix):], urlPathSegments), true
 	case scheme == unavailableScheme:
 		return unavailableDisplay(rest), true
+	case IsPostgRESTScheme(scheme):
+		// A PostgREST API path may hold a few segments (Supabase's /rest/v1), and
+		// the schema/id options are non-secret: they stay off the text, which names
+		// the endpoint and no option.
+		return hostPortPath(rest, 4), true
+	case IsLibSQLScheme(scheme):
+		// A libSQL server may name a base path of a few segments; the text names the
+		// endpoint and never a credential, a query or a fragment (Parse refuses them).
+		return hostPortPath(rest, 2), true
 	case isLocalScheme(scheme):
 		return localTextDisplay(rest), true
 	default:

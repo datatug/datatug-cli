@@ -47,13 +47,15 @@ Pinning the contract surface lets the implementation evolve without breaking use
 | [db/](db/README.md) | Open a database viewer by URL |
 | [queries/](queries/README.md) | Queries management (lists saved queries) |
 | [execute/](execute/README.md) | Execute an SQL query/command (currently exposed under the name `updateUrlConfig`) |
-| [query/](query/README.md) | `query run` — run an ad-hoc DTQL query through the user's access policies (`~/.datatug/policies/`): rows to stdout, applied limitations to stderr |
+| [query/](query/README.md) | `query run` — run an ad-hoc TugQL query through the user's access policies (`~/.datatug/policies/`): rows to stdout, applied limitations to stderr |
 | [version/](version/README.md) | CLI version reporting |
 | [board](board/README.md) | List the boards of a project (`list`) |
 | [entity](entity/README.md) | Author and read entities and their fields (`add`, `field add/set/rm`, `list`, `show`) |
 | [incident](incident/README.md) | List, search, inspect, create/update and resolve incidents; attach context, hypotheses and evidence; link recurrence; `watch` streams the event stream for humans, scripts and AI agents |
+| [daemon](daemon/README.md) | `daemon status\|start\|stop\|url` and the global `--client` flag: an owned, read-only local `serve` for AI-agent mods and their web-UI deep links |
 | [self-update](self-update/README.md) | datatug self-update, built from github.com/strongo/cli-helpers/selfupdate against datatug's own compiled-in cliinstall catalog entry. |
 | [install](install/README.md) | datatug install, built from github.com/strongo/cli-helpers/cliinstall against the same catalog entry — lists and installs the fleet CLIs relevant to datatug (ingitdb, ovdb, specscore). |
+| [backup](backup/README.md) | `backup new\|list\|pin\|run\|point list\|restore\|verify` — named, commit-safe backup profiles (secrets by reference) that keep incremental, append-only restore points of a project source in a git remote, a local folder or object storage; built on `db copy` (Draft; retention is a later Feature) |
 
 External command groups live in their own packages and are referenced here but not specified in this tree:
 

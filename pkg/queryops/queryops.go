@@ -1,6 +1,6 @@
-// Package queryops derives bounded, previewable DTQL operations without running
+// Package queryops derives bounded, previewable TugQL operations without running
 // a query or resolving any source. It only transforms DALgo's typed AST and
-// returns a canonical DTQL document for the caller to inspect or submit.
+// returns a canonical TugQL document for the caller to inspect or submit.
 package queryops
 
 import (
@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 )
 
 var (
@@ -37,9 +37,9 @@ type SortTerm struct {
 	Descending bool
 }
 
-// Preview is the exact validated DTQL document and its resulting projection.
+// Preview is the exact validated TugQL document and its resulting projection.
 type Preview struct {
-	DTQL          string
+	TugQL         string
 	OutputColumns []string
 	Scope         Scope
 }
@@ -54,13 +54,13 @@ var safeAlias = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // DeriveGroup creates a bounded query preview grouped by selected projected
 // columns. Count adds only an explicit COUNT(*) output; no other aggregates are
 // inferred. Empty groupColumns is refused.
-func DeriveGroup(originalDTQL string, groupColumns []string, count bool, scope Scope) (Preview, error) {
-	return DeriveGroupAggregates(originalDTQL, groupColumns, count, nil, scope)
+func DeriveGroup(originalTugQL string, groupColumns []string, count bool, scope Scope) (Preview, error) {
+	return DeriveGroupAggregates(originalTugQL, groupColumns, count, nil, scope)
 }
 
 // DeriveSort creates a bounded query preview ordered by selected projected
 // columns. It deliberately replaces the query's final ordering and output cap.
-func DeriveSort(originalDTQL string, terms []SortTerm, scope Scope) (Preview, error) {
+func DeriveSort(originalTugQL string, terms []SortTerm, scope Scope) (Preview, error) {
 	if len(terms) == 0 {
 		return Preview{}, fmt.Errorf("%w: sorting needs at least one selected column", ErrInvalidColumn)
 	}
@@ -68,7 +68,7 @@ func DeriveSort(originalDTQL string, terms []SortTerm, scope Scope) (Preview, er
 	for i, term := range terms {
 		names[i] = term.Column
 	}
-	query, err := parseOriginal(originalDTQL)
+	query, err := parseOriginal(originalTugQL)
 	if err != nil {
 		return Preview{}, err
 	}
@@ -94,19 +94,9 @@ func DeriveSort(originalDTQL string, terms []SortTerm, scope Scope) (Preview, er
 			}
 		}
 		builder.OrderBy(orders...).Offset(query.Offset()).Limit(boundedLimit(query.Limit()))
-		outputNames, err := allOutputNames(query)
-		if err != nil {
-			return Preview{}, err
-		}
-		return serializePreview(builder.SelectColumns(columns...), outputNames, scope)
+		return serializePreview(builder.SelectColumns(columns...), allOutputNames(query), scope)
 	}
-	if scope != OriginalOutput {
-		return Preview{}, fmt.Errorf("%w: unknown scope %d", ErrUnsupported, scope)
-	}
-	all, err := allOutputNames(query)
-	if err != nil {
-		return Preview{}, err
-	}
+	all := allOutputNames(query)
 	builder := dal.From(dal.NewQuerySource(query, "original")).NewQuery()
 	columns := make([]dal.Column, len(all))
 	for i, name := range all {
@@ -127,35 +117,29 @@ func DeriveSort(originalDTQL string, terms []SortTerm, scope Scope) (Preview, er
 
 func parseOriginal(raw string) (dal.StructuredQuery, error) {
 	if strings.TrimSpace(raw) == "" {
-		return nil, fmt.Errorf("%w: empty DTQL", ErrUnsupported)
+		return nil, fmt.Errorf("%w: empty TugQL", ErrUnsupported)
 	}
-	query, err := dtql.Deserialize([]byte(raw))
-	if err != nil {
-		return nil, fmt.Errorf("%w: invalid original DTQL: %v", ErrUnsupported, err)
-	}
-	if query.From() == nil {
-		return nil, fmt.Errorf("%w: original query has no source", ErrUnsupported)
-	}
-	if err := dal.ValidateJoinTree(query.From()); err != nil {
-		return nil, fmt.Errorf("%w: invalid source tree: %v", ErrUnsupported, err)
+	query, err := tugql.Deserialize([]byte(raw))
+	if err != nil || query.From() == nil || dal.ValidateJoinTree(query.From()) != nil {
+		return nil, fmt.Errorf("%w: invalid original TugQL: %v", ErrUnsupported, err)
 	}
 	return query, nil
 }
 
 func serializePreview(query dal.StructuredQuery, columns []string, scope Scope) (Preview, error) {
-	encoded, err := dtql.Serialize(query)
-	if err != nil {
-		return Preview{}, fmt.Errorf("%w: derived query cannot be represented as DTQL: %v", ErrUnsupported, err)
+	encoded, err := tugql.Serialize(query)
+	var parsed dal.StructuredQuery
+	if err == nil {
+		parsed, err = tugql.Deserialize(encoded)
 	}
-	parsed, err := dtql.Deserialize(encoded)
-	if err != nil {
-		return Preview{}, fmt.Errorf("%w: derived preview failed validation: %v", ErrUnsupported, err)
+	var roundTrip []byte
+	if err == nil {
+		roundTrip, err = tugql.Serialize(parsed)
 	}
-	roundTrip, err := dtql.Serialize(parsed)
 	if err != nil || !bytes.Equal(encoded, roundTrip) {
-		return Preview{}, fmt.Errorf("%w: derived preview is not an exact canonical round-trip", ErrUnsupported)
+		return Preview{}, fmt.Errorf("%w: derived query cannot be represented as TugQL: %v", ErrUnsupported, err)
 	}
-	return Preview{DTQL: string(encoded), OutputColumns: append([]string(nil), columns...), Scope: scope}, nil
+	return Preview{TugQL: string(encoded), OutputColumns: append([]string(nil), columns...), Scope: scope}, nil
 }
 
 func resolveProjection(query dal.StructuredQuery, names []string, scope Scope) ([]projectedColumn, error) {
@@ -224,16 +208,13 @@ func projectedColumns(query dal.StructuredQuery) ([]projectedColumn, error) {
 	return result, nil
 }
 
-func allOutputNames(query dal.StructuredQuery) ([]string, error) {
-	columns, err := projectedColumns(query)
-	if err != nil {
-		return nil, err
-	}
+func allOutputNames(query dal.StructuredQuery) []string {
+	columns, _ := projectedColumns(query)
 	result := make([]string, len(columns))
 	for i, column := range columns {
 		result[i] = column.name
 	}
-	return result, nil
+	return result
 }
 
 func validateMatchingSource(query dal.StructuredQuery) error {
@@ -262,12 +243,6 @@ func validateMatchingSource(query dal.StructuredQuery) error {
 
 func containsDerivedSource(from dal.FromSource) bool {
 	if from == nil {
-		return true
-	}
-	if _, ok := from.Base().(dal.QuerySource); ok {
-		return true
-	}
-	if _, ok := from.Base().(*dal.QuerySource); ok {
 		return true
 	}
 	if _, ok := from.Base().(dal.CollectionRef); !ok {

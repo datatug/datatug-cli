@@ -24,7 +24,10 @@ datatug db <url>
 
 | Directory | Description |
 |---|---|
+| [add/](add/README.md) | `datatug db add --project <id> --db <path\|env:NAME>` — registers a database as a source of a project without opening it. |
 | [copy/](copy/README.md) | `datatug db copy --from <url> --to <url>` — cross-engine database copy primitive. |
+| [metadata/](metadata/README.md) | `datatug db table`, `db column`, `db objects` — read-only metadata of one table, column or the other object kinds. |
+| [schema/](schema/README.md) | `datatug db schema --db <url>` (or `--db datatug://<project>/<db>`) — read-only listing of a database's tables and views. |
 
 ## Problem
 
@@ -83,7 +86,8 @@ The viewer MUST connect read-only by default, mirroring [scan REQ: connection-st
 |---|---|
 | [CLI](../README.md) | Parent. |
 | [ui](../ui/README.md) | The viewer this command launches SHOULD be the same DB viewer the TUI uses. |
-| [scan](../scan/README.md) | Independent. `scan` updates a project; `db` only opens a viewer. |
+| [backup](../backup/README.md) | `backup` keeps named, repeatable restore points of a project source on top of `db copy`; `db copy` and `db export` stay one-shot, and remote or cloud destinations belong to `backup` only. |
+| [scan](../scan/README.md) | Independent. `scan` updates a project; `db` only opens a viewer. The subcommand [`db add`](add/README.md) is the exception to "no project": it registers a database in a project, and writes the files a scan writes. |
 
 ## Acceptance Criteria
 
@@ -109,7 +113,9 @@ The connection opened by `datatug db` MUST be read-only. Verifiable by attemptin
 
 | Subcommand | Status | Description |
 |---|---|---|
+| [`db add`](add/README.md) | Implementing | `datatug db add --project <id> --db <path\|env:NAME>` — registers a database as a source of a registered project; never opens it. |
 | [`db copy`](copy/README.md) | Approved | `datatug db copy --from <url> --to <url>` — cross-engine database copy primitive. |
+| [`db schema`](schema/README.md) | Approved | `datatug db schema --db <url>`, or `--db datatug://<project>/<db>` for a source of a project — read-only table and view listing. |
 
 ## Open Questions
 

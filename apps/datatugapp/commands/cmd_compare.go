@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/datatug/datatug-cli/pkg/agentaccess"
 	"io"
 	"net/http"
 	"os"
@@ -341,6 +342,7 @@ func (c agentHTTPClient) get(ctx context.Context, path string) ([]byte, int, err
 	if err != nil {
 		return nil, 0, err
 	}
+	agentaccess.Apply(request)
 	return c.do(request)
 }
 
@@ -353,6 +355,7 @@ func (c agentHTTPClient) post(ctx context.Context, path string, input any) ([]by
 	if err != nil {
 		return nil, 0, err
 	}
+	agentaccess.Apply(request)
 	request.Header.Set("Content-Type", "application/json")
 	return c.do(request)
 }

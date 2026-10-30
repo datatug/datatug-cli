@@ -7,15 +7,18 @@ project:
   repo: datatug-cli
 
 # Related SpecScore projects (repo-config REQ:projects-list). The hub repo
-# (github.com/datatug/datatug) owns the ai-query-builder, incidents and
-# serve-brokered-query-builder Capabilities that this repo's Implementations
-# cite cross-repo. SpecScore resolves paths relative to the checkout root and
+# (github.com/datatug/datatug) owns ai-query-builder and
+# serve-brokered-query-builder; github.com/datatug/backstage owns incidents.
+# This repo cites these Capabilities cross-repo. SpecScore resolves paths relative to the checkout root and
 # skips absent entries, so list the sibling hub from both the canonical clone
 # and a WB-managed `.worktrees/<task>` checkout.
 projects:
   - ../datatug
+  - ../backstage
   - ../../../datatug
+  - ../../../backstage
   - ../../../../../datatug/datatug
+  - ../../../../../datatug/backstage
 
 # Reviewer gates (event-keyed per the reviewer-gates contract / loader).
 # specstudio:specify guards gates.feature.approved.

@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/hex"
 	"fmt"
+	"github.com/datatug/datatug-cli/pkg/agentaccess"
 	"sync"
 	"time"
 
@@ -40,8 +41,19 @@ var (
 // such grant". Both default false: Phase 1's read journey is safe-by-default
 // unless an operator explicitly opts a serve process into either capability.
 type Capabilities struct {
-	AllowWrites    bool
-	AllowOpaqueSQL bool
+	// EnvironmentMetadataPolicies explicitly grants the fixed principal project metadata access.
+	EnvironmentMetadataPolicies map[string]EnvironmentMetadataPolicy
+	EnvironmentPrivateDir       string
+	EnvironmentAuthorityID      string
+
+	// Access, when set, is the agent's shared-token access: every route but a preflight and the
+	// exchange of a one-time code requires its session token (pkg/agentaccess). `datatug serve`
+	// always sets it.
+	Access      *agentaccess.Access
+	AllowWrites bool
+	// NativeSessionDetective remains opt-in until local and hosted conformance are proven.
+	NativeSessionDetective bool
+	AllowOpaqueSQL         bool
 	// AllowLiveConnections is `datatug serve --allow-live-connections`: the routes that connect
 	// to a database server that the served project records (dbserver-databases) answer 403
 	// without it. It is off by default: such a connection is made under the identity of the
@@ -78,7 +90,7 @@ type Capabilities struct {
 // builds once for its whole process lifetime (REQ:principal-selection) into
 // every request this process handles, and records the project-id ->
 // filesystem-directory map serve already resolved (pathsByID) so a saved
-// query's SQL/DTQL sidecar file can be located — pkg/datatug-core's
+// query's SQL/TugQL sidecar file can be located — pkg/datatug-core's
 // LoadQuery does not hydrate QueryDef.Text back from that file yet (that
 // lands with the datatug-core sidecar-read story; see loadQueryDocument).
 //

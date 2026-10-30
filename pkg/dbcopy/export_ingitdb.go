@@ -21,6 +21,7 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
+	"github.com/datatug/datatug-cli/pkg/dbcopy/filter"
 	"github.com/ingitdb/dalgo2ingitdb"
 	"github.com/ingitdb/ingitdb-go/ingitdb"
 	"github.com/ingitdb/ingitdb-go/ingitdb/datavalidator"
@@ -42,23 +43,60 @@ type exportTable struct {
 // source provider: SourceRowsReader streams, while a generic query reader may
 // materialize its collection before returning rows.
 func ExportInGitDB(ctx context.Context, source dal.DB, destination string, options ...ExportOptions) (map[string]int64, error) {
+	result, err := ExportInGitDBReport(ctx, source, destination, options...)
+	if err != nil {
+		return nil, err
+	}
+	counts := make(map[string]int64, len(result.Tables))
+	for _, table := range result.Tables {
+		counts[table.Name] = table.Rows
+	}
+	return counts, nil
+}
+
+// ExportInGitDBReport is ExportInGitDB that also reports what it did: the
+// tables and rows written (or, with DryRun, that would be written) and every
+// warning. It is the one native inGitDB destination of `datatug db copy` and
+// `datatug db export`.
+func ExportInGitDBReport(ctx context.Context, source dal.DB, destination string, options ...ExportOptions) (*ExportResult, error) {
 	format := ingitdb.RecordFormatJSON
 	if len(options) > 1 {
 		return nil, fmt.Errorf("only one export options value is supported")
 	}
+	var opts ExportOptions
 	if len(options) == 1 {
 		var err error
-		format, err = normalizeExportFormat(options[0].RecordsFormat)
+		opts = options[0]
+		format, err = normalizeExportFormat(opts.RecordsFormat)
 		if err != nil {
 			return nil, err
 		}
 	}
+	result := &ExportResult{}
 	refs, err := dbschema.ListCollections(ctx, source, nil)
 	if err != nil {
 		return nil, fmt.Errorf("list source collections: %w", err)
 	}
 	if len(refs) == 0 {
 		return nil, ErrSourceHasNoTables
+	}
+	allNames := make(map[string]bool, len(refs))
+	for _, ref := range refs {
+		allNames[ref.Name()] = true
+	}
+	refs, err = filter.ApplyTableFilter(refs, opts.Filters)
+	if err != nil {
+		return nil, err
+	}
+	if len(refs) == 0 {
+		return nil, ErrNoCollectionsSelected
+	}
+	selected := make(map[string]bool, len(refs))
+	for _, ref := range refs {
+		selected[ref.Name()] = true
+	}
+	if err := checkFilterTables(opts.Filters, selected); err != nil {
+		return nil, err
 	}
 	defs := make([]exportTable, 0, len(refs))
 	seenNames := map[string]bool{}
@@ -69,7 +107,7 @@ func ExportInGitDB(ctx context.Context, source dal.DB, destination string, optio
 		if ref.Schema() != "" || ref.Database() != "" || ref.Parent() != nil {
 			return nil, fmt.Errorf("source collection %q has a namespace, database, or parent that native root export cannot preserve", ref.Path())
 		}
-		nativeID, err := nativeCollectionID(ref.Name())
+		nativeID, err := exportNativeCollectionID(ref.Name())
 		if err != nil {
 			return nil, err
 		}
@@ -115,6 +153,7 @@ func ExportInGitDB(ctx context.Context, source dal.DB, destination string, optio
 				}
 			}
 		}
+		def.ForeignKeys = dropUnselectedForeignKeys(def, selected, allNames, result)
 		if _, err := dalgo2ingitdb.ExportCollectionDefinition(*def); err != nil {
 			return nil, fmt.Errorf("map source collection %q: %w", ref.Name(), err)
 		}
@@ -123,6 +162,7 @@ func ExportInGitDB(ctx context.Context, source dal.DB, destination string, optio
 	if err := validateExportRelationships(defs); err != nil {
 		return nil, err
 	}
+	warnFilteredParents(defs, opts.Filters, result)
 	constraintsChecked := false
 	if checker, ok := dal.As[dbschema.SourceConstraintChecker](source); ok {
 		if err := checker.CheckSourceConstraints(ctx); err != nil {
@@ -130,20 +170,28 @@ func ExportInGitDB(ctx context.Context, source dal.DB, destination string, optio
 		}
 		constraintsChecked = true
 	}
-	path, err := filepath.Abs(destination)
+	path, err := exportFilepathAbs(destination)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := os.Lstat(path); err == nil {
+	if _, err := exportOSLstat(path); err == nil {
 		return nil, fmt.Errorf("destination already exists: %s", path)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
+	// The destination's folder must exist, for a dry run as much as for a real run: the dry run says what the real run
+	// would say.
 	parent := filepath.Dir(path)
 	if _, err := os.Stat(parent); err != nil {
 		return nil, fmt.Errorf("destination parent: %w", err)
 	}
-	stage, err := os.MkdirTemp(parent, ".datatug-export-*")
+	// A dry run builds the whole project to check every row, and throws it away: it stays
+	// where nothing is published and the destination's folder is not touched.
+	stageParent := parent
+	if opts.DryRun {
+		stageParent = os.TempDir()
+	}
+	stage, err := exportOSMkdirTemp(stageParent, ".datatug-export-*")
 	if err != nil {
 		return nil, fmt.Errorf("create export staging directory: %w", err)
 	}
@@ -151,36 +199,35 @@ func ExportInGitDB(ctx context.Context, source dal.DB, destination string, optio
 	// Reserve every collection name exclusively before writing any records.
 	// The target filesystem decides which names alias (case, Unicode, and
 	// platform rules), so an alias cannot overwrite another table's files.
-	if err := reserveExportCollectionDirs(stage, defs, os.Mkdir); err != nil {
+	if err := exportReserveCollectionDirs(stage, defs, os.Mkdir); err != nil {
 		return nil, err
 	}
 	registry := map[string]string{}
-	counts := map[string]int64{}
 	for _, table := range defs {
 		def := table.def
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		count, err := exportCollection(ctx, source, stage, table.ref, def, table.nativeID, sourceIDs, constraintsChecked, format)
+		count, err := exportCollection(ctx, source, stage, table.ref, def, table.nativeID, sourceIDs, constraintsChecked, format, opts.Filters)
 		if err != nil {
 			return nil, fmt.Errorf("export %q: %w", def.Name, err)
 		}
 		registry[table.nativeID] = table.nativeID
-		counts[def.Name] = count
+		result.Tables = append(result.Tables, exportTableReport(def, count))
 	}
-	if err := os.MkdirAll(filepath.Join(stage, ".ingitdb"), 0o755); err != nil {
+	if err := exportOSMkdirAll(filepath.Join(stage, ".ingitdb"), 0o755); err != nil {
 		return nil, err
 	}
 	// This mapping retains the logical source name even for providers without
 	// native DDL. Collection IDs and filesystem paths are transport names.
-	mapping, err := json.MarshalIndent(struct {
+	mapping, err := exportJSONMarshalIndent(struct {
 		Format      string            `json:"format"`
 		Collections map[string]string `json:"collections"`
 	}{Format: "datatug-source-collections/v1", Collections: nativeIDs}, "", "  ")
 	if err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(filepath.Join(stage, ".ingitdb", "source-collections.json"), append(mapping, '\n'), 0o644); err != nil {
+	if err := exportOSWriteFile(filepath.Join(stage, ".ingitdb", "source-collections.json"), append(mapping, '\n'), 0o644); err != nil {
 		return nil, err
 	}
 	if viewReader, ok := dal.As[dbschema.SourceViewReader](source); ok {
@@ -194,32 +241,35 @@ func ExportInGitDB(ctx context.Context, source dal.DB, destination string, optio
 			}
 		}
 		if len(views) > 0 {
-			viewMetadata, err := yaml.Marshal(views)
+			viewMetadata, err := exportYAMLMarshal(views)
 			if err != nil {
 				return nil, err
 			}
-			if err := os.WriteFile(filepath.Join(stage, ".ingitdb", "source-views.yaml"), viewMetadata, 0o644); err != nil {
+			if err := exportOSWriteFile(filepath.Join(stage, ".ingitdb", "source-views.yaml"), viewMetadata, 0o644); err != nil {
 				return nil, err
 			}
 		}
 	}
-	contents, err := yaml.Marshal(registry)
+	contents, err := exportYAMLMarshal(registry)
 	if err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(filepath.Join(stage, ".ingitdb", "root-collections.yaml"), contents, 0o644); err != nil {
+	if err := exportOSWriteFile(filepath.Join(stage, ".ingitdb", "root-collections.yaml"), contents, 0o644); err != nil {
 		return nil, err
 	}
-	if _, err := validator.ReadDefinition(stage, ingitdb.Validate()); err != nil {
+	if _, err := exportReadDefinition(stage, ingitdb.Validate()); err != nil {
 		return nil, fmt.Errorf("staged native definition invalid: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if err := publishExportExclusive(stage, path); err != nil {
+	if opts.DryRun {
+		return result, nil
+	}
+	if err := exportPublishExclusive(stage, path); err != nil {
 		return nil, fmt.Errorf("publish export: %w", err)
 	}
-	return counts, nil
+	return result, nil
 }
 
 func reserveExportCollectionDirs(stage string, tables []exportTable, mkdir func(string, os.FileMode) error) error {
@@ -302,7 +352,7 @@ func nativeCollectionID(name string) (string, error) {
 	if len(id) > 255 {
 		return "", fmt.Errorf("native collection ID for %q exceeds 255 bytes", name)
 	}
-	if err := ingitdb.ValidateCollectionID(id); err != nil {
+	if err := exportValidateCollectionID(id); err != nil {
 		return "", fmt.Errorf("native collection ID for %q: %w", name, err)
 	}
 	return id, nil
@@ -339,7 +389,7 @@ func safeINGRHeaderName(name string) error {
 	return nil
 }
 
-func exportCollection(ctx context.Context, source dal.DB, stage string, ref dal.CollectionRef, def dbschema.CollectionDef, nativeID string, sourceIDs map[string]string, constraintsChecked bool, format ingitdb.RecordFormat) (int64, error) {
+func exportCollection(ctx context.Context, source dal.DB, stage string, ref dal.CollectionRef, def dbschema.CollectionDef, nativeID string, sourceIDs map[string]string, constraintsChecked bool, format ingitdb.RecordFormat, filters *filter.Directives) (int64, error) {
 	colDef, err := dalgo2ingitdb.ExportCollectionDefinition(def)
 	if err != nil {
 		return 0, err
@@ -369,30 +419,34 @@ func exportCollection(ctx context.Context, source dal.DB, stage string, ref dal.
 	if len(def.PrimaryKey) == 0 {
 		colDef.PrimaryKey = nil
 	}
-	if err := colDef.Validate(); err != nil {
+	if err := exportValidateColDef(colDef); err != nil {
 		return 0, err
 	}
 	colDir := filepath.Join(stage, nativeID)
-	if err := os.MkdirAll(filepath.Join(colDir, ingitdb.SchemaDir), 0o755); err != nil {
+	if err := exportOSMkdirAll(filepath.Join(colDir, ingitdb.SchemaDir), 0o755); err != nil {
 		return 0, err
 	}
-	y, err := yaml.Marshal(colDef)
+	y, err := exportYAMLMarshal(colDef)
 	if err != nil {
 		return 0, err
 	}
-	if err := os.WriteFile(filepath.Join(colDir, ingitdb.SchemaDir, ingitdb.CollectionDefFileName), y, 0o644); err != nil {
+	if err := exportOSWriteFile(filepath.Join(colDir, ingitdb.SchemaDir, ingitdb.CollectionDefFileName), y, 0o644); err != nil {
 		return 0, err
 	}
-	file, err := os.Create(filepath.Join(colDir, colDef.RecordFile.Name))
+	file, err := exportOSCreate(filepath.Join(colDir, colDef.RecordFile.Name))
 	if err != nil {
 		return 0, err
 	}
 	defer func() { _ = file.Close() }()
-	writer, err := newExportRecordsWriter(file, format, nativeID, def.Fields)
+	writer, err := exportNewRecordsWriter(file, format, nativeID, def.Fields)
 	if err != nil {
 		return 0, err
 	}
 	var builder dal.IQueryBuilder = dal.NewQueryBuilder(dal.From(ref))
+	builder, rowFilter, err := applyExportRowFilters(builder, source, def, filters)
+	if err != nil {
+		return 0, err
+	}
 	order := def.PrimaryKey
 	if len(order) == 0 {
 		for _, field := range def.Fields {
@@ -403,7 +457,7 @@ func exportCollection(ctx context.Context, source dal.DB, stage string, ref dal.
 		builder = builder.OrderBy(dal.AscendingField(string(field)))
 	}
 	var next func() (dbschema.SourceRow, error)
-	if native, ok := dal.As[dbschema.SourceRowsReader](source); ok {
+	if native, ok := dal.As[dbschema.SourceRowsReader](source); ok && !rowFilter {
 		cursor, err := native.OpenSourceRows(ctx, &ref)
 		if err != nil {
 			return 0, fmt.Errorf("open source rows: %w", err)
@@ -483,7 +537,7 @@ func exportCollection(ctx context.Context, source dal.DB, stage string, ref dal.
 	if err := writer.Close(); err != nil {
 		return count, err
 	}
-	if err := file.Sync(); err != nil {
+	if err := exportFileSync(file); err != nil {
 		return count, err
 	}
 	files, err := storage.Close()
@@ -491,11 +545,11 @@ func exportCollection(ctx context.Context, source dal.DB, stage string, ref dal.
 		return count, err
 	}
 	colDef.SourceSchema.StorageClassFiles = files
-	y, err = yaml.Marshal(colDef)
+	y, err = exportYAMLMarshal(colDef)
 	if err != nil {
 		return count, err
 	}
-	if err := os.WriteFile(filepath.Join(colDir, ingitdb.SchemaDir, ingitdb.CollectionDefFileName), y, 0o644); err != nil {
+	if err := exportOSWriteFile(filepath.Join(colDir, ingitdb.SchemaDir, ingitdb.CollectionDefFileName), y, 0o644); err != nil {
 		return count, err
 	}
 	return count, file.Close()
@@ -508,33 +562,59 @@ type exportIDIndex struct {
 	insert *sql.Stmt
 }
 
+var (
+	exportCreateTemp            = os.CreateTemp
+	exportFileClose             = func(f *os.File) error { return f.Close() }
+	exportFileSync              = func(f *os.File) error { return f.Sync() }
+	exportSQLOpen               = sql.Open
+	exportDBExec                = func(db *sql.DB, query string) (sql.Result, error) { return db.Exec(query) }
+	exportDBBegin               = func(db *sql.DB) (*sql.Tx, error) { return db.Begin() }
+	exportTxPrepare             = func(tx *sql.Tx, query string) (*sql.Stmt, error) { return tx.Prepare(query) }
+	exportJSONMarshal           = json.Marshal
+	exportJSONMarshalIndent     = json.MarshalIndent
+	exportYAMLMarshal           = yaml.Marshal
+	exportValidateCollectionID  = ingitdb.ValidateCollectionID
+	exportValidateColDef        = func(c *ingitdb.CollectionDef) error { return c.Validate() }
+	exportReadDefinition        = validator.ReadDefinition
+	exportPublishExclusive      = publishExportExclusive
+	exportNativeCollectionID    = nativeCollectionID
+	exportFilepathAbs           = filepath.Abs
+	exportOSLstat               = os.Lstat
+	exportOSMkdirTemp           = os.MkdirTemp
+	exportOSMkdirAll            = os.MkdirAll
+	exportOSCreate              = os.Create
+	exportOSWriteFile           = os.WriteFile
+	exportReserveCollectionDirs = reserveExportCollectionDirs
+	exportNewRecordsWriter      = newExportRecordsWriter
+)
+
 func newExportIDIndex(stage string) (*exportIDIndex, error) {
-	f, err := os.CreateTemp(stage, ".export-ids-*.sqlite")
+	f, err := exportCreateTemp(stage, ".export-ids-*.sqlite")
 	if err != nil {
 		return nil, err
 	}
 	path := f.Name()
-	if err := f.Close(); err != nil {
+	if err := exportFileClose(f); err != nil {
 		_ = os.Remove(path)
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", path)
+	db, err := exportSQLOpen("sqlite", path)
 	if err != nil {
 		_ = os.Remove(path)
 		return nil, err
 	}
-	if _, err := db.Exec(`PRAGMA journal_mode=OFF; PRAGMA synchronous=OFF; CREATE TABLE ids (id TEXT PRIMARY KEY) WITHOUT ROWID`); err != nil {
+	if _, err := exportDBExec(db, `PRAGMA journal_mode=OFF; PRAGMA synchronous=OFF; CREATE TABLE ids (id TEXT PRIMARY KEY) WITHOUT ROWID`); err != nil {
 		_ = db.Close()
 		_ = os.Remove(path)
 		return nil, err
 	}
-	tx, err := db.Begin()
+	tx, err := exportDBBegin(db)
 	if err != nil {
 		_ = db.Close()
 		_ = os.Remove(path)
 		return nil, err
 	}
-	insert, err := tx.Prepare(`INSERT INTO ids (id) VALUES (?)`)
+	insert, err := exportTxPrepare(tx, `INSERT INTO ids (id) VALUES (?)`)
 	if err != nil {
 		_ = tx.Rollback()
 		_ = db.Close()
@@ -583,7 +663,7 @@ func encodeExportRow(def dbschema.CollectionDef, data map[string]any, ordinal in
 		}
 		components[i] = [2]any{fmt.Sprintf("%T", value), value}
 	}
-	b, err := json.Marshal(components)
+	b, err := exportJSONMarshal(components)
 	if err != nil {
 		return nil, "", err
 	}

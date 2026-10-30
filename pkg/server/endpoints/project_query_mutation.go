@@ -71,7 +71,7 @@ func projectCapabilitiesHandler(w http.ResponseWriter, r *http.Request) {
 		writeProjectMutationError(w, r, err)
 		return
 	}
-	writeProjectMutationJSON(w, r, http.StatusOK, result)
+	writeProjectMutationJSON(w, r, http.StatusOK, projectCapabilitiesWithTags{ProjectCapabilities: result, BoardTags: true, DbServerTags: true})
 }
 
 func projectConnectionCatalogHandler(w http.ResponseWriter, r *http.Request) {
@@ -86,7 +86,7 @@ func projectConnectionCatalogHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for key, values := range q {
-		if len(values) != 1 || (key != "project" && key != "storage") {
+		if len(values) != 1 || (key != "project" && key != "storage" && key != "branch") {
 			writeProjectMutationError(w, r, validation.NewBadRequestError(errors.New("invalid catalog selector")))
 			return
 		}
@@ -96,7 +96,12 @@ func projectConnectionCatalogHandler(w http.ResponseWriter, r *http.Request) {
 		writeProjectMutationError(w, r, err)
 		return
 	}
-	result, err := api.LocalProjectConnectionCatalog(r.Context(), ref)
+	var result any
+	if q.Has("branch") {
+		result, err = api.LocalProjectConnectionCatalogForBranch(r.Context(), ref, q.Get("branch"))
+	} else {
+		result, err = api.LocalProjectConnectionCatalog(r.Context(), ref)
+	}
 	if err != nil {
 		writeProjectMutationError(w, r, err)
 		return
@@ -135,6 +140,8 @@ func writeProjectMutationError(w http.ResponseWriter, r *http.Request, err error
 	switch {
 	case errors.Is(err, secureread.ErrAccessDenied):
 		status, code, message = http.StatusForbidden, "ACCESS_DENIED", "project query access denied"
+	case errors.Is(err, api.ErrItemTagsRevisionConflict):
+		status, code, message = http.StatusConflict, "ITEM_REVISION_CONFLICT", "item changed; reload before saving tags"
 	case errors.Is(err, dto.ErrQueryRevisionConflict):
 		status, code, message = http.StatusConflict, "QUERY_REVISION_CONFLICT", "query changed; reload before saving"
 	case errors.Is(err, dto.ErrBranchHeadConflict):

@@ -8,6 +8,8 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+
+	"github.com/datatug/datatug-cli/pkg/agentaccess"
 )
 
 // requestRefusedMessage is the whole of what a refusal says: a sentence built here, which holds
@@ -28,13 +30,21 @@ const requestRefusedMessage = "this agent answers a request only when it comes f
 //     Origin is on the list. A request that carries neither header (the CLI, curl, a script) is
 //     answered when its Host passes.
 //
+// When the server has an access secret, a request that is not a preflight or a code exchange must
+// also carry the session token (`Authorization: Bearer`), or it is a 401.
+//
 // A refusal is a 403 with a fixed sentence: no echo of what the request said, and no
-// Access-Control-Allow-Origin.
+// Access-Control-Allow-Origin. Every other answer to a request whose Origin is on the list, an
+// error as much as a success, carries Access-Control-Allow-Origin for that Origin and
+// Vary: Origin (writeCORSOrigin).
 type RequestGuard struct {
 	// host is the host the person configured, lower case and with no brackets; "" when none.
 	host string
 	// port is the port the server listens on; 0 when it is not known, which accepts any port.
 	port int
+	// access, when set, makes every route but a preflight and the code exchange require the session
+	// token (see agentaccess). nil: no token is required (a server built without one, in tests).
+	access *agentaccess.Access
 }
 
 // NewRequestGuard builds the guard of a server that listens on servedHost and servedPort. The
@@ -47,7 +57,9 @@ func NewRequestGuard(servedHost string, servedPort int) RequestGuard {
 // RequestGuard is the guard of a server started with these capabilities: the host and port it
 // serves on are the ones of Capabilities.
 func (c Capabilities) RequestGuard() RequestGuard {
-	return NewRequestGuard(c.ServedHost, c.ServedPort)
+	guard := NewRequestGuard(c.ServedHost, c.ServedPort)
+	guard.access = c.Access
+	return guard
 }
 
 // Wrap returns next behind the guard: the request is refused (see RequestGuard) or answered by
@@ -55,11 +67,29 @@ func (c Capabilities) RequestGuard() RequestGuard {
 func (g RequestGuard) Wrap(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if reason := g.refusal(r); reason != "" {
-			refuseRequest(w, r, reason)
+			refuseRequest(w, r, http.StatusForbidden, requestRefusedMessage, reason)
+			return
+		}
+		// The Origin, when there is one, is on the list here: every answer from now on (a 401, the
+		// router's own 404 and 405, a route's error or success) carries the same CORS headers, so
+		// the page reads the real status instead of a network failure (status 0).
+		writeCORSOrigin(w, r)
+		if g.access != nil && !tokenExempt(r) && !g.access.Authorized(r) {
+			refuseRequest(w, r, http.StatusUnauthorized, tokenRequiredMessage, "no valid session token")
 			return
 		}
 		next(w, r)
 	}
+}
+
+// tokenRequiredMessage is what a request with no valid session token is told.
+const tokenRequiredMessage = "this agent needs the session token of its link: open the link again from the card"
+
+// tokenExempt is whether a request needs no token: a preflight (it carries none, and is answered
+// by origin only) and the exchange of a one-time code, which is how a page gets the token.
+func tokenExempt(r *http.Request) bool {
+	return r.Method == http.MethodOptions ||
+		(r.Method == http.MethodPost && r.URL.Path == agentaccess.ExchangePath)
 }
 
 // guardedRouter is the router that every route of the table is registered with: each handler is
@@ -150,12 +180,12 @@ func normalizeHostName(host string) string {
 
 // refuseRequest answers the 403 of a refusal and logs why. What the request sent is logged,
 // quoted and cut short, for the operator and never answered.
-func refuseRequest(w http.ResponseWriter, r *http.Request, reason string) {
+func refuseRequest(w http.ResponseWriter, r *http.Request, status int, message, reason string) {
 	log.Printf("request refused: %s (%s Host=%s Origin=%s Sec-Fetch-Site=%s)", reason, r.Method,
 		quotedForLog(r.Host), quotedForLog(strings.Join(r.Header.Values("Origin"), ",")), quotedForLog(strings.Join(r.Header.Values("Sec-Fetch-Site"), ",")))
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusForbidden)
-	if err := json.NewEncoder(w).Encode(wireErrorEnvelope(newAccessDenied(requestRefusedMessage))); err != nil {
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(wireErrorEnvelope(newAccessDenied(message))); err != nil {
 		log.Printf("request guard: failed to encode the refusal: %v", err)
 	}
 }

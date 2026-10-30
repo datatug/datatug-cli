@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 )
 
 func (r relatedRecord) target() RelationInstance {
@@ -28,7 +28,7 @@ func (a ForeignKeyJoinApplication) PreviewRelationships(ctx context.Context, rec
 	if !storedSourceNames(record.Source, a.Source) || a.Executor == nil {
 		return nil, fmt.Errorf("related records are unavailable for this source")
 	}
-	query, err := dtql.Deserialize([]byte(record.DTQL))
+	query, err := tugql.Deserialize([]byte(record.TugQL))
 	if err != nil {
 		return nil, fmt.Errorf("this result has no authoritative relation provenance")
 	}
@@ -86,7 +86,7 @@ func (a ForeignKeyJoinApplication) PreviewRelationships(ctx context.Context, rec
 		if target.Schema != "" && !strings.EqualFold(target.Schema, "main") {
 			collection = dal.NewQualifiedRootCollectionRef(target.Schema, target.Relation, "")
 		}
-		doc, err := dtql.Serialize(dal.From(collection).NewQuery().Where(conditions...).Limit(5).SelectColumns())
+		doc, err := tugqlSerialize(dal.From(collection).NewQuery().Where(conditions...).Limit(5).SelectColumns())
 		if err != nil {
 			item.err = fmt.Errorf("relationship query is unsupported")
 			continue
@@ -95,7 +95,7 @@ func (a ForeignKeyJoinApplication) PreviewRelationships(ctx context.Context, rec
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		item.result, err = a.Executor.RunDTQL(ctx, a.Source, doc, nil)
+		item.result, err = a.Executor.RunTugQL(ctx, a.Source, doc, nil)
 		if err != nil {
 			item.err = fmt.Errorf("related query failed: %s", publicQueryError(err, nil))
 		}

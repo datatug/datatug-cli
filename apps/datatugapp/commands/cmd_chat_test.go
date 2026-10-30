@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dal-go/dalgo2postgres"
 	"github.com/datatug/datatug-cli/pkg/chat"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
@@ -77,7 +78,7 @@ func TestBuildChatProjectCatalogKeepsUnscannedSources(t *testing.T) {
 	write("environments/local/catalogs/chinook-local/chinook-local.db.json", fmt.Sprintf(`{"driver":"sqlite3","path":%q,"dbModel":"chinook"}`, filepath.Join(dir, "chinook.sqlite")))
 	write("dbmodels/chinook/main/tables/Customer/main.Customer.columns.json", `{"columns":[{"name":"CustomerId","dbType":"INTEGER"}]}`)
 	write("dbmodels/chinook/main/tables/Invoice/main.Invoice.columns.json", `{"columns":[{"name":"InvoiceId","dbType":"INTEGER"}]}`)
-	write("queries/customers/customer-purchases-by-genre.query.json", `{"id":"customer-purchases-by-genre","title":"Customer purchases by genre","type":"SQL","targets":[{"catalog":"chinook-local"}]}`)
+	write("queries/customers/customer-purchases-by-genre.query.json", `{"createdAt":"2026-10-01T00:00:00Z","id":"customer-purchases-by-genre","title":"Customer purchases by genre","type":"SQL","targets":[{"catalog":"chinook-local"}]}`)
 	write("queries/customers/customer-purchases-by-genre.query.sql", "SELECT GenreName FROM Genre")
 
 	store := filestore.NewProjectStore("chat-test", dir)
@@ -168,9 +169,9 @@ func TestBuildChatProjectCatalogIncludesQueries(t *testing.T) {
 	write("environments/local/local.env.json", `{"id":"local","dbServers":[{"driver":"sqlite3","catalogs":["chinook-local","second-db"]}]}`)
 	write("environments/local/catalogs/chinook-local/chinook-local.db.json", fmt.Sprintf(`{"driver":"sqlite3","path":%q}`, filepath.Join(dir, "chinook.sqlite")))
 	write("environments/local/catalogs/second-db/second-db.db.json", fmt.Sprintf(`{"driver":"sqlite3","path":%q}`, filepath.Join(dir, "second.sqlite")))
-	write("queries/scoped.query.json", `{"id":"scoped","title":"Scoped query","type":"DTQL","targets":[{"catalog":"chinook-local"}]}`)
-	write("queries/ambiguous.query.json", `{"id":"ambiguous","type":"DTQL","targets":[{"catalog":"chinook-local"},{"catalog":"second-db"}]}`)
-	write("queries/untargeted.query.json", `{"id":"untargeted","type":"DTQL"}`)
+	write("queries/scoped.query.json", `{"createdAt":"2026-10-01T00:00:00Z","id":"scoped","title":"Scoped query","type":"TugQL","targets":[{"catalog":"chinook-local"}]}`)
+	write("queries/ambiguous.query.json", `{"createdAt":"2026-10-01T00:00:00Z","id":"ambiguous","type":"TugQL","targets":[{"catalog":"chinook-local"},{"catalog":"second-db"}]}`)
+	write("queries/untargeted.query.json", `{"createdAt":"2026-10-01T00:00:00Z","id":"untargeted","type":"TugQL"}`)
 
 	store := filestore.NewProjectStore("chat-test", dir)
 	catalog, urls, err := buildChatProjectCatalog(context.Background(), dir, store, "local")
@@ -297,17 +298,31 @@ func TestSameProjectDirectoryHandlesMissingPaths(t *testing.T) {
 }
 
 // TestLoadChatJoinApplicationUnavailableSourceIsANoop covers
-// loadChatJoinApplication's "unavailable://" and non-sqlite early returns:
-// neither is an error (JOIN discovery is simply skipped).
-func TestLoadChatJoinApplicationSkipsUnavailableAndNonSQLiteSources(t *testing.T) {
+// loadChatJoinApplication's "unavailable://" early return (JOIN discovery is
+// simply skipped), and that a source of another engine is read too.
+func TestLoadChatJoinApplicationSkipsUnavailableAndReadsOtherEngines(t *testing.T) {
 	ctx := context.Background()
 	app, closeFn, err := loadChatJoinApplication(ctx, "unavailable://chinook-local", nil, false)
 	if app != nil || closeFn != nil || err != nil {
 		t.Fatalf("unavailable source: app=%v close=%v err=%v, want all nil/zero", app, closeFn != nil, err)
 	}
-	app, closeFn, err = loadChatJoinApplication(ctx, "ingitdb:///some/project", nil, false)
-	if app != nil || closeFn != nil || err != nil {
-		t.Fatalf("non-sqlite source: app=%v close=%v err=%v, want all nil/zero", app, closeFn != nil, err)
+	// a source of another engine is read through the same schema calls
+	ingit := setupQueryDB(t)
+	app, closeFn, err = loadChatJoinApplication(ctx, ingit, nil, true)
+	if app == nil || closeFn == nil || err != nil {
+		t.Fatalf("inGitDB source: app=%v close=%v err=%v", app, closeFn != nil, err)
+	}
+	defer closeFn()
+	if app.Snapshot.Columns["main.products"] == nil {
+		t.Fatalf("inGitDB snapshot: %+v", app.Snapshot)
+	}
+	// a PostgreSQL source is opened like any other, and the failure of its open is the answer
+	opens := standInForPostgres(t, &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork})
+	if _, _, err = loadChatJoinApplication(ctx, "postgres://u@h/d", nil, true); err == nil {
+		t.Fatal("a PostgreSQL source that cannot be opened was read")
+	}
+	if opens.calls.Load() == 0 {
+		t.Fatal("the PostgreSQL source never reached the opener")
 	}
 }
 

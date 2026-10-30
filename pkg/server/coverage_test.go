@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/comparecache"
 	"github.com/datatug/datatug-cli/pkg/incidentstore"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/storage"
@@ -45,7 +46,7 @@ func TestGlobalOptionsHandler_MissingHeaders(t *testing.T) {
 
 	// Missing access control request method
 	req = httptest.NewRequest(http.MethodOptions, "/test", nil)
-	req.Header.Set("Origin", "http://localhost:3000")
+	req.Header.Set("Origin", "http://datatug.localhost:3000")
 	rec = httptest.NewRecorder()
 	globalOptionsHandler(rec, req)
 	if rec.Code != http.StatusBadRequest {
@@ -83,7 +84,11 @@ func TestHttpServer_ServeHTTP_EvidenceError(t *testing.T) {
 
 func TestHttpServer_ServeHTTP_Defaults(t *testing.T) {
 	origListen := listenAndServeFn
-	defer func() { listenAndServeFn = origListen }()
+	origCompare := configureCompareCacheFn
+	defer func() {
+		listenAndServeFn = origListen
+		configureCompareCacheFn = origCompare
+	}()
 
 	var capturedServer *http.Server
 	listenAndServeFn = func(srv *http.Server) error {
@@ -102,6 +107,13 @@ func TestHttpServer_ServeHTTP_Defaults(t *testing.T) {
 	}
 	if capturedServer.Addr != "localhost:8989" {
 		t.Fatalf("captured Addr = %q, want localhost:8989", capturedServer.Addr)
+	}
+
+	configureCompareCacheFn = func(comparecache.Options) error {
+		return errors.New("compare cache init error")
+	}
+	if err := s.ServeHTTP(map[string]string{}, "", 0, session, api.Capabilities{}); err != nil {
+		t.Fatalf("ServeHTTP with compare cache error failed: %v", err)
 	}
 }
 

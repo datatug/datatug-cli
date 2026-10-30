@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/google/uuid"
 )
@@ -39,6 +39,7 @@ func (w *failWriter) Write(p []byte) (n int, err error) {
 }
 
 func TestFinalRound_ChartsAndSorting(t *testing.T) {
+	t.Parallel()
 	candidates := []ChartCandidate{
 		{Score: 10, Spec: ChartSpec{Title: "B", Kind: "bar", Dimension: "d1"}},
 		{Score: 10, Spec: ChartSpec{Title: "A", Kind: "bar", Dimension: "d1"}},
@@ -56,6 +57,7 @@ func TestFinalRound_ChartsAndSorting(t *testing.T) {
 }
 
 func TestFinalRound_AttachedJoinAndSessionChat(t *testing.T) {
+	// Not parallel: mutates package-level execContextFn seam.
 	ctx := context.Background()
 
 	// 1. AttachedJoin with failing Candidates
@@ -70,7 +72,7 @@ func TestFinalRound_AttachedJoinAndSessionChat(t *testing.T) {
 			},
 		},
 	}
-	q := QueryResult{Title: "T", Source: "sqlite:///chinook.db", DTQL: "from: {name: some_table}"}
+	q := QueryResult{Title: "T", Source: "sqlite:///chinook.db", TugQL: "from: {name: some_table}"}
 	_, _, err := chat.joinAttachedQuery(ctx, session, "prompt", q)
 	if err == nil {
 		t.Fatal("expected error from joinAttachedQuery")
@@ -80,7 +82,7 @@ func TestFinalRound_AttachedJoinAndSessionChat(t *testing.T) {
 	switching := &switchingRunner{chat: chat}
 	chat.savedQueryService = switching
 	chat.activeID = "s1"
-	if err := chat.RunSavedDTQLActive(ctx, "s1", "q1", nil); !errors.Is(err, ErrActiveSessionChanged) {
+	if err := chat.RunSavedTugQLActive(ctx, "s1", "q1", nil); !errors.Is(err, ErrActiveSessionChanged) {
 		t.Fatalf("expected ErrActiveSessionChanged, got %v", err)
 	}
 
@@ -104,14 +106,14 @@ type switchingRunner struct {
 }
 
 func (s *switchingRunner) List(ctx context.Context) ([]SavedQuery, error) {
-	return []SavedQuery{{ID: "q1", Type: "DTQL"}}, nil
+	return []SavedQuery{{ID: "q1", Type: "TugQL"}}, nil
 }
 
 func (s *switchingRunner) Run(ctx context.Context, id string) (QueryResult, error) {
 	return QueryResult{Title: "Res"}, nil
 }
 
-func (s *switchingRunner) RunDTQLWithVariables(ctx context.Context, id string, vars map[string]string) (QueryResult, error) {
+func (s *switchingRunner) RunTugQLWithVariables(ctx context.Context, id string, vars map[string]string) (QueryResult, error) {
 	s.chat.activeID = "s2"
 	return QueryResult{Title: "Res"}, nil
 }
@@ -143,6 +145,7 @@ func (m *mockJoinAppWithError) ApplyAttached(ctx context.Context, record RecordS
 }
 
 func TestFinalRound_HTTPSettings(t *testing.T) {
+	// Not parallel: mutates package-level osLstat, settingsDBExec, and sqlOpenStore seams.
 	ctx := context.Background()
 	dir := t.TempDir()
 
@@ -197,6 +200,7 @@ func TestFinalRound_HTTPSettings(t *testing.T) {
 }
 
 func TestFinalRound_HTTPStore(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -302,6 +306,7 @@ func TestFinalRound_HTTPStore(t *testing.T) {
 }
 
 func TestFinalRound_BridgeEndpoints(t *testing.T) {
+	// Not parallel: mutates package-level netListenTCP seam.
 	chat, _ := newTestSessionChat(t)
 	bridge, err := StartBrowserBridge(chat)
 	if err != nil {
@@ -373,7 +378,7 @@ func TestFinalRound_BridgeEndpoints(t *testing.T) {
 	}
 
 	// 6. /v1/chat/queries POST conflict
-	bodyRun, _ := json.Marshal(map[string]any{"sessionId": "wrong-id", "action": "run_dtql", "queryId": "q1"})
+	bodyRun, _ := json.Marshal(map[string]any{"sessionId": "wrong-id", "action": "run_tugql", "queryId": "q1"})
 	reqRun := newReq(http.MethodPost, "/v1/chat/queries", bytes.NewReader(bodyRun))
 	recRun := httptest.NewRecorder()
 	handler.ServeHTTP(recRun, reqRun)
@@ -441,6 +446,7 @@ func TestFinalRound_BridgeEndpoints(t *testing.T) {
 }
 
 func TestFinalRound_ExportDetails(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	// 1. exportFlat error on CSV header write
@@ -498,6 +504,7 @@ func TestFinalRound_ExportDetails(t *testing.T) {
 }
 
 func TestFinalRound_BookmarkFullBranches(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -565,6 +572,7 @@ func TestFinalRound_BookmarkFullBranches(t *testing.T) {
 }
 
 func TestFinalRound_JoinCompleteBranches(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	// 1. activeJoinPairs branches:
@@ -606,8 +614,8 @@ func TestFinalRound_JoinCompleteBranches(t *testing.T) {
 	}
 
 	// 5. prepareJoinProjection wildcard errors
-	dtqlDoc := []byte("from:\n  name: a\n  alias: a\n  joins:\n    - from: {name: b, alias: b}\n      on: [{left: {field: id, source: a}, op: '==', right: {field: a_id, source: b}}]\n")
-	qBase, err := dtql.Deserialize(dtqlDoc)
+	tugqlDoc := []byte("from:\n  name: a\n  alias: a\n  joins:\n    - from: {name: b, alias: b}\n      on: [{left: {field: id, source: a}, op: '==', right: {field: a_id, source: b}}]\n")
+	qBase, err := tugql.Deserialize(tugqlDoc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -625,13 +633,13 @@ func TestFinalRound_JoinCompleteBranches(t *testing.T) {
 		Secure:        true,
 		CanReadTarget: nil, // denies
 	}
-	validDTQL := "from: {name: t}\ncolumns: [{field: id}]\n"
-	cands, err := fkApp.Candidates(ctx, RecordSet{Source: "src", DTQL: validDTQL})
+	validTugQL := "from: {name: t}\ncolumns: [{field: id}]\n"
+	cands, err := fkApp.Candidates(ctx, RecordSet{Source: "src", TugQL: validTugQL})
 	if err != nil || len(cands) != 0 {
 		t.Fatalf("expected empty candidates when CanReadTarget is nil and Secure=true, got %v, %v", cands, err)
 	}
 
-	rec := RecordSet{Source: "src", DTQL: validDTQL}
+	rec := RecordSet{Source: "src", TugQL: validTugQL}
 	if _, err := fkApp.Apply(ctx, rec, "cand1"); err == nil {
 		t.Fatal("expected error when applying with nil CanReadTarget and Secure=true")
 	}

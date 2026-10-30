@@ -356,3 +356,35 @@ func TestIsVersionJSONInvocation(t *testing.T) {
 		})
 	}
 }
+
+// TestMain_EnsuresDaemonAfterTheCommand pins the --client wrapper's place in main:
+// it runs after the command's own work, also when that work failed, and does
+// not change the exit code (spec/features/cli/daemon#req:client-ensures-daemon).
+func TestMain_EnsuresDaemonAfterTheCommand(t *testing.T) {
+	getCommandBackup, ensureBackup, osExitBackup := getCommand, ensureDaemon, osExit
+	dtlogEnqueueBackup, dtlogStartBackup := dtlogEnqueue, dtlogStart
+	defer func() {
+		getCommand, ensureDaemon, osExit = getCommandBackup, ensureBackup, osExitBackup
+		dtlogEnqueue, dtlogStart = dtlogEnqueueBackup, dtlogStartBackup
+	}()
+	dtlogEnqueue = func(posthog.Message) {}
+	dtlogStart = func() {}
+	var order []string
+	getCommand = func() (*cobra.Command, []fang.Option) {
+		return &cobra.Command{
+			Use: "datatug", SilenceUsage: true, SilenceErrors: true,
+			RunE: func(*cobra.Command, []string) error {
+				order = append(order, "command")
+				return commands.Exit("boom", 7)
+			},
+		}, nil
+	}
+	ensureDaemon = func(*cobra.Command, []string, io.Writer) { order = append(order, "ensure") }
+	exitCode := -1
+	osExit = func(code int) { exitCode = code }
+
+	main()
+
+	assert.Equal(t, []string{"command", "ensure"}, order)
+	assert.Equal(t, 7, exitCode)
+}

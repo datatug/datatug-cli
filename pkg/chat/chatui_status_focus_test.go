@@ -15,6 +15,7 @@ import (
 // tags it "message" when ChatUI appends it, see loadSession) shows
 // "message selected · Enter edit", not the default composer hint set.
 func TestChatUIStatusBarMessageFocusedHint(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")
@@ -51,6 +52,7 @@ func TestChatUIStatusBarMessageFocusedHint(t *testing.T) {
 // TestChatUIStatusBarHTTPDocumentFocusedHint is ui.go's u.messageFocused
 // HTTP-document variant.
 func TestChatUIStatusBarHTTPDocumentFocusedHint(t *testing.T) {
+	t.Parallel()
 	u, sessions := newTestChatUI(t, nil, Turn{})
 	ctx := context.Background()
 	user, err := sessions.store.AppendUser(ctx, sessions.activeID, "/http get https://example.com/doc")
@@ -88,6 +90,7 @@ func TestChatUIStatusBarHTTPDocumentFocusedHint(t *testing.T) {
 // TestChatUIStatusBarWorkspaceFocusedHint covers the distinct Explorer and
 // Inspect controls, including Tab cycling and Bookmarks states.
 func TestChatUIStatusBarWorkspaceFocusedHint(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = workspaceTestCatalog()
 	u.shell.SetLeftPanel(u.explorer)
@@ -138,6 +141,7 @@ func TestChatUIStatusBarWorkspaceFocusedHint(t *testing.T) {
 // TestChatUIStatusBarComposerChipHints covers attachment controls and the
 // focus-return hint while preserving the composer draft.
 func TestChatUIStatusBarComposerChipHints(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.shell.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
 	u.snapshot.Workspace.Attachments = []ContextReference{{Kind: "bookmark", ObjectID: "saved"}}
@@ -174,6 +178,7 @@ func TestChatUIStatusBarComposerChipHints(t *testing.T) {
 // TestChatUIStatusBarJoinFocusedHint keeps bare j in grid search and checks
 // that the explicit Actions command opens the secure relationship chooser.
 func TestChatUIStatusBarJoinFocusedHint(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -186,7 +191,7 @@ func TestChatUIStatusBarJoinFocusedHint(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := store.AppendQuery(ctx, sessions.activeID, user.ID, "sqlite:///fixture.db", QueryResult{
-		Title: "Invoices", DTQL: "from: {name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 5\n",
+		Title: "Invoices", TugQL: "from: {name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 5\n",
 		Result: secureread.Result{Columns: []string{"InvoiceId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 1}}}},
 	}); err != nil {
 		t.Fatal(err)

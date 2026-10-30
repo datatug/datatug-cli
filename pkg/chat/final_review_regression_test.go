@@ -17,7 +17,7 @@ import (
 
 func reviewJoinUI(t *testing.T) *ChatUI {
 	t.Helper()
-	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Invoice", DTQL: "from: {schema: main, name: Invoice}\ncolumns: [{field: InvoiceId}, {field: CustomerId}]\nlimit: 5\n", Result: secureread.Result{Columns: []string{"InvoiceId", "CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 1, "CustomerId": 1}}, {Data: map[string]any{"InvoiceId": 2, "CustomerId": 2}}}}})
+	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Invoice", TugQL: "from: {schema: main, name: Invoice}\ncolumns: [{field: InvoiceId}, {field: CustomerId}]\nlimit: 5\n", Result: secureread.Result{Columns: []string{"InvoiceId", "CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 1, "CustomerId": 1}}, {Data: map[string]any{"InvoiceId": 2, "CustomerId": 2}}}}})
 	u.sessions.ConfigureJoinApplication(ForeignKeyJoinApplication{Source: "sqlite:///fixture.db", Snapshot: joinSnapshot(), Executor: &joinExecutorStub{}})
 	u.loadSession(u.snapshot)
 	u.shell.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -26,6 +26,7 @@ func reviewJoinUI(t *testing.T) *ChatUI {
 }
 
 func TestUnifiedWorkspaceDecodedLFNeverEntersInlineJoin(t *testing.T) {
+	t.Parallel()
 	u := reviewJoinUI(t)
 	id := u.activeRecordSetID()
 	events := make(chan uv.Event, 4)
@@ -69,15 +70,16 @@ func (a *reviewDelayedJoin) Apply(ctx context.Context, r RecordSet, _ JoinCandid
 	case <-ctx.Done():
 		return QueryResult{}, ctx.Err()
 	}
-	return QueryResult{Title: "Joined", DTQL: r.DTQL, Result: r.Result}, nil
+	return QueryResult{Title: "Joined", TugQL: r.TugQL, Result: r.Result}, nil
 }
 func TestUnifiedWorkspaceDelayedJoinRetainsNewerContext(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"result", "row", "composer", "editor", "modal"} {
 		t.Run(change, func(t *testing.T) {
 			u := reviewJoinUI(t)
 			_, origin, _ := u.activeGrid()
 			originID := origin.ID
-			second, err := u.sessions.store.AppendQuery(t.Context(), u.sessionID, origin.OriginMessageID, origin.Source, QueryResult{Title: "Other", DTQL: origin.DTQL, Result: origin.Result})
+			second, err := u.sessions.store.AppendQuery(t.Context(), u.sessionID, origin.OriginMessageID, origin.Source, QueryResult{Title: "Other", TugQL: origin.TugQL, Result: origin.Result})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -147,6 +149,7 @@ func TestUnifiedWorkspaceDelayedJoinRetainsNewerContext(t *testing.T) {
 }
 
 func TestUnifiedWorkspaceLongRelationshipListsFollowSelection(t *testing.T) {
+	t.Parallel()
 	u := reviewJoinUI(t)
 	candidates := make([]JoinCandidate, 24)
 	for i := range candidates {
@@ -195,6 +198,7 @@ func TestUnifiedWorkspaceLongRelationshipListsFollowSelection(t *testing.T) {
 }
 
 func TestUnifiedWorkspaceComposerSelectTextPreservesDraftAndCaret(t *testing.T) {
+	t.Parallel()
 	u := reviewJoinUI(t)
 	u.shell.Update(uitest.Key("f4"))
 	u.shell.SetComposerText("before 世界 after")
@@ -256,6 +260,7 @@ func TestUnifiedWorkspaceComposerSelectTextPreservesDraftAndCaret(t *testing.T) 
 }
 
 func TestUnifiedWorkspaceSelectionViewportTracksLongUnicodeCaret(t *testing.T) {
+	t.Parallel()
 	text := []rune(strings.Repeat("世界 abc\n", 30) + "最後")
 	s := &queryTextSelection{text: text, anchor: len(text) - 2, cursor: len(text), copyOnAccept: true}
 	view := ansi.Strip(s.View(20, 7))
@@ -269,6 +274,7 @@ func TestUnifiedWorkspaceSelectionViewportTracksLongUnicodeCaret(t *testing.T) {
 }
 
 func TestUnifiedWorkspaceCompactGroupAndMembersKeepSelectionVisible(t *testing.T) {
+	t.Parallel()
 	for _, members := range []bool{false, true} {
 		t.Run(fmt.Sprint(members), func(t *testing.T) {
 			rows := make([]secureread.Row, 24)
@@ -279,7 +285,7 @@ func TestUnifiedWorkspaceCompactGroupAndMembersKeepSelectionVisible(t *testing.T
 				}
 				rows[i] = secureread.Row{Data: map[string]any{"Category": key, "Label": fmt.Sprintf("Row%02d", i)}}
 			}
-			u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Many rows", DTQL: "from: {name: Item}\ncolumns: [{field: Category}, {field: Label}]\nlimit: 24\n", Result: secureread.Result{Columns: []string{"Category", "Label"}, Rows: rows}})
+			u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Many rows", TugQL: "from: {name: Item}\ncolumns: [{field: Category}, {field: Label}]\nlimit: 24\n", Result: secureread.Result{Columns: []string{"Category", "Label"}, Rows: rows}})
 			_, record, _ := u.activeGrid()
 			u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "table", SourceID: record.Database, ObjectID: "main.Item"}, Columns: []string{"Category", "Label"}, ColumnTypes: map[string]string{"Category": "TEXT", "Label": "TEXT"}}}}
 			uxSearchAction(t, u, "Group loaded")

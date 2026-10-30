@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/datatug/datatug-cli/pkg/gitpath"
 	"github.com/datatug/datatug-cli/pkg/incidentstore"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/incidents"
@@ -204,45 +205,10 @@ func pathWithin(root, path string) bool {
 	return relative == "." || relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
+// pathInsideGitRepository is the shared gitpath check, run through this
+// package's osLstat seam.
 func pathInsideGitRepository(path string) (bool, error) {
-	info, err := osLstat(path)
-	if err == nil && !info.IsDir() {
-		path = filepath.Dir(path)
-	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return false, err
-	}
-	for current := path; ; current = filepath.Dir(current) {
-		gitMarker := filepath.Join(current, ".git")
-		if _, err := osLstat(gitMarker); err == nil {
-			return true, nil
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return false, err
-		}
-		bare, err := isBareGitRepository(current)
-		if err != nil {
-			return false, err
-		}
-		if bare {
-			return true, nil
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			return false, nil
-		}
-	}
-}
-
-func isBareGitRepository(path string) (bool, error) {
-	markers := []string{"HEAD", "objects", "refs"}
-	for _, marker := range markers {
-		if _, err := osLstat(filepath.Join(path, marker)); err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				return false, nil
-			}
-			return false, err
-		}
-	}
-	return true, nil
+	return gitpath.Inside(path, osLstat)
 }
 
 // ProjectStore opens the primary project-repository evidence route.

@@ -10,7 +10,7 @@ import (
 	"github.com/datatug/datatug-core/pkg/apicontract"
 )
 
-// A saved SQL or DTQL query is its "<id>.query.json" and a document beside it (the text of the
+// A saved SQL or TugQL query is its "<id>.query.json" and a document beside it (the text of the
 // query). When the document is not there, exec/run_query answers one sentence built from the ID
 // of the query, a 400; the text of the read, which quotes the path of the file in the served
 // project, is in the log of the server. When a folder is in the place of the document, the
@@ -20,14 +20,14 @@ func TestExecRunQuery_ASavedQueryWhoseDocumentCannotBeReadAnswersOneBuiltSentenc
 	for _, c := range []struct {
 		name, queryID, document string
 	}{
-		{"DTQL", "customers/customer-invoices", "customer-invoices.query.dtql"},
+		{"TugQL", "customers/customer-invoices", "customer-invoices.query.tugql.yaml"},
 		{"SQL", "customers/customer-count", "customer-count.query.sql"},
 	} {
 		for _, breakage := range []string{"missing", "a folder"} {
 			t.Run(c.name+" "+breakage, func(t *testing.T) {
 				projectDir, projectID := writeRunQueryTestProject(t)
 				queriesDir := filepath.Join(projectDir, "queries", "customers")
-				mustWriteFile(t, filepath.Join(queriesDir, "customer-count.query.json"), `{"id": "customer-count", "title": "Customer count", "type": "SQL"}`)
+				mustWriteFile(t, filepath.Join(queriesDir, "customer-count.query.json"), `{"createdAt":"2026-01-01T00:00:00Z","id": "customer-count", "title": "Customer count", "type": "SQL"}`)
 				document := filepath.Join(queriesDir, c.document)
 				if err := os.RemoveAll(document); err != nil {
 					t.Fatal(err)

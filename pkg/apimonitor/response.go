@@ -143,9 +143,6 @@ func (r *response) wrap() http.ResponseWriter {
 		if flushDiscovery == capabilityIndeterminate {
 			return http.ErrNotSupported
 		}
-		if fe == nil {
-			return http.ErrNotSupported
-		}
 		err := fe.FlushError()
 		// A successful flush commits the underlying writer's implicit 200.
 		// Record that observation without forwarding a second WriteHeader.
@@ -175,7 +172,7 @@ func (r *response) wrap() http.ResponseWriter {
 		return q.ReadFrom(src)
 	})
 	switch bits {
-	case 0:
+	default:
 		return r
 	case 1:
 		return struct {
@@ -381,7 +378,5 @@ func (r *response) wrap() http.ResponseWriter {
 			http.Pusher
 			io.ReaderFrom
 		}{r, ff, fef, hh, pp, qq}
-	default:
-		return r
 	}
 }

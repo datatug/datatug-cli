@@ -7,12 +7,18 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"regexp"
+	"sort"
+	"strings"
 
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
+	"github.com/datatug/datatug-core/pkg/storage/filestore"
 )
 
 var errConnectionCatalogUnavailable = errors.New("project connection catalog unavailable")
+
+var browserFixtureAssetURL = regexp.MustCompile(`^/assets/showcase/[a-z0-9][a-z0-9-]*\.sqlite$`)
 
 // LocalConnectionCatalog exposes declaration metadata, never connection profiles
 // or arbitrary files. Public-source executors must independently admit its pins.
@@ -32,7 +38,19 @@ type LocalCatalogConnection struct {
 	} `json:"browserFixture,omitempty"`
 }
 
-func LocalProjectConnectionCatalog(_ context.Context, ref dto.ProjectRef) (*LocalConnectionCatalog, error) {
+var (
+	servedProjectDirCatalog     = servedProjectDir
+	ioReadAllCatalog            = io.ReadAll
+	openConnectionCatalogReader = openQualifiedProjectReader
+	openConnectionCatalogFile   = func(r *qualifiedProjectReader, name string) (connectionCatalogFile, error) { return r.root.Open(name) }
+)
+
+type connectionCatalogFile interface {
+	io.ReadCloser
+	Stat() (os.FileInfo, error)
+}
+
+func LocalProjectConnectionCatalog(ctx context.Context, ref dto.ProjectRef) (result *LocalConnectionCatalog, err error) {
 	if err := requireLocalReadPrincipal(); err != nil {
 		return nil, err
 	}
@@ -42,11 +60,123 @@ func LocalProjectConnectionCatalog(_ context.Context, ref dto.ProjectRef) (*Loca
 	if ref.StoreID != LocalStoreID {
 		return nil, ErrUnknownStoreID
 	}
-	dir, err := servedProjectDir(ref.ProjectID)
+	dir, err := servedProjectDirCatalog(ref.ProjectID)
 	if err != nil {
 		return nil, err
 	}
-	return readLocalConnectionCatalog(dir)
+	err = filestore.ReadEnvironmentFiles(ctx, dir, func(_ *filestore.EnvironmentFiles) error {
+		reader, e := openConnectionCatalogReader(dir)
+		if e != nil {
+			return errConnectionCatalogUnavailable
+		}
+		defer reader.close()
+		result, e = readMergedLocalConnectionCatalog(reader)
+		return e
+	})
+	return result, err
+}
+
+// LocalProjectConnectionCatalogForBranch binds declaration metadata to the
+// selected current branch and its observed HEAD.
+func LocalProjectConnectionCatalogForBranch(ctx context.Context, ref dto.ProjectRef, branch string) (*LocalConnectionCatalog, error) {
+	value, err := withCurrentBranchRead(ctx, ref, branch, func(reader *qualifiedProjectReader) (any, error) {
+		dir, err := servedProjectDirCatalog(ref.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		var result *LocalConnectionCatalog
+		err = filestore.ReadEnvironmentFiles(ctx, dir, func(_ *filestore.EnvironmentFiles) error {
+			var e error
+			result, e = readMergedLocalConnectionCatalog(reader)
+			return e
+		})
+		return result, err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return value.(*LocalConnectionCatalog), nil
+}
+
+// Read the same bounded collection namespace as the owning file provider.
+// Unknown fields stay private; source URLs and browser pins remain validated.
+func readMergedLocalConnectionCatalog(reader *qualifiedProjectReader) (*LocalConnectionCatalog, error) {
+	entries, err := reader.dirEntries("connections")
+	if err != nil || len(entries) > 1024 {
+		return nil, errConnectionCatalogUnavailable
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	result := &LocalConnectionCatalog{Format: datatug.ConnectionCatalogFormat, Connections: []LocalCatalogConnection{}}
+	all := datatug.ProjectConnections{Format: datatug.ConnectionCatalogFormat}
+	files := 0
+	catalogFiles := 0
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		files++
+		if files > 32 || !datatug.ValidConnectionID(strings.TrimSuffix(entry.Name(), ".json")) {
+			return nil, errConnectionCatalogUnavailable
+		}
+		body, err := readLocalCatalogDocument(reader, "connections/"+entry.Name())
+		if err != nil {
+			return nil, errConnectionCatalogUnavailable
+		}
+		_, isCatalog, err := datatug.ParsePublicProjectConnectionDirectoryJSON(entry.Name(), body)
+		if err != nil {
+			return nil, errConnectionCatalogUnavailable
+		}
+		if !isCatalog {
+			continue
+		} // only an exactly owned and fully validated log document
+		catalogFiles++
+		catalog, err := readLocalConnectionCatalogBody(body)
+		if err != nil {
+			return nil, err
+		}
+		result.Connections = append(result.Connections, catalog.Connections...)
+		result.BigQueryEditions = append(result.BigQueryEditions, catalog.BigQueryEditions...)
+		result.BigQueryPlans = append(result.BigQueryPlans, catalog.BigQueryPlans...)
+		for _, connection := range catalog.Connections {
+			all.Connections = append(all.Connections, connection.EditionConnection)
+		}
+		all.BigQueryEditions = append(all.BigQueryEditions, catalog.BigQueryEditions...)
+		all.BigQueryPlans = append(all.BigQueryPlans, catalog.BigQueryPlans...)
+	}
+	if catalogFiles == 0 || all.Validate() != nil {
+		return nil, errConnectionCatalogUnavailable
+	}
+	return result, nil
+}
+
+func readLocalCatalogDocument(reader *qualifiedProjectReader, name string) (body []byte, err error) {
+	f, err := openConnectionCatalogFile(reader, name)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if closeErr := f.Close(); err == nil && closeErr != nil {
+			body, err = nil, closeErr
+		}
+	}()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Size() > datatug.MaxPublicConnectionCatalogBytes {
+		return nil, errConnectionCatalogUnavailable
+	}
+	remaining := maxQualifiedReadBytes - reader.bytes
+	limit := datatug.MaxPublicConnectionCatalogBytes
+	if remaining < limit {
+		limit = remaining
+	}
+	if limit < 0 {
+		return nil, errConnectionCatalogUnavailable
+	}
+	body, err = ioReadAllCatalog(io.LimitReader(f, int64(limit)+1))
+	if err != nil || len(body) > limit {
+		return nil, errConnectionCatalogUnavailable
+	}
+	reader.bytes += len(body)
+	return body, nil
 }
 
 func readLocalConnectionCatalog(dir string) (*LocalConnectionCatalog, error) {
@@ -61,28 +191,36 @@ func readLocalConnectionCatalog(dir string) (*LocalConnectionCatalog, error) {
 	}
 	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Size() > 256<<10 {
+	if err != nil || !info.Mode().IsRegular() || info.Size() > datatug.MaxPublicConnectionCatalogBytes {
 		return nil, errConnectionCatalogUnavailable
 	}
-	body, err := io.ReadAll(io.LimitReader(f, (256<<10)+1))
-	if err != nil || len(body) > 256<<10 {
+	body, err := ioReadAllCatalog(io.LimitReader(f, datatug.MaxPublicConnectionCatalogBytes+1))
+	if err != nil || len(body) > datatug.MaxPublicConnectionCatalogBytes {
 		return nil, errConnectionCatalogUnavailable
 	}
-	var declarations datatug.ProjectConnections
+	return readLocalConnectionCatalogBody(body)
+}
+
+func readLocalConnectionCatalogBody(body []byte) (*LocalConnectionCatalog, error) {
+	_, err := datatug.ParsePublicProjectConnectionsJSON(body)
 	var catalog LocalConnectionCatalog
-	if json.Unmarshal(body, &declarations) != nil || declarations.Validate() != nil || json.Unmarshal(body, &catalog) != nil {
+	if err != nil || json.Unmarshal(body, &catalog) != nil {
 		return nil, errConnectionCatalogUnavailable
 	}
 	for _, connection := range catalog.Connections {
-		for _, source := range []string{connection.Source, connection.BrowserFixture.URL} {
-			if source == "" {
-				continue
-			}
-			parsed, parseErr := url.Parse(source)
-			if parseErr != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
-				return nil, errConnectionCatalogUnavailable
-			}
+		if connection.Source != "" && !isCatalogRemoteURL(connection.Source) {
+			return nil, errConnectionCatalogUnavailable
+		}
+		if fixtureURL := connection.BrowserFixture.URL; fixtureURL != "" &&
+			!browserFixtureAssetURL.MatchString(fixtureURL) && !isCatalogRemoteURL(fixtureURL) {
+			return nil, errConnectionCatalogUnavailable
 		}
 	}
 	return &catalog, nil
+}
+
+func isCatalogRemoteURL(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	return err == nil && (parsed.Scheme == "https" || parsed.Scheme == "http") && parsed.Host != "" &&
+		parsed.User == nil && parsed.RawQuery == "" && !parsed.ForceQuery && parsed.Fragment == ""
 }

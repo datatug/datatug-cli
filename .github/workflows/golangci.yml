@@ -50,6 +50,9 @@ on:
     branches:
       - '**'
 
+env:
+  GOPRIVATE: github.com/datatug/datatug-core
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -59,12 +62,15 @@ jobs:
   strongo_workflow:
     permissions:
       contents: write
-    # Pin the shared workflow exactly so it cannot change underneath this job.
-    # v1.20.0 adds the opt-in conventional PR-title gate enabled below.
-    uses: strongo/cicd/.github/workflows/workflow.yml@v1.21.3
+    uses: strongo/cicd/.github/workflows/workflow.yml@a62ab9a0ed90f3fba476e37dd59d49002d4d86b6 # v1.23.1
     secrets:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GOPRIVATE_GITHUB_APP_PRIVATE_KEY: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
     with:
+      GOPRIVATE: github.com/datatug/datatug-core
+      goprivate_github_app_client_id: Iv23li26w131Kv6u3IdM
+      goprivate_github_app_owner: datatug
+      goprivate_github_app_repositories: datatug-core
       require_conventional_pr_title: true
       # Uses the C-based github.com/mattn/go-sqlite3 driver, which requires cgo.
       cgo_enabled: true
@@ -72,20 +78,17 @@ jobs:
       # This workflow only builds/lints/tests and never creates a tag.
       disable-version-bumping: true
       code_coverage: true
-      # Lowered from 60.9 (2026-08-28): the 2026-08-25/26 Go 1.27 toolchain
-      # bump (f98ec681, 96ec4e5) changed how `go tool cover` counts covered
-      # statements and dropped measured total coverage to 55.8% with no
-      # tests removed — confirmed by "Go CI" passing at 60.9%+ through
-      # 6069b41 (pre-bump) and failing on every commit since. Set to 55.5 to
-      # reflect the current, actually-measured state with a small buffer
-      # rather than chasing the toolchain's new counting on unrelated PRs.
-      # Lowered again to 49.0 (PR #197): deleting the vendored, well-tested
-      # pkg/datatug-core (204 files) in favor of the real datatug-core module
-      # dependency shrank the coverage denominator, dropping measured total
-      # to 49.8% with no tests removed — same shape as the toolchain-bump
-      # adjustment above, not a real coverage regression. Raise it again as
-      # pkg/api and pkg/server's own test coverage grows.
-      min_test_coverage_percent: 49.0
+      # Enforce 100% statement test coverage across datatug-cli.
+      min_test_coverage_percent: 100
+      # Must be >= go.mod's `go` directive, same constraint as release.yml.
+      # This input drives setup-go for BOTH the Lint and Build & test jobs of
+      # the shared workflow (workflow.yml@a62ab9a, lines 413 and 923), and its
+      # default is '1.27.0' — below this module's `go 1.27.1`, which failed both
+      # jobs before any test ran with
+      # "go.mod requires go >= 1.27.1 (running go 1.27.0; GOTOOLCHAIN=local)".
+      # Keep in sync with release.yml's go_version: a mismatch means CI proves
+      # a build under a different toolchain than the release actually uses.
+      go_version: '1.27.1'
   # Fail fast on go.mod/go.sum drift — the gap that shipped v0.13.2.
   #
   # Renovate raised two PRs for the same go-github v90->v91 bump a minute
@@ -108,10 +111,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Authenticate private Core dependency
+        uses: ./.github/actions/private-core
+        with:
+          private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
       - uses: actions/setup-go@v7
         with:
           # Must be >= go.mod's `go` directive, same constraint as release.yml.
-          go-version: '1.27.2'
+          go-version: '1.27.3'
           cache: true
       - name: go mod tidy -diff
         run: go mod tidy -diff
@@ -129,10 +136,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Authenticate private Core dependency
+        uses: ./.github/actions/private-core
+        with:
+          private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
       - uses: actions/setup-go@v7
         with:
           # Must be >= go.mod's `go` directive, same constraint as release.yml.
-          go-version: '1.27.2'
+          go-version: '1.27.3'
           cache: true
       - name: check-hermetic-tests.sh
         env:
@@ -155,15 +166,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Authenticate private Core dependency
+        uses: ./.github/actions/private-core
+        with:
+          private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
       - uses: actions/setup-go@v7
         with:
           # Must be >= go.mod's `go` directive, same constraint as release.yml.
-          go-version: '1.27.2'
+          go-version: '1.27.3'
           cache: true
       - name: Scan a SQLite file with cgo off
         env:
           CGO_ENABLED: '0'
-        run: go test -count=1 -run 'TestScanDbCatalog_SQLite3|TestScanJourney|TestQuickStartOfTheREADMEIsTrue' ./pkg/api/ ./apps/datatugapp/commands/
+        run: go test -count=1 -run 'TestScanDbCatalog_SQLite3|TestScanJourney|TestQuickStartOfTheREADMEIsTrue|TestQueryDuckDBRequiresCGO' ./pkg/api/ ./apps/datatugapp/commands/
       - name: Export SQLite to native inGitDB with cgo off
         env:
           CGO_ENABLED: '0'
@@ -225,10 +240,14 @@ jobs:
       DATATUG_TEST_POSTGRES_MAJOR: ${{ matrix.postgres }}
     steps:
       - uses: actions/checkout@v7
+      - name: Authenticate private Core dependency
+        uses: ./.github/actions/private-core
+        with:
+          private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
       - uses: actions/setup-go@v7
         with:
           # Must be >= go.mod's `go` directive, same constraint as release.yml.
-          go-version: '1.27.2'
+          go-version: '1.27.3'
           cache: true
       - name: Scan and query a real PostgreSQL server
         env:
@@ -236,3 +255,91 @@ jobs:
           # strongo_workflow above.
           CGO_ENABLED: '1'
         run: ./scripts/check-journey-postgres.sh
+
+  # Runs in the always-present Go CI workflow so exact-commit release gating
+  # observes browser/asset regressions as well as Go tests. No path filter/skip.
+  mcp-apps-browser:
+    name: MCP Apps browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      DATATUG_TELEMETRY: '0'
+      DO_NOT_TRACK: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Authenticate private Core dependency
+        uses: ./.github/actions/private-core
+        with:
+          private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: '1.27.3'
+          cache: true
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: pkg/mcpserver/app/package-lock.json
+      - name: Check out exact public demo fixture
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: datatug/datatug-demo-project
+          ref: 08cc4d367e33cca82269bff54dc8a35b242e9937
+          path: .browser-fixtures/demo
+          persist-credentials: false
+      - name: Verify locked App source and embedded asset
+        working-directory: pkg/mcpserver/app
+        run: |
+          npm ci --ignore-scripts
+          npm test
+          npm run build:check
+          npx --no-install playwright install --with-deps chromium
+      - name: Build actual CLI using the release pure-Go configuration
+        env:
+          CGO_ENABLED: '0'
+        run: go build -o "$RUNNER_TEMP/datatug-mcp-apps" .
+      - name: Exercise official sandbox and actual CLI saved SQL
+        run: |
+          DATATUG_MCP_TEST_BINARY="$RUNNER_TEMP/datatug-mcp-apps" \
+          DATATUG_DEMO_PROJECT_DIR="$GITHUB_WORKSPACE/.browser-fixtures/demo/demo-project-1" \
+          DATATUG_MCP_APPS_ARTIFACTS="$RUNNER_TEMP/mcp-apps-browser-artifacts" \
+          npm --prefix pkg/mcpserver/app run test:browser
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: mcp-apps-browser
+          path: ${{ runner.temp }}/mcp-apps-browser-artifacts
+          if-no-files-found: error
+
+  watch-firestore:
+    name: Watch Firestore conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Authenticate private Core dependency
+        uses: ./.github/actions/private-core
+        with:
+          private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: '1.27.3'
+          cache: true
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Run pinned emulator with owned teardown
+        env:
+          WATCH_FIRESTORE_ARTIFACTS: ${{ runner.temp }}/watch-firestore
+        run: ./scripts/check-watch-firestore.sh
+      - name: Upload transaction evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: watch-firestore
+          path: ${{ runner.temp }}/watch-firestore
+          if-no-files-found: error

@@ -43,6 +43,7 @@ func openTestDatabase(t *testing.T, ddl string, statements ...string) *dalgo2sql
 	return db
 }
 
+// Not parallel: integration test uses SQLite or global seams.
 func TestCompareCountsAllDifferencesPastDetailLimitAndPreservesBytes(t *testing.T) {
 	left := openTestDatabase(t,
 		`CREATE TABLE Item (a TEXT NOT NULL, b TEXT NOT NULL, amount NUMERIC, payload BLOB, note TEXT, PRIMARY KEY(a,b))`,
@@ -67,6 +68,7 @@ func TestCompareCountsAllDifferencesPastDetailLimitAndPreservesBytes(t *testing.
 	require.NotEmpty(t, report.Relations[0].Details[0].ID)
 }
 
+// Not parallel: integration test uses SQLite or global seams.
 func TestCompareSQLiteToBigQueryPreservesTypedPhysicalRowsWithoutJobs(t *testing.T) {
 	sqlite := openTestDatabase(t,
 		`CREATE TABLE item (id INTEGER NOT NULL, flag BOOLEAN NOT NULL, amount NUMERIC NOT NULL, payload BLOB, empty_blob BLOB NOT NULL, day DATE NOT NULL)`,
@@ -109,6 +111,7 @@ func TestCompareSQLiteToBigQueryPreservesTypedPhysicalRowsWithoutJobs(t *testing
 	}
 }
 
+// Not parallel: integration test uses SQLite or global seams.
 func TestCompareSQLiteToNativeInGitDBPreservesKeylessDuplicates(t *testing.T) {
 	sqlite := openTestDatabase(t, `CREATE TABLE event (body TEXT, payload BLOB)`,
 		`INSERT INTO event VALUES ('same', X'00FF')`,
@@ -132,6 +135,7 @@ func TestCompareSQLiteToNativeInGitDBPreservesKeylessDuplicates(t *testing.T) {
 	require.Equal(t, "multiset", report.Relations[0].Identity)
 }
 
+// Not parallel: integration test uses SQLite or global seams.
 func TestCompareUsesExplicitTableMapForTransformedProviderNames(t *testing.T) {
 	left := openTestDatabase(t, `CREATE TABLE "Production.Document" (id INTEGER PRIMARY KEY, FileExtension BLOB)`,
 		`INSERT INTO "Production.Document" VALUES (1, X'00FF')`,
@@ -150,6 +154,7 @@ func TestCompareUsesExplicitTableMapForTransformedProviderNames(t *testing.T) {
 	require.Empty(t, report.SchemaChanges)
 }
 
+// Not parallel: integration test uses SQLite or global seams.
 func TestCompareTableMapDoesNotSilentlyReuseExplicitlyMappedRightRelation(t *testing.T) {
 	left := map[string]relation{"same": {}, "renamed": {}}
 	right := map[string]relation{"same": {}, "target": {}}
@@ -172,6 +177,7 @@ func TestCompareTableMapDoesNotSilentlyReuseExplicitlyMappedRightRelation(t *tes
 	require.Equal(t, 1, rightOnly)
 }
 
+// Not parallel: integration test uses SQLite or global seams.
 func TestCompareRejectsUnknownOrAmbiguousTableMaps(t *testing.T) {
 	left := openTestDatabase(t, `CREATE TABLE alpha (id INTEGER PRIMARY KEY)`, `INSERT INTO alpha VALUES (1)`)
 	right := openTestDatabase(t, `CREATE TABLE beta (id INTEGER PRIMARY KEY)`, `INSERT INTO beta VALUES (1)`)
@@ -197,6 +203,7 @@ func (compareBigQueryProvider) Authorize(_ context.Context, transport http.Round
 	return bigquery.Identity{Principal: bigquery.Principal{Kind: "google-user", Subject: "fixture-reader", Generation: "fixture-grant"}, ExpiresAt: time.Now().Add(time.Hour), Read: true}, transport, nil
 }
 
+// Not parallel: integration test uses SQLite or global seams.
 func TestCompareCompositeKeysWithSeparatorsRemainDistinct(t *testing.T) {
 	left := openTestDatabase(t, `CREATE TABLE item (a TEXT NOT NULL, b TEXT NOT NULL, value TEXT, PRIMARY KEY(a,b))`,
 		`INSERT INTO item VALUES ('a__b','c','first')`,
@@ -213,6 +220,7 @@ func TestCompareCompositeKeysWithSeparatorsRemainDistinct(t *testing.T) {
 	require.Contains(t, report.Relations[0].Details[0].ID, "b__c")
 }
 
+// Not parallel: integration test uses SQLite or global seams.
 func TestCompareKeylessRowsIsOrderIndependentAndCountsDuplicateMultiplicity(t *testing.T) {
 	left := openTestDatabase(t, `CREATE TABLE event (body BLOB, description TEXT)`,
 		`INSERT INTO event VALUES (X'00FF', NULL)`,
@@ -229,6 +237,7 @@ func TestCompareKeylessRowsIsOrderIndependentAndCountsDuplicateMultiplicity(t *t
 	require.False(t, report.DetailsLimited)
 }
 
+// Not parallel: integration test uses SQLite or global seams.
 func TestCompareExplicitKeyClassifiesKeylessSourceChanges(t *testing.T) {
 	left := openTestDatabase(t, `CREATE TABLE item (id INTEGER NOT NULL, value TEXT)`,
 		`INSERT INTO item VALUES (1, 'before')`,
@@ -245,6 +254,7 @@ func TestCompareExplicitKeyClassifiesKeylessSourceChanges(t *testing.T) {
 	require.Equal(t, "id=1", report.Relations[0].Details[0].ID)
 }
 
+// Not parallel: integration test uses SQLite or global seams.
 func TestCompareExplicitKeyRejectsDuplicateAndNullValues(t *testing.T) {
 	t.Run("duplicate", func(t *testing.T) {
 		left := openTestDatabase(t, `CREATE TABLE item (id INTEGER, value TEXT)`,
@@ -268,6 +278,7 @@ func TestCompareExplicitKeyRejectsDuplicateAndNullValues(t *testing.T) {
 	})
 }
 
+// Not parallel: integration test uses SQLite or global seams.
 func TestRowStoreUsesPrivateDiskSpoolAndRemovesIt(t *testing.T) {
 	store, err := newRowStore(false)
 	require.NoError(t, err)
@@ -280,6 +291,7 @@ func TestRowStoreUsesPrivateDiskSpoolAndRemovesIt(t *testing.T) {
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
+// Not parallel: integration test uses SQLite or global seams.
 func TestCompareReportsMissingRelationsAndColumnChanges(t *testing.T) {
 	left := openTestDatabase(t,
 		`CREATE TABLE alpha (id INTEGER PRIMARY KEY, old_name TEXT)`,
@@ -303,6 +315,7 @@ func TestCompareReportsMissingRelationsAndColumnChanges(t *testing.T) {
 	require.Equal(t, int64(1), report.Summary.Removed)
 }
 
+// Not parallel: integration test uses SQLite or global seams.
 func TestCompareViewDefinitionsOnlyWithinSameProviderFamily(t *testing.T) {
 	left := relationInventory{adapterName: "postgres", views: map[string]dbschema.SourceViewDef{
 		"summary": {Name: "summary", Columns: []string{"id"}, CreateSQL: "SELECT id FROM item"},
@@ -321,6 +334,7 @@ func TestCompareViewDefinitionsOnlyWithinSameProviderFamily(t *testing.T) {
 	require.Equal(t, []string{"view summary definition differs"}, report.SchemaChanges)
 }
 
+// Not parallel: integration test uses SQLite or global seams.
 func TestNormalizeExactValuesAndRejectsUnrepresentableTypes(t *testing.T) {
 	field := dbschema.FieldDef{Type: dbschema.Decimal}
 	value, err := normalizeValue(field, "12345678901234567890.12345678")
@@ -358,6 +372,7 @@ func TestNormalizeExactValuesAndRejectsUnrepresentableTypes(t *testing.T) {
 	require.Error(t, err, "binary floating point cannot be promoted to an exact decimal")
 }
 
+// Not parallel: integration test uses SQLite or global seams.
 func TestNormalizeProviderEquivalentBooleansIntegersDecimalsAndTemporalValues(t *testing.T) {
 	boolFromPostgres, err := normalizeValue(dbschema.FieldDef{Type: dbschema.Bool}, true)
 	require.NoError(t, err)
@@ -398,6 +413,7 @@ func TestNormalizeProviderEquivalentBooleansIntegersDecimalsAndTemporalValues(t 
 	require.Equal(t, "01:15:00+13:00", timeOnly.Text)
 }
 
+// Not parallel: integration test uses SQLite or global seams.
 func TestDetailsDisabledStillComparesWholeTables(t *testing.T) {
 	left := openTestDatabase(t, `CREATE TABLE item (id INTEGER PRIMARY KEY, value TEXT)`,
 		`INSERT INTO item VALUES (1, 'old')`,
@@ -411,6 +427,7 @@ func TestDetailsDisabledStillComparesWholeTables(t *testing.T) {
 	require.Empty(t, report.Relations[0].Details)
 }
 
+// Not parallel: integration test uses SQLite or global seams.
 func TestRecordDetailContainsBeforeAndAfterValues(t *testing.T) {
 	left := openTestDatabase(t, `CREATE TABLE item (id INTEGER PRIMARY KEY, value TEXT)`,
 		`INSERT INTO item VALUES (1, 'before')`,
@@ -432,6 +449,7 @@ func TestRecordDetailContainsBeforeAndAfterValues(t *testing.T) {
 	require.True(t, zero.DetailsLimited)
 }
 
+// Not parallel: integration test uses SQLite or global seams.
 func TestRecordDetailJSONDistinguishesNullFromEmptyString(t *testing.T) {
 	left := openTestDatabase(t, `CREATE TABLE item (id INTEGER PRIMARY KEY, value TEXT)`,
 		`INSERT INTO item VALUES (1, NULL)`,

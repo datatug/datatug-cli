@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/apicontract"
@@ -24,7 +24,7 @@ var (
 )
 
 // executeCompareFactsSide binds one current-policy-visible incident cohort to
-// one saved DTQL query parameter. It accepts only structured SQLite and
+// one saved TugQL query parameter. It accepts only structured SQLite and
 // inGitDB paths whose parsed query proves an exact `field In $parameter` node.
 // HTTP templates and opaque SQL cannot provide that proof, so they fail before
 // computeRunQuery reaches a data source rather than looping or filtering rows.
@@ -119,8 +119,11 @@ func proveNativeFactsBinding(ctx context.Context, queryID string, side apicontra
 	if err != nil {
 		return "", newNotFound(fmt.Sprintf("query %q not found", dbcopy.QueryIDDisplay(queryID)))
 	}
-	if queryDef.Type != datatug.QueryTypeDTQL {
-		return "", newSourceUnavailable("facts comparison requires a saved structured DTQL query with native set binding")
+	if err = queryDef.RefuseContextVariables(); err != nil {
+		return "", newInvalidRequest("queryId", err.Error())
+	}
+	if queryDef.Type != datatug.QueryTypeTugQL {
+		return "", newSourceUnavailable("facts comparison requires a saved structured TugQL query with native set binding")
 	}
 	parameterID, err := matchingCohortParameter(queryDef, entity, field)
 	if err != nil {
@@ -143,7 +146,7 @@ func proveNativeFactsBinding(ctx context.Context, queryID string, side apicontra
 	if err != nil {
 		return "", newSourceUnavailable("the saved structured query document is unavailable")
 	}
-	query, err := dtql.Deserialize([]byte(document))
+	query, err := tugql.Deserialize([]byte(document))
 	if err != nil {
 		return "", newSourceUnavailable("the saved structured query cannot prove native set binding")
 	}

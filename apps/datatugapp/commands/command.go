@@ -1,10 +1,13 @@
 package commands
 
 import (
+	"fmt"
 	"github.com/datatug/datatug-cli/apps"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers/clouds/gcloud/gcloudcmds"
 	"github.com/datatug/datatug-cli/pkg/auth"
+	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/spf13/cobra"
+	"path/filepath"
 )
 
 // rootHelp is the long description of the root command, the text of
@@ -36,6 +39,19 @@ func DatatugCommand() *cobra.Command {
 			return runUI("")
 		},
 	}
+	root.PersistentFlags().String("config", "", "Explicit settings file (default: ~/.datatug.yaml); parent directory must exist")
+	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
+		selected, err := cmd.Flags().GetString("config")
+		if err != nil {
+			return err
+		}
+		if selected != "" && !filepath.IsAbs(selected) {
+			return fmt.Errorf("--config must be an absolute settings file path")
+		}
+		dtconfig.SetConfigFilePath(selected)
+		return nil
+	}
+	addClientFlag(root)
 	root.Flags().BoolP(apps.TUIFlagName, apps.TUIFlagShorthand, false, apps.TUIFlagUsage)
 
 	root.AddCommand(
@@ -51,12 +67,15 @@ func DatatugCommand() *cobra.Command {
 		demoCommandArgs(),
 		updateUrlConfigCommandArgs(),
 		projectsCommandArgs(),
+		dataModelsCommand(),
 		boardCommand(),
 		queriesCommand(),
 		queryCommand(),
 		renderCommandArgs(),
 		scanCommandArgs(),
 		serveCommandArgs(),
+		mcpCommand(),
+		daemonCommand(),
 		showCommandArgs(),
 		testCommandArgs(),
 		consoleCommandArgs(),

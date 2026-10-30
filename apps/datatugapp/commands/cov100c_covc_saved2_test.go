@@ -26,32 +26,32 @@ func TestCovCSavedRunLoadQueryFailure(t *testing.T) {
 
 func TestCovCSavedRunEnvironmentAndCatalogResolution(t *testing.T) {
 	db := covCSQLiteFile(t, "main.sqlite", `CREATE TABLE Item(id INTEGER PRIMARY KEY, name TEXT)`, `INSERT INTO Item VALUES (1,'a')`)
-	dtqlFile := covCQueryFiles("f", "q", "DTQL", "dtql", covCItemDTQL, "")
+	tugqlFile := covCQueryFiles("f", "q", "TugQL", "tugql", covCItemTugQL, "")
 	// single environment is picked without --env
-	dir := covCWriteProject(t, covCMerge(covCEnvFiles(map[string]string{"main": db}), dtqlFile))
+	dir := covCWriteProject(t, covCMerge(covCEnvFiles(map[string]string{"main": db}), tugqlFile))
 	stdout, stderr, err := covCRunSaved(t, queryOptions{project: dir, query: "f/q", format: "json", quiet: true})
 	if err != nil || !strings.Contains(stdout, "a") {
 		t.Fatalf("single env: %v %s %s", err, stdout, stderr)
 	}
 	// no environments at all
-	dir = covCWriteProject(t, dtqlFile)
+	dir = covCWriteProject(t, tugqlFile)
 	if _, _, err = covCRunSaved(t, queryOptions{project: dir, query: "f/q", format: "json"}); err == nil || !strings.Contains(err.Error(), "no environments") {
 		t.Fatalf("no envs: %v", err)
 	}
 	// the query names its catalog through targets
-	targeted := covCQueryFiles("f", "q", "DTQL", "dtql", covCItemDTQL, `,"targets":[{"catalog":"main"}]`)
+	targeted := covCQueryFiles("f", "q", "TugQL", "tugql", covCItemTugQL, `,"targets":[{"catalog":"main"}]`)
 	dir = covCWriteProject(t, covCMerge(covCEnvFiles(map[string]string{"main": db, "spare": db}), targeted))
 	if _, stderr, err = covCRunSaved(t, queryOptions{project: dir, query: "f/q", env: "local", format: "json", quiet: true}); err != nil {
 		t.Fatalf("targets: %v %s", err, stderr)
 	}
 	// ... and a target that no server declares is reported as not found
-	missing := covCQueryFiles("f", "q", "DTQL", "dtql", covCItemDTQL, `,"targets":[{"catalog":"absent"}]`)
+	missing := covCQueryFiles("f", "q", "TugQL", "tugql", covCItemTugQL, `,"targets":[{"catalog":"absent"}]`)
 	dir = covCWriteProject(t, covCMerge(covCEnvFiles(map[string]string{"main": db}), missing))
 	if _, _, err = covCRunSaved(t, queryOptions{project: dir, query: "f/q", env: "local", format: "json"}); err == nil || !strings.Contains(err.Error(), "not found in environment") {
 		t.Fatalf("absent catalog: %v", err)
 	}
 	// an environment without catalogs
-	dir = covCWriteProject(t, covCMerge(map[string]string{"environments/local/local.env.json": `{"id":"local","dbServers":[{"driver":"sqlite3"}]}`}, dtqlFile))
+	dir = covCWriteProject(t, covCMerge(map[string]string{"environments/local/local.env.json": `{"id":"local","dbServers":[{"driver":"sqlite3"}]}`}, tugqlFile))
 	if _, _, err = covCRunSaved(t, queryOptions{project: dir, query: "f/q", env: "local", format: "json"}); err == nil || !strings.Contains(err.Error(), "no database catalogs") {
 		t.Fatalf("no catalogs: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestCovCQuerySourceURLFromCatalog(t *testing.T) {
 			t.Fatalf("%s: %q parses to %q, %v", dir, got, ref.Path, err)
 		}
 	}
-	if _, err := querySourceURLFromCatalog(mk("oracle", "x"), "/p"); err == nil || !strings.Contains(err.Error(), "not supported") {
+	if _, err := querySourceURLFromCatalog(mk("unsupported-driver", "x"), "/p"); err == nil || !strings.Contains(err.Error(), "not supported") {
 		t.Fatalf("unsupported driver: %v", err)
 	}
 }
@@ -163,14 +163,14 @@ func TestCovCSavedStreamedErrors(t *testing.T) {
 	lookups := func(base string) string {
 		return fmt.Sprintf(`,"federation":{"ovdbBaseUrl":%q,"lookups":[{"database":"extra","collection":"Country","fromColumn":"id","concurrency":2,"fields":[{"source":"region","target":"region"}]}]}`, base)
 	}
-	parameterised := strings.Replace(streamingJoinDTQL, "columns:", "where: {op: '==', left: {field: id, source: o}, right: {param: Wanted}}\ncolumns:", 1)
+	parameterised := strings.Replace(streamingJoinTugQL, "columns:", "where: {op: '==', left: {field: id, source: o}, right: {param: Wanted}}\ncolumns:", 1)
 	dir := covCStreamProject(t, covCMerge(
-		covCQueryFiles("f", "nocols", "DTQL", "dtql", streamingLookupDTQL, ""),
-		covCQueryFiles("f", "lookup", "DTQL", "dtql", streamingLookupDTQL, lookups(server.URL)),
-		covCQueryFiles("f", "badlookup", "DTQL", "dtql", streamingLookupDTQL, lookups("ftp://nope")),
-		covCQueryFiles("f", "param", "DTQL", "dtql", parameterised, ""),
+		covCQueryFiles("f", "nocols", "TugQL", "tugql", streamingLookupTugQL, ""),
+		covCQueryFiles("f", "lookup", "TugQL", "tugql", streamingLookupTugQL, lookups(server.URL)),
+		covCQueryFiles("f", "badlookup", "TugQL", "tugql", streamingLookupTugQL, lookups("ftp://nope")),
+		covCQueryFiles("f", "param", "TugQL", "tugql", parameterised, ""),
 	))
-	if _, _, err := covCRunSaved(t, queryOptions{project: dir, query: "f/nocols", env: "local", format: "csv", quiet: true}); err == nil || !strings.Contains(err.Error(), "explicit DTQL columns") {
+	if _, _, err := covCRunSaved(t, queryOptions{project: dir, query: "f/nocols", env: "local", format: "csv", quiet: true}); err == nil || !strings.Contains(err.Error(), "explicit TugQL columns") {
 		t.Fatalf("csv without columns: %v", err)
 	}
 	stdout, stderr, err := covCRunSaved(t, queryOptions{project: dir, query: "f/lookup", env: "local", format: "jsonl"})
@@ -184,7 +184,7 @@ func TestCovCSavedStreamedErrors(t *testing.T) {
 		t.Fatal("unresolved parameter accepted by streaming path")
 	}
 	// federated databases with no environment to resolve them
-	bare := covCWriteProject(t, covCQueryFiles("f", "fed", "DTQL", "dtql", streamingLookupDTQL, ""))
+	bare := covCWriteProject(t, covCQueryFiles("f", "fed", "TugQL", "tugql", streamingLookupTugQL, ""))
 	if _, _, err = covCRunSaved(t, queryOptions{project: bare, query: "f/fed", format: "jsonl"}); err == nil || !strings.Contains(err.Error(), "no environments") {
 		t.Fatalf("federated without environment: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestCovCSavedStreamedSourceOpenFailure(t *testing.T) {
 			"orders":    "/nonexistent-covc/orders.sqlite",
 			"countries": "/nonexistent-covc/countries.sqlite",
 		}),
-		covCQueryFiles("f", "rows", "DTQL", "dtql", streamingJoinDTQL, ""),
+		covCQueryFiles("f", "rows", "TugQL", "tugql", streamingJoinTugQL, ""),
 	))
 	if _, _, err := covCRunSaved(t, queryOptions{project: dir, query: "f/rows", env: "local", format: "jsonl", quiet: true}); err == nil {
 		t.Fatal("unopenable federated sources accepted")

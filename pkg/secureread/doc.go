@@ -1,5 +1,5 @@
 // Package secureread is the policy-enforced read executor for the DataTug
-// agent server (`datatug serve`). It runs structured, DTQL and native-SQL
+// agent server (`datatug serve`). It runs structured, TugQL and native-SQL
 // queries against any pkg/dbcopy-supported source through one fixed
 // [Session]'s DALgo access policies, so every read the web UI can trigger
 // goes through the same access-control path regardless of the query shape
@@ -18,8 +18,8 @@
 //     AND-ed into the query, field allow-lists redact each row, and a query
 //     that explicitly references a field no policy allows is refused with
 //     ErrAccessDenied rather than silently emptied (AC hidden-column-refused).
-//   - RunDTQL deserializes a DTQL-YAML document (dal-go/dalgo/dtql) and runs
-//     it exactly like RunStructured (REQ:dtql-query-type).
+//   - RunTugQL deserializes a TugQL-YAML document (dal-go/dalgo/tugql) and runs
+//     it exactly like RunStructured (REQ:tugql-query-type).
 //   - RunNativeSQL executes raw SQL text read-only. DALgo cannot rewrite text
 //     it does not parse, so per REQ:opaque-sql-limitation (assumption A2 in
 //     the hub Feature) only the source-level allow/deny — an

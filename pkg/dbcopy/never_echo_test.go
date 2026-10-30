@@ -138,12 +138,12 @@ func TestParse_RefusalWordingPerScheme(t *testing.T) {
 func TestParse_UnsupportedSchemeNamesOnlyTheScheme(t *testing.T) {
 	t.Parallel()
 	for _, input := range []string{
-		"mysql://alice:s3cret@db.example.com/shop",
-		"MySQL://alice:s3cret@db.example.com/shop?password=s3cret",
+		"db2://alice:s3cret@db.example.com/shop",
+		"DB2://alice:s3cret@db.example.com/shop?password=s3cret",
 	} {
 		_, err := Parse(input)
 		require.Error(t, err, input)
-		assert.Equal(t, `unsupported scheme "mysql": supported schemes are `+strings.Join(supportedSchemes, ", ")+", or env:NAME", err.Error())
+		assert.Equal(t, `unsupported scheme "db2": supported schemes are `+strings.Join(supportedSchemes, ", ")+", or env:NAME", err.Error())
 	}
 }
 
@@ -289,11 +289,13 @@ func TestOpen_HTTPFailureIsClassifiedAndNeverQuotesTheDirectory(t *testing.T) {
 }
 
 func TestOpen_PostgresKeepsItsOwnSentinelText(t *testing.T) {
-	t.Parallel()
+	// not parallel: it swaps a package seam
+	fake := &fakeOpener{err: errors.New("dial postgres://alice:s3cret@127.0.0.1:1/shop: refused")}
+	stubPostgresOpener(t, fake.open)
 	ref, err := Parse("postgres://alice:s3cret@127.0.0.1:1/shop")
 	require.NoError(t, err)
-	_, err = ref.Open(context.Background()) // the preview switch is off: nothing is dialled
-	require.ErrorIs(t, err, ErrPostgresPreview)
+	_, err = ref.Open(context.Background())
+	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "s3cret")
 	assert.NotContains(t, err.Error(), "alice")
 }
@@ -378,7 +380,7 @@ func TestOpenFailure_ReasonsAreFixedSentences(t *testing.T) {
 	assert.Same(t, own, ref.OpenFailure(own))
 	classified := ref.OpenFailure(errors.New("driver says s3cret"))
 	assert.Same(t, classified, ref.OpenFailure(classified), "classifying twice changes nothing")
-	assert.Equal(t, ErrPostgresPreview, ref.OpenFailure(ErrPostgresPreview))
+	assert.Equal(t, errPostgresReadOnlyOff, ref.OpenFailure(errPostgresReadOnlyOff))
 	assert.Equal(t, errUnsupportedBackend, ref.OpenFailure(errUnsupportedBackend))
 	// A driver that wraps one of this package's sentinels around its own text does
 	// not get its text through.

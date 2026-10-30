@@ -8,6 +8,10 @@ import (
 	"github.com/dal-go/record"
 )
 
+// These are logical policy resource names, not physical Firestore paths.
+// Private cloud Firestore records live under ext/datatug/projects; changing
+// their storage location does not change existing local policy grants.
+//
 // ProjectsCollection and ProjectQueriesCollection name DataTug project files
 // as DALgo policy resources: a saved query is the record
 // /datatug_projects/{projectID}/queries/{queryID}, where queryID is the

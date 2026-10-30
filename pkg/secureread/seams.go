@@ -3,17 +3,24 @@ package secureread
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"math/big"
 	"os"
 
+	"github.com/dal-go/dalgo/condeval"
+	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/dal-go/dalgo2sql"
+	"github.com/datatug/datatug-cli/pkg/accesspolicies"
+	"github.com/datatug/datatug-cli/pkg/resultops"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 )
 
 var (
 	collectRowsFn          = collectRows
 	collectRowsFederatedFn = collectRows
-	streamFederatedDTQLFn  = func(e *Executor, ctx context.Context, document []byte, sourceURLs map[string]string, variables map[string]any) (*FederatedStream, error) {
-		return e.StreamFederatedDTQL(ctx, document, sourceURLs, variables)
+	streamFederatedTugQLFn = func(e *Executor, ctx context.Context, document []byte, sourceURLs map[string]string, variables map[string]any) (*FederatedStream, error) {
+		return e.StreamFederatedTugQL(ctx, document, sourceURLs, variables)
 	}
 	osMkdirTemp            = os.MkdirTemp
 	osChmod                = os.Chmod
@@ -35,4 +42,16 @@ var (
 		_, err := db.ExecContext(ctx, "PRAGMA query_only = ON")
 		return err
 	}
+	tugqlSerialize               = tugql.Serialize
+	resultopsCapture             = resultops.Capture
+	accesspoliciesRun            = accesspolicies.Run
+	condevalSubstitute           = condeval.Substitute
+	exactAggregateRatFloatString = func(r *big.Rat, prec int) string { return r.FloatString(prec) }
+	exactAggregateJSONMarshal    = json.Marshal
+	outputSort                   = func(s resultops.Snapshot, order []resultops.SortKey) ([]int, error) { return s.Sort(order) }
+	dalExecuteRecursiveQuery     = dal.ExecuteRecursiveQuery
+	tugqlDeserialize             = tugql.Deserialize
+	// openSourceFn is openSource, a seam so a test can hand the executor an
+	// owned handle whose Close is observable (the CouchDB/PostgREST shape).
+	openSourceFn = openSource
 )

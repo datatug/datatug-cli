@@ -57,7 +57,7 @@ func readLegacyTerminalChat(ctx context.Context, path, id string, scope sessionc
 	if id == "" {
 		return payload, errors.New("--legacy-session is required")
 	}
-	path, err := filepath.Abs(path)
+	path, err := sessionAbsPath(path)
 	if err != nil {
 		return payload, errors.New("legacy chat source unavailable")
 	}
@@ -66,7 +66,7 @@ func readLegacyTerminalChat(ctx context.Context, path, id string, scope sessionc
 		return payload, errors.New("legacy chat source must be an existing private regular file")
 	}
 	uri := url.URL{Scheme: "file", Path: path, RawQuery: "mode=ro&_pragma=query_only(1)"}
-	db, err := sql.Open("sqlite", uri.String())
+	db, err := sessionSqlOpen("sqlite", uri.String())
 	if err != nil {
 		return payload, errors.New("legacy chat source unavailable")
 	}
@@ -122,3 +122,8 @@ func readLegacyTerminalChat(ctx context.Context, path, id string, scope sessionc
 	}
 	return payload, nil
 }
+
+var (
+	sessionAbsPath = filepath.Abs
+	sessionSqlOpen = sql.Open
+)

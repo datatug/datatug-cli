@@ -1,0 +1,86 @@
+name: Journey (MySQL)
+
+# NOT a required check, and deliberately separate from golangci.yml ("Go CI"): that workflow's checks are
+# required by branch protection and gate releases, so it runs on every change and cannot take `paths:` filters.
+# This one can, and it does: it only runs when the SQL-script export, its verifier or its journey changes.
+#
+# It loads the scripts of `datatug db copy --to sqlscript:...?dialect=mysql` into a real MySQL 8.4 server (the
+# mysql client inside the server's container) for the edge-case fixture and the pinned demo databases, and
+# runs the cross-engine verifier (internal/crossverify) over every one. Then, on the same server, the journey of a
+# MySQL source: the scan (-D mysql), query run and saved queries. See scripts/check-journey-mysql.sh.
+on:
+  pull_request:
+    paths:
+      - 'pkg/dbcopy/*.go'
+      - 'pkg/dbcopy/faithful/**'
+      - 'internal/crossverify/**'
+      - 'apps/datatugapp/commands/cmd_db_copy*.go'
+      - 'apps/datatugapp/commands/cmd_scan_db.go'
+      - 'apps/datatugapp/commands/cmd_query*.go'
+      - 'apps/datatugapp/commands/server_journey_*_real_test.go'
+      - 'pkg/api/**'
+      - 'pkg/secureread/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'scripts/check-journey-mysql.sh'
+      - 'scripts/lib/source-journey.sh'
+      - 'scripts/check-mysql-readiness.sh'
+      - 'scripts/lib/mysql-readiness.sh'
+      - 'scripts/journey-datasets.txt'
+      - '.github/workflows/journey-mysql.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'pkg/dbcopy/*.go'
+      - 'pkg/dbcopy/faithful/**'
+      - 'internal/crossverify/**'
+      - 'apps/datatugapp/commands/cmd_db_copy*.go'
+      - 'apps/datatugapp/commands/cmd_scan_db.go'
+      - 'apps/datatugapp/commands/cmd_query*.go'
+      - 'apps/datatugapp/commands/server_journey_*_real_test.go'
+      - 'pkg/api/**'
+      - 'pkg/secureread/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'scripts/check-journey-mysql.sh'
+      - 'scripts/lib/source-journey.sh'
+      - 'scripts/check-mysql-readiness.sh'
+      - 'scripts/lib/mysql-readiness.sh'
+      - 'scripts/journey-datasets.txt'
+      - '.github/workflows/journey-mysql.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  journey-mysql:
+    name: Journey (MySQL 8.4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      # The server image, pinned by digest (mysql:8.4 on 2026-10-16). A bot that updates the digest must also
+      # re-run this journey: that is what the job is for.
+      MYSQL_IMAGE: mysql:8.4@sha256:24989179f58856db763f418010c1169fecc944e3ec1ea7e921572d83eb070f70
+    steps:
+      - uses: actions/checkout@v7
+      - name: Authenticate private Core dependency
+        uses: ./.github/actions/private-core
+        with:
+          private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
+      - uses: actions/setup-go@v7
+        with:
+          # Must be >= go.mod's `go` directive, same constraint as release.yml.
+          go-version: '1.27.3'
+          cache: true
+      - name: MySQL readiness regression (no Docker)
+        run: bash scripts/check-mysql-readiness.sh
+      - name: MySQL journey
+        env:
+          CGO_ENABLED: '1'
+        run: ./scripts/check-journey-mysql.sh

@@ -20,9 +20,9 @@ type columnCountingExecutor struct {
 	cancel context.CancelFunc
 }
 
-func (e *columnCountingExecutor) RunDTQL(ctx context.Context, source string, doc []byte, params map[string]any) (secureread.Result, error) {
+func (e *columnCountingExecutor) RunTugQL(ctx context.Context, source string, doc []byte, params map[string]any) (secureread.Result, error) {
 	e.calls++
-	r, err := e.Executor.RunDTQL(ctx, source, doc, params)
+	r, err := e.Executor.RunTugQL(ctx, source, doc, params)
 	if e.cancel != nil {
 		e.cancel()
 	}
@@ -51,7 +51,7 @@ func resultColumnsFixture(t *testing.T, schema, document string) (*SessionChat, 
 	}
 	executor := &columnCountingExecutor{Executor: secureread.NewExecutor(secureread.Session{Unrestricted: true})}
 	c.ConfigureQueryExecutor(executor)
-	result, err := executor.RunDTQL(ctx, source, []byte(document), nil)
+	result, err := executor.RunTugQL(ctx, source, []byte(document), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func resultColumnsFixture(t *testing.T, schema, document string) (*SessionChat, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	query, err := store.AppendQuery(ctx, c.activeID, user.ID, source, QueryResult{Title: "Invoice counts", SourceID: scope.Database, DTQL: document, Result: result})
+	query, err := store.AppendQuery(ctx, c.activeID, user.ID, source, QueryResult{Title: "Invoice counts", SourceID: scope.Database, TugQL: document, Result: result})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,6 +97,7 @@ func columnNameIDs(t *testing.T, c *SessionChat, parent RecordSet, names ...stri
 }
 
 func TestResultColumnsGroupedSecureSQLitePreservesCountsAndOrigin(t *testing.T) {
+	t.Parallel()
 	c, parent, e, _ := resultColumnsFixture(t, resultColumnsSchema, resultColumnsDocument)
 	ctx := context.Background()
 	before, _ := json.Marshal(parent)
@@ -108,14 +109,14 @@ func TestResultColumnsGroupedSecureSQLitePreservesCountsAndOrigin(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(preview.DTQL, "type: left") || !strings.Contains(preview.DTQL, "Customer_FirstName") {
-		t.Fatal(preview.DTQL)
+	if !strings.Contains(preview.TugQL, "type: left") || !strings.Contains(preview.TugQL, "Customer_FirstName") {
+		t.Fatal(preview.TugQL)
 	}
 	s, query, err := c.executeResultColumns(ctx, c.activeID, parent.ID, ids, preview.Fingerprint, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if e.calls != 1 || query.DTQL != preview.DTQL {
+	if e.calls != 1 || query.TugQL != preview.TugQL {
 		t.Fatalf("calls %d query %+v", e.calls, query)
 	}
 	after, _ := json.Marshal(s.RecordSets[parent.ID])
@@ -145,6 +146,7 @@ func TestResultColumnsGroupedSecureSQLitePreservesCountsAndOrigin(t *testing.T) 
 }
 
 func TestResultColumnsRefusesNoCaseTextKeyBeforeExecution(t *testing.T) {
+	t.Parallel()
 	schema := `CREATE TABLE Customer(CustomerId TEXT PRIMARY KEY COLLATE BINARY,FirstName TEXT,LastName TEXT);CREATE TABLE Invoice(InvoiceId INTEGER PRIMARY KEY,CustomerId TEXT COLLATE NOCASE REFERENCES Customer(CustomerId));INSERT INTO Customer VALUES('a','lower','a'),('A','upper','A');INSERT INTO Invoice VALUES(1,'a'),(2,'A');`
 	c, parent, e, db := resultColumnsFixture(t, schema, resultColumnsDocument)
 	var nativeGroups, nativeCount int
@@ -177,6 +179,7 @@ func TestResultColumnsRefusesNoCaseTextKeyBeforeExecution(t *testing.T) {
 }
 
 func TestResultColumnsStaleCancelAndUnsafeShapes(t *testing.T) {
+	t.Parallel()
 	c, parent, e, db := resultColumnsFixture(t, resultColumnsSchema, resultColumnsDocument)
 	ids := columnNameIDs(t, c, parent, "Customer.FirstName", "Customer.LastName")
 	ctx := context.Background()
@@ -216,13 +219,14 @@ func TestResultColumnsStaleCancelAndUnsafeShapes(t *testing.T) {
 		t.Fatal("cancelled child persisted")
 	}
 	unsafe := parent
-	unsafe.DTQL = strings.ReplaceAll(parent.DTQL, "COUNT", "SUM")
+	unsafe.TugQL = strings.ReplaceAll(parent.TugQL, "COUNT", "SUM")
 	if _, _, err = resultColumnQuery(unsafe); err == nil {
 		t.Fatal("SUM accepted")
 	}
 }
 
 func TestResultColumnsPreservesHavingFiltersParametersOrderOffset(t *testing.T) {
+	t.Parallel()
 	doc := strings.Replace(resultColumnsDocument, "orderBy:", "where: {op: '>', left: {field: InvoiceId, source: i}, right: {value: 0}}\nhaving: {op: '>', left: {field: InvoiceCount}, right: {value: 0}}\noffset: 1\norderBy:", 1)
 	c, parent, _, _ := resultColumnsFixture(t, resultColumnsSchema, doc)
 	ids := columnNameIDs(t, c, parent, "Customer.FirstName", "Customer.LastName")
@@ -234,8 +238,8 @@ func TestResultColumnsPreservesHavingFiltersParametersOrderOffset(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(q.DTQL, "having:") || !strings.Contains(q.DTQL, "offset: 1") || len(q.Result.Rows) != len(parent.Result.Rows) {
-		t.Fatal(q.DTQL)
+	if !strings.Contains(q.TugQL, "having:") || !strings.Contains(q.TugQL, "offset: 1") || len(q.Result.Rows) != len(parent.Result.Rows) {
+		t.Fatal(q.TugQL)
 	}
 	if len(s.RecordSets) != 2 {
 		t.Fatal("wrong result count")
@@ -243,6 +247,7 @@ func TestResultColumnsPreservesHavingFiltersParametersOrderOffset(t *testing.T) 
 }
 
 func TestResultColumnsDeniedSourceAndTargetNames(t *testing.T) {
+	t.Parallel()
 	c, parent, _, _ := resultColumnsFixture(t, resultColumnsSchema, resultColumnsDocument)
 	for _, fields := range []string{"", "    fields: [CustomerId]\n"} {
 		dir := t.TempDir()
@@ -274,6 +279,7 @@ func TestResultColumnsDeniedSourceAndTargetNames(t *testing.T) {
 }
 
 func TestResultColumnsRefusesCompositeDescAndNonUniqueTargets(t *testing.T) {
+	t.Parallel()
 	for _, target := range []string{"CustomerId INTEGER, Other INTEGER, PRIMARY KEY(CustomerId,Other)", "CustomerId INTEGER PRIMARY KEY DESC", "CustomerId INTEGER"} {
 		schema := "CREATE TABLE Customer(" + target + ",FirstName TEXT,LastName TEXT);CREATE TABLE Invoice(InvoiceId INTEGER PRIMARY KEY,CustomerId INTEGER REFERENCES Customer(CustomerId));INSERT INTO Invoice VALUES(1,999);"
 		// A table-level composite constraint has to follow physical columns.
@@ -297,6 +303,7 @@ func TestResultColumnsRefusesCompositeDescAndNonUniqueTargets(t *testing.T) {
 }
 
 func TestResultColumnsSimpleProjectionAddsMultipleFields(t *testing.T) {
+	t.Parallel()
 	doc := "from: {name: Customer}\ncolumns: [{field: CustomerId}]\norderBy: [{field: CustomerId}]\nlimit: 100\n"
 	c, parent, e, _ := resultColumnsFixture(t, resultColumnsSchema, doc)
 	ids := columnNameIDs(t, c, parent, "FirstName", "LastName")
@@ -311,6 +318,7 @@ func TestResultColumnsSimpleProjectionAddsMultipleFields(t *testing.T) {
 }
 
 func TestResultColumnsWildcardCandidatesNeverAdvertiseExecution(t *testing.T) {
+	t.Parallel()
 	c, parent, executor, _ := resultColumnsFixture(t, resultColumnsSchema, "from: {name: Invoice}\ncolumns: [{wildcard: {exclude: [InvoiceId]}}]\nlimit: 100\n")
 	rows, err := c.ResultColumns(context.Background(), parent.ID)
 	if err != nil {
@@ -333,6 +341,7 @@ func TestResultColumnsWildcardCandidatesNeverAdvertiseExecution(t *testing.T) {
 }
 
 func TestResultColumnsGroupedLargeRowidDirectRefusesBeforeExecution(t *testing.T) {
+	t.Parallel()
 	schema := "CREATE TABLE Customer(CustomerId INTEGER PRIMARY KEY,Name TEXT);INSERT INTO Customer VALUES(9007199254740992,'A'),(9007199254740993,'B');"
 	doc := "from: {name: Customer}\ncolumns: [{field: CustomerId}, {aggregate: {function: COUNT, args: [{star: true}]}, as: N}]\ngroupBy: [{field: CustomerId}]\nlimit: 100\n"
 	c, parent, executor, _ := resultColumnsFixture(t, schema, doc)
@@ -370,6 +379,7 @@ func TestResultColumnsGroupedLargeRowidDirectRefusesBeforeExecution(t *testing.T
 }
 
 func TestResultColumnsImplicitGeneratedProjectionRefusesJoin(t *testing.T) {
+	t.Parallel()
 	schema := "CREATE TABLE Customer(CustomerId INTEGER PRIMARY KEY,Name TEXT);CREATE TABLE Invoice(InvoiceId INTEGER PRIMARY KEY,CustomerId INTEGER REFERENCES Customer(CustomerId),Display TEXT GENERATED ALWAYS AS ('invoice-'||InvoiceId) VIRTUAL);INSERT INTO Customer VALUES(1,'A');INSERT INTO Invoice(InvoiceId,CustomerId) VALUES(1,1);"
 	c, parent, executor, _ := resultColumnsFixture(t, schema, "from: {name: Invoice}\nlimit: 100\n")
 	before, _ := json.Marshal(parent)
@@ -406,6 +416,7 @@ func TestResultColumnsImplicitGeneratedProjectionRefusesJoin(t *testing.T) {
 }
 
 func TestResultColumnsGroupedLargeForeignKeyRefusesWithoutChild(t *testing.T) {
+	t.Parallel()
 	schema := "CREATE TABLE Customer(CustomerId INTEGER PRIMARY KEY,FirstName TEXT,LastName TEXT);CREATE TABLE Invoice(InvoiceId INTEGER PRIMARY KEY,CustomerId INTEGER REFERENCES Customer(CustomerId));INSERT INTO Customer VALUES(9007199254740992,'A','One'),(9007199254740993,'B','Two');INSERT INTO Invoice VALUES(1,9007199254740992),(2,9007199254740993);"
 	c, parent, executor, _ := resultColumnsFixture(t, schema, resultColumnsDocument)
 	before, _ := json.Marshal(parent)
@@ -442,6 +453,7 @@ func TestResultColumnsGroupedLargeForeignKeyRefusesWithoutChild(t *testing.T) {
 }
 
 func TestResultColumnsLiveLargeForeignKeySecureExecutorRefuses(t *testing.T) {
+	t.Parallel()
 	c, parent, executor, db := resultColumnsFixture(t, resultColumnsSchema, resultColumnsDocument)
 	ids := columnNameIDs(t, c, parent, "Customer.FirstName", "Customer.LastName")
 	preview, err := c.resultColumnsPreview(context.Background(), c.activeID, parent.ID, ids)
@@ -471,6 +483,7 @@ func TestResultColumnsLiveLargeForeignKeySecureExecutorRefuses(t *testing.T) {
 }
 
 func TestResultColumnsGeneratedTargetCandidateDisabled(t *testing.T) {
+	t.Parallel()
 	schema := "CREATE TABLE Customer(CustomerId INTEGER PRIMARY KEY,Name TEXT,Display TEXT GENERATED ALWAYS AS ('customer-'||CustomerId) STORED);CREATE TABLE Invoice(InvoiceId INTEGER PRIMARY KEY,CustomerId INTEGER REFERENCES Customer(CustomerId));INSERT INTO Customer(CustomerId,Name) VALUES(1,'A');INSERT INTO Invoice VALUES(1,1);"
 	c, parent, executor, _ := resultColumnsFixture(t, schema, "from: {name: Invoice}\ncolumns: [{field: InvoiceId}, {field: CustomerId}]\nlimit: 100\n")
 	rows, err := c.ResultColumns(context.Background(), parent.ID)
@@ -495,6 +508,7 @@ func TestResultColumnsGeneratedTargetCandidateDisabled(t *testing.T) {
 }
 
 func TestResultColumnsProofMatchesGroupedAndPlainQueries(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		name, document string
 		grouped        bool

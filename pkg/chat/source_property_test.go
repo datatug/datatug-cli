@@ -19,6 +19,7 @@ import (
 // from the display form's cut), no secret of four or more characters is in any
 // file the store wrote or in the source it reads back.
 func TestProperty_ChatStoreNeverPersistsASourceSecret(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	cases := sourcecases.CommandCases()
@@ -53,7 +54,7 @@ func TestProperty_ChatStoreNeverPersistsASourceSecret(t *testing.T) {
 	result := secureread.Result{Columns: []string{"id"}, Rows: []secureread.Row{{Key: "1", Data: map[string]any{"id": int64(1)}}}}
 	for _, c := range cases {
 		for _, source := range []string{c.Source, standIn(c.Source)} {
-			if _, err := store.AppendTurn(ctx, session.ID, user.ID, source, Turn{Queries: []QueryResult{{Title: "Rows", DTQL: "from: {name: t}", SourceID: "shop", Result: result}}}); err != nil {
+			if _, err := store.AppendTurn(ctx, session.ID, user.ID, source, Turn{Queries: []QueryResult{{Title: "Rows", TugQL: "from: {name: t}", SourceID: "shop", Result: result}}}); err != nil {
 				t.Fatalf("%s: %v", c.Name, err)
 			}
 		}

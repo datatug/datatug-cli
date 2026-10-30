@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/datatug/datatug-cli/pkg/auth/device"
 	"github.com/datatug/datatug-cli/pkg/chat"
+	"github.com/datatug/datatug-cli/pkg/cloudapi"
 	"github.com/datatug/datatug-cli/pkg/dtlog"
 	"github.com/strongo/aichat/ai"
 	"github.com/strongo/aichat/ai/clientctx"
@@ -24,6 +26,17 @@ import (
 )
 
 const defaultAIAPIURL = "https://api.sneat.cloud/v0/"
+
+// defaultAIAPIURLs is the cloud API host list used when --base-url is unset,
+// primary first. Requests fail over to the later hosts (pkg/cloudapi). The
+// production default is still the single legacy host; switching to the
+// api.datatug.app / api2.datatug.app pair is a change of this one line.
+var defaultAIAPIURLs = []string{defaultAIAPIURL}
+
+// cloudFailoverNotice receives the one-line notice printed when the cloud API
+// fails over to another host. There is no quiet flag in the CLI yet; a future
+// one nils this out.
+var cloudFailoverNotice io.Writer = os.Stderr
 
 var chatUserConfigDir = os.UserConfigDir
 var chatSavedTokenSource = device.SavedTokenSource
@@ -94,16 +107,26 @@ type cloudSession struct {
 	identity   string // local preference scope only; never sent as authorization
 }
 
-func loadCloudSession(ctx context.Context, options chatOptions) (cloudSession, error) {
+var loadCloudSession = defaultLoadCloudSession
+
+func defaultLoadCloudSession(ctx context.Context, options chatOptions) (cloudSession, error) {
 	if options.apiKey != "" {
 		return cloudSession{}, fmt.Errorf("cloud chat uses 'datatug auth login', not an AI profile API key")
 	}
-	baseURL := strings.TrimSpace(options.baseURL)
-	if baseURL == "" {
-		baseURL = defaultAIAPIURL
+	baseURLs := cloudapi.SplitBaseURLs(options.baseURL)
+	if len(baseURLs) == 0 {
+		baseURLs = defaultAIAPIURLs
 	}
-	if err := validateAIAPIURL(baseURL); err != nil {
-		return cloudSession{}, err
+	for _, u := range baseURLs {
+		if err := validateAIAPIURL(u); err != nil {
+			return cloudSession{}, err
+		}
+	}
+	httpClient := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	if len(baseURLs) > 1 {
+		httpClient.Transport = cloudapi.NewTransport(cloudapi.Config{BaseURLs: baseURLs, Notice: cloudFailoverNotice})
 	}
 	tokens, err := chatSavedTokenSource(ctx, options.insecureStorage)
 	if err != nil {
@@ -120,10 +143,8 @@ func loadCloudSession(ctx context.Context, options chatOptions) (cloudSession, e
 	}
 	var tokenMu sync.Mutex
 	return cloudSession{
-		baseURL: baseURL,
-		httpClient: &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		}},
+		baseURL:    baseURLs[0],
+		httpClient: httpClient,
 		token: func(requestCtx context.Context) (string, error) {
 			tokenMu.Lock()
 			defer tokenMu.Unlock()

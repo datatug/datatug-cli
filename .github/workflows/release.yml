@@ -10,9 +10,9 @@ name: Release artifacts
 # datatug-cli is pre-1.0: allow_major_version_bump stays false, so a stray
 # `feat!:` is capped to a minor bump instead of jumping to v1.0.0.
 #
-# The release binaries are CGO_ENABLED=0 (see .goreleaser.yaml builds), so they
-# cross-compile cleanly on the shared ubuntu runner even though CI tests use cgo
-# for the sqlite driver.
+# DuckDB requires native cgo builds. The shared release workflow dispatches
+# native-release.yml at its guarded exact tag, then imports verified binaries
+# before the existing archive/sign/notarize/promotion gates.
 
 on:
   push:
@@ -29,18 +29,18 @@ permissions:
 
 jobs:
   release:
-    # Pinned to an exact tag, not the moving @v1: that tag defines the
-    # require_notarized_macos input but does NOT contain the
-    # macos_signing_preflight job, so the gate silently no-ops there.
-    uses: strongo/cicd/.github/workflows/release.yml@v1.21.3
+    # Pin the released private-dependency and macOS signing contract.
+    uses: strongo/cicd/.github/workflows/release.yml@e9d8156d4d20c4faef7b7b5f01ba3c3c10ba5abc # verified native-build contract
     permissions:
       contents: write
-      # Lets the require_workflow_success guard below read Go CI's result for
-      # this commit. A reusable workflow cannot grant itself more than its
-      # caller allows, so this has to be here rather than in the shared
-      # workflow. Without it the guard fails closed and says so.
-      actions: read
+      # Read exact-head CI results and dispatch the exact-tag native build.
+      # A reusable workflow cannot grant more permission than its caller.
+      actions: write
     with:
+      GOPRIVATE: github.com/datatug/datatug-core
+      goprivate_github_app_client_id: Iv23li26w131Kv6u3IdM
+      goprivate_github_app_owner: datatug
+      goprivate_github_app_repositories: datatug-core
       # Keep GitHub release artifacts automatic, but never update downstream
       # package managers as a side effect of merging code.
       goreleaser_extra_args: '--skip=homebrew,winget'
@@ -52,13 +52,19 @@ jobs:
       # GoReleaser's `go mod tidy` before-hook re-added v90 in the runner.
       # Names the workflow's `name:`, not its filename; a name matching no
       # workflow fails rather than quietly disabling the gate.
-      require_workflow_success: 'Go CI'
-      # Must be >= go.mod's `go` directive. Adopting github.com/strongo/buildinfo
-      # raised it to 1.27.0. The shared release job runs its `go mod tidy`
-      # before-hook under this setup-go version with GOTOOLCHAIN=local, so
-      # leaving it unset (default '1.26') fails with
-      # "go.mod requires go >= 1.27.0" before the build starts.
-      go_version: '1.27.0'
+      require_workflow_success: |
+        Go CI
+        Native release builds
+      native_build_workflow: native-release.yml
+      # Must be >= go.mod's `go` directive, whose current value is `go 1.27.1`
+      # (it was 1.27.0 when adopting github.com/strongo/buildinfo raised it;
+      # the directive has moved on since). The shared release job runs its
+      # `go mod tidy` before-hook under this setup-go version with
+      # GOTOOLCHAIN=local, so leaving it unset (default '1.27.0') fails with
+      # "go.mod requires go >= 1.27.1" before the build starts. This input is
+      # also kept equal to golangci.yml's strongo_workflow go_version, so CI
+      # proves the same toolchain the release builds under.
+      go_version: '1.27.1'
       # Pre-1.0: cap an accidental major (feat!:) to a minor bump.
       allow_major_version_bump: false
       # Block publication unless the macOS build is genuinely signed, notarized,
@@ -67,8 +73,10 @@ jobs:
       # See https://github.com/strongo/cicd/issues/66
       require_notarized_macos: true
     secrets:
-      # This workflow has no cross-repository publishing token. Only the
-      # manually triggered package workflow can update the Homebrew tap.
+      GOPRIVATE_GITHUB_APP_PRIVATE_KEY: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
+      # The verified release uses only its repository token. The public hub
+      # mirror below mints its own narrowly scoped, short-lived App token.
+      # Only the manually triggered package workflow updates the Homebrew tap.
       # macOS signing + notarization. These activate the `notarize:` block in
       # .goreleaser.yaml, which is gated on MACOS_SIGN_P12 being set. See
       # ingitdb/ingitdb-cli's release.yml, the reference implementation this
@@ -80,8 +88,8 @@ jobs:
       NOTARIZE_KEY: ${{ secrets.NOTARIZE_KEY }}
 
   # Publishes the verified, notarized release and all binary assets to the public
-  # hub repository (datatug/datatug) so users and installers can download public
-  # release artifacts while datatug/datatug-cli remains private.
+  # hub repository (datatug/datatug), preserving the stable download location
+  # used by users and installers now that datatug/datatug-cli is also public.
   publish-datatug-release:
     name: Publish release to datatug/datatug
     needs: release
@@ -91,16 +99,30 @@ jobs:
       contents: read
     steps:
       - name: Check out publisher script
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      # datatug-cli is public; the private-repository-only publisher secret is unavailable.
+      # Mint only contents-write access to the public hub, revoked after the job.
+      - name: Mint exact public release token
+        id: public-release-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: Iv23li26w131Kv6u3IdM
+          private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
+          owner: datatug
+          repositories: datatug
+          permission-contents: write
 
       - name: Publish release to datatug/datatug
         env:
           GH_SOURCE_TOKEN: ${{ github.token }}
-          GH_TARGET_TOKEN: ${{ secrets.DATATUG_RELEASE_TOKEN || secrets.GORELEASER_GITHUB_TOKEN }}
+          GH_TARGET_TOKEN: ${{ steps.public-release-token.outputs.token }}
           TAG: ${{ needs.release.outputs.tag }}
         run: |
           if [[ -z "${GH_TARGET_TOKEN:-}" ]]; then
-            echo "::error::No token found for publishing to datatug/datatug. Set DATATUG_RELEASE_TOKEN or GORELEASER_GITHUB_TOKEN with write access to datatug/datatug."
+            echo "::error::The scoped public-release App token was not minted."
             exit 1
           fi
           bash scripts/publish-datatug-release.sh "$TAG" "datatug/datatug-cli" "datatug/datatug"

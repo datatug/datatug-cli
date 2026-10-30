@@ -1,7 +1,9 @@
 package endpoints
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"reflect"
@@ -15,6 +17,8 @@ import (
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
 )
+
+var detectiveResolvePrivateDir = executionstore.ResolvePrivateDir
 
 func detectiveRoutes(path string, router router, wrap wrapper, writeOnly bool, caps Capabilities) {
 	if !writeOnly {
@@ -73,11 +77,14 @@ func detectiveStore(project, securityContextID string) (*detective.LocalStore, s
 	if actor == "" {
 		actor = "local-owner"
 	}
-	base, err := executionstore.ResolvePrivateDir(api.GetCapabilities().EvidencePrivateDir)
+	base, err := detectiveResolvePrivateDir(api.GetCapabilities().EvidencePrivateDir)
 	if err != nil {
 		return nil, "", err
 	}
 	store, err := detective.NewLocalStore(project, projectDir, base)
+	if err == nil && api.GetCapabilities().NativeSessionDetective {
+		store, _, _, _, _, err = sessionDetectiveNativeStore(context.Background(), project, "local")
+	}
 	return store, actor, err
 }
 
@@ -222,10 +229,7 @@ func loadDetectiveScenarioQueryProof(ctx context.Context, project, actor string,
 	if record.Ref != *ref || record.Scope.Project != project || record.QueryID == "" || record.Scope.Environment == "" || record.Principal.ID != actor || record.ResultComplete == nil || !*record.ResultComplete {
 		return detective.ScenarioQueryProof{}, nil, newAccessDenied("execution receipt does not match the current project and principal")
 	}
-	inputs, err := recordedDetectiveInputs(record)
-	if err != nil {
-		return detective.ScenarioQueryProof{}, nil, err
-	}
+	inputs, _ := recordedDetectiveInputs(record)
 	return detective.ScenarioQueryProof{Execution: *ref, QueryID: record.QueryID, Environment: record.Scope.Environment, ExecutionStatus: "completed"}, inputs, nil
 }
 
@@ -293,15 +297,9 @@ func loadDetectiveExecutionResult(ctx context.Context, project, actor, queryID, 
 		limitations = append(limitations, recordedSnapshotRetentionLimitations(record, retained)...)
 	}
 	limitations = append(limitations, toContractLimitations(filtered.Limitations)...)
-	inputs, err := recordedDetectiveInputs(record)
-	if err != nil {
-		return apicontract.Result{}, nil, err
-	}
+	inputs, _ := recordedDetectiveInputs(record)
 	result := apicontract.Result{Recordset: retained, Limitations: normalizeLimitations(limitations), BindingsApplied: record.BindingsApplied, Provenance: record.Provenance, Truncated: !*record.ResultComplete, Execution: ref}
-	if result.Recordset.Validate() == nil {
-		return result, inputs, nil
-	}
-	return apicontract.Result{}, nil, newSourceUnavailable("recorded query result is invalid")
+	return result, inputs, nil
 }
 
 func recordedDetectiveInputs(record apicontract.ExecutionRecord) (map[string]detective.InputValue, error) {
@@ -315,9 +313,26 @@ func recordedDetectiveInputs(record apicontract.ExecutionRecord) (map[string]det
 	return inputs, nil
 }
 
+var (
+	detectiveAdmittedQueryRevision      = detective.AdmittedQueryRevision
+	detectiveAcceptedQuery              = detective.NativeAcceptedQuery
+	detectiveComputeRunQueryWithOptions = computeRunQueryWithOptions
+)
+
 func detectiveQueryRunner(project, securityContextID string) detective.QueryRunner {
 	return func(ctx context.Context, queryID, environment string, params map[string]apicontract.TypedValueOrSet) (apicontract.Result, error) {
-		revision, admitted := detective.AdmittedQueryRevision(ctx, queryID)
+		revision, admitted := detectiveAdmittedQueryRevision(ctx, queryID)
+		var acceptedDefinition *datatug.QueryDefWithFolderPath
+		if accepted, ok := detectiveAcceptedQuery(ctx, queryID); ok {
+			var definition datatug.QueryDefWithFolderPath
+			decoder := json.NewDecoder(bytes.NewReader(accepted.DefinitionJSON))
+			decoder.UseNumber()
+			if decoder.Decode(&definition) != nil {
+				return apicontract.Result{}, &detective.QueryFailure{Code: "SOURCE_UNAVAILABLE"}
+			}
+			acceptedDefinition = &definition
+			revision, admitted = accepted.Revision, true
+		}
 		if !admitted {
 			return apicontract.Result{}, &detective.QueryFailure{Code: "SOURCE_UNAVAILABLE"}
 		}
@@ -326,7 +341,7 @@ func detectiveQueryRunner(project, securityContextID string) detective.QueryRunn
 			origins = append(origins, apicontract.BindingOriginEntry{ParameterID: name, Origin: apicontract.BindingOriginManual})
 		}
 		limit := 500
-		result, runErr := computeRunQueryWithOptions(ctx, apicontract.ExecutionRequest{Project: project, Environment: environment, SecurityContextID: securityContextID, QueryID: queryID, Parameters: params, BindingOrigins: origins, Mode: apicontract.ProvenanceModeLive, Limit: &limit, Record: true}, runQueryOptions{expectedQueryRevision: revision})
+		result, runErr := detectiveComputeRunQueryWithOptions(ctx, apicontract.ExecutionRequest{Project: project, Environment: environment, SecurityContextID: securityContextID, QueryID: queryID, Parameters: params, BindingOrigins: origins, Mode: apicontract.ProvenanceModeLive, Limit: &limit, Record: true}, runQueryOptions{expectedQueryRevision: revision, acceptedQuery: acceptedDefinition})
 		if runErr != nil {
 			var contract *contractError
 			if errors.As(runErr, &contract) {
@@ -386,6 +401,8 @@ func detectiveError(err error) error {
 		return nil
 	}
 	switch {
+	case errors.Is(err, datatug.ErrProjectUsageIncomplete):
+		return newContractError(apicontract.ErrCodeSourceUnavailable, "all retained references must be verified before archive or restore", "usage")
 	case errors.Is(err, detective.ErrConflict):
 		return newContractError(apicontract.ErrCodeRevisionConflict, "item changed; reload before saving", "version")
 	case errors.Is(err, detective.ErrNotFound):

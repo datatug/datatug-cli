@@ -19,6 +19,7 @@ import (
 )
 
 func TestTelemetryFullCoverage(t *testing.T) {
+	// Not parallel: mutates package-level newUUID seam.
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db")
@@ -56,8 +57,8 @@ func TestTelemetryFullCoverage(t *testing.T) {
 
 	turnWithActionsAndQueries := Turn{
 		Queries: []QueryResult{
-			{DTQL: "SELECT 1", Err: nil},
-			{DTQL: "SELECT 2", Err: errors.New("query failed")},
+			{TugQL: "SELECT 1", Err: nil},
+			{TugQL: "SELECT 2", Err: errors.New("query failed")},
 		},
 		Actions: []WorkspaceActionResult{
 			{Summary: "set_tab", Err: nil},
@@ -78,6 +79,7 @@ func TestTelemetryFullCoverage(t *testing.T) {
 }
 
 func TestWorkspaceFullCoverage(t *testing.T) {
+	t.Parallel()
 	catalog := workspaceTestCatalog()
 	session := ChatSession{
 		Workspace: WorkspaceState{
@@ -299,6 +301,7 @@ func TestWorkspaceFullCoverage(t *testing.T) {
 }
 
 func TestStoreFullCoverage(t *testing.T) {
+	// Not parallel: mutates package-level store and filesystem seams.
 	ctx := context.Background()
 
 	// 1. DefaultChatStorePath error branches
@@ -424,8 +427,8 @@ func TestStoreFullCoverage(t *testing.T) {
 		for _, s := range []string{
 			`CREATE TABLE sessions (id TEXT PRIMARY KEY, scope TEXT, title TEXT, created_at TEXT, updated_at TEXT)`,
 			`CREATE TABLE messages (id TEXT PRIMARY KEY, session_id TEXT, role TEXT, kind TEXT, text TEXT, created_at TEXT)`,
-			`CREATE TABLE queries (id TEXT PRIMARY KEY, session_id TEXT, origin_message_id TEXT, title TEXT, dtql TEXT, source TEXT, parameters_json TEXT, executed_at TEXT, error TEXT)`,
-			`CREATE TABLE recordsets (id TEXT PRIMARY KEY, session_id TEXT, query_id TEXT, origin_message_id TEXT, title TEXT, dtql TEXT, source TEXT, environment TEXT, database_id TEXT, parameters_json TEXT, created_at TEXT, result_json BLOB)`,
+			`CREATE TABLE queries (id TEXT PRIMARY KEY, session_id TEXT, origin_message_id TEXT, title TEXT, tugql TEXT, source TEXT, parameters_json TEXT, executed_at TEXT, error TEXT)`,
+			`CREATE TABLE recordsets (id TEXT PRIMARY KEY, session_id TEXT, query_id TEXT, origin_message_id TEXT, title TEXT, tugql TEXT, source TEXT, environment TEXT, database_id TEXT, parameters_json TEXT, created_at TEXT, result_json BLOB)`,
 			`CREATE TABLE session_workspace (session_id TEXT PRIMARY KEY, state_json TEXT)`,
 			`CREATE TABLE bookmarks (id TEXT PRIMARY KEY, project_id TEXT, scope TEXT, title TEXT, tags_json TEXT, target_kind TEXT, created_at TEXT, updated_at TEXT, snapshot_json BLOB)`,
 			`CREATE TABLE chat_preferences (scope TEXT PRIMARY KEY, table_style TEXT)`,
@@ -735,43 +738,43 @@ func TestStoreFullCoverage(t *testing.T) {
 	_, _ = store5.db.Exec(`DELETE FROM messages WHERE id = 'bad_msg'`)
 
 	// Corrupt query parameters
-	_, _ = store5.db.Exec(`INSERT INTO queries (id, session_id, origin_message_id, title, dtql, source, parameters_json, executed_at, error) VALUES ('bad_q1', ?, 'm', 't', 'd', 's', 'bad_json', '2026-01-01T00:00:00Z', '')`, s5.ID)
+	_, _ = store5.db.Exec(`INSERT INTO queries (id, session_id, origin_message_id, title, tugql, source, parameters_json, executed_at, error) VALUES ('bad_q1', ?, 'm', 't', 'd', 's', 'bad_json', '2026-01-01T00:00:00Z', '')`, s5.ID)
 	if _, err := store5.Load(ctx, s5.ID); err == nil {
 		t.Errorf("expected corrupt query params error")
 	}
 	_, _ = store5.db.Exec(`DELETE FROM queries WHERE id = 'bad_q1'`)
 
 	// Corrupt query timestamp
-	_, _ = store5.db.Exec(`INSERT INTO queries (id, session_id, origin_message_id, title, dtql, source, parameters_json, executed_at, error) VALUES ('bad_q2', ?, 'm', 't', 'd', 's', '{}', 'bad_time', '')`, s5.ID)
+	_, _ = store5.db.Exec(`INSERT INTO queries (id, session_id, origin_message_id, title, tugql, source, parameters_json, executed_at, error) VALUES ('bad_q2', ?, 'm', 't', 'd', 's', '{}', 'bad_time', '')`, s5.ID)
 	if _, err := store5.Load(ctx, s5.ID); err == nil {
 		t.Errorf("expected corrupt query timestamp error")
 	}
 	_, _ = store5.db.Exec(`DELETE FROM queries WHERE id = 'bad_q2'`)
 
 	// Corrupt recordset params
-	_, _ = store5.db.Exec(`INSERT INTO queries (id, session_id, origin_message_id, title, dtql, source, parameters_json, executed_at, error) VALUES ('valid_q', ?, 'm', 't', 'd', 's', '{}', '2026-01-01T00:00:00Z', '')`, s5.ID)
-	_, _ = store5.db.Exec(`INSERT INTO recordsets (id, session_id, query_id, origin_message_id, title, dtql, source, environment, database_id, parameters_json, created_at, result_json, parent_recordset_id, join_candidate_id, join_applied_edges_json) VALUES ('bad_r1', ?, 'valid_q', 'm', 't', 'd', 's', 'e', 'db', 'bad_json', '2026-01-01T00:00:00Z', '{}', '', '', '[]')`, s5.ID)
+	_, _ = store5.db.Exec(`INSERT INTO queries (id, session_id, origin_message_id, title, tugql, source, parameters_json, executed_at, error) VALUES ('valid_q', ?, 'm', 't', 'd', 's', '{}', '2026-01-01T00:00:00Z', '')`, s5.ID)
+	_, _ = store5.db.Exec(`INSERT INTO recordsets (id, session_id, query_id, origin_message_id, title, tugql, source, environment, database_id, parameters_json, created_at, result_json, parent_recordset_id, join_candidate_id, join_applied_edges_json) VALUES ('bad_r1', ?, 'valid_q', 'm', 't', 'd', 's', 'e', 'db', 'bad_json', '2026-01-01T00:00:00Z', '{}', '', '', '[]')`, s5.ID)
 	if _, err := store5.Load(ctx, s5.ID); err == nil {
 		t.Errorf("expected corrupt recordset params error")
 	}
 	_, _ = store5.db.Exec(`DELETE FROM recordsets WHERE id = 'bad_r1'`)
 
 	// Corrupt recordset timestamp
-	_, _ = store5.db.Exec(`INSERT INTO recordsets (id, session_id, query_id, origin_message_id, title, dtql, source, environment, database_id, parameters_json, created_at, result_json, parent_recordset_id, join_candidate_id, join_applied_edges_json) VALUES ('bad_r2', ?, 'valid_q', 'm', 't', 'd', 's', 'e', 'db', '{}', 'bad_time', '{}', '', '', '[]')`, s5.ID)
+	_, _ = store5.db.Exec(`INSERT INTO recordsets (id, session_id, query_id, origin_message_id, title, tugql, source, environment, database_id, parameters_json, created_at, result_json, parent_recordset_id, join_candidate_id, join_applied_edges_json) VALUES ('bad_r2', ?, 'valid_q', 'm', 't', 'd', 's', 'e', 'db', '{}', 'bad_time', '{}', '', '', '[]')`, s5.ID)
 	if _, err := store5.Load(ctx, s5.ID); err == nil {
 		t.Errorf("expected corrupt recordset timestamp error")
 	}
 	_, _ = store5.db.Exec(`DELETE FROM recordsets WHERE id = 'bad_r2'`)
 
 	// Corrupt recordset result_json
-	_, _ = store5.db.Exec(`INSERT INTO recordsets (id, session_id, query_id, origin_message_id, title, dtql, source, environment, database_id, parameters_json, created_at, result_json, parent_recordset_id, join_candidate_id, join_applied_edges_json) VALUES ('bad_r3', ?, 'valid_q', 'm', 't', 'd', 's', 'e', 'db', '{}', '2026-01-01T00:00:00Z', 'bad_json', '', '', '[]')`, s5.ID)
+	_, _ = store5.db.Exec(`INSERT INTO recordsets (id, session_id, query_id, origin_message_id, title, tugql, source, environment, database_id, parameters_json, created_at, result_json, parent_recordset_id, join_candidate_id, join_applied_edges_json) VALUES ('bad_r3', ?, 'valid_q', 'm', 't', 'd', 's', 'e', 'db', '{}', '2026-01-01T00:00:00Z', 'bad_json', '', '', '[]')`, s5.ID)
 	if _, err := store5.Load(ctx, s5.ID); err == nil {
 		t.Errorf("expected corrupt recordset result error")
 	}
 	_, _ = store5.db.Exec(`DELETE FROM recordsets WHERE id = 'bad_r3'`)
 
 	// Corrupt recordset JOIN lineage
-	_, _ = store5.db.Exec(`INSERT INTO recordsets (id, session_id, query_id, origin_message_id, title, dtql, source, environment, database_id, parameters_json, created_at, result_json, parent_recordset_id, join_candidate_id, join_applied_edges_json) VALUES ('bad_r4', ?, 'valid_q', 'm', 't', 'd', 's', 'e', 'db', '{}', '2026-01-01T00:00:00Z', '{"Rows":[]}', 'p1', 'c1', 'bad_json')`, s5.ID)
+	_, _ = store5.db.Exec(`INSERT INTO recordsets (id, session_id, query_id, origin_message_id, title, tugql, source, environment, database_id, parameters_json, created_at, result_json, parent_recordset_id, join_candidate_id, join_applied_edges_json) VALUES ('bad_r4', ?, 'valid_q', 'm', 't', 'd', 's', 'e', 'db', '{}', '2026-01-01T00:00:00Z', '{"Rows":[]}', 'p1', 'c1', 'bad_json')`, s5.ID)
 	if _, err := store5.Load(ctx, s5.ID); err == nil {
 		t.Errorf("expected corrupt recordset lineage error")
 	}
@@ -811,7 +814,7 @@ func TestStoreFullCoverage(t *testing.T) {
 		TextFormat: "markdown",
 		Queries: []QueryResult{
 			{QueryID: "pre-existing-id"},
-			{Title: "Q1", DTQL: "SELECT 1", Result: secureread.Result{Columns: []string{"id"}, Rows: []secureread.Row{{Data: map[string]any{"id": int64(1)}}}}},
+			{Title: "Q1", TugQL: "SELECT 1", Result: secureread.Result{Columns: []string{"id"}, Rows: []secureread.Row{{Data: map[string]any{"id": int64(1)}}}}},
 		},
 	})
 	if err != nil {
@@ -866,6 +869,7 @@ func (m mockRowsAffectedErrorResult) RowsAffected() (int64, error) {
 }
 
 func TestStoreRemaining100Coverage(t *testing.T) {
+	// Not parallel: mutates package-level store and SQLite seams.
 	ctx := context.Background()
 
 	// 1. OpenSessionStore osLstat & osOpenFile error branches
@@ -1044,8 +1048,8 @@ func TestStoreRemaining100Coverage(t *testing.T) {
 	for _, s := range []string{
 		`CREATE TABLE sessions (id TEXT PRIMARY KEY, scope TEXT, title TEXT, created_at TEXT, updated_at TEXT)`,
 		`CREATE TABLE messages (id TEXT PRIMARY KEY, session_id TEXT, role TEXT, kind TEXT, text TEXT, created_at TEXT)`,
-		`CREATE TABLE queries (id TEXT PRIMARY KEY, session_id TEXT, origin_message_id TEXT, title TEXT, dtql TEXT, source TEXT, parameters_json TEXT, executed_at TEXT, error TEXT)`,
-		`CREATE TABLE recordsets (id TEXT PRIMARY KEY, session_id TEXT, query_id TEXT, origin_message_id TEXT, title TEXT, dtql TEXT, source TEXT, environment TEXT, database_id TEXT, parameters_json TEXT, created_at TEXT, result_json BLOB)`,
+		`CREATE TABLE queries (id TEXT PRIMARY KEY, session_id TEXT, origin_message_id TEXT, title TEXT, tugql TEXT, source TEXT, parameters_json TEXT, executed_at TEXT, error TEXT)`,
+		`CREATE TABLE recordsets (id TEXT PRIMARY KEY, session_id TEXT, query_id TEXT, origin_message_id TEXT, title TEXT, tugql TEXT, source TEXT, environment TEXT, database_id TEXT, parameters_json TEXT, created_at TEXT, result_json BLOB)`,
 	} {
 		_, _ = qcDB.Exec(s)
 	}
@@ -1112,8 +1116,8 @@ func TestStoreRemaining100Coverage(t *testing.T) {
 		for _, s := range []string{
 			`CREATE TABLE sessions (id TEXT PRIMARY KEY, scope TEXT, title TEXT, created_at TEXT, updated_at TEXT)`,
 			`CREATE TABLE messages (id TEXT PRIMARY KEY, session_id TEXT, role TEXT, kind TEXT, text TEXT, created_at TEXT)`,
-			`CREATE TABLE queries (id TEXT PRIMARY KEY, session_id TEXT, origin_message_id TEXT, title TEXT, dtql TEXT, source TEXT, parameters_json TEXT, executed_at TEXT, error TEXT)`,
-			`CREATE TABLE recordsets (id TEXT PRIMARY KEY, session_id TEXT, query_id TEXT, origin_message_id TEXT, title TEXT, dtql TEXT, source TEXT, environment TEXT, database_id TEXT, parameters_json TEXT, created_at TEXT, result_json BLOB)`,
+			`CREATE TABLE queries (id TEXT PRIMARY KEY, session_id TEXT, origin_message_id TEXT, title TEXT, tugql TEXT, source TEXT, parameters_json TEXT, executed_at TEXT, error TEXT)`,
+			`CREATE TABLE recordsets (id TEXT PRIMARY KEY, session_id TEXT, query_id TEXT, origin_message_id TEXT, title TEXT, tugql TEXT, source TEXT, environment TEXT, database_id TEXT, parameters_json TEXT, created_at TEXT, result_json BLOB)`,
 			`CREATE TABLE session_workspace (session_id TEXT PRIMARY KEY, state_json TEXT)`,
 			`CREATE TABLE bookmarks (id TEXT PRIMARY KEY, project_id TEXT, scope TEXT, title TEXT, tags_json TEXT, target_kind TEXT, created_at TEXT, updated_at TEXT, snapshot_json BLOB)`,
 			`CREATE TABLE chat_preferences (scope TEXT PRIMARY KEY, table_style TEXT)`,
@@ -1183,8 +1187,8 @@ func TestStoreRemaining100Coverage(t *testing.T) {
 		for _, s := range []string{
 			`CREATE TABLE sessions (id TEXT PRIMARY KEY, scope TEXT, title TEXT, created_at TEXT, updated_at TEXT)`,
 			`CREATE TABLE messages (id TEXT PRIMARY KEY, session_id TEXT, role TEXT, kind TEXT, text TEXT, created_at TEXT, http_response_id TEXT)`,
-			`CREATE TABLE queries (id TEXT PRIMARY KEY, session_id TEXT, origin_message_id TEXT, title TEXT, dtql TEXT, source TEXT, parameters_json TEXT, executed_at TEXT, error TEXT)`,
-			`CREATE TABLE recordsets (id TEXT PRIMARY KEY, session_id TEXT, query_id TEXT, origin_message_id TEXT, title TEXT, dtql TEXT, source TEXT, environment TEXT, database_id TEXT, parameters_json TEXT, created_at TEXT, result_json BLOB, parent_recordset_id TEXT, join_candidate_id TEXT, join_applied_edges_json TEXT, http_response_id TEXT, refresh_parent_id TEXT)`,
+			`CREATE TABLE queries (id TEXT PRIMARY KEY, session_id TEXT, origin_message_id TEXT, title TEXT, tugql TEXT, source TEXT, parameters_json TEXT, executed_at TEXT, error TEXT)`,
+			`CREATE TABLE recordsets (id TEXT PRIMARY KEY, session_id TEXT, query_id TEXT, origin_message_id TEXT, title TEXT, tugql TEXT, source TEXT, environment TEXT, database_id TEXT, parameters_json TEXT, created_at TEXT, result_json BLOB, parent_recordset_id TEXT, join_candidate_id TEXT, join_applied_edges_json TEXT, http_response_id TEXT, refresh_parent_id TEXT)`,
 			`CREATE TABLE session_workspace (session_id TEXT PRIMARY KEY, state_json TEXT)`,
 			`CREATE TABLE bookmarks (id TEXT PRIMARY KEY, project_id TEXT, scope TEXT, title TEXT, tags_json TEXT, target_kind TEXT, created_at TEXT, updated_at TEXT, snapshot_json BLOB)`,
 			`CREATE TABLE chat_preferences (scope TEXT PRIMARY KEY, table_style TEXT, result_versions_to_keep INTEGER NOT NULL DEFAULT 2)`,
@@ -1335,7 +1339,7 @@ func TestStoreRemaining100Coverage(t *testing.T) {
 	}
 	qRes, err := store.AppendQuery(ctx, s.ID, uMsg.ID, "sqlite:///chinook.db", QueryResult{
 		Title: "Two rows",
-		DTQL:  "SELECT * FROM t",
+		TugQL: "SELECT * FROM t",
 		Result: secureread.Result{
 			Columns: []string{"id", "val"},
 			Rows: []secureread.Row{

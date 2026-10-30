@@ -21,10 +21,10 @@ var errUnsupportedBackend = errors.New("unsupported scheme (this is a bug; Parse
 type openError struct {
 	message string
 	cause   error
-	// postgres is true for the failure of a PostgreSQL source, whose text names no source (see OpenFailure). The text
-	// of any other holds the display form of the source: the path of its file, or the scheme, the host, the port and
-	// the database of a URL.
-	postgres bool
+	// server is true for the failure of a PostgreSQL, MySQL, Oracle or SQL Server source, whose text names no source (see
+	// OpenFailure). The text of any other holds the display form of the source: the path of its file, or the scheme,
+	// the host, the port and the database of a URL.
+	server bool
 }
 
 func (e *openError) Error() string { return e.message }
@@ -39,13 +39,13 @@ func (e *openError) Unwrap() error { return e.cause }
 // permission, a timeout, a cancelled attempt, a refused connection), why.
 // errors.Is and errors.As still see the driver's own error.
 //
-// A PostgreSQL source is not named at all: the text is the sentence the adapter chose for the failure and the hint of
+// A PostgreSQL, MySQL, Oracle or SQL Server source is not named at all: the text is the sentence the adapter chose for the failure and the hint of
 // where the connection string is read from (the name of the variable or of the flag), the text a call that fails
 // after the open gives too (see postgresFailureText). The display form of a PostgreSQL URL holds its host.
 //
 // The errors this package wrote itself (the missing-file error CheckSourceFile
 // returns, an error OpenFailure returned before, the fixed refusals such as
-// ErrPostgresPreview) carry text built from the display form of the source or from
+// errPostgresReadOnlyOff) carry text built from the display form of the source or from
 // no source at all, and pass through unchanged. They are recognised by what they are, never
 // by errors.Is: a driver can wrap one of them around its own text. A nil err
 // stays nil.
@@ -54,14 +54,41 @@ func (r BackendRef) OpenFailure(err error) error {
 		return nil
 	}
 	switch err.(type) { //nolint:errorlint // an exact match is the point: see the doc comment
-	case *missingSourceFileError, *openError, *refusedError:
+	case *missingSourceFileError, *openError, *refusedError, *serverURLRefusal:
 		return err
 	}
 	if err == errUnsupportedBackend { //nolint:errorlint // an exact match is the point: see the doc comment
 		return err
 	}
+	if engine, ok := serverEngineOf(r.Scheme); ok {
+		return &openError{message: r.serverFailureText(engine, err), cause: err, server: true}
+	}
 	if r.Scheme == "postgres" {
-		return &openError{message: postgresFailureText(postgresFailureReason(err), r.connectionHint()), cause: err, postgres: true}
+		return &openError{message: postgresFailureText(postgresFailureReason(err), r.connectionHint()), cause: err, server: true}
+	}
+	if IsCouchDBScheme(r.Scheme) {
+		return &openError{
+			message: fmt.Sprintf("open %s source %q: %s", r.Scheme, r.Display(), couchDBFailureReason(err)),
+			cause:   err,
+		}
+	}
+	if IsPostgRESTScheme(r.Scheme) {
+		return &openError{
+			message: fmt.Sprintf("open %s source %q: %s", r.Scheme, r.Display(), postgRESTFailureReason(err)),
+			cause:   err,
+		}
+	}
+	if IsLibSQLScheme(r.Scheme) {
+		return &openError{
+			message: fmt.Sprintf("open %s source %q: %s", r.Scheme, r.Display(), libSQLFailureReason(err)),
+			cause:   err,
+		}
+	}
+	if IsTypesenseScheme(r.Scheme) {
+		return &openError{
+			message: fmt.Sprintf("open %s source %q: %s", r.Scheme, r.Display(), typesenseFailureReason(err)),
+			cause:   err,
+		}
 	}
 	return &openError{
 		message: fmt.Sprintf("open %s source %q: %s", r.Scheme, r.Display(), openFailureReason(err)),
@@ -84,6 +111,8 @@ func postgresFailureReason(err error) string {
 func openFailureReason(err error) string {
 	var netErr net.Error
 	switch {
+	case errors.Is(err, errDuckDBRequiresCGO):
+		return errDuckDBRequiresCGO.Error()
 	case errors.Is(err, fs.ErrNotExist):
 		return "the file or directory does not exist"
 	case errors.Is(err, fs.ErrPermission):

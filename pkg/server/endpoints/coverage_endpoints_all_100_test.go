@@ -36,6 +36,16 @@ type errReader struct{}
 func (errReader) Read([]byte) (int, error) { return 0, errors.New("read error") }
 
 func TestCoverageFinish100_Compare(t *testing.T) {
+	session, err := secureread.NewSession(secureread.SessionOptions{As: "alice", NoPolicies: true})
+	require.NoError(t, err)
+	dir := t.TempDir()
+	api.ConfigureSecureSession(session, map[string]string{"p": dir}, api.Capabilities{AllowWrites: true})
+	defer api.ConfigureSecureSession(secureread.Session{}, nil, api.Capabilities{})
+
+	origStore := storage.NewDatatugStore
+	storage.NewDatatugStore = func(string) (storage.Store, error) { return filestore.NewStore("files", map[string]string{"p": dir}) }
+	defer func() { storage.NewDatatugStore = origStore }()
+
 	handler := compareHandler(Capabilities{})
 
 	// 1. GET method
@@ -68,15 +78,15 @@ func TestCoverageFinish100_Compare(t *testing.T) {
 		"securityContextId": %q,
 		"queryId": "nonexistent_query",
 		"key": ["id"],
-		"left": {"kind":"scope","storeId":"s","project":"p","environment":"e"},
-		"right": {"kind":"scope","storeId":"s","project":"p","environment":"e"}
+		"left": {"kind":"scope","storeId":"local","project":"p","environment":"e"},
+		"right": {"kind":"scope","storeId":"local","project":"p","environment":"e"}
 	}`, api.SecurityContextID())))
 	compareHandler(Capabilities{AllowWrites: true})(wFail, rFail)
 	assert.Equal(t, http.StatusNotFound, wFail.Code)
 
 	// 6. computeCompareWith with req.Left.Kind == CompareSideRecord and no key
 	ctx := context.Background()
-	_, err := computeCompareWith(ctx, apicontract.CompareRequest{
+	_, err = computeCompareWith(ctx, apicontract.CompareRequest{
 		SecurityContextID: api.SecurityContextID(),
 		QueryID:           "q1",
 		Left:              apicontract.CompareSideSpec{Kind: apicontract.CompareSideRecord, Execution: &apicontract.ExecutionRef{StoreID: "s", ProjectID: "p", ExecutionID: "ex1"}},
@@ -151,7 +161,8 @@ func TestCoverageFinish100_CompareKey(t *testing.T) {
 	require.NoError(t, os.MkdirAll(qDir, 0755))
 
 	qDef := datatug.QueryDef{
-		ID: "q1",
+		CreatedAt: "2026-01-01T00:00:00Z",
+		ID:        "q1",
 		Recordsets: []datatug.RecordsetDefinition{
 			{
 				PrimaryKey: &datatug.UniqueKey{Columns: []string{"id"}},
@@ -165,7 +176,7 @@ func TestCoverageFinish100_CompareKey(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(qDir, "q1.query.json"), data, 0644))
 
 	// mappedCompareKey with no recordsets
-	qDefNoRec := datatug.QueryDef{ID: "q_no_rec"}
+	qDefNoRec := datatug.QueryDef{CreatedAt: "2026-01-01T00:00:00Z", ID: "q_no_rec"}
 	dataNoRec, _ := json.Marshal(qDefNoRec)
 	require.NoError(t, os.WriteFile(filepath.Join(qDir, "q_no_rec.query.json"), dataNoRec, 0644))
 
@@ -174,7 +185,8 @@ func TestCoverageFinish100_CompareKey(t *testing.T) {
 
 	// mappedCompareKey with column missing Meta
 	qDefNoMeta := datatug.QueryDef{
-		ID: "q_no_meta",
+		CreatedAt: "2026-01-01T00:00:00Z",
+		ID:        "q_no_meta",
 		Recordsets: []datatug.RecordsetDefinition{
 			{
 				PrimaryKey: &datatug.UniqueKey{Columns: []string{"id"}},
@@ -210,7 +222,8 @@ func TestCoverageFinish100_CompareKey(t *testing.T) {
 	qDir2 := filepath.Join(dir2, "queries")
 	require.NoError(t, os.MkdirAll(qDir2, 0755))
 	qDefDiff := datatug.QueryDef{
-		ID: "q1",
+		CreatedAt: "2026-01-01T00:00:00Z",
+		ID:        "q1",
 		Recordsets: []datatug.RecordsetDefinition{
 			{
 				PrimaryKey: &datatug.UniqueKey{Columns: []string{"id2"}},
@@ -727,22 +740,22 @@ func TestCoverageFinish100_QueryCapture_And_Validate(t *testing.T) {
 	req := captureQueryRequest{
 		Project: pID, Environment: "env", SecurityContextID: api.SecurityContextID(),
 		IfNoneMatch: true,
-		Query:       capturedQuery{ID: "c1", Title: "Orders", Source: "s1", DTQL: "from: {name: orders}\n"},
+		Query:       capturedQuery{ID: "c1", Title: "Orders", Source: "s1", TugQL: "from: {name: orders}\n"},
 	}
 	_, _, err := computeCaptureQuery(ctx, req)
 	assert.Error(t, err)
 	authorizeProjectQueryWrite = origAuthWrite
 
-	// 2. query_capture_validate.go:215 - dtqlCollectionHook returns ""
-	origCollHook := dtqlCollectionHook
-	dtqlCollectionHook = func(dal.StructuredQuery) string {
+	// 2. query_capture_validate.go:215 - tugqlCollectionHook returns ""
+	origCollHook := tugqlCollectionHook
+	tugqlCollectionHook = func(dal.StructuredQuery) string {
 		return ""
 	}
-	defer func() { dtqlCollectionHook = origCollHook }()
+	defer func() { tugqlCollectionHook = origCollHook }()
 
-	_, err = validateCaptureDTQL("from: {name: orders}\n", nil)
+	_, err = validateCaptureTugQL("from: {name: orders}\n", nil)
 	assert.Error(t, err)
-	dtqlCollectionHook = origCollHook
+	tugqlCollectionHook = origCollHook
 }
 
 func TestCoverageFinish100_QueryEndpoints(t *testing.T) {

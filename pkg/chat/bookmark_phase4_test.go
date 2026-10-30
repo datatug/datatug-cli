@@ -12,6 +12,7 @@ import (
 )
 
 func TestBookmarkCrossSessionContextRestartAndDeletion(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
@@ -106,6 +107,7 @@ func TestBookmarkCrossSessionContextRestartAndDeletion(t *testing.T) {
 // in chatui_sidepanel_test.go.
 
 func TestAgentBookmarkActionsAndDiscoveryUseDataTug(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	session, err := store.LatestOrCreate(ctx)
@@ -154,6 +156,7 @@ func TestAgentBookmarkActionsAndDiscoveryUseDataTug(t *testing.T) {
 }
 
 func TestImplicitBookmarkTargetExpiresAfterInterveningTurn(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	chat, err := NewSessionChat(ctx, store, &contextualStub{turns: []Turn{{Text: "Hello."}}}, "sqlite:///chinook.db", ProjectCatalog{ID: testScope().ProjectID})
@@ -179,6 +182,7 @@ func TestImplicitBookmarkTargetExpiresAfterInterveningTurn(t *testing.T) {
 }
 
 func TestBookmarkUsesActualSafeSourceIDAcrossSessions(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	scope := testScope()
 	scope.Sources["alias"] = scope.Sources["private"] // same URL must not change the source identity
@@ -224,8 +228,8 @@ func TestBookmarkUsesActualSafeSourceIDAcrossSessions(t *testing.T) {
 	}
 	llm := &scriptedProvider{steps: []scriptedStep{
 		{toolCalls: []ai.ToolCall{toolCall("1", toolFindBookmarks, map[string]any{})}},
-		{toolCalls: []ai.ToolCall{toolCall("2", toolRunDTQL, map[string]any{
-			"sourceId": "private", "title": "Invoices", "dtql": "from: {name: Invoice}\nwhere:\n  op: In\n  left: {field: CustomerId}\n  right: {param: selection_1_c1}\nlimit: 20",
+		{toolCalls: []ai.ToolCall{toolCall("2", toolRunTugQL, map[string]any{
+			"sourceId": "private", "title": "Invoices", "tugql": "from: {name: Invoice}\nwhere:\n  op: In\n  left: {field: CustomerId}\n  right: {param: selection_1_c1}\nlimit: 20",
 		})}},
 		{text: "Done."},
 	}}

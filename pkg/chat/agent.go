@@ -1,4 +1,4 @@
-// Package chat implements DataTug Chat: an aichat agent loop produces DTQL,
+// Package chat implements DataTug Chat: an aichat agent loop produces TugQL,
 // DataTug executes it into structured results, and session-owned RecordSets
 // persist those results independently of the model provider's memory.
 package chat
@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/chat/narrowing"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
@@ -27,7 +27,7 @@ import (
 const (
 	maxRows              = 1000
 	maxModelCallsPerTurn = 3  // agent.Loop.MaxSteps: hard fatal cap on model calls in one turn.
-	maxToolCallsPerTurn  = 2  // per-tool friendly cap on run_dtql attempts (returns a tool error, doesn't abort).
+	maxToolCallsPerTurn  = 2  // per-tool friendly cap on run_tugql attempts (returns a tool error, doesn't abort).
 	maxAgentToolCalls    = 12 // agent.Loop.MaxToolCalls: hard fatal cap across every tool in one turn.
 	// maxDescribeCallsPerTurn bounds describe_relation: each call is another model
 	// round trip that re-sends the whole request, so reading omitted tables must stay
@@ -36,18 +36,18 @@ const (
 	turnTimeout             = 90 * time.Second
 )
 
-// DTQLExecutor is the existing DataTug query boundary used by Chat.
-type DTQLExecutor interface {
-	RunDTQL(context.Context, string, []byte, map[string]any) (secureread.Result, error)
+// TugQLExecutor is the existing DataTug query boundary used by Chat.
+type TugQLExecutor interface {
+	RunTugQL(context.Context, string, []byte, map[string]any) (secureread.Result, error)
 }
 
 // QueryResult records one structured tool execution for the UI.
 type QueryResult struct {
 	// Title is presentation metadata supplied by the same structured tool
-	// action as DTQL. It is never included in, or interpreted as, executable
+	// action as TugQL. It is never included in, or interpreted as, executable
 	// query text.
 	Title           string
-	DTQL            string
+	TugQL           string
 	QueryID         string
 	RecordSetID     string
 	HTTPResponseID  string
@@ -240,7 +240,6 @@ func withAttachedJoin(ctx context.Context, join func(context.Context, QueryResul
 
 const (
 	toolRunTugQL           = "run_tugql"
-	toolRunDTQL            = "run_dtql"
 	toolWorkspaceAction    = "workspace_action"
 	toolFindBookmarks      = "find_bookmarks"
 	toolApplyJoinCandidate = "apply_join_candidate"
@@ -251,7 +250,7 @@ const (
 // durable ChatSession, not provider-side memory, owns conversation history.
 type AIConversation struct {
 	provider              ai.LLMProvider
-	executor              DTQLExecutor
+	executor              TugQLExecutor
 	sourceURL             string
 	instruction           string
 	browserInterpretation bool
@@ -276,15 +275,15 @@ type AIConversation struct {
 
 	lastStreamTurn Turn
 
-	// runDTQLOverride is a test-only seam over runDTQL (nil in production,
-	// where handlers() falls back to c.runDTQL itself): runDTQL's own
+	// runTugQLOverride is a test-only seam over runTugQL (nil in production,
+	// where handlers() falls back to c.runTugQL itself): runTugQL's own
 	// signature promises an error return, but every one of its real code
-	// paths reports a failure through runDTQLResponse.Error instead and
-	// always returns a nil error -- so the run_dtql tool handler's own
+	// paths reports a failure through runTugQLResponse.Error instead and
+	// always returns a nil error -- so the run_tugql tool handler's own
 	// "infrastructure-level error" guard is otherwise structurally
 	// unreachable. Founder directive: all new Go code aims for 100%
 	// coverage via seams, not left uncovered.
-	runDTQLOverride func(ctx context.Context, executor DTQLExecutor, sourceURL string, args runDTQLArgs) (runDTQLResponse, error)
+	runTugQLOverride func(ctx context.Context, executor TugQLExecutor, sourceURL string, args runTugQLArgs) (runTugQLResponse, error)
 }
 
 type conversationConfig struct {
@@ -366,14 +365,13 @@ func WithHostedModel(model string) Option {
 	}
 }
 
-type runDTQLArgs struct {
+type runTugQLArgs struct {
 	Title    string `json:"title,omitempty" jsonschema:"A short human-readable title for the result, one line, at most 60 characters"`
 	TugQL    string `json:"tugql,omitempty" jsonschema:"A complete TugQL YAML document to validate and execute"`
-	DTQL     string `json:"dtql,omitempty" jsonschema:"A complete TugQL YAML document (deprecated alias for tugql)"`
 	SourceID string `json:"sourceId,omitempty" jsonschema:"Project source/catalog ID; omit for the active database"`
 }
 
-type runDTQLResponse struct {
+type runTugQLResponse struct {
 	Title       string   `json:"title,omitempty"`
 	OK          bool     `json:"ok"`
 	RecordSetID string   `json:"recordSetId,omitempty"`
@@ -422,12 +420,12 @@ type applyJoinCandidateResponse struct {
 
 // NewAIConversation builds the constrained chat agent. schemaContext is a
 // compact description derived from DataTug's stored dbmodel.
-func NewAIConversation(provider ai.LLMProvider, executor DTQLExecutor, sourceURL, schemaContext string, options ...Option) (*AIConversation, error) {
+func NewAIConversation(provider ai.LLMProvider, executor TugQLExecutor, sourceURL, schemaContext string, options ...Option) (*AIConversation, error) {
 	if provider == nil {
 		return nil, errors.New("chat: model is required")
 	}
 	if executor == nil {
-		return nil, errors.New("chat: DTQL executor is required")
+		return nil, errors.New("chat: TugQL executor is required")
 	}
 	if sourceURL == "" {
 		return nil, errors.New("chat: source URL is required")
@@ -455,19 +453,19 @@ func NewAIConversation(provider ai.LLMProvider, executor DTQLExecutor, sourceURL
 	}
 	c.instruction = c.instructionFor(schemaContext)
 	if config.browserInterpretation {
-		c.tools = []ai.Tool{c.dtqlTool()}
+		c.tools = []ai.Tool{c.tugqlTool()}
 	} else {
-		c.tools = []ai.Tool{c.dtqlTool(), c.workspaceTool(), c.bookmarkTool(), c.joinTool()}
+		c.tools = []ai.Tool{c.tugqlTool(), c.workspaceTool(), c.bookmarkTool(), c.joinTool()}
 		c.tools = append(c.tools, c.resultColumnsTools()...)
 	}
 	return c, nil
 }
 
-func (c *AIConversation) dtqlTool() ai.Tool {
+func (c *AIConversation) tugqlTool() ai.Tool {
 	return ai.Tool{
-		Name:        toolRunDTQL,
-		Description: "Validate and execute one DTQL YAML query through DataTug and return structured result metadata.",
-		Schema:      argsSchema(runDTQLArgs{}),
+		Name:        toolRunTugQL,
+		Description: "Validate and execute one TugQL YAML query through DataTug and return structured result metadata.",
+		Schema:      argsSchema(runTugQLArgs{}),
 	}
 }
 
@@ -510,7 +508,7 @@ func (c *AIConversation) describeTool() ai.Tool {
 func (c *AIConversation) joinTool() ai.Tool {
 	return ai.Tool{
 		Name:        toolApplyJoinCandidate,
-		Description: "Apply an exact DataTug foreign-key candidate to an existing RecordSet. DataTug derives ON, validates DTQL, executes the query, and saves a new RecordSet. Never supply SQL or ON fields.",
+		Description: "Apply an exact DataTug foreign-key candidate to an existing RecordSet. DataTug derives ON, validates TugQL, executes the query, and saves a new RecordSet. Never supply SQL or ON fields.",
 		Schema:      argsSchema(applyJoinCandidateArgs{}),
 	}
 }
@@ -520,31 +518,27 @@ func (c *AIConversation) joinTool() ai.Tool {
 // so AskWithContext can install fresh ones per call).
 func (c *AIConversation) handlers() map[string]agent.Handler {
 	runQueryHandler := func(ctx context.Context, call ai.ToolCall) (ai.ToolResult, error) {
-		var args runDTQLArgs
+		var args runTugQLArgs
 		if err := json.Unmarshal(call.Arguments, &args); err != nil {
 			return errorResult(call.ID, "invalid query arguments: "+err.Error()), nil
 		}
-		if args.TugQL != "" && args.DTQL == "" {
-			args.DTQL = args.TugQL
-		}
-		run := c.runDTQL
-		if c.runDTQLOverride != nil {
-			run = c.runDTQLOverride
+		run := c.runTugQL
+		if c.runTugQLOverride != nil {
+			run = c.runTugQLOverride
 		}
 		resp, err := run(ctx, c.executor, c.sourceURL, args)
 		if err != nil {
-			// runDTQL's own real code paths always return a nil error
+			// runTugQL's own real code paths always return a nil error
 			// (failures are reported through resp.Error instead,
 			// captured as a QueryResult); this guard covers a future
-			// runDTQL change or DTQLExecutor implementation that starts
+			// runTugQL change or TugQLExecutor implementation that starts
 			// returning an infrastructure-level error -- exercised via
-			// runDTQLOverride, see AIConversation's doc comment on it.
+			// runTugQLOverride, see AIConversation's doc comment on it.
 			return errorResult(call.ID, err.Error()), nil
 		}
 		return jsonResult(call.ID, resp), nil
 	}
 	handlers := map[string]agent.Handler{
-		toolRunDTQL:  runQueryHandler,
 		toolRunTugQL: runQueryHandler,
 	}
 	handlers[toolDescribeRelation] = func(_ context.Context, call ai.ToolCall) (ai.ToolResult, error) {
@@ -620,80 +614,77 @@ func errorResult(callID, message string) ai.ToolResult {
 	return ai.ToolResult{CallID: callID, Content: message, IsError: true}
 }
 
-func (c *AIConversation) runDTQL(ctx context.Context, executor DTQLExecutor, sourceURL string, args runDTQLArgs) (runDTQLResponse, error) {
+func (c *AIConversation) runTugQL(ctx context.Context, executor TugQLExecutor, sourceURL string, args runTugQLArgs) (runTugQLResponse, error) {
 	title := normalizeGridTitle(args.Title)
 	c.mu.Lock()
 	joined := c.joinApplied
 	c.mu.Unlock()
 	if joined {
-		return runDTQLResponse{Title: title, Error: "A JOIN already produced the result for this turn; do not run another query."}, nil
+		return runTugQLResponse{Title: title, Error: "A JOIN already produced the result for this turn; do not run another query."}, nil
 	}
 	if args.SourceID != "" {
 		resolved := c.sources[args.SourceID]
 		if resolved == "" {
-			return runDTQLResponse{Title: title, Error: "That project data source is unavailable."}, nil
+			return runTugQLResponse{Title: title, Error: "That project data source is unavailable."}, nil
 		}
 		sourceURL = resolved
 	}
 	if strings.HasPrefix(sourceURL, "unavailable://") {
-		return runDTQLResponse{Title: title, Error: "That project data source is unavailable. Choose a healthy source or inspect Project explorer."}, nil
+		return runTugQLResponse{Title: title, Error: "That project data source is unavailable. Choose a healthy source or inspect Project explorer."}, nil
 	}
 	if !c.allowToolCall() {
 		err := fmt.Errorf("the agent exceeded %d query attempts in one turn", maxToolCallsPerTurn)
-		c.capture(ctx, QueryResult{Title: title, DTQL: strings.TrimSpace(args.DTQL), Err: err})
-		return runDTQLResponse{Title: title, Error: err.Error()}, nil
+		c.capture(ctx, QueryResult{Title: title, TugQL: strings.TrimSpace(args.TugQL), Err: err})
+		return runTugQLResponse{Title: title, Error: err.Error()}, nil
 	}
 	rawDoc := args.TugQL
-	if rawDoc == "" {
-		rawDoc = args.DTQL
-	}
 	doc := strings.TrimSpace(rawDoc)
 	if doc == "" {
-		err := errors.New("the agent supplied empty DTQL")
+		err := errors.New("the agent supplied empty TugQL")
 		c.capture(ctx, QueryResult{Title: title, Err: err})
-		return runDTQLResponse{Title: title, Error: "DTQL must not be empty"}, nil
+		return runTugQLResponse{Title: title, Error: "TugQL must not be empty"}, nil
 	}
-	query, err := dtql.Deserialize([]byte(doc))
+	query, err := tugql.Deserialize([]byte(doc))
 	if err != nil {
-		wrapped := fmt.Errorf("invalid DTQL: %w", err)
-		c.capture(ctx, QueryResult{Title: title, DTQL: doc, Err: wrapped})
-		return runDTQLResponse{Title: title, Error: "I couldn't construct a valid query: " + conciseError(wrapped)}, nil
+		wrapped := fmt.Errorf("invalid TugQL: %w", err)
+		c.capture(ctx, QueryResult{Title: title, TugQL: doc, Err: wrapped})
+		return runTugQLResponse{Title: title, Error: "I couldn't construct a valid query: " + conciseError(wrapped)}, nil
 	}
 	if len(query.From().Joins()) > 0 {
-		err := errors.New("model-authored JOIN DTQL is not allowed; select an available foreign-key candidate")
-		c.capture(ctx, QueryResult{Title: title, DTQL: doc, Err: err})
-		return runDTQLResponse{Title: title, Error: err.Error()}, nil
+		err := errors.New("model-authored JOIN TugQL is not allowed; select an available foreign-key candidate")
+		c.capture(ctx, QueryResult{Title: title, TugQL: doc, Err: err})
+		return runTugQLResponse{Title: title, Error: err.Error()}, nil
 	}
 	if query.Limit() < 1 || query.Limit() > maxRows {
-		err := fmt.Errorf("DTQL limit must be between 1 and %d", maxRows)
-		c.capture(ctx, QueryResult{Title: title, DTQL: doc, Err: err})
-		return runDTQLResponse{Title: title, Error: err.Error()}, nil
+		err := fmt.Errorf("TugQL limit must be between 1 and %d", maxRows)
+		c.capture(ctx, QueryResult{Title: title, TugQL: doc, Err: err})
+		return runTugQLResponse{Title: title, Error: err.Error()}, nil
 	}
 	var parameters map[string]any
 	if resolve, ok := ctx.Value(selectionParametersKey{}).(func() map[string]any); ok {
 		parameters = referencedSelectionParameters(doc, resolve())
 	}
 	if join, ok := ctx.Value(attachedJoinKey{}).(func(context.Context, QueryResult) (QueryResult, bool, error)); ok {
-		base := QueryResult{Title: title, DTQL: doc, Source: sourceURL, SourceID: args.SourceID, Parameters: parameters}
+		base := QueryResult{Title: title, TugQL: doc, Source: sourceURL, SourceID: args.SourceID, Parameters: parameters}
 		joined, applied, joinErr := join(ctx, base)
 		if joinErr != nil {
-			c.capture(ctx, QueryResult{Title: title, DTQL: doc, Parameters: parameters, Err: joinErr})
-			return runDTQLResponse{Title: title, Error: publicQueryError(joinErr, parameters)}, nil
+			c.capture(ctx, QueryResult{Title: title, TugQL: doc, Parameters: parameters, Err: joinErr})
+			return runTugQLResponse{Title: title, Error: publicQueryError(joinErr, parameters)}, nil
 		}
 		if applied {
 			captured := c.capture(ctx, joined)
 			if captured.Err != nil {
-				return runDTQLResponse{Title: title, Error: publicQueryError(captured.Err, captured.Parameters)}, nil
+				return runTugQLResponse{Title: title, Error: publicQueryError(captured.Err, captured.Parameters)}, nil
 			}
-			return runDTQLResponse{Title: captured.Title, OK: true, RecordSetID: captured.RecordSetID, Columns: captured.Result.Columns, Rows: len(captured.Result.Rows)}, nil
+			return runTugQLResponse{Title: captured.Title, OK: true, RecordSetID: captured.RecordSetID, Columns: captured.Result.Columns, Rows: len(captured.Result.Rows)}, nil
 		}
 	}
-	result, err := executor.RunDTQL(ctx, sourceURL, []byte(doc), parameters)
-	captured := c.capture(ctx, QueryResult{Title: title, DTQL: doc, Result: result, Parameters: parameters, Source: sourceURL, SourceID: args.SourceID, Err: err})
+	result, err := executor.RunTugQL(ctx, sourceURL, []byte(doc), parameters)
+	captured := c.capture(ctx, QueryResult{Title: title, TugQL: doc, Result: result, Parameters: parameters, Source: sourceURL, SourceID: args.SourceID, Err: err})
 	if captured.Err != nil {
-		return runDTQLResponse{Title: title, Error: publicQueryError(captured.Err, captured.Parameters)}, nil
+		return runTugQLResponse{Title: title, Error: publicQueryError(captured.Err, captured.Parameters)}, nil
 	}
-	return runDTQLResponse{Title: title, OK: true, RecordSetID: captured.RecordSetID, Columns: result.Columns, Rows: len(result.Rows)}, nil
+	return runTugQLResponse{Title: title, OK: true, RecordSetID: captured.RecordSetID, Columns: result.Columns, Rows: len(result.Rows)}, nil
 }
 
 func (c *AIConversation) runJoinCandidate(ctx context.Context, args applyJoinCandidateArgs) applyJoinCandidateResponse {
@@ -743,7 +734,7 @@ func publicJoinError(err error) string {
 	}
 }
 
-// Only bind Selection values named in this validated DTQL document. This
+// Only bind Selection values named in this validated TugQL document. This
 // avoids sending unrelated attached selections through the DALgo boundary or
 // persisting them as lineage for a query that did not use them.
 func referencedSelectionParameters(doc string, available map[string]any) map[string]any {
@@ -752,7 +743,7 @@ func referencedSelectionParameters(doc string, available map[string]any) map[str
 	}
 	var root yaml.Node
 	if err := yaml.Unmarshal([]byte(doc), &root); err != nil {
-		return nil // runDTQL already validated the same document
+		return nil // runTugQL already validated the same document
 	}
 	used := map[string]any{}
 	visited := map[*yaml.Node]bool{}
@@ -991,10 +982,10 @@ func (c *AIConversation) newLoop(narrowed bool, columnPlanning ...bool) *agent.L
 	}
 	maxToolCalls := maxAgentToolCalls
 	if c.browserInterpretation {
-		// Interpret allows one correction: the model's first run_dtql
-		// attempt can be invalid DTQL (a tool-level error result, not an
-		// infrastructure failure -- see runDTQL), and it gets exactly one
-		// more model call to read that error and retry with corrected DTQL.
+		// Interpret allows one correction: the model's first run_tugql
+		// attempt can be invalid TugQL (a tool-level error result, not an
+		// infrastructure failure -- see runTugQL), and it gets exactly one
+		// more model call to read that error and retry with corrected TugQL.
 		// MaxToolCalls=2 (one failed + one corrected attempt) bounds that;
 		// MaxSteps=3 covers the worst case of three separate model calls
 		// (invalid attempt, corrected attempt, then a final plain-text
@@ -1136,7 +1127,7 @@ func (c *AIConversation) StreamAskWithContext(ctx context.Context, prompt, prior
 			// return an outright empty completion (no text, no tool call) on
 			// the first try. Give the loop exactly one more fresh user turn,
 			// with a nudge instead of the original prompt, before giving up --
-			// matching main's attempt<2 loop, generalized from run_dtql's own
+			// matching main's attempt<2 loop, generalized from run_tugql's own
 			// finalQueries()/hasSuccessfulPending() bookkeeping to "no queries,
 			// no actions, no text" so it also covers a workspace-action turn.
 			if attempt > 0 || c.hasPending() || c.hasActions() || strings.TrimSpace(text.String()) != "" {
@@ -1151,7 +1142,7 @@ func (c *AIConversation) StreamAskWithContext(ctx context.Context, prompt, prior
 // emptyTurnRetryPrompt is the fresh user turn sent once, in place of the
 // original prompt, when the model's first pass yielded nothing at all --
 // see StreamAskWithContext's retry loop.
-const emptyTurnRetryPrompt = "Your previous response was empty. For the current data request, call run_dtql with valid DTQL YAML using the configured schema; otherwise give a brief explanation."
+const emptyTurnRetryPrompt = "Your previous response was empty. For the current data request, call run_tugql with valid TugQL YAML using the configured schema; otherwise give a brief explanation."
 
 func (c *AIConversation) setLastStreamTurn(t Turn) {
 	c.mu.Lock()
@@ -1177,8 +1168,8 @@ func finalQueries(queries []QueryResult) []QueryResult {
 	var successful []QueryResult
 	seen := make(map[string]bool)
 	for _, query := range queries {
-		if query.Err == nil && !seen[query.DTQL] {
-			seen[query.DTQL] = true
+		if query.Err == nil && !seen[query.TugQL] {
+			seen[query.TugQL] = true
 			successful = append(successful, query)
 		}
 	}
@@ -1232,25 +1223,25 @@ This is automatic enrichment within the current query request, not a human
 review. If metadata/equality/permissions are unavailable or ambiguous, explain
 that limitation briefly. Never author JOIN/ON or fabricate candidate IDs.
 
-For a data request, call run_dtql with a short one-line title and a complete DTQL YAML document. Never
+For a data request, call run_tugql with a short one-line title and a complete TugQL YAML document. Never
 write SQL. Never format query rows as Markdown, ASCII, JSON, or prose; DataTug
 renders the structured tool result. You may add one short sentence explaining
 what you queried after a successful tool call.
 If attached context names another project source, supply its sourceId to
-run_dtql. Never invent a source ID or URL.
+run_tugql. Never invent a source ID or URL.
 Attached tables and their column definitions are the active scope for an
 underspecified new request such as "top 5 rows". Prefer them over an earlier
 RecordSet unless the user explicitly refers to that result or another table.
 If the user asks for another table while one or more tables are attached,
-write the single-table DTQL for the requested root table. DataTug will add
+write the single-table TugQL for the requested root table. DataTug will add
 readable many-to-one foreign-key JOINs to attached tables when the relationship
 is unique; it will ask the user to choose when multiple relationships are
 possible. For a one-to-many request, use the many-side table as the root so
 the requested row count is not multiplied by a JOIN.
 
-For a new data query, run_dtql accepts a single source relation, selected
+For a new data query, run_tugql accepts a single source relation, selected
 columns, where expressions, groupBy, aggregate columns, having, orderBy, limit,
-and offset. Do not write a JOIN into run_dtql: DataTug rejects model-authored
+and offset. Do not write a JOIN into run_tugql: DataTug rejects model-authored
 JOINs. To follow a foreign-key relationship on an existing RecordSet, call
 apply_join_candidate with the exact recordSetId and candidateId from the
 available FK candidate context. DataTug derives the ON fields and runs the
@@ -1259,7 +1250,7 @@ schema changes. If more than one relationship could satisfy the user's target
 (for example billing and shipping addresses), ask which relationship they
 mean instead of guessing. Never invent a candidate ID, ON clause or row value.
 After a successful apply_join_candidate call, the joined RecordSet is the
-answer. Do not call run_dtql again in that turn or create a placeholder query.
+answer. Do not call run_tugql again in that turn or create a placeholder query.
 Every query must include
 a limit from 1 to 1000; use 100 when the user gives no count. Use exact relation
 and column names from the schema. A typical shape is:
@@ -1297,7 +1288,7 @@ columns:
     as: TotalAmount
 
 For follow-ups about an earlier RecordSet, use the DataTug-provided context.
-Attached or docked selections contain only identity, schema, count, and local DTQL
+Attached or docked selections contain only identity, schema, count, and local TugQL
 parameter names, never row values. For a follow-up over those rows, use the
 given parameter with "op: In" and "right: {param: selection_1_c1}" on the
 corresponding field. DataTug binds the actual values locally. Do not invent
@@ -1320,7 +1311,7 @@ in the tag field. Never create a bookmark by rerunning a historical query.
 Use a bookmark reference of kind "bookmark" and its exact ID to attach/dock it.
 An attached or docked bookmark exposes local selection_N_cN parameter names
 for its visible columns, as described in session context. Use those parameters
-in DTQL; do not request or invent saved row values.
+in TugQL; do not request or invent saved row values.
 
 For requests to select, attach, detach, dock, undock, or clear selection, call
 workspace_action with structured arguments. Use "select" over an existing
@@ -1339,14 +1330,14 @@ recordSetId. Never infer unseen row values from a grid summary.
 
 If a requested JOIN has no FK candidate or cannot be represented safely,
 explain that briefly and do not invent data or fall back to SQL. If the tool reports invalid
-DTQL, correct it once when possible. Do not expose internal payloads.
+TugQL, correct it once when possible. Do not expose internal payloads.
 
 Configured schema:
 ` + schema
 }
 
 func buildBrowserInstruction(schema string) string {
-	return `You are DataTug Chat. For each data question, call run_dtql once with a complete DTQL YAML document. The browser will execute the query over its own local IndexedDB data. You do not see any rows. Never produce SQL, HTML, Markdown tables, or invented row data.
+	return `You are DataTug Chat. For each data question, call run_tugql once with a complete TugQL YAML document. The browser will execute the query over its own local IndexedDB data. You do not see any rows. Never produce SQL, HTML, Markdown tables, or invented row data.
 
 Use exactly one source from the schema, with from, optional one where comparison, optional orderBy, and required limit between 1 and 1000. Do not use columns, joins, groupBy, having, or offset. Use exact table and field names. A typical action is:
 
@@ -1361,7 +1352,7 @@ limit: 50
 
 For requests for the last, latest, or newest N records, sort descending before applying the limit. For Chinook orders or invoices, use InvoiceId with desc: true (or InvoiceDate with desc: true if the user specifically asks by date). For first or oldest N, sort ascending. Never return an ascending query for a last/latest/newest request.
 
-An In comparison uses right: {values: [a, b]}. If the question cannot be represented by this subset, explain briefly without inventing data. If the tool rejects DTQL, correct it once when possible.
+An In comparison uses right: {values: [a, b]}. If the question cannot be represented by this subset, explain briefly without inventing data. If the tool rejects TugQL, correct it once when possible.
 
 Configured schema:
 ` + schema

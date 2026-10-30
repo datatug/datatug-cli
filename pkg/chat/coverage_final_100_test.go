@@ -18,6 +18,7 @@ import (
 
 // 1. refresh.go:72: hiddenRefreshVersions with keep < 1
 func TestRefreshHiddenVersionsCoverageRemaining(t *testing.T) {
+	t.Parallel()
 	session := ChatSession{
 		ID: "s1",
 		RecordSets: map[string]RecordSet{
@@ -32,6 +33,7 @@ func TestRefreshHiddenVersionsCoverageRemaining(t *testing.T) {
 
 // 2. store.go:641: loadWorkspace error when DB query fails (e.g. closed DB)
 func TestStoreWorkspaceLoadError(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	session := ChatSession{ID: "s1"}
@@ -44,6 +46,7 @@ func TestStoreWorkspaceLoadError(t *testing.T) {
 
 // 3. saved_query_lookup.go uncovered branches
 func TestSavedQueryLookupCoverageRemaining(t *testing.T) {
+	t.Parallel()
 	// DiscoverSavedQueryLookup with empty args
 	if got := DiscoverSavedQueryLookup(ForeignKeySnapshot{}, "", ""); got != nil {
 		t.Fatalf("expected nil, got %v", got)
@@ -120,9 +123,9 @@ where:
 		t.Fatalf("expected nil for multi=false with In op, got %v", got)
 	}
 
-	// Invalid DTQL in doc
-	invalidDTQLDoc := []byte(`
-syntax: not_a_real_dtql_version_or_kind
+	// Invalid TugQL in doc
+	invalidTugQLDoc := []byte(`
+syntax: not_a_real_tugql_version_or_kind
 where:
   op: "=="
   left:
@@ -130,7 +133,7 @@ where:
   right:
     param: cid
 `)
-	_ = DiscoverSavedQueryParameterLookupWithMode(invalidDTQLDoc, validSnapshot, "cid", "dbo.Customers", "CustomerID", false)
+	_ = DiscoverSavedQueryParameterLookupWithMode(invalidTugQLDoc, validSnapshot, "cid", "dbo.Customers", "CustomerID", false)
 
 	// parameter in Left, field in Right (line 93)
 	leftParamDoc := []byte(`
@@ -229,6 +232,7 @@ where:
 
 // 4. session_chat_settings.go
 func TestSessionChatSettingsCoverageRemaining(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	chat, store := newTestSessionChat(t)
 
@@ -259,6 +263,7 @@ func TestSessionChatSettingsCoverageRemaining(t *testing.T) {
 
 // 5. session_chat_http.go
 func TestSessionChatHTTPCoverageRemaining(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	chat, store := newTestSessionChat(t)
 
@@ -375,14 +380,14 @@ func TestSessionChatHTTPCoverageRemaining(t *testing.T) {
 
 // 6. session_chat.go queries, actions, joins, export
 type mockSavedQueryService struct {
-	queries    []SavedQuery
-	listErr    error
-	runHTTPRes QueryResult
-	runHTTPErr error
-	runDTQLRes QueryResult
-	runDTQLErr error
-	savedQuery SavedQuery
-	saveErr    error
+	queries     []SavedQuery
+	listErr     error
+	runHTTPRes  QueryResult
+	runHTTPErr  error
+	runTugQLRes QueryResult
+	runTugQLErr error
+	savedQuery  SavedQuery
+	saveErr     error
 }
 
 func (m *mockSavedQueryService) List(ctx context.Context) ([]SavedQuery, error) {
@@ -394,8 +399,8 @@ func (m *mockSavedQueryService) Run(ctx context.Context, id string) (QueryResult
 func (m *mockSavedQueryService) RunHTTPWithVariables(ctx context.Context, id string, vars map[string]string) (QueryResult, error) {
 	return m.runHTTPRes, m.runHTTPErr
 }
-func (m *mockSavedQueryService) RunDTQLWithVariables(ctx context.Context, id string, vars map[string]string) (QueryResult, error) {
-	return m.runDTQLRes, m.runDTQLErr
+func (m *mockSavedQueryService) RunTugQLWithVariables(ctx context.Context, id string, vars map[string]string) (QueryResult, error) {
+	return m.runTugQLRes, m.runTugQLErr
 }
 func (m *mockSavedQueryService) Save(ctx context.Context, req SavedQuerySaveRequest) (SavedQuery, error) {
 	return m.savedQuery, m.saveErr
@@ -414,6 +419,7 @@ func (p plainSavedQueryService) Run(ctx context.Context, id string) (QueryResult
 }
 
 func TestSessionChatQueriesAndActionsCoverageRemaining(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	chat, store := newTestSessionChat(t)
 
@@ -424,7 +430,7 @@ func TestSessionChatQueriesAndActionsCoverageRemaining(t *testing.T) {
 
 	mockSvc := &mockSavedQueryService{
 		queries: []SavedQuery{
-			{ID: "q1", Title: "Query 1", Type: "DTQL", Parameters: []SavedQueryParameter{{ID: "p1"}}},
+			{ID: "q1", Title: "Query 1", Type: "TugQL", Parameters: []SavedQueryParameter{{ID: "p1"}}},
 			{ID: "q2", Title: "", Type: "HTTP"},
 		},
 	}
@@ -434,26 +440,26 @@ func TestSessionChatQueriesAndActionsCoverageRemaining(t *testing.T) {
 		t.Fatalf("expected 2 queries, got %d, err %v", len(list), err)
 	}
 
-	// RunSavedDTQLActive / RunSavedHTTPActive:
+	// RunSavedTugQLActive / RunSavedHTTPActive:
 	// 1) session mismatch
-	if err := chat.RunSavedDTQLActive(ctx, "wrong-id", "q1", nil); !errors.Is(err, ErrActiveSessionChanged) {
+	if err := chat.RunSavedTugQLActive(ctx, "wrong-id", "q1", nil); !errors.Is(err, ErrActiveSessionChanged) {
 		t.Fatalf("expected ErrActiveSessionChanged, got %v", err)
 	}
 	// 2) service == nil
 	chat.ConfigureSavedQueryService(nil)
-	if err := chat.RunSavedDTQLActive(ctx, chat.activeID, "q1", nil); err == nil {
+	if err := chat.RunSavedTugQLActive(ctx, chat.activeID, "q1", nil); err == nil {
 		t.Fatal("expected error with nil service")
 	}
 	// 3) service.List error
 	mockSvc.listErr = errors.New("list failed")
 	chat.ConfigureSavedQueryService(mockSvc)
-	if err := chat.RunSavedDTQLActive(ctx, chat.activeID, "q1", nil); err == nil {
+	if err := chat.RunSavedTugQLActive(ctx, chat.activeID, "q1", nil); err == nil {
 		t.Fatal("expected list error")
 	}
 	mockSvc.listErr = nil
 
 	// 4) selected == nil or selected.Type != queryType
-	if err := chat.RunSavedDTQLActive(ctx, chat.activeID, "nonexistent", nil); err == nil {
+	if err := chat.RunSavedTugQLActive(ctx, chat.activeID, "nonexistent", nil); err == nil {
 		t.Fatal("expected not found error")
 	}
 	if err := chat.RunSavedHTTPActive(ctx, chat.activeID, "q1", nil); err == nil {
@@ -461,7 +467,7 @@ func TestSessionChatQueriesAndActionsCoverageRemaining(t *testing.T) {
 	}
 
 	// 5) unknown query parameter
-	if err := chat.RunSavedDTQLActive(ctx, chat.activeID, "q1", map[string]string{"unknown_param": "val"}); err == nil {
+	if err := chat.RunSavedTugQLActive(ctx, chat.activeID, "q1", map[string]string{"unknown_param": "val"}); err == nil {
 		t.Fatal("expected unknown query parameter error")
 	}
 
@@ -470,22 +476,22 @@ func TestSessionChatQueriesAndActionsCoverageRemaining(t *testing.T) {
 	if err := chat.RunSavedHTTPActive(ctx, chat.activeID, "q2", nil); err == nil {
 		t.Fatal("expected HTTP runner unavailable")
 	}
-	if err := chat.RunSavedDTQLActive(ctx, chat.activeID, "q1", nil); err == nil {
-		t.Fatal("expected DTQL runner unavailable")
+	if err := chat.RunSavedTugQLActive(ctx, chat.activeID, "q1", nil); err == nil {
+		t.Fatal("expected TugQL runner unavailable")
 	}
 	chat.ConfigureSavedQueryService(mockSvc)
 
 	// 7) runner error
-	mockSvc.runDTQLErr = errors.New("dtql failed")
-	if err := chat.RunSavedDTQLActive(ctx, chat.activeID, "q1", nil); err == nil {
+	mockSvc.runTugQLErr = errors.New("tugql failed")
+	if err := chat.RunSavedTugQLActive(ctx, chat.activeID, "q1", nil); err == nil {
 		t.Fatal("expected query failed error")
 	}
-	mockSvc.runDTQLErr = nil
+	mockSvc.runTugQLErr = nil
 
-	// 8) success for DTQL and HTTP (empty result.Title -> fallback to selected.ID when selected.Title is empty)
-	mockSvc.runDTQLRes = QueryResult{Title: "", Source: "sqlite:///chinook.db"}
-	if err := chat.RunSavedDTQLActive(ctx, chat.activeID, "q1", map[string]string{"p1": "val"}); err != nil {
-		t.Fatalf("unexpected RunSavedDTQLActive error: %v", err)
+	// 8) success for TugQL and HTTP (empty result.Title -> fallback to selected.ID when selected.Title is empty)
+	mockSvc.runTugQLRes = QueryResult{Title: "", Source: "sqlite:///chinook.db"}
+	if err := chat.RunSavedTugQLActive(ctx, chat.activeID, "q1", map[string]string{"p1": "val"}); err != nil {
+		t.Fatalf("unexpected RunSavedTugQLActive error: %v", err)
 	}
 	mockSvc.runHTTPRes = QueryResult{Title: "", Source: "https://api.example.com"}
 	if err := chat.RunSavedHTTPActive(ctx, chat.activeID, "q2", nil); err != nil {
@@ -512,7 +518,7 @@ func TestSessionChatQueriesAndActionsCoverageRemaining(t *testing.T) {
 		t.Fatal("expected unsupported type error")
 	}
 	// 5) empty query text
-	if err := chat.SaveQueryActive(ctx, chat.activeID, SavedQuerySaveRequest{Title: "T", Type: "DTQL", Text: ""}); err == nil {
+	if err := chat.SaveQueryActive(ctx, chat.activeID, SavedQuerySaveRequest{Title: "T", Type: "TugQL", Text: ""}); err == nil {
 		t.Fatal("expected empty text error")
 	}
 	// 6) HTTP with invalid origin
@@ -525,12 +531,12 @@ func TestSessionChatQueriesAndActionsCoverageRemaining(t *testing.T) {
 	}
 	// 8) writer.Save error
 	mockSvc.saveErr = errors.New("save failed")
-	if err := chat.SaveQueryActive(ctx, chat.activeID, SavedQuerySaveRequest{Title: "T", Type: "DTQL", Text: "SELECT 1"}); err == nil {
+	if err := chat.SaveQueryActive(ctx, chat.activeID, SavedQuerySaveRequest{Title: "T", Type: "TugQL", Text: "SELECT 1"}); err == nil {
 		t.Fatal("expected save failed error")
 	}
 	mockSvc.saveErr = nil
 	// 9) success
-	if err := chat.SaveQueryActive(ctx, chat.activeID, SavedQuerySaveRequest{Title: "T", Type: "DTQL", Text: "SELECT 1"}); err != nil {
+	if err := chat.SaveQueryActive(ctx, chat.activeID, SavedQuerySaveRequest{Title: "T", Type: "TugQL", Text: "SELECT 1"}); err != nil {
 		t.Fatalf("unexpected save error: %v", err)
 	}
 
@@ -668,6 +674,7 @@ func TestSessionChatQueriesAndActionsCoverageRemaining(t *testing.T) {
 
 // 7. Ask and StreamAsk error persistence (lines 907 and 1030)
 func TestSessionChatAskAndStreamAskAppendError(t *testing.T) {
+	// Not parallel: mutates package-level txCommitFn seam.
 	ctx := context.Background()
 	chat, _ := newTestSessionChat(t)
 
@@ -706,7 +713,8 @@ func TestSessionChatAskAndStreamAskAppendError(t *testing.T) {
 		return origTxCommit(tx)
 	}
 	seq, drain := streamChat.StreamAsk(ctx, "hello")
-	for range seq {
+	for _, streamErr := range seq {
+		_ = streamErr // The terminal drain below owns and asserts this injected failure.
 	}
 	if _, err := drain(); err == nil {
 		t.Fatal("expected StreamAsk error when AppendTurn fails")
@@ -714,6 +722,7 @@ func TestSessionChatAskAndStreamAskAppendError(t *testing.T) {
 }
 
 func TestRefreshRecordSetBranches(t *testing.T) {
+	// Not parallel: mutates package-level txCommitFn seam.
 	ctx := context.Background()
 	chat, store := newTestSessionChat(t)
 	// queryExecutor nil
@@ -747,15 +756,15 @@ func TestRefreshRecordSetBranches(t *testing.T) {
 		t.Fatal("expected unallowed source error")
 	}
 
-	// record with invalid DTQL
-	qBadDTQL, _ := store.AppendQuery(ctx, chat.activeID, user.ID, "sqlite:///chinook.db", QueryResult{Title: "Q3", DTQL: "invalid: [", Result: secureread.Result{Columns: []string{"id"}}})
-	if _, err := chat.RefreshRecordSet(ctx, chat.activeID, qBadDTQL.RecordSetID); err == nil {
-		t.Fatal("expected invalid DTQL error")
+	// record with invalid TugQL
+	qBadTugQL, _ := store.AppendQuery(ctx, chat.activeID, user.ID, "sqlite:///chinook.db", QueryResult{Title: "Q3", TugQL: "invalid: [", Result: secureread.Result{Columns: []string{"id"}}})
+	if _, err := chat.RefreshRecordSet(ctx, chat.activeID, qBadTugQL.RecordSetID); err == nil {
+		t.Fatal("expected invalid TugQL error")
 	}
 
-	// record with valid DTQL but RunDTQL fails
-	validDTQL := "from: {name: Invoice}\nlimit: 10\n"
-	qValid, _ := store.AppendQuery(ctx, chat.activeID, user.ID, "sqlite:///chinook.db", QueryResult{Title: "Q4", DTQL: validDTQL, Result: secureread.Result{Columns: []string{"id"}}})
+	// record with valid TugQL but RunTugQL fails
+	validTugQL := "from: {name: Invoice}\nlimit: 10\n"
+	qValid, _ := store.AppendQuery(ctx, chat.activeID, user.ID, "sqlite:///chinook.db", QueryResult{Title: "Q4", TugQL: validTugQL, Result: secureread.Result{Columns: []string{"id"}}})
 	exec.err = errors.New("runtime failure")
 	if _, err := chat.RefreshRecordSet(ctx, chat.activeID, qValid.RecordSetID); err == nil {
 		t.Fatal("expected query failed error")
@@ -792,13 +801,14 @@ func TestRefreshRecordSetBranches(t *testing.T) {
 }
 
 func TestSessionChatMoreBranches(t *testing.T) {
+	// Not parallel: mutates package-level execContextFn and txCommitFn seams.
 	ctx := context.Background()
 	chat, store := newTestSessionChat(t)
 
 	// runSavedQueryActive: AppendUser error and AppendQuery error
 	mockSvc := &mockSavedQueryService{
-		queries:    []SavedQuery{{ID: "q1", Title: "Q", Type: "DTQL"}},
-		runDTQLRes: QueryResult{Title: "T", Source: "sqlite:///chinook.db"},
+		queries:     []SavedQuery{{ID: "q1", Title: "Q", Type: "TugQL"}},
+		runTugQLRes: QueryResult{Title: "T", Source: "sqlite:///chinook.db"},
 	}
 	chat.ConfigureSavedQueryService(mockSvc)
 
@@ -806,8 +816,8 @@ func TestSessionChatMoreBranches(t *testing.T) {
 	defer func() { txCommitFn = origTxCommit }()
 
 	txCommitFn = func(tx *sql.Tx) error { return errors.New("user fail") }
-	if err := chat.RunSavedDTQLActive(ctx, chat.activeID, "q1", nil); err == nil {
-		t.Fatal("expected AppendUser error in RunSavedDTQLActive")
+	if err := chat.RunSavedTugQLActive(ctx, chat.activeID, "q1", nil); err == nil {
+		t.Fatal("expected AppendUser error in RunSavedTugQLActive")
 	}
 
 	commitCount := 0
@@ -818,8 +828,8 @@ func TestSessionChatMoreBranches(t *testing.T) {
 		}
 		return origTxCommit(tx)
 	}
-	if err := chat.RunSavedDTQLActive(ctx, chat.activeID, "q1", nil); err == nil {
-		t.Fatal("expected AppendQuery error in RunSavedDTQLActive")
+	if err := chat.RunSavedTugQLActive(ctx, chat.activeID, "q1", nil); err == nil {
+		t.Fatal("expected AppendQuery error in RunSavedTugQLActive")
 	}
 	txCommitFn = origTxCommit
 
@@ -861,6 +871,7 @@ func TestSessionChatMoreBranches(t *testing.T) {
 }
 
 func TestGridFullCoverage(t *testing.T) {
+	t.Parallel()
 	// sanitizeMultilineText with control characters <= 0x1f
 	s := sanitizeMultilineText("hello\x01world")
 	if !strings.Contains(s, "hello world") {
@@ -896,6 +907,7 @@ func TestGridFullCoverage(t *testing.T) {
 }
 
 func TestChartsAndRenderChartFullCoverage(t *testing.T) {
+	t.Parallel()
 	// renderChart width < 24 || height < 4
 	if got := renderChart(ChartSpec{}, 20, 2); got != "Chart needs a wider pane." {
 		t.Fatalf("unexpected message: %q", got)
@@ -959,6 +971,7 @@ func TestChartsAndRenderChartFullCoverage(t *testing.T) {
 }
 
 func TestAttachedJoinFullCoverage(t *testing.T) {
+	t.Parallel()
 	// splitAttachedRelation without dot
 	schema, rel := splitAttachedRelation("customers")
 	if schema != "" || rel != "customers" {
@@ -979,14 +992,14 @@ func TestAttachedJoinFullCoverage(t *testing.T) {
 	ctx := context.Background()
 	chat := &SessionChat{source: "sqlite:///fixture.db", joinApplication: ForeignKeyJoinApplication{Source: "sqlite:///fixture.db", Snapshot: joinSnapshot()}}
 
-	// invalid DTQL
-	qInvalidDTQL := QueryResult{Source: chat.source, DTQL: "invalid: ["}
-	if _, _, err := chat.joinAttachedQuery(ctx, ChatSession{}, "prompt", qInvalidDTQL); err == nil {
-		t.Fatal("expected DTQL deserialize error")
+	// invalid TugQL
+	qInvalidTugQL := QueryResult{Source: chat.source, TugQL: "invalid: ["}
+	if _, _, err := chat.joinAttachedQuery(ctx, ChatSession{}, "prompt", qInvalidTugQL); err == nil {
+		t.Fatal("expected TugQL deserialize error")
 	}
 
-	// DTQL with Aggregate
-	qAgg := QueryResult{Source: chat.source, DTQL: "from: {schema: main, name: Invoice}\ncolumns: [{aggregate: {function: COUNT, args: [{star: true}]}, as: Count}]\nlimit: 5\n"}
+	// TugQL with Aggregate
+	qAgg := QueryResult{Source: chat.source, TugQL: "from: {schema: main, name: Invoice}\ncolumns: [{aggregate: {function: COUNT, args: [{star: true}]}, as: Count}]\nlimit: 5\n"}
 	if _, applied, err := chat.joinAttachedQuery(ctx, ChatSession{}, "prompt", qAgg); err != nil || applied {
 		t.Fatalf("expected not applied and no error, got %v, %v", applied, err)
 	}
@@ -997,7 +1010,7 @@ func TestAttachedJoinFullCoverage(t *testing.T) {
 			Attachments: []ContextReference{{Kind: "recordset", ObjectID: "rs1"}},
 		},
 	}
-	qValid := QueryResult{Source: chat.source, SourceID: "main_db", DTQL: "from: {schema: main, name: Invoice}\ncolumns: [{field: InvoiceId}]\n"}
+	qValid := QueryResult{Source: chat.source, SourceID: "main_db", TugQL: "from: {schema: main, name: Invoice}\ncolumns: [{field: InvoiceId}]\n"}
 	if _, applied, err := chat.joinAttachedQuery(ctx, sessionNonTable, "prompt", qValid); err != nil || applied {
 		t.Fatalf("expected not applied and no error, got %v, %v", applied, err)
 	}
@@ -1024,6 +1037,7 @@ func TestAttachedJoinFullCoverage(t *testing.T) {
 }
 
 func TestRecordSetUIFullCoverage(t *testing.T) {
+	t.Parallel()
 	resp := HTTPResponse{
 		StatusCode:     http.StatusOK,
 		Method:         "GET",
@@ -1041,6 +1055,7 @@ func TestRecordSetUIFullCoverage(t *testing.T) {
 }
 
 func TestBookmarkProjectionOutOfRange(t *testing.T) {
+	t.Parallel()
 	record := RecordSet{
 		Result: secureread.Result{
 			Columns: []string{"id"},
@@ -1057,6 +1072,7 @@ func TestBookmarkProjectionOutOfRange(t *testing.T) {
 }
 
 func TestBrowserCellDetailFullCoverage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	chat, store := newTestSessionChat(t)
 
@@ -1100,6 +1116,7 @@ func TestBrowserCellDetailFullCoverage(t *testing.T) {
 }
 
 func TestChatUIAndComponentsCoverage(t *testing.T) {
+	t.Parallel()
 	// join_block default key
 	b := newTestJoinBlock()
 	b.joinFocused = true

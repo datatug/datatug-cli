@@ -1,6 +1,6 @@
 # DataTug Chat Phase 4 --- Bookmarks, Tags and Cross-Session RecordSets
 
-Phases 1--3 of `datatug chat` are implemented: AI → DTQL → real
+Phases 1--3 of `datatug chat` are implemented: AI → TugQL → real
 RecordSets/grids, durable sessions and snapshots, split Chat/Workspace
 UI, project explorer, structured context attachments, Views/Selections,
 and session-scoped docking.
@@ -309,7 +309,7 @@ A bookmark must retain enough provenance to answer:
 -   what is this data?
 -   where did it come from?
 -   when was the snapshot created?
--   which DTQL produced it?
+-   which TugQL produced it?
 -   is it a full RecordSet, View, or Selection?
 -   what filter/order/selection produced the subset?
 
@@ -372,7 +372,7 @@ Verify:
 -   provenance remains;
 -   bookmark opens correctly;
 -   bookmark can be attached in another session;
--   the agent can issue new DTQL using it as context.
+-   the agent can issue new TugQL using it as context.
 
 This must pass before Phase 4 is complete.
 
@@ -529,7 +529,7 @@ Then:
 ``` text
 > Show their largest orders.
 
-[new DTQL based on bookmarked customer context]
+[new TugQL based on bookmarked customer context]
 [new real RecordSet/grid]
 ```
 

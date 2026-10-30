@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/datatug/datatug-cli/pkg/agentaccess"
 	"io"
 	"net/http"
 	"net/url"
@@ -63,6 +64,7 @@ func lookupValue(base *url.URL, client *http.Client, lookup datatug.QueryHTTPLoo
 		if err != nil {
 			return nil, err
 		}
+		agentaccess.Apply(request)
 		request.Header.Set("Accept", "application/json")
 		response, err := client.Do(request)
 		if err != nil {

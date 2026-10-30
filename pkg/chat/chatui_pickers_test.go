@@ -12,6 +12,7 @@ import (
 )
 
 func TestChatUIF4FocusesComposerAndSessionsCommandSwitches(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	u, sessions := newTestChatUI(t, nil, Turn{})
 	firstID := u.sessionID
@@ -46,6 +47,7 @@ func TestChatUIF4FocusesComposerAndSessionsCommandSwitches(t *testing.T) {
 }
 
 func TestChatUIF3OpensProjectPickerAndSelects(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.SetProjectChoices([]ProjectChoice{{Key: "p1", Title: "Project One"}, {Key: "p2", Title: "Project Two"}})
 
@@ -69,6 +71,7 @@ func TestChatUIF3OpensProjectPickerAndSelects(t *testing.T) {
 }
 
 func TestChatUIF3NoOpWithoutChoices(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	_, consumed := u.globalKeys(tea.KeyPressMsg{Code: tea.KeyF3})
 	if !consumed {
@@ -81,6 +84,7 @@ func TestChatUIF3NoOpWithoutChoices(t *testing.T) {
 }
 
 func TestChatUISessionPickerEscCloses(t *testing.T) {
+	t.Parallel()
 	overlay := &sessionPickerOverlay{ui: nil, sessions: []ChatSession{{ID: "a", Title: "A"}}}
 	_, _, done := overlay.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if !done {
@@ -89,6 +93,7 @@ func TestChatUISessionPickerEscCloses(t *testing.T) {
 }
 
 func TestChatUICtrlRRefreshesLastRecordSet(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db")
@@ -100,7 +105,7 @@ func TestChatUICtrlRRefreshesLastRecordSet(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc := "from: {name: Invoice}\nlimit: 20"
-	query, err := store.AppendQuery(ctx, sessions.activeID, origin.ID, "sqlite:///chinook.db", QueryResult{Title: "Invoices", DTQL: doc, SourceID: "chinook", Result: secureread.Result{Columns: []string{"InvoiceId"}}})
+	query, err := store.AppendQuery(ctx, sessions.activeID, origin.ID, "sqlite:///chinook.db", QueryResult{Title: "Invoices", TugQL: doc, SourceID: "chinook", Result: secureread.Result{Columns: []string{"InvoiceId"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +124,7 @@ func TestChatUICtrlRRefreshesLastRecordSet(t *testing.T) {
 	}
 	drainCmd(t, u, cmd)
 	if executor.calls != 1 {
-		t.Fatalf("expected the refresh to re-run the saved DTQL once, got %d calls", executor.calls)
+		t.Fatalf("expected the refresh to re-run the saved TugQL once, got %d calls", executor.calls)
 	}
 }
 
@@ -128,6 +133,7 @@ func TestChatUICtrlRRefreshesLastRecordSet(t *testing.T) {
 // doesn't already cover (that one selects the first/default choice; this
 // one moves down to the second before selecting).
 func TestChatUIProjectPickerDownThenEnterSelectsSecondChoice(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = workspaceTestCatalog()
 	u.SetProjectChoices([]ProjectChoice{{Key: "/projects/chinook", Title: "Chinook"}, {Key: "sales", Title: "Sales"}})
@@ -157,6 +163,7 @@ func TestChatUIProjectPickerDownThenEnterSelectsSecondChoice(t *testing.T) {
 // ChatUI equivalent — see cycleTableStyle's own comment — so this checks
 // the AppendAssistant confirmation it uses instead.
 func TestChatUIAltShiftSCyclesAllTablesAndRestoresSessionStyle(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -208,6 +215,7 @@ func TestChatUIAltShiftSCyclesAllTablesAndRestoresSessionStyle(t *testing.T) {
 // TestChatUIMacOptionShiftSCyclesTableStyle is ported from
 // ui_test.go's TestMacOptionSCyclesTableStyle using the current shortcut.
 func TestChatUIMacOptionShiftSCyclesTableStyle(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.shell.Update(tea.KeyPressMsg{Code: 'ß', Text: "ß"})
 	if !strings.Contains(u.shell.View().Content, "ß") {

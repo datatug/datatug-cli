@@ -483,7 +483,7 @@ func TestExecRunQuery_HTTPSource_UnenforceablePolicyCondition_AccessDenied(t *te
 
 	queriesDir := filepath.Join(dir, "queries", "reference")
 	mustMkdirAll(t, queriesDir)
-	mustWriteFile(t, filepath.Join(queriesDir, "widget.query.json"), `{
+	mustWriteFile(t, filepath.Join(queriesDir, "widget.query.json"), `{"createdAt":"2026-01-01T00:00:00Z",
 		"id": "widget",
 		"title": "Widget",
 		"type": "HTTP",

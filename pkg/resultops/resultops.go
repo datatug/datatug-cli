@@ -324,7 +324,7 @@ func (s Snapshot) aggregateGroup(rowIndexes []int, term struct {
 		if nonNull == 0 {
 			return Cell{Present: true}, nil
 		}
-		cloned, err := cloneValue(selected.value)
+		cloned, err := cloneValueHook(selected.value)
 		if err != nil {
 			return Cell{}, err
 		}
@@ -562,6 +562,10 @@ func parseDeclaredType(typ string) (string, []int64, error) {
 	return base, args, nil
 }
 
+var encodeNormalizedCell = func(n normalizedCell, kind valueType) ([]byte, error) {
+	return n.encoding(kind)
+}
+
 func encodeGroupCell(kind valueType, declared string, cell Cell) ([]byte, Cell, error) {
 	var out []byte
 	if !cell.Present {
@@ -576,7 +580,7 @@ func encodeGroupCell(kind valueType, declared string, cell Cell) ([]byte, Cell, 
 	if err != nil {
 		return nil, Cell{}, fmt.Errorf("declared %s value: %w", declared, err)
 	}
-	payload, err := normalized.encoding(kind)
+	payload, err := encodeNormalizedCell(normalized, kind)
 	if err != nil {
 		return nil, Cell{}, err
 	}
@@ -747,11 +751,15 @@ func exactDecimal(value any) (*big.Rat, error) {
 	return nil, fmt.Errorf("want exact decimal value, got %T", value)
 }
 
+var ratSetString = func(r *big.Rat, s string) (*big.Rat, bool) {
+	return r.SetString(s)
+}
+
 func parseDecimal(text string) (*big.Rat, error) {
 	if err := validateDecimalBudget(text); err != nil {
 		return nil, err
 	}
-	v, ok := new(big.Rat).SetString(text)
+	v, ok := ratSetString(new(big.Rat), text)
 	if !ok {
 		return nil, fmt.Errorf("invalid decimal %q", text)
 	}
@@ -987,12 +995,16 @@ func compareRunes(left, right string) int {
 	return 1
 }
 
+var cloneValueHook = func(value any) (any, error) {
+	return cloneValue(value)
+}
+
 func cloneCell(cell Cell) (Cell, error) {
 	copy := Cell{Present: cell.Present}
 	if !cell.Present || cell.Value == nil {
 		return copy, nil
 	}
-	value, err := cloneValue(cell.Value)
+	value, err := cloneValueHook(cell.Value)
 	copy.Value = value
 	return copy, err
 }

@@ -2,20 +2,31 @@ package api
 
 import "strings"
 
-// defaultSchemaForDriver returns the schema name a driver resolves an
+// DefaultSchemaForDriver returns the schema name a driver resolves an
 // unqualified table/collection name to (SQLite's single implicit database
 // is always named "main"; PostgreSQL's default search_path entry is
 // "public"), or "" for a driver with no such convention (e.g. ingitdb, which
-// has no schema concept at all). Read from the resolved catalog's own
+// has no schema concept at all). A MySQL, Oracle or SQL Server catalog records its tables
+// under ServerDefaultSchema, the schema of the connection, whatever its real
+// name (see ServerDefaultSchema). Read from the resolved catalog's own
 // Driver field (see resolveSourceURL) rather than assumed unconditionally,
 // so a caller never strips a qualifier for a source where it would not
 // actually be the implicit default.
-func defaultSchemaForDriver(driver string) string {
+func DefaultSchemaForDriver(driver string) string {
 	switch strings.ToLower(driver) {
 	case "sqlite3", "sqlite":
 		return "main"
 	case "postgres", "postgresql", "pgx":
 		return "public"
+	case DriverMySQL, DriverOracle, DriverSQLServer, DriverCouchDB, DriverPostgREST, DriverTypesense:
+		// A CouchDB or Typesense catalog has no SQL namespace: ServerDefaultSchema is
+		// only the logical grouping its one collection is recorded under, so a
+		// "default.<collection>" reference and a bare "<collection>" name the same
+		// collection and match the same policy.
+		return ServerDefaultSchema
+	case DriverLibSQL:
+		// libSQL is SQLite over HTTP: one implicit database, named "main".
+		return "main"
 	default:
 		return ""
 	}
@@ -52,7 +63,7 @@ func defaultSchemaForDriver(driver string) string {
 // provably the same table; an unmatched path still denies exactly as
 // before.
 func PolicyCollectionName(name, driver string) string {
-	schema := defaultSchemaForDriver(driver)
+	schema := DefaultSchemaForDriver(driver)
 	if schema == "" {
 		return name
 	}

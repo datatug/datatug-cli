@@ -24,6 +24,12 @@ type storageClassWriter struct {
 	closed bool
 }
 
+var (
+	storageJSONMarshal    = json.Marshal
+	storageClassFileSync  = func(f *os.File) error { return f.Sync() }
+	storageClassFileClose = func(f *os.File) error { return f.Close() }
+)
+
 func newStorageClassWriter(dir string) *storageClassWriter { return &storageClassWriter{dir: dir} }
 
 func (w *storageClassWriter) Append(id string, fields []dbschema.FieldDef, classes map[string]string) error {
@@ -42,7 +48,7 @@ func (w *storageClassWriter) Append(id string, fields []dbschema.FieldDef, class
 	if len(relevant) == 0 {
 		return nil
 	}
-	line, err := json.Marshal(struct {
+	line, err := storageJSONMarshal(struct {
 		ID      string            `json:"id"`
 		Classes map[string]string `json:"classes"`
 	}{id, relevant})
@@ -83,10 +89,10 @@ func (w *storageClassWriter) finishFile() error {
 	if err := w.buffer.Flush(); err != nil {
 		return err
 	}
-	if err := w.file.Sync(); err != nil {
+	if err := storageClassFileSync(w.file); err != nil {
 		return err
 	}
-	if err := w.file.Close(); err != nil {
+	if err := storageClassFileClose(w.file); err != nil {
 		return err
 	}
 	w.file, w.buffer = nil, nil

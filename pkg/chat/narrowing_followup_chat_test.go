@@ -29,9 +29,10 @@ func toolNames(req ai.ChatRequest) []string {
 // A model that needs a table the narrowing left out can name it and read it: the
 // narrowing is recoverable inside the turn.
 func TestModelCanReadAnOmittedTable(t *testing.T) {
+	t.Parallel()
 	llm := &scriptedProvider{steps: []scriptedStep{
 		{toolCalls: []ai.ToolCall{toolCall("1", toolDescribeRelation, map[string]any{"name": "Track"})}},
-		{toolCalls: []ai.ToolCall{toolCall("2", toolRunDTQL, map[string]any{"title": "Tracks", "dtql": "from: {name: Track}\ncolumns: [{field: Name}]\nlimit: 5"})}},
+		{toolCalls: []ai.ToolCall{toolCall("2", toolRunTugQL, map[string]any{"title": "Tracks", "tugql": "from: {name: Track}\ncolumns: [{field: Name}]\nlimit: 5"})}},
 		{text: "Here are the tracks."},
 	}}
 	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"Name"}}}
@@ -67,6 +68,7 @@ func TestModelCanReadAnOmittedTable(t *testing.T) {
 
 // A turn that was not narrowed offers exactly today's tools.
 func TestUnnarrowedTurnOffersNoDescribeTool(t *testing.T) {
+	t.Parallel()
 	baseline, _ := askNarrowed(t, narrowingQuestion)
 	req, _ := askNarrowed(t, narrowingQuestion, WithTableNarrowing(chinookNarrower(t, nil)))
 	if !reflect.DeepEqual(toolNames(req), toolNames(baseline)) || slices.Contains(toolNames(req), "describe_relation") {
@@ -75,6 +77,7 @@ func TestUnnarrowedTurnOffersNoDescribeTool(t *testing.T) {
 }
 
 func TestDescribeRelationToolRefusals(t *testing.T) {
+	t.Parallel()
 	run := func(c *AIConversation, args string) describeRelationResponse {
 		t.Helper()
 		result, err := c.handlers()[toolDescribeRelation](context.Background(), ai.ToolCall{ID: "1", Arguments: json.RawMessage(args)})
@@ -117,6 +120,7 @@ func TestDescribeRelationToolRefusals(t *testing.T) {
 // session supplies the earlier questions and the tables kept before, and the join
 // path survives every turn.
 func TestThreeTurnConversationKeepsTheJoinPath(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	engine := &narrowingtest.Scorer{Calibrated: true, Floor: 0.04, Model: "jev-1.13.0", ByText: map[string]map[string]float64{
@@ -171,6 +175,7 @@ func TestThreeTurnConversationKeepsTheJoinPath(t *testing.T) {
 }
 
 func TestNarrowingHistory(t *testing.T) {
+	t.Parallel()
 	enabled := func(origin string, kept ...string) StoredNarrowing {
 		return StoredNarrowing{OriginMessageID: origin, Record: narrowing.Record{DeciderEnabled: true, Kept: kept}}
 	}
@@ -196,6 +201,7 @@ func TestNarrowingHistory(t *testing.T) {
 // A session restored after the user opted in: a question typed before that was
 // never sent and is not sent now; a question asked since is history.
 func TestQuestionsTypedBeforeOptInAreNeverSent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	build := func(engine decision.ScoredProvider, steps int) *SessionChat {
@@ -254,11 +260,12 @@ func TestQuestionsTypedBeforeOptInAreNeverSent(t *testing.T) {
 // describe_relation is bounded: past the limit the model gets a final refusal, and
 // the turn still completes.
 func TestDescribeRelationIsLimitedPerTurnAndDegradesGracefully(t *testing.T) {
+	t.Parallel()
 	llm := &scriptedProvider{steps: []scriptedStep{
 		{toolCalls: []ai.ToolCall{toolCall("1", toolDescribeRelation, map[string]any{"name": "Track"})}},
 		{toolCalls: []ai.ToolCall{toolCall("2", toolDescribeRelation, map[string]any{"name": "Album"})}},
 		{toolCalls: []ai.ToolCall{toolCall("3", toolDescribeRelation, map[string]any{"name": "Artist"})}},
-		{toolCalls: []ai.ToolCall{toolCall("4", toolRunDTQL, map[string]any{"title": "Tracks", "dtql": "from: {name: Track}\ncolumns: [{field: Name}]\nlimit: 5"})}},
+		{toolCalls: []ai.ToolCall{toolCall("4", toolRunTugQL, map[string]any{"title": "Tracks", "tugql": "from: {name: Track}\ncolumns: [{field: Name}]\nlimit: 5"})}},
 		{text: "Done."},
 	}}
 	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"Name"}}}
@@ -290,6 +297,7 @@ func TestDescribeRelationIsLimitedPerTurnAndDegradesGracefully(t *testing.T) {
 // every request the model receives in a turn, summed over the turn's model calls
 // (each tool round trip re-sends the whole request).
 func TestNetInputBytesOnChinook(t *testing.T) {
+	t.Parallel()
 	run := func(describe bool, options ...Option) (calls int, total int) {
 		t.Helper()
 		var steps []scriptedStep
@@ -297,7 +305,7 @@ func TestNetInputBytesOnChinook(t *testing.T) {
 			steps = append(steps, scriptedStep{toolCalls: []ai.ToolCall{toolCall("1", toolDescribeRelation, map[string]any{"name": "Track"})}})
 		}
 		steps = append(steps,
-			scriptedStep{toolCalls: []ai.ToolCall{toolCall("2", toolRunDTQL, map[string]any{"title": "Sales", "dtql": "from: {name: Invoice}\ncolumns: [{field: BillingCountry}]\nlimit: 5"})}},
+			scriptedStep{toolCalls: []ai.ToolCall{toolCall("2", toolRunTugQL, map[string]any{"title": "Sales", "tugql": "from: {name: Invoice}\ncolumns: [{field: BillingCountry}]\nlimit: 5"})}},
 			scriptedStep{text: "Here."})
 		llm := &scriptedProvider{steps: steps}
 		conversation, err := NewAIConversation(llm, &fakeExecutor{result: secureread.Result{Columns: []string{"BillingCountry"}}}, "sqlite:///chinook.db", chinookFullSchema(), options...)
@@ -334,6 +342,7 @@ func TestNetInputBytesOnChinook(t *testing.T) {
 // The user can see the context was narrowed, and to which tables, live and after
 // a reload.
 func TestUserSeesTheNarrowingNotice(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	narrowed := func(names ...string) *narrowing.Record {
 		return &narrowing.Record{Narrowed: true, CandidatesBefore: 11, CandidatesAfter: len(names), Kept: names}
@@ -376,6 +385,7 @@ func TestUserSeesTheNarrowingNotice(t *testing.T) {
 // A CLI that predates narrowing clears a session without clearing its decisions;
 // those orphans are pruned on load and never shown.
 func TestOrphanedNarrowingDecisionsArePruned(t *testing.T) {
+	// Not parallel: mutates package-level execContextFn seam.
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	session, err := store.Create(ctx, "s")
@@ -417,6 +427,7 @@ func TestOrphanedNarrowingDecisionsArePruned(t *testing.T) {
 
 // With the decider disabled and no rule matching, nothing is reported to telemetry.
 func TestDisabledDeciderReportsNothing(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	narrower, err := narrowing.New(narrowing.Config{
@@ -455,10 +466,11 @@ func TestDisabledDeciderReportsNothing(t *testing.T) {
 // Once the turn has used its describe_relation calls the tool is no longer offered,
 // so a model cannot spend the turn's remaining steps asking for it.
 func TestDescribeRelationIsWithdrawnOnceTheTurnHasSpentIt(t *testing.T) {
+	t.Parallel()
 	llm := &scriptedProvider{steps: []scriptedStep{
 		{toolCalls: []ai.ToolCall{toolCall("1", toolDescribeRelation, map[string]any{"name": "Track"})}},
 		{toolCalls: []ai.ToolCall{toolCall("2", toolDescribeRelation, map[string]any{"name": "Album"})}},
-		{toolCalls: []ai.ToolCall{toolCall("3", toolRunDTQL, map[string]any{"title": "Tracks", "dtql": "from: {name: Track}\ncolumns: [{field: Name}]\nlimit: 5"})}},
+		{toolCalls: []ai.ToolCall{toolCall("3", toolRunTugQL, map[string]any{"title": "Tracks", "tugql": "from: {name: Track}\ncolumns: [{field: Name}]\nlimit: 5"})}},
 		{text: "Done."},
 	}}
 	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"Name"}}}
@@ -479,8 +491,8 @@ func TestDescribeRelationIsWithdrawnOnceTheTurnHasSpentIt(t *testing.T) {
 		}
 	}
 	// Withdrawing it leaves every other tool in place, and the next turn has it again.
-	if !slices.Contains(toolNames(llm.requests[3]), toolRunDTQL) {
-		t.Errorf("run_dtql went missing: %v", toolNames(llm.requests[3]))
+	if !slices.Contains(toolNames(llm.requests[3]), toolRunTugQL) {
+		t.Errorf("run_tugql went missing: %v", toolNames(llm.requests[3]))
 	}
 	conversation.resetTurn()
 	llm2 := &scriptedProvider{steps: []scriptedStep{{text: "ok"}}}

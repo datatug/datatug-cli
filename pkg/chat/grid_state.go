@@ -188,11 +188,11 @@ func (g *gridState) bindQuery(record RecordSet, session ChatSession) {
 	if record.QueryID != "" {
 		lines = append(lines, "Execution: "+sanitizeTerminalText(record.QueryID))
 	}
-	doc := record.DTQL
+	doc := record.TugQL
 	if doc == "" && record.QueryID != "" {
 		for _, q := range session.Queries {
 			if q.ID == record.QueryID {
-				doc = q.DTQL
+				doc = q.TugQL
 				break
 			}
 		}
@@ -210,8 +210,8 @@ func (g *gridState) bindQuery(record RecordSet, session ChatSession) {
 	}
 	if record.Lineage != nil {
 		lines = append(lines, "", "Derived from result: "+sanitizeTerminalText(record.Lineage.ParentRecordSetID))
-		if parent, ok := session.RecordSets[record.Lineage.ParentRecordSetID]; ok && parent.DTQL != "" {
-			lines = append(lines, "Parent query", sanitizeMultilineText(parent.DTQL))
+		if parent, ok := session.RecordSets[record.Lineage.ParentRecordSetID]; ok && parent.TugQL != "" {
+			lines = append(lines, "Parent query", sanitizeMultilineText(parent.TugQL))
 		}
 	}
 	if len(record.Parameters) > 0 {

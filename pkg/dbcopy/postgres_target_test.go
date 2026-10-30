@@ -132,7 +132,7 @@ func TestSourceScopeIdentity_ARefusedLiteralSourceIsItsDisplayForm(t *testing.T)
 	for source, want := range map[string]string{
 		"http://alice:s3cretpw@host/x":           "http://host/x",
 		"ingitdb://s3cretpw@github.com/org/repo": "ingitdb://github.com/org/repo",
-		"mongodb://alice:s3cretpw@host/db":       UnparsableSource,
+		"unsupporteddb://alice:s3cretpw@host/db": UnparsableSource,
 		"alice:s3cretpw@host/shop":               UnparsableSource,
 	} {
 		assert.Equal(t, want, sourceScopeIdentity(source, fakeEnv(nil)), source)
@@ -210,7 +210,7 @@ func TestSourceScopeIdentity_AVariableThatDoesNotResolveIsItsOwnScope(t *testing
 	unresolved := "env:SHOP_PG_URL#unresolved"
 	assert.Equal(t, unresolved, sourceScopeIdentity("env:SHOP_PG_URL", fakeEnv(nil)))
 	assert.Equal(t, unresolved, sourceScopeIdentity("env:SHOP_PG_URL", fakeEnv(map[string]string{"SHOP_PG_URL": ""})))
-	assert.Equal(t, unresolved, sourceScopeIdentity("env:SHOP_PG_URL", fakeEnv(map[string]string{"SHOP_PG_URL": "mongodb://alice:s3cret@h/db"})))
+	assert.Equal(t, unresolved, sourceScopeIdentity("env:SHOP_PG_URL", fakeEnv(map[string]string{"SHOP_PG_URL": "unsupporteddb://alice:s3cret@h/db"})))
 	assert.Equal(t, "env:lower#unresolved", sourceScopeIdentity("env:lower", fakeEnv(nil)))
 }
 

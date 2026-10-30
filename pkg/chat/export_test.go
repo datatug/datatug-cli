@@ -23,6 +23,7 @@ func exportFixture(title string) RecordSet {
 }
 
 func TestExportFlatFormats(t *testing.T) {
+	t.Parallel()
 	for _, format := range []ExportFormat{ExportCSV, ExportJSON, ExportYAML, ExportINGR, ExportDBF} {
 		t.Run(string(format), func(t *testing.T) {
 			var output bytes.Buffer
@@ -69,6 +70,7 @@ func TestExportFlatFormats(t *testing.T) {
 }
 
 func TestExportBucketXLSXAndSQLite(t *testing.T) {
+	t.Parallel()
 	records := []RecordSet{exportFixture("Invoices"), exportFixture("Invoices")}
 	for _, format := range []ExportFormat{ExportXLSX, ExportSQLite} {
 		t.Run(string(format), func(t *testing.T) {
@@ -109,6 +111,7 @@ func TestExportBucketXLSXAndSQLite(t *testing.T) {
 }
 
 func TestExportBucketZIPAndNoOverwrite(t *testing.T) {
+	t.Parallel()
 	records := []RecordSet{exportFixture("Invoices"), exportFixture("Invoices")}
 	var output bytes.Buffer
 	if err := ExportRecordSets(context.Background(), records, ExportCSV, &output); err != nil {
@@ -142,6 +145,7 @@ func TestExportBucketZIPAndNoOverwrite(t *testing.T) {
 }
 
 func TestXLSXValuesDoNotBecomeFormulas(t *testing.T) {
+	t.Parallel()
 	record := RecordSet{Title: "Values", Result: secureread.Result{Columns: []string{"Text"}, Rows: []secureread.Row{{Data: map[string]any{"Text": "=1+1"}}}}}
 	var output bytes.Buffer
 	if err := ExportRecordSets(context.Background(), []RecordSet{record}, ExportXLSX, &output); err != nil {
@@ -159,6 +163,7 @@ func TestXLSXValuesDoNotBecomeFormulas(t *testing.T) {
 }
 
 func TestExportRestoredNumericValues(t *testing.T) {
+	t.Parallel()
 	record := RecordSet{Title: "Restored", Result: secureread.Result{Columns: []string{"ID", "Amount"}, Rows: []secureread.Row{{Data: map[string]any{"ID": json.Number("412"), "Amount": json.Number("1.99")}}}}}
 	for _, format := range []ExportFormat{ExportXLSX, ExportSQLite} {
 		var output bytes.Buffer
@@ -185,6 +190,7 @@ func TestExportRestoredNumericValues(t *testing.T) {
 }
 
 func TestExportPreservesLongDecimal(t *testing.T) {
+	t.Parallel()
 	const exact = "0.123456789012345678901"
 	record := RecordSet{Title: "Precise", Result: secureread.Result{Columns: []string{"Amount"}, Rows: []secureread.Row{{Data: map[string]any{"Amount": json.Number(exact)}}}}}
 	for _, format := range []ExportFormat{ExportJSON, ExportYAML, ExportINGR, ExportXLSX, ExportSQLite} {
@@ -212,6 +218,7 @@ func TestExportPreservesLongDecimal(t *testing.T) {
 }
 
 func TestINGRExportPreservesSourceRowKey(t *testing.T) {
+	t.Parallel()
 	record := RecordSet{Title: "Customers", Result: secureread.Result{Columns: []string{"Name"}, Rows: []secureread.Row{{Key: "customer-123", Data: map[string]any{"Name": "Ana"}}}}}
 	var output bytes.Buffer
 	if err := ExportRecordSets(context.Background(), []RecordSet{record}, ExportINGR, &output); err != nil {
@@ -227,6 +234,7 @@ func TestINGRExportPreservesSourceRowKey(t *testing.T) {
 }
 
 func TestExportBucketActionIsSessionScoped(t *testing.T) {
+	t.Parallel()
 	session := ChatSession{RecordSets: map[string]RecordSet{"r1": {ID: "r1"}}}
 	state := WorkspaceState{}
 	var err error
@@ -247,6 +255,7 @@ func TestExportBucketActionIsSessionScoped(t *testing.T) {
 }
 
 func TestExportBucketSurvivesSessionReload(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
@@ -277,13 +286,14 @@ func TestExportBucketSurvivesSessionReload(t *testing.T) {
 }
 
 func TestRealChinookRecordSetExports(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path, err := filepath.Abs(filepath.Join("..", "dbcopy", "testdata", "chinook.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	executor := secureread.NewExecutor(secureread.Session{Unrestricted: true})
-	result, err := executor.RunDTQL(ctx, "sqlite://"+path, []byte("from: {name: Invoice}\ncolumns:\n  - field: InvoiceId\n  - field: CustomerId\n  - field: Total\norderBy:\n  - field: InvoiceId\n    desc: true\nlimit: 5\n"), nil)
+	result, err := executor.RunTugQL(ctx, "sqlite://"+path, []byte("from: {name: Invoice}\ncolumns:\n  - field: InvoiceId\n  - field: CustomerId\n  - field: Total\norderBy:\n  - field: InvoiceId\n    desc: true\nlimit: 5\n"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

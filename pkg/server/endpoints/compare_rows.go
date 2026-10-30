@@ -12,6 +12,13 @@ import (
 	"github.com/datatug/datatug-core/pkg/recordsetcompare"
 )
 
+var (
+	compareRowsAuthorizeHook             = authorizeCachedComparison
+	compareRowsPageCompareCacheHook      = api.PageCompareCache
+	compareRowsLoadCompareRecordSideHook = loadCompareRecordSide
+	compareRowsLookupCompareCacheHook    = api.LookupCompareCache
+)
+
 func compareRowsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeContractResponse(w, r, newInvalidRequest("", "only GET is supported for compare rows"), nil)
@@ -43,16 +50,16 @@ func compareRowsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = parsed
 	}
-	meta, err := api.LookupCompareCache(r.Context(), comparisonID)
+	meta, err := compareRowsLookupCompareCacheHook(r.Context(), comparisonID)
 	if err != nil {
 		writeContractResponse(w, r, mapCompareCacheError(err), nil)
 		return
 	}
-	if err := authorizeCachedComparison(r.Context(), meta); err != nil {
+	if err := compareRowsAuthorizeHook(r.Context(), meta); err != nil {
 		writeContractResponse(w, r, err, nil)
 		return
 	}
-	page, err := api.PageCompareCache(r.Context(), comparecache.PageRequest{
+	page, err := compareRowsPageCompareCacheHook(r.Context(), comparecache.PageRequest{
 		ComparisonID: comparisonID,
 		State:        state,
 		After:        query.Get("after"),
@@ -71,11 +78,11 @@ func authorizeCachedComparison(ctx context.Context, meta comparecache.Meta) erro
 	}
 	request := apicontract.CompareRequest{QueryID: meta.QueryID}
 	left := apicontract.CompareSideSpec{Kind: apicontract.CompareSideRecord, Execution: &meta.Left}
-	if _, err := loadCompareRecordSide(ctx, request, left); err != nil {
+	if _, err := compareRowsLoadCompareRecordSideHook(ctx, request, left); err != nil {
 		return err
 	}
 	right := apicontract.CompareSideSpec{Kind: apicontract.CompareSideRecord, Execution: &meta.Right}
-	if _, err := loadCompareRecordSide(ctx, request, right); err != nil {
+	if _, err := compareRowsLoadCompareRecordSideHook(ctx, request, right); err != nil {
 		return err
 	}
 	return nil

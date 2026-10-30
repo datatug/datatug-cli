@@ -7,7 +7,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
-	"github.com/google/go-github/v92/github"
+	"github.com/google/go-github/v93/github"
 	"github.com/tuigoff/tuigoff/pkg/nav"
 	"github.com/tuigoff/tuigoff/pkg/theme"
 	"github.com/tuigoff/tuigoff/pkg/widgets"

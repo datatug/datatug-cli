@@ -34,6 +34,7 @@ func resultColumnsUIFixture(t *testing.T) (*ChatUI, *resultColumnsOverlay, *colu
 }
 
 func TestResultColumnsCheckboxApplyReviewRunAndCancel(t *testing.T) {
+	t.Parallel()
 	u, o, e := resultColumnsUIFixture(t)
 	for i, r := range o.rows {
 		if r.Name == "Customer.FirstName" || r.Name == "Customer.LastName" {
@@ -48,7 +49,7 @@ func TestResultColumnsCheckboxApplyReviewRunAndCancel(t *testing.T) {
 	if o.preview == nil || e.calls != 0 {
 		t.Fatal("Apply executed instead of review")
 	}
-	document := o.preview.DTQL
+	document := o.preview.TugQL
 	view := ansi.Strip(o.View(70, 20))
 	if !strings.Contains(view, "Review column query") || !strings.Contains(view, "Run on server") {
 		t.Fatal(view)
@@ -68,13 +69,14 @@ func TestResultColumnsCheckboxApplyReviewRunAndCancel(t *testing.T) {
 		t.Fatal("Run did not launch")
 	}
 	msg, ok := cmd().(workspaceRelatedOpenedMsg)
-	if !ok || msg.err != nil || msg.query.DTQL != document || e.calls != 1 {
+	if !ok || msg.err != nil || msg.query.TugQL != document || e.calls != 1 {
 		t.Fatalf("execution %+v calls=%d", msg, e.calls)
 	}
 	u.shell.Update(msg)
 }
 
-func TestResultColumnsReviewViewPreservesExactDTQLLayout(t *testing.T) {
+func TestResultColumnsReviewViewPreservesExactTugQLLayout(t *testing.T) {
+	t.Parallel()
 	_, overlay, executor := resultColumnsUIFixture(t)
 	for i, row := range overlay.rows {
 		if row.Name == "Customer.FirstName" || row.Name == "Customer.LastName" {
@@ -86,7 +88,7 @@ func TestResultColumnsReviewViewPreservesExactDTQLLayout(t *testing.T) {
 	if overlay.preview == nil || executor.calls != 0 {
 		t.Fatal("Apply did not open an execution-free review")
 	}
-	document := overlay.preview.DTQL
+	document := overlay.preview.TugQL
 	view := ansi.Strip(overlay.View(100, 80))
 	visibleLines := strings.Split(view, "\n")
 	for i, line := range visibleLines {
@@ -96,14 +98,14 @@ func TestResultColumnsReviewViewPreservesExactDTQLLayout(t *testing.T) {
 	for _, fragment := range []string{
 		"Add Customer.FirstName, Customer.LastName\n\n",
 		"aggregate output.\n\nSecure source-bound execution",
-		"Exact DTQL submitted:\nfrom:\n  name: Invoice\n  alias: i\n  joins:",
+		"Exact TugQL submitted:\nfrom:\n  name: Invoice\n  alias: i\n  joins:",
 		"\ncolumns:\n  - field: CustomerId\n    source: i",
 	} {
 		if !strings.Contains(content, fragment) {
 			t.Fatalf("review lost line breaks or indentation around %q:\n%s", fragment, view)
 		}
 	}
-	if overlay.preview.DTQL != document || executor.calls != 0 {
+	if overlay.preview.TugQL != document || executor.calls != 0 {
 		t.Fatal("rendering changed the submitted document or executed it")
 	}
 	for _, line := range strings.Split(view, "\n") {
@@ -114,6 +116,7 @@ func TestResultColumnsReviewViewPreservesExactDTQLLayout(t *testing.T) {
 }
 
 func TestResultColumnsOverlayHelpFollowsCurrentStep(t *testing.T) {
+	t.Parallel()
 	_, overlay, _ := resultColumnsUIFixture(t)
 	choices := overlay.HelpHints()
 	for _, hint := range []string{"↑↓ choose", "Space checkbox", "Enter Apply and review", "Esc cancel"} {
@@ -146,6 +149,7 @@ func TestResultColumnsOverlayHelpFollowsCurrentStep(t *testing.T) {
 }
 
 func TestResultColumnsStalePickerCannotExecuteAndEmptyCancel(t *testing.T) {
+	t.Parallel()
 	u, o, e := resultColumnsUIFixture(t)
 	for i, r := range o.rows {
 		if r.Addable {
@@ -171,6 +175,7 @@ func TestResultColumnsStalePickerCannotExecuteAndEmptyCancel(t *testing.T) {
 }
 
 func TestResultColumnsOpenLoadsOnlyMetadataAndFitsSmallViewport(t *testing.T) {
+	t.Parallel()
 	u, _, e := resultColumnsUIFixture(t)
 	cmd := u.openResultColumns()
 	if cmd == nil {

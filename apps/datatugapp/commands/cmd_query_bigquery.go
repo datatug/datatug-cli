@@ -63,9 +63,9 @@ func queryBigQueryCommand() *cobra.Command {
 		op := operation
 		child := &cobra.Command{Use: op, Short: map[string]string{"connect": "Explicitly connect Google with separate BigQuery grants", "preflight": "Verify operator identity and granted scopes without a BigQuery request", "preview": "Show policy-effective query, verified identity, estimate and approval digest", "run": "Approve an exact preview digest and submit once", "page": "Resume the same job and read its next page", "status": "Observe authoritative status for an existing job", "cancel": "Request cancellation with separately enabled granted permission"}[op], Args: cobra.NoArgs, SilenceUsage: true, RunE: func(c *cobra.Command, _ []string) error { return runBigQueryCommand(c, op) }}
 		f := child.Flags()
-		f.StringP("file", "f", "", "Bounded JSON source profile and scalar DTQL query; '-' reads stdin")
+		f.StringP("file", "f", "", "Bounded JSON source profile and scalar TugQL query; '-' reads stdin")
 		f.String("auth", "", "Explicit credential source: adc (Google-user ADC) or google (existing stored Google OAuth grant)")
-		f.String("source-profile", "", "Separate reviewed source-profile JSON; --file then contains scalar DTQL JSON")
+		f.String("source-profile", "", "Separate reviewed source-profile JSON; --file then contains scalar TugQL JSON")
 		f.String("ledger", "", "Absolute private directory shared by every operation in this session")
 		f.String("format", "json", "Result envelope format (json only)")
 		f.String("preview-out", "", "Private preview-*.json output in --ledger directory")
@@ -533,7 +533,7 @@ func writeBigQueryRun(run *bigquery.Run, operationError error, write func(any) e
 	}
 	page := bigquery.Page{}
 	if operationError == nil {
-		page, operationError = run.NextPage()
+		page, operationError = bqNextPage(run)
 		if errors.Is(operationError, dal.ErrNoMoreRecords) {
 			operationError = nil
 		}
@@ -605,7 +605,7 @@ func writeBigQueryExport(path string, value any, dir string) error {
 		_, err = f.Write(raw)
 	}
 	if err == nil {
-		err = f.Sync()
+		err = bqExportSync(f)
 	}
 	closeErr := f.Close()
 	if err != nil || closeErr != nil {
@@ -616,3 +616,8 @@ func writeBigQueryExport(path string, value any, dir string) error {
 	}
 	return nil
 }
+
+var (
+	bqExportSync = func(f *os.File) error { return f.Sync() }
+	bqNextPage   = func(r *bigquery.Run) (bigquery.Page, error) { return r.NextPage() }
+)

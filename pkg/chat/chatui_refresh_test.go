@@ -20,6 +20,7 @@ import (
 // refreshLastRecordSet, chatui_pickers.go) re-fetches a focused HTTP
 // result and the new grid's versionBadge reflects the change.
 func TestChatUIHTTPRefreshAddsChangedImmutableVersion(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -62,9 +63,10 @@ func TestChatUIHTTPRefreshAddsChangedImmutableVersion(t *testing.T) {
 	}
 }
 
-// TestChatUISavedNonDTQLResultDoesNotOfferRefresh is ported from
-// TestSavedNonDTQLResultDoesNotOfferRefresh.
-func TestChatUISavedNonDTQLResultDoesNotOfferRefresh(t *testing.T) {
+// TestChatUISavedNonTugQLResultDoesNotOfferRefresh is ported from
+// TestSavedNonTugQLResultDoesNotOfferRefresh.
+func TestChatUISavedNonTugQLResultDoesNotOfferRefresh(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")
@@ -108,6 +110,7 @@ func TestChatUISavedNonDTQLResultDoesNotOfferRefresh(t *testing.T) {
 // hiddenRefreshVersions filtering (shared with ui.go) keeps only the
 // latest kept version's grid visible in the transcript.
 func TestChatUIHTTPVersionsAcrossDocumentKeepOneVisibleGrid(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	session, err := store.Create(ctx, "Versions")

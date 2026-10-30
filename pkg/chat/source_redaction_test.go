@@ -33,6 +33,7 @@ func storeBytes(t *testing.T, path string) string {
 }
 
 func TestFriendlyQueryErrorRedactsSourceURLs(t *testing.T) {
+	t.Parallel()
 	err := errors.New(`dial "postgres://alice:` + redactionSecret + `@db.example.com/shop" failed; password=` + redactionSecret)
 	got := friendlyQueryError(err)
 	if strings.Contains(got, redactionSecret) || !strings.Contains(got, "postgres://alice:xxxxx@db.example.com/shop") {
@@ -47,6 +48,7 @@ func TestFriendlyQueryErrorRedactsSourceURLs(t *testing.T) {
 }
 
 func TestChatStoreNeverPersistsASourcePassword(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	literal := "postgres://alice:" + redactionSecret + "@db.example.com:5432/shop?sslmode=require"
@@ -63,7 +65,7 @@ func TestChatStoreNeverPersistsASourcePassword(t *testing.T) {
 		t.Fatal(err)
 	}
 	turn, err := store.AppendTurn(ctx, session.ID, user.ID, literal, Turn{Queries: []QueryResult{{
-		Title: "Orders", DTQL: "from: {name: orders}", SourceID: "shop",
+		Title: "Orders", TugQL: "from: {name: orders}", SourceID: "shop",
 		Result: secureread.Result{Columns: []string{"id"}, Rows: []secureread.Row{{Key: "1", Data: map[string]any{"id": int64(1)}}}},
 	}}})
 	if err != nil {
@@ -89,6 +91,7 @@ func TestChatStoreNeverPersistsASourcePassword(t *testing.T) {
 }
 
 func TestChatScopeIdentityIgnoresSourcePasswords(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	scopeWith := func(password string) ChatScope {
@@ -115,6 +118,7 @@ func TestChatScopeIdentityIgnoresSourcePasswords(t *testing.T) {
 }
 
 func TestChatStoreKeepsAnEnvSourceVerbatim(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	scope := testScope()
@@ -130,7 +134,7 @@ func TestChatStoreKeepsAnEnvSourceVerbatim(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.AppendTurn(ctx, session.ID, user.ID, "env:SHOP_PG_URL", Turn{Queries: []QueryResult{{Title: "Orders", DTQL: "from: {name: orders}", SourceID: "shop", Result: secureread.Result{Columns: []string{"id"}}}}}); err != nil {
+	if _, err := store.AppendTurn(ctx, session.ID, user.ID, "env:SHOP_PG_URL", Turn{Queries: []QueryResult{{Title: "Orders", TugQL: "from: {name: orders}", SourceID: "shop", Result: secureread.Result{Columns: []string{"id"}}}}}); err != nil {
 		t.Fatal(err)
 	}
 	restored, err := store.Load(ctx, session.ID)

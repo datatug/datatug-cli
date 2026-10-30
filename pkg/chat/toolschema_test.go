@@ -27,6 +27,7 @@ type toolSchemaFixture struct {
 }
 
 func TestArgsSchemaCoversEveryFieldShape(t *testing.T) {
+	t.Parallel()
 	raw := argsSchema(toolSchemaFixture{})
 	var schema map[string]any
 	if err := json.Unmarshal(raw, &schema); err != nil {
@@ -83,6 +84,7 @@ func TestArgsSchemaCoversEveryFieldShape(t *testing.T) {
 // loop (t = t.Elem()): the same struct schema must come out whether called
 // with a value or a pointer to it.
 func TestArgsSchemaDereferencesPointerRoot(t *testing.T) {
+	t.Parallel()
 	value := argsSchema(toolSchemaFixture{})
 	pointer := argsSchema(&toolSchemaFixture{})
 	if string(value) != string(pointer) {
@@ -91,6 +93,7 @@ func TestArgsSchemaDereferencesPointerRoot(t *testing.T) {
 }
 
 func TestStructSchemaPanicsOnNonStruct(t *testing.T) {
+	t.Parallel()
 	defer func() {
 		r := recover()
 		if r == nil || !strings.Contains(r.(string), "is not a struct") {
@@ -105,6 +108,7 @@ func TestStructSchemaPanicsOnNonStruct(t *testing.T) {
 // never builds an unmarshalable shape, so there is no real struct that
 // reaches this branch honestly.
 func TestArgsSchemaPanicsOnMarshalFailure(t *testing.T) {
+	// Not parallel: mutates package-level marshalToolSchema seam.
 	restore := marshalToolSchema
 	t.Cleanup(func() { marshalToolSchema = restore })
 	marshalErr := errors.New("boom")
@@ -119,6 +123,7 @@ func TestArgsSchemaPanicsOnMarshalFailure(t *testing.T) {
 }
 
 func TestFieldSchemaPanicsOnUnsupportedKind(t *testing.T) {
+	t.Parallel()
 	type unsupported struct {
 		Ch chan int `json:"ch"`
 	}

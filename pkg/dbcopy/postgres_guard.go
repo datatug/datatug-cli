@@ -203,8 +203,13 @@ func (s *sharedPostgres) ListSchemaViews(ctx context.Context, schema string) ([]
 	return guarded[[]dal.CollectionRef](s.hint)(s.Database.ListSchemaViews(ctx, schema))
 }
 
+var postgresAsSourceViewReader = func(db *dalgo2postgres.Database) (dbschema.SourceViewReader, bool) {
+	reader, ok := any(db).(dbschema.SourceViewReader)
+	return reader, ok
+}
+
 func (s *sharedPostgres) ListSourceViews(ctx context.Context) ([]dbschema.SourceViewDef, error) {
-	reader, ok := any(s.Database).(dbschema.SourceViewReader)
+	reader, ok := postgresAsSourceViewReader(s.Database)
 	if !ok {
 		return nil, dal.ErrNotSupported
 	}

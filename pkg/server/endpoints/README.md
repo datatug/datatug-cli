@@ -14,8 +14,13 @@ request; see `RequestGuard` in `request_guard.go`):
 - the `Host` of the request is one that the server was started for: `localhost`, `127.0.0.1`
   or `::1`, or the host given with `--host`, on the port that the server listens on;
 - the `Origin` of the request, when it has one, is on the list of the `OPTIONS` handler
-  (`IsSupportedOrigin`: `localhost` and `127.0.0.1` pages, `https://datatug.app` and its
-  subdomains, `https://app.incidentius.com`);
+  (`IsSupportedOrigin`: exactly `https://datatug.app`, and the host `datatug.localhost` over
+  `http` or `https` with no port or a numeric one, for local UI development; nothing else, no
+  flag adds one);
+- unless the server was built without an access secret (tests only), the request carries the
+  session token (`Authorization: Bearer`), except a preflight and `POST /datatug/session/exchange`,
+  which trades the one-time code of a link for the token (see `pkg/agentaccess`); a request without
+  it is a `401`;
 - the `Sec-Fetch-Site` of the request, when it has one, is `same-origin`, `same-site` or `none`,
   or its `Origin` is on the list.
 
@@ -31,6 +36,65 @@ the loopback names, and no other name: the host a client reaches it by has to be
 The live connection to a database server is a capability that is off by default (see
 `GET /dbserver-databases` below): `datatug serve --allow-live-connections`.
 
+## Record lookup
+
+`POST /datatug/records/lookup` reads at most one row of a table of a registered source by its primary key,
+through the same policy-enforced executor as every other read (a denied principal gets `403 ACCESS_DENIED`
+and no data). It is not registered in write-only mode and needs no write capability.
+
+Request: `{"project","env","source","schema","table","key":{"<pkCol>":<value>}}`. `schema` may be `""`;
+no other field may be left out; unknown fields are refused. `project`, `env` and `source` are plain
+names and the source is looked up in the registry of the environment (there is no default source);
+`schema` and `table` hold no `://`, path separator or control character. A refused field is a `400`
+that does not echo its value, and nothing is looked up.
+
+`key` names exactly the declared primary-key columns of the table, read live from the source (a source
+that was never scanned works), with a string, or a number or string that is an exact integer literal for
+an integer column (an optional `-` and digits, no `+`, space, leading zero, fraction or exponent; it must
+fit int64). An integer is read from its literal text, never through a float, so `9007199254740993` opens
+that record and not its neighbour. Values are bound as query parameters; identifiers come from the live
+schema only. A key that does not fit (unknown, non-key, missing or extra column, `null`, object, array,
+boolean, wrong type, a key type that is not integer or string, a table with no primary key) is
+`400 INVALID_REQUEST` with `field: "key"` and a message that does not quote the request, and no query is
+issued.
+
+The access decision (the session's policies, on the collection) is made before the source is opened or
+its schema read, on both routes: a principal the policy refuses gets one `403 ACCESS_DENIED` whether the
+table exists or not and whatever the key looks like. Only the default schema of the driver (or no schema)
+names a table; any other `schema` is `404 NOT_FOUND` with `field: "schema"`, so the queried object is
+always the object the policy decided on. A key column that appears twice in `key` is a bad key.
+
+An integer key above 2^53 - 1 reads up to 64 candidates (SQLite compares numbers as floats) and keeps the
+row whose key is exactly equal. If none is exact and the candidates cannot be compared (a key column the
+policy masks, or returned as a float or bytes) or the 64 are all used (keys above about 2^60), the answer is
+`500 INTERNAL`, never `404` and never a neighbour.
+
+Response `200`: the contract `Result` of `semantic/related/rows` and `exec/run_query`
+(`recordset` with one row of typed values, `limitations`, `provenance`). Errors are the contract envelope:
+`NOT_FOUND` with `field` `project`, `source`, `table` or `key` (record not found), `400
+INVALID_REQUEST` / `MISSING_PARAMETER`, `ACCESS_DENIED`, `SOURCE_UNAVAILABLE`, `TIMEOUT`. The body, the
+key and the row are never logged.
+
+`POST /datatug/records/schema` takes the same body without `key` and answers
+`{"source","schema","table","columns":[{"name","type"}],"primaryKey":[...],"referencedBy":[...],"foreignKeys":[...]}`.
+It reads no row. `foreignKeys` lists the outgoing foreign keys of the table, read live from the source's own
+catalog by its driver (`pragma_foreign_key_list` for SQLite, `pg_catalog` for PostgreSQL; identifiers come from
+the schema only and nothing of the request is interpolated): `{"name","columns":[...],"refTable":{"schema","name"},
+"refColumns":[...]}`, with `columns` and `refColumns` in matching positions (composite keys keep their order).
+`refTable.schema` is the schema the reference is in: the one the source reports for another schema, else the
+schema of the request, else the default schema of the driver (`main` for SQLite, `public` for PostgreSQL), so it
+is never empty on those drivers. A key whose referenced table is in another schema than the default one, or
+that the principal may not read (the same access decision as for the table asked about), is left out, as is
+the same table in `referencedBy`: an allowed table never reveals the name or columns of a denied one. A key
+whose `columns` and `refColumns` differ in length is left out. SQLite names no constraint: its `name` is
+synthesized (`<table>_fk_<id>`) and is not a constraint name of the database. A table with no foreign key, or a source that
+reports none, answers `[]`, never `null`. Both routes make the same access decision first, so a denied
+principal gets the identical `403` and learns nothing of the schema.
+
+A key value that is a boolean or a non-integer number is a `400` bad-key on the lookup: the lookup binds strings
+and exact integers only (a float is never compared for equality, and the structured SQLite read binds no boolean).
+`datatug daemon url --record` refuses those kinds with exit `2` for the same reason.
+
 ## Endpoints
 
 | Method | Path | Description |
@@ -38,6 +102,8 @@ The live connection to a database server is a capability that is off by default 
 |  **Executor** |
 | POST   | /exec/execute | Executes a batch of commands |
 | GET | /exec/select | Executes a single non mutating SELECT command |
+| POST | /records/lookup | One record by the typed values of its declared primary key; read-only, see [Record lookup](#record-lookup) |
+| POST | /records/schema | The live schema (columns and types, primary key, referencing tables) of one table of a registered source, read from the source and not from a scan |
 |  **Entities** |
 | GET | /entities/all_entities | |
 | GET | /entities/entity | |
@@ -52,7 +118,7 @@ The live connection to a database server is a capability that is off by default 
 | POST | /queries/create_query | Legacy create-or-replace; needs `--allow-writes` and a project-write grant for the serving principal |
 | PUT | /queries/update_query | Legacy create-or-replace; same authorization as create_query |
 | DELETE | /queries/delete_query | Needs `--allow-writes` and a project-write grant |
-| POST | /queries/capture | Save as project query: an atomic, revision-checked create (`ifNoneMatch`) or update (`ifMatch`) of a DTQL query pair; same authorization |
+| POST | /queries/capture | Save as project query: an atomic, revision-checked create (`ifNoneMatch`) or update (`ifMatch`) of a TugQL query pair; same authorization |
 |  **Recordsets** |
 | GET | /data/recordsets | |
 | GET | /data/recordset_definition | |

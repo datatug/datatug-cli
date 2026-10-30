@@ -97,9 +97,9 @@ func TestSourceURLFromCatalog_PostgresRefusesWhatItCannotTrust(t *testing.T) {
 }
 
 func TestSourceURLFromCatalog_UnsupportedDriverListsPostgres(t *testing.T) {
-	_, err := sourceURLFromCatalog(datatug.DbCatalog{DbCatalogBase: datatug.DbCatalogBase{Driver: "oracle", Path: "/a"}}, "")
+	_, err := sourceURLFromCatalog(datatug.DbCatalog{DbCatalogBase: datatug.DbCatalogBase{Driver: "unsupported-driver", Path: "/a"}}, "")
 	require.Error(t, err)
-	for _, want := range []string{`"oracle"`, "sqlite3", "ingitdb", "openvaultdb", "postgres"} {
+	for _, want := range []string{`"unsupported-driver"`, "sqlite3", "ingitdb", "openvaultdb", "postgres"} {
 		assert.Contains(t, err.Error(), want)
 	}
 }
@@ -181,4 +181,13 @@ func TestListSources_LeavesOutAPostgresCatalogWhoseVariableDoesNotResolve(t *tes
 	sources, err := ListSources(context.Background(), store, dir, "prod")
 	require.NoError(t, err)
 	assert.Empty(t, sources, "a source that cannot be resolved is not offered")
+}
+
+func TestSourceURLFromCatalog_Firestore(t *testing.T) {
+	dir := t.TempDir()
+	writeDescriptor(t, dir, "firestore.json", `{"dsnEnv":"DATATUG_FIRESTORE_SOURCE_URL"}`)
+	t.Setenv("DATATUG_FIRESTORE_SOURCE_URL", "firestore://demo-project/named-db")
+	source, err := sourceURLFromCatalog(datatug.DbCatalog{DbCatalogBase: datatug.DbCatalogBase{Driver: "firestore", Path: "firestore.json"}}, dir)
+	require.NoError(t, err)
+	assert.Equal(t, "env:DATATUG_FIRESTORE_SOURCE_URL", source)
 }

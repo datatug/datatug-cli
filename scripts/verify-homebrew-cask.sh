@@ -3,7 +3,8 @@
 #
 # usage: verify-homebrew-cask.sh [--warn-only] <release-tag>
 #
-# Downloads the release's checksums file from $GITHUB_REPOSITORY, reads
+# Downloads the release's checksums file from RELEASE_REPO when set, otherwise
+# GITHUB_REPOSITORY, reads
 # Casks/datatug.rb from the public tap, and hands both to check-homebrew-cask.sh.
 # A read can fail for a moment, so the whole read-and-compare is retried. The
 # final message says whether the tap could not be read or was read and is not
@@ -18,7 +19,9 @@
 #     "current" is an ::error:: line and a non-zero exit, so a manual publish
 #     that did not reach the tap is a failed run.
 #
-# Environment: GITHUB_REPOSITORY (required), GH_TOKEN (for gh), and for tests
+# Environment: RELEASE_REPO (optional public asset repository), GITHUB_REPOSITORY
+# (fallback asset repository and publisher workflow location), GH_TOKEN (for gh),
+# and for tests
 # GH (the gh command, default gh), ATTEMPTS (default 5), INTERVAL (seconds
 # between attempts, default 30).
 #
@@ -50,9 +53,10 @@ if [[ $# -ne 1 ]]; then
 fi
 
 tag="$1"
-repo="${GITHUB_REPOSITORY:-}"
+repo="${RELEASE_REPO:-${GITHUB_REPOSITORY:-}}"
+publisher_repo="${GITHUB_REPOSITORY:-datatug/datatug-cli}"
 if [[ -z "$repo" ]]; then
-  finish 2 "GITHUB_REPOSITORY is not set, so the Homebrew tap was not compared with $tag."
+  finish 2 "Neither RELEASE_REPO nor GITHUB_REPOSITORY is set, so the Homebrew tap was not compared with $tag."
 fi
 gh="${GH:-gh}"
 attempts="${ATTEMPTS:-5}"
@@ -96,9 +100,9 @@ for ((attempt = 1; attempt <= attempts; attempt++)); do
 done
 
 if [[ "$reason" == "read" ]]; then
-  finish 1 "could not check whether the Homebrew tap is current: could not read datatug/homebrew-tap or the $tag checksums after $attempts attempts. Check Casks/datatug.rb by hand."
+  finish 1 "could not check whether the Homebrew tap is current: could not read datatug/homebrew-tap or the $repo $tag checksums after $attempts attempts. Check Casks/datatug.rb by hand."
 fi
 if [[ $warn_only -eq 1 ]]; then
-  finish 1 "the Homebrew tap is behind the release $tag ($detail). Homebrew installs get an older version until someone starts the workflow \"Publish latest packages\" (Actions tab of $repo, on main)."
+  finish 1 "the Homebrew tap is behind the release $tag ($detail). Homebrew installs get an older version until someone starts the workflow \"Publish latest packages\" (Actions tab of $publisher_repo, on main)."
 fi
 finish 1 "the Homebrew tap does not carry the release $tag after publishing ($detail). Homebrew installs would get an older version: check datatug/homebrew-tap Casks/datatug.rb."

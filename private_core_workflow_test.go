@@ -1,0 +1,108 @@
+package main
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+)
+
+func TestPrivateCoreCredentialMatchesOnlyExactRepository(t *testing.T) {
+	data, err := os.ReadFile(".github/actions/private-core/action.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	action := string(data)
+	for _, value := range []string{"uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510", "client-id: Iv23li26w131Kv6u3IdM", "owner: datatug", "repositories: datatug-core", "permission-contents: read"} {
+		if !strings.Contains(action, value) {
+			t.Fatalf("missing scoped App input %s", value)
+		}
+	}
+	start := strings.Index(action, "      run: |\n")
+	if start < 0 {
+		t.Fatal("missing credential script")
+	}
+	script := strings.ReplaceAll(action[start+len("      run: |\n"):], "        ", "")
+	temp := filepath.Join(t.TempDir(), "runner temp")
+	if err := os.Mkdir(temp, 0700); err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(temp, "home")
+	if err := os.Mkdir(home, 0700); err != nil {
+		t.Fatal(err)
+	}
+	gitConfig := filepath.Join(temp, "core-test.gitconfig")
+	gitEnv := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "XDG_CONFIG_HOME=" + filepath.Join(home, "xdg"), "GIT_CONFIG_GLOBAL=" + gitConfig, "GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0"}
+	run := exec.Command("bash", "-c", script)
+	// Neither setup nor lookup may inherit this checkout's credential helpers.
+	run.Dir = temp
+	run.Env = append(append([]string{}, gitEnv...), "RUNNER_TEMP="+temp, "GITHUB_JOB=test", "RUNNER_OS="+os.Getenv("RUNNER_OS"), "GITHUB_ENV="+filepath.Join(temp, "env"), "CORE_READ_TOKEN=TEST_READ_TOKEN")
+	if out, err := run.CombinedOutput(); err != nil {
+		t.Fatalf("credential setup failed: %v %s", err, out)
+	}
+	for _, repo := range []string{"datatug/datatug-core", "datatug/datatug-core.git", "datatug/datatug-core-tools", "other/datatug-core", "datatug/datatug"} {
+		command := exec.Command("git", "credential", "fill")
+		command.Dir = temp
+		command.Env = gitEnv
+		command.Stdin = strings.NewReader("protocol=https\nhost=github.com\npath=" + repo + "\n\n")
+		out, err := command.CombinedOutput()
+		exact := repo == "datatug/datatug-core" || repo == "datatug/datatug-core.git"
+		if exact && (err != nil || !strings.Contains(string(out), "username=x-access-token") || !strings.Contains(string(out), "password=TEST_READ_TOKEN")) {
+			t.Fatalf("exact Core credential lookup failed for %s: %v", repo, err)
+		}
+		if !exact && (err == nil || strings.Contains(string(out), "TEST_READ_TOKEN") || strings.Contains(string(out), "username=x-access-token")) {
+			t.Fatalf("Core credential exposed to %s", repo)
+		}
+	}
+}
+
+func TestPrivateCoreAuthPrecedesEveryLocalGoJob(t *testing.T) {
+	data, err := os.ReadFile(".github/workflows/golangci.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow := string(data)
+	jobs := regexp.MustCompile(`(?m)^  [a-zA-Z0-9_-]+:\n`).Split(workflow, -1)
+	count := 0
+	for _, job := range jobs {
+		if !strings.Contains(job, "uses: actions/setup-go@v7") {
+			continue
+		}
+		count++
+		auth := strings.Index(job, "uses: ./.github/actions/private-core")
+		setup := strings.Index(job, "uses: actions/setup-go@v7")
+		if auth < 0 || auth > setup {
+			t.Fatal("Go job fetches dependencies before private Core authentication")
+		}
+	}
+	if count != 4 {
+		t.Fatalf("expected four independently authenticated Go jobs, got %d", count)
+	}
+	if !strings.Contains(workflow, "GOPRIVATE: github.com/datatug/datatug-core") {
+		t.Fatal("private Core could reach public module proxy")
+	}
+	release, err := os.ReadFile(".github/workflows/release.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseJob := readWorkflow(t, "release.yml").Jobs["release"]
+	gates, _ := releaseJob.With["require_workflow_success"].(string)
+	for _, gate := range []string{"Go CI", "Native release builds"} {
+		found := false
+		for _, configured := range strings.Split(gates, "\n") {
+			if strings.TrimSpace(configured) == gate {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("release must require exact-head %s workflow", gate)
+		}
+	}
+	for _, required := range []string{"goprivate_github_app_repositories: datatug-core", "GOPRIVATE_GITHUB_APP_PRIVATE_KEY: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}", `bash scripts/publish-datatug-release.sh "$TAG" "datatug/datatug-cli" "datatug/datatug"`, "require_notarized_macos: true"} {
+		if !strings.Contains(string(release), required) {
+			t.Fatalf("release invariant missing: %s", required)
+		}
+	}
+}

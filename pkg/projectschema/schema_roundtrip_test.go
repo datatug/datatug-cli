@@ -52,7 +52,7 @@ func TestQueryRoundTripsThroughStaticSchema(t *testing.T) {
 	// definition marks required (datatug.QueryDef embeds ProjectItem, whose
 	// ValidateWithOptions(true) requires id and title; QueryDef.Validate's
 	// own switch requires type).
-	wantData := map[string]any{"id": "q1", "title": "Query 1", "type": "SQL"}
+	wantData := map[string]any{"createdAt": "2026-01-01T00:00:00Z", "id": "q1", "title": "Query 1", "type": "SQL"}
 	err = db.RunReadwriteTransaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
 		return tx.Set(ctx, record.NewRecordWithData(queryKey, wantData))
 	})
@@ -88,7 +88,7 @@ func TestQueryRoundTripsThroughStaticSchema(t *testing.T) {
 	if !ok {
 		t.Fatalf("read back data is %T, want map[string]any", got.Data())
 	}
-	for _, field := range []string{"id", "title", "type"} {
+	for _, field := range []string{"id", "title", "type", "createdAt"} {
 		if gotData[field] != wantData[field] {
 			t.Errorf("read back %s = %v, want %v", field, gotData[field], wantData[field])
 		}

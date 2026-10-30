@@ -9,6 +9,7 @@ import (
 )
 
 func TestUnifiedWorkspaceAggregateDefaultsExecuteReviewedScopeAndReloadTypes(t *testing.T) {
+	t.Parallel()
 	for _, original := range []bool{false, true} {
 		name := "Matching source"
 		if original {

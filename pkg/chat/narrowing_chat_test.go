@@ -64,6 +64,7 @@ func askNarrowed(t *testing.T, prompt string, options ...Option) (ai.ChatRequest
 // The decision narrows the schema context before the AI conversation is created,
 // and the model receives only the selected tables: a materially smaller context.
 func TestConversationPassesOnlyTheSelectedTablesToTheModel(t *testing.T) {
+	t.Parallel()
 	baseline, baselineTurn := askNarrowed(t, narrowingQuestion)
 	if baselineTurn.Narrowing != nil {
 		t.Fatalf("a conversation without narrowing recorded a decision: %+v", baselineTurn.Narrowing)
@@ -107,6 +108,7 @@ func TestConversationPassesOnlyTheSelectedTablesToTheModel(t *testing.T) {
 // With the decider disabled, timing out, uncertain, uncalibrated or stopped, the
 // chat behaves exactly as today: the model receives the very same request.
 func TestConversationFallsBackToTheFullSchemaExactlyAsToday(t *testing.T) {
+	t.Parallel()
 	baseline, _ := askNarrowed(t, narrowingQuestion)
 	tests := []struct {
 		name        string
@@ -157,6 +159,7 @@ func (o orderingProvider) Stream(ctx context.Context, req ai.ChatRequest) iter.S
 }
 
 func TestNarrowingRunsBeforeTheModelIsAsked(t *testing.T) {
+	t.Parallel()
 	var events []string
 	provider := orderingProvider{&events, &scriptedProvider{steps: []scriptedStep{{text: "ok"}}}}
 	conversation, err := NewAIConversation(provider, &fakeExecutor{}, "sqlite:///chinook.db", chinookFullSchema(), WithTableNarrowing(orderingNarrower{&events}))
@@ -172,6 +175,7 @@ func TestNarrowingRunsBeforeTheModelIsAsked(t *testing.T) {
 }
 
 func TestNarrowingWithBrowserInterpretationUsesTheBrowserInstruction(t *testing.T) {
+	t.Parallel()
 	req, _ := askNarrowed(t, narrowingQuestion, WithBrowserInterpretation(), WithTableNarrowing(chinookNarrower(t, narrowingScorer(narrowingMusicSales))))
 	if !strings.HasPrefix(req.System, "You are DataTug Chat. For each data question") || strings.Contains(req.System, "- Track (") {
 		t.Fatalf("system = %q", req.System)
@@ -179,6 +183,7 @@ func TestNarrowingWithBrowserInterpretationUsesTheBrowserInstruction(t *testing.
 }
 
 func TestWithTableNarrowingRequiresANarrower(t *testing.T) {
+	t.Parallel()
 	if _, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///x.db", "", WithTableNarrowing(nil)); err == nil {
 		t.Fatal("a nil narrower was accepted")
 	}
@@ -186,6 +191,7 @@ func TestWithTableNarrowingRequiresANarrower(t *testing.T) {
 
 // A failed turn keeps its decision: provenance does not depend on success.
 func TestFailedTurnKeepsTheNarrowingDecision(t *testing.T) {
+	t.Parallel()
 	llm := &scriptedProvider{steps: []scriptedStep{{err: &ai.Error{Code: ai.ErrCodeUpstream, Message: "model down"}}}}
 	conversation, err := NewAIConversation(llm, &fakeExecutor{}, "sqlite:///chinook.db", chinookFullSchema(), WithTableNarrowing(chinookNarrower(t, narrowingScorer(narrowingMusicSales))))
 	if err != nil {
@@ -200,6 +206,7 @@ func TestFailedTurnKeepsTheNarrowingDecision(t *testing.T) {
 // The decision and its engine are written to the session and to telemetry, with
 // the candidates before and after.
 func TestSessionAndTelemetryRecordTheDecision(t *testing.T) {
+	t.Parallel()
 	for _, streaming := range []bool{false, true} {
 		t.Run(fmt.Sprintf("streaming=%v", streaming), func(t *testing.T) {
 			ctx := context.Background()
@@ -217,7 +224,10 @@ func TestSessionAndTelemetryRecordTheDecision(t *testing.T) {
 			sessions.ConfigureTelemetry(reporter, ai.ClientContext{InstallationID: "550e8400-e29b-41d4-a716-446655440000"})
 			if streaming {
 				seq, finish := sessions.StreamAsk(ctx, narrowingQuestion)
-				for range seq {
+				for _, streamErr := range seq {
+					if streamErr != nil {
+						t.Fatal(streamErr)
+					}
 				}
 				if _, err := finish(); err != nil {
 					t.Fatal(err)
@@ -270,6 +280,7 @@ func TestSessionAndTelemetryRecordTheDecision(t *testing.T) {
 
 // A turn whose model failed still records the decision in the session.
 func TestSessionRecordsTheDecisionOfAFailedTurn(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	llm := &scriptedProvider{steps: []scriptedStep{{err: &ai.Error{Code: ai.ErrCodeUpstream, Message: "model down"}}}}
@@ -291,6 +302,7 @@ func TestSessionRecordsTheDecisionOfAFailedTurn(t *testing.T) {
 }
 
 func TestClearAndDeleteRemoveNarrowingDecisions(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	count := func() int {
@@ -325,6 +337,7 @@ func TestClearAndDeleteRemoveNarrowingDecisions(t *testing.T) {
 }
 
 func TestNarrowingStorageFailures(t *testing.T) {
+	// Not parallel: mutates package-level store and JSON seams.
 	ctx := context.Background()
 	t.Run("schema creation fails when the store opens", func(t *testing.T) {
 		original := dbExec

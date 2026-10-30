@@ -12,7 +12,7 @@ import (
 // --env takes the ID of an environment, and a source string can be typed there.
 // Every message of resolveQueryDatabase names the environment only when it is a
 // plain name, and carries the loader's error, which quotes the path the ID
-// became, only then.
+// became, only then. A source string is refused before the store is read at all.
 func TestResolveQueryDatabase_NamesTheEnvironmentOnlyWhenItIsAPlainName(t *testing.T) {
 	const typed = "sqlite://carol:pw-Zk39x@host.example/x"
 	loaderError := errors.New("open /project/environments/entry: no such file or directory")
@@ -40,9 +40,13 @@ func TestResolveQueryDatabase_NamesTheEnvironmentOnlyWhenItIsAPlainName(t *testi
 				t.Errorf("the loader's error is carried = %v, want %v: %v", !tc.wantCause, tc.wantCause, plainErr)
 			}
 
+			calls := tc.store.catalogsCalls
 			_, err := resolveQueryDatabase(context.Background(), tc.store, typed, &datatug.QueryDef{ID: "saved"})
-			if err == nil || !strings.Contains(err.Error(), tc.wantPhrase) {
-				t.Fatalf("error = %v, want one that says %q", err, tc.wantPhrase)
+			if err == nil || !strings.Contains(err.Error(), "must be a plain name") || !strings.Contains(err.Error(), "database catalogs") {
+				t.Fatalf("error = %v, want a refusal of a source string as an environment ID", err)
+			}
+			if tc.store.catalogsCalls != calls {
+				t.Errorf("the environment's catalogs were read %d time(s) for a source string: want none", tc.store.catalogsCalls-calls)
 			}
 			for _, part := range []string{"carol", "pw-Zk39x", "host.example", "/project/environments"} {
 				if strings.Contains(err.Error(), part) {

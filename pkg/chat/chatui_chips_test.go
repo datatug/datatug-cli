@@ -82,6 +82,7 @@ func runeIndex(s, substr string) int {
 // original test did (attachment count), not chatshell's own internal chip
 // state.
 func TestChatUIComposerAttachmentChipsCanBeFocusedClearedAndRestored(t *testing.T) {
+	t.Parallel()
 	u, _ := newChipTestChatUI(t)
 	u.shell.SetComposerText("Top 5 rows")
 	if !strings.Contains(ansi.Strip(u.shell.View().Content), "Customer") {
@@ -170,6 +171,7 @@ func TestChatUIComposerAttachmentChipsCanBeFocusedClearedAndRestored(t *testing.
 // the composer's chip area disappear back to zero rows once every chip is
 // gone, exercised here only through ChatUI's real attach/detach path.
 func TestChatUIComposerNeverWrapsChipsOverflowsInsteadWhenTheyDontFit(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	catalog := ProjectCatalog{ID: "chinook", Title: "Chinook"}
@@ -269,6 +271,7 @@ func firstChipRowLine(content string) (line int, ok bool) {
 // a different Type -- chatshell's own chips, or another product's, never
 // round-trip into a ContextReference.
 func TestReferenceFromChipRejectsForeignChips(t *testing.T) {
+	t.Parallel()
 	if _, ok := referenceFromChip(chatshell.Chip{ID: "no-ref", Label: "No ref"}); ok {
 		t.Fatal("a chip with a nil Ref should not resolve to a ContextReference")
 	}
@@ -285,6 +288,7 @@ func TestReferenceFromChipRejectsForeignChips(t *testing.T) {
 // shell hasn't been constructed (only reachable via a zero-value struct in
 // this package's own tests -- NewChatUI always sets it) must not panic.
 func TestSyncChipsWithoutShellIsANoop(t *testing.T) {
+	t.Parallel()
 	u := &ChatUI{}
 	u.syncChips() // must not panic
 }
@@ -294,6 +298,7 @@ func TestSyncChipsWithoutShellIsANoop(t *testing.T) {
 // SessionChat) -- attachment sync requires a durable session to persist
 // into, so it's simply skipped, matching NewSessionChatUI's absence here.
 func TestOnChipsChangeWithoutSessionsIsANoop(t *testing.T) {
+	t.Parallel()
 	u := NewChatUI(context.Background(), nil, "fake-model")
 	if cmd := u.OnChipsChange([]chatshell.Chip{{ID: "x"}}); cmd != nil {
 		t.Fatalf("OnChipsChange without sessions returned a non-nil cmd: %v", cmd)
@@ -308,6 +313,7 @@ func TestOnChipsChangeWithoutSessionsIsANoop(t *testing.T) {
 // restored/new chip whose Reference the catalog no longer recognizes
 // (attach fails: validateContextReference).
 func TestOnChipsChangeReportsDetachAndAttachErrors(t *testing.T) {
+	t.Parallel()
 	u, _ := newChipTestChatUI(t)
 	staleRef := ContextReference{Kind: "table", SourceID: "chinook-local", ObjectID: "main.NeverAttached", Title: "Never attached"}
 	// u.snapshot.Workspace.Attachments claims staleRef is attached, but the

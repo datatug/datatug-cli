@@ -11,11 +11,11 @@ status: Approved
 **Owner:** alex
 **Source Ideas:** —
 **Supersedes:** —
-**Implements:** specscore://github.com/datatug/datatug/feature/incidents
+**Implements:** specscore://github.com/datatug/backstage/feature/incidents
 
 ## Summary
 
-The **CLI Implementation** of the Incidents Capability (`specscore://github.com/datatug/datatug/feature/incidents`): first-class incident access for humans, scripts and AI agents through one singular resource namespace, `datatug incident`, on the same domain model and through the same server the Incidentius web UI uses. This Feature specifies only the CLI-specific surface — verbs, flags, output shapes, exit codes, id handling — not the event stream, projection semantics, assertion kinds or lifecycle rules, which are inherited unchanged from the Capability it `**Implements:**`.
+The **CLI Implementation** of the Incidents Capability (`specscore://github.com/datatug/backstage/feature/incidents`): first-class incident access for humans, scripts and AI agents through one singular resource namespace, `datatug incident`, on the same domain model and through the same server the Incidentius web UI uses. This Feature specifies only the CLI-specific surface — verbs, flags, output shapes, exit codes, id handling — not the event stream, projection semantics, assertion kinds or lifecycle rules, which are inherited unchanged from the Capability it `**Implements:**`.
 
 ## Problem
 

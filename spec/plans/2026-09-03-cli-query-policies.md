@@ -12,7 +12,7 @@ status: Implemented
 
 ## Summary
 
-Implement `datatug query run`: DTQL or `--from` input with query-parameter substitution, database opening by URL, policies discovered from the per-user directory with fail-closed defaults, principal and variables from flags, secured execution through `access.SecureReadSession` with the hidden-field reference check, rows to stdout in five formats, and the limitation report to stderr. All acceptance criteria are covered; none deferred.
+Implement `datatug query run`: TugQL or `--from` input with query-parameter substitution, database opening by URL, policies discovered from the per-user directory with fail-closed defaults, principal and variables from flags, secured execution through `access.SecureReadSession` with the hidden-field reference check, rows to stdout in five formats, and the limitation report to stderr. All acceptance criteria are covered; none deferred.
 
 ## Approach
 
@@ -41,11 +41,31 @@ The reusable core lives in `pkg/accesspolicies` (discovery, decoding, variable p
 ### Task 3: Query command
 
 **Id:** task-3
-**Verifies:** cli/query#ac:query-from-collection, cli/query#ac:query-file-stdin, cli/query#ac:input-mutually-exclusive, cli/query#ac:query-param-substituted, cli/query#ac:db-url-required, cli/query#ac:db-scheme-unsupported, cli/query#ac:rows-filtered-by-principal, cli/query#ac:fields-hidden, cli/query#ac:no-policies-warns, cli/query#ac:quiet-suppresses-report, cli/query#ac:denied-exit-5, cli/query#ac:formats, cli/query#ac:header-follows-request-order, cli/query#ac:numbers-plain, cli/query#ac:db-unopenable-exit-4
+**Verifies:** cli/query#ac:query-from-collection, cli/query#ac:query-file-stdin, cli/query#ac:input-mutually-exclusive, cli/query#ac:query-param-substituted, cli/query#ac:db-url-required, cli/query#ac:db-scheme-unsupported, cli/query#ac:db-project-reference, cli/query#ac:rows-filtered-by-principal, cli/query#ac:fields-hidden, cli/query#ac:no-policies-warns, cli/query#ac:quiet-suppresses-report, cli/query#ac:denied-exit-5, cli/query#ac:formats, cli/query#ac:header-follows-request-order, cli/query#ac:numbers-plain, cli/query#ac:db-unopenable-exit-4, cli/query#ac:limit-caps-rows, cli/query#ac:offset-pages-rows
 **Depends-On:** 2
 **Status:** complete
 
-`cmd_query.go`: the `query` group and `run` verb, flags, DTQL/`--from`, `dbcopy` URL backend, exit codes 2/4/5/1, row normalisation and the five formats.
+`cmd_query.go`: the `query` group and `run` verb, flags, TugQL/`--from`, `dbcopy` URL backend, exit codes 2/4/5/1, row normalisation and the five formats.
+
+### Task 4: Result files
+
+**Id:** task-4
+**Verifies:** cli/query#ac:result-columns-in-source-order, cli/query#ac:result-prompt-annotated, cli/query#ac:result-files-written, cli/query#ac:result-rows-capped, cli/query#ac:result-meta-describes-the-run, cli/query#ac:results-pruned-and-removed
+**Depends-On:** 3
+**Status:** complete
+
+`query_result_order_test.go` verifies source column order and saved results; `query_result_annotate_test.go` verifies annotation and preservation of result metadata.
+
+`pkg/queryresults` (store, collector, `meta.json` types), `--result-id`/`--result-rows` on both forms of `query run`, the path-free locator and failure lines, and `query results locate|check|prune|rm`; the Git checks moved from `pkg/executionstore` to `pkg/gitpath`.
+
+### Task 5: Result sources, related tables and declared column facts
+
+**Id:** task-5
+**Verifies:** cli/query#ac:result-sources-and-related
+**Depends-On:** 4
+**Status:** complete
+
+`pkg/joinmeta` (relation instances, and the foreign-key snapshot read through `dbschema` for every engine, shared with the chat, whose SQLite-only gate is gone), and the `meta.json` builder for ad-hoc, saved TugQL, federated, native SQL and HTTP results.
 
 ## Open Questions
 

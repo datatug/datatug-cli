@@ -122,9 +122,9 @@ func (s *rowStore) Close() error {
 	}
 	var closeErr error
 	if s.db != nil {
-		closeErr = s.db.Close()
+		closeErr = dbClose(s.db)
 	}
-	removeErr := os.RemoveAll(s.tempDir)
+	removeErr := osRemoveAll(s.tempDir)
 	if removeErr != nil {
 		removeErr = errors.New("comparison temporary row files could not be removed")
 	}
@@ -132,23 +132,23 @@ func (s *rowStore) Close() error {
 }
 
 func newRowStore(keyed bool) (*rowStore, error) {
-	dir, err := os.MkdirTemp("", "datatug-compare-")
+	dir, err := osMkdirTemp("", "datatug-compare-")
 	if err != nil {
 		return nil, errors.New("could not create comparison row staging")
 	}
 	path := filepath.Join(dir, "rows.sqlite")
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+	file, err := osOpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
 	if err != nil {
-		_ = os.RemoveAll(dir)
+		_ = osRemoveAll(dir)
 		return nil, errors.New("could not create comparison row spool")
 	}
-	if err := file.Close(); err != nil {
-		_ = os.RemoveAll(dir)
+	if err := fileClose(file); err != nil {
+		_ = osRemoveAll(dir)
 		return nil, errors.New("could not initialize comparison row spool")
 	}
-	db, err := sql.Open("sqlite", path)
+	db, err := sqlOpen("sqlite", path)
 	if err != nil {
-		_ = os.RemoveAll(dir)
+		_ = osRemoveAll(dir)
 		return nil, errors.New("could not open comparison row spool")
 	}
 	db.SetMaxOpenConns(1)
@@ -159,9 +159,9 @@ func newRowStore(keyed bool) (*rowStore, error) {
 		`PRAGMA synchronous = OFF`,
 		`CREATE TABLE staged_rows(sort_key BLOB NOT NULL, payload BLOB NOT NULL)`,
 	} {
-		if _, err := db.Exec(statement); err != nil {
-			_ = db.Close()
-			_ = os.RemoveAll(dir)
+		if _, err := dbExec(db, statement); err != nil {
+			_ = dbClose(db)
+			_ = osRemoveAll(dir)
 			return nil, errors.New("could not initialize comparison row spool")
 		}
 	}
@@ -293,7 +293,7 @@ func Compare(ctx context.Context, leftName string, left dal.DB, rightName string
 			perRelationLimit = 0
 		}
 		columns := relationColumns(leftRelation.def, rightRelation.def)
-		counts, details, limited, err := diffRows(ctx, leftRows, rightRows, columns, key, perRelationLimit)
+		counts, details, limited, err := diffRowsFn(ctx, leftRows, rightRows, columns, key, perRelationLimit)
 		closeErr := errors.Join(leftRows.Close(), rightRows.Close())
 		if err != nil {
 			return report, fmt.Errorf("compare rows in collection %q: %w", name, err)
@@ -322,7 +322,7 @@ func Compare(ctx context.Context, leftName string, left dal.DB, rightName string
 }
 
 func inspect(ctx context.Context, db dal.DB, querySchema string) (relationInventory, error) {
-	refs, err := dbschema.ListCollections(ctx, db, nil)
+	refs, err := dbschemaListCollections(ctx, db, nil)
 	if err != nil {
 		return relationInventory{}, fmt.Errorf("list collections: %w", err)
 	}
@@ -361,7 +361,7 @@ func inspect(ctx context.Context, db dal.DB, querySchema string) (relationInvent
 		if _, duplicate := inventory.collections[name]; duplicate {
 			return relationInventory{}, fmt.Errorf("source returned duplicate collection %q", name)
 		}
-		definition, describeErr := dbschema.DescribeCollection(ctx, db, &ref)
+		definition, describeErr := dbschemaDescribeCollection(ctx, db, &ref)
 		if describeErr != nil {
 			return relationInventory{}, fmt.Errorf("describe %q: %w", name, describeErr)
 		}
@@ -383,7 +383,7 @@ func inspect(ctx context.Context, db dal.DB, querySchema string) (relationInvent
 			}
 			fieldNames[fieldName] = true
 		}
-		indexes, indexErr := dbschema.ListIndexes(ctx, db, &ref)
+		indexes, indexErr := dbschemaListIndexes(ctx, db, &ref)
 		if indexErr != nil {
 			if errors.Is(indexErr, dal.ErrNotSupported) {
 				inventory.warnings = append(inventory.warnings, fmt.Sprintf("index metadata for %s is unsupported by the source adapter; index differences were not compared", name))
@@ -761,11 +761,11 @@ func readRows(ctx context.Context, db dal.DB, ref dal.CollectionRef, own dbschem
 			_ = store.Close()
 		}
 	}()
-	tx, err := store.db.BeginTx(ctx, nil)
+	tx, err := txBegin(ctx, store.db)
 	if err != nil {
 		return nil, errors.New("could not begin comparison row staging")
 	}
-	statement, err := tx.PrepareContext(ctx, `INSERT INTO staged_rows(sort_key, payload) VALUES (?, ?)`)
+	statement, err := txPrepare(ctx, tx, `INSERT INTO staged_rows(sort_key, payload) VALUES (?, ?)`)
 	if err != nil {
 		_ = tx.Rollback()
 		return nil, errors.New("could not prepare comparison row staging")
@@ -805,15 +805,15 @@ func readRows(ctx context.Context, db dal.DB, ref dal.CollectionRef, own dbschem
 		if len(keyCells) > 0 {
 			sortValues = keyCells
 		}
-		sortKey, err := json.Marshal(sortValues)
+		sortKey, err := jsonMarshal(sortValues)
 		if err != nil {
 			return errors.New("could not encode normalized comparison key")
 		}
-		payload, err := json.Marshal(stagedRow{Values: cells})
+		payload, err := jsonMarshal(stagedRow{Values: cells})
 		if err != nil {
 			return errors.New("could not encode normalized comparison row")
 		}
-		if _, err := statement.ExecContext(ctx, sortKey, payload); err != nil {
+		if _, err := stmtExecContext(ctx, statement, sortKey, payload); err != nil {
 			return errors.New("could not stage normalized comparison row")
 		}
 		store.count++
@@ -844,7 +844,7 @@ func readRows(ctx context.Context, db dal.DB, ref dal.CollectionRef, own dbschem
 			}
 		}
 	} else {
-		reader, err := db.ExecuteQueryToRecordsReader(ctx, dal.NewQueryBuilder(dal.From(ref)).SelectIntoRecordset())
+		reader, err := dbExecuteQueryToRecordsReader(ctx, db, dal.NewQueryBuilder(dal.From(ref)).SelectIntoRecordset())
 		if err != nil {
 			sourceErr = fmt.Errorf("open row reader: %w", err)
 		} else {
@@ -877,14 +877,14 @@ func readRows(ctx context.Context, db dal.DB, ref dal.CollectionRef, own dbschem
 		_ = tx.Rollback()
 		return nil, sourceErr
 	}
-	if err := statement.Close(); err != nil {
+	if err := stmtClose(statement); err != nil {
 		_ = tx.Rollback()
 		return nil, errors.New("could not finish comparison row staging")
 	}
-	if err := tx.Commit(); err != nil {
+	if err := txCommit(tx); err != nil {
 		return nil, errors.New("could not commit comparison row staging")
 	}
-	if _, err := store.db.ExecContext(ctx, `CREATE INDEX staged_rows_sort ON staged_rows(sort_key)`); err != nil {
+	if _, err := dbExecContext(ctx, store.db, `CREATE INDEX staged_rows_sort ON staged_rows(sort_key)`); err != nil {
 		return nil, errors.New("could not index comparison row staging")
 	}
 	cleanupOnError = false
@@ -942,10 +942,10 @@ func normalizeValueForSource(field dbschema.FieldDef, dialect, declared string, 
 			return normalizedValue{}, fmt.Errorf("unsupported decimal value %T", raw)
 		}
 		rat := new(big.Rat)
-		if _, ok := rat.SetString(value); !ok {
+		if _, ok := ratSetString(rat, value); !ok {
 			return normalizedValue{}, fmt.Errorf("invalid decimal value")
 		}
-		canonical, ok := canonicalDecimal(rat)
+		canonical, ok := canonicalDecimalFn(rat)
 		if !ok {
 			return normalizedValue{}, fmt.Errorf("decimal value has no finite decimal representation")
 		}
@@ -1007,7 +1007,7 @@ func canonicalDecimal(value *big.Rat) (string, bool) {
 	if powers[1] > scale {
 		scale = powers[1]
 	}
-	text := value.FloatString(scale)
+	text := floatString(value, scale)
 	if strings.Contains(text, ".") {
 		text = strings.TrimRight(strings.TrimRight(text, "0"), ".")
 	}
@@ -1110,7 +1110,7 @@ func floatValue(value any) (float64, bool) {
 		return v, true
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 		text, _ := integerString(v)
-		i, ok := new(big.Int).SetString(text, 10)
+		i, ok := bigIntSetString(new(big.Int), text, 10)
 		if !ok {
 			return 0, false
 		}
@@ -1270,7 +1270,7 @@ func diffRows(ctx context.Context, left, right *rowStore, columns, key []string,
 	counts := DifferenceCounts{}
 	details := make([]RecordDiff, 0)
 	limited := false
-	for diff, err := range recordops.Diff[string](leftSeq, []recordops.RecordSeq[string]{rightSeq}, recordops.WithIncludeMatched()) {
+	for diff, err := range recordopsDiff(leftSeq, []recordops.RecordSeq[string]{rightSeq}, recordops.WithIncludeMatched()) {
 		if err != nil {
 			return counts, details, limited, err
 		}
@@ -1398,7 +1398,7 @@ func rowSequence(ctx context.Context, store *rowStore, columns []string) recordo
 		if store == nil {
 			return
 		}
-		rows, err := store.db.QueryContext(ctx, `SELECT sort_key, payload FROM staged_rows ORDER BY sort_key, rowid`)
+		rows, err := queryContext(ctx, store.db, `SELECT sort_key, payload FROM staged_rows ORDER BY sort_key, rowid`)
 		if err != nil {
 			var zero record.WithID[string]
 			yield(zero, errors.New("could not read comparison row spool"))

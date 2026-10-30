@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -12,16 +11,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/datatug/datatug-cli/pkg/schemers/mssqlschema"
-	"github.com/datatug/datatug-cli/pkg/schemers/sqliteschema"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dbconnection"
 	"github.com/datatug/datatug-core/pkg/dto"
 	"github.com/datatug/datatug-core/pkg/parallel"
-	"github.com/datatug/datatug-core/pkg/schemer"
 	"github.com/strongo/slice"
 	"github.com/strongo/validation"
-	_ "modernc.org/sqlite" // registers the pure-Go "sqlite" driver sqliteScanDriver names
 )
 
 // ProjectLoader defines an interface to load project info
@@ -58,7 +53,11 @@ func loggedTarget(params dbconnection.Params) string {
 // connection URL that stays in an environment variable: a project is pushed to places the
 // URL must never reach, so its server is the driver and nothing else.
 func serverHasHost(driver string) bool {
-	return driver != dbconnection.DriverSQLite3 && driver != DriverPostgres
+	// CouchDB and PostgREST, like PostgreSQL, are reached through a connection
+	// descriptor: the project records the descriptor and the driver, never an
+	// endpoint. Non-secret host metadata may still be shown, but it must not become
+	// the bound source.
+	return driver != dbconnection.DriverSQLite3 && driver != DriverCouchDB && driver != DriverPostgREST && driver != DriverLibSQL && driver != DriverTypesense && !IsServerDriver(driver)
 }
 
 // ScannedServer is the server a scan of driver with dbConnParams reads, as the project
@@ -209,29 +208,7 @@ func updateProjectWithDbCatalog(project *datatug.Project, envID string, dbServer
 		return fmt.Errorf("new db catalog is invalid: %w", err)
 	}
 	// Update environment
-	{
-		if environment := project.Environments.GetByID(envID); environment == nil {
-			environment = &datatug.Environment{
-				ProjectItem: datatug.ProjectItem{
-					ProjItemBrief: datatug.ProjItemBrief{ID: envID},
-				},
-				DbServers: datatug.EnvDbServers{
-					{
-						ServerRef: dbServerRef,
-						Catalogs:  []string{dbCatalog.ID},
-					},
-				},
-			}
-			project.Environments = append(project.Environments, environment)
-		} else if envDbServer := environment.DbServers.GetByServerRef(dbServerRef); envDbServer == nil {
-			environment.DbServers = append(environment.DbServers, &datatug.EnvDbServer{
-				ServerRef: dbServerRef,
-				Catalogs:  []string{dbCatalog.ID},
-			})
-		} else if i := slice.Index(envDbServer.Catalogs, dbCatalog.ID); i < 0 {
-			envDbServer.Catalogs = append(envDbServer.Catalogs, dbCatalog.ID)
-		}
-	}
+	addCatalogToEnvironments(&project.Environments, envID, dbServerRef, dbCatalog.ID)
 	// Update DB server
 	{
 		ctx := context.Background()
@@ -258,9 +235,9 @@ func updateProjectWithDbCatalog(project *datatug.Project, envID string, dbServer
 		for j, db := range projDbServer.Catalogs {
 			if db.ID == dbCatalog.ID {
 				// restore path as path might be normalized if pointing to user's directory.
-				// A PostgreSQL catalog's path is the connection descriptor the scan is writing
-				// now: the catalog and the descriptor are updated together, never apart.
-				if dbServerRef.Driver != DriverPostgres {
+				// A PostgreSQL, CouchDB or PostgREST catalog's path is the connection descriptor the scan is
+				// writing now: the catalog and the descriptor are updated together, never apart.
+				if !IsServerDriver(dbServerRef.Driver) && dbServerRef.Driver != DriverCouchDB && dbServerRef.Driver != DriverPostgREST && dbServerRef.Driver != DriverLibSQL && dbServerRef.Driver != DriverTypesense {
 					dbCatalog.Path = projDbServer.Catalogs[j].Path
 				}
 				// TODO: currently replaces catalog with new info, should merge to preserver comments
@@ -274,6 +251,39 @@ func updateProjectWithDbCatalog(project *datatug.Project, envID string, dbServer
 		}
 	}
 	return nil
+}
+
+// addCatalogToEnvironments records, in the environment envID of envs, that the server dbServerRef
+// holds the catalog catalogID: the environment is made when envs has none of that id, the server
+// is added when the environment does not list it, and the catalog is added to the server when it
+// does not list it. It is how the environment file of a scan, and of `db add`, lists a database.
+func addCatalogToEnvironments(envs *datatug.Environments, envID string, dbServerRef datatug.ServerRef, catalogID string) {
+	environment := envs.GetByID(envID)
+	if environment == nil {
+		*envs = append(*envs, &datatug.Environment{
+			ProjectItem: datatug.ProjectItem{
+				ProjItemBrief: datatug.ProjItemBrief{ID: envID},
+			},
+			DbServers: datatug.EnvDbServers{
+				{
+					ServerRef: dbServerRef,
+					Catalogs:  []string{catalogID},
+				},
+			},
+		})
+		return
+	}
+	envDbServer := environment.DbServers.GetByServerRef(dbServerRef)
+	if envDbServer == nil {
+		environment.DbServers = append(environment.DbServers, &datatug.EnvDbServer{
+			ServerRef: dbServerRef,
+			Catalogs:  []string{catalogID},
+		})
+		return
+	}
+	if slice.Index(envDbServer.Catalogs, catalogID) < 0 {
+		envDbServer.Catalogs = append(envDbServer.Catalogs, catalogID)
+	}
 }
 
 func newProjectWithDatabase(projectID, environment string, dbServer datatug.ServerRef, dbCatalog *datatug.DbCatalog) (project *datatug.Project, err error) {
@@ -324,12 +334,6 @@ func newProjectWithDatabase(projectID, environment string, dbServer datatug.Serv
 	log.Println("project.ID:", project.ID)
 	return project, err
 }
-
-// sqliteScanDriver is the database/sql driver a SQLite scan opens: modernc.org/sqlite,
-// which is pure Go and is the driver the rest of the CLI opens SQLite files with. A
-// release is built with cgo off, where the cgo driver registered as "sqlite3" is a
-// stub that fails on its first use.
-const sqliteScanDriver = "sqlite"
 
 // existingSQLiteFile is the path of the SQLite file connectionParams name, which
 // must be an existing file. A scan must not open a path that is not one: SQLite
@@ -410,10 +414,22 @@ func driverTitle(driver string) string {
 	switch driver {
 	case dbconnection.DriverSQLite3:
 		return "SQLite"
-	case "sqlserver":
+	case DriverSQLServer:
 		return "SQL Server"
 	case DriverPostgres:
 		return "PostgreSQL"
+	case DriverMySQL:
+		return "MySQL"
+	case DriverOracle:
+		return "Oracle"
+	case DriverCouchDB:
+		return "CouchDB"
+	case DriverPostgREST:
+		return "PostgREST"
+	case DriverLibSQL:
+		return "libSQL"
+	case DriverTypesense:
+		return "Typesense"
 	default:
 		return driver
 	}
@@ -426,52 +442,38 @@ func scanDbCatalog(server datatug.ServerRef, connectionParams dbconnection.Param
 
 // scanCatalog reads the catalog connectionParams name. What it leaves out of a
 // SQLite catalog, and why, is named on the warnings of ctx (see WithScanWarnings).
-func scanCatalog(ctx context.Context, server datatug.ServerRef, connectionParams dbconnection.Params) (dbCatalog *datatug.DbCatalog, err error) {
-	if server.Driver == DriverPostgres {
+func scanCatalog(ctx context.Context, server datatug.ServerRef, connectionParams dbconnection.Params) (*datatug.DbCatalog, error) {
+	if IsServerDriver(server.Driver) {
 		// PostgreSQL is read through DALgo's schema reader, and opened from an
 		// environment variable: there is no connection string to give database/sql.
-		return scanPostgresCatalog(ctx, connectionParams)
+		return scanPostgresCatalog(ctx, server.Driver, connectionParams)
 	}
-	var db *sql.DB
-
-	driverName := server.Driver
-	dsn := connectionParams.ConnectionString()
+	if server.Driver == DriverCouchDB {
+		// CouchDB is read through the same generic SchemaReader seam; the
+		// endpoint comes from an environment variable, never from a project.
+		return scanCouchDBCatalog(ctx, connectionParams)
+	}
+	if server.Driver == DriverPostgREST {
+		// PostgREST is read through the same generic SchemaReader seam; the API
+		// root comes from an environment variable, never from a project.
+		return scanPostgRESTCatalog(ctx, connectionParams)
+	}
+	if server.Driver == DriverLibSQL {
+		// libSQL is read through the same generic SchemaReader seam; the server
+		// base address comes from an environment variable, never from a project.
+		return scanLibSQLCatalog(ctx, connectionParams)
+	}
+	if server.Driver == DriverTypesense {
+		// Typesense is read through the same generic SchemaReader seam; the origin
+		// and the one collection come from an environment variable, never from a
+		// project, and the scoped key lives only in the operator's environment.
+		return scanTypesenseCatalog(ctx, connectionParams)
+	}
 	if server.Driver == dbconnection.DriverSQLite3 {
-		var path string
-		if path, err = existingSQLiteFile(connectionParams); err != nil {
-			return nil, err
-		}
-		driverName = sqliteScanDriver
-		dsn = sqliteReadOnlyDSN(path)
+		// SQLite is read through DALgo's schema reader too (dalgo2sqlite).
+		return scanSQLiteCatalog(ctx, connectionParams)
 	}
-	if db, err = sql.Open(driverName, dsn); err != nil {
-		return nil, fmt.Errorf("failed to open SQL db: %w", err)
-	}
-
-	// Close the database connection pool after command executes
-	defer func() { _ = db.Close() }()
-
-	//informationSchema := schemer.NewInformationSchema(server, db)
-
-	var scanner schemer.Scanner
-	switch server.Driver {
-	case "sqlserver":
-		scanner = schemer.NewScanner(mssqlschema.NewSchemaProvider(db))
-	case dbconnection.DriverSQLite3:
-		scanner = schemer.NewScanner(sqliteschema.NewSchemaProviderWithWarnings(func() (*sql.DB, error) { return db, nil }, scanWarningsFrom(ctx)))
-	default:
-		return nil, fmt.Errorf("unsupported DB driver: %v", server.Driver)
-	}
-
-	dbCatalog, err = scanner.ScanCatalog(ctx, connectionParams.Catalog())
-	if err != nil {
-		return dbCatalog, fmt.Errorf("failed to get dbCatalog metadata: %w", err)
-	}
-	dbCatalog.ID = connectionParams.Catalog()
-	//if database, err = informationSchema.GetDatabase(connectionParams.Database()); err != nil {
-	//	return nil, fmt.Errorf("failed to get database metadata: %w", err)
-	//}
-	return
+	return nil, fmt.Errorf("unsupported DB driver: %v", server.Driver)
 }
 
 func updateDbModelWithDbCatalog(envID string, dbModel *datatug.DbModel, dbCatalog *datatug.DbCatalog) (err error) {

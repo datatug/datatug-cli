@@ -86,6 +86,10 @@ var ErrLegacyQueryWriteConflict = errors.New("the query kept changing while it w
 // capture field at all, so a request's "capture" block never decodes and
 // is never stored.
 func saveLegacyQuery(ctx context.Context, storeID, projectID string, query *datatug.QueryDefWithFolderPath, mode legacyWriteMode) (*datatug.QueryDefWithFolderPath, error) {
+	if hasProjectMeaningRefs(query.SemanticModel) {
+		return nil, validation.NewBadRequestError(errors.New("canonical meanings require revisioned save_query"))
+	}
+
 	// The project is the one in the body of the request, which no route resolved a store
 	// for: it is a project this process serves, as for every other entry of that kind
 	// (see servedProjectDir), before anything is authorized or opened.

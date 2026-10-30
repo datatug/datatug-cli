@@ -20,7 +20,7 @@ func TestLocalConnectionCatalogIsAuthorizedFixedBoundedMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "connections", "demo-db.json")
-	valid := `{"format":"datatug-demo-connections/v1","connections":[{"id":"chinook-sqlite","dataset":"chinook","storage":"sqlite","readiness":"public-api","source":"https://demodb.dev/ovdb/v1/databases/chinook","fixtureSha256":"7651ba378ac2fcd0dfc3c66fb101f7a7eed3ba39a612ec642b96e20702061f15","browserFixture":{"url":"https://chinook.demodb.dev/data/chinook.sqlite","bytes":1007616},"password":"private-value"}],"credentials":{"apiKey":"private-value"}}`
+	valid := `{"format":"datatug-demo-connections/v1","connections":[{"id":"chinook-sqlite","dataset":"chinook","storage":"sqlite","readiness":"public-api","source":"https://demodb.dev/ovdb/v1/databases/chinook","fixtureSha256":"7651ba378ac2fcd0dfc3c66fb101f7a7eed3ba39a612ec642b96e20702061f15","browserFixture":{"url":"/assets/showcase/chinook.sqlite","bytes":1007616},"password":"private-value"}],"credentials":{"apiKey":"private-value"}}`
 	write := func(content string) {
 		t.Helper()
 		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
@@ -34,9 +34,9 @@ func TestLocalConnectionCatalogIsAuthorizedFixedBoundedMetadata(t *testing.T) {
 		t.Helper()
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "http://localhost/datatug/projects/connection_catalog?"+query, nil)
-		r.Header.Set("Origin", "http://localhost:4200")
+		r.Header.Set("Origin", "http://datatug.localhost:4200")
 		router.ServeHTTP(w, r)
-		if w.Code != want || w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Access-Control-Allow-Origin") != "http://localhost:4200" {
+		if w.Code != want || w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Access-Control-Allow-Origin") != "http://datatug.localhost:4200" {
 			t.Fatalf("status=%d headers=%v body=%s", w.Code, w.Header(), w.Body.String())
 		}
 		if strings.Contains(w.Body.String(), "private-value") || strings.Contains(w.Body.String(), dir) {
@@ -45,7 +45,7 @@ func TestLocalConnectionCatalogIsAuthorizedFixedBoundedMetadata(t *testing.T) {
 		return w
 	}
 	query := "storage=local&project=" + project
-	if got := request(query, http.StatusOK).Body.String(); !strings.Contains(got, `"fixtureSha256":"7651ba378ac2fcd0dfc3c66fb101f7a7eed3ba39a612ec642b96e20702061f15"`) || !strings.Contains(got, `"bytes":1007616`) {
+	if got := request(query, http.StatusOK).Body.String(); !strings.Contains(got, `"fixtureSha256":"7651ba378ac2fcd0dfc3c66fb101f7a7eed3ba39a612ec642b96e20702061f15"`) || !strings.Contains(got, `"url":"/assets/showcase/chinook.sqlite"`) || !strings.Contains(got, `"bytes":1007616`) {
 		t.Fatal("catalog lost actual source pins")
 	}
 	request(query+"&path=datatug-project.json", http.StatusBadRequest)

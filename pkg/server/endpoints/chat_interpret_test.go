@@ -16,8 +16,8 @@ func TestChatInterpretRejectsUnsafeRequests(t *testing.T) {
 		status             int
 	}{
 		{"bad origin", "https://example.com", body, http.StatusForbidden},
-		{"missing key", "http://localhost:4200", strings.Replace(body, "secret-test-key", "", 1), http.StatusBadRequest},
-		{"unknown field", "http://localhost:4200", strings.Replace(body, `"question":`, `"unexpected":1,"question":`, 1), http.StatusBadRequest},
+		{"missing key", "http://datatug.localhost:4200", strings.Replace(body, "secret-test-key", "", 1), http.StatusBadRequest},
+		{"unknown field", "http://datatug.localhost:4200", strings.Replace(body, `"question":`, `"unexpected":1,"question":`, 1), http.StatusBadRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := httptest.NewRequest(http.MethodPost, "/datatug/chat/interpret", strings.NewReader(tc.data))
@@ -91,13 +91,13 @@ func TestChatInterpretReturnsProviderUsage(t *testing.T) {
 		if r.URL.Path != "/v1/chat/completions" {
 			t.Errorf("provider path = %q", r.URL.Path)
 		}
-		arguments, _ := json.Marshal(map[string]string{"dtql": doc})
+		arguments, _ := json.Marshal(map[string]string{"tugql": doc})
 		toolCallChunk, _ := json.Marshal(map[string]any{
 			"model": "deepseek-flash",
 			"choices": []any{map[string]any{"index": 0, "delta": map[string]any{
 				"tool_calls": []any{map[string]any{
 					"index": 0, "id": "call_1", "type": "function",
-					"function": map[string]any{"name": "run_dtql", "arguments": string(arguments)},
+					"function": map[string]any{"name": "run_tugql", "arguments": string(arguments)},
 				}},
 			}}},
 		})
@@ -115,12 +115,12 @@ func TestChatInterpretReturnsProviderUsage(t *testing.T) {
 	defer provider.Close()
 	body := fmt.Sprintf(`{"question":"Show last 100 orders","schema":"main.Invoice: InvoiceId","provider":{"protocol":"openai-chat","baseUrl":%q,"model":"deepseek-flash","apiKey":"test-key"}}`, provider.URL)
 	r := httptest.NewRequest(http.MethodPost, "/datatug/chat/interpret", strings.NewReader(body))
-	r.Header.Set("Origin", "http://localhost:4305")
+	r.Header.Set("Origin", "http://datatug.localhost:4305")
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	chatInterpretHandler(w, r)
 	var response struct {
-		DTQL  string `json:"dtql"`
+		TugQL string `json:"tugql"`
 		Usage struct {
 			InputTokens  int64 `json:"inputTokens"`
 			OutputTokens int64 `json:"outputTokens"`
@@ -130,9 +130,9 @@ func TestChatInterpretReturnsProviderUsage(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatalf("response JSON: %v", err)
 	}
-	if w.Code != http.StatusOK || response.DTQL != doc || response.Usage.InputTokens != 121 ||
+	if w.Code != http.StatusOK || response.TugQL != doc || response.Usage.InputTokens != 121 ||
 		response.Usage.OutputTokens != 24 || response.Usage.TotalTokens != 145 ||
-		w.Header().Get("Access-Control-Allow-Origin") != "http://localhost:4305" {
+		w.Header().Get("Access-Control-Allow-Origin") != "http://datatug.localhost:4305" {
 		t.Fatalf("status=%d, response=%+v", w.Code, response)
 	}
 }

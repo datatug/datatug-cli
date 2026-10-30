@@ -15,11 +15,12 @@ import (
 )
 
 func TestChatUIEmptyToolResultRestoresAsGrid(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
 	llm := &scriptedProvider{steps: []scriptedStep{
-		{toolCalls: []ai.ToolCall{toolCall("1", toolRunDTQL, map[string]any{"dtql": "from: {name: Customer}\nlimit: 1"})}},
+		{toolCalls: []ai.ToolCall{toolCall("1", toolRunTugQL, map[string]any{"tugql": "from: {name: Customer}\nlimit: 1"})}},
 		{text: "No matching rows"},
 	}}
 	agent, err := NewAIConversation(llm, &fakeExecutor{result: secureread.Result{}}, "sqlite:///chinook.db", "- Customer")

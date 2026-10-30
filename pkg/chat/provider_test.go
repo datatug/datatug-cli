@@ -21,6 +21,7 @@ import (
 // as the migration brief specifies; the family name is still asserted here
 // because it drives which default base URL and API-key env var apply.
 func TestResolveProviderFamilyMatchesPiGo(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name          string
 		model         string
@@ -117,6 +118,7 @@ func TestResolveProviderFamilyMatchesPiGo(t *testing.T) {
 // must fail loudly (pi-go's Resolve behavior) rather than silently defaulting
 // to OpenAI's own API with the caller's name and credential.
 func TestNewLLMProviderErrorsOnUnknownModelWithoutBaseURL(t *testing.T) {
+	t.Parallel()
 	if _, err := NewLLMProvider("deepseek-flash", "", "key"); err == nil || !strings.Contains(err.Error(), "unknown model") {
 		t.Fatalf("NewLLMProvider(unknown, no base URL) = %v, want an unknown-model error", err)
 	}
@@ -126,6 +128,7 @@ func TestNewLLMProviderErrorsOnUnknownModelWithoutBaseURL(t *testing.T) {
 // ResolveWithBaseURL fallback: an explicit --base-url makes an otherwise
 // unrecognized model name an intentional custom OpenAI-compatible endpoint.
 func TestNewLLMProviderUnknownModelWithBaseURLIsCustomEndpoint(t *testing.T) {
+	t.Parallel()
 	provider, err := NewLLMProvider("deepseek-flash", "https://api.deepseek.com", "key")
 	if err != nil {
 		t.Fatalf("NewLLMProvider: %v", err)
@@ -140,6 +143,7 @@ func TestNewLLMProviderUnknownModelWithBaseURLIsCustomEndpoint(t *testing.T) {
 // or --base-url set, it must error naming the family, not silently pick some
 // other default.
 func TestNewLLMProviderAzureRequiresEndpoint(t *testing.T) {
+	// Not parallel: mutates environment variables.
 	// t.Setenv clears (and restores after the test) rather than merely
 	// reading, so this also isolates the assertion from whatever the host
 	// environment happens to have set.
@@ -153,6 +157,7 @@ func TestNewLLMProviderAzureRequiresEndpoint(t *testing.T) {
 // AZURE_OPENAI_ENDPOINT environment fallback for the base URL, used when
 // neither --base-url nor an AI profile supplies one.
 func TestNewLLMProviderAzureEndpointEnvFallback(t *testing.T) {
+	// Not parallel: mutates environment variables.
 	t.Setenv("AZURE_OPENAI_ENDPOINT", "https://my-resource.openai.azure.com")
 	provider, err := NewLLMProvider("azure/my-deployment", "", "key")
 	if err != nil {
@@ -168,6 +173,7 @@ func TestNewLLMProviderAzureEndpointEnvFallback(t *testing.T) {
 // AZURE_OPENAI_API_KEY, then AZURE_API_KEY): NewLLMProvider must not error
 // requiring an explicit key when any one of them is set.
 func TestNewLLMProviderAzureAPIKeyEnvFallbackChain(t *testing.T) {
+	// Not parallel: mutates environment variables.
 	for _, env := range []string{"AZURE_OPENAI_API_KEY"} {
 		t.Setenv(env, "azure-key")
 		if _, err := NewLLMProvider("azure/my-deployment", "https://my-resource.openai.azure.com", ""); err != nil {
@@ -183,6 +189,7 @@ func TestNewLLMProviderAzureAPIKeyEnvFallbackChain(t *testing.T) {
 // itself to keep the same override working. An explicit --base-url still
 // wins over the environment.
 func TestNewLLMProviderOpenAIAndAnthropicBaseURLEnvOverride(t *testing.T) {
+	// Not parallel: mutates environment variables.
 	t.Setenv("OPENAI_BASE_URL", "https://gateway.example.com/openai/v1")
 	if _, err := NewLLMProvider("gpt-4o", "", "key"); err != nil {
 		t.Fatalf("NewLLMProvider(gpt-4o) with OPENAI_BASE_URL set: %v", err)
@@ -210,6 +217,7 @@ func TestNewLLMProviderOpenAIAndAnthropicBaseURLEnvOverride(t *testing.T) {
 // Anthropic adapter, not OpenAI-compatible, while its "chat"/"responses"
 // models do not.
 func TestResolveEndpointM1Routing(t *testing.T) {
+	// Not parallel: mutates environment variables.
 	for _, tc := range []struct {
 		name              string
 		model, baseURL    string
@@ -302,6 +310,7 @@ func TestResolveEndpointM1Routing(t *testing.T) {
 }
 
 func TestNewLLMProviderRequiresModelName(t *testing.T) {
+	t.Parallel()
 	if _, err := NewLLMProvider("  ", "", "key"); err == nil || !strings.Contains(err.Error(), "model is required") {
 		t.Fatalf("err = %v, want a model-required error", err)
 	}
@@ -312,6 +321,7 @@ func TestNewLLMProviderRequiresModelName(t *testing.T) {
 // (see M1's table) must route to ai/openairesponses instead of
 // ai/openaicompat.
 func TestNewLLMProviderRoutesResponsesOnlyModel(t *testing.T) {
+	t.Parallel()
 	provider, err := NewLLMProvider("gpt-5-codex", "", "key")
 	if err != nil {
 		t.Fatalf("NewLLMProvider: %v", err)
@@ -322,6 +332,7 @@ func TestNewLLMProviderRoutesResponsesOnlyModel(t *testing.T) {
 }
 
 func TestEnsureV1AndStripTrailingV1ReturnRawOnParseError(t *testing.T) {
+	t.Parallel()
 	// A lone "%zz" is an invalid URL escape (net/url.Parse rejects it), the
 	// only realistic way to hit either helper's err != nil branch.
 	const malformed = "http://example.com/%zz"
@@ -337,6 +348,7 @@ func TestEnsureV1AndStripTrailingV1ReturnRawOnParseError(t *testing.T) {
 // already exercised indirectly through WithThinkingLevel's own "low"/error
 // cases in agent_test.go.
 func TestNormalizeReasoningLevels(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ level, want string }{
 		{"", ""},
 		{"  ", ""},
@@ -351,6 +363,7 @@ func TestNormalizeReasoningLevels(t *testing.T) {
 }
 
 func TestEnsureV1DoesNotAppendWhenPathAlreadyContainsV1(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ in, want string }{
 		{"https://api.deepseek.com", "https://api.deepseek.com/v1"},
 		{"https://api.openai.com/v1", "https://api.openai.com/v1"},

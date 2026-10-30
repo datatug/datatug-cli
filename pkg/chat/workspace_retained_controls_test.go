@@ -18,6 +18,7 @@ import (
 )
 
 func TestUnifiedWorkspaceBrowserFallbackAndBusyVisibleAtBothWidths(t *testing.T) {
+	t.Parallel()
 	for _, width := range []int{80, 150} {
 		u, _ := newTestChatUI(t, nil, Turn{})
 		u.shell.Update(tea.WindowSizeMsg{Width: width, Height: 30})
@@ -44,6 +45,7 @@ func TestUnifiedWorkspaceBrowserFallbackAndBusyVisibleAtBothWidths(t *testing.T)
 }
 
 func TestUnifiedWorkspaceBookmarkEscCancelsOneLayerWithoutMutation(t *testing.T) {
+	t.Parallel()
 	u, sessions := newTestChatUI(t, nil, Turn{})
 	session, ref := bookmarkableSelection(t, sessions.store)
 	if _, err := sessions.store.CreateBookmark(u.ctx, session.ID, ref, "Saved invoice selection"); err != nil {
@@ -76,6 +78,7 @@ func TestUnifiedWorkspaceBookmarkEscCancelsOneLayerWithoutMutation(t *testing.T)
 }
 
 func TestUnifiedWorkspaceMixedSQLiteNumbersSurviveStoreReloadAndLocalOperations(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "mixed.sqlite")
 	db, err := sql.Open("sqlite", path)
@@ -89,7 +92,7 @@ func TestUnifiedWorkspaceMixedSQLiteNumbersSurviveStoreReloadAndLocalOperations(
 	source := "sqlite://" + path
 	executor := secureread.NewExecutor(secureread.Session{Unrestricted: true})
 	document := "from: {schema: main, name: Mixed}\ncolumns: [{field: Id}, {field: Amount}]\norderBy: [{field: Id}]\nlimit: 10\n"
-	result, err := executor.RunDTQL(ctx, source, []byte(document), nil)
+	result, err := executor.RunTugQL(ctx, source, []byte(document), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +113,7 @@ func TestUnifiedWorkspaceMixedSQLiteNumbersSurviveStoreReloadAndLocalOperations(
 	if err != nil {
 		t.Fatal(err)
 	}
-	query, err := store.AppendQuery(ctx, sessions.activeID, user.ID, source, QueryResult{Title: "Mixed", DTQL: document, SourceID: scope.Database, Result: result})
+	query, err := store.AppendQuery(ctx, sessions.activeID, user.ID, source, QueryResult{Title: "Mixed", TugQL: document, SourceID: scope.Database, Result: result})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +146,7 @@ func TestUnifiedWorkspaceMixedSQLiteNumbersSurviveStoreReloadAndLocalOperations(
 	if previewErr != nil {
 		t.Fatal(previewErr)
 	}
-	_, _, executionErr := sessions.executeDerivedResult(ctx, sessions.activeID, parent.ID, operation, preview.DTQL)
+	_, _, executionErr := sessions.executeDerivedResult(ctx, sessions.activeID, parent.ID, operation, preview.TugQL)
 	if executionErr == nil {
 		t.Fatal("generic OriginalOutput grouping collapsed adjacent BIGINT values instead of refusing")
 	}
@@ -156,7 +159,7 @@ func TestUnifiedWorkspaceMixedSQLiteNumbersSurviveStoreReloadAndLocalOperations(
 	if previewErr != nil {
 		t.Fatal(previewErr)
 	}
-	_, nativeGroup, executionErr := sessions.executeDerivedResult(ctx, sessions.activeID, parent.ID, operation, preview.DTQL)
+	_, nativeGroup, executionErr := sessions.executeDerivedResult(ctx, sessions.activeID, parent.ID, operation, preview.TugQL)
 	if executionErr != nil || len(nativeGroup.Result.Rows) != 2 {
 		t.Fatalf("native SQL grouping failed exact adjacent BIGINT: %v %+v", executionErr, nativeGroup.Result.Rows)
 	}
@@ -171,6 +174,7 @@ func TestUnifiedWorkspaceMixedSQLiteNumbersSurviveStoreReloadAndLocalOperations(
 }
 
 func TestUnifiedWorkspaceUnsafePersistedNumericParametersRefuseWithoutAppending(t *testing.T) {
+	t.Parallel()
 	sessions, parent := derivedFixture(t)
 	for _, value := range []any{json.Number("9007199254740993"), int64(9007199254740993), json.Number("0.10000000000000000001")} {
 		parent.Parameters = map[string]any{"minimum": value}
@@ -184,7 +188,7 @@ func TestUnifiedWorkspaceUnsafePersistedNumericParametersRefuseWithoutAppending(
 		if err != nil {
 			t.Fatal(err)
 		}
-		query, err := sessions.store.AppendQuery(context.Background(), sessions.activeID, user.ID, parent.Source, QueryResult{Title: parent.Title, DTQL: parent.DTQL, Parameters: parent.Parameters, SourceID: parent.Database, Result: parent.Result})
+		query, err := sessions.store.AppendQuery(context.Background(), sessions.activeID, user.ID, parent.Source, QueryResult{Title: parent.Title, TugQL: parent.TugQL, Parameters: parent.Parameters, SourceID: parent.Database, Result: parent.Result})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -192,7 +196,7 @@ func TestUnifiedWorkspaceUnsafePersistedNumericParametersRefuseWithoutAppending(
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, _, err = sessions.executeDerivedResult(context.Background(), sessions.activeID, query.RecordSetID, operation, preview.DTQL)
+		_, _, err = sessions.executeDerivedResult(context.Background(), sessions.activeID, query.RecordSetID, operation, preview.TugQL)
 		if err == nil {
 			t.Fatalf("unsafe numeric parameter %T executed successfully", value)
 		}
@@ -204,9 +208,10 @@ func TestUnifiedWorkspaceUnsafePersistedNumericParametersRefuseWithoutAppending(
 }
 
 func TestUnifiedWorkspaceExplorerDetailsScrollAndResetThroughShell(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	query := "first-query-line\n" + strings.Repeat("middle-query-line\n", 35) + "last-query-line"
-	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "query", ObjectID: "q", Title: "Saved report"}, QueryType: "DTQL", QueryText: query}}}
+	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "query", ObjectID: "q", Title: "Saved report"}, QueryType: "TugQL", QueryText: query}}}
 	u.shell.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	u.shell.FocusLeftPanel()
 	for i, node := range u.explorer.explorerNodes() {
@@ -232,7 +237,8 @@ func TestUnifiedWorkspaceExplorerDetailsScrollAndResetThroughShell(t *testing.T)
 }
 
 func TestUnifiedWorkspaceQuickLoadedSortChordsAndModalOwnership(t *testing.T) {
-	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Items", DTQL: "from: {schema: main, name: Item}\nlimit: 2\n", Result: secureread.Result{Columns: []string{"Id"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 2}}, {Data: map[string]any{"Id": 1}}}}})
+	t.Parallel()
+	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Items", TugQL: "from: {schema: main, name: Item}\nlimit: 2\n", Result: secureread.Result{Columns: []string{"Id"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 2}}, {Data: map[string]any{"Id": 1}}}}})
 	g, record, _ := u.activeGrid()
 	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "table", ObjectID: "main.Item", SourceID: record.Database}, Columns: []string{"Id"}, ColumnTypes: map[string]string{"Id": "INTEGER"}}}}
 	selected := g.sourceRowKey()
@@ -252,6 +258,7 @@ func TestUnifiedWorkspaceQuickLoadedSortChordsAndModalOwnership(t *testing.T) {
 }
 
 func TestUnifiedWorkspaceModalHelpReturnsToRetainedGroupChoices(t *testing.T) {
+	t.Parallel()
 	sessions, _ := derivedFixture(t)
 	u, err := NewSessionChatUI(context.Background(), sessions, "none")
 	if err != nil {
@@ -278,6 +285,7 @@ func TestUnifiedWorkspaceModalHelpReturnsToRetainedGroupChoices(t *testing.T) {
 }
 
 func TestUnifiedWorkspaceQuickServerSortOpensExactPreviewWithoutExecution(t *testing.T) {
+	t.Parallel()
 	sessions, _ := derivedFixture(t)
 	u, err := NewSessionChatUI(context.Background(), sessions, "none")
 	if err != nil {
@@ -314,6 +322,7 @@ func clickWorkspaceText(t *testing.T, u *ChatUI, label string) tea.Cmd {
 }
 
 func TestUnifiedWorkspaceToolbarTogglePreservesContextFeedbackAndModalPriority(t *testing.T) {
+	t.Parallel()
 	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Items", Result: secureread.Result{Columns: []string{"Id"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 1}}}}})
 	u.shell.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	u.shell.FocusComposer()
@@ -356,6 +365,7 @@ func TestUnifiedWorkspaceToolbarTogglePreservesContextFeedbackAndModalPriority(t
 }
 
 func TestUnifiedWorkspaceMouseGroupChoicesAndQueryEditorControls(t *testing.T) {
+	t.Parallel()
 	sessions, _ := derivedFixture(t)
 	u, err := NewSessionChatUI(context.Background(), sessions, "none")
 	if err != nil {
@@ -395,6 +405,7 @@ func TestUnifiedWorkspaceMouseGroupChoicesAndQueryEditorControls(t *testing.T) {
 }
 
 func TestUnifiedWorkspaceOriginalOutputRefusesInexactArithmeticBeforeChildPersistence(t *testing.T) {
+	t.Parallel()
 	sessions, _ := derivedFixture(t)
 	ctx := context.Background()
 	db, err := sql.Open("sqlite", strings.TrimPrefix(sessions.source, "sqlite://"))
@@ -408,7 +419,7 @@ func TestUnifiedWorkspaceOriginalOutputRefusesInexactArithmeticBeforeChildPersis
 	for _, function := range []string{"sum", "avg"} {
 		document := "from: {schema: main, name: Item}\ncolumns: [{aggregate: {function: " + function + ", args: [{field: Value}]}, as: total}]\nlimit: 10\n"
 		executor := secureread.NewExecutor(secureread.Session{Unrestricted: true})
-		native, err := executor.RunDTQL(ctx, sessions.source, []byte(document), nil)
+		native, err := executor.RunTugQL(ctx, sessions.source, []byte(document), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -416,7 +427,7 @@ func TestUnifiedWorkspaceOriginalOutputRefusesInexactArithmeticBeforeChildPersis
 		if err != nil {
 			t.Fatal(err)
 		}
-		query, err := sessions.store.AppendQuery(ctx, sessions.activeID, origin.ID, sessions.source, QueryResult{Title: function, SourceID: sessions.catalog.Objects[0].Reference.SourceID, DTQL: document, Result: native})
+		query, err := sessions.store.AppendQuery(ctx, sessions.activeID, origin.ID, sessions.source, QueryResult{Title: function, SourceID: sessions.catalog.Objects[0].Reference.SourceID, TugQL: document, Result: native})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -429,7 +440,7 @@ func TestUnifiedWorkspaceOriginalOutputRefusesInexactArithmeticBeforeChildPersis
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err = sessions.executeDerivedResult(ctx, sessions.activeID, query.RecordSetID, operation, preview.DTQL); err == nil || !strings.Contains(err.Error(), "SUM/AVG") {
+		if _, _, err = sessions.executeDerivedResult(ctx, sessions.activeID, query.RecordSetID, operation, preview.TugQL); err == nil || !strings.Contains(err.Error(), "SUM/AVG") {
 			t.Fatalf("%s arithmetic did not refuse explicitly: %v", function, err)
 		}
 		after, err := sessions.Snapshot(ctx)
@@ -440,6 +451,7 @@ func TestUnifiedWorkspaceOriginalOutputRefusesInexactArithmeticBeforeChildPersis
 }
 
 func TestUnifiedWorkspaceHeaderSessionPickerAndExpandAreClickable(t *testing.T) {
+	t.Parallel()
 	sessions, _ := derivedFixture(t)
 	u, err := NewSessionChatUI(context.Background(), sessions, "none")
 	if err != nil {

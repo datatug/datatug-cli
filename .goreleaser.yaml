@@ -18,7 +18,9 @@ builds:
   - id: datatug-unix
     main: .
     binary: datatug
-    env: [ CGO_ENABLED=0 ]
+    env: [ CGO_ENABLED=1 ]
+    tool: python3
+    command: scripts/native-release-go.py
     goos: [ linux, darwin ]
     goarch: [ amd64, arm64 ]
     ldflags:
@@ -30,7 +32,9 @@ builds:
   - id: datatug-windows
     main: .
     binary: datatug
-    env: [ CGO_ENABLED=0 ]
+    env: [ CGO_ENABLED=1 ]
+    tool: python3
+    command: scripts/native-release-go.py
     goos: [ windows ]
     goarch: [ amd64 ]
     ldflags:
@@ -85,6 +89,13 @@ notarize:
         key: "{{ .Env.NOTARIZE_KEY }}"
         timeout: 20m
 
+# GoReleaser publishes to THIS repository (datatug/datatug-cli), the only one
+# the job's GITHUB_TOKEN can write to. The shared release workflow drafts the
+# release here, then verifies, promotes and smoke-tests it from
+# $GITHUB_REPOSITORY. The publish-datatug-release job in release.yml then
+# copies the promoted release to the public hub repository datatug/datatug,
+# which is where `datatug self-update` looks. Pointing this block at
+# datatug/datatug fails with 403 "Resource not accessible by integration".
 release:
   github:
     owner: datatug

@@ -16,6 +16,7 @@ import (
 )
 
 func TestInferChartCandidatesRanksSemanticCategoriesAndOrderedLines(t *testing.T) {
+	t.Parallel()
 	stats := secureread.RecordSetStatistics{RowCount: 100, Columns: []secureread.ColumnStatistics{
 		{Name: "InvoiceId", NonNullCount: 100, Cardinality: 100, Types: secureread.TypeObservations{Number: 100}, Frequencies: []secureread.ValueFrequency{{Label: "1", Count: 1}}},
 		{Name: "Country", NonNullCount: 100, Cardinality: 40, Types: secureread.TypeObservations{String: 100}, Frequencies: []secureread.ValueFrequency{{Label: "Brazil", Count: 10}, {Label: "USA", Count: 15}}},
@@ -51,6 +52,7 @@ func TestInferChartCandidatesRanksSemanticCategoriesAndOrderedLines(t *testing.T
 }
 
 func TestCategoricalTopTenAndDeterministicTies(t *testing.T) {
+	t.Parallel()
 	frequencies := make([]secureread.ValueFrequency, 12)
 	for i := range frequencies {
 		frequencies[i] = secureread.ValueFrequency{Label: string(rune('A' + i)), Count: 2}
@@ -70,6 +72,7 @@ func TestCategoricalTopTenAndDeterministicTies(t *testing.T) {
 }
 
 func TestDateLineBucketsToMonthsDeterministically(t *testing.T) {
+	t.Parallel()
 	buckets := make([]secureread.DateBucket, 61)
 	for i := range buckets {
 		month, day := 1, i+1
@@ -90,6 +93,7 @@ func dateLabel(year, month, day int) string {
 }
 
 func TestIncompleteFrequenciesNeverClaimExactTopTen(t *testing.T) {
+	t.Parallel()
 	stats := secureread.RecordSetStatistics{RowCount: 5000, Columns: []secureread.ColumnStatistics{{Name: "Country", NonNullCount: 5000, Cardinality: 4096, CardinalityIncomplete: true, FrequenciesIncomplete: true, Frequencies: []secureread.ValueFrequency{{Label: "USA", Count: 10}}}}}
 	if got := InferChartCandidates(stats); len(got) != 0 {
 		t.Fatalf("incomplete data generated false exact chart: %+v", got)
@@ -97,6 +101,7 @@ func TestIncompleteFrequenciesNeverClaimExactTopTen(t *testing.T) {
 }
 
 func TestInferChartCandidatesKeepsSameDayDatetimeCountAndSumLines(t *testing.T) {
+	t.Parallel()
 	stats := secureread.RecordSetStatistics{RowCount: 2, Columns: []secureread.ColumnStatistics{{
 		Name: "Timestamp", NonNullCount: 2, Cardinality: 2, Types: secureread.TypeObservations{Datetime: 2},
 		DateBuckets: []secureread.DateBucket{{Bucket: "2026-09-21T10:00:00Z", Count: 1}, {Bucket: "2026-09-21T11:00:00Z", Count: 1}},
@@ -121,6 +126,7 @@ func TestInferChartCandidatesKeepsSameDayDatetimeCountAndSumLines(t *testing.T) 
 }
 
 func TestInferChartCandidatesRendersMixedDateAndDatetimeSameDayLines(t *testing.T) {
+	t.Parallel()
 	stats := secureread.RecordSetStatistics{RowCount: 2, Columns: []secureread.ColumnStatistics{{
 		Name: "Timestamp", NonNullCount: 2, Cardinality: 2, Types: secureread.TypeObservations{Date: 1, Datetime: 1},
 		DateBuckets: []secureread.DateBucket{{Bucket: "2026-09-21", Count: 1}, {Bucket: "2026-09-21T10:00:00Z", Count: 1}},
@@ -150,6 +156,7 @@ func TestInferChartCandidatesRendersMixedDateAndDatetimeSameDayLines(t *testing.
 }
 
 func TestInferChartCandidatesRejectsCollapsedMixedDateAndDatetimeMidnightLines(t *testing.T) {
+	t.Parallel()
 	stats := secureread.RecordSetStatistics{RowCount: 2, Columns: []secureread.ColumnStatistics{{
 		Name: "Timestamp", NonNullCount: 2, Cardinality: 2, Types: secureread.TypeObservations{Date: 1, Datetime: 1},
 		DateBuckets: []secureread.DateBucket{{Bucket: "2026-09-21", Count: 1}, {Bucket: "2026-09-21T00:00:00Z", Count: 1}},
@@ -164,6 +171,7 @@ func TestInferChartCandidatesRejectsCollapsedMixedDateAndDatetimeMidnightLines(t
 }
 
 func TestDatetimeChartBucketsKeepSameDayPrecisionAndCrossDayDateAggregation(t *testing.T) {
+	t.Parallel()
 	sameDay := make([]secureread.DateBucket, 61)
 	for i := range sameDay {
 		stamp := time.Date(2026, 9, 21, 10, 0, 0, 0, time.UTC).Add(time.Duration(i) * time.Minute).Format(time.RFC3339)
@@ -198,6 +206,7 @@ func TestDatetimeChartBucketsKeepSameDayPrecisionAndCrossDayDateAggregation(t *t
 }
 
 func TestInferChartCandidatesRejectsOverflowedGroupedDateSums(t *testing.T) {
+	t.Parallel()
 	buckets := make([]secureread.DateNumericBucket, 61)
 	for i := range buckets {
 		month, day := 9, i+1
@@ -217,6 +226,7 @@ func TestInferChartCandidatesRejectsOverflowedGroupedDateSums(t *testing.T) {
 }
 
 func TestChartInferenceEdgeCases(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		stats secureread.RecordSetStatistics
@@ -245,6 +255,7 @@ func TestChartInferenceEdgeCases(t *testing.T) {
 }
 
 func TestNTChartsAdapterRendersSupportedSpecs(t *testing.T) {
+	t.Parallel()
 	for _, spec := range []ChartSpec{
 		{Kind: ChartBar, Measure: "Rows", Points: []ChartPoint{{Label: "Brazil", Value: 5}, {Label: "USA", Value: 3}}},
 		{Kind: ChartLine, Bucket: "day", Points: []ChartPoint{{Label: "2013-01-01", Value: 5}, {Label: "2013-01-02", Value: 3}}},
@@ -265,6 +276,7 @@ func TestNTChartsAdapterRendersSupportedSpecs(t *testing.T) {
 }
 
 func TestNTChartsAdapterKeepsHistoricalLineRangeAndBarLabels(t *testing.T) {
+	t.Parallel()
 	historical := renderChart(ChartSpec{
 		Kind:   ChartLine,
 		Bucket: "day",
@@ -290,12 +302,13 @@ func TestNTChartsAdapterKeepsHistoricalLineRangeAndBarLabels(t *testing.T) {
 }
 
 func TestChinookInvoiceChartsUseRealDALgoRows(t *testing.T) {
+	t.Parallel()
 	path, err := filepath.Abs(filepath.Join("..", "dbcopy", "testdata", "chinook.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	doc := []byte("from: {name: Invoice}\ncolumns:\n  - field: InvoiceDate\n  - field: Total\norderBy:\n  - field: InvoiceId\n    desc: true\nlimit: 100\n")
-	result, err := secureread.NewExecutor(secureread.Session{Unrestricted: true}).RunDTQL(context.Background(), "sqlite://"+path, doc, nil)
+	result, err := secureread.NewExecutor(secureread.Session{Unrestricted: true}).RunTugQL(context.Background(), "sqlite://"+path, doc, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

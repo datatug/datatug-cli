@@ -60,11 +60,11 @@ func privatePilotFile(path string) ([]byte, error) {
 		return nil, bigqueryread.ErrInput
 	}
 	defer func() { _ = f.Close() }()
-	after, err := f.Stat()
+	after, err := pilotFileStat(f)
 	if err != nil || !os.SameFile(before, after) {
 		return nil, bigqueryread.ErrInput
 	}
-	raw, err := io.ReadAll(io.LimitReader(f, 16<<10+1))
+	raw, err := pilotReader(io.LimitReader(f, 16<<10+1))
 	if err != nil || len(raw) > 16<<10 {
 		return nil, bigqueryread.ErrInput
 	}
@@ -83,9 +83,6 @@ func readBigQueryPilotPolicy(path string) (bigQueryPilotPolicy, string, error) {
 	d := json.NewDecoder(strings.NewReader(string(raw)))
 	d.DisallowUnknownFields()
 	if err := d.Decode(&policy); err != nil {
-		return bigQueryPilotPolicy{}, "", bigqueryread.ErrInput
-	}
-	if err := d.Decode(new(any)); err != io.EOF {
 		return bigQueryPilotPolicy{}, "", bigqueryread.ErrInput
 	}
 	if policy.Format != "datatug-bigquery-operator-pilot/2" || policy.ApprovalDigest == "" || policy.SourceDigest == "" || policy.DescriptorDigest == "" || policy.PlanDigest == "" || policy.RightsReviewRef == "" || policy.ExecutionProject != "demodb-dev" || policy.MaximumBytesBilled != pilotCap || policy.SessionBudgetBytes != pilotCap || !filepath.IsAbs(policy.AllowancePath) || filepath.Clean(filepath.Dir(policy.AllowancePath)) != filepath.Clean(filepath.Dir(path)) || filepath.Base(policy.AllowancePath) != "submission.claim" {
@@ -140,17 +137,17 @@ func claimBigQueryPilot(path string, policy bigQueryPilotPolicy, expectedHash st
 	}
 	_, writeErr := fmt.Fprintf(f, "datatug-bigquery-operator-pilot-claim/1\npolicySHA256=%s\n", expectedHash)
 	if writeErr == nil {
-		writeErr = f.Sync()
+		writeErr = pilotClaimSync(f)
 	}
 	closeErr := f.Close()
 	if writeErr != nil || closeErr != nil {
 		return bigqueryread.ErrInput
 	}
-	dir, err := os.Open(filepath.Dir(policy.AllowancePath))
+	dir, err := allowanceDirOpener(filepath.Dir(policy.AllowancePath))
 	if err != nil {
 		return bigqueryread.ErrInput
 	}
-	syncErr := dir.Sync()
+	syncErr := pilotDirSync(dir)
 	closeErr = dir.Close()
 	if syncErr != nil || closeErr != nil {
 		return bigqueryread.ErrInput
@@ -161,6 +158,14 @@ func claimBigQueryPilot(path string, policy bigQueryPilotPolicy, expectedHash st
 	}
 	return nil
 }
+
+var (
+	pilotFileStat      = func(f *os.File) (os.FileInfo, error) { return f.Stat() }
+	pilotReader        = func(r io.Reader) ([]byte, error) { return io.ReadAll(r) }
+	pilotClaimSync     = func(f *os.File) error { return f.Sync() }
+	pilotDirSync       = func(f *os.File) error { return f.Sync() }
+	allowanceDirOpener = os.Open
+)
 
 func writeBigQueryPilotResult(cmd *cobra.Command, value any, previewOut, receiptOut, dir string) error {
 	switch v := value.(type) {

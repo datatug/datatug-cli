@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
 
@@ -158,14 +159,17 @@ func (s *Store) transaction(ctx context.Context, fn dal.RWTxWorker) error {
 	})
 }
 
-// SQLite schema setup contends with live writers too. Retry only BUSY/LOCKED,
-// using the caller's bound for the whole bootstrap or transaction operation.
+// SQLite operations contend with live writers. Retry only BUSY/LOCKED, using
+// the caller's bound for the whole bootstrap, transaction, or standalone read.
 func retrySQLiteBusy(ctx context.Context, operation func() error) error {
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		err := operation()
+		if errors.Is(err, errSQLiteReadCleanup) {
+			return err
+		}
 		var code interface{ Code() int }
 		if !errors.As(err, &code) || (code.Code()&255 != 5 && code.Code()&255 != 6) {
 			return err
@@ -179,10 +183,50 @@ func retrySQLiteBusy(ctx context.Context, operation func() error) error {
 		}
 	}
 }
+
+var watchReadRecord = func(ctx context.Context, r dal.Getter, rec record.Record) error {
+	return r.Get(ctx, rec)
+}
+
+var watchReadRecords = func(ctx context.Context, r dal.QueryExecutor, query dal.Query) (dal.RecordsReader, error) {
+	return r.ExecuteQueryToRecordsReader(ctx, query)
+}
+
+var errSQLiteReadCleanup = errors.New("watch reader cleanup failed")
+
+func standaloneSQLiteRead[T any](ctx context.Context, source any, operation func(context.Context) (T, error)) (T, error) {
+	// A transaction must restart at its owning transaction boundary. Firestore
+	// and other getters retain their own admission and retry policies too.
+	if _, standalone := source.(*dalgo2sqlite.Database); !standalone {
+		return operation(ctx)
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	var result T
+	err := retrySQLiteBusy(ctx, func() error {
+		var err error
+		// Recreate the record/reader and consume it completely on every attempt.
+		// readOnce/listOnce return only after their reader cleanup has finished.
+		result, err = operation(ctx)
+		return err
+	})
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	return result, nil
+}
+
 func read[T any](ctx context.Context, r dal.Getter, table string, scope Scope, id string) (T, error) {
+	return standaloneSQLiteRead(ctx, r, func(ctx context.Context) (T, error) {
+		return readOnce[T](ctx, r, table, scope, id)
+	})
+}
+
+func readOnce[T any](ctx context.Context, r dal.Getter, table string, scope Scope, id string) (T, error) {
 	var data T
 	m := map[string]any{}
-	err := r.Get(ctx, record.NewRecordWithData(key(table, scope, id), m))
+	err := watchReadRecord(ctx, r, record.NewRecordWithData(key(table, scope, id), m))
 	if record.IsNotFound(err) {
 		return data, ErrNotFound
 	}
@@ -230,6 +274,12 @@ func (s *Store) save(ctx context.Context, tx dal.ReadwriteTransaction, table str
 	return tx.Update(ctx, k, u)
 }
 func list[T any](ctx context.Context, r dal.QueryExecutor, table string, scope Scope, watchID string) ([]T, error) {
+	return standaloneSQLiteRead(ctx, r, func(ctx context.Context) ([]T, error) {
+		return listOnce[T](ctx, r, table, scope, watchID)
+	})
+}
+
+func listOnce[T any](ctx context.Context, r dal.QueryExecutor, table string, scope Scope, watchID string) (items []T, resultErr error) {
 	conditions := []dal.Condition{dal.WhereField("namespace", dal.Equal, scope.Namespace)}
 	if scope.Project != "" {
 		conditions = append(conditions, dal.WhereField("project", dal.Equal, scope.Project))
@@ -241,12 +291,23 @@ func list[T any](ctx context.Context, r dal.QueryExecutor, table string, scope S
 		conditions = append(conditions, dal.WhereField("watch", dal.Equal, watchID))
 	}
 	q := dal.From(dal.NewRootCollectionRef(table, "")).NewQuery().Where(dal.NewGroupCondition(dal.And, conditions...)).SelectColumns()
-	reader, err := r.ExecuteQueryToRecordsReader(ctx, q)
+	reader, err := watchReadRecords(ctx, r, q)
 	if err != nil {
+		if reader != nil && (reflect.ValueOf(reader).Kind() != reflect.Pointer || !reflect.ValueOf(reader).IsNil()) {
+			if closeErr := reader.Close(); closeErr != nil {
+				return nil, errors.Join(errSQLiteReadCleanup, err, closeErr)
+			}
+		}
 		return nil, err
 	}
-	defer func() { _ = reader.Close() }()
-	items := []T{}
+	defer func() {
+		if closeErr := reader.Close(); closeErr != nil {
+			// Do not publish rows or retry after unconfirmed reader cleanup.
+			items = nil
+			resultErr = errors.Join(errSQLiteReadCleanup, resultErr, closeErr)
+		}
+	}()
+	items = []T{}
 	for {
 		rec, err := reader.Next()
 		if errors.Is(err, dal.ErrNoMoreRecords) {

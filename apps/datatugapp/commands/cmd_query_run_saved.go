@@ -110,16 +110,21 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	// Lookup enrichment consumes keyed map rows. Refuse before the first leaf
 	// query rather than manufacturing keys for anonymous ClickHouse results.
 	if queryDef.Federation != nil && len(queryDef.Federation.Lookups) > 0 && (queryDef.Type == datatug.QueryTypeSQL || queryDef.Type == datatug.QueryTypeTugQL) {
-		source, lookupErr := resolveSQLOrTugQLSourceURL(ctx, projStore, projectDir, o.env, queryDef)
+		// A named-database federated query has no single catalog target. Use
+		// the same classification as exact-variable dispatch above; its leaves
+		// still pass the executor's pre-I/O ClickHouse federation refusal.
+		sources, lookupErr := federatedTugQLURLsForClickHouse(ctx, projStore, projectDir, o.env, queryDef)
 		if lookupErr != nil {
 			return savedQueryFailure(lookupErr)
 		}
-		ref, lookupErr := dbcopy.Parse(source)
-		if lookupErr != nil {
-			return savedQueryFailure(lookupErr)
-		}
-		if dbcopy.IsClickHouseScheme(ref.Scheme) {
-			return savedQueryFailure(fmt.Errorf("%w: ClickHouse anonymous recordsets do not support keyed lookup enrichment", dal.ErrNotSupported))
+		if len(sources) == 1 {
+			ref, lookupErr := dbcopy.Parse(sources[0])
+			if lookupErr != nil {
+				return savedQueryFailure(lookupErr)
+			}
+			if dbcopy.IsClickHouseScheme(ref.Scheme) {
+				return savedQueryFailure(fmt.Errorf("%w: ClickHouse anonymous recordsets do not support keyed lookup enrichment", dal.ErrNotSupported))
+			}
 		}
 	}
 	if queryDef.Type == datatug.QueryTypeTugQL && (o.format == "jsonl" || o.format == "csv") {

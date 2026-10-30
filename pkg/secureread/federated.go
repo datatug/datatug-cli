@@ -73,10 +73,10 @@ func (s *FederatedStream) Limitations() []Limitation {
 func (e *Executor) StreamFederatedTugQL(ctx context.Context, document []byte, sourceURLs map[string]string, variables map[string]any) (*FederatedStream, error) {
 	// This consumer promises durable record keys; anonymous ClickHouse rows
 	// must not enter its RecordsReader fallback, even as a later join leaf.
-	for _, source := range sourceURLs {
+	for database, source := range sourceURLs {
 		ref, err := dbcopy.Parse(source)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("open database %q: %w", database, err)
 		}
 		if dbcopy.IsClickHouseScheme(ref.Scheme) {
 			return nil, fmt.Errorf("%w: ClickHouse anonymous recordsets cannot enter keyed federation", dal.ErrNotSupported)

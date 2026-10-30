@@ -90,7 +90,7 @@ func validateHost(field, host string) error {
 // Descriptor acceptance does not register a query or scan runtime for that driver. A driver that is
 // a plain name and is not one of them is refused by ValidateServerRef with a fixed
 // message: the one of datatug.ServerRef quotes the driver.
-var dbServerDrivers = []string{"sqlite3", "ingitdb", "openvaultdb", "https-json", "sqlserver", "mysql", "oracle", "postgres", "couchdb", "postgrest", "libsql", "typesense"}
+var dbServerDrivers = []string{"sqlite3", "ingitdb", "openvaultdb", "https-json", "sqlserver", "mysql", "oracle", "postgres", "couchdb", "postgrest", "libsql", "typesense", "clickhouse"}
 
 // hostlessDrivers are the drivers of dbServerDrivers whose server is a file or a URL and
 // has no host: datatug.ServerRef.Validate refuses a host for them, and for sqlite3 it

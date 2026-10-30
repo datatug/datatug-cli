@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo2clickhouse"
+	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
@@ -60,6 +62,24 @@ func TestClickHouseCLIJourney(t *testing.T) {
 	t.Setenv(dbcopy.ClickHousePasswordEnv, "synthetic-reader")
 	t.Setenv(dbcopy.ClickHouseRelationsEnv, `{"events":[]}`)
 	t.Setenv(dbcopy.ClickHouseNativeSQLEnv, "true")
+	owned, err := dbcopy.Parse("env:DATATUG_CH_JOURNEY")
+	require.NoError(t, err)
+	host, _, err := net.SplitHostPort(owned.ClickHouseAddress)
+	require.NoError(t, err)
+	ip := net.ParseIP(host)
+	require.NotNil(t, ip)
+	require.True(t, ip.IsLoopback(), "the real journey may open only its owned literal loopback fixture")
+	require.True(t, dbcopy.IsClickHouseScheme(owned.Scheme))
+	previousOpen := api.OpenSchemaScanForTest()
+	t.Cleanup(api.SetOpenSchemaScanForTest(func(ref dbcopy.BackendRef, ctx context.Context) (dbcopy.SchemaScanDB, error) {
+		if ref.Raw == "env:DATATUG_CH_JOURNEY" && dbcopy.IsClickHouseScheme(ref.Scheme) && ref.Scheme == owned.Scheme && ref.ClickHouseAddress == owned.ClickHouseAddress && ref.ClickHouseDatabase == owned.ClickHouseDatabase && ref.Path == owned.Path {
+			return ref.OpenSchemaScan(ctx)
+		}
+		return previousOpen(ref, ctx)
+	}))
+	require.Panics(t, func() {
+		_, _ = api.OpenSchemaScanForTest()(dbcopy.BackendRef{Scheme: "sqlite", Raw: "env:DATATUG_NOT_THE_FIXTURE"}, context.Background())
+	}, "the existing guard must still reject every unrelated source")
 	write := func(relative, text string) {
 		path := filepath.Join(dir, relative)
 		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0700))

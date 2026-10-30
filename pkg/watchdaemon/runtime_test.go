@@ -97,8 +97,11 @@ func TestWatchRunnerUsesHTTPAndReportsEvaluationErrorAsUnknown(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- runner.Run(ctx) }()
 	deadline := time.Now().Add(2 * time.Second)
+	readCtx, cancelRead := context.WithDeadline(ctx, deadline)
+	defer cancelRead()
+	observedTerminal := false
 	for time.Now().Before(deadline) {
-		runs, err := f.store.ListRuns(ctx, watch.Actor{ID: "alice", Scope: protocolScope}, "failure")
+		runs, err := f.store.ListRuns(readCtx, watch.Actor{ID: "alice", Scope: protocolScope}, "failure")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -106,6 +109,7 @@ func TestWatchRunnerUsesHTTPAndReportsEvaluationErrorAsUnknown(t *testing.T) {
 			if runs[0].Outcome != "unknown" || runs[0].FailureCode != "SOURCE_UNAVAILABLE" {
 				t.Fatalf("source error became business false %+v", runs[0])
 			}
+			observedTerminal = true
 			break
 		}
 		time.Sleep(5 * time.Millisecond)
@@ -113,6 +117,9 @@ func TestWatchRunnerUsesHTTPAndReportsEvaluationErrorAsUnknown(t *testing.T) {
 	cancel()
 	if err := <-done; !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
+	}
+	if !observedTerminal {
+		t.Fatal("the runner did not persist its terminal unknown outcome before the deadline")
 	}
 	if executions.Load() != 1 {
 		t.Fatalf("unexpected query retries %d", executions.Load())

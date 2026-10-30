@@ -41,6 +41,55 @@ type productClient struct {
 	now                func() time.Time
 }
 
+// The shared helper performs its own userinfo and replacement-revocation IO.
+// Fence its persistence and final success against this credential's original
+// expiry, without changing the helper's token cleanup or legacy stores.
+type productLoginStore struct {
+	deviceauth.Store
+	ctx context.Context
+	p   *productClient
+}
+
+func (s productLoginStore) check(credential deviceauth.Credential) error {
+	if err := s.ctx.Err(); err != nil {
+		return err
+	}
+	return s.p.validToken(&oauth2.Token{AccessToken: credential.AccessToken, TokenType: credential.TokenType, RefreshToken: credential.RefreshToken, Expiry: credential.Expiry}, true)
+}
+
+func (s productLoginStore) discard(credential deviceauth.Credential) error {
+	current, err := s.Load()
+	if errors.Is(err, deviceauth.ErrCredentialNotFound) {
+		return nil
+	}
+	if err != nil || current.AccessToken != credential.AccessToken {
+		return err
+	}
+	return s.Delete()
+}
+
+func (s productLoginStore) Save(credential deviceauth.Credential) error {
+	if err := s.check(credential); err != nil {
+		return err
+	}
+	if err := s.Store.Save(credential); err != nil {
+		return errors.Join(err, s.discard(credential))
+	}
+	if err := s.check(credential); err != nil {
+		return errors.Join(err, s.discard(credential))
+	}
+	return nil
+}
+
+func (s productLoginStore) complete(credential deviceauth.Credential) error {
+	if err := s.check(credential); err != nil {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(s.ctx), 5*time.Second)
+		defer cancel()
+		return errors.Join(err, s.discard(credential), s.p.client.Revoke(cleanup, credential.AccessToken))
+	}
+	return nil
+}
+
 func newProductClient(options ProductOptions) (*productClient, error) {
 	if options.Issuer == "" {
 		options.Issuer = os.Getenv("DATATUG_PRODUCT_ISSUER")
@@ -178,6 +227,7 @@ func ProductCommand() *cobra.Command {
 			return err
 		}
 		ctx := context.WithValue(command.Context(), oauth2.HTTPClient, p.http)
+		store := productLoginStore{Store: p.store, ctx: ctx, p: p}
 		auth, err := p.client.DeviceLoginAndStore(ctx, deviceauth.DeviceLoginOptions{DeviceInfo: deviceInfo(), OpenBrowser: productOpenBrowser, Output: command.OutOrStdout(), ErrorOutput: command.ErrOrStderr(), TokenTransformer: func(ctx context.Context, token *oauth2.Token) (*oauth2.Token, error) {
 			if token == nil || token.Extra("credential_family") != string(sneatauth.ProductDelegationFamily) {
 				return nil, errors.New("authorization server returned a different credential family")
@@ -186,11 +236,14 @@ func ProductCommand() *cobra.Command {
 				return nil, err
 			}
 			return token, nil
-		}}, p.store)
+		}}, store)
 		if err != nil {
 			return err
 		}
 		printWarnings(command.ErrOrStderr(), auth.Warnings)
+		if err = store.complete(auth.Credential); err != nil {
+			return err
+		}
 		_, err = fmt.Fprintf(command.OutOrStdout(), "Product login active as %s.\nToken storage: %s\n", auth.Identity.Subject, p.description)
 		return err
 	}})

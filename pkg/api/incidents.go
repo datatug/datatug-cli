@@ -128,10 +128,15 @@ func incidentViewPolicy(ctx context.Context, stored incidents.Incident, events [
 }
 
 func incidentFactVisibility(ctx context.Context, fact investigation.Fact, session secureread.Session, paths map[string]string) incidents.FactVisibility {
+	var err error
+	session, err = secureread.NormalizeSession(session)
+	if err != nil {
+		return incidents.FactHidden
+	}
 	if fact.Scope == nil || !incidentProjectScopeServed(*fact.Scope, paths) {
 		return incidents.FactHidden
 	}
-	if session.Unrestricted {
+	if session.DatabaseProfile.PolicyFreeReads() && len(session.Policies) == 0 {
 		return incidents.FactVisible
 	}
 	if len(session.Policies) == 0 {

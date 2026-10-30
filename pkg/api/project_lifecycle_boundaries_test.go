@@ -74,7 +74,7 @@ func TestLocalLifecycleRejectsInvalidAuthorityAndProviderOutput(t *testing.T) {
 				selection.StoreID = "other"
 			case "limited":
 				secureMu.Lock()
-				secureSession.Unrestricted = false
+				secureSession.LocalProjectOwner = false
 				secureMu.Unlock()
 			case "unserved":
 				selection.ProjectID = "foreign"

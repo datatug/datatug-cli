@@ -194,7 +194,7 @@ func TestCoverage_Fields(t *testing.T) {
 }
 
 func TestCoverage_NativeSQL_Errors(t *testing.T) {
-	e := &Executor{session: Session{Unrestricted: true}}
+	e := &Executor{session: Session{DatabaseProfile: DatabasePolicyFreeReads}}
 
 	// Invalid URL
 	_, err := e.RunNativeSQL(context.Background(), "::not-a-url::", "SELECT 1")
@@ -269,7 +269,7 @@ func TestCoverage_Executor_CollectRowsError(t *testing.T) {
 	}
 	defer func() { collectRowsFn = origCollect }()
 
-	e := &Executor{session: Session{Unrestricted: true}}
+	e := &Executor{session: Session{DatabaseProfile: DatabasePolicyFreeReads}}
 	tmp := filepath.Join(t.TempDir(), "test.db")
 	sqlDB, err := sql.Open("sqlite", tmp)
 	require.NoError(t, err)
@@ -284,7 +284,7 @@ func TestCoverage_Executor_CollectRowsError(t *testing.T) {
 }
 
 func TestCoverage_Federated(t *testing.T) {
-	e := &Executor{session: Session{Unrestricted: true}}
+	e := &Executor{session: Session{DatabaseProfile: DatabasePolicyFreeReads}}
 
 	// Deserialize error
 	_, err := e.StreamFederatedTugQL(context.Background(), []byte("not valid TugQL json"), nil, nil)
@@ -333,7 +333,7 @@ func TestCoverage_Federated(t *testing.T) {
 
 	// securedLeaf methods
 	leaf := securedLeaf{
-		session:     Session{Unrestricted: true},
+		session:     Session{DatabaseProfile: DatabasePolicyFreeReads},
 		limitations: new([]Limitation),
 	}
 	_, err = leaf.ExecuteQueryToRecordsetReader(context.Background(), nil)
@@ -343,7 +343,7 @@ func TestCoverage_Federated(t *testing.T) {
 	dbOpen, _, _ := openSource(context.Background(), "sqlite://"+ordersPath, false, 0)
 	leafWithDB := securedLeaf{
 		db:          dbOpen,
-		session:     Session{Unrestricted: true},
+		session:     Session{DatabaseProfile: DatabasePolicyFreeReads},
 		limitations: new([]Limitation),
 	}
 	_, err = leafWithDB.ExecuteQueryToRecordsReader(context.Background(), dal.NewTextQuery("SELECT * FROM non_existent_table", nil))
@@ -366,7 +366,7 @@ func TestCoverage_Federated(t *testing.T) {
 }
 
 func TestCoverage_Snapshot_ValuesAndErrors(t *testing.T) {
-	e := &Executor{session: Session{Unrestricted: true}}
+	e := &Executor{session: Session{DatabaseProfile: DatabasePolicyFreeReads}}
 
 	// Validation error on recordset
 	_, err := e.RunSnapshot(context.Background(), "coll", apicontract.Recordset{

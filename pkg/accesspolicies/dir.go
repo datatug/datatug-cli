@@ -163,17 +163,18 @@ func DecodeLoaded(data []byte, codec access.Codec, source string) (Loaded, error
 }
 
 // Fingerprint returns a deterministic server-attested identity for the exact
-// policy documents in their evaluation order. An unrestricted session has a
-// stable, distinct fingerprint as well.
+// policy documents in their evaluation order. Loaded policies always contribute,
+// including when the compatibility input allows absent policies. The profile
+// marker remains distinct because it also carries the legacy raw capability.
 func Fingerprint(loaded []Loaded, unrestricted bool, principal *access.Principal) string {
 	h := sha256.New()
 	if unrestricted {
 		_, _ = h.Write([]byte("datatug:unrestricted:v1"))
 	} else {
 		_, _ = h.Write([]byte("datatug:policies:v1"))
-		for _, item := range loaded {
-			_, _ = h.Write(item.digest[:])
-		}
+	}
+	for _, item := range loaded {
+		_, _ = h.Write(item.digest[:])
 	}
 	identity := struct {
 		ID     string   `json:"id"`

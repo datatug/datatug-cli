@@ -19,6 +19,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/datatug/datatug-cli/pkg/chat"
+	"github.com/datatug/datatug-cli/pkg/secureread"
 )
 
 // TestChatCommandWarnsOnInvalidLastOptionsThenRuns covers chatCommand's
@@ -60,7 +61,7 @@ func TestChatCommandWarnsOnInvalidLastOptionsThenRuns(t *testing.T) {
 // --- loadChatJoinApplication ------------------------------------------
 
 func TestLoadChatJoinApplicationParseError(t *testing.T) {
-	_, closeFn, err := loadChatJoinApplication(context.Background(), "://not-a-valid-url", nil, false)
+	_, closeFn, err := loadChatJoinApplication(context.Background(), "://not-a-valid-url", nil, secureread.Session{})
 	if err == nil {
 		t.Fatal("expected dbcopy.Parse to fail for a malformed source URL")
 	}
@@ -71,7 +72,7 @@ func TestLoadChatJoinApplicationParseError(t *testing.T) {
 
 func TestLoadChatJoinApplicationMissingSourceFile(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "does-not-exist.sqlite")
-	_, closeFn, err := loadChatJoinApplication(context.Background(), "sqlite:///"+missing, nil, false)
+	_, closeFn, err := loadChatJoinApplication(context.Background(), "sqlite:///"+missing, nil, secureread.Session{})
 	if err == nil {
 		t.Fatal("expected CheckSourceFile to fail for a missing sqlite file")
 	}
@@ -85,7 +86,7 @@ func TestLoadChatJoinApplicationRefreshError(t *testing.T) {
 	if err := os.WriteFile(garbage, []byte("not a sqlite database"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, closeFn, err := loadChatJoinApplication(context.Background(), "sqlite:///"+garbage, nil, false)
+	_, closeFn, err := loadChatJoinApplication(context.Background(), "sqlite:///"+garbage, nil, secureread.Session{})
 	if err == nil {
 		t.Fatal("expected the initial snapshot refresh to fail against a non-sqlite file")
 	}

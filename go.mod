@@ -25,7 +25,7 @@ require (
 	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/ultraviolet v0.0.0-20260812204455-68fa937c71be
 	github.com/charmbracelet/x/ansi v0.11.8
-	github.com/dal-go/dalgo v0.96.0
+	github.com/dal-go/dalgo v0.96.2
 	github.com/dal-go/dalgo2bigquery v0.3.2
 	github.com/dal-go/dalgo2couchdb v0.0.0-20261027213543-120b25e81833
 	github.com/dal-go/dalgo2duckdb v0.1.0
@@ -45,7 +45,7 @@ require (
 	github.com/dal-go/dalgo2typesense v0.0.0-20261028075318-b1ba445d3434
 	github.com/dal-go/record v0.1.5
 	github.com/datatug/cliformat v0.0.3
-	github.com/datatug/datatug-core v0.127.0
+	github.com/datatug/datatug-core v0.128.0
 	github.com/datatug/sql2csv v0.0.1
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/go-sql-driver/mysql v1.10.0
@@ -55,7 +55,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/gosuri/uitable v0.0.4
 	github.com/ingitdb/dalgo2ingitdb v0.7.3
-	github.com/ingitdb/ingitdb-go/ingitdb v0.9.1
+	github.com/ingitdb/ingitdb-go/ingitdb v0.10.6
 	github.com/ingr-io/ingr-go v0.0.2
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/julienschmidt/httprouter v1.3.0
@@ -68,11 +68,11 @@ require (
 	github.com/posthog/posthog-go v1.24.3
 	github.com/redis/go-redis/v9 v9.7.3
 	github.com/sijms/go-ora/v3 v3.0.1
-	github.com/sneat-co/sneat-go-core v0.71.16
+	github.com/sneat-co/sneat-go-core v0.74.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.12.1
-	github.com/strongo/aichat v0.15.1
+	github.com/strongo/aichat v0.15.3
 	github.com/strongo/buildinfo v0.3.0
 	github.com/strongo/cli-helpers v0.27.1
 	github.com/strongo/deviceauth v0.1.0
@@ -200,7 +200,7 @@ require (
 	github.com/sergi/go-diff v1.4.0 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/skeema/knownhosts v1.3.2 // indirect
-	github.com/strongo/analytics v0.2.10 // indirect
+	github.com/strongo/analytics v0.2.12 // indirect
 	github.com/strongo/decimal v0.1.2 // indirect
 	github.com/strongo/gotwilio v0.0.0-20160123000810-f024bbefe80f // indirect
 	github.com/strongo/strongoapp v0.31.72 // indirect
@@ -225,7 +225,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.46.0 // indirect
 	go.opentelemetry.io/otel/sdk/metric v1.46.0 // indirect
 	go.opentelemetry.io/otel/trace v1.46.0 // indirect
-	go.starlark.net v0.0.0-20260708150628-5395d018f003 // indirect
+	go.starlark.net v0.0.0-20261021141710-4f4267fb140d // indirect
 	go.uber.org/mock v0.6.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/crypto v0.58.0 // indirect

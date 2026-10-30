@@ -342,14 +342,14 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	store, err := chat.OpenSessionStore(storePath, chat.ChatScope{
 		ProjectID:   projectCatalog.ID,
 		Environment: options.env, Database: database,
-		AccessFingerprint: accesspolicies.Fingerprint(session.Policies, session.Unrestricted, session.Principal),
+		AccessFingerprint: accesspolicies.Fingerprint(session.Policies, session.DatabaseProfile.PolicyFreeReads(), session.Principal),
 		Sources:           sourceURLs,
 	})
 	if err != nil {
 		return "", Exit(fmt.Sprintf("open chat sessions: %v", err), exitCodeUsage)
 	}
 	defer func() { _ = store.Close() }()
-	joinApplication, closeJoin, joinErr := loadChatJoinApplication(ctx, sourceURL, executor, session.Unrestricted)
+	joinApplication, closeJoin, joinErr := loadChatJoinApplication(ctx, sourceURL, executor, session)
 	if closeJoin != nil {
 		defer closeJoin()
 	}
@@ -451,7 +451,11 @@ var openJoinMetadataDB = func(ctx context.Context, backend dbcopy.BackendRef) (d
 	return openBackend(ctx, backend)
 }
 
-func loadChatJoinApplication(ctx context.Context, sourceURL string, executor *secureread.Executor, unrestricted bool) (*chat.ForeignKeyJoinApplication, func(), error) {
+func loadChatJoinApplication(ctx context.Context, sourceURL string, executor *secureread.Executor, session secureread.Session) (*chat.ForeignKeyJoinApplication, func(), error) {
+	session, err := secureread.NormalizeSession(session)
+	if err != nil {
+		return nil, nil, err
+	}
 	if strings.HasPrefix(sourceURL, "unavailable://") {
 		return nil, nil, nil
 	}
@@ -477,7 +481,7 @@ func loadChatJoinApplication(ctx context.Context, sourceURL string, executor *se
 	defaultSchema := api.DefaultSchemaForDriver(joinSource.Scheme)
 	application := &chat.ForeignKeyJoinApplication{
 		Source: sourceURL, Snapshot: snapshot, Refresh: refresh,
-		Executor: executor, Secure: !unrestricted,
+		Executor: executor, Secure: !session.DatabaseProfile.PolicyFreeReads() || len(session.Policies) > 0,
 		CanReadTarget: func(ctx context.Context, target chat.RelationInstance) error {
 			if target.Schema != "" && !strings.EqualFold(target.Schema, defaultSchema) {
 				return fmt.Errorf("JOIN target schema is not supported by this policy preflight")

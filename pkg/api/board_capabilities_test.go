@@ -52,7 +52,7 @@ func TestGuardedBoardCapabilityRequiresCurrentNativeAuthorityAndExactScope(t *te
 				secureMu.Unlock()
 			case "restricted":
 				secureMu.Lock()
-				secureSession.Unrestricted = false
+				secureSession.LocalProjectOwner = false
 				secureMu.Unlock()
 			case "no principal":
 				secureMu.Lock()
@@ -116,7 +116,7 @@ func TestGuardedBoardCapabilityCannotSurviveAuthorityOrGitDrift(t *testing.T) {
 					case "principal":
 						secureSession.Principal = &access.Principal{ID: "bob"}
 					case "restricted":
-						secureSession.Unrestricted = false
+						secureSession.LocalProjectOwner = false
 					}
 					secureMu.Unlock()
 					switch drift {

@@ -32,7 +32,7 @@ var createBoardMu sync.Mutex
 func localBoardWriter() (generation, actor string, allowed bool) {
 	secureMu.RLock()
 	defer secureMu.RUnlock()
-	if securityContextID == "" || !capabilities.AllowWrites || !secureSession.Unrestricted || secureSession.Principal == nil || secureSession.Principal.ID == nil {
+	if securityContextID == "" || !capabilities.AllowWrites || !secureSession.LocalProjectOwner || secureSession.Principal == nil || secureSession.Principal.ID == nil {
 		return "", "", false
 	}
 	return securityContextID, fmt.Sprint(secureSession.Principal.ID), true

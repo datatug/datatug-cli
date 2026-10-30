@@ -69,7 +69,7 @@ func TestPostgresResultMetaMatchesSQLite(t *testing.T) {
 		assert.Equal(t, want, got, tc.id)
 	}
 
-	app, closeFn, err := loadChatJoinApplication(context.Background(), "env:"+realPgScanVar, secureread.NewExecutor(secureread.Session{Unrestricted: true}), true)
+	app, closeFn, err := loadChatJoinApplication(context.Background(), "env:"+realPgScanVar, secureread.NewExecutor(secureread.Session{Unrestricted: true}), secureread.Session{DatabaseProfile: secureread.DatabasePolicyFreeReads})
 	require.NoError(t, err)
 	defer closeFn()
 	candidates, err := chat.DiscoverJoinCandidates([]byte("from: {name: Invoice}\n"), app.Snapshot)

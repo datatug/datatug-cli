@@ -43,7 +43,7 @@ func localLifecycleStore(selection LocalLifecycleSelection, write bool) (datatug
 		return nil, scope, datatug.ErrProjectLifecycleInvalid
 	}
 	secureMu.RLock()
-	unrestricted, writable := secureSession.Unrestricted, capabilities.AllowWrites
+	unrestricted, writable := secureSession.LocalProjectOwner, capabilities.AllowWrites
 	secureMu.RUnlock()
 	// Limited principals must not gain access to private retained history or
 	// bypass their definition policies through the aggregate lifecycle API.

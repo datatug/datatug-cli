@@ -147,7 +147,7 @@ func TestNativeBoardCreateRechecksCurrentAdmissionAfterProviderStaging(t *testin
 						case "principal":
 							secureSession.Principal = &access.Principal{ID: "bob"}
 						case "restricted":
-							secureSession.Unrestricted = false
+							secureSession.LocalProjectOwner = false
 						}
 						secureMu.Unlock()
 						switch drift {

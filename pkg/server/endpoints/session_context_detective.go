@@ -110,7 +110,7 @@ func sessionContextDetectiveHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	// Existing router origin/client/session-token admission wraps this handler.
 	// Require active local owner/write admission even for missing status IDs.
-	if !api.GetCapabilities().NativeSessionDetective || !api.GetCapabilities().AllowWrites || !api.SecureSessionUnrestricted() || api.SecurePrincipalID() == "" {
+	if !api.GetCapabilities().NativeSessionDetective || !api.GetCapabilities().AllowWrites || !api.SecureLocalProjectOwner() || api.SecurePrincipalID() == "" {
 		writeSessionDetectiveError(w, r, sessioncontext.ErrForbidden)
 		return
 	}
@@ -412,7 +412,7 @@ func sessionDetectiveContentAdmission(ctx context.Context, storage, project stri
 		return nil, current, err
 	}
 	current.Executor = true
-	if current.Actor != p.Actor || current.DatabaseID != p.DatabaseID || current.ProjectID != p.ProjectID || !api.GetCapabilities().AllowWrites || !api.SecureSessionUnrestricted() {
+	if current.Actor != p.Actor || current.DatabaseID != p.DatabaseID || current.ProjectID != p.ProjectID || !api.GetCapabilities().AllowWrites || !api.SecureLocalProjectOwner() {
 		return nil, current, sessioncontext.ErrForbidden
 	}
 	if err = sessionDetectiveActorGate(ctx, current, id); err != nil {

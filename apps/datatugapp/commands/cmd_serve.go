@@ -222,7 +222,7 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return Exit(err.Error(), exitCodeUsage)
 	}
-	if session.Unrestricted {
+	if session.DatabaseProfile.PolicyFreeReads() && len(session.Policies) == 0 {
 		log.Print(unrestrictedServeLog(session))
 	} else {
 		log.Printf("serve: %d access policy document(s) loaded; serving as principal %+v", len(session.Policies), session.Principal)

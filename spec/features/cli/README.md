@@ -184,7 +184,23 @@ The user-level config MUST live at `~/.datatug.yaml`. The CLI MUST NOT silently 
 
 The user-level config file MUST be valid YAML. Comments are preserved on read where the underlying YAML library permits.
 
+### Product authentication
+
+#### REQ: product-only-login
+
+`datatug auth product login|status|logout` MUST use a separate `product-delegation.v1` credential namespace bound to the exact canonical HTTPS versioned issuer, explicit realm, client, and product. `--auth-host` / `DATATUG_PRODUCT_ISSUER` select the issuer; `--realm` / `DATATUG_PRODUCT_REALM` select the realm. The default issuer is `https://auth.sneat.co/product-delegation/v1`. A deployment must enable that protocol before login can succeed.
+
+The normal store is the operating system keyring. Explicit `--insecure-storage` uses an isolated plaintext `0600` file; the same option must be supplied to subsequent commands using that credential. Legacy Firebase credentials MUST NOT be loaded, converted, or refreshed by this path. The product bearer MUST be canonical, carry no refresh token, and retain its original expiry (at most one hour). Current server identity MUST verify family, realm, subject, client, product, and required scopes before use. Revocation MUST succeed before local credentials are removed; an already absent login is an idempotent logout. Commands MUST NOT print a bearer or follow authenticated redirects.
+
+This is additive to existing authentication. [`db get`](db/README.md#req-protected-record-lookup) is the initial product-only read consumer; it does not migrate existing commands or broaden the server's protected execution profile.
+
 ## Acceptance Criteria
+
+### AC: product-only-login
+
+**Requirements:** cli#req:product-only-login
+
+Product login, current status, protected reads, and revocation use only the versioned product protocol and isolated credential namespace. Wrong-family, wrong-realm, expired, revoked, or changed-subject credentials fail without legacy fallback or token output. Existing `auth login/status/logout` retain their behavior.
 
 ### AC: bare-invocation-launches-tui
 

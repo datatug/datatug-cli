@@ -23,6 +23,7 @@ func Command() *cobra.Command {
 	}
 	cmd.AddCommand(
 		device.LoginCommand(),
+		device.ProductCommand(),
 		device.StatusCommand(),
 		device.LogoutCommand(),
 		gauth.GoogleAuthCommand(),

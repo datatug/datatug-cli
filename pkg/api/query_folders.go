@@ -41,7 +41,7 @@ func CreateProjectQueryFolder(ctx context.Context, r QueryFolderCreate) (*datatu
 	}
 	secureMu.RLock()
 	generation := securityContextID
-	allowed := generation != "" && capabilities.AllowWrites && secureSession.Unrestricted && secureSession.Principal != nil && secureSession.Principal.ID != nil
+	allowed := generation != "" && capabilities.AllowWrites && secureSession.LocalProjectOwner && secureSession.Principal != nil && secureSession.Principal.ID != nil
 	actor := ""
 	if allowed {
 		actor = fmt.Sprint(secureSession.Principal.ID)
@@ -56,7 +56,7 @@ func CreateProjectQueryFolder(ctx context.Context, r QueryFolderCreate) (*datatu
 		}
 		secureMu.RLock()
 		defer secureMu.RUnlock()
-		if securityContextID != generation || !capabilities.AllowWrites || !secureSession.Unrestricted || secureSession.Principal == nil || secureSession.Principal.ID == nil || fmt.Sprint(secureSession.Principal.ID) != actor {
+		if securityContextID != generation || !capabilities.AllowWrites || !secureSession.LocalProjectOwner || secureSession.Principal == nil || secureSession.Principal.ID == nil || fmt.Sprint(secureSession.Principal.ID) != actor {
 			return secureread.ErrAccessDenied
 		}
 		return nil

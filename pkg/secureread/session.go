@@ -1,36 +1,77 @@
 package secureread
 
 import (
+	"fmt"
+
 	"github.com/dal-go/dalgo/access"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 )
 
-// Session is the fixed identity and policy set one `datatug serve` process
-// runs under for its whole life (REQ:principal-selection): the principal
-// named by --as/--role/--group, the policies loaded from
-// --policies-dir/--policy, and whether the session runs Unrestricted
-// (--no-policies, deliberately bypassing every policy). Build one with
-// NewSession and hand it to NewExecutor.
+// DatabaseProfile classifies the existing database-read policy mode. It never
+// conveys project ownership or permission to perform a database mutation.
+type DatabaseProfile uint8
+
+const (
+	// DatabaseProfileUnspecified accepts legacy literals at construction only.
+	DatabaseProfileUnspecified DatabaseProfile = iota
+	// DatabasePolicyGoverned requires the existing policy evaluator to grant reads.
+	DatabasePolicyGoverned
+	// DatabasePolicyFreeReads permits today's no-policy reads. Loaded policies
+	// and the existing native safeguards still apply.
+	DatabasePolicyFreeReads
+)
+
+// PolicyFreeReads reports the configured read profile independently of project
+// ownership. Loaded policies still govern; this is never a policy bypass.
+func (p DatabaseProfile) PolicyFreeReads() bool { return p == DatabasePolicyFreeReads }
+
+// Session fixes identity, project ownership and the database read profile.
+// Database requests use DatabaseProfile and the existing policy evaluator;
+// project-file and asset operations use LocalProjectOwner.
 type Session struct {
-	// Principal is the caller every query in this session runs as; nil only
-	// when Unrestricted is set.
-	Principal *access.Principal
-	// Policies are the loaded documents every secured query runs through.
-	Policies []accesspolicies.Loaded
-	// Unrestricted must be set explicitly (--no-policies) to run with no
-	// policy enforcement at all.
+	Principal         *access.Principal
+	Policies          []accesspolicies.Loaded
+	LocalProjectOwner bool
+	DatabaseProfile   DatabaseProfile
+	// AllowAnonymousLocalIdentity preserves the local read authentication fallback.
+	// It grants neither project ownership nor database access.
+	AllowAnonymousLocalIdentity bool
+	// Unrestricted is translated only when DatabaseProfile is unspecified. Its
+	// output mirrors the read profile; execution never uses this field.
+	// Deprecated: use the separate ownership, database and identity fields.
 	Unrestricted bool
-	// AllowOpaqueSQL is the "separate explicit opaque-query grant"
-	// REQ:opaque-sql-limitation describes: without it (and without
-	// Unrestricted), RunNativeSQL refuses before dispatch with
-	// ErrOpaqueSQLNotGranted, for every caller — the appendix's exec/
-	// run_query AND every legacy execution route (exec/select,
-	// exec/execute_commands) share this one Executor/Session, so gating it
-	// here (rather than per-endpoint) is what makes "all legacy routes obey
-	// the same boundary" (api-contract.md "Security and errors") actually
-	// true instead of aspirational. Set from `datatug serve
-	// --allow-opaque-sql` via pkg/api.Capabilities/ConfigureSecureSession.
-	AllowOpaqueSQL bool
+	// AllowOpaqueSQL is the existing native-query capability, never a data-write grant.
+	AllowOpaqueSQL   bool
+	configurationErr error
+}
+
+// NormalizeSession translates legacy construction input and validates profiles.
+// On error the returned session retains no authority. Explicit profiles never
+// rederive ownership or identity from the legacy compatibility echo.
+func NormalizeSession(s Session) (Session, error) {
+	if s.configurationErr != nil {
+		return Session{configurationErr: s.configurationErr}, s.configurationErr
+	}
+	switch s.DatabaseProfile {
+	case DatabaseProfileUnspecified:
+		s.DatabaseProfile = DatabasePolicyGoverned
+		if s.Unrestricted {
+			s.DatabaseProfile = DatabasePolicyFreeReads
+			s.LocalProjectOwner = true
+			s.AllowAnonymousLocalIdentity = true
+		}
+	case DatabasePolicyGoverned:
+		if s.Unrestricted {
+			err := fmt.Errorf("%w: legacy no-policy input contradicts the explicit policy-governed profile", ErrInvalidSession)
+			return Session{configurationErr: err}, err
+		}
+	case DatabasePolicyFreeReads:
+	default:
+		err := fmt.Errorf("%w: unknown database profile", ErrInvalidSession)
+		return Session{configurationErr: err}, err
+	}
+	s.Unrestricted = s.DatabaseProfile.PolicyFreeReads()
+	return s, nil
 }
 
 // SessionOptions mirrors the serve-style flags `datatug query run` already
@@ -81,5 +122,11 @@ func NewSession(o SessionOptions) (Session, error) {
 	if !o.NoPolicies && principal == nil {
 		return Session{}, ErrNoPrincipal
 	}
-	return Session{Principal: principal, Policies: loaded, Unrestricted: o.NoPolicies}, nil
+	profile := DatabasePolicyGoverned
+	if o.NoPolicies {
+		profile = DatabasePolicyFreeReads
+	}
+	return NormalizeSession(Session{Principal: principal, Policies: loaded,
+		LocalProjectOwner: o.NoPolicies, DatabaseProfile: profile,
+		AllowAnonymousLocalIdentity: o.NoPolicies})
 }

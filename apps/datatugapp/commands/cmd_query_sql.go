@@ -41,12 +41,16 @@ func runSQLQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	if err != nil {
 		return Exit(err.Error(), exitCodeUsage)
 	}
-	session := secureread.Session{Policies: loaded, Unrestricted: o.noPolicies || len(loaded) == 0}
+	profile := secureread.DatabasePolicyGoverned
+	if o.noPolicies || len(loaded) == 0 {
+		profile = secureread.DatabasePolicyFreeReads
+	}
+	session := secureread.Session{Policies: loaded, DatabaseProfile: profile}
 	if o.as != "" || len(o.roles) > 0 || len(o.groups) > 0 {
 		session.Principal = &access.Principal{ID: o.as, Roles: o.roles, Groups: o.groups}
 	}
 	stderr := cmd.ErrOrStderr()
-	if session.Unrestricted {
+	if session.DatabaseProfile.PolicyFreeReads() && len(session.Policies) == 0 {
 		_, _ = fmt.Fprintln(stderr, "access: running without access policies")
 	}
 	result, err := secureread.NewExecutor(session).RunNativeSQL(ctx, sourceURL, text)

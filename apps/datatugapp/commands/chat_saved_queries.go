@@ -59,7 +59,7 @@ func (s chatSavedQueries) Save(ctx context.Context, request chat.SavedQuerySaveR
 	}
 	id := savedQueryID(request.Title)
 	if err := accesspolicies.AuthorizeWrite(ctx, accesspolicies.WriteOptions{
-		Principal: s.session.Principal, Policies: s.session.Policies, Unrestricted: s.session.Unrestricted,
+		Principal: s.session.Principal, Policies: s.session.Policies, Unrestricted: s.session.LocalProjectOwner,
 	}, access.Insert, accesspolicies.ProjectQueryResource(s.projectID, id)); err != nil {
 		return chat.SavedQuery{}, err
 	}

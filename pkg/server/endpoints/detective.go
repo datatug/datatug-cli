@@ -70,7 +70,7 @@ func detectiveStore(project, securityContextID string) (*detective.LocalStore, s
 	// Case/Check resource grant. A query grant cannot authorize Case context.
 	// Until that grant exists, secured profiles fail closed; explicit local
 	// --no-policies owner mode alone can access this local private store.
-	if !api.SecureSessionUnrestricted() {
+	if !api.SecureLocalProjectOwner() {
 		return nil, "", newAccessDenied("Detective project assets require a project asset grant")
 	}
 	actor := api.SecurePrincipalID()

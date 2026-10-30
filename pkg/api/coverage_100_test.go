@@ -1344,8 +1344,8 @@ func TestIncidentsAPI(t *testing.T) {
 	secureMu.Lock()
 	securityContextID = "ctx1"
 	secureSession = secureread.Session{
-		Unrestricted: true,
-		Principal:    &access.Principal{ID: "alice"},
+		DatabaseProfile: secureread.DatabasePolicyFreeReads,
+		Principal:       &access.Principal{ID: "alice"},
 	}
 	secureMu.Unlock()
 
@@ -1951,7 +1951,7 @@ func TestCoverageRemaining100(t *testing.T) {
 	// 1. AuthTokenFromHTTPRequest & principalUID
 	secureMu.Lock()
 	secureSession.Principal = nil
-	secureSession.Unrestricted = true
+	secureSession.AllowAnonymousLocalIdentity = true
 	secureMu.Unlock()
 	tok, err := AuthTokenFromHTTPRequest(nil, false)
 	assert.NoError(t, err)
@@ -1959,7 +1959,7 @@ func TestCoverageRemaining100(t *testing.T) {
 
 	secureMu.Lock()
 	secureSession.Principal = nil
-	secureSession.Unrestricted = false
+	secureSession.AllowAnonymousLocalIdentity = false
 	secureMu.Unlock()
 	tok, err = AuthTokenFromHTTPRequest(nil, false)
 	assert.NoError(t, err)

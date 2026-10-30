@@ -117,13 +117,23 @@ func ConfigureSecureSession(session secureread.Session, pathsByID map[string]str
 	// exec/run_query and the legacy exec/select/exec/execute_commands
 	// routes — shares this one Executor, so setting it here rather than
 	// per-endpoint is what makes the refusal apply uniformly).
+	var sessionErr error
+	session, sessionErr = secureread.NormalizeSession(session)
+	if sessionErr != nil {
+		// Invalid configuration cannot retain file, metadata or identity power.
+		caps = Capabilities{}
+		pathsByID = nil
+	}
 	session.AllowOpaqueSQL = caps.AllowOpaqueSQL
 	secureSession = session
 	secureExecutor = secureread.NewExecutor(session)
 	projectDirs = pathsByID
 	capabilities = caps
-	policyFingerprint = accesspolicies.Fingerprint(session.Policies, session.Unrestricted, session.Principal)
-	securityContextID = newSecurityContextID()
+	policyFingerprint = accesspolicies.Fingerprint(session.Policies, session.DatabaseProfile.PolicyFreeReads(), session.Principal)
+	securityContextID = ""
+	if sessionErr == nil {
+		securityContextID = newSecurityContextID()
+	}
 }
 
 // SecurePolicyFingerprint identifies the exact policy session that decided
@@ -230,12 +240,21 @@ func SecureConfiguredProjectIDs() []string {
 	return ids
 }
 
+// SecureLocalProjectOwner reports local project-file and asset authority only.
+func SecureLocalProjectOwner() bool {
+	secureMu.RLock()
+	defer secureMu.RUnlock()
+	return secureSession.LocalProjectOwner
+}
+
 // SecureSessionUnrestricted reports whether this process's session runs
-// with no access-policy enforcement at all (--no-policies).
+// with the historical policy-free database-read profile. Loaded policies still
+// govern; this compatibility getter is never an authorization bypass.
+// Deprecated: use SecureLocalProjectOwner for local assets.
 func SecureSessionUnrestricted() bool {
 	secureMu.RLock()
 	defer secureMu.RUnlock()
-	return secureSession.Unrestricted
+	return secureSession.DatabaseProfile.PolicyFreeReads()
 }
 
 // projectDir returns the filesystem directory serve resolved for projectID,

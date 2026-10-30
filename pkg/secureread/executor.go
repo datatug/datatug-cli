@@ -22,6 +22,7 @@ type Executor struct {
 
 // NewExecutor returns an Executor bound to session.
 func NewExecutor(session Session) *Executor {
+	session, _ = NormalizeSession(session)
 	return &Executor{session: session}
 }
 
@@ -61,6 +62,9 @@ func (e *Executor) RunStructuredInsecureForTest(ctx context.Context, sourceURL s
 }
 
 func (e *Executor) runStructured(ctx context.Context, sourceURL string, query dal.Query, variables map[string]any, insecureAllowLoopback bool) (Result, error) {
+	if err := e.session.configurationErr; err != nil {
+		return Result{}, err
+	}
 	db, closeSource, err := openSourceFn(ctx, sourceURL, insecureAllowLoopback, len(e.session.Policies))
 	if err != nil {
 		return Result{}, err
@@ -105,7 +109,7 @@ func (e *Executor) runThroughPolicies(ctx context.Context, db dal.DB, query dal.
 		Principal:    e.session.Principal,
 		Variables:    variables,
 		Policies:     e.session.Policies,
-		Unrestricted: e.session.Unrestricted,
+		Unrestricted: e.session.DatabaseProfile.PolicyFreeReads(),
 	})
 	if err != nil {
 		return Result{}, err

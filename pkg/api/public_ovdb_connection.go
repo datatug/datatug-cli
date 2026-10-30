@@ -16,7 +16,7 @@ import (
 func canCreatePublicOVDBConnection() bool {
 	secureMu.RLock()
 	defer secureMu.RUnlock()
-	return securityContextID != "" && secureSession.Principal != nil && secureSession.Principal.ID != nil && secureSession.Unrestricted && capabilities.AllowWrites
+	return securityContextID != "" && secureSession.Principal != nil && secureSession.Principal.ID != nil && secureSession.LocalProjectOwner && capabilities.AllowWrites
 }
 
 var readPublicConnectionState = (*filestore.EnvironmentFiles).PublicOVDBConnectionState

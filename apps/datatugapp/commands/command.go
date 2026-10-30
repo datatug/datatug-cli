@@ -31,6 +31,7 @@ func DatatugCommand() *cobra.Command {
 		initCommand(),
 		uiCommandArgs(),
 		auth.Command(),
+		auth.WhoamiCommand(),
 		gcloudcmds.GoogleCloudCommand(),
 		configCommand(),
 		datasetCommands(),

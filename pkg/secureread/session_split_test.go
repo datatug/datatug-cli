@@ -118,3 +118,52 @@ func TestSessionSplitInvalidConfigurationFailsBeforeAnySourceOpen(t *testing.T) 
 		t.Fatalf("invalid configuration opened %d sources", opens)
 	}
 }
+
+func TestSessionSplitInvalidSessionCannotRegainPublicAuthority(t *testing.T) {
+	closed, err := NormalizeSession(Session{DatabaseProfile: DatabaseProfile(255)})
+	if !errors.Is(err, ErrInvalidSession) {
+		t.Fatal(err)
+	}
+	closed.Principal = &access.Principal{ID: "alice"}
+	closed.Policies = []accesspolicies.Loaded{{Policy: access.MustPolicy("allow", access.Root(access.Allow(access.ReadWrite)))}}
+	closed.DatabaseProfile = DatabasePolicyFreeReads
+	closed.LocalProjectOwner = true
+	closed.AllowAnonymousLocalIdentity = true
+	closed.AllowOpaqueSQL = true
+	closed.Unrestricted = true
+	again, err := NormalizeSession(closed)
+	if !errors.Is(err, ErrInvalidSession) || again.Principal != nil || len(again.Policies) != 0 || again.DatabaseProfile != DatabaseProfileUnspecified || again.LocalProjectOwner || again.AllowAnonymousLocalIdentity || again.AllowOpaqueSQL || again.Unrestricted {
+		t.Fatalf("invalid session regained public authority: %+v %v", again, err)
+	}
+	// Also defend the JOIN preflight against an already-bound session changed
+	// inside the package; every other read entrypoint checks this sticky error.
+	executor := &Executor{session: closed}
+	if err := executor.CanReadWholeCollection(context.Background(), "customers"); !errors.Is(err, ErrInvalidSession) {
+		t.Fatalf("invalid JOIN authority: %v", err)
+	}
+	if err := NewExecutor(closed).Authorize(context.Background(), customersQuery(), nil); !errors.Is(err, ErrInvalidSession) {
+		t.Fatal(err)
+	}
+}
+
+func TestSessionSplitPolicyFreeProfilePreservesWholeCollectionPolicies(t *testing.T) {
+	for _, tc := range []struct {
+		name, policy, collection string
+		allowed                  bool
+	}{
+		{"allowed", permissivePolicy, "customers", true},
+		{"denied", productsOnlyPolicy, "customers", false},
+		{"row", ownerScopedPolicy, "customers", false},
+		{"field", fieldRestrictedPolicy, "customers", false},
+		{"unrestricted other collection", ownerScopedPolicy, "products", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			session := aliceSession(t, tc.policy)
+			session.DatabaseProfile = DatabasePolicyFreeReads
+			err := NewExecutor(session).CanReadWholeCollection(context.Background(), tc.collection)
+			if (err == nil) != tc.allowed {
+				t.Fatalf("policy-free JOIN preflight: %v, allowed=%v", err, tc.allowed)
+			}
+		})
+	}
+}

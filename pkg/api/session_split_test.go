@@ -94,3 +94,53 @@ func TestSessionSplitInvalidConfigurationDropsAllConfiguredAuthority(t *testing.
 	executor, _ := SecureExecutor()
 	require.ErrorIs(t, executor.Authorize(context.Background(), nil, nil), secureread.ErrInvalidSession)
 }
+
+func TestSessionSplitInvalidSessionCannotRegainAPIOrFactAuthority(t *testing.T) {
+	t.Cleanup(func() { ConfigureSecureSession(secureread.Session{}, nil, Capabilities{}) })
+	session, err := secureread.NormalizeSession(secureread.Session{DatabaseProfile: secureread.DatabaseProfile(255)})
+	require.ErrorIs(t, err, secureread.ErrInvalidSession)
+	session.Principal = &access.Principal{ID: "alice"}
+	session.Policies = []accesspolicies.Loaded{{Policy: access.MustPolicy("allow", access.Root(access.Allow(access.ReadWrite)))}}
+	session.DatabaseProfile = secureread.DatabasePolicyFreeReads
+	session.LocalProjectOwner, session.AllowAnonymousLocalIdentity, session.AllowOpaqueSQL = true, true, true
+	scope := investigation.ProjectScope{StoreID: LocalStoreID, ProjectID: "p", Environment: "prod"}
+	fact := investigation.Fact{Scope: &scope, Entity: "Customer", Field: "ID"}
+	require.Equal(t, incidents.FactHidden, incidentFactVisibility(context.Background(), fact, session, map[string]string{"p": "/p"}))
+	ConfigureSecureSession(session, map[string]string{"p": "/p"}, Capabilities{AllowWrites: true, AllowOpaqueSQL: true})
+	require.Empty(t, SecurityContextID())
+	require.Empty(t, SecurePrincipalID())
+	require.False(t, SecureLocalProjectOwner())
+	require.False(t, SecureSessionUnrestricted())
+	token, err := AuthTokenFromHTTPRequest(nil, true)
+	require.NoError(t, err)
+	require.Nil(t, token)
+	require.Error(t, AuthorizeProjectQueryWrite(context.Background(), "p", "q", access.Set))
+	require.False(t, GetCapabilities().AllowWrites)
+	require.False(t, GetCapabilities().AllowOpaqueSQL)
+	executor, _ := SecureExecutor()
+	require.ErrorIs(t, executor.CanReadWholeCollection(context.Background(), "Customer"), secureread.ErrInvalidSession)
+}
+
+func TestSessionSplitPolicyFreeProfilePreservesIncidentPolicies(t *testing.T) {
+	scope := investigation.ProjectScope{StoreID: LocalStoreID, ProjectID: "p", Environment: "prod"}
+	fact := investigation.Fact{Scope: &scope, Entity: "Customer", Field: "ID"}
+	for _, tc := range []struct {
+		name, path, rule string
+		want             incidents.FactVisibility
+	}{
+		{"allowed", "/Customer", "", incidents.FactVisible},
+		{"denied", "/Other", "", incidents.FactHidden},
+		{"field restricted", "/Customer", "        fields: [Name]\n", incidents.FactValueRedacted},
+		{"row restricted", "/Customer", "        where: {op: '==', left: {field: ID}, right: {value: 5}}\n", incidents.FactHidden},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := "apiVersion: dalgo.io/access/v1\nkind: AccessPolicy\nmetadata: {name: incident-policy}\ndefault: deny\nscopes:\n  - path: " + tc.path + "\n    rules:\n      - id: read\n        effect: allow\n        operations: [query]\n" + tc.rule
+			loaded, err := accesspolicies.DecodeLoaded([]byte(doc), access.YAMLCodec{}, "incident-policy.yaml")
+			require.NoError(t, err)
+			for _, profile := range []secureread.DatabaseProfile{secureread.DatabasePolicyGoverned, secureread.DatabasePolicyFreeReads} {
+				session := secureread.Session{DatabaseProfile: profile, Policies: []accesspolicies.Loaded{loaded}}
+				require.Equal(t, tc.want, incidentFactVisibility(context.Background(), fact, session, map[string]string{"p": "/p"}), "profile %v", profile)
+			}
+		})
+	}
+}

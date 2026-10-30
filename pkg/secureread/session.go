@@ -49,7 +49,7 @@ type Session struct {
 // rederive ownership or identity from the legacy compatibility echo.
 func NormalizeSession(s Session) (Session, error) {
 	if s.configurationErr != nil {
-		return s, s.configurationErr
+		return Session{configurationErr: s.configurationErr}, s.configurationErr
 	}
 	switch s.DatabaseProfile {
 	case DatabaseProfileUnspecified:

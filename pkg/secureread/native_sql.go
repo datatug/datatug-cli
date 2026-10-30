@@ -111,6 +111,9 @@ func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, 
 	if err := e.session.configurationErr; err != nil {
 		return Result{}, err
 	}
+	// The policy-free profile retains its historical operator-level raw
+	// capability. runThroughPolicies still requires every loaded policy to
+	// grant OpaqueQueryScope; this gate never removes loaded policies.
 	if !e.session.DatabaseProfile.PolicyFreeReads() && !e.session.AllowOpaqueSQL {
 		return Result{}, ErrOpaqueSQLNotGranted
 	}
@@ -148,7 +151,7 @@ func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, 
 	if err != nil {
 		return Result{}, err
 	}
-	if !e.session.DatabaseProfile.PolicyFreeReads() {
+	if !e.session.DatabaseProfile.PolicyFreeReads() || len(e.session.Policies) > 0 {
 		result.Limitations = append(result.Limitations, nativeSQLLimitation)
 	}
 	result.ColumnOrder = selectListOrder(ctx, sqlDB, sqlText, args)
@@ -222,10 +225,10 @@ func openReadOnlySQLiteDB(ctx context.Context, path string) (dal.DB, *sql.DB, fu
 // read-only too; in-memory sessions still allow Parquet SELECTs.
 func (e *Executor) runDuckDBNativeSQL(ctx context.Context, ref dbcopy.BackendRef, text string, args []dal.QueryArg) (Result, error) {
 	// DuckDB queries can read external files and URLs. A policy on a database
-	// cannot bound those resources, so only an operator's unrestricted session
-	// may use this native surface.
-	if !e.session.DatabaseProfile.PolicyFreeReads() {
-		return Result{}, fmt.Errorf("DuckDB native SQL requires an unrestricted session because queries can read external files and URLs")
+	// cannot bound those resources, so this native surface requires the
+	// policy-free read profile and no loaded policies.
+	if !e.session.DatabaseProfile.PolicyFreeReads() || len(e.session.Policies) > 0 {
+		return Result{}, fmt.Errorf("DuckDB native SQL requires policy-free reads with no loaded policies because queries can read external files and URLs")
 	}
 	if ref.Path != "" {
 		if err := dbcopy.CheckSourceFile(ref.Path); err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/dal-go/dalgo/access"
@@ -165,5 +166,45 @@ func TestSessionSplitPolicyFreeProfilePreservesWholeCollectionPolicies(t *testin
 				t.Fatalf("policy-free JOIN preflight: %v, allowed=%v", err, tc.allowed)
 			}
 		})
+	}
+}
+
+func TestSessionSplitPolicyFreeProfileKeepsOpaquePolicyAndLimitation(t *testing.T) {
+	source := newSQLiteFixture(t)
+	for _, tc := range []struct {
+		name, policy string
+		allowed      bool
+	}{
+		{"opaque grant", opaqueSQLAllowedPolicy, true},
+		{"no opaque grant", ownerScopedPolicy, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			session := aliceSession(t, tc.policy)
+			session.DatabaseProfile = DatabasePolicyFreeReads
+			// The policy-free profile retains its historical operator-level raw
+			// capability. Loaded policies must still grant OpaqueQueryScope.
+			result, err := NewExecutor(session).RunNativeSQL(context.Background(), source, "SELECT name FROM products")
+			if !tc.allowed {
+				if !errors.Is(err, ErrAccessDenied) {
+					t.Fatalf("opaque policy bypassed: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Rows) != 3 || findLimitation(result.Limitations, LimitationNativeSQL) == nil {
+				t.Fatalf("governed opaque result lost its mandatory limitation: %+v", result)
+			}
+		})
+	}
+}
+
+func TestSessionSplitPolicyFreeProfileDoesNotBypassDuckDBExternalBoundary(t *testing.T) {
+	session := aliceSession(t, opaqueSQLAllowedPolicy)
+	session.DatabaseProfile = DatabasePolicyFreeReads
+	_, err := NewExecutor(session).RunNativeSQL(context.Background(), "duckdb://:memory:", "SELECT 1")
+	if err == nil || !strings.Contains(err.Error(), "external files and URLs") {
+		t.Fatalf("loaded policies reached DuckDB native execution: %v", err)
 	}
 }

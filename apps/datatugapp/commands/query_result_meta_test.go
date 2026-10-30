@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"github.com/datatug/datatug-cli/pkg/secureread"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -374,7 +375,7 @@ func TestDescribeColumnsOfAView(t *testing.T) {
 
 func TestLoadChatJoinApplicationWithoutSchemaMetadata(t *testing.T) {
 	project := writeHTTPSourceProject(t, "https://example.test/widgets?name={name}")
-	app, closeFn, err := loadChatJoinApplication(context.Background(), "http://"+project, nil, false)
+	app, closeFn, err := loadChatJoinApplication(context.Background(), "http://"+project, nil, secureread.Session{})
 	assert.Error(t, err)
 	assert.Nil(t, app)
 	assert.Nil(t, closeFn)

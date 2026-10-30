@@ -21,7 +21,8 @@ const (
 	DatabasePolicyFreeReads
 )
 
-// PolicyFreeReads reports the read profile independently of project ownership.
+// PolicyFreeReads reports the configured read profile independently of project
+// ownership. Loaded policies still govern; this is never a policy bypass.
 func (p DatabaseProfile) PolicyFreeReads() bool { return p == DatabasePolicyFreeReads }
 
 // Session fixes identity, project ownership and the database read profile.

@@ -144,3 +144,15 @@ func TestSessionSplitPolicyFreeProfilePreservesIncidentPolicies(t *testing.T) {
 		})
 	}
 }
+
+func TestSessionSplitAPIFingerprintTracksLoadedPoliciesInFreeMode(t *testing.T) {
+	t.Cleanup(func() { ConfigureSecureSession(secureread.Session{}, nil, Capabilities{}) })
+	fingerprints := []string{}
+	for _, fields := range []string{"ID", "ID, Name"} {
+		loaded, err := accesspolicies.DecodeLoaded([]byte("apiVersion: dalgo.io/access/v1\nkind: AccessPolicy\nmetadata: {name: customer}\ndefault: deny\nscopes:\n  - path: /Customer\n    rules:\n      - id: read\n        effect: allow\n        operations: [query]\n        fields: ["+fields+"]\n"), access.YAMLCodec{}, "customer.yaml")
+		require.NoError(t, err)
+		ConfigureSecureSession(secureread.Session{Principal: &access.Principal{ID: "alice"}, DatabaseProfile: secureread.DatabasePolicyFreeReads, Policies: []accesspolicies.Loaded{loaded}}, nil, Capabilities{})
+		fingerprints = append(fingerprints, SecurePolicyFingerprint())
+	}
+	require.NotEqual(t, fingerprints[0], fingerprints[1], "API cache/execution fingerprints must change with a loaded mask")
+}

@@ -248,7 +248,8 @@ func SecureLocalProjectOwner() bool {
 }
 
 // SecureSessionUnrestricted reports whether this process's session runs
-// with the historical policy-free database-read profile.
+// with the historical policy-free database-read profile. Loaded policies still
+// govern; this compatibility getter is never an authorization bypass.
 // Deprecated: use SecureLocalProjectOwner for local assets.
 func SecureSessionUnrestricted() bool {
 	secureMu.RLock()

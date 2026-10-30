@@ -50,7 +50,7 @@ func runSQLQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		session.Principal = &access.Principal{ID: o.as, Roles: o.roles, Groups: o.groups}
 	}
 	stderr := cmd.ErrOrStderr()
-	if session.DatabaseProfile.PolicyFreeReads() {
+	if session.DatabaseProfile.PolicyFreeReads() && len(session.Policies) == 0 {
 		_, _ = fmt.Fprintln(stderr, "access: running without access policies")
 	}
 	result, err := secureread.NewExecutor(session).RunNativeSQL(ctx, sourceURL, text)

@@ -84,7 +84,7 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	if err != nil {
 		return Exit(err.Error(), exitCodeUsage)
 	}
-	if session.DatabaseProfile.PolicyFreeReads() {
+	if session.DatabaseProfile.PolicyFreeReads() && len(session.Policies) == 0 {
 		_, _ = fmt.Fprintln(stderr, "access: running without access policies")
 	}
 	executor := secureread.NewExecutor(session)

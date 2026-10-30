@@ -24,6 +24,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/chat"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
@@ -899,7 +900,7 @@ func TestLoadChatJoinApplicationOpenMetadataDBErrorReported(t *testing.T) {
 	if _, statErr := os.Stat(real); statErr != nil {
 		t.Skipf("chinook fixture unavailable: %v", statErr)
 	}
-	_, closeFn, err := loadChatJoinApplication(context.Background(), "sqlite:///"+real, nil, false)
+	_, closeFn, err := loadChatJoinApplication(context.Background(), "sqlite:///"+real, nil, secureread.Session{})
 	if !errors.Is(err, injected) {
 		t.Fatalf("loadChatJoinApplication error = %v, want the injected sql.Open error", err)
 	}

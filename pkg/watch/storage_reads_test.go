@@ -86,7 +86,11 @@ func TestSQLiteStandaloneReadsResumeAfterAnObservedExclusiveWriter(t *testing.T)
 				<-finished
 			}()
 			select {
-			case <-busy:
+			case busyErr := <-busy:
+				var code interface{ Code() int }
+				if !errors.As(busyErr, &code) || code.Code()&255 != 5 {
+					t.Fatalf("expected an actual SQLite BUSY error, got %v", busyErr)
+				}
 				// Release only after the actual provider read has returned BUSY.
 				// The old one-shot read therefore fails deterministically.
 			case <-ctx.Done():

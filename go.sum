@@ -116,8 +116,8 @@ github.com/crediterra/money v0.4.2 h1:jywtH44L+BwPV3Yy+VxAmvk18eayaUXfVxvz1dnk5w
 github.com/crediterra/money v0.4.2/go.mod h1:v1LjiUrGIVmK0L070iz4ghVDhqVGiyd9vNX0XJOLGak=
 github.com/cyphar/filepath-securejoin v0.7.0 h1:s0Y3ITPy6sQn5xt54DuYvTF8hu134ooYLUb58DX/HjE=
 github.com/cyphar/filepath-securejoin v0.7.0/go.mod h1:ymLGms/u3BYaviIiuKFnUx8EkQEZeK6cInNoAPJA3o4=
-github.com/dal-go/dalgo v0.96.0 h1:O0vsU0z1AWw+iTe9O1ki7OTkP1UvZuHayb5evBxb7I4=
-github.com/dal-go/dalgo v0.96.0/go.mod h1:UCGV7G50rWbXamWXbmbBGmHiACWtNYUFNIL+qM5AAs8=
+github.com/dal-go/dalgo v0.96.2 h1:4sRgnlNDsWDIY3n3rhW3PJarE1T+uhIfS+HnQP9zJg0=
+github.com/dal-go/dalgo v0.96.2/go.mod h1:UCGV7G50rWbXamWXbmbBGmHiACWtNYUFNIL+qM5AAs8=
 github.com/dal-go/dalgo2bigquery v0.3.2 h1:1csPB0KBMZVCuK7jYTo0RT9GDvGnAn/26tDEIEs4RFY=
 github.com/dal-go/dalgo2bigquery v0.3.2/go.mod h1:HSFmmveLpuU56sYBmnubGMReGqyWBzU883ckm1l4MyI=
 github.com/dal-go/dalgo2couchdb v0.0.0-20261027213543-120b25e81833 h1:iXzRdMr4f/thKHO6AKbCcLbPhekpUNbm1hupkyvTNng=
@@ -158,8 +158,8 @@ github.com/danieljoos/wincred v1.2.3 h1:v7dZC2x32Ut3nEfRH+vhoZGvN72+dQ/snVXo/vMF
 github.com/danieljoos/wincred v1.2.3/go.mod h1:6qqX0WNrS4RzPZ1tnroDzq9kY3fu1KwE7MRLQK4X0bs=
 github.com/datatug/cliformat v0.0.3 h1:d9p5vo7r8BH6qSKyTHQ9Al2sT6QHsQTK9KRlihaJdIU=
 github.com/datatug/cliformat v0.0.3/go.mod h1:DwX9tWHiyH+vZtbVEVOyHOEOw1Km9AzhgHoqI0PowAc=
-github.com/datatug/datatug-core v0.127.0 h1:FGKOilSOrv855iOx5aRWhBSTH6cc5fKb6ZcVJANAmuY=
-github.com/datatug/datatug-core v0.127.0/go.mod h1:x/H3T9cOzCgAtiL4YZzkOCKyXAla282gxGMH1jlD+28=
+github.com/datatug/datatug-core v0.128.0 h1:ADhEpbdqsSmM2AyXlAFq0/kWVZ9IeAuTcLdryrA8+Pw=
+github.com/datatug/datatug-core v0.128.0/go.mod h1:GLqxlX5JTIe3x4i4tokKm9QSEvqhhUQTEx11o+85Ong=
 github.com/datatug/sql2csv v0.0.1 h1:mmQI9gWAqVKtnwwNKPEPamplV0g1+KaTovME7/7+SIY=
 github.com/datatug/sql2csv v0.0.1/go.mod h1:nZwHW70TWPF2PTXyCa4hysB+nVgY/AcF6m/KclO3fvs=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
@@ -279,8 +279,8 @@ github.com/ingitdb/dalgo2ingitdb v0.7.3 h1:I7h2xwHVeDH+ladm5lBJKygAeDgzzz6Seodm3
 github.com/ingitdb/dalgo2ingitdb v0.7.3/go.mod h1:boqchnO8br74dYjzUT5lNYi/cLxg4GEfzGxHPZAa7Lk=
 github.com/ingitdb/dalgo2ingitdb4github v0.2.3 h1:9cOBFdWWtUREBkbnL5hvO7fT0gYzl08hLHy3jesiIJI=
 github.com/ingitdb/dalgo2ingitdb4github v0.2.3/go.mod h1:4AJrmWiyCBI+9pwLQq1PE8EFlgNfHboXXL4C/UJ5Tlg=
-github.com/ingitdb/ingitdb-go/ingitdb v0.9.1 h1:CrGmOpqf8M60bQrYzVUvygtLnNCMUPjPSjYFJB5efAY=
-github.com/ingitdb/ingitdb-go/ingitdb v0.9.1/go.mod h1:p0dD9yIhTKG86CedtvJCoasv4Nf4AKei9KQUy45agdI=
+github.com/ingitdb/ingitdb-go/ingitdb v0.10.6 h1:v46YpfFL/4H9ajtfFK58nD1bNfwkch4RhbsP+xVw8AI=
+github.com/ingitdb/ingitdb-go/ingitdb v0.10.6/go.mod h1:0Jm9fWk+6g/g1Xf8C9TbFs7X9z6Pal9rfgaSMFP16e4=
 github.com/ingr-io/ingr-go v0.0.2 h1:2AfFllqzCe2dCNtxIUo306oYzaZr//YzrVOHd0C73nI=
 github.com/ingr-io/ingr-go v0.0.2/go.mod h1:gb/dGW0qXziCq9iAIgk0yITyWY013w2bhdYiXO0RLuY=
 github.com/jackc/pgpassfile v1.0.0 h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsIM=
@@ -423,8 +423,8 @@ github.com/stretchr/testify v1.4.0/go.mod h1:j7eGeouHqKxXV5pUuKE4zz7dFj8WfuZ+81P
 github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWDWE=
 github.com/stretchr/testify v1.12.1/go.mod h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=
-github.com/strongo/aichat v0.15.1 h1:tDHlOyI/gyGqzCXRUZkLCwNS0inUyNpoYUFkzg1wSpk=
-github.com/strongo/aichat v0.15.1/go.mod h1:x5NGnyj0TMozy+HiNhzMGfmmn7dBeqLptn4fZZbtqbo=
+github.com/strongo/aichat v0.15.3 h1:g/tdGDTsrwX2+krdpUyGBO3KnsYk87PSMeepXZBaGPs=
+github.com/strongo/aichat v0.15.3/go.mod h1:x5NGnyj0TMozy+HiNhzMGfmmn7dBeqLptn4fZZbtqbo=
 github.com/strongo/analytics v0.2.12 h1:T+g84q9jRhAFBP9MAHd4fYmKVvJAi8DqInGZYEyLlvI=
 github.com/strongo/analytics v0.2.12/go.mod h1:WRQ+hUgzABvqmlg5dPdFECcrtWziXTQg9ww5yLP7KEg=
 github.com/strongo/buildinfo v0.3.0 h1:nPbCrSA+7I3bct6mwZ24U6SHfV7TaRafoYzDucwl1Qg=
@@ -504,8 +504,8 @@ go.opentelemetry.io/otel/sdk/metric v1.46.0 h1:0piZ26EG4RBfebb2jhDH6ERCYHoVWduc3
 go.opentelemetry.io/otel/sdk/metric v1.46.0/go.mod h1:I1PbKrdVc8Qu8HYVDNtqVIwLwjNrhsV/uFuxfwg8mO4=
 go.opentelemetry.io/otel/trace v1.46.0 h1:OULy7ccdJnZtJ0UDYFOIGaCmiWzJ8Vi2G/Rsu60qs1c=
 go.opentelemetry.io/otel/trace v1.46.0/go.mod h1:J7GAXweO77XSFkB/rmAqk9D6ihszhFjLU+d9WuUxDLI=
-go.starlark.net v0.0.0-20260708150628-5395d018f003 h1:cAxcqHgW8fnmT0cEBU3TzvVYHIFt8IIGDMWUF6rImk4=
-go.starlark.net v0.0.0-20260708150628-5395d018f003/go.mod h1:Iue6g6iirlfLoVi/DYCi5/x0h/bAOuWF3dULTKpt2Vo=
+go.starlark.net v0.0.0-20261021141710-4f4267fb140d h1:wmJ4xTYwnBup3nwA+3OtmpaCwd90YXVyyCHZQoiD0+0=
+go.starlark.net v0.0.0-20261021141710-4f4267fb140d/go.mod h1:Iue6g6iirlfLoVi/DYCi5/x0h/bAOuWF3dULTKpt2Vo=
 go.uber.org/mock v0.6.0 h1:hyF9dfmbgIX5EfOdasqLsWD6xqpNZlXblLB/Dbnwv3Y=
 go.uber.org/mock v0.6.0/go.mod h1:KiVJ4BqZJaMj4svdfmHM0AUx4NJYO8ZNpPnZn1Z+BBU=
 go.yaml.in/yaml/v3 v3.0.4/go.mod h1:DhzuOOF2ATzADvBadXxruRBLzYTpT36CKvDb3+aBEFg=

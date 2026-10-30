@@ -37,7 +37,35 @@ func queryResultsCommand() *cobra.Command {
 (data.json and meta.json, private to you). A result lives 7 days; the oldest go
 first once more than 200 results or 512 MiB are kept.`,
 	}
-	cmd.AddCommand(queryResultsLocateCommand(), queryResultsCheckCommand(), queryResultsPruneCommand(), queryResultsRmCommand(), queryResultsAnnotateCommand())
+	cmd.AddCommand(queryResultsLocateCommand(), queryResultsCheckCommand(), queryResultsPruneCommand(), queryResultsRmCommand(), queryResultsAnnotateCommand(), queryResultsShowCommand())
+	return cmd
+}
+
+// Show reopens the validated stored typed recordset without a connection,
+// reexecution, fake record keys or label-to-map conversion.
+func queryResultsShowCommand() *cobra.Command {
+	cmd := &cobra.Command{Use: "show --id <id>", Short: "Reopen a stored typed result without running its query", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		if err := checkResultsFormat(cmd); err != nil {
+			return err
+		}
+		id, _ := cmd.Flags().GetString(queryResultsIDFlag)
+		store, err := openResultsStore()
+		if err != nil {
+			return storeExit(err)
+		}
+		loaded, err := store.Load(id)
+		if err != nil {
+			return storeExit(err)
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(struct {
+			Anonymous bool                  `json:"anonymous,omitempty"`
+			Recordset any                   `json:"recordset"`
+			Columns   []queryresults.Column `json:"ordinalColumns"`
+		}{loaded.Anonymous, loaded.Recordset, loaded.Meta.Columns})
+	}}
+	cmd.Flags().String(queryResultsIDFlag, "", "Result id")
+	_ = cmd.MarkFlagRequired(queryResultsIDFlag)
+	addResultsFormatFlag(cmd)
 	return cmd
 }
 

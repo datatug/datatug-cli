@@ -172,6 +172,19 @@ func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, er
 			return "", fmt.Errorf("catalog %q: environment variable %s must hold a postgrest:// URL, not a %s source", catalog.ID, strings.TrimPrefix(source, "env:"), ref.Scheme)
 		}
 		return source, nil
+	case DriverClickHouse:
+		source, err := descriptorSource(catalog, projDir, "ClickHouse", dbcopy.ReadClickHouseDescriptor)
+		if err != nil {
+			return "", err
+		}
+		ref, err := dbcopyParse(source)
+		if err != nil {
+			return "", err
+		}
+		if !dbcopy.IsClickHouseScheme(ref.Scheme) {
+			return "", fmt.Errorf("catalog %q: descriptor must name a ClickHouse source", catalog.ID)
+		}
+		return source, nil
 	case DriverLibSQL:
 		// A libSQL catalog records a connection descriptor (a project file that
 		// names an environment variable and nothing else), exactly as a PostgreSQL or

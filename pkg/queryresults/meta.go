@@ -41,6 +41,7 @@ const (
 // holds no row value, connection string, file path, host, user, password,
 // environment variable or policy path.
 type Meta struct {
+	Anonymous  bool        `json:"anonymous,omitempty"`
 	Format     string      `json:"format"`
 	Version    int         `json:"version"`
 	ID         string      `json:"id"`
@@ -313,6 +314,7 @@ func NewMeta(id, cliVersion string, data Data) Meta {
 		DataBytes:  int64(len(data.Bytes)),
 		Rows:       data.Rows,
 		Columns:    data.Columns,
+		Anonymous:  data.Anonymous,
 	}
 }
 

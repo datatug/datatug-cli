@@ -124,6 +124,9 @@ func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, 
 	if dbcopy.IsServerScheme(ref.Scheme) {
 		return e.runServerNativeSQL(ctx, sourceURL, ref, sqlText, args)
 	}
+	if dbcopy.IsClickHouseScheme(ref.Scheme) {
+		return e.runClickHouseNative(ctx, ref, sqlText, args)
+	}
 	if ref.Scheme == "duckdb" {
 		return e.runDuckDBNativeSQL(ctx, ref, sqlText, args)
 	}

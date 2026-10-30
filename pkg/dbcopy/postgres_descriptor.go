@@ -126,6 +126,10 @@ func readPostgRESTDescriptor(path string, lookupEnv func(string) (string, bool))
 // readers: a project file may name only a variable the operator allowed, and the
 // server base address is never in the project. The token is never in the
 // descriptor either: it comes from the operator's environment for each request.
+func ReadClickHouseDescriptor(path string) (ConnectionDescriptor, error) {
+	return readConnectionDescriptor(path, "ClickHouse", os.LookupEnv)
+}
+
 func ReadLibSQLDescriptor(path string) (ConnectionDescriptor, error) {
 	return readLibSQLDescriptor(path, os.LookupEnv)
 }

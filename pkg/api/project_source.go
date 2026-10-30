@@ -39,6 +39,9 @@ type ProjectSourceRequest struct {
 	ID          string // the id of the source (the catalog id), a plain name
 	SQLitePath  string
 	DSNEnv      string
+	// Driver optionally distinguishes an env-only ClickHouse source. Empty
+	// retains the existing PostgreSQL descriptor registration behavior.
+	Driver string
 }
 
 // AddedSource is what AddProjectSource did: Added is false when the same database was already a
@@ -78,7 +81,7 @@ func catalogIdentity(projectDir string, catalog *datatug.DbCatalog) (sourceIdent
 			return sourceIdentity{}, false
 		}
 		return sourceIdentity{dbconnection.DriverSQLite3, canonicalFile(path)}, true
-	case IsServerDriver(catalog.Driver):
+	case IsServerDriver(catalog.Driver) || catalog.Driver == DriverClickHouse:
 		file, err := ResolveDescriptorPath(projectDir, catalog.Path)
 		if err != nil {
 			return sourceIdentity{}, false
@@ -108,6 +111,13 @@ func AddProjectSource(ctx context.Context, store datatug.ProjectStore, projectDi
 	driver, want := dbconnection.DriverSQLite3, sourceIdentity{dbconnection.DriverSQLite3, canonicalFile(req.SQLitePath)}
 	if req.DSNEnv != "" {
 		driver, want = DriverPostgres, sourceIdentity{DriverPostgres, req.DSNEnv}
+		if req.Driver != "" {
+			if req.Driver != DriverPostgres && req.Driver != DriverClickHouse {
+				return AddedSource{}, refuseSource("unsupported descriptor driver")
+			}
+			driver = req.Driver
+			want = sourceIdentity{driver, req.DSNEnv}
+		}
 	}
 	for _, name := range []struct{ flag, value string }{{"--env", req.Environment}, {"--name", req.ID}} {
 		if err := CheckScanName(name.flag, name.value); err != nil {
@@ -288,7 +298,7 @@ type SourceUnresolvedError struct {
 }
 
 func (e *SourceUnresolvedError) Error() string {
-	if isSQLiteDriver(e.Driver) || IsServerDriver(e.Driver) || e.Driver == DriverCouchDB || e.Driver == DriverPostgREST || e.Driver == DriverLibSQL || e.Driver == DriverTypesense {
+	if isSQLiteDriver(e.Driver) || IsServerDriver(e.Driver) || e.Driver == DriverCouchDB || e.Driver == DriverPostgREST || e.Driver == DriverLibSQL || e.Driver == DriverTypesense || e.Driver == DriverClickHouse {
 		return "its catalog path or connection descriptor cannot be resolved"
 	}
 	return "its driver is not one that can be opened (sqlite3, ingitdb, openvaultdb, postgres, mysql, oracle, sqlserver, firestore, couchdb, postgrest, libsql or typesense)"

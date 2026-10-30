@@ -25,6 +25,9 @@ const (
 	// tables and views as collections; the token comes from the environment.
 	DriverLibSQL = "libsql"
 
+	// DriverClickHouse names the read-only anonymous-recordset adapter.
+	DriverClickHouse = "clickhouse"
+
 	// DriverTypesense is the driver name a Typesense catalog carries, and the
 	// --driver value `datatug scan` reads it with. One Typesense server exposes
 	// one configured collection of native documents; the scoped API key comes

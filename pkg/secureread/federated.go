@@ -10,6 +10,7 @@ import (
 	"github.com/dal-go/dalgo/recordset"
 	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 )
 
 // RunFederatedTugQL runs a named-database query through secured, independent
@@ -72,6 +73,17 @@ func (s *FederatedStream) Limitations() []Limitation {
 func (e *Executor) StreamFederatedTugQL(ctx context.Context, document []byte, sourceURLs map[string]string, variables map[string]any) (*FederatedStream, error) {
 	if err := e.session.configurationErr; err != nil {
 		return nil, err
+	}
+	// This consumer promises durable record keys; anonymous ClickHouse rows
+	// must not enter its RecordsReader fallback, even as a later join leaf.
+	for database, source := range sourceURLs {
+		ref, err := dbcopy.Parse(source)
+		if err != nil {
+			return nil, fmt.Errorf("open database %q: %w", database, err)
+		}
+		if dbcopy.IsClickHouseScheme(ref.Scheme) {
+			return nil, fmt.Errorf("%w: ClickHouse anonymous recordsets cannot enter keyed federation", dal.ErrNotSupported)
+		}
 	}
 	if err := refuseContextVariables(document); err != nil {
 		return nil, err

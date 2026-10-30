@@ -151,6 +151,7 @@ Examples:
 	flags.StringArray(queryPolicyFlag, nil, "Additional policy document, applied after the directory (repeatable)")
 	flags.String(queryPoliciesDirFlag, "", "Policies directory (default $"+accesspolicies.DirEnv+" or ~/"+accesspolicies.DefaultDir+")")
 	flags.Bool(queryNoPoliciesFlag, false, "Run without any access policy")
+	flags.Bool(serveAllowOpaqueSQLFlag, false, "Allow opaque native SQL when an opaque-query policy also grants it; row/column rules do not apply")
 	flags.BoolP(queryQuietFlag, "q", false, "Do not report applied policy limitations on stderr")
 	flags.String(queryResultIDFlag, "", "Write the result to private files under ~/"+queryresults.DefaultDir+"/<id>/ instead of printing rows; stdout gets one path-free JSON line")
 	flags.Int(queryResultRowsFlag, queryresults.DefaultRows, fmt.Sprintf("Rows kept with --result-id (%d to %d)", queryresults.MinRows, queryresults.MaxRows))
@@ -167,19 +168,20 @@ type queryOptions struct {
 	// limitSet is whether --limit was typed, so a CouchDB --from read can tell
 	// "no bound given" (use the visible exploration default) from an explicit
 	// --limit 0 (pass it through; the adapter then refuses it).
-	limitSet    bool
-	format      string
-	as          string
-	roles       []string
-	groups      []string
-	vars        []string
-	policies    []string
-	policiesDir string
-	noPolicies  bool
-	quiet       bool
-	project     string
-	query       string
-	env         string
+	limitSet       bool
+	format         string
+	as             string
+	roles          []string
+	groups         []string
+	vars           []string
+	policies       []string
+	policiesDir    string
+	noPolicies     bool
+	allowOpaqueSQL bool
+	quiet          bool
+	project        string
+	query          string
+	env            string
 	// resultID and resultRows are --result-id and --result-rows; sink is the
 	// result being written when resultID is set.
 	resultID   string
@@ -205,6 +207,7 @@ func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
 	o.policies, _ = flags.GetStringArray(queryPolicyFlag)
 	o.policiesDir, _ = flags.GetString(queryPoliciesDirFlag)
 	o.noPolicies, _ = flags.GetBool(queryNoPoliciesFlag)
+	o.allowOpaqueSQL, _ = flags.GetBool(serveAllowOpaqueSQLFlag)
 	o.quiet, _ = flags.GetBool(queryQuietFlag)
 	o.project, _ = flags.GetString(queryProjectFlag)
 	o.query, _ = flags.GetString(queryQueryFlag)
@@ -338,6 +341,9 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		return Exit(err.Error(), exitCodeUsage)
 	}
 	variables, err := accesspolicies.ParseVariables(o.vars)
+	if dbcopy.IsClickHouseScheme(backend.Scheme) {
+		variables, err = parseClickHouseVariables(o.vars)
+	}
 	if err != nil {
 		return Exit(err.Error(), exitCodeUsage)
 	}
@@ -351,6 +357,9 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	ctx := cmd.Context()
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if dbcopy.IsClickHouseScheme(backend.Scheme) {
+		return runClickHouseQuery(cmd, o, backend, query, queryText, variables, loaded, principal)
 	}
 	// An exploratory `--from` read of a CouchDB or PostgREST source needs an
 	// explicit bound because the adapter refuses an unbounded read instead of
@@ -487,6 +496,12 @@ func provenanceLine(prov dalgo2http.Provenance) string {
 // explicit; it is never turned into a partial result. An unfiltered read does
 // not reach this: it is served by CouchDB's native primary index.
 func queryFailureFor(backend dbcopy.BackendRef, err error) error {
+	if dbcopy.IsClickHouseScheme(backend.Scheme) {
+		if errors.Is(err, access.ErrAccessDenied) {
+			return Exit("ClickHouse read denied by access policy", exitCodeAccessDenied)
+		}
+		return Exit("ClickHouse read failed: "+dbcopy.ClickHouseFailureReason(err), exitCodeDatabase)
+	}
 	if dbcopy.IsCouchDBScheme(backend.Scheme) && dbcopy.IsCouchDBIndexRequired(err) {
 		return Exit("CouchDB requires a Mango index for a filtered query: the read is refused rather than falling back to a full scan that could hide documents. Create an index outside DataTug that covers the filter and the order, then run the query again.", exitCodeDatabase)
 	}

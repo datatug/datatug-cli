@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/dal-go/dalgo/access"
+	"github.com/dal-go/dalgo/dal"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
@@ -45,7 +47,7 @@ func runSQLQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	if o.noPolicies || len(loaded) == 0 {
 		profile = secureread.DatabasePolicyFreeReads
 	}
-	session := secureread.Session{Policies: loaded, DatabaseProfile: profile}
+	session := secureread.Session{Policies: loaded, DatabaseProfile: profile, AllowOpaqueSQL: o.allowOpaqueSQL}
 	if o.as != "" || len(o.roles) > 0 || len(o.groups) > 0 {
 		session.Principal = &access.Principal{ID: o.as, Roles: o.roles, Groups: o.groups}
 	}
@@ -53,15 +55,33 @@ func runSQLQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	if session.DatabaseProfile.PolicyFreeReads() && len(session.Policies) == 0 {
 		_, _ = fmt.Fprintln(stderr, "access: running without access policies")
 	}
-	result, err := secureread.NewExecutor(session).RunNativeSQL(ctx, sourceURL, text)
+	var args []dal.QueryArg
+	if ref, parseErr := dbcopy.Parse(sourceURL); parseErr == nil && dbcopy.IsClickHouseScheme(ref.Scheme) {
+		variables, parseErr := parseClickHouseVariables(o.vars)
+		if parseErr != nil {
+			return Exit(parseErr.Error(), exitCodeUsage)
+		}
+		names := make([]string, 0, len(variables))
+		for name := range variables {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			args = append(args, dal.QueryArg{Name: name, Value: variables[name]})
+		}
+	}
+	result, err := runNativeSQLCLI(secureread.NewExecutor(session), ctx, sourceURL, text, args...)
 	if errors.Is(err, secureread.ErrOpaqueSQLNotGranted) {
-		return Exit(err.Error()+": SQL text is not read through the row and column rules of access policies; run it with --no-policies", exitCodeUsage)
+		return Exit(err.Error()+": SQL text is not read through the row and column rules of access policies; use --allow-opaque-sql with an opaque-query policy grant, or run it with --no-policies", exitCodeUsage)
 	}
 	if err != nil {
 		return savedQueryFailure(err)
 	}
 	if !o.quiet {
 		writeSavedQueryLimitations(stderr, result.Limitations)
+	}
+	if result.AnonymousRecordset != nil {
+		return writeAnonymousResult(cmd.OutOrStdout(), o.format, result)
 	}
 	if err := writeQueryRows(cmd.OutOrStdout(), o.format, result.Columns, secureRowsToQueryRows(result.Rows), nil); err != nil {
 		return Exit(err.Error(), 1)

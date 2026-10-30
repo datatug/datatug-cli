@@ -61,7 +61,7 @@ import (
 
 // supportedSchemes is the MVP-supported scheme list, used both for dispatch
 // and to construct the error message for REQ:unknown-scheme-rejected.
-var supportedSchemes = []string{"duckdb", "sqlite", "ingitdb", "postgres", "mysql", "oracle", "sqlserver", "http", "https", "openvaultdb", "bigquery", "mongodb", "mongodb+srv", "firestore", CouchDBScheme, CouchDBHTTPSScheme, CouchDBHTTPScheme, PostgRESTScheme, PostgRESTHTTPSScheme, PostgRESTHTTPScheme, LibSQLScheme, LibSQLHTTPSScheme, LibSQLHTTPScheme, TypesenseScheme, TypesenseHTTPSScheme, TypesenseHTTPScheme}
+var supportedSchemes = []string{"duckdb", "sqlite", "ingitdb", "postgres", "mysql", "oracle", "sqlserver", "http", "https", "openvaultdb", "bigquery", "mongodb", "mongodb+srv", "firestore", CouchDBScheme, CouchDBHTTPSScheme, CouchDBHTTPScheme, PostgRESTScheme, PostgRESTHTTPSScheme, PostgRESTHTTPScheme, LibSQLScheme, LibSQLHTTPSScheme, LibSQLHTTPScheme, TypesenseScheme, TypesenseHTTPSScheme, TypesenseHTTPScheme, ClickHouseScheme, ClickHouseHTTPSScheme, ClickHouseHTTPScheme}
 
 // SupportedSchemes returns the exact schemes Parse/Open dispatch, in
 // dispatch order. It is the single source of truth other packages should
@@ -190,6 +190,8 @@ type BackendRef struct {
 	// libSQL endpoint selectors: one existing libSQL database, whose tables and
 	// views are read as SQLite relations. The base address holds no credentials;
 	// the token is read from DATATUG_LIBSQL_BEARER for each request.
+	ClickHouseAddress       string
+	ClickHouseDatabase      string
 	LibSQLHost              string
 	LibSQLBasePath          string
 	LibSQLAllowLoopbackHTTP bool
@@ -309,6 +311,8 @@ func parseURL(rawURL string) (BackendRef, error) {
 		return parseCouchDBSource(scheme, rest, display)
 	case PostgRESTScheme, PostgRESTHTTPSScheme, PostgRESTHTTPScheme:
 		return parsePostgRESTSource(scheme, rest, display)
+	case ClickHouseScheme, ClickHouseHTTPSScheme, ClickHouseHTTPScheme:
+		return parseClickHouseSource(scheme, rest, display)
 	case LibSQLScheme, LibSQLHTTPSScheme, LibSQLHTTPScheme:
 		return parseLibSQLSource(scheme, rest, display)
 	case TypesenseScheme, TypesenseHTTPSScheme, TypesenseHTTPScheme:
@@ -771,6 +775,8 @@ func (r BackendRef) openSource(ctx context.Context, mode openMode) (dal.DB, erro
 		return openCouchDB(ctx, r, mode)
 	case PostgRESTScheme, PostgRESTHTTPSScheme, PostgRESTHTTPScheme:
 		return openPostgREST(ctx, r, mode)
+	case ClickHouseScheme, ClickHouseHTTPSScheme, ClickHouseHTTPScheme:
+		return openClickHouse(ctx, r, mode)
 	case LibSQLScheme, LibSQLHTTPSScheme, LibSQLHTTPScheme:
 		return openLibSQL(ctx, r, mode)
 	case TypesenseScheme, TypesenseHTTPSScheme, TypesenseHTTPScheme:

@@ -46,7 +46,7 @@ func dbAddCommand() *cobra.Command {
 		Long: "Registers a database as a source of an environment of a registered DataTug project, in the files a scan writes, " +
 			"and does not open the database: no metadata is scanned and no row is read (`datatug scan` describes it later).\n\n" +
 			"--db is a SQLite file path (or a sqlite:// URL), stored as a scan stores it, or env:NAME, the name of an environment variable that " +
-			"holds a PostgreSQL URL: the project then holds only the name of the variable in a connection descriptor, never the URL. " +
+			"holds a PostgreSQL URL or a set ClickHouse URL: the project then holds only the name of the variable in a connection descriptor, never the URL. " +
 			"A connection URL with credentials is refused: put it in an environment variable and pass env:NAME.\n\n" +
 			"When the same database is already a source of the environment nothing is written and the existing id is printed with added false.",
 		Example: "  datatug db add --project shop --db ./shop.sqlite --env local\n" +
@@ -56,7 +56,7 @@ func dbAddCommand() *cobra.Command {
 	}
 	flags := cmd.Flags()
 	flags.StringP("project", "p", "", "Registered project id/name to add the source to (required)")
-	flags.String("db", "", "The database: a SQLite file path or sqlite:// URL, or env:NAME for a PostgreSQL URL held in an environment variable (required)")
+	flags.String("db", "", "The database: a SQLite file path or sqlite:// URL, or env:NAME for PostgreSQL or ClickHouse (set the variable before adding ClickHouse; required)")
 	flags.String("env", "", "Environment of the project the source belongs to: a plain name; made when the project has none of that id (default: the project's only environment, or \"local\" when it has several)")
 	flags.String("name", "", "Id of the source: a plain name (default for a SQLite file: its file name without the extension; required for env:NAME)")
 	flags.String("format", "json", "Output format: json or text (json carries dbRef, the --db value that addresses the source)")
@@ -65,6 +65,7 @@ func dbAddCommand() *cobra.Command {
 
 // dbAddSource is the database `db add` was given, resolved and checked without opening it.
 type dbAddSource struct {
+	driver     string
 	sqlitePath string // the absolute path of a SQLite file
 	dsnEnv     string // the variable that holds a PostgreSQL URL
 }
@@ -107,7 +108,7 @@ func dbAddAction(cmd *cobra.Command, _ []string) error {
 		}
 	}
 	added, err := api.AddProjectSource(ctx, store, base.ProjectDir, api.ProjectSourceRequest{
-		Environment: env, ID: name, SQLitePath: source.sqlitePath, DSNEnv: source.dsnEnv,
+		Environment: env, ID: name, SQLitePath: source.sqlitePath, DSNEnv: source.dsnEnv, Driver: source.driver,
 	})
 	if err != nil {
 		var refusal *api.ProjectSourceRefusal
@@ -182,6 +183,9 @@ func resolveDbAddEnv(variable string, stderr io.Writer) (dbAddSource, error) {
 	ref, err := dbcopy.ParseWithEnv("env:"+variable, dbAddLookupEnv)
 	if err != nil {
 		return dbAddSource{}, Exit("--db: "+err.Error(), exitCodeUsage)
+	}
+	if dbcopy.IsClickHouseScheme(ref.Scheme) {
+		return dbAddSource{dsnEnv: variable, driver: api.DriverClickHouse}, nil
 	}
 	if ref.Scheme != api.DriverPostgres {
 		return dbAddSource{}, Exit(fmt.Sprintf("--db: environment variable %s must hold a postgres:// URL, not a %s source: a SQLite file is given as its path", variable, ref.Scheme), exitCodeUsage)

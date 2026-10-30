@@ -1,0 +1,37 @@
+name: Journey (ClickHouse)
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: clickhouse-cli-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  clickhouse:
+    name: Journey (ClickHouse)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=2'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Authenticate private Core dependency
+        uses: ./.github/actions/private-core
+        with:
+          private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.3'
+          cache: true
+      - name: Real bounded server and command journey
+        run: bash scripts/check-journey-clickhouse.sh
+      - name: Prove owned fixture cleanup
+        if: always()
+        run: |
+          set -euo pipefail
+          containers=$(docker ps -aq --filter 'name=datatug-cli-clickhouse-')
+          test -z "$containers" || { echo 'Owned ClickHouse fixture remains'; exit 1; }

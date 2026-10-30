@@ -395,7 +395,13 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 		limit = options.rowLimit
 	}
 	truncated := len(result.Rows) > limit
-	if truncated {
+	if result.AnonymousRecordset != nil {
+		truncated = len(result.AnonymousRecordset.Rows) > limit
+		if truncated {
+			result.AnonymousRecordset.Rows = result.AnonymousRecordset.Rows[:limit]
+		}
+	}
+	if truncated && result.AnonymousRecordset == nil {
 		result.Rows = result.Rows[:limit]
 	}
 

@@ -1,0 +1,13 @@
+{
+  "upstream": "https://github.com/dal-go/dalgo2clickhouse",
+  "commit": "99a44064132e9e3ca603e2c2bb04afb7b8b1986a",
+  "moduleVersion": "v0.0.0-20261030135300-99a44064132e",
+  "license": "Apache-2.0",
+  "files": {
+    "testdata/init.sql": "a03c14ee8cf183910c8ae3b05bde5a95d8f3c6f7e9c01a6be33c27633e0e15dd",
+    "testdata/access.xml": "a1d9d02e6ce31b7f6bfb5e1af6fe48055a54437fbc400c41ebd3e6d57a52cdb9",
+    "LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+  },
+  "script": "scripts/check-journey-clickhouse.sh derives from upstream testdata/integration.sh at this commit; paths and the CLI build/journey invocation differ, while server caps, startup barrier, assertions, resource guards and owned teardown remain.",
+  "image": "clickhouse/clickhouse-server:26.10.3.7@sha256:739e099abd1157390960a59e4532d21781d8fde57e6e4151cb920ea02c30b1ce"
+}

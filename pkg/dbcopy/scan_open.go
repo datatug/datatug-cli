@@ -119,6 +119,13 @@ func (r BackendRef) OpenSchemaScan(ctx context.Context) (SchemaScanDB, error) {
 			}
 			return schemaReaderOf(db, "PostgREST")
 		}
+		if IsClickHouseScheme(r.Scheme) {
+			db, err := openClickHouse(ctx, r, openMode{})
+			if err != nil {
+				return nil, err
+			}
+			return schemaReaderOf(db, "ClickHouse")
+		}
 		if IsLibSQLScheme(r.Scheme) {
 			db, err := openLibSQL(ctx, r, openMode{})
 			if err != nil {

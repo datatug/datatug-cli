@@ -84,6 +84,9 @@ func (r BackendRef) OpenFailure(err error) error {
 			cause:   err,
 		}
 	}
+	if IsClickHouseScheme(r.Scheme) {
+		return &openError{message: "ClickHouse: " + ClickHouseFailureReason(err), cause: err}
+	}
 	if IsTypesenseScheme(r.Scheme) {
 		return &openError{
 			message: fmt.Sprintf("open %s source %q: %s", r.Scheme, r.Display(), typesenseFailureReason(err)),

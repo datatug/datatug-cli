@@ -26,6 +26,9 @@ var ErrSnapshotPolicyUnexpressible = errors.New("snapshot policy evaluation is n
 // accesspolicies.Run path enforce both column projections and expressible row
 // conditions; an unsupported condition fails closed in RunStructured.
 func (e *Executor) RunSnapshot(ctx context.Context, collection string, recordset apicontract.Recordset) (Result, error) {
+	if err := e.session.configurationErr; err != nil {
+		return Result{}, err
+	}
 	if err := recordset.Validate(); err != nil {
 		return Result{}, err
 	}

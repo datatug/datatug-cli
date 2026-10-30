@@ -131,7 +131,7 @@ func incidentFactVisibility(ctx context.Context, fact investigation.Fact, sessio
 	if fact.Scope == nil || !incidentProjectScopeServed(*fact.Scope, paths) {
 		return incidents.FactHidden
 	}
-	if session.Unrestricted {
+	if session.DatabaseProfile.PolicyFreeReads() {
 		return incidents.FactVisible
 	}
 	if len(session.Policies) == 0 {

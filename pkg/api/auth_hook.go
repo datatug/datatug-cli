@@ -24,34 +24,17 @@ import (
 // already-resolved principal for every request alike, exactly as if that
 // principal had presented a bearer token on each one.
 //
-// A nil token — which apicore.VerifyRequest already turns into
-// facade.ErrUnauthorized (401) whenever the endpoint is AuthRequired,
-// without this hook needing to duplicate that check — is returned only when
-// the session both names no principal AND is not Unrestricted: a policy set
-// was loaded (Session.Policies is non-empty, or would be were policies
-// findable) but nobody was identified for it to run as. That is exactly the
-// "anonymous request when a policy set exists" case REQ:server-acl-all-reads
-// requires refused, never treated as an implicit admin.
-//
-// A Session with Principal == nil AND Unrestricted == true (no policies were
-// found at all, and the caller ran `serve` with none of --as/--role/--group)
-// still yields a token: Unrestricted already means every read this process
-// serves is unenforced regardless of who asks, so there is no principal left
-// to gate on — refusing here would only turn "no policies configured" into a
-// different, spurious 401 with no security benefit. resolveServeSession's
-// own production path never actually produces this combination (it defaults
-// --as to "admin" whenever no principal was named and no policies exist),
-// but secureread.NewSession(SessionOptions{NoPolicies: true}) can build one
-// directly (as test helpers across this package already do), so this hook
-// handles it explicitly rather than assuming that default always ran.
+// A nil token is returned when no principal and no explicit anonymous local
+// identity fallback were configured. The fallback preserves legacy local reads
+// only; it grants neither project ownership nor database authority.
 func AuthTokenFromHTTPRequest(_ *http.Request, _ bool) (*sneatauth.Token, error) {
 	secureMu.RLock()
 	principal := secureSession.Principal
-	unrestricted := secureSession.Unrestricted
+	anonymousLocalIdentity := secureSession.AllowAnonymousLocalIdentity
 	secureMu.RUnlock()
 
 	if principal == nil {
-		if unrestricted {
+		if anonymousLocalIdentity {
 			return &sneatauth.Token{}, nil
 		}
 		return nil, nil

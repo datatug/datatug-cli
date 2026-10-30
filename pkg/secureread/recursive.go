@@ -15,6 +15,9 @@ import (
 // source. Every nested leaf passes through the same policy session and bound
 // variables. Named databases are refused: they require a routing executor.
 func (e *Executor) RunRecursiveTugQL(ctx context.Context, sourceURL string, document []byte, variables map[string]any) (Result, error) {
+	if err := e.session.configurationErr; err != nil {
+		return Result{}, err
+	}
 	if err := refuseContextVariables(document); err != nil {
 		return Result{}, err
 	}

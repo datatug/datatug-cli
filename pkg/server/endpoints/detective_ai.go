@@ -158,7 +158,7 @@ func (p localAIPorts) verifyBasis(ctx context.Context, basis ai.Snapshot, state 
 		actor = "local-owner"
 	}
 	_, projectExists := api.ProjectDir(p.project)
-	if !api.ValidateSecurityContext(p.contextID) || !api.SecureSessionUnrestricted() || actor != p.local.Scope.Actor || !projectExists || !api.GetCapabilities().AllowWrites {
+	if !api.ValidateSecurityContext(p.contextID) || !api.SecureLocalProjectOwner() || actor != p.local.Scope.Actor || !projectExists || !api.GetCapabilities().AllowWrites {
 		return ai.ErrUnauthorized
 	}
 	current, err := detectiveAISnapshotFromState(ctx, p.project, state)

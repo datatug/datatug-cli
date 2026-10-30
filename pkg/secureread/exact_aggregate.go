@@ -52,6 +52,9 @@ func (q aggregateUnordered) OrderBy() []dal.OrderExpression { return nil }
 // Input budgets are hard errors, never partial aggregates. Integer/decimal
 // results use exact JSON numeric lexemes; FLOAT follows resultops IEEE addition.
 func (e *Executor) RunExactAggregateTugQL(ctx context.Context, sourceURL string, originalDocument, document []byte, variables map[string]any, columns []resultops.Column) (ExactAggregateResult, error) {
+	if err := e.session.configurationErr; err != nil {
+		return ExactAggregateResult{}, err
+	}
 	if err := ctx.Err(); err != nil {
 		return ExactAggregateResult{}, err
 	}
@@ -279,7 +282,7 @@ func (e *Executor) executeExactAggregate(ctx context.Context, db dal.DB, p exact
 		}
 		sourceQuery = builder.SelectColumns(scanColumns...)
 	}
-	secured, err := accesspoliciesRun(ctx, db, sourceQuery, accesspolicies.Options{Principal: e.session.Principal, Variables: variables, Policies: e.session.Policies, Unrestricted: e.session.Unrestricted})
+	secured, err := accesspoliciesRun(ctx, db, sourceQuery, accesspolicies.Options{Principal: e.session.Principal, Variables: variables, Policies: e.session.Policies, Unrestricted: e.session.DatabaseProfile.PolicyFreeReads()})
 	if err != nil {
 		return ExactAggregateResult{}, err
 	}

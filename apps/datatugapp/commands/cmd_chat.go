@@ -342,14 +342,14 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	store, err := chat.OpenSessionStore(storePath, chat.ChatScope{
 		ProjectID:   projectCatalog.ID,
 		Environment: options.env, Database: database,
-		AccessFingerprint: accesspolicies.Fingerprint(session.Policies, session.Unrestricted, session.Principal),
+		AccessFingerprint: accesspolicies.Fingerprint(session.Policies, session.DatabaseProfile.PolicyFreeReads(), session.Principal),
 		Sources:           sourceURLs,
 	})
 	if err != nil {
 		return "", Exit(fmt.Sprintf("open chat sessions: %v", err), exitCodeUsage)
 	}
 	defer func() { _ = store.Close() }()
-	joinApplication, closeJoin, joinErr := loadChatJoinApplication(ctx, sourceURL, executor, session.Unrestricted)
+	joinApplication, closeJoin, joinErr := loadChatJoinApplication(ctx, sourceURL, executor, session.DatabaseProfile.PolicyFreeReads())
 	if closeJoin != nil {
 		defer closeJoin()
 	}

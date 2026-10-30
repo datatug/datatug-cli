@@ -218,7 +218,7 @@ func authorizeItemTagsWrite(ctx context.Context, s ItemTagsSelector) error {
 	}
 	project := record.NewKeyWithID(accesspolicies.ProjectsCollection, s.ProjectID)
 	resource := access.RecordResourceForKey(record.NewKeyWithParentAndID(project, collection, accesspolicies.CanonicalQueryID(id)))
-	return accesspolicies.AuthorizeWrite(ctx, accesspolicies.WriteOptions{Principal: session.Principal, Policies: session.Policies, Unrestricted: session.Unrestricted}, access.Update, resource)
+	return accesspolicies.AuthorizeWrite(ctx, accesspolicies.WriteOptions{Principal: session.Principal, Policies: session.Policies, Unrestricted: session.LocalProjectOwner}, access.Update, resource)
 }
 
 // SaveLocalProjectItemTags changes only tags on an existing document. It uses

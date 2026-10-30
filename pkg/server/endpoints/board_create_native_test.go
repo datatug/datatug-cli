@@ -172,14 +172,14 @@ func TestNativeBoardCreateRefusesMissingOrRestrictedServerPrincipalAndWrongBranc
 	for _, change := range []string{"missing principal", "restricted principal", "writes revoked", "wrong branch"} {
 		t.Run(change, func(t *testing.T) {
 			router, dir, token := nativeBoardHTTP(t)
-			session := secureread.Session{Principal: &access.Principal{ID: "operator"}, Unrestricted: true}
+			session := secureread.Session{Principal: &access.Principal{ID: "operator"}, DatabaseProfile: secureread.DatabasePolicyFreeReads, LocalProjectOwner: true}
 			caps := api.Capabilities{AllowWrites: true}
 			if change == "missing principal" {
 				session.Principal = nil
-				session.Unrestricted = false
+				session.LocalProjectOwner = false
 			}
 			if change == "restricted principal" {
-				session.Unrestricted = false
+				session.LocalProjectOwner = false
 			}
 			if change == "writes revoked" {
 				caps.AllowWrites = false

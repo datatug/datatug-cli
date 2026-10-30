@@ -318,7 +318,7 @@ func configureWatchExecution(cfg watchdaemon.Config, projectID string) (func(), 
 	}
 	// Detective deliberately has no secured project-asset grant yet. Preserve
 	// its existing fail-closed boundary instead of impersonating a local owner.
-	if !session.Unrestricted {
+	if !session.LocalProjectOwner {
 		return nil, errors.New("watch Check assets require explicit local owner mode; secured project asset grants are unavailable")
 	}
 	paths := map[string]string{projectID: cfg.Runner.ProjectDir}

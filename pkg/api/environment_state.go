@@ -87,8 +87,8 @@ func envPolicy(projectID string) (actor string, c dto.EnvironmentCapabilities, p
 		// legacy GET /environments/all_environments already lets it; only an unrestricted session,
 		// or an explicit metadata policy above, may change them.
 		c.CanReadOrder = true
-		c.CanWriteOrder = secureSession.Unrestricted && capabilities.AllowWrites
-		c.CanCreateEnvironment = secureSession.Unrestricted && capabilities.AllowWrites
+		c.CanWriteOrder = secureSession.LocalProjectOwner && capabilities.AllowWrites
+		c.CanCreateEnvironment = secureSession.LocalProjectOwner && capabilities.AllowWrites
 	}
 	c.Reasons = map[string]string{}
 	if !c.CanReadOrder {

@@ -135,7 +135,7 @@ func TestNativeBoardCreateRechecksAuthorityAfterEveryOwnedWait(t *testing.T) {
 				case "writes":
 					capabilities.AllowWrites = false
 				case "unrestricted":
-					secureSession.Unrestricted = false
+					secureSession.LocalProjectOwner = false
 				case "generation":
 					securityContextID += "changed"
 				case "principal":
@@ -318,7 +318,7 @@ func TestNativeBoardCreateRequiresAnIdentifiedUnrestrictedWritableSession(t *tes
 		t.Run(kind, func(t *testing.T) {
 			dir, _ := setupTestGitProject(t, "board-admission")
 			paths := map[string]string{"board-admission": dir}
-			session := secureread.Session{Principal: &access.Principal{ID: "operator"}, Unrestricted: true}
+			session := secureread.Session{Principal: &access.Principal{ID: "operator"}, DatabaseProfile: secureread.DatabasePolicyFreeReads, LocalProjectOwner: true}
 			caps := Capabilities{AllowWrites: true}
 			switch kind {
 			case "unbound":
@@ -327,7 +327,7 @@ func TestNativeBoardCreateRequiresAnIdentifiedUnrestrictedWritableSession(t *tes
 			case "readonly":
 				caps.AllowWrites = false
 			case "restricted":
-				session.Unrestricted = false
+				session.LocalProjectOwner = false
 			case "missing principal":
 				session.Principal = nil
 			case "missing principal ID":

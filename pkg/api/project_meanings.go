@@ -52,7 +52,7 @@ func authorizeMeaningWrite(ctx context.Context, project string) error {
 		return secureread.ErrAccessDenied
 	}
 	key := record.NewKeyWithParentAndID(record.NewKeyWithID(accesspolicies.ProjectsCollection, project), "meanings", "project")
-	return accesspolicies.AuthorizeWrite(ctx, accesspolicies.WriteOptions{Principal: session.Principal, Policies: session.Policies, Unrestricted: session.Unrestricted}, access.Set, access.RecordResourceForKey(key))
+	return accesspolicies.AuthorizeWrite(ctx, accesspolicies.WriteOptions{Principal: session.Principal, Policies: session.Policies, Unrestricted: session.LocalProjectOwner}, access.Set, access.RecordResourceForKey(key))
 }
 
 // withLocalMeanings holds the same lock as revisioned query writes. Branches

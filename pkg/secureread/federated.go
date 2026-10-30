@@ -70,6 +70,9 @@ func (s *FederatedStream) Limitations() []Limitation {
 
 // StreamFederatedTugQL exposes the secured DALgo reader without collecting rows.
 func (e *Executor) StreamFederatedTugQL(ctx context.Context, document []byte, sourceURLs map[string]string, variables map[string]any) (*FederatedStream, error) {
+	if err := e.session.configurationErr; err != nil {
+		return nil, err
+	}
 	if err := refuseContextVariables(document); err != nil {
 		return nil, err
 	}
@@ -124,7 +127,7 @@ func WithFederatedProgress(ctx context.Context, observer func(dal.FederatedProgr
 func (s securedLeaf) ExecuteQueryToRecordsReader(ctx context.Context, query dal.Query) (dal.RecordsReader, error) {
 	result, err := accesspolicies.Run(ctx, s.db, query, accesspolicies.Options{
 		Principal: s.session.Principal, Variables: s.variables,
-		Policies: s.session.Policies, Unrestricted: s.session.Unrestricted,
+		Policies: s.session.Policies, Unrestricted: s.session.DatabaseProfile.PolicyFreeReads(),
 	})
 	if err != nil {
 		return nil, err

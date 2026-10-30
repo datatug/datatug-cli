@@ -16,7 +16,7 @@ func (e *Executor) CanReadWholeCollection(ctx context.Context, collection string
 	if e == nil || collection == "" {
 		return fmt.Errorf("JOIN target is unavailable")
 	}
-	if e.session.Unrestricted {
+	if e.session.DatabaseProfile.PolicyFreeReads() {
 		return nil
 	}
 	if len(e.session.Policies) == 0 {

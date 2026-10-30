@@ -175,7 +175,7 @@ func TestQueryFolderAuthoritySurvivesNeitherOuterNorProviderWait(t *testing.T) {
 				case "writes revoked":
 					capabilities.AllowWrites = false
 				case "unrestricted revoked":
-					secureSession.Unrestricted = false
+					secureSession.LocalProjectOwner = false
 				case "generation":
 					securityContextID += "replaced"
 				case "principal":

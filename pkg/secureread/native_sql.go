@@ -108,7 +108,10 @@ var nativeSQLLimitation = Limitation{
 // connection authorizer described above. Other sources without SQL text
 // execution fail with ErrNativeSQLUnsupported.
 func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, args ...dal.QueryArg) (Result, error) {
-	if !e.session.Unrestricted && !e.session.AllowOpaqueSQL {
+	if err := e.session.configurationErr; err != nil {
+		return Result{}, err
+	}
+	if !e.session.DatabaseProfile.PolicyFreeReads() && !e.session.AllowOpaqueSQL {
 		return Result{}, ErrOpaqueSQLNotGranted
 	}
 	ref, err := dbcopy.Parse(sourceURL)
@@ -145,7 +148,7 @@ func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, 
 	if err != nil {
 		return Result{}, err
 	}
-	if !e.session.Unrestricted {
+	if !e.session.DatabaseProfile.PolicyFreeReads() {
 		result.Limitations = append(result.Limitations, nativeSQLLimitation)
 	}
 	result.ColumnOrder = selectListOrder(ctx, sqlDB, sqlText, args)
@@ -221,7 +224,7 @@ func (e *Executor) runDuckDBNativeSQL(ctx context.Context, ref dbcopy.BackendRef
 	// DuckDB queries can read external files and URLs. A policy on a database
 	// cannot bound those resources, so only an operator's unrestricted session
 	// may use this native surface.
-	if !e.session.Unrestricted {
+	if !e.session.DatabaseProfile.PolicyFreeReads() {
 		return Result{}, fmt.Errorf("DuckDB native SQL requires an unrestricted session because queries can read external files and URLs")
 	}
 	if ref.Path != "" {

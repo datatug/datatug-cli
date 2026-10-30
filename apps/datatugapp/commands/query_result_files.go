@@ -153,6 +153,18 @@ func (s *resultSink) describeSaved(ctx context.Context, store datatug.ProjectSto
 	}
 }
 
+// describeAnonymousSaved uses the same catalog identity that classified and
+// executed the read. It needs no keyed schema/relationship discovery and never
+// resolves the catalog again to infer a driver from an env:NAME reference.
+func (s *resultSink) describeAnonymousSaved(projectDir, queryID string, queryDef *datatug.QueryDef, source resolvedQuerySource, variables map[string]any) {
+	s.meta.Query = queryresults.Query{Kind: queryresults.QueryKindSaved, SavedQueryID: queryID, SavedQueryType: strings.ToLower(string(queryDef.Type)), Parameters: clickHouseTypedParameters(variables), Policy: queryresults.PolicyProject}
+	s.meta.DB = queryresults.DB{Driver: source.Driver}
+	if projectID := registeredProjectID(projectDir); projectID != "" {
+		s.meta.DB = projectDB(dbcopy.DatatugRef{Project: projectID, DB: source.Catalog, Env: source.Environment}, source.Driver)
+	}
+	s.meta.SetEditor(queryDef.Text, strings.ToLower(string(queryDef.Type)))
+}
+
 // savedTugQLSources opens the databases of a saved TugQL query: each named
 // database of a federated query, else the one it runs on.
 func savedTugQLSources(ctx context.Context, store datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef) tugqlSources {

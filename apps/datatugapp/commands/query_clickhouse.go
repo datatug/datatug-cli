@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 	"text/tabwriter"
 	"unicode/utf8"
 
@@ -23,22 +24,26 @@ import (
 
 // Resolve only the single-source path here. Federated queries retain their own
 // validation and ClickHouse refusal in secureread before any source is opened.
-func federatedTugQLURLsForClickHouse(ctx context.Context, store datatug.ProjectStore, dir, env string, q *datatug.QueryDef) ([]string, error) {
+func savedQuerySourceForClickHouse(ctx context.Context, store datatug.ProjectStore, dir, env string, q *datatug.QueryDef) (resolvedQuerySource, error) {
 	if q.Type == datatug.QueryTypeTugQL {
 		urls, err := federatedTugQLURLs(ctx, store, dir, env, q)
 		if err != nil {
-			return nil, err
+			return resolvedQuerySource{}, err
 		}
 		if len(urls) > 0 {
-			return nil, nil
+			return resolvedQuerySource{}, nil
 		}
 	}
-	source, err := resolveSQLOrTugQLSourceURL(ctx, store, dir, env, q)
-	if err != nil {
-		return nil, err
-	}
-	return []string{source}, nil
+	return resolveSQLOrTugQLSource(ctx, store, dir, env, q)
 }
+
+// Keep command dispatch testable without changing session construction or the
+// executor's policy, source and provider boundaries.
+var runClickHouseStructured = func(ctx context.Context, session secureread.Session, source string, query dal.Query, variables map[string]any) (secureread.Result, error) {
+	return secureread.NewExecutor(session).RunStructured(ctx, source, query, variables)
+}
+var runNativeSQLCLI = (*secureread.Executor).RunNativeSQL
+var runSavedTugQLCLI = (*secureread.Executor).RunTugQL
 
 func runClickHouseQuery(cmd *cobra.Command, o queryOptions, backend dbcopy.BackendRef, query dal.Query, text string, variables map[string]any, policies []accesspolicies.Loaded, principal *access.Principal) error {
 	ctx := cmd.Context()
@@ -54,7 +59,7 @@ func runClickHouseQuery(cmd *cobra.Command, o queryOptions, backend dbcopy.Backe
 		query = fromQuery(o, nil)
 	}
 	session := secureread.Session{Policies: policies, Principal: principal, Unrestricted: o.noPolicies}
-	result, err := secureread.NewExecutor(session).RunStructured(ctx, backend.Raw, query, variables)
+	result, err := runClickHouseStructured(ctx, session, backend.Raw, query, variables)
 	if err != nil {
 		return queryFailureFor(backend, err)
 	}
@@ -152,17 +157,11 @@ func writeAnonymousResult(w io.Writer, format string, result secureread.Result) 
 		}
 		out := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 		for _, row := range rows {
+			quoted := make([]string, len(row))
 			for i, value := range row {
-				if i > 0 {
-					if _, err := fmt.Fprint(out, "\t"); err != nil {
-						return err
-					}
-				}
-				if _, err := fmt.Fprintf(out, "%q", value); err != nil {
-					return err
-				}
+				quoted[i] = strconv.Quote(value)
 			}
-			if _, err := fmt.Fprintln(out); err != nil {
+			if _, err := fmt.Fprintln(out, strings.Join(quoted, "\t")); err != nil {
 				return err
 			}
 		}

@@ -53,20 +53,28 @@ func (e *Executor) runClickHouseStructured(ctx context.Context, db dal.DB, query
 	return result, nil
 }
 
-func (e *Executor) runClickHouseNative(ctx context.Context, ref dbcopy.BackendRef, text string, args []dal.QueryArg) (Result, error) {
-	db, err := ref.OpenClickHouse(ctx, true)
-	if err != nil {
-		return Result{}, err
-	}
-	defer dbcopy.CloseSource(db)
-	query := dal.NewTextQuery(text, nil, args...)
-	guard := func(q dal.Query) error {
+var openClickHouseNativeFn = func(ctx context.Context, ref dbcopy.BackendRef) (dal.DB, error) {
+	return ref.OpenClickHouse(ctx, true)
+}
+
+func clickHouseNativeQueryGuard(text string, args []dal.QueryArg) func(dal.Query) error {
+	return func(q dal.Query) error {
 		t, ok := q.(dal.TextQuery)
 		if !ok || t.Text() != text || !reflect.DeepEqual(t.Args(), args) {
 			return fmt.Errorf("%w: native ClickHouse SQL and bindings must remain opaque", dal.ErrNotSupported)
 		}
 		return nil
 	}
+}
+
+func (e *Executor) runClickHouseNative(ctx context.Context, ref dbcopy.BackendRef, text string, args []dal.QueryArg) (Result, error) {
+	db, err := openClickHouseNativeFn(ctx, ref)
+	if err != nil {
+		return Result{}, err
+	}
+	defer dbcopy.CloseSource(db)
+	query := dal.NewTextQuery(text, nil, args...)
+	guard := clickHouseNativeQueryGuard(text, args)
 	_, err = accesspolicies.PrepareRecordset(ctx, query, accesspolicies.Options{Principal: e.session.Principal, Policies: e.session.Policies, Unrestricted: e.session.Unrestricted}, guard)
 	if err != nil {
 		return Result{}, clickHousePreparationError(err)

@@ -33,9 +33,6 @@ func BuildAnonymous(id string, rs apicontract.Recordset, native, encodings []str
 		columns[i] = Column{Name: col.Name, Type: col.Type, DeclaredType: &typ, Encoding: encodings[i]}
 	}
 	for _, row := range rs.Rows {
-		if len(row) != len(rs.Columns) {
-			return Data{}, fmt.Errorf("invalid anonymous row width")
-		}
 		for _, cell := range row {
 			if err := cell.Validate(); err != nil || !utf8.ValidString(cell.Str) {
 				return Data{}, fmt.Errorf("invalid anonymous cell")

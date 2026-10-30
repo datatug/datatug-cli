@@ -191,16 +191,45 @@ limit: 3
 	shadowed := decode(stdout)
 	require.Len(t, shadowed.Recordset.Rows, 2)
 	require.Equal(t, "18446744073709551615", shadowed.Recordset.Rows[0][0].Str)
-	stdout, stderr, code = runQuery(t, "", "--project", dir, "--query", "warehouse/large", "--env", "local", "--as", "alice", "--result-id", "clickhouse-proof", "--format", "json")
-	require.Zero(t, code, stderr)
-	require.Contains(t, stdout, "clickhouse-proof")
-	show := queryResultsShowCommand()
-	var reopened bytes.Buffer
-	show.SetOut(&reopened)
-	show.SetArgs([]string{"--id", "clickhouse-proof"})
-	require.NoError(t, show.Execute())
-	require.Contains(t, reopened.String(), `"anonymous":true`)
-	require.Len(t, decode(reopened.String()).Recordset.Rows, 2)
+	t.Run("private locator and typed reopen", func(t *testing.T) {
+		stdout, stderr, code := runQuery(t, "", "--project", dir, "--query", "warehouse/large", "--env", "local", "--as", "alice", "--result-id", "clickhouse-proof", "--format", "json")
+		require.Zero(t, code, stderr)
+		var locator struct {
+			ResultFiles struct {
+				Version int `json:"version"`
+			} `json:"resultFiles"`
+			RowsKept int  `json:"rowsKept"`
+			HasMore  bool `json:"hasMore"`
+			Columns  int  `json:"columns"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(stdout), &locator))
+		require.Equal(t, 1, locator.ResultFiles.Version)
+		require.Equal(t, 2, locator.RowsKept)
+		require.False(t, locator.HasMore)
+		require.Equal(t, 2, locator.Columns)
+		require.JSONEq(t, `{"resultFiles":{"version":1},"rowsKept":2,"hasMore":false,"columns":2}`, stdout)
+		for _, private := range []string{"clickhouse-proof", dir, `"id"`, `"rows"`, "18446744073709551615", "12345678901234567890.123456789"} {
+			require.NotContains(t, stdout, private, "the locator contains only ID-free, path-free result counts")
+		}
+		show := queryResultsShowCommand()
+		var reopened bytes.Buffer
+		show.SetOut(&reopened)
+		show.SetArgs([]string{"--id", "clickhouse-proof"})
+		require.NoError(t, show.Execute())
+		var result struct {
+			Anonymous bool                  `json:"anonymous"`
+			Recordset apicontract.Recordset `json:"recordset"`
+		}
+		require.NoError(t, json.Unmarshal(reopened.Bytes(), &result))
+		require.True(t, result.Anonymous)
+		require.Len(t, result.Recordset.Rows, 2)
+		require.NotContains(t, reopened.String(), "$key")
+		for _, row := range result.Recordset.Rows {
+			require.Len(t, row, 2)
+			require.Equal(t, apicontract.NewIntegerValue("18446744073709551615"), row[0])
+			require.Equal(t, apicontract.NewDecimalValue("12345678901234567890.123456789"), row[1])
+		}
+	})
 	// Named values retain exact JSON numeric lexemes through saved sqlQueryArgs
 	// and native driver bindings. There is no positional/name dropping fallback.
 	write("queries/warehouse/exact.query.json", `{"id":"warehouse/exact","type":"SQL","createdAt":"2026-01-01T00:00:00Z","targets":[{"catalog":"warehouse"}],"parameters":[{"id":"id","type":"integer","isRequired":true},{"id":"amount","type":"number","isRequired":true}]}`)
@@ -212,7 +241,7 @@ limit: 3
 	_, stderr, code = runQuery(t, "", "--project", dir, "--query", "warehouse/exact", "--env", "local", "--as", "alice", "--var", "id=18446744073709551615", "--var", "amount=12345678901234567890.123456789")
 	require.NotZero(t, code)
 	require.Contains(t, stderr, "opaque")
-	// Binary proof exercises the installed command routes, not a mock executor.
+	// Binary proof exercises this checkout's built CLI command routes.
 	command := exec.Command(binary, "query", "run", "--db", "env:DATATUG_CH_JOURNEY", "--sql", "SELECT id AS same,id AS same FROM explore.events LIMIT 3", "--format", "json", "--no-policies")
 	var out, errOut bytes.Buffer
 	command.Stdout = &out

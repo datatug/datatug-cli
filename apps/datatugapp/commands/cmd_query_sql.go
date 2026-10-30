@@ -66,7 +66,7 @@ func runSQLQueryCommand(cmd *cobra.Command, o queryOptions) error {
 			args = append(args, dal.QueryArg{Name: name, Value: variables[name]})
 		}
 	}
-	result, err := secureread.NewExecutor(session).RunNativeSQL(ctx, sourceURL, text, args...)
+	result, err := runNativeSQLCLI(secureread.NewExecutor(session), ctx, sourceURL, text, args...)
 	if errors.Is(err, secureread.ErrOpaqueSQLNotGranted) {
 		return Exit(err.Error()+": SQL text is not read through the row and column rules of access policies; use --allow-opaque-sql with an opaque-query policy grant, or run it with --no-policies", exitCodeUsage)
 	}

@@ -79,21 +79,16 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	if err != nil {
 		return Exit(err.Error(), exitCodeUsage)
 	}
+	var source resolvedQuerySource
 	if queryDef.Type == datatug.QueryTypeSQL || queryDef.Type == datatug.QueryTypeTugQL {
-		urls, urlErr := federatedTugQLURLsForClickHouse(ctx, projStore, projectDir, o.env, queryDef)
-		if urlErr != nil {
-			return savedQueryFailure(urlErr)
+		source, err = savedQuerySourceForClickHouse(ctx, projStore, projectDir, o.env, queryDef)
+		if err != nil {
+			return savedQueryFailure(err)
 		}
-		if len(urls) == 1 {
-			ref, parseErr := dbcopy.Parse(urls[0])
-			if parseErr != nil {
-				return savedQueryFailure(parseErr)
-			}
-			if dbcopy.IsClickHouseScheme(ref.Scheme) {
-				variables, err = parseClickHouseVariables(o.vars)
-				if err != nil {
-					return Exit(err.Error(), exitCodeUsage)
-				}
+		if source.Driver == api.DriverClickHouse {
+			variables, err = parseClickHouseVariables(o.vars)
+			if err != nil {
+				return Exit(err.Error(), exitCodeUsage)
 			}
 		}
 	}
@@ -111,23 +106,13 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	// query rather than manufacturing keys for anonymous ClickHouse results.
 	if queryDef.Federation != nil && len(queryDef.Federation.Lookups) > 0 && (queryDef.Type == datatug.QueryTypeSQL || queryDef.Type == datatug.QueryTypeTugQL) {
 		// A named-database federated query has no single catalog target. Use
-		// the same classification as exact-variable dispatch above; its leaves
+		// the validated snapshot from exact-variable dispatch above; its leaves
 		// still pass the executor's pre-I/O ClickHouse federation refusal.
-		sources, lookupErr := federatedTugQLURLsForClickHouse(ctx, projStore, projectDir, o.env, queryDef)
-		if lookupErr != nil {
-			return savedQueryFailure(lookupErr)
-		}
-		if len(sources) == 1 {
-			ref, lookupErr := dbcopy.Parse(sources[0])
-			if lookupErr != nil {
-				return savedQueryFailure(lookupErr)
-			}
-			if dbcopy.IsClickHouseScheme(ref.Scheme) {
-				return savedQueryFailure(fmt.Errorf("%w: ClickHouse anonymous recordsets do not support keyed lookup enrichment", dal.ErrNotSupported))
-			}
+		if source.Driver == api.DriverClickHouse {
+			return savedQueryFailure(fmt.Errorf("%w: ClickHouse anonymous recordsets do not support keyed lookup enrichment", dal.ErrNotSupported))
 		}
 	}
-	if queryDef.Type == datatug.QueryTypeTugQL && (o.format == "jsonl" || o.format == "csv") {
+	if queryDef.Type == datatug.QueryTypeTugQL && source.URL == "" && (o.format == "jsonl" || o.format == "csv") {
 		streamed, streamErr := runStreamedSavedTugQL(ctx, cmd.OutOrStdout(), stderr, o, executor, projStore, projectDir, queryDef, variables)
 		if streamed {
 			if streamErr != nil {
@@ -142,9 +127,13 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	case datatug.QueryTypeHTTP:
 		result, err = runHTTPSavedQuery(ctx, executor, projectDir, queryDef, variables)
 	case datatug.QueryTypeSQL:
-		result, err = runSQLSavedQuery(ctx, executor, projStore, projectDir, o.env, queryDef, variables)
+		result, err = runSQLSavedQueryAtSource(ctx, executor, source.URL, queryDef, variables)
 	case datatug.QueryTypeTugQL:
-		result, err = runTugQLSavedQuery(ctx, executor, projStore, projectDir, o.env, queryDef, variables)
+		if source.URL != "" {
+			result, err = runTugQLSavedQueryAtSource(ctx, executor, source.URL, queryDef, variables)
+		} else {
+			result, err = runTugQLSavedQuery(ctx, executor, projStore, projectDir, o.env, queryDef, variables)
+		}
 	default:
 		err = fmt.Errorf("query %q has type %q, which is not yet runnable through the policy-enforced path", o.query, queryDef.Type)
 	}
@@ -174,7 +163,11 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		provenance = newQueryProvenance(*result.Provenance)
 	}
 	if o.sink != nil {
-		o.sink.describeSaved(ctx, projStore, projectDir, o, canonicalID, queryDef, variables, result)
+		if result.AnonymousRecordset != nil && source.Driver == api.DriverClickHouse {
+			o.sink.describeAnonymousSaved(projectDir, canonicalID, queryDef, source, variables)
+		} else {
+			o.sink.describeSaved(ctx, projStore, projectDir, o, canonicalID, queryDef, variables, result)
+		}
 		if result.Provenance != nil {
 			o.sink.meta.Provenance = resultProvenance(*result.Provenance)
 		}
@@ -287,9 +280,25 @@ func resolveQueryDatabase(ctx context.Context, projStore datatug.ProjectStore, e
 // sourceURLFromCatalog and this function agree, instead of each carrying
 // its own copy.
 func resolveQuerySourceURL(ctx context.Context, projStore datatug.ProjectStore, projectDir, envID, database string) (string, error) {
+	source, err := resolveQuerySource(ctx, projStore, projectDir, envID, database)
+	return source.URL, err
+}
+
+// Driver is retained only after the catalog's source has passed the resolver's
+// descriptor and environment-scheme checks. It is not an unchecked project label.
+// URL retains an env:NAME reference: provider execution still validates the
+// operator's current environment; this snapshot does not freeze its secret bytes.
+type resolvedQuerySource struct {
+	URL         string
+	Driver      string
+	Environment string
+	Catalog     string
+}
+
+func resolveQuerySource(ctx context.Context, projStore datatug.ProjectStore, projectDir, envID, database string) (resolvedQuerySource, error) {
 	env, err := projStore.LoadEnvironment(ctx, envID)
 	if err != nil {
-		return "", api.LookupError("load environment %q", err, envID)
+		return resolvedQuerySource{}, api.LookupError("load environment %q", err, envID)
 	}
 	var lastErr error
 	for _, server := range env.DbServers {
@@ -301,14 +310,18 @@ func resolveQuerySourceURL(ctx context.Context, projStore datatug.ProjectStore, 
 			lastErr = catErr
 			continue
 		}
-		return querySourceURLFromCatalog(catalog, projectDir)
+		source, err := querySourceURLFromCatalog(catalog, projectDir)
+		if err != nil {
+			return resolvedQuerySource{}, err
+		}
+		return resolvedQuerySource{URL: source, Driver: catalog.Driver, Environment: envID, Catalog: database}, nil
 	}
 	// database and envID are what the command was given, and a source string can
 	// be typed where an ID belongs: see api.LookupError.
 	if lastErr != nil {
-		return "", api.LookupError("database %q not found in environment %q", lastErr, database, envID)
+		return resolvedQuerySource{}, api.LookupError("database %q not found in environment %q", lastErr, database, envID)
 	}
-	return "", api.LookupError("environment %q has no DB servers configured; cannot resolve database %q", nil, envID, database)
+	return resolvedQuerySource{}, api.LookupError("environment %q has no DB servers configured; cannot resolve database %q", nil, envID, database)
 }
 
 func querySourceURLFromCatalog(catalog datatug.DbCatalog, projectDir string) (string, error) {
@@ -351,11 +364,15 @@ func runSQLSavedQuery(ctx context.Context, executor *secureread.Executor, projSt
 	if err != nil {
 		return secureread.Result{}, err
 	}
+	return runSQLSavedQueryAtSource(ctx, executor, sourceURL, queryDef, variables)
+}
+
+func runSQLSavedQueryAtSource(ctx context.Context, executor *secureread.Executor, sourceURL string, queryDef *datatug.QueryDef, variables map[string]any) (secureread.Result, error) {
 	args, err := sqlQueryArgs(queryDef, variables)
 	if err != nil {
 		return secureread.Result{}, fmt.Errorf("query %q: %w", queryDef.ID, err)
 	}
-	return executor.RunNativeSQL(ctx, sourceURL, queryDef.Text, args...)
+	return runNativeSQLCLI(executor, ctx, sourceURL, queryDef.Text, args...)
 }
 
 // runTugQLSavedQuery resolves the TugQL query's environment+database and runs
@@ -377,7 +394,15 @@ func runTugQLSavedQuery(ctx context.Context, executor *secureread.Executor, proj
 	if err != nil {
 		return secureread.Result{}, err
 	}
-	return executor.RunTugQL(ctx, sourceURL, []byte(document), variables)
+	return runSavedTugQLCLI(executor, ctx, sourceURL, []byte(document), variables)
+}
+
+func runTugQLSavedQueryAtSource(ctx context.Context, executor *secureread.Executor, sourceURL string, queryDef *datatug.QueryDef, variables map[string]any) (secureread.Result, error) {
+	document, err := querybody.Structured(queryDef)
+	if err != nil {
+		return secureread.Result{}, err
+	}
+	return runSavedTugQLCLI(executor, ctx, sourceURL, []byte(document), variables)
 }
 
 func federatedTugQLURLs(ctx context.Context, projStore datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef) (map[string]string, error) {
@@ -593,15 +618,20 @@ func writeStreamedRows(ctx context.Context, out io.Writer, format string, column
 }
 
 func resolveSQLOrTugQLSourceURL(ctx context.Context, projStore datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef) (string, error) {
+	source, err := resolveSQLOrTugQLSource(ctx, projStore, projectDir, envFlag, queryDef)
+	return source.URL, err
+}
+
+func resolveSQLOrTugQLSource(ctx context.Context, projStore datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef) (resolvedQuerySource, error) {
 	envID, err := resolveQueryEnvironment(ctx, projStore, envFlag)
 	if err != nil {
-		return "", err
+		return resolvedQuerySource{}, err
 	}
 	database, err := resolveQueryDatabase(ctx, projStore, envID, queryDef)
 	if err != nil {
-		return "", err
+		return resolvedQuerySource{}, err
 	}
-	return resolveQuerySourceURL(ctx, projStore, projectDir, envID, database)
+	return resolveQuerySource(ctx, projStore, projectDir, envID, database)
 }
 
 // runHTTPSavedQuery runs an HTTP-type query through pkg/httpsource, which

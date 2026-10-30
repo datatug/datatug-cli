@@ -250,6 +250,8 @@ Help wanted to [get test coverage to 100%](https://github.com/datatug/datatug-cl
 
 Environment overrides: `DATATUG_VERSION` (default: latest release), `DATATUG_INSTALL_DIR` (default: `~/.local/bin`).
 
+When the install directory is not on `PATH`, the installer appends one line that adds it to your shell's startup file (`~/.zshrc`, `~/.bashrc`, `~/.bash_profile` on macOS, fish's `config.fish`, otherwise `~/.profile`) and prints the file, line number and line it wrote. `DATATUG_MODIFY_PATH=0` skips that edit and prints the line to add yourself. `scripts/install.sh` is a copy of the published script, whose source is `apps/app/public/install/get-cli` in [datatug/websites](https://github.com/datatug/websites).
+
 ### Windows — PowerShell
 
 ```powershell

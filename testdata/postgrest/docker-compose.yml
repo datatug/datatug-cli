@@ -4,7 +4,7 @@
 # pair the dalgo2postgrest adapter is tested against, pinned by version.
 services:
   postgres:
-    image: "${POSTGRES_IMAGE:-postgres:17}"
+    image: "${POSTGRES_IMAGE:-postgres:18}"
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres

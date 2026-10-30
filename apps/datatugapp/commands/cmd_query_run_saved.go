@@ -67,6 +67,13 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	if err != nil {
 		return Exit(fmt.Sprintf("load query %q: %v", canonicalID, err), exitCodeDatabase)
 	}
+	// A context variable ({SneatUserPersonalSpaceID}, @SneatUserID) is bound
+	// only by the DataTug web app for a signed-in user: refused here, before
+	// any session, executor or connection exists, rather than run with an
+	// empty value (backstage spec/features/my-data-project).
+	if err = queryDef.RefuseContextVariables(); err != nil {
+		return Exit(err.Error(), exitCodeUsage)
+	}
 
 	variables, err := accesspolicies.ParseVariables(o.vars)
 	if err != nil {
@@ -278,13 +285,13 @@ func querySourceURLFromCatalog(catalog datatug.DbCatalog, projectDir string) (st
 			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
 		}
 		return dbcopy.LocalSourceURL("ingitdb", path), nil
-	case "firestore", api.DriverPostgres, api.DriverMySQL, api.DriverOracle, api.DriverSQLServer, api.DriverCouchDB, api.DriverPostgREST, api.DriverLibSQL:
+	case "firestore", api.DriverPostgres, api.DriverMySQL, api.DriverOracle, api.DriverSQLServer, api.DriverCouchDB, api.DriverPostgREST, api.DriverLibSQL, api.DriverTypesense:
 		// The catalog's path is a connection descriptor that names an operator
 		// environment variable; the source is a value pkg/api builds and validates,
 		// never an endpoint or a credential held by the project.
 		return api.ResolveCatalogSourceURL(catalog, projectDir)
 	default:
-		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3, ingitdb, postgres, mysql, oracle, sqlserver, firestore, couchdb, postgrest or libsql)", catalog.Driver)
+		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3, ingitdb, postgres, mysql, oracle, sqlserver, firestore, couchdb, postgrest, libsql or typesense)", catalog.Driver)
 	}
 }
 

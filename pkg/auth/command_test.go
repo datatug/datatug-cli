@@ -24,3 +24,13 @@ func TestCommand(t *testing.T) {
 		}
 	}
 }
+
+func TestWhoamiCommand(t *testing.T) {
+	cmd := WhoamiCommand()
+	if cmd == nil {
+		t.Fatal("WhoamiCommand() returned nil")
+	}
+	if cmd.Name() != "whoami" {
+		t.Errorf("expected Name %q, got %q", "whoami", cmd.Name())
+	}
+}

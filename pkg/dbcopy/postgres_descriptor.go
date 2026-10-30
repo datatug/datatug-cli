@@ -136,6 +136,21 @@ func readLibSQLDescriptor(path string, lookupEnv func(string) (string, bool)) (C
 	return readConnectionDescriptor(path, "libSQL", lookupEnv)
 }
 
+// ReadTypesenseDescriptor reads and strictly decodes the Typesense connection
+// descriptor at path, applying the same dsnEnv rule as the other descriptor
+// readers: a project file may name only a variable the operator allowed, and the
+// endpoint is never in the project. The scoped API key is never in the descriptor
+// either: it comes from DATATUG_TYPESENSE_API_KEY for each request.
+func ReadTypesenseDescriptor(path string) (ConnectionDescriptor, error) {
+	return readTypesenseDescriptor(path, os.LookupEnv)
+}
+
+// readTypesenseDescriptor is ReadTypesenseDescriptor over an injected environment
+// lookup, so tests never touch the process environment.
+func readTypesenseDescriptor(path string, lookupEnv func(string) (string, bool)) (ConnectionDescriptor, error) {
+	return readConnectionDescriptor(path, "Typesense", lookupEnv)
+}
+
 // readConnectionDescriptor is the one reader of a descriptor file; title names
 // the source in the error text ("PostgreSQL", "CouchDB").
 func readConnectionDescriptor(path, title string, lookupEnv func(string) (string, bool)) (ConnectionDescriptor, error) {
@@ -185,6 +200,12 @@ func DecodePostgRESTDescriptor(data []byte) (ConnectionDescriptor, error) {
 // same one-field shape, with errors that name libSQL.
 func DecodeLibSQLDescriptor(data []byte) (ConnectionDescriptor, error) {
 	return decodeConnectionDescriptor(data, "libSQL")
+}
+
+// DecodeTypesenseDescriptor is DecodePostgresDescriptor for a Typesense
+// descriptor: the same one-field shape, with errors that name Typesense.
+func DecodeTypesenseDescriptor(data []byte) (ConnectionDescriptor, error) {
+	return decodeConnectionDescriptor(data, "Typesense")
 }
 
 func decodeConnectionDescriptor(data []byte, title string) (ConnectionDescriptor, error) {

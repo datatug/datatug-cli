@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -744,5 +745,40 @@ func TestExecuteRequests_RefuseAnUnsafeProject(t *testing.T) {
 	plainCommands := ExecuteCommandsRequest{Project: "p1", Commands: []ExecuteCommandRequest{{Type: "SQL", Text: "SELECT 1", Env: "local", DB: "shop"}}}
 	if err := plainCommands.Validate(); err != nil {
 		t.Errorf("a plain execute_commands request is refused: %v", err)
+	}
+}
+
+// A create writes only when the store says the ID is free: an entity that is
+// there is not replaced, and a store that cannot answer stops the create.
+func TestCreateEntityWritesOnlyAnIDThatIsFree(t *testing.T) {
+	serveProjects(t, "p1")
+	previous := storage.NewDatatugStore
+	t.Cleanup(func() { storage.NewDatatugStore = previous })
+	for name, tc := range map[string]struct {
+		loadErr   error
+		wantError string
+		wantSaved bool
+	}{
+		"taken":      {wantError: `entity "Customer" already exists`},
+		"unreadable": {loadErr: errors.New("disk"), wantError: `could not create entity "Customer"`},
+		"free":       {loadErr: fs.ErrNotExist, wantSaved: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			saved := false
+			storage.NewDatatugStore = func(string) (storage.Store, error) {
+				return mockStore{getProjectStoreFunc: func(string) datatug.ProjectStore {
+					return mockProjectStore{
+						loadEntityFunc: func(context.Context, string, ...datatug.StoreOption) (*datatug.Entity, error) {
+							return &datatug.Entity{}, tc.loadErr
+						},
+						saveEntityFunc: func(context.Context, *datatug.Entity) error { saved = true; return nil },
+					}
+				}}, nil
+			}
+			err := CreateEntity(context.Background(), plainProject(), plainEntity("Customer", ""))
+			if saved != tc.wantSaved || (tc.wantError == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.wantError)) {
+				t.Fatalf("create: %v, saved=%v", err, saved)
+			}
+		})
 	}
 }

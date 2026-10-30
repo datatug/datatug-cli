@@ -56,12 +56,13 @@ func saveProjectItemTags(w http.ResponseWriter, r *http.Request) {
 	writeProjectMutationJSON(w, r, http.StatusOK, result)
 }
 
-// Extend capabilities without requiring a Core DTO release. Old agents do
-// not advertise either field; clients must require these flags before editing.
+// Extend the project capabilities wrapper without changing strict AgentInfo.
+// Old agents omit these fields; clients must require literal true before editing.
 type projectCapabilitiesWithTags struct {
 	dto.ProjectCapabilities
-	BoardTags    bool `json:"boardTags"`
-	DbServerTags bool `json:"dbServerTags"`
+	BoardTags          bool `json:"boardTags"`
+	DbServerTags       bool `json:"dbServerTags"`
+	GuardedBoardCreate bool `json:"guardedBoardCreate"`
 }
 
 func getProjectDbServers(w http.ResponseWriter, r *http.Request) {

@@ -12,6 +12,12 @@ func TestCommandIsNotNil(t *testing.T) {
 	assert.NotNil(t, cmd)
 }
 
+func TestWhoamiCommandIsRegistered(t *testing.T) {
+	cmd, _, err := DatatugCommand().Find([]string{"whoami"})
+	assert.NoError(t, err)
+	assert.Equal(t, "whoami", cmd.Name())
+}
+
 // `datatug --help` names the variables that turn telemetry off.
 func TestRootHelpNamesTheTelemetrySwitches(t *testing.T) {
 	help := DatatugCommand().Long

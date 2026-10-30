@@ -79,6 +79,24 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	if err != nil {
 		return Exit(err.Error(), exitCodeUsage)
 	}
+	if queryDef.Type == datatug.QueryTypeSQL || queryDef.Type == datatug.QueryTypeTugQL {
+		urls, urlErr := federatedTugQLURLsForClickHouse(ctx, projStore, projectDir, o.env, queryDef)
+		if urlErr != nil {
+			return savedQueryFailure(urlErr)
+		}
+		if len(urls) == 1 {
+			ref, parseErr := dbcopy.Parse(urls[0])
+			if parseErr != nil {
+				return savedQueryFailure(parseErr)
+			}
+			if dbcopy.IsClickHouseScheme(ref.Scheme) {
+				variables, err = parseClickHouseVariables(o.vars)
+				if err != nil {
+					return Exit(err.Error(), exitCodeUsage)
+				}
+			}
+		}
+	}
 
 	session, err := resolveServeSession(projectDir, serveFlags{projectDir: projectDir, as: o.as, roles: o.roles, groups: o.groups})
 	if err != nil {
@@ -87,7 +105,23 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	if session.Unrestricted {
 		_, _ = fmt.Fprintln(stderr, "access: running without access policies")
 	}
+	session.AllowOpaqueSQL = o.allowOpaqueSQL
 	executor := secureread.NewExecutor(session)
+	// Lookup enrichment consumes keyed map rows. Refuse before the first leaf
+	// query rather than manufacturing keys for anonymous ClickHouse results.
+	if queryDef.Federation != nil && len(queryDef.Federation.Lookups) > 0 && (queryDef.Type == datatug.QueryTypeSQL || queryDef.Type == datatug.QueryTypeTugQL) {
+		source, lookupErr := resolveSQLOrTugQLSourceURL(ctx, projStore, projectDir, o.env, queryDef)
+		if lookupErr != nil {
+			return savedQueryFailure(lookupErr)
+		}
+		ref, lookupErr := dbcopy.Parse(source)
+		if lookupErr != nil {
+			return savedQueryFailure(lookupErr)
+		}
+		if dbcopy.IsClickHouseScheme(ref.Scheme) {
+			return savedQueryFailure(fmt.Errorf("%w: ClickHouse anonymous recordsets do not support keyed lookup enrichment", dal.ErrNotSupported))
+		}
+	}
 	if queryDef.Type == datatug.QueryTypeTugQL && (o.format == "jsonl" || o.format == "csv") {
 		streamed, streamErr := runStreamedSavedTugQL(ctx, cmd.OutOrStdout(), stderr, o, executor, projStore, projectDir, queryDef, variables)
 		if streamed {
@@ -139,7 +173,14 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		if result.Provenance != nil {
 			o.sink.meta.Provenance = resultProvenance(*result.Provenance)
 		}
+		if result.AnonymousRecordset != nil {
+			o.sink.meta.Query.Parameters = clickHouseTypedParameters(variables)
+			return o.sink.writeAnonymous(cmd.OutOrStdout(), result)
+		}
 		return o.sink.writeSecureRows(cmd.OutOrStdout(), result.Columns, result.Rows)
+	}
+	if result.AnonymousRecordset != nil {
+		return writeAnonymousResult(cmd.OutOrStdout(), o.format, result)
 	}
 	if err := writeQueryRows(cmd.OutOrStdout(), o.format, result.Columns, secureRowsToQueryRows(result.Rows), provenance); err != nil {
 		return Exit(err.Error(), 1)
@@ -285,7 +326,7 @@ func querySourceURLFromCatalog(catalog datatug.DbCatalog, projectDir string) (st
 			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
 		}
 		return dbcopy.LocalSourceURL("ingitdb", path), nil
-	case "firestore", api.DriverPostgres, api.DriverMySQL, api.DriverOracle, api.DriverSQLServer, api.DriverCouchDB, api.DriverPostgREST, api.DriverLibSQL, api.DriverTypesense:
+	case "firestore", api.DriverPostgres, api.DriverMySQL, api.DriverOracle, api.DriverSQLServer, api.DriverCouchDB, api.DriverPostgREST, api.DriverLibSQL, api.DriverTypesense, api.DriverClickHouse:
 		// The catalog's path is a connection descriptor that names an operator
 		// environment variable; the source is a value pkg/api builds and validates,
 		// never an endpoint or a credential held by the project.

@@ -18,13 +18,30 @@ var wrapRecordsetSession = func(s dal.ReadSession) dal.ReadSession {
 // guard must visit the entire original AST before parameter substitution and the
 // SecureReadSession recursive route, then the effective AST before compilation.
 func PrepareRecordset(ctx context.Context, query dal.Query, o Options, guard func(dal.Query) error) (Result, error) {
+	return prepareRecordset(ctx, query, o, guard, ExactVariables)
+}
+
+// PrepareRecordsetWithVariables is for native recordset executors whose scalar
+// domain includes exact integers/decimals unavailable to keyed local comparison.
+// normalize must be pure, bounded and detach supported scalar values. It does
+// not authorize a query. The mandatory original/effective whole-AST guard and
+// exactly-one capture still run; no RecordsReader/local evaluation is exposed.
+// Run and PrepareRecordset retain ExactVariables and their existing refusals.
+func PrepareRecordsetWithVariables(ctx context.Context, query dal.Query, o Options, guard func(dal.Query) error, normalize func(map[string]any) (map[string]any, error)) (Result, error) {
+	if normalize == nil {
+		return Result{}, fmt.Errorf("%w: missing native scalar normalizer", ErrInvalidQuery)
+	}
+	return prepareRecordset(ctx, query, o, guard, normalize)
+}
+
+func prepareRecordset(ctx context.Context, query dal.Query, o Options, guard func(dal.Query) error, normalize func(map[string]any) (map[string]any, error)) (Result, error) {
 	if guard == nil {
 		return Result{}, fmt.Errorf("%w: missing whole-query guard", ErrInvalidQuery)
 	}
 	if err := guard(query); err != nil {
 		return Result{}, err
 	}
-	ctx, result, err := prepareRead(ctx, query, o)
+	ctx, result, err := prepareReadWithVariables(ctx, query, o, normalize)
 	if err != nil {
 		return result, err
 	}

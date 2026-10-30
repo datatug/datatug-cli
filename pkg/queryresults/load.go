@@ -2,6 +2,7 @@ package queryresults
 
 import (
 	"encoding/json"
+	"unicode/utf8"
 
 	"github.com/datatug/datatug-core/pkg/apicontract"
 )
@@ -11,6 +12,7 @@ const ReasonVersion = "unsupported-version"
 
 // Loaded is a complete result read back from its files.
 type Loaded struct {
+	Anonymous bool
 	Meta      Meta
 	Recordset apicontract.Recordset
 	// MetaJSON and DataJSON are the files as they were read.
@@ -41,6 +43,7 @@ func (s *Store) Load(id string) (Loaded, error) {
 		return Loaded{}, fail(ReasonIncomplete)
 	}
 	var data struct {
+		Anonymous bool                  `json:"anonymous"`
 		Format    string                `json:"format"`
 		Version   int                   `json:"version"`
 		Recordset apicontract.Recordset `json:"recordset"`
@@ -51,11 +54,44 @@ func (s *Store) Load(id string) (Loaded, error) {
 	if data.Format != DataFormat || data.Version != Version {
 		return Loaded{}, fail(ReasonVersion)
 	}
-	if !wellFormed(data.Recordset, loaded.Meta.Query.Parameters) {
+	if data.Anonymous != loaded.Meta.Anonymous {
+		return Loaded{}, fail(ReasonIncomplete)
+	}
+	valid := wellFormed(data.Recordset, loaded.Meta.Query.Parameters)
+	if data.Anonymous {
+		valid = utf8.Valid(dataJSON) && wellFormedAnonymous(data.Recordset, loaded.Meta)
+	}
+	if !valid {
 		return Loaded{}, fail(ReasonIncomplete)
 	}
 	loaded.Recordset, loaded.MetaJSON, loaded.DataJSON = data.Recordset, metaJSON, dataJSON
+	loaded.Anonymous = data.Anonymous
 	return loaded, nil
+}
+
+func wellFormedAnonymous(rs apicontract.Recordset, meta Meta) bool {
+	if len(rs.Columns) == 0 || len(rs.Columns) != len(meta.Columns) || rs.Validate() != nil {
+		return false
+	}
+	for i, col := range rs.Columns {
+		info := meta.Columns[i]
+		if !utf8.ValidString(col.Name) || col.Name != info.Name || col.Type != info.Type || info.Internal || info.PK != nil || info.DeclaredType == nil || *info.DeclaredType == "" || !utf8.ValidString(*info.DeclaredType) || (info.Encoding != "" && info.Encoding != EncodingJSON) {
+			return false
+		}
+	}
+	for _, row := range rs.Rows {
+		for _, cell := range row {
+			if !utf8.ValidString(cell.Str) {
+				return false
+			}
+		}
+	}
+	for _, value := range meta.Query.Parameters {
+		if value.Validate() != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // wellFormed is whether a recordset and the parameters have the shape this

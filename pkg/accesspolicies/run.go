@@ -161,11 +161,15 @@ func paramNames(expression dal.Expression) []string {
 
 // prepareRead shares identity, substitution and field checks across keyed and keyless reads.
 func prepareRead(ctx context.Context, query dal.Query, o Options) (context.Context, Result, error) {
+	return prepareReadWithVariables(ctx, query, o, ExactVariables)
+}
+
+func prepareReadWithVariables(ctx context.Context, query dal.Query, o Options, normalize func(map[string]any) (map[string]any, error)) (context.Context, Result, error) {
 	if len(o.Policies) == 0 && !o.Unrestricted {
 		return ctx, Result{}, ErrNoPolicies
 	}
 	var err error
-	o.Variables, err = ExactVariables(o.Variables)
+	o.Variables, err = normalize(o.Variables)
 	if err != nil {
 		return ctx, Result{}, err
 	}

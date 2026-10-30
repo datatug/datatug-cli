@@ -6,6 +6,7 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/tugql"
+	"github.com/dal-go/dalgo2clickhouse"
 	"github.com/dal-go/dalgo2http"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
@@ -101,6 +102,9 @@ func (e *Executor) RunTugQL(ctx context.Context, sourceURL string, tugqlDoc []by
 // the admitted rows, and translate the policy Explain lines into Result
 // Limitations.
 func (e *Executor) runThroughPolicies(ctx context.Context, db dal.DB, query dal.Query, variables map[string]any) (Result, error) {
+	if validator, ok := dal.As[dalgo2clickhouse.StructuredQueryValidator](db); ok {
+		return e.runClickHouseStructured(ctx, db, query, variables, validator)
+	}
 	apResult, err := accesspolicies.Run(ctx, db, query, accesspolicies.Options{
 		Principal:    e.session.Principal,
 		Variables:    variables,

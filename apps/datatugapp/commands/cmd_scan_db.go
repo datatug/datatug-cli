@@ -234,7 +234,7 @@ var scanLookupEnv = os.LookupEnv
 var scanUpdateDbSchema = api.UpdateDbSchema
 
 // scanDrivers are the drivers a scan reads, in the order the messages name them.
-var scanDrivers = []string{dbconnection.DriverSQLite3, api.DriverPostgres, api.DriverMySQL, api.DriverOracle, api.DriverSQLServer, api.DriverCouchDB, api.DriverPostgREST, api.DriverLibSQL, api.DriverTypesense}
+var scanDrivers = []string{dbconnection.DriverSQLite3, api.DriverPostgres, api.DriverMySQL, api.DriverOracle, api.DriverSQLServer, api.DriverCouchDB, api.DriverPostgREST, api.DriverLibSQL, api.DriverTypesense, api.DriverClickHouse}
 
 // checkScanDriver is an error, naming --driver and the drivers a scan reads, when driver is not
 // one of them. The value is said as it was typed only when it is a plain name: the flag may have
@@ -256,11 +256,11 @@ func scanDriverNames() string {
 
 // connectionParams builds DB connection parameters from the scan flags.
 func (v *scanDbCommand) connectionParams() (dbconnection.Params, error) {
-	if api.IsServerDriver(v.Driver) || v.Driver == api.DriverCouchDB || v.Driver == api.DriverPostgREST || v.Driver == api.DriverLibSQL || v.Driver == api.DriverTypesense {
+	if api.IsServerDriver(v.Driver) || v.Driver == api.DriverCouchDB || v.Driver == api.DriverPostgREST || v.Driver == api.DriverLibSQL || v.Driver == api.DriverTypesense || v.Driver == api.DriverClickHouse {
 		return v.descriptorConnectionParams()
 	}
 	if v.DSNEnv != "" {
-		return nil, fmt.Errorf("--dsn-env applies only to -D %s, %s, %s, %s, %s, %s, %s or %s", api.DriverPostgres, api.DriverMySQL, api.DriverOracle, api.DriverSQLServer, api.DriverCouchDB, api.DriverPostgREST, api.DriverLibSQL, api.DriverTypesense)
+		return nil, fmt.Errorf("--dsn-env applies only to -D %s, %s, %s, %s, %s, %s, %s, %s or %s", api.DriverPostgres, api.DriverMySQL, api.DriverOracle, api.DriverSQLServer, api.DriverCouchDB, api.DriverPostgREST, api.DriverLibSQL, api.DriverTypesense, api.DriverClickHouse)
 	}
 	// sqlite3 is the one driver a scan reads that is not a server (checkScanDriver has refused any other).
 	if v.Path == "" {
@@ -279,14 +279,15 @@ func scanArticle(driver string) string {
 
 // scanURLExamples is the shape of the connection URL of each driver a scan reads from --dsn-env.
 var scanURLExamples = map[string]string{
-	api.DriverPostgres:  "postgres://user:password@host/database",
-	api.DriverMySQL:     "mysql://user:password@host:3306/database",
-	api.DriverOracle:    "oracle://user:password@host:1521/service",
-	api.DriverSQLServer: "sqlserver://user:password@host:1433/database",
-	api.DriverCouchDB:   "couchdb://host:6984/database (couchdb+http://127.0.0.1:5984/database for a loopback development server)",
-	api.DriverPostgREST: "postgrest://host:3000/rest/v1 (postgrest+http://127.0.0.1:3000 for a loopback development server)",
-	api.DriverLibSQL:    "libsql://host[:port][/base-path] (libsql+http://127.0.0.1:8080 for a loopback development server); the token is never in the URL but in DATATUG_LIBSQL_BEARER",
-	api.DriverTypesense: "typesense://host[:port]/collection (typesense+http://127.0.0.1:8108/books for a loopback development server); the scoped API key is never in the URL but in DATATUG_TYPESENSE_API_KEY",
+	api.DriverPostgres:   "postgres://user:password@host/database",
+	api.DriverMySQL:      "mysql://user:password@host:3306/database",
+	api.DriverOracle:     "oracle://user:password@host:1521/service",
+	api.DriverSQLServer:  "sqlserver://user:password@host:1433/database",
+	api.DriverCouchDB:    "couchdb://host:6984/database (couchdb+http://127.0.0.1:5984/database for a loopback development server)",
+	api.DriverPostgREST:  "postgrest://host:3000/rest/v1 (postgrest+http://127.0.0.1:3000 for a loopback development server)",
+	api.DriverClickHouse: "clickhouse://host:9440/database (TLS native) or clickhouse+https://host:8443/database; credentials and relation grants stay in DATATUG_CLICKHOUSE_*",
+	api.DriverLibSQL:     "libsql://host[:port][/base-path] (libsql+http://127.0.0.1:8080 for a loopback development server); the token is never in the URL but in DATATUG_LIBSQL_BEARER",
+	api.DriverTypesense:  "typesense://host[:port]/collection (typesense+http://127.0.0.1:8108/books for a loopback development server); the scoped API key is never in the URL but in DATATUG_TYPESENSE_API_KEY",
 }
 
 // descriptorConnectionParams builds the parameters of a PostgreSQL, MySQL, Oracle, SQL Server or CouchDB
@@ -329,6 +330,13 @@ func (v *scanDbCommand) descriptorConnectionParams() (dbconnection.Params, error
 		params, err := api.NewPostgRESTScanParams(scanLookupEnv, v.DSNEnv, v.Environment, v.Database)
 		if err != nil {
 			return nil, err // not params: a nil *PostgRESTScanParams would be a non-nil Params
+		}
+		return params, nil
+	}
+	if v.Driver == api.DriverClickHouse {
+		params, err := api.NewClickHouseScanParams(scanLookupEnv, v.DSNEnv, v.Environment, v.Database)
+		if err != nil {
+			return nil, err
 		}
 		return params, nil
 	}
@@ -379,7 +387,7 @@ func scanCommandArgs() *cobra.Command {
 	flags := cmd.Flags()
 	flags.StringP("project", "p", "", "Registered project id/name to scan into; with --directory, the id of a new project (default: the name of the folder)")
 	flags.StringP("directory", "d", "", "Path to the project directory (alternative to --project); made if it does not exist")
-	flags.StringP("driver", "D", "", "DB driver: sqlite3, postgres, mysql, oracle, sqlserver, couchdb, postgrest, libsql or typesense (postgres reads every schema; for every driver but sqlite3 the connection URL comes from the environment variable of --dsn-env)")
+	flags.StringP("driver", "D", "", "DB driver: sqlite3, postgres, mysql, oracle, sqlserver, couchdb, postgrest, libsql, typesense or clickhouse (postgres reads every schema; for every driver but sqlite3 the connection URL comes from the environment variable of --dsn-env)")
 	flags.StringP("server", "s", "", "Not accepted: a server's host is in the connection URL of --dsn-env")
 	flags.Int("port", 0, "Not accepted: a server's port is in the connection URL of --dsn-env")
 	flags.StringP("user", "U", "", "Not accepted: the user is in the connection URL of --dsn-env")

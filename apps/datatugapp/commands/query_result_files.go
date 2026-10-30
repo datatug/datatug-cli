@@ -227,6 +227,35 @@ func (s *resultSink) writeSecureRows(stdout io.Writer, columns []string, rows []
 	return s.write(stdout, collector, columns)
 }
 
+func (s *resultSink) writeAnonymous(stdout io.Writer, result secureread.Result) error {
+	if result.AnonymousRecordset == nil {
+		return fmt.Errorf("anonymous recordset unavailable")
+	}
+	native := make([]string, len(result.OrdinalColumns))
+	encodings := make([]string, len(native))
+	for i, col := range result.OrdinalColumns {
+		native[i] = col.NativeType
+		encodings[i] = col.Encoding
+	}
+	data, err := queryresults.BuildAnonymous(s.id, *result.AnonymousRecordset, native, encodings, s.rows)
+	if err != nil {
+		return err
+	}
+	meta := queryresults.NewMeta(s.id, cliVersion(), data)
+	meta.DB = s.meta.DB
+	meta.Query = s.meta.Query
+	// Anonymous result columns have no unique-record or relationship promise.
+	meta.Unavailable.Participants = queryresults.UnavailableNoRelMetadata
+	meta.Unavailable.Related = queryresults.UnavailableNoRelMetadata
+	if err := s.result.Write(data.Bytes, meta.Encode()); err != nil {
+		return storeExit(err)
+	}
+	s.written = true
+	_, _ = s.store.Prune(false)
+	_, err = stdout.Write(queryresults.LocatorLine(data))
+	return err
+}
+
 func (s *resultSink) write(stdout io.Writer, collector *queryresults.Collector, columns []string) error {
 	description := resultDescription{}
 	if s.describe != nil {

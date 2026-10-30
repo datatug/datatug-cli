@@ -154,3 +154,10 @@ func TestWhoami_UserInfoError(t *testing.T) {
 		t.Fatalf("error = %v, want validate Firebase session", err)
 	}
 }
+
+func TestWhoamiCommand_IsTopLevelWhoami(t *testing.T) {
+	cmd := WhoamiCommand()
+	if cmd.Name() != "whoami" {
+		t.Fatalf("Name = %q, want whoami", cmd.Name())
+	}
+}

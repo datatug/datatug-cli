@@ -62,6 +62,7 @@ External command groups live in their own packages and are referenced here but n
 | External group | Source | Notes |
 |---|---|---|
 | `auth` | [`pkg/auth`](../../../pkg/auth) | Authentication subcommands |
+| `whoami` | [`pkg/auth/device`](../../../pkg/auth/device) | Top-level: shows the signed-in DataTug account (email, UID, issuer, scopes, token expiry and storage) from the same device login as `auth login`; never prints a token |
 | `gcloud` | [`apps/datatugapp/datatugui/dtviewers/clouds/gcloud/gcloudcmds`](../../../apps/datatugapp/datatugui/dtviewers/clouds/gcloud/gcloudcmds) | Google Cloud integration subcommands |
 
 These groups MUST observe the shared conventions defined below even though their per-command contracts live elsewhere.

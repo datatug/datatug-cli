@@ -148,8 +148,7 @@ func writeAnonymousResult(w io.Writer, format string, result secureread.Result) 
 		}
 		if format == "csv" {
 			out := csv.NewWriter(w)
-			out.WriteAll(rows)
-			return out.Error()
+			return out.WriteAll(rows)
 		}
 		out := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 		for _, row := range rows {

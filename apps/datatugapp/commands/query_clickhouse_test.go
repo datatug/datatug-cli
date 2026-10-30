@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -56,4 +57,29 @@ func TestClickHouseAnonymousOutputUsesOrdinals(t *testing.T) {
 	out.Reset()
 	require.Error(t, writeAnonymousResult(&out, "json", result))
 	require.Empty(t, out.String())
+}
+
+type clickHouseFailingCSVWriter struct {
+	err   error
+	calls int
+}
+
+func (w *clickHouseFailingCSVWriter) Write([]byte) (int, error) {
+	w.calls++
+	return 0, w.err
+}
+
+func TestClickHouseAnonymousCSVPropagatesDestinationFailure(t *testing.T) {
+	brokenPipe := errors.New("CSV destination closed")
+	destination := &clickHouseFailingCSVWriter{err: brokenPipe}
+	result := secureread.Result{
+		AnonymousRecordset: &apicontract.Recordset{
+			Columns: []apicontract.Column{{Name: "id", Type: "integer"}},
+			Rows:    [][]apicontract.TypedValue{{apicontract.NewIntegerValue("18446744073709551615")}},
+		},
+		OrdinalColumns: []secureread.OrdinalColumn{{NativeType: "UInt64"}},
+	}
+	err := writeAnonymousResult(destination, "csv", result)
+	require.ErrorIs(t, err, brokenPipe)
+	require.Positive(t, destination.calls, "the valid result must reach the destination writer")
 }

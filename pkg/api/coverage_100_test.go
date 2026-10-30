@@ -582,7 +582,7 @@ func TestBoardAPI(t *testing.T) {
 	ctx := context.Background()
 	ref := dto.ProjectRef{ProjectID: "p1"}
 	itemRef := dto.ProjectItemRef{ProjectRef: ref, ID: "b1"}
-	board := datatug.Board{ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "b1"}}}
+	board := datatug.Board{ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "b1", Title: "Board", Folder: "~"}}}
 
 	// Store error
 	storage.NewDatatugStore = func(string) (storage.Store, error) {
@@ -602,20 +602,23 @@ func TestBoardAPI(t *testing.T) {
 	storage.NewDatatugStore = func(string) (storage.Store, error) {
 		return mockStore{
 			getProjectStoreFunc: func(projectID string) datatug.ProjectStore {
-				return mockProjectStore{
+				return guardedBoardTestProject{ProjectStore: mockProjectStore{
 					saveBoardFunc: func(ctx context.Context, b *datatug.Board) error {
 						savedBoard = b
 						return nil
 					},
 					loadBoardFunc: func(ctx context.Context, id string, o ...datatug.StoreOption) (*datatug.Board, error) {
 						loadedID = id
+						if savedBoard == nil {
+							return nil, os.ErrNotExist
+						}
 						return &board, nil
 					},
 					deleteBoardFunc: func(ctx context.Context, id string) error {
 						deletedID = id
 						return nil
 					},
-				}
+				}, create: func(_ context.Context, b *datatug.Board) error { savedBoard = b; return nil }}
 			},
 		}, nil
 	}

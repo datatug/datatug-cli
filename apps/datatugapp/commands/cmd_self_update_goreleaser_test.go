@@ -73,8 +73,17 @@ func TestDatatugCatalogEntry_MatchesGoReleaserConfig(t *testing.T) {
 	if gr.ProjectName != entry.ID {
 		t.Errorf("goreleaser project_name = %q, want catalog id %q", gr.ProjectName, entry.ID)
 	}
-	if got, want := gr.Release.GitHub.Owner+"/"+gr.Release.GitHub.Name, entry.Repository; got != want {
-		t.Errorf("goreleaser release.github = %q, want catalog Repository %q", got, want)
+	// In the private builder repository (datatug/datatug-cli), GoReleaser
+	// attaches release artifacts to datatug/datatug-cli. A separate CI publisher
+	// job (publish-datatug-release) copies public releases to datatug/datatug.
+	// The catalog entry used for self-update and installation must query the
+	// public distribution repo ("datatug/datatug"), while GoReleaser releases to
+	// "datatug/datatug-cli".
+	if got, want := gr.Release.GitHub.Owner+"/"+gr.Release.GitHub.Name, "datatug/datatug-cli"; got != want {
+		t.Errorf("goreleaser release.github = %q, want builder repository %q", got, want)
+	}
+	if got, want := entry.Repository, "datatug/datatug"; got != want {
+		t.Errorf("catalog Repository = %q, want public distribution repository %q", got, want)
 	}
 	if entry.TagPrefix != "" {
 		t.Errorf("catalog TagPrefix = %q, want empty: datatug publishes one product per repository", entry.TagPrefix)

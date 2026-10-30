@@ -198,7 +198,7 @@ func entitiesRoutes(path string, router router, wrap wrapper, writeOnly bool, ca
 		route(router, wrap, http.MethodGet, path+"/entities/all_entities", getEntities)
 		route(router, wrap, http.MethodGet, path+"/entities/entity", getEntity)
 	}
-	route(router, wrap, http.MethodPost, path+"/entities/create_entity", requireWriteCapability(caps, saveEntity))
+	route(router, wrap, http.MethodPost, path+"/entities/create_entity", requireWriteCapability(caps, createEntity))
 	route(router, wrap, http.MethodPut, path+"/entities/save_entity", requireWriteCapability(caps, saveEntity))
 	route(router, wrap, http.MethodDelete, path+"/entities/delete_entity", requireWriteCapability(caps, rejectUnreviewedProjectLifecycle))
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -37,6 +38,35 @@ func fixtureProductToken(t *testing.T) *oauth2.Token {
 }
 func fixtureProductIdentity() productIdentity {
 	return productIdentity{Family: sneatauth.ProductDelegationFamily, Realm: "demo-datatug-access", Subject: "uid", Client: clientID, Audience: clientID, Product: "datatug", Scopes: append([]string(nil), productScopes...), Scope: strings.Join(productScopes, " ")}
+}
+
+func TestProductOriginalExpiryAndCancellationRemainBoundAcrossIdentityIO(t *testing.T) {
+	for _, cancelled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cancelled=%t", cancelled), func(t *testing.T) {
+			now := time.Now()
+			token := fixtureProductToken(t)
+			token.Expiry = now.Add(time.Second)
+			client, err := deviceauth.NewClient(deviceauth.ClientConfig{Issuer: "https://fixture.test" + sneatauth.ProductDelegationPath, ClientID: clientID, Scopes: productScopes, RequiredScopes: productScopes})
+			require.NoError(t, err)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			p := &productClient{client: client, realm: "demo-datatug-access", now: func() time.Time { return now }, store: &memoryStore{credential: deviceauth.Credential{AccessToken: token.AccessToken, TokenType: "Bearer", Expiry: token.Expiry, Issuer: client.Issuer(), ClientID: clientID, AccountID: "uid"}}}
+			p.http = &http.Client{Transport: productRoundTrip(func(*http.Request) (*http.Response, error) {
+				if cancelled {
+					cancel()
+				} else {
+					now = token.Expiry
+				}
+				raw, e := json.Marshal(fixtureProductIdentity())
+				require.NoError(t, e)
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(raw))}, nil
+			})}
+			got, identity, err := p.token(ctx)
+			require.Error(t, err)
+			require.Nil(t, got, "no credential may be returned active after its original deadline")
+			require.Empty(t, identity.Subject)
+		})
+	}
 }
 
 func TestProductOnlyLoginStatusLogoutAndCurrentState(t *testing.T) {

@@ -148,6 +148,29 @@ func TestProtectedRecordRejectsInvalidInputCredentialsAndWireShapes(t *testing.T
 	require.NotContains(t, err.Error(), token)
 }
 
+func TestProtectedRecordSelectorsMatchServerProfileBeforeCredentialIO(t *testing.T) {
+	options, dependencies, _ := protectedReadFixture(t)
+	credentialCalls, httpCalls := 0, 0
+	dependencies.bearer = func(context.Context, device.ProductOptions) (string, error) { credentialCalls++; return "", nil }
+	dependencies.client = &http.Client{Transport: protectedReadRoundTrip(func(*http.Request) (*http.Response, error) { httpCalls++; return nil, errors.New("unexpected HTTP") })}
+	for _, set := range []func(*protectedRecordRequest, string){func(r *protectedRecordRequest, v string) { r.Space = v }, func(r *protectedRecordRequest, v string) { r.Project = v }, func(r *protectedRecordRequest, v string) { r.Connection = v }, func(r *protectedRecordRequest, v string) { r.Collection = v }, func(r *protectedRecordRequest, v string) { r.ID = v }} {
+		for _, invalid := range []string{"bad space", strings.Repeat("x", 129), "caf\u00e9", "a.b"} {
+			copy := options
+			set(&copy.request, invalid)
+			result, err := readProtectedRecord(context.Background(), copy, dependencies)
+			require.Nil(t, result)
+			var exit ExitCoder
+			require.ErrorAs(t, err, &exit)
+			require.Equal(t, exitCodeUsage, exit.ExitCode())
+		}
+	}
+	require.Zero(t, credentialCalls)
+	require.Zero(t, httpCalls)
+	for _, valid := range []string{"a-Z_09", strings.Repeat("x", 128)} {
+		require.True(t, validProtectedSelector(valid))
+	}
+}
+
 func TestProtectedRecordNeverForwardsBearerAcrossRedirect(t *testing.T) {
 	options, dependencies, _ := protectedReadFixture(t)
 	targetCalls := 0

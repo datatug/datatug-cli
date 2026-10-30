@@ -125,6 +125,12 @@ func (p *productClient) identity(ctx context.Context, token *oauth2.Token) (prod
 		identity.Client != clientID || identity.Audience != clientID || identity.Product != "datatug" || strings.Join(identity.Scopes, " ") != identity.Scope || deviceauth.ValidateRequiredScopes(identity.Scopes, productScopes) != nil {
 		return productIdentity{}, errors.New("product identity binding does not match this login")
 	}
+	if err = ctx.Err(); err != nil {
+		return productIdentity{}, err
+	}
+	if err = p.validToken(token, true); err != nil {
+		return productIdentity{}, err
+	}
 	return identity, nil
 }
 

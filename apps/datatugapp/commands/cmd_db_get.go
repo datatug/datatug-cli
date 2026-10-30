@@ -7,9 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strings"
 	"time"
-	"unicode"
 
 	"github.com/datatug/datatug-cli/pkg/auth/device"
 	"github.com/sneat-co/sneat-go-core/sneatauth"
@@ -68,7 +66,15 @@ func protectedReadCommand(dependencies protectedReadDependencies) *cobra.Command
 }
 
 func validProtectedSelector(value string) bool {
-	return value != "" && len(value) <= 256 && value != "." && value != ".." && strings.TrimSpace(value) == value && !strings.ContainsAny(value, "/\\?#") && !strings.ContainsFunc(value, unicode.IsControl)
+	if len(value) == 0 || len(value) > 128 {
+		return false
+	}
+	for _, c := range value {
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '-' && c != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 func readProtectedRecord(ctx context.Context, options protectedReadOptions, dependencies protectedReadDependencies) (map[string]any, error) {

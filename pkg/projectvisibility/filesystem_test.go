@@ -283,3 +283,79 @@ func TestJournalAdmissionFailureNeverStartsNativeRestore(t *testing.T) {
 		})
 	}
 }
+
+func TestPrivateDirectoryRejectsAncestorSwapDuringCreationBeforeChmod(t *testing.T) {
+	preserveJournalOS(t)
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := filepath.Join(base, "private")
+	if err = os.Mkdir(parent, 0700); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(base, "outside")
+	if err = os.Mkdir(outside, 0755); err != nil {
+		t.Fatal(err)
+	}
+	foreign := filepath.Join(outside, "namespace")
+	if err = os.Mkdir(foreign, 0755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(foreign, "retained")
+	if err = os.WriteFile(marker, []byte("outside bytes"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(foreign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalMkdir := journalOS.mkdirAll
+	journalOS.mkdirAll = func(path string, mode os.FileMode) error {
+		if err := os.Rename(parent, parent+"-original"); err != nil {
+			return err
+		}
+		if err := os.Symlink(outside, parent); err != nil {
+			return err
+		}
+		return originalMkdir(path, mode)
+	}
+	if err = durablePrivateDirectory(filepath.Join(parent, "namespace")); err == nil {
+		t.Fatal("mid-creation ancestor swap accepted")
+	}
+	after, err := os.Stat(foreign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bytes, err := os.ReadFile(marker)
+	if err != nil || string(bytes) != "outside bytes" || before.Mode() != after.Mode() {
+		t.Fatalf("foreign directory changed: %v->%v %q %v", before.Mode(), after.Mode(), bytes, err)
+	}
+}
+func TestPrivateDirectoryRechecksPathIdentityImmediatelyBeforeChmod(t *testing.T) {
+	for _, kind := range []string{"missing-path", "changed-inode"} {
+		t.Run(kind, func(t *testing.T) {
+			preserveJournalOS(t)
+			base, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(base, "private")
+			original := journalOS.lstat
+			calls := 0
+			journalOS.lstat = func(p string) (os.FileInfo, error) {
+				calls++
+				if calls == 4 {
+					if kind == "missing-path" {
+						return nil, errJournalIO
+					}
+					return os.Stat(base)
+				}
+				return original(p)
+			}
+			if err = durablePrivateDirectory(path); err == nil {
+				t.Fatal("changed path identity accepted")
+			}
+		})
+	}
+}

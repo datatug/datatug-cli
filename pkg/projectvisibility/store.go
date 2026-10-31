@@ -577,6 +577,19 @@ func durablePrivateDirectory(path string) error {
 		_ = directory.Close()
 		return ErrOutcomeUncertain
 	}
+	// An ancestor may have changed while directories were created/opened. The
+	// descriptor must still belong to the accepted canonical private path before
+	// changing its mode; matching Lstat/Open alone can agree on a foreign target.
+	resolved, err = sessionstore.ResolvePrivateDirectory(path)
+	if err != nil || resolved != filepath.Clean(path) {
+		_ = directory.Close()
+		return ErrOutcomeUncertain
+	}
+	current, err := journalOS.lstat(path)
+	if err != nil || !os.SameFile(current, actual) {
+		_ = directory.Close()
+		return ErrOutcomeUncertain
+	}
 	err = journalOS.chmod(directory, 0700)
 	err = errors.Join(err, directory.Close())
 	if err != nil {

@@ -158,6 +158,7 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 	defer func() { _ = api.CloseCompareCache() }()
 	api.ConfigureSecureSession(session, pathsByID, caps)
 	api.ConfigureLocalProjectRegistry(registry)
+	api.ConfigureLocalVisibilityInventory(endpoints.PrepareLocalVisibilityItems)
 	// Every request receives an immutable map snapshot. A successful create
 	// registers its new project under secureMu before it can be opened.
 	storage.NewDatatugStore = func(id string) (storage.Store, error) {

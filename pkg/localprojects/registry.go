@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -331,6 +332,9 @@ func (r *Registry) Create(ctx context.Context, request Create, authorize ...func
 		if err != nil {
 			return err
 		}
+		if err = initializeProjectGit(ctx, stagingRoot.Name()); err != nil {
+			return err
+		}
 		if err = syncRootDirectory(stagingRoot); err != nil {
 			return err
 		}
@@ -543,4 +547,20 @@ func syncRootDirectory(root *os.Root) error {
 	}
 	defer file.Close()
 	return file.Sync()
+}
+
+// Native item authoring binds its writes to a local branch and commit. Create
+// that project-owned repository before publication, with ordinary Git hooks.
+func initializeProjectGit(ctx context.Context, dir string) error {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	commands := [][]string{{"init", "--quiet", "--initial-branch=main"}, {"add", "--", "datatug-project.json", "environments"}, {"-c", "user.name=DataTug", "-c", "user.email=local@datatug.app", "commit", "--quiet", "-m", "Create DataTug project"}}
+	for _, args := range commands {
+		command := exec.CommandContext(ctx, "git", args...)
+		command.Dir = dir
+		if output, err := command.CombinedOutput(); err != nil {
+			return fmt.Errorf("initialize local project repository: %w (%s)", err, strings.TrimSpace(string(output)))
+		}
+	}
+	return nil
 }

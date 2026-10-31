@@ -138,6 +138,7 @@ func ConfigureSecureSession(session secureread.Session, pathsByID map[string]str
 		}
 	}
 	localProjectRegistry = nil
+	visibilityInventoryFactory = nil
 	capabilities = caps
 	policyFingerprint = accesspolicies.Fingerprint(session.Policies, session.DatabaseProfile.PolicyFreeReads(), session.Principal)
 	securityContextID = ""

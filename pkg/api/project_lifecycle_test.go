@@ -63,7 +63,7 @@ func lifecycleAPISetup(t *testing.T, writable bool) (LocalLifecycleSelection, *l
 func lifecycleWrite(selection LocalLifecycleSelection) LocalLifecycleWrite {
 	return LocalLifecycleWrite{LocalLifecycleSelection: selection, ProjectLifecycleWrite: datatug.ProjectLifecycleWrite{OperationID: "operation-1", ExpectedRevision: "r1", Change: datatug.ProjectLifecycleChange{Object: datatug.ProjectObjectRef{Kind: "query", ID: "q"}, Action: "archive"}}}
 }
-func TestLocalProjectLifecycleBindsScopeAndChecksFreshReferences(t *testing.T) {
+func TestLocalProjectLifecycleBindsScopeAndKeepsDeleteReferenceSafe(t *testing.T) {
 	selection, provider := lifecycleAPISetup(t, true)
 	review, err := LocalProjectLifecycleReview(context.Background(), selection, datatug.ProjectObjectRef{Kind: "query", ID: "q"})
 	if err != nil || !review.CanArchive {
@@ -72,10 +72,12 @@ func TestLocalProjectLifecycleBindsScopeAndChecksFreshReferences(t *testing.T) {
 	if provider.scope.ActorID == "" || provider.scope.Storage != LocalStoreID || provider.scope.Project != "p" || provider.scope.Branch != "feature/x" {
 		t.Fatalf("scope lost: %+v", provider.scope)
 	}
-	// A reference arriving after the review MUST be checked by the provider's
-	// fresh write admission, not admitted using the old client capability.
+	// Visibility preserves references. Destructive Delete still checks the
+	// fresh retained graph at the provider boundary.
 	provider.snapshot.Objects = append(provider.snapshot.Objects, datatug.ProjectObjectUsage{Ref: datatug.ProjectObjectRef{Kind: "board", ID: "new-board"}, ContentRevision: "b1", References: []datatug.ProjectObjectRef{{Kind: "query", ID: "q"}}})
-	_, err = LocalProjectLifecycleChange(context.Background(), lifecycleWrite(selection))
+	request := lifecycleWrite(selection)
+	request.Change.Action = "delete"
+	_, err = LocalProjectLifecycleChange(context.Background(), request)
 	if !errors.Is(err, datatug.ErrProjectObjectReferenced) || provider.writes != 0 {
 		t.Fatalf("new reference bypassed: %v, writes %d", err, provider.writes)
 	}
@@ -99,29 +101,44 @@ func TestLocalProjectLifecycleRejectsUnconfirmedReceipt(t *testing.T) {
 		t.Fatalf("receipt mismatch: %v", err)
 	}
 }
-func TestLocalProjectLifecycleDoesNotTreatFilesystemCRUDAsUsageProof(t *testing.T) {
-	project, dir := servedWritableProject(t, secureread.SessionOptions{As: "alice", NoPolicies: true}, true)
-	path := filepath.Join(dir, "kept.sql")
-	before := []byte("select 1;\n")
+func TestLocalProjectLifecycleFilesystemVisibilityPreservesExecutionDefinition(t *testing.T) {
+	project, queriesDir := servedWritableProject(t, secureread.SessionOptions{As: "alice", NoPolicies: true}, true)
+	dir := filepath.Dir(queriesDir)
+	if err := os.MkdirAll(filepath.Join(dir, "queries"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	before := []byte(`{"title":"Kept query","queryType":"sql","text":"select 1"}`)
+	path := filepath.Join(dir, "queries", "q.query.json")
 	if err := os.WriteFile(path, before, 0600); err != nil {
 		t.Fatal(err)
 	}
 	selection := LocalLifecycleSelection{ProjectRef: dto.ProjectRef{StoreID: LocalStoreID, ProjectID: project}}
-	for _, action := range []string{"archive", "delete", "restore"} {
-		request := lifecycleWrite(selection)
-		request.Change.Action = action
-		_, err := LocalProjectLifecycleChange(context.Background(), request)
-		if !errors.Is(err, datatug.ErrProjectUsageIncomplete) {
-			t.Fatalf("unsupported %s admitted: %v", action, err)
-		}
+	review, err := LocalProjectLifecycleReview(context.Background(), selection, datatug.ProjectObjectRef{Kind: "query", ID: "q"})
+	if err != nil || !review.CanArchive || !review.ArchiveSupported || review.Complete || review.CanDelete {
+		t.Fatalf("visibility unavailable: %+v %v", review, err)
 	}
-	_, err := LocalProjectLifecycleReview(context.Background(), selection, datatug.ProjectObjectRef{Kind: "query", ID: "q"})
-	if !errors.Is(err, datatug.ErrProjectUsageIncomplete) {
-		t.Fatalf("unsupported review: %v", err)
+	request := lifecycleWrite(selection)
+	request.ExpectedRevision = review.Revision
+	if _, err = LocalProjectLifecycleChange(context.Background(), request); err != nil {
+		t.Fatal(err)
 	}
 	after, err := os.ReadFile(path)
-	if err != nil || string(after) != string(before) {
-		t.Fatalf("unverified project changed: %q %v", after, err)
+	if err != nil || string(before) != string(after) {
+		t.Fatalf("definition changed: %s %v", after, err)
+	}
+	request.Change.Action = "delete"
+	if _, err = LocalProjectLifecycleChange(context.Background(), request); !errors.Is(err, datatug.ErrProjectUsageIncomplete) {
+		t.Fatalf("delete granted without graph: %v", err)
+	}
+	catalog, err := LocalProjectLifecycleCatalog(context.Background(), selection, true)
+	if err != nil || len(catalog.Items) != 1 || !catalog.Items[0].Archived {
+		t.Fatalf("archive missing: %+v %v", catalog, err)
+	}
+	request.OperationID = "restore"
+	request.ExpectedRevision = catalog.Revision
+	request.Change.Action = "restore"
+	if _, err = LocalProjectLifecycleChange(context.Background(), request); err != nil {
+		t.Fatal(err)
 	}
 }
 func TestLocalProjectLifecycleRejectsInvalidScopeAndCommands(t *testing.T) {

@@ -52,6 +52,11 @@ func sessionContextHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.HasSuffix(r.URL.Path, "/capabilities") {
+		caps.Environments, err = filterLocalVisible(q.Get("project"), "environment", caps.Environments, func(item api.SessionContextEnvironment) string { return item.EnvironmentID })
+		if err != nil {
+			writeSessionContextError(w, r, err)
+			return
+		}
 		writeContractResponseStatus(w, r, http.StatusOK, caps)
 		return
 	}
@@ -96,7 +101,12 @@ func sessionContextHandler(w http.ResponseWriter, r *http.Request) {
 			}{input, revisions}
 		case id == "":
 			limit, _ := sessionContextPageLimit(q)
-			result, err = service.ListSessions(r.Context(), principal, q.Get("cursor"), limit)
+			page, listErr := service.ListSessions(r.Context(), principal, q.Get("cursor"), limit)
+			err = listErr
+			if err == nil {
+				page.Items, err = filterLocalVisible(q.Get("project"), "session", page.Items, func(item sessioncontext.Session) string { return item.ID })
+			}
+			result = page
 		case strings.Contains(r.URL.Path, "/operations/"):
 			result, err = service.ReadOperation(r.Context(), principal, id)
 		default:

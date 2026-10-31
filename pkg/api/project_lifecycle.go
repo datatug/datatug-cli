@@ -7,6 +7,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
+	"github.com/datatug/datatug-core/pkg/storage/filestore"
 )
 
 type LocalLifecycleSelection struct {
@@ -23,7 +24,19 @@ type LocalLifecycleWrite struct {
 
 var lifecycleMutationScope = SecureProjectMutationScope
 
-func localLifecycleStore(selection LocalLifecycleSelection, write bool) (datatug.ProjectLifecycleStore, datatug.ProjectLifecycleScope, error) {
+// LocalVisibilityInventoryFactory prepares native services before Core takes
+// its environment lock. Core invokes the returned callback outside that lock.
+type LocalVisibilityInventoryFactory func(context.Context, datatug.ProjectLifecycleScope) (func(context.Context, datatug.ProjectLifecycleScope) ([]datatug.ProjectUsageItem, error), error)
+
+var visibilityInventoryFactory LocalVisibilityInventoryFactory
+
+func ConfigureLocalVisibilityInventory(factory LocalVisibilityInventoryFactory) {
+	secureMu.Lock()
+	defer secureMu.Unlock()
+	visibilityInventoryFactory = factory
+}
+
+func localLifecycleStore(ctx context.Context, selection LocalLifecycleSelection, write bool) (datatug.ProjectLifecycleStore, datatug.ProjectLifecycleScope, error) {
 	var scope datatug.ProjectLifecycleScope
 	if err := requireLocalReadPrincipal(); err != nil {
 		return nil, scope, err
@@ -58,11 +71,26 @@ func localLifecycleStore(selection LocalLifecycleSelection, write bool) (datatug
 	if err != nil {
 		return nil, scope, err
 	}
+	scope = datatug.ProjectLifecycleScope{ActorID: authority.ActorID, Storage: selection.StoreID, Project: selection.ProjectID, Branch: selection.Branch, Environment: selection.Environment}
+	secureMu.RLock()
+	factory := visibilityInventoryFactory
+	secureMu.RUnlock()
+	if factory != nil {
+		inventory, err := factory(ctx, scope)
+		if err != nil {
+			return nil, scope, err
+		}
+		root, ok := ProjectDir(selection.ProjectID)
+		if !ok {
+			return nil, scope, secureread.ErrAccessDenied
+		}
+		store = filestore.NewProjectStoreWithVisibilityItems(selection.ProjectID, root, inventory)
+	}
 	provider, ok := store.(datatug.ProjectLifecycleStore)
 	if !ok {
 		return nil, scope, datatug.ErrProjectUsageIncomplete
 	}
-	scope = datatug.ProjectLifecycleScope{ActorID: authority.ActorID, Storage: selection.StoreID, Project: selection.ProjectID, Branch: selection.Branch, Environment: selection.Environment}
+
 	return provider, scope, nil
 }
 
@@ -71,7 +99,7 @@ func LocalProjectLifecycleReview(ctx context.Context, selection LocalLifecycleSe
 	if err := object.Validate(); err != nil {
 		return out, err
 	}
-	provider, scope, err := localLifecycleStore(selection, false)
+	provider, scope, err := localLifecycleStore(ctx, selection, false)
 	if err != nil {
 		return out, err
 	}
@@ -85,8 +113,14 @@ func LocalProjectLifecycleReview(ctx context.Context, selection LocalLifecycleSe
 	secureMu.RLock()
 	writable := capabilities.AllowWrites
 	secureMu.RUnlock()
-	if !out.Complete || !writable {
-		out.CanArchive, out.CanDelete, out.CanRestore = false, false, false
+	if !out.Complete {
+		out.CanDelete = false
+	}
+	if !out.Complete && !out.ArchiveSupported || !writable {
+		out.CanArchive, out.CanRestore = false, false
+	}
+	if !writable {
+		out.CanDelete = false
 	}
 	return out, nil
 }
@@ -96,7 +130,7 @@ func LocalProjectLifecycleChange(ctx context.Context, request LocalLifecycleWrit
 	if err := request.Validate(); err != nil {
 		return out, err
 	}
-	provider, scope, err := localLifecycleStore(request.LocalLifecycleSelection, true)
+	provider, scope, err := localLifecycleStore(ctx, request.LocalLifecycleSelection, true)
 	if err != nil {
 		return out, err
 	}
@@ -113,7 +147,7 @@ func LocalProjectLifecycleChange(ctx context.Context, request LocalLifecycleWrit
 }
 
 func LocalProjectLifecycleCatalog(ctx context.Context, selection LocalLifecycleSelection, archived bool) (datatug.ProjectLifecycleCatalog, error) {
-	provider, scope, err := localLifecycleStore(selection, false)
+	provider, scope, err := localLifecycleStore(ctx, selection, false)
 	if err != nil {
 		return datatug.ProjectLifecycleCatalog{}, err
 	}

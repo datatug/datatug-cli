@@ -55,7 +55,7 @@ func GetAllEntities(ctx context.Context, ref dto.ProjectRef) (entity datatug.Ent
 	if err != nil {
 		return nil, err
 	}
-	entities, err := projectStore.LoadEntities(ctx)
+	entities, err := projectStore.LoadEntities(ctx, datatug.ActiveItemsOnly())
 	if err != nil {
 		return nil, itemsNotLoaded("entities", dbcopy.SourceIDDisplay(ref.ProjectID), err)
 	}

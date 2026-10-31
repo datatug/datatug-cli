@@ -146,7 +146,11 @@ func getAllQueries(ctx context.Context, ref dto.ProjectRef) (*datatug.QueriesFol
 	if err != nil {
 		return nil, queriesNotLoaded(ref.ProjectID, err)
 	}
-	return buildQueriesFolderTree(queries, canonicalIDs, datatug.RootSharedFolderName, declared...), nil
+	tree := buildQueriesFolderTree(queries, canonicalIDs, datatug.RootSharedFolderName, declared...)
+	if err := filterLocalQueryVisibility(ref.ProjectID, tree, ""); err != nil {
+		return nil, queriesNotLoaded(ref.ProjectID, err)
+	}
+	return tree, nil
 }
 
 // queriesNotLoaded is the answer for the queries of a project that cannot be loaded (listed,

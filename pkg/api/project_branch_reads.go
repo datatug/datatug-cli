@@ -96,6 +96,13 @@ func LocalProjectBoards(ctx context.Context, ref dto.ProjectRef, branch string) 
 		}
 		briefs := make([]datatug.ProjBoardBrief, 0, len(boards))
 		for _, board := range boards {
+			hidden, err := filestore.ProjectItemArchived(reader.root.Name(), datatug.ProjectObjectRef{Kind: "board", ID: board.ID})
+			if err != nil {
+				return nil, err
+			}
+			if hidden {
+				continue
+			}
 			briefs = append(briefs, datatug.ProjBoardBrief{ProjItemBrief: datatug.ProjItemBrief{ID: board.ID, Title: board.Title, Folder: board.Folder, ListOfTags: board.ListOfTags}, Parameters: board.Parameters, RequiredParams: board.RequiredParams})
 		}
 		return briefs, nil
@@ -131,7 +138,18 @@ func LocalProjectCards(ctx context.Context, ref dto.ProjectRef, branch string) (
 		if err != nil {
 			return nil, itemsNotLoaded("cards", ref.ProjectID, err)
 		}
-		return cards.Briefs(), nil
+		briefs := cards.Briefs()
+		active := briefs[:0]
+		for _, card := range briefs {
+			hidden, err := filestore.ProjectItemArchived(reader.root.Name(), datatug.ProjectObjectRef{Kind: "card", ID: card.ID})
+			if err != nil {
+				return nil, err
+			}
+			if !hidden {
+				active = append(active, card)
+			}
+		}
+		return active, nil
 	})
 	if err != nil {
 		return nil, err
@@ -166,6 +184,13 @@ func LocalProjectEntities(ctx context.Context, ref dto.ProjectRef, branch string
 		}
 		briefs := make([]datatug.ProjEntityBrief, 0, len(entities))
 		for _, entity := range entities {
+			hidden, err := filestore.ProjectItemArchived(reader.root.Name(), datatug.ProjectObjectRef{Kind: "entity", ID: entity.ID})
+			if err != nil {
+				return nil, err
+			}
+			if hidden {
+				continue
+			}
 			briefs = append(briefs, datatug.ProjEntityBrief{ProjItemBrief: datatug.ProjItemBrief{ID: entity.ID, Title: entity.Title, Folder: entity.Folder, ListOfTags: entity.ListOfTags}})
 		}
 		return briefs, nil
@@ -274,6 +299,13 @@ func LocalProjectSummary(ctx context.Context, ref dto.ProjectRef, branch string)
 		}
 		summary := &datatug.ProjectSummary{ProjectFile: projectFile, Entities: make([]*datatug.ProjEntityBrief, 0, len(entities))}
 		for _, entity := range entities {
+			hidden, err := filestore.ProjectItemArchived(reader.root.Name(), datatug.ProjectObjectRef{Kind: "entity", ID: entity.ID})
+			if err != nil {
+				return nil, err
+			}
+			if hidden {
+				continue
+			}
 			summary.Entities = append(summary.Entities, &datatug.ProjEntityBrief{ProjItemBrief: datatug.ProjItemBrief{ID: entity.ID, Title: entity.Title, Folder: entity.Folder, ListOfTags: entity.ListOfTags}})
 		}
 		return summary, nil
@@ -303,6 +335,13 @@ func LocalProjectEnvironments(ctx context.Context, ref dto.ProjectRef, branch st
 		briefs := make([]LocalEnvironmentBrief, 0, len(environments))
 		for _, environment := range environments {
 			env := environment.env
+			hidden, err := filestore.ProjectItemArchived(reader.root.Name(), datatug.ProjectObjectRef{Kind: "environment", ID: env.ID})
+			if err != nil {
+				return nil, err
+			}
+			if hidden {
+				continue
+			}
 			title := env.Title
 			if title == "" {
 				title = env.ID

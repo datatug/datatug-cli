@@ -73,6 +73,9 @@ func LocalProjectConnectionCatalog(ctx context.Context, ref dto.ProjectRef) (res
 		result, e = readMergedLocalConnectionCatalog(reader)
 		return e
 	})
+	if err == nil {
+		err = filterLocalConnectionVisibility(dir, result)
+	}
 	return result, err
 }
 
@@ -90,6 +93,9 @@ func LocalProjectConnectionCatalogForBranch(ctx context.Context, ref dto.Project
 			result, e = readMergedLocalConnectionCatalog(reader)
 			return e
 		})
+		if err == nil {
+			err = filterLocalConnectionVisibility(dir, result)
+		}
 		return result, err
 	})
 	if err != nil {
@@ -223,4 +229,31 @@ func isCatalogRemoteURL(rawURL string) bool {
 	parsed, err := url.Parse(rawURL)
 	return err == nil && (parsed.Scheme == "https" || parsed.Scheme == "http") && parsed.Host != "" &&
 		parsed.User == nil && parsed.RawQuery == "" && !parsed.ForceQuery && parsed.Fragment == ""
+}
+
+// Public discovery omits archived declarations. Source resolution continues to
+// use readMergedLocalConnectionCatalog and the complete owning definitions.
+func filterLocalConnectionVisibility(root string, catalog *LocalConnectionCatalog) error {
+	if catalog == nil {
+		return nil
+	}
+	hidden, err := filestore.ReadProjectArchivedItems(root)
+	if err != nil {
+		return err
+	}
+	connections := catalog.Connections[:0]
+	for _, connection := range catalog.Connections {
+		if !hidden[datatug.ProjectObjectRef{Kind: "connection", ID: connection.ID}] {
+			connections = append(connections, connection)
+		}
+	}
+	catalog.Connections = connections
+	editions := catalog.BigQueryEditions[:0]
+	for _, edition := range catalog.BigQueryEditions {
+		if !hidden[datatug.ProjectObjectRef{Kind: "connection", ID: edition.ID}] {
+			editions = append(editions, edition)
+		}
+	}
+	catalog.BigQueryEditions = editions
+	return nil
 }

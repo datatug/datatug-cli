@@ -1,7 +1,6 @@
 package endpoints
 
 import (
-	"encoding/json"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"net/http"
@@ -39,7 +38,7 @@ func annotateProjectModelVisibility(root string, project *datatug.Project) (map[
 	if err != nil {
 		return nil, err
 	}
-	body, err := json.Marshal(project)
+	body, err := marshalVisibilityProjection(project)
 	if err != nil {
 		return nil, err
 	}

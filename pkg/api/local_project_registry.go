@@ -11,6 +11,10 @@ import (
 
 var localProjectRegistry *localprojects.Registry
 
+// Private IO seams allow deterministic post-publication failure/revocation tests.
+var localRegistryPaths = (*localprojects.Registry).Paths
+var registerCreatedProjectEvidence = registerExecutionEvidenceProject
+
 type LocalProjectRegistryState struct {
 	CanCreate  bool                    `json:"canCreate"`
 	CanArchive bool                    `json:"canArchive"`
@@ -74,7 +78,7 @@ func CreateLocalProject(ctx context.Context, request localprojects.Create) (loca
 	if err != nil {
 		return localprojects.Project{}, err
 	}
-	paths := registry.Paths()
+	paths := localRegistryPaths(registry)
 	path, exists := paths[project.ID]
 	if !exists {
 		return localprojects.Project{}, errors.New("created project is unavailable")
@@ -82,7 +86,7 @@ func CreateLocalProject(ctx context.Context, request localprojects.Create) (loca
 	if err = registryWriteAuthority(registry)(); err != nil {
 		return localprojects.Project{}, err
 	}
-	if err = registerExecutionEvidenceProject(project.ID, path); err != nil {
+	if err = registerCreatedProjectEvidence(project.ID, path); err != nil {
 		return localprojects.Project{}, err
 	}
 	secureMu.Lock()

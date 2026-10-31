@@ -33,7 +33,6 @@ func failRegistryNth[A any](original func(A) ([]byte, error), nth int) func(A) (
 }
 
 type testRegistryLock struct {
-	ctx    context.Context
 	cancel context.CancelFunc
 	locked bool
 	err    error

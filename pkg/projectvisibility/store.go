@@ -200,7 +200,7 @@ func (s *Store) ChangeProjectLifecycle(ctx context.Context, scope datatug.Projec
 	if err != nil {
 		return ack, err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	name := hash(struct{ Actor, Operation string }{scope.ActorID, write.OperationID}) + ".json"
 	digest := hash(struct {
 		Binding string
@@ -436,7 +436,7 @@ func completeOperation(root *os.Root, name string) error {
 	if err != nil {
 		return err
 	}
-	defer dir.Close()
+	defer func() { _ = dir.Close() }()
 	return dir.Sync()
 }
 func nativeOutcomeMatches(targets []Target, expected *Target) bool {
@@ -475,7 +475,7 @@ func readOperation(root *os.Root, name string, op *operation) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	actual, err := journalOS.stat(file)
 	if err != nil || !os.SameFile(info, actual) || actual.Size() > 1<<20 || actual.Size() != info.Size() {
 		return ErrOutcomeUncertain
@@ -512,7 +512,7 @@ func writeOperation(root *os.Root, name string, op operation) error {
 	if err != nil {
 		return err
 	}
-	defer root.Remove(temp)
+	defer func() { _ = root.Remove(temp) }()
 	if _, err = file.Write(body); err == nil {
 		err = file.Sync()
 	}
@@ -530,7 +530,7 @@ func writeOperation(root *os.Root, name string, op operation) error {
 	if err != nil {
 		return err
 	}
-	defer dir.Close()
+	defer func() { _ = dir.Close() }()
 	return dir.Sync()
 }
 func strconvNano() string { return time.Now().UTC().Format("20060102150405.000000000") }
@@ -570,7 +570,7 @@ func durablePrivateDirectory(path string) error {
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	anchor, err := journalOS.rootOpen(root, ".")
 	if err != nil {
 		return err

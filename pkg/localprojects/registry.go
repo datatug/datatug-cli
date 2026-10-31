@@ -267,7 +267,7 @@ func (r *Registry) Create(ctx context.Context, request Create, authorize ...func
 		if err != nil {
 			return err
 		}
-		defer root.Close()
+		defer func() { _ = root.Close() }()
 		if _, err = registryIO.rootLstat(root, request.ID); !errors.Is(err, os.ErrNotExist) {
 			if err == nil {
 				return ErrConflict
@@ -282,18 +282,18 @@ func (r *Registry) Create(ctx context.Context, request Create, authorize ...func
 		if err = registryIO.rootMkdir(root, staging, 0700); err != nil {
 			return err
 		}
-		defer root.RemoveAll(staging)
+		defer func() { _ = root.RemoveAll(staging) }()
 		stagingRoot, err := registryIO.rootOpenRoot(root, staging)
 		if err != nil {
 			return err
 		}
-		defer stagingRoot.Close()
+		defer func() { _ = stagingRoot.Close() }()
 		file := projectDocument{ProjectFile: datatug.ProjectFile{
 			ProjectItem:      datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: request.ID, Title: request.Title}, Access: "private"},
 			Created:          &datatug.ProjectCreated{At: registryIO.now().UTC()},
 			EnvironmentOrder: []string{"dev"},
 		}, LocalCreation: &wantCreation}
-		if err = file.ProjectFile.Validate(); err != nil {
+		if err = file.Validate(); err != nil {
 			return err
 		}
 		if err = writeJSONRoot(stagingRoot, storage.ProjectSummaryFileName, file); err != nil {
@@ -445,7 +445,7 @@ func readJSON(dir, name string, value any) error {
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	info, err := registryIO.rootLstat(root, name)
 	if err != nil {
 		return err
@@ -457,7 +457,7 @@ func readJSON(dir, name string, value any) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	body, err := readMetadata(file)
 	if err != nil || len(body) > maxMetadata {
 		return ErrConflict
@@ -470,7 +470,7 @@ func writeJSON(dir, name string, value any) error {
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	return writeJSONRoot(root, name, value)
 }
 
@@ -490,7 +490,7 @@ func writeJSONRoot(root *os.Root, name string, value any) error {
 	if err != nil {
 		return err
 	}
-	defer root.Remove(temp)
+	defer func() { _ = root.Remove(temp) }()
 	if _, err = file.Write(body); err == nil {
 		err = file.Sync()
 	}
@@ -530,7 +530,7 @@ func withLock(ctx context.Context, dir, name string, fn func() error) error {
 	if !locked {
 		return errors.Join(context.DeadlineExceeded, ctx.Err())
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -545,7 +545,7 @@ func syncRootDirectory(root *os.Root) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	return file.Sync()
 }
 

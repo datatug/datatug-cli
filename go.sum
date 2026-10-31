@@ -146,8 +146,8 @@ github.com/dal-go/dalgo2openvaultdb v0.4.1 h1:wXw1czdfoIRAUugU6qwVoTecmxvMOG/PpX
 github.com/dal-go/dalgo2openvaultdb v0.4.1/go.mod h1:Lezh1ZI9vr6qp+T+P+GDD5JrrtvGe7kujAMpU7yz4HM=
 github.com/dal-go/dalgo2oracle v0.0.1 h1:cc8j+jMCFAsmNNktGDc96S9P952cPWisFRWnLlIYvFM=
 github.com/dal-go/dalgo2oracle v0.0.1/go.mod h1:hzQAEs9V6OqUKHElzC08UFPubZkXkmjfwjJGrncTQk0=
-github.com/dal-go/dalgo2postgres v0.10.0 h1:GAzZl8iiZEC1jYodd44XLhGnuQR8lLuAkMsIxpa+n4I=
-github.com/dal-go/dalgo2postgres v0.10.0/go.mod h1:jiwyaLzKeICdOjju15i6qXr3/keDbtuQVVIHPJP4+58=
+github.com/dal-go/dalgo2postgres v0.10.1 h1:M3Vpd2LhpkNP8RRQZa4wb36ihyhn+EEPWkMtbKInY+8=
+github.com/dal-go/dalgo2postgres v0.10.1/go.mod h1:jiwyaLzKeICdOjju15i6qXr3/keDbtuQVVIHPJP4+58=
 github.com/dal-go/dalgo2postgrest v0.0.0-20261027200821-d952c8fc3279 h1:s26W3F4E8CVnc+2N3f3iRJhJMlrDzGxNF+DV7o//IJQ=
 github.com/dal-go/dalgo2postgrest v0.0.0-20261027200821-d952c8fc3279/go.mod h1:fvTdA6Qk3cQFnBH3VT4/5P1/EUDfVs+1SQBSepJfkgk=
 github.com/dal-go/dalgo2redis v0.1.0 h1:+tqsnvap/k3BCZdpIdYr3V4qQwtD46MNvuPUrZkiEcM=
@@ -164,8 +164,8 @@ github.com/danieljoos/wincred v1.2.3 h1:v7dZC2x32Ut3nEfRH+vhoZGvN72+dQ/snVXo/vMF
 github.com/danieljoos/wincred v1.2.3/go.mod h1:6qqX0WNrS4RzPZ1tnroDzq9kY3fu1KwE7MRLQK4X0bs=
 github.com/datatug/cliformat v0.0.3 h1:d9p5vo7r8BH6qSKyTHQ9Al2sT6QHsQTK9KRlihaJdIU=
 github.com/datatug/cliformat v0.0.3/go.mod h1:DwX9tWHiyH+vZtbVEVOyHOEOw1Km9AzhgHoqI0PowAc=
-github.com/datatug/datatug-core v0.133.2 h1:gDBlB14qkKTTqMK+8gxzKftNi/kjQgMJbyk2rJd2iOM=
-github.com/datatug/datatug-core v0.133.2/go.mod h1:PuoL8kXF90djFtw+wW37PVNh2RnhYh+YbpVbFX1Qcyw=
+github.com/datatug/datatug-core v0.131.0 h1:fNK3FL+gxuwFHSDye57mNDAtKxfbK7LZgXKx43xscN4=
+github.com/datatug/datatug-core v0.131.0/go.mod h1:8HGRWJsrdBPPXqhSQF5hd919tJi/Qqlc6dF2dK8O9/0=
 github.com/datatug/sql2csv v0.0.1 h1:mmQI9gWAqVKtnwwNKPEPamplV0g1+KaTovME7/7+SIY=
 github.com/datatug/sql2csv v0.0.1/go.mod h1:nZwHW70TWPF2PTXyCa4hysB+nVgY/AcF6m/KclO3fvs=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

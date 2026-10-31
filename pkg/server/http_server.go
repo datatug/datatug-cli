@@ -14,6 +14,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/comparecache"
 	"github.com/datatug/datatug-cli/pkg/executionstore"
+	"github.com/datatug/datatug-cli/pkg/localprojects"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-cli/pkg/server/endpoints"
 	"github.com/datatug/datatug-core/pkg/storage"
@@ -137,6 +138,11 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 	if pathsByID == nil {
 		pathsByID = map[string]string{}
 	}
+	registry, err := localprojects.Open(caps.ProjectsRoot, pathsByID)
+	if err != nil {
+		return fmt.Errorf("configure local project registry: %w", err)
+	}
+	pathsByID = registry.Paths()
 	storage.NewDatatugStore = newDatatugStoreFactory(pathsByID)
 	if err := api.ConfigureExecutionEvidence(pathsByID, caps.IncidentStores, executionstore.Options{
 		PrivateDir: caps.EvidencePrivateDir,
@@ -151,6 +157,16 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 	}
 	defer func() { _ = api.CloseCompareCache() }()
 	api.ConfigureSecureSession(session, pathsByID, caps)
+	api.ConfigureLocalProjectRegistry(registry)
+	// Every request receives an immutable map snapshot. A successful create
+	// registers its new project under secureMu before it can be opened.
+	storage.NewDatatugStore = func(id string) (storage.Store, error) {
+		store, err := filestoreNewStore("files", api.SecureConfiguredProjectPaths())
+		if err != nil {
+			return nil, fmt.Errorf("failed to create configured local store: %w", err)
+		}
+		return store, nil
+	}
 	api.WarnMissingSourceFiles(context.Background(), pathsByID)
 
 	// apicore.Execute (wired in below) panics if this hook is left nil

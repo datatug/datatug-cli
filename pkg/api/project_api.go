@@ -35,6 +35,25 @@ func GetProjects(ctx context.Context, storeID string) ([]datatug.ProjectBrief, e
 		log.Printf("api: %s: %s", projectsNotListed, dbcopy.RedactText(err.Error()))
 		return nil, errors.New(projectsNotListed)
 	}
+	// Archive changes discovery only: old project-list clients also hide archived
+	// projects, while direct summary and execution routes retain access.
+	if registry, _, authorityErr := registryAuthority(false); authorityErr == nil {
+		entries, listErr := registry.List()
+		if listErr != nil {
+			return nil, errors.New(projectsNotListed)
+		}
+		archived := make(map[string]bool, len(entries))
+		for _, entry := range entries {
+			archived[entry.ID] = entry.Archived
+		}
+		active := projects[:0]
+		for _, project := range projects {
+			if !archived[project.ID] {
+				active = append(active, project)
+			}
+		}
+		projects = active
+	}
 	return projects, nil
 }
 

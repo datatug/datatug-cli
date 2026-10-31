@@ -174,7 +174,7 @@ func TestPrivateDirectoryCreationValidatesIdentityAndDurability(t *testing.T) {
 				t.Fatal(err)
 			}
 			path := filepath.Join(base, "new-private", "namespace")
-			originalLstat, originalMkdir, originalOpen := journalOS.lstat, journalOS.mkdirAll, journalOS.open
+			originalMkdir, originalOpen := journalOS.mkdirAll, journalOS.rootOpen
 			switch kind {
 			case "resolve-error":
 				if err = os.WriteFile(filepath.Join(base, ".git"), []byte("marker"), 0600); err != nil {
@@ -190,47 +190,50 @@ func TestPrivateDirectoryCreationValidatesIdentityAndDurability(t *testing.T) {
 			case "depth":
 				journalOS.lstat = func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
 			case "mkdir-error":
-				journalOS.mkdirAll = func(string, os.FileMode) error { return errJournalIO }
+				journalOS.mkdirAll = func(*os.Root, string, os.FileMode) error { return errJournalIO }
 			case "final-lstat-error":
 				made := false
-				journalOS.mkdirAll = func(path string, mode os.FileMode) error { made = true; return originalMkdir(path, mode) }
-				journalOS.lstat = func(path string) (os.FileInfo, error) {
+				journalOS.mkdirAll = func(root *os.Root, path string, mode os.FileMode) error {
+					made = true
+					return originalMkdir(root, path, mode)
+				}
+				journalOS.rootLstat = func(root *os.Root, path string) (os.FileInfo, error) {
 					if made {
 						return nil, errJournalIO
 					}
-					return originalLstat(path)
+					return root.Lstat(path)
 				}
 			case "final-not-directory":
-				journalOS.mkdirAll = func(path string, mode os.FileMode) error {
-					if err := originalMkdir(filepath.Dir(path), mode); err != nil {
+				journalOS.mkdirAll = func(root *os.Root, path string, mode os.FileMode) error {
+					if err := originalMkdir(root, filepath.Dir(path), mode); err != nil {
 						return err
 					}
-					return os.WriteFile(path, []byte("file"), 0600)
+					return root.WriteFile(path, []byte("file"), 0600)
 				}
 			case "open-error":
-				journalOS.open = func(string) (*os.File, error) { return nil, errJournalIO }
+				journalOS.rootOpen = func(*os.Root, string) (*os.File, error) { return nil, errJournalIO }
 			case "identity-change":
 				other := t.TempDir()
-				journalOS.open = func(string) (*os.File, error) { return os.Open(other) }
+				journalOS.rootOpen = func(*os.Root, string) (*os.File, error) { return os.Open(other) }
 			case "chmod-error":
 				journalOS.chmod = func(*os.File, os.FileMode) error { return errJournalIO }
 			case "sync-open-error":
 				calls := 0
-				journalOS.open = func(path string) (*os.File, error) {
+				journalOS.rootOpen = func(root *os.Root, path string) (*os.File, error) {
 					calls++
-					if calls == 2 {
+					if calls == 3 {
 						return nil, errJournalIO
 					}
-					return originalOpen(path)
+					return originalOpen(root, path)
 				}
 			case "sync-error":
 				calls := 0
-				journalOS.open = func(path string) (*os.File, error) {
+				journalOS.rootOpen = func(root *os.Root, path string) (*os.File, error) {
 					calls++
-					if calls == 2 {
+					if calls == 3 {
 						return closedJournalFile(t), nil
 					}
-					return originalOpen(path)
+					return originalOpen(root, path)
 				}
 			case "windows":
 				journalOS.platform = "windows"
@@ -256,7 +259,7 @@ func TestJournalAdmissionFailureNeverStartsNativeRestore(t *testing.T) {
 			write := restoreWrite(t, store, scope)
 			switch kind {
 			case "mkdir":
-				journalOS.mkdirAll = func(string, os.FileMode) error { return errJournalIO }
+				journalOS.mkdirAll = func(*os.Root, string, os.FileMode) error { return errJournalIO }
 			case "lock-error":
 				journalOS.lock = func(string) coordinatorLocker { return failedCoordinatorLock{err: errJournalIO} }
 			case "lock-busy":
@@ -311,14 +314,14 @@ func TestPrivateDirectoryRejectsAncestorSwapDuringCreationBeforeChmod(t *testing
 		t.Fatal(err)
 	}
 	originalMkdir := journalOS.mkdirAll
-	journalOS.mkdirAll = func(path string, mode os.FileMode) error {
+	journalOS.mkdirAll = func(root *os.Root, path string, mode os.FileMode) error {
 		if err := os.Rename(parent, parent+"-original"); err != nil {
 			return err
 		}
 		if err := os.Symlink(outside, parent); err != nil {
 			return err
 		}
-		return originalMkdir(path, mode)
+		return originalMkdir(root, path, mode)
 	}
 	if err = durablePrivateDirectory(filepath.Join(parent, "namespace")); err == nil {
 		t.Fatal("mid-creation ancestor swap accepted")
@@ -345,7 +348,7 @@ func TestPrivateDirectoryRechecksPathIdentityImmediatelyBeforeChmod(t *testing.T
 			calls := 0
 			journalOS.lstat = func(p string) (os.FileInfo, error) {
 				calls++
-				if calls == 4 {
+				if calls == 3 {
 					if kind == "missing-path" {
 						return nil, errJournalIO
 					}
@@ -355,6 +358,137 @@ func TestPrivateDirectoryRechecksPathIdentityImmediatelyBeforeChmod(t *testing.T
 			}
 			if err = durablePrivateDirectory(path); err == nil {
 				t.Fatal("changed path identity accepted")
+			}
+		})
+	}
+}
+
+func TestPrivateDirectoryAncestorSwapCannotCreateAChildOutsideItsHeldRoot(t *testing.T) {
+	preserveJournalOS(t)
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, outside := filepath.Join(base, "private"), filepath.Join(base, "empty-outside")
+	for _, dir := range []string{parent, outside} {
+		if err = os.Mkdir(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before, err := os.Stat(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalMkdir := journalOS.mkdirAll
+	journalOS.mkdirAll = func(root *os.Root, path string, mode os.FileMode) error {
+		if err := os.Rename(parent, parent+"-original"); err != nil {
+			return err
+		}
+		if err := os.Symlink(outside, parent); err != nil {
+			return err
+		}
+		return originalMkdir(root, path, mode)
+	}
+	if err = durablePrivateDirectory(filepath.Join(parent, "new-namespace")); err == nil {
+		t.Fatal("redirected ancestor accepted")
+	}
+	entries, err := os.ReadDir(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 || before.Mode() != after.Mode() {
+		t.Fatalf("outside tree changed: %v %v->%v", entries, before.Mode(), after.Mode())
+	}
+	if _, err = os.Stat(filepath.Join(parent+"-original", "new-namespace")); err != nil {
+		t.Fatalf("creation was not confined to the held original ancestor: %v", err)
+	}
+}
+
+func TestAnchoredDirectoryAdmissionRejectsChangedAncestorsAndTargetDescriptors(t *testing.T) {
+	for _, kind := range []string{"ancestor-not-directory", "ancestor-became-git", "target-open", "target-identity"} {
+		t.Run(kind, func(t *testing.T) {
+			preserveJournalOS(t)
+			base, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(base, "private")
+			originalLstat, originalOpen := journalOS.lstat, journalOS.rootOpen
+			switch kind {
+			case "ancestor-not-directory":
+				file, err := os.CreateTemp(t.TempDir(), "file")
+				if err != nil {
+					t.Fatal(err)
+				}
+				info, err := file.Stat()
+				_ = file.Close()
+				if err != nil {
+					t.Fatal(err)
+				}
+				journalOS.lstat = func(p string) (os.FileInfo, error) {
+					if p == base {
+						return info, nil
+					}
+					return originalLstat(p)
+				}
+			case "ancestor-became-git":
+				journalOS.rootOpen = func(r *os.Root, n string) (*os.File, error) {
+					if err := os.WriteFile(filepath.Join(base, ".git"), []byte("marker"), 0600); err != nil {
+						return nil, err
+					}
+					return originalOpen(r, n)
+				}
+			case "target-open", "target-identity":
+				calls := 0
+				other := t.TempDir()
+				journalOS.rootOpen = func(r *os.Root, n string) (*os.File, error) {
+					calls++
+					if calls == 2 {
+						if kind == "target-open" {
+							return nil, errJournalIO
+						}
+						return os.Open(other)
+					}
+					return originalOpen(r, n)
+				}
+			}
+			if err = durablePrivateDirectory(path); err == nil {
+				t.Fatal("changed anchor/target accepted")
+			}
+		})
+	}
+}
+func TestCoordinatorRejectsLateJournalOpenAndReadFailures(t *testing.T) {
+	for _, kind := range []string{"open", "read"} {
+		t.Run(kind, func(t *testing.T) {
+			preserveJournalOS(t)
+			create, state, scope := nativeStoreFixture(t)
+			store := create()
+			write := restoreWrite(t, store, scope)
+			switch kind {
+			case "open":
+				original := journalOS.openRoot
+				journalOS.openRoot = func(path string) (*os.Root, error) {
+					if path == store.private {
+						return nil, errJournalIO
+					}
+					return original(path)
+				}
+			case "read":
+				original := journalOS.rootLstat
+				journalOS.rootLstat = func(r *os.Root, name string) (os.FileInfo, error) {
+					if strings.HasSuffix(name, ".json") {
+						return nil, errJournalIO
+					}
+					return original(r, name)
+				}
+			}
+			if _, err := store.ChangeProjectLifecycle(context.Background(), scope, write); err == nil || state.restores != 0 {
+				t.Fatalf("late journal failure bypassed %v %+v", err, state)
 			}
 		})
 	}

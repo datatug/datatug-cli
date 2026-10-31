@@ -23,11 +23,10 @@ var journalOS = struct {
 	rootLstat    func(*os.Root, string) (os.FileInfo, error)
 	rootRename   func(*os.Root, string, string) error
 	readNames    func(*os.File, int) ([]string, error)
-	mkdirAll     func(string, os.FileMode) error
+	mkdirAll     func(*os.Root, string, os.FileMode) error
 	lstat        func(string) (os.FileInfo, error)
-	open         func(string) (*os.File, error)
 	stat         func(*os.File) (os.FileInfo, error)
 	chmod        func(*os.File, os.FileMode) error
 	lock         func(string) coordinatorLocker
 	platform     string
-}{os.OpenRoot, (*os.Root).Open, (*os.Root).OpenFile, (*os.Root).Lstat, (*os.Root).Rename, (*os.File).Readdirnames, os.MkdirAll, os.Lstat, os.Open, (*os.File).Stat, (*os.File).Chmod, func(path string) coordinatorLocker { return flock.New(path) }, runtime.GOOS}
+}{os.OpenRoot, (*os.Root).Open, (*os.Root).OpenFile, (*os.Root).Lstat, (*os.Root).Rename, (*os.File).Readdirnames, (*os.Root).MkdirAll, os.Lstat, (*os.File).Stat, (*os.File).Chmod, func(path string) coordinatorLocker { return flock.New(path) }, runtime.GOOS}

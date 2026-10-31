@@ -545,30 +545,59 @@ func durablePrivateDirectory(path string) error {
 		return ErrOutcomeUncertain
 	}
 	missing := []string{}
+	ancestor := path
+	var ancestorInfo os.FileInfo
 	for current := path; ; current = filepath.Dir(current) {
-		_, err := journalOS.lstat(current)
-		if err == nil {
+		info, statErr := journalOS.lstat(current)
+		if statErr == nil {
+			ancestor, ancestorInfo = current, info
 			break
 		}
-		if !errors.Is(err, os.ErrNotExist) {
-			return err
+		if !errors.Is(statErr, os.ErrNotExist) {
+			return statErr
 		}
 		if len(missing) >= 32 {
 			return ErrOutcomeUncertain
 		}
 		missing = append(missing, current)
 	}
-	if err := journalOS.mkdirAll(path, 0700); err != nil {
+	if !ancestorInfo.IsDir() || ancestorInfo.Mode()&os.ModeSymlink != 0 {
+		return ErrOutcomeUncertain
+	}
+	// Hold the accepted existing ancestor while creating descendants. A renamed
+	// ancestor or a newly inserted symlink cannot redirect MkdirAll outside it.
+	root, err := journalOS.openRoot(ancestor)
+	if err != nil {
 		return err
 	}
-	info, err := journalOS.lstat(path)
+	defer root.Close()
+	anchor, err := journalOS.rootOpen(root, ".")
+	if err != nil {
+		return err
+	}
+	actualAnchor, statErr := journalOS.stat(anchor)
+	_ = anchor.Close()
+	if statErr != nil || !os.SameFile(ancestorInfo, actualAnchor) {
+		return ErrOutcomeUncertain
+	}
+	resolved, err = sessionstore.ResolvePrivateDirectory(ancestor)
+	if err != nil || resolved != ancestor {
+		return ErrOutcomeUncertain
+	}
+	// Both paths come from the same absolute ancestor walk, so their volumes
+	// and absolute/relative forms necessarily agree.
+	relative, _ := filepath.Rel(ancestor, path)
+	if err = journalOS.mkdirAll(root, relative, 0700); err != nil {
+		return err
+	}
+	info, err := journalOS.rootLstat(root, relative)
 	if err != nil {
 		return err
 	}
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return ErrOutcomeUncertain
 	}
-	directory, err := journalOS.open(path)
+	directory, err := journalOS.rootOpen(root, relative)
 	if err != nil {
 		return err
 	}
@@ -600,7 +629,8 @@ func durablePrivateDirectory(path string) error {
 	}
 	for _, created := range missing {
 		for _, directory := range []string{created, filepath.Dir(created)} {
-			file, err := journalOS.open(directory)
+			relative, _ := filepath.Rel(ancestor, directory)
+			file, err := journalOS.rootOpen(root, relative)
 			if err != nil {
 				return err
 			}

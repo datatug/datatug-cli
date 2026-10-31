@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -158,6 +159,37 @@ func storeCallSites(t *testing.T, names ...string) []string {
 // every declaration of a file: a function (named by it), and a variable, whose value may be a
 // function literal, which is how the seams of a package are written (named by the variable).
 func storeCallSitesIn(t *testing.T, dir string, names ...string) []string {
+	return storeCallSitesMatching(t, dir, nil, names...)
+}
+
+func fileStoreCallSitesIn(t *testing.T, dir string, names ...string) []string {
+	return storeCallSitesMatching(t, dir, func(file *ast.File, call *ast.CallExpr) bool {
+		for _, imported := range file.Imports {
+			path, err := strconv.Unquote(imported.Path.Value)
+			if err != nil || path != "github.com/datatug/datatug-core/pkg/storage/filestore" {
+				continue
+			}
+			alias := "filestore"
+			if imported.Name != nil {
+				alias = imported.Name.Name
+			}
+			switch fn := call.Fun.(type) {
+			case *ast.SelectorExpr:
+				qualifier, ok := fn.X.(*ast.Ident)
+				if ok && qualifier.Name == alias {
+					return true
+				}
+			case *ast.Ident:
+				if alias == "." {
+					return true
+				}
+			}
+		}
+		return false
+	}, names...)
+}
+
+func storeCallSitesMatching(t *testing.T, dir string, matches func(*ast.File, *ast.CallExpr) bool, names ...string) []string {
 	t.Helper()
 	files, err := filepath.Glob(filepath.Join(dir, "*.go"))
 	if err != nil {
@@ -191,7 +223,7 @@ func storeCallSitesIn(t *testing.T, dir string, names ...string) []string {
 				case *ast.Ident:
 					called = fn.Name
 				}
-				if wanted[called] {
+				if wanted[called] && (matches == nil || matches(parsed, call)) {
 					sites = append(sites, file+": "+declarationName(declaration)+" calls "+called)
 				}
 				return true
@@ -253,22 +285,62 @@ func TestProjectStores_AreNotAskedForOutsidePkgAPI(t *testing.T) {
 // helper. This package calls one in the scan, which is given a folder and not the ID
 // of a project that is served, and once in a private temporary preview store
 // used only to compute Core's exact query-pair revision before journaling a
-// local mutation. Neither constructor opens a served project. The server packages call none (pkg/server keeps its one
+// local mutation. Neither constructor opens a served project. The lifecycle
+// wrapper adds its native inventory only after projectStoreForID and the
+// principal/registered-root guards admit that exact project. The server packages call none (pkg/server keeps its one
 // factory of stores in a variable, and the walk does not count a variable as a call).
 func TestFileStoreConstructors_AreCalledByTheScanOnly(t *testing.T) {
-	constructors := []string{"NewProjectStore", "NewSingleProjectStore", "NewStore"}
+	constructors := []string{"NewProjectStore", "NewSingleProjectStore", "NewStore", "NewProjectStoreWithVisibilityItems"}
 	want := []string{
+		"project_lifecycle.go: localLifecycleStore calls NewProjectStoreWithVisibilityItems",
 		"project_query_adapter.go: previewLocalQueryRevision calls NewProjectStore",
 		"scan_driver.go: recordedCatalogDriver calls NewProjectStore",
 		"scan_names.go: recordedDbModel calls NewProjectStore",
 	}
-	if got := storeCallSites(t, constructors...); strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Errorf("the calls of the file store's constructors are\n  %s\nwant only the scan's\n  %s\nan entry gets its project store from projectStoreForID", strings.Join(got, "\n  "), strings.Join(want, "\n  "))
+	if got := fileStoreCallSitesIn(t, ".", constructors...); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("the calls of the file store's constructors are\n  %s\nwant only the guarded owners\n  %s\nan entry gets its project store from projectStoreForID", strings.Join(got, "\n  "), strings.Join(want, "\n  "))
 	}
 	for _, dir := range []string{"../server/endpoints", "../server"} {
-		if got := storeCallSitesIn(t, dir, constructors...); len(got) != 0 {
+		if got := fileStoreCallSitesIn(t, dir, constructors...); len(got) != 0 {
 			t.Errorf("%s opens a project folder by a constructor of the file store: %s", dir, strings.Join(got, ", "))
 		}
+	}
+}
+
+func TestFileStoreConstructorClassifierBindsImportedOwner(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"owned.go": `package p
+import fs "github.com/datatug/datatug-core/pkg/storage/filestore"
+import visibility "github.com/datatug/datatug-cli/pkg/projectvisibility"
+func owned() { fs.NewProjectStore(); fs.NewProjectStoreWithVisibilityItems(); visibility.NewStore() }
+`,
+		"default.go": `package p
+import "github.com/datatug/datatug-core/pkg/storage/filestore"
+func ordinary() { filestore.NewStore() }
+`,
+		"dot.go": `package p
+import . "github.com/datatug/datatug-core/pkg/storage/filestore"
+func dot() { NewSingleProjectStore() }
+`,
+		"unrelated.go": `package p
+import filestore "example.test/unrelated"
+func unrelated() { filestore.NewStore(); NewProjectStore() }
+`,
+		"ignored_test.go": `package p
+import "github.com/datatug/datatug-core/pkg/storage/filestore"
+func excluded() { filestore.NewStore() }
+`,
+	}
+	for name, source := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(source), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := fileStoreCallSitesIn(t, dir, "NewStore", "NewProjectStore", "NewSingleProjectStore", "NewProjectStoreWithVisibilityItems")
+	want := []string{"default.go: ordinary calls NewStore", "dot.go: dot calls NewSingleProjectStore", "owned.go: owned calls NewProjectStore", "owned.go: owned calls NewProjectStoreWithVisibilityItems"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("constructor owner classification = %v, want %v", got, want)
 	}
 }
 

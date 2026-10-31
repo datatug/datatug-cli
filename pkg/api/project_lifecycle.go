@@ -27,6 +27,7 @@ type LocalLifecycleWrite struct {
 }
 
 var lifecycleMutationScope = SecureProjectMutationScope
+var resolveLifecyclePrivateDir = executionstore.ResolvePrivateDir
 
 // LocalVisibilityInventoryFactory prepares native services before Core takes
 // its environment lock. Core invokes the returned callback outside that lock.
@@ -101,7 +102,7 @@ func localLifecycleStore(ctx context.Context, selection LocalLifecycleSelection,
 			}
 			return items, nil
 		}).(datatug.ProjectLifecycleStore)
-		private, err := executionstore.ResolvePrivateDir(GetCapabilities().EvidencePrivateDir)
+		private, err := resolveLifecyclePrivateDir(GetCapabilities().EvidencePrivateDir)
 		if err != nil {
 			return nil, scope, err
 		}

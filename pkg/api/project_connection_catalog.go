@@ -19,6 +19,9 @@ import (
 
 var errConnectionCatalogUnavailable = errors.New("project connection catalog unavailable")
 
+// Defaults to the real codec; tests exercise refusal without partial output.
+var marshalLocalConnectionVisibility = json.Marshal
+
 var browserFixtureAssetURL = regexp.MustCompile(`^/assets/showcase/[a-z0-9][a-z0-9-]*\.sqlite$`)
 
 // LocalConnectionCatalog exposes declaration metadata, never connection profiles
@@ -233,8 +236,8 @@ func isCatalogRemoteURL(rawURL string) bool {
 		parsed.User == nil && parsed.RawQuery == "" && !parsed.ForceQuery && parsed.Fragment == ""
 }
 
-// Public discovery omits archived declarations. Source resolution continues to
-// use readMergedLocalConnectionCatalog and the complete owning definitions.
+// Discovery receives visibility flags alongside the complete declarations.
+// Saved references continue to resolve through the complete owning catalog.
 func filterLocalConnectionVisibility(root string, catalog *LocalConnectionCatalog) error {
 	if catalog == nil {
 		return nil
@@ -256,7 +259,7 @@ func filterLocalConnectionVisibility(root string, catalog *LocalConnectionCatalo
 // execution may still resolve an archived connection explicitly by ID.
 func (catalog LocalConnectionCatalog) MarshalJSON() ([]byte, error) {
 	type plain LocalConnectionCatalog
-	body, err := json.Marshal(plain(catalog))
+	body, err := marshalLocalConnectionVisibility(plain(catalog))
 	if err != nil {
 		return nil, err
 	}

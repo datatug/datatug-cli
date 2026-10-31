@@ -25,7 +25,7 @@ require (
 	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/ultraviolet v0.0.0-20260812204455-68fa937c71be
 	github.com/charmbracelet/x/ansi v0.11.8
-	github.com/dal-go/dalgo v0.96.2
+	github.com/dal-go/dalgo v0.97.0
 	github.com/dal-go/dalgo2bigquery v0.3.2
 	github.com/dal-go/dalgo2clickhouse v0.0.0-20261030135300-99a44064132e
 	github.com/dal-go/dalgo2couchdb v0.0.0-20261027213543-120b25e81833
@@ -46,7 +46,7 @@ require (
 	github.com/dal-go/dalgo2typesense v0.0.0-20261028075318-b1ba445d3434
 	github.com/dal-go/record v0.1.5
 	github.com/datatug/cliformat v0.0.3
-	github.com/datatug/datatug-core v0.131.0
+	github.com/datatug/datatug-core v0.133.2
 	github.com/datatug/sql2csv v0.0.1
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/go-sql-driver/mysql v1.10.0

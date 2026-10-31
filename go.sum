@@ -120,8 +120,8 @@ github.com/crediterra/money v0.4.2 h1:jywtH44L+BwPV3Yy+VxAmvk18eayaUXfVxvz1dnk5w
 github.com/crediterra/money v0.4.2/go.mod h1:v1LjiUrGIVmK0L070iz4ghVDhqVGiyd9vNX0XJOLGak=
 github.com/cyphar/filepath-securejoin v0.7.0 h1:s0Y3ITPy6sQn5xt54DuYvTF8hu134ooYLUb58DX/HjE=
 github.com/cyphar/filepath-securejoin v0.7.0/go.mod h1:ymLGms/u3BYaviIiuKFnUx8EkQEZeK6cInNoAPJA3o4=
-github.com/dal-go/dalgo v0.96.2 h1:4sRgnlNDsWDIY3n3rhW3PJarE1T+uhIfS+HnQP9zJg0=
-github.com/dal-go/dalgo v0.96.2/go.mod h1:UCGV7G50rWbXamWXbmbBGmHiACWtNYUFNIL+qM5AAs8=
+github.com/dal-go/dalgo v0.97.0 h1:oiE9RJ0EPxtdzBf3c5JAxfF74Jhh0KCxNa+B9ytsN2E=
+github.com/dal-go/dalgo v0.97.0/go.mod h1:UCGV7G50rWbXamWXbmbBGmHiACWtNYUFNIL+qM5AAs8=
 github.com/dal-go/dalgo2bigquery v0.3.2 h1:1csPB0KBMZVCuK7jYTo0RT9GDvGnAn/26tDEIEs4RFY=
 github.com/dal-go/dalgo2bigquery v0.3.2/go.mod h1:HSFmmveLpuU56sYBmnubGMReGqyWBzU883ckm1l4MyI=
 github.com/dal-go/dalgo2clickhouse v0.0.0-20261030135300-99a44064132e h1:koN3TRsNRluxQ9QR7exDNQMOGVo4saWIS5hckBkaDJg=
@@ -164,8 +164,8 @@ github.com/danieljoos/wincred v1.2.3 h1:v7dZC2x32Ut3nEfRH+vhoZGvN72+dQ/snVXo/vMF
 github.com/danieljoos/wincred v1.2.3/go.mod h1:6qqX0WNrS4RzPZ1tnroDzq9kY3fu1KwE7MRLQK4X0bs=
 github.com/datatug/cliformat v0.0.3 h1:d9p5vo7r8BH6qSKyTHQ9Al2sT6QHsQTK9KRlihaJdIU=
 github.com/datatug/cliformat v0.0.3/go.mod h1:DwX9tWHiyH+vZtbVEVOyHOEOw1Km9AzhgHoqI0PowAc=
-github.com/datatug/datatug-core v0.131.0 h1:fNK3FL+gxuwFHSDye57mNDAtKxfbK7LZgXKx43xscN4=
-github.com/datatug/datatug-core v0.131.0/go.mod h1:8HGRWJsrdBPPXqhSQF5hd919tJi/Qqlc6dF2dK8O9/0=
+github.com/datatug/datatug-core v0.133.2 h1:gDBlB14qkKTTqMK+8gxzKftNi/kjQgMJbyk2rJd2iOM=
+github.com/datatug/datatug-core v0.133.2/go.mod h1:PuoL8kXF90djFtw+wW37PVNh2RnhYh+YbpVbFX1Qcyw=
 github.com/datatug/sql2csv v0.0.1 h1:mmQI9gWAqVKtnwwNKPEPamplV0g1+KaTovME7/7+SIY=
 github.com/datatug/sql2csv v0.0.1/go.mod h1:nZwHW70TWPF2PTXyCa4hysB+nVgY/AcF6m/KclO3fvs=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

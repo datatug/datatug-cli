@@ -337,3 +337,45 @@ func TestNativeRestoreExternalMutationCannotCauseFalseAcknowledgementOrBlockLate
 		})
 	}
 }
+
+func TestCoordinatorRejectsFinalPrivateSymlinkWithoutChangingOutsideDirectory(t *testing.T) {
+	create, _, scope := nativeStoreFixture(t)
+	store := create()
+	write := restoreWrite(t, store, scope)
+	outside := t.TempDir()
+	if err := os.Chmod(outside, 0755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(outside, "must-stay.txt")
+	if err := os.WriteFile(marker, []byte("unchanged"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.MkdirAll(filepath.Dir(store.private), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Symlink(outside, store.private); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.ChangeProjectLifecycle(context.Background(), scope, write); err == nil {
+		t.Fatal("coordinator symlink accepted")
+	}
+	after, err := os.Stat(outside)
+	if err != nil || after.Mode().Perm() != before.Mode().Perm() {
+		t.Fatalf("rejected symlink changed outside mode: %v %v", after, err)
+	}
+	body, err := os.ReadFile(marker)
+	if err != nil || string(body) != "unchanged" {
+		t.Fatal("rejected symlink changed outside contents", err)
+	}
+	entries, err := os.ReadDir(outside)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("rejected symlink created outside state: %+v %v", entries, err)
+	}
+	if err = durablePrivateDirectory(store.private); err == nil {
+		t.Fatal("owning directory helper followed final symlink")
+	}
+}

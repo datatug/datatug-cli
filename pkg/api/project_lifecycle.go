@@ -158,5 +158,14 @@ func LocalProjectLifecycleCatalog(ctx context.Context, selection LocalLifecycleS
 	if out.Revision == "" || len(out.Revision) > 512 || len(out.Items) > 10000 {
 		return datatug.ProjectLifecycleCatalog{}, datatug.ErrProjectUsageIncomplete
 	}
+	// Provider's bool may mean include-archived; this transport returns one
+	// exact discovery state while retaining the complete catalog's revision.
+	items := make([]datatug.ProjectUsageItem, 0, len(out.Items))
+	for _, item := range out.Items {
+		if item.Archived == archived {
+			items = append(items, item)
+		}
+	}
+	out.Items = items
 	return out, nil
 }

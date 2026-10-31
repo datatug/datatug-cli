@@ -96,6 +96,21 @@ func TestServeHTTPLocalCreateOpensImmediatelyAndArchiveOnlyHidesDiscovery(t *tes
 		post("projects/lifecycle/change", string(body))
 	}
 	change("archive", "hide-session", review.Revision)
+	var archivedItems datatug.ProjectLifecycleCatalog
+	get("projects/lifecycle/catalog?storage=local&project="+created.ID+"&archived=true", &archivedItems)
+	if len(archivedItems.Items) != 1 || archivedItems.Items[0].Ref != (datatug.ProjectObjectRef{Kind: "session", ID: "kept-session"}) {
+		t.Fatalf("archive included active definitions: %+v", archivedItems)
+	}
+	var activeItems datatug.ProjectLifecycleCatalog
+	get("projects/lifecycle/catalog?storage=local&project="+created.ID, &activeItems)
+	if len(activeItems.Items) < 3 {
+		t.Fatalf("active board/entity/environment lost: %+v", activeItems)
+	}
+	for _, item := range activeItems.Items {
+		if item.Archived {
+			t.Fatalf("active list contains archive: %+v", item)
+		}
+	}
 	listPath := "session-context/sessions?" + url.Values{"storage": {"local"}, "project": {created.ID}, "databaseId": {principal.DatabaseID}, "projectId": {principal.ProjectID}}.Encode()
 	var sessionPage sessioncontext.Page[sessioncontext.Session]
 	get(listPath, &sessionPage)
@@ -111,6 +126,10 @@ func TestServeHTTPLocalCreateOpensImmediatelyAndArchiveOnlyHidesDiscovery(t *tes
 		t.Fatalf("hidden session cannot restore: %+v", review)
 	}
 	change("restore", "show-session", review.Revision)
+	get("projects/lifecycle/catalog?storage=local&project="+created.ID+"&archived=true", &archivedItems)
+	if len(archivedItems.Items) != 0 {
+		t.Fatalf("restored item remains in archive: %+v", archivedItems)
+	}
 	get(listPath, &sessionPage)
 	if len(sessionPage.Items) != 1 {
 		t.Fatalf("restored session missing: %s", fmt.Sprint(sessionPage))

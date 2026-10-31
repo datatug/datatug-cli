@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 
@@ -16,7 +17,7 @@ type nativeFixture struct {
 	archived   bool
 	revision   string
 	restores   int
-	operations map[string]bool
+	operations map[string]Target
 	denied     bool
 }
 
@@ -29,24 +30,28 @@ func nativeStoreFixture(t *testing.T) (func() *Store, *nativeFixture, datatug.Pr
 	if err := os.WriteFile(filepath.Join(root, "queries", "kept.query.json"), []byte(`{"title":"Kept query"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	state := &nativeFixture{archived: true, revision: "1", operations: map[string]bool{}}
+	state := &nativeFixture{archived: true, revision: "1", operations: map[string]Target{}}
 	scope := datatug.ProjectLifecycleScope{ActorID: "owner", Storage: "local", Project: "project"}
 	native := Runtime{
 		Inventory: func(context.Context, datatug.ProjectLifecycleScope) ([]Target, error) {
 			return []Target{{Item: datatug.ProjectUsageItem{Ref: datatug.ProjectObjectRef{Kind: "session", ID: "session"}, Title: "Private session", Archived: state.archived}, Revision: state.revision}}, nil
 		},
-		Restore: func(_ context.Context, _ datatug.ProjectLifecycleScope, target Target, operation string) error {
-			if state.operations[operation] {
-				return nil
+		Restore: func(_ context.Context, _ datatug.ProjectLifecycleScope, target Target, operation string) (Target, error) {
+			if prior, ok := state.operations[operation]; ok {
+				return prior, nil
 			}
 			if !state.archived || target.Revision != state.revision {
-				return datatug.ErrProjectLifecycleConflict
+				return Target{}, ErrRestoreConflict
 			}
 			state.archived = false
-			state.revision = "2"
+			version, _ := strconv.Atoi(state.revision)
+			state.revision = strconv.Itoa(version + 1)
 			state.restores++
-			state.operations[operation] = true
-			return nil
+			expected := target
+			expected.Item.Archived = false
+			expected.Revision = state.revision
+			state.operations[operation] = expected
+			return expected, nil
 		},
 		Authorize: func(_ context.Context, _ datatug.ProjectLifecycleScope, write bool) error {
 			if state.denied && write {
@@ -65,7 +70,7 @@ func nativeStoreFixture(t *testing.T) (func() *Store, *nativeFixture, datatug.Pr
 			}
 			return out, err
 		}).(datatug.ProjectLifecycleStore)
-		store, err := NewStore(provider, scope, private, native)
+		store, err := NewStore(provider, scope, private, root, native)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -205,5 +210,130 @@ func TestPendingNativeRestoreCannotUndoANewerArchive(t *testing.T) {
 	after, err := create().ReviewProjectLifecycle(context.Background(), scope, restore.Change.Object)
 	if err != nil || !after.Target.Archived || !after.CanRestore || state.restores != 1 {
 		t.Fatalf("old native receipt undid newer archive: %+v %v", after, err)
+	}
+}
+
+func TestNativeJournalBindingSeparatesDifferentRegisteredRoots(t *testing.T) {
+	create, a, scope := nativeStoreFixture(t)
+	first := create()
+	writeA := restoreWrite(t, first, scope)
+	secondRoot := t.TempDir()
+	if err := os.Mkdir(filepath.Join(secondRoot, "queries"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(secondRoot, "queries", "kept.query.json"), []byte(`{"title":"Kept query"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	b := &nativeFixture{archived: true, revision: "1", operations: map[string]Target{}}
+	nativeB := Runtime{
+		Inventory: func(context.Context, datatug.ProjectLifecycleScope) ([]Target, error) {
+			return []Target{{Item: datatug.ProjectUsageItem{Ref: datatug.ProjectObjectRef{Kind: "session", ID: "session"}, Title: "Private session", Archived: b.archived}, Revision: b.revision}}, nil
+		},
+		Restore: func(_ context.Context, _ datatug.ProjectLifecycleScope, target Target, operation string) (Target, error) {
+			if prior, ok := b.operations[operation]; ok {
+				return prior, nil
+			}
+			if !b.archived || target.Revision != b.revision {
+				return Target{}, ErrRestoreConflict
+			}
+			b.archived = false
+			b.revision = "2"
+			b.restores++
+			target.Item.Archived = false
+			target.Revision = b.revision
+			b.operations[operation] = target
+			return target, nil
+		},
+		Authorize: func(context.Context, datatug.ProjectLifecycleScope, bool) error { return nil },
+	}
+	providerB := filestore.NewProjectStoreWithVisibilityItems(scope.Project, secondRoot, func(ctx context.Context, scope datatug.ProjectLifecycleScope) ([]datatug.ProjectUsageItem, error) {
+		targets, err := nativeB.Inventory(ctx, scope)
+		item := targets[0].Item
+		item.Archived = false
+		return []datatug.ProjectUsageItem{item}, err
+	}).(datatug.ProjectLifecycleStore)
+	second, err := NewStore(providerB, scope, filepath.Dir(filepath.Dir(first.private)), secondRoot, nativeB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.private == second.private {
+		t.Fatal("different registered roots share a journal namespace")
+	}
+	fault = func(stage string) error {
+		if stage == "accepted" {
+			return errors.New("crash before native restore")
+		}
+		return nil
+	}
+	if _, err = first.ChangeProjectLifecycle(context.Background(), scope, writeA); !errors.Is(err, ErrOutcomeUncertain) {
+		t.Fatal(err)
+	}
+	fault = nil
+	if _, err = second.ChangeProjectLifecycle(context.Background(), scope, writeA); !errors.Is(err, datatug.ErrProjectLifecycleConflict) || b.restores != 0 {
+		t.Fatal("foreign review/recovery changed another native root", err)
+	}
+	writeB := restoreWrite(t, second, scope)
+	if writeA.ExpectedRevision == writeB.ExpectedRevision {
+		t.Fatal("review revisions omit trusted source binding")
+	}
+	ackB, err := second.ChangeProjectLifecycle(context.Background(), scope, writeB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.restores != 0 || b.restores != 1 {
+		t.Fatalf("second provider recovered foreign intent: a=%+v b=%+v", a, b)
+	}
+	ackA, err := create().ChangeProjectLifecycle(context.Background(), scope, writeA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ackA.Revision == ackB.Revision {
+		t.Fatal("different roots produced interchangeable acknowledgements")
+	}
+}
+
+func TestNativeRestoreExternalMutationCannotCauseFalseAcknowledgementOrBlockLaterWrites(t *testing.T) {
+	for _, stage := range []string{"accepted", "native-restored", "metadata-restored"} {
+		t.Run(stage, func(t *testing.T) {
+			create, state, scope := nativeStoreFixture(t)
+			store := create()
+			old := restoreWrite(t, store, scope)
+			fault = func(current string) error {
+				if current == stage {
+					return errors.New("crash window")
+				}
+				return nil
+			}
+			if _, err := store.ChangeProjectLifecycle(context.Background(), scope, old); !errors.Is(err, ErrOutcomeUncertain) {
+				t.Fatal(err)
+			}
+			fault = nil
+			// A newer native archive/version is authoritative even though the old
+			// stable native operation may have a successful restoration receipt.
+			state.archived = true
+			state.revision = "3"
+			if _, err := create().ChangeProjectLifecycle(context.Background(), scope, old); !errors.Is(err, datatug.ErrProjectLifecycleConflict) {
+				t.Fatalf("old operation falsely acknowledged restore: %v", err)
+			}
+			if !state.archived || state.revision != "3" {
+				t.Fatal("old receipt overwrote newer native state")
+			}
+			current, err := create().ListProjectLifecycle(context.Background(), scope, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			unrelated := datatug.ProjectLifecycleWrite{OperationID: "archive-query-after-conflict", ExpectedRevision: current.Revision, Change: datatug.ProjectLifecycleChange{Object: datatug.ProjectObjectRef{Kind: "query", ID: "kept"}, Action: "archive"}}
+			if _, err = create().ChangeProjectLifecycle(context.Background(), scope, unrelated); err != nil {
+				t.Fatalf("terminal native conflict blocked unrelated action: %v", err)
+			}
+			fresh := restoreWrite(t, create(), scope)
+			fresh.OperationID = "fresh-native-restore"
+			if _, err = create().ChangeProjectLifecycle(context.Background(), scope, fresh); err != nil {
+				t.Fatal(err)
+			}
+			if state.archived || state.revision != "4" {
+				t.Fatalf("fresh restoration unavailable: %+v", state)
+			}
+		})
 	}
 }

@@ -10,6 +10,8 @@ import (
 	core "github.com/datatug/datatug-core/pkg/detective"
 )
 
+var ErrVisibilityRestoreConflict = errors.New("native Case restore was superseded")
+
 // RestoreVisibilityCase reverses a legacy native archive using Core's owning
 // transition. Its private operation journal survives a crash between the Case
 // image, audit and receipt; replay never overwrites a later Case revision.
@@ -25,8 +27,11 @@ func (s *LocalStore) RestoreVisibilityCase(ctx context.Context, id, actor, opera
 		var op actionOperation
 		body, e := safeReadFile(s.privateItemDir("action-operations"), operationID)
 		if e == nil {
-			if json.Unmarshal(body, &op) != nil || core.CheckOperationReplay(op.Receipt, binding) != nil || op.Kind != "cases" || op.ID != id || op.Response.Case == nil || !op.Produced {
-				return ErrConflict
+			if json.Unmarshal(body, &op) != nil || op.Kind != "cases" || op.ID != id || op.Response.Case == nil || !op.Produced {
+				return ErrOutcomeUncertain
+			}
+			if core.CheckOperationReplay(op.Receipt, binding) != nil {
+				return ErrVisibilityRestoreConflict
 			}
 			if op.Done {
 				result = *op.Response.Case
@@ -34,14 +39,23 @@ func (s *LocalStore) RestoreVisibilityCase(ctx context.Context, id, actor, opera
 			}
 		} else if errors.Is(e, os.ErrNotExist) {
 			before, e := safeReadFile(s.privateItemDir("cases"), id)
+			if errors.Is(e, os.ErrNotExist) {
+				return ErrVisibilityRestoreConflict
+			}
 			if e != nil {
 				return e
 			}
 			var old Case
-			if json.Unmarshal(before, &old) != nil || old.ID != id || old.Version != expectedVersion || old.WorkItemID != "" {
-				return ErrConflict
+			if json.Unmarshal(before, &old) != nil {
+				return ErrOutcomeUncertain
+			}
+			if old.ID != id || old.Version != expectedVersion || old.WorkItemID != "" {
+				return ErrVisibilityRestoreConflict
 			}
 			next, audit, e := core.RestoreCase(old, actor, time.Now().UTC())
+			if errors.Is(e, core.ErrConflict) || errors.Is(e, core.ErrInvalid) {
+				return ErrVisibilityRestoreConflict
+			}
 			if e != nil {
 				return e
 			}
@@ -63,6 +77,9 @@ func (s *LocalStore) RestoreVisibilityCase(ctx context.Context, id, actor, opera
 			return e
 		}
 		if e = s.finishActionFile(s.privateItemDir("cases"), id, op.Before, json.RawMessage(op.After)); e != nil {
+			if errors.Is(e, ErrConflict) {
+				return ErrVisibilityRestoreConflict
+			}
 			return e
 		}
 		if e = writeItemSyncDir(s.privateItemDir("cases")); e != nil {

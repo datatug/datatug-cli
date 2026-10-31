@@ -19,7 +19,6 @@ import (
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
-	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/gofrs/flock"
 	"github.com/strongo/validation"
 )
@@ -313,25 +312,6 @@ func LocalProjectMeaningsCatalog(ctx context.Context, ref dto.ProjectRef, branch
 		if err != nil {
 			return err
 		}
-		hidden, err := filestore.ReadProjectArchivedItems(root.Name())
-		if err != nil {
-			return err
-		}
-		entities := result.Entities[:0]
-		for _, entity := range result.Entities {
-			if hidden[datatug.ProjectObjectRef{Kind: "meaning", ID: "project/" + entity.ConceptID}] {
-				continue
-			}
-			fields := entity.Fields[:0]
-			for _, field := range entity.Fields {
-				if !hidden[datatug.ProjectObjectRef{Kind: "meaning", ID: "project/" + field.ConceptID}] {
-					fields = append(fields, field)
-				}
-			}
-			entity.Fields = fields
-			entities = append(entities, entity)
-		}
-		result.Entities = entities
 		return nil
 	})
 	return result, err

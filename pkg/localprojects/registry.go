@@ -42,17 +42,15 @@ type Project struct {
 }
 
 func (p Project) MarshalJSON() ([]byte, error) {
-	body, err := json.Marshal(p.ProjectSummary)
-	if err != nil {
-		return nil, err
-	}
-	var fields map[string]json.RawMessage
-	if err = json.Unmarshal(body, &fields); err != nil {
-		return nil, err
-	}
-	delete(fields, "localCreation")
-	fields["archived"], _ = json.Marshal(p.Archived)
-	return json.Marshal(fields)
+	// Registry discovery never exposes opaque project metadata, connection
+	// profiles or credentials retained in legacy native project documents.
+	return json.Marshal(struct {
+		ID               string                  `json:"id"`
+		Title            string                  `json:"title"`
+		Archived         bool                    `json:"archived"`
+		Created          *datatug.ProjectCreated `json:"created,omitempty"`
+		EnvironmentOrder []string                `json:"environmentOrder,omitempty"`
+	}{p.ID, p.Title, p.Archived, p.Created, p.EnvironmentOrder})
 }
 
 func (p *Project) UnmarshalJSON(body []byte) error {
@@ -198,9 +196,10 @@ func (r *Registry) discover() error {
 		if errors.Is(err, os.ErrNotExist) {
 			continue // An unrelated directory is not a project.
 		}
-		if err != nil || file.ID != entry.Name() {
+		if err != nil || file.ID != "" && file.ID != entry.Name() {
 			return fmt.Errorf("invalid project metadata in creation root")
 		}
+		file.ID = entry.Name()
 		if old, ok := r.dirs[file.ID]; ok && filepath.Clean(old) != dir {
 			return ErrConflict
 		}
@@ -428,7 +427,9 @@ func readProject(dir string) (projectDocument, error) {
 	if err := readJSON(dir, storage.ProjectSummaryFileName, &file); err != nil {
 		return file, err
 	}
-	return file, file.ProjectFile.Validate()
+	// Existing registered projects may predate created.at and newer fields.
+	// New creation validates its complete metadata before staging/publishing.
+	return file, nil
 }
 
 func readState(dir string) (projectState, error) {

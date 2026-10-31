@@ -105,7 +105,7 @@ func localLifecycleStore(ctx context.Context, selection LocalLifecycleSelection,
 		if err != nil {
 			return nil, scope, err
 		}
-		wrapped, err := projectvisibility.NewStore(provider, scope, private, native)
+		wrapped, err := projectvisibility.NewStore(provider, scope, private, root, native)
 		if err != nil {
 			return nil, scope, err
 		}

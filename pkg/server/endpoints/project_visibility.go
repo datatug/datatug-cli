@@ -1,13 +1,15 @@
 package endpoints
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/datatug/datatug-cli/pkg/projectvisibility"
 	"strconv"
 	"strings"
 
-	"github.com/datatug/datatug-cli/pkg/detective"
+	detectivePackage "github.com/datatug/datatug-cli/pkg/detective"
 
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-core/pkg/datatug"
@@ -129,25 +131,54 @@ func PrepareLocalVisibilityItems(ctx context.Context, scope datatug.ProjectLifec
 		}
 		return nil
 	}
-	restore := func(ctx context.Context, current datatug.ProjectLifecycleScope, target projectvisibility.Target, operation string) error {
+
+	restore := func(ctx context.Context, current datatug.ProjectLifecycleScope, target projectvisibility.Target, operation string) (projectvisibility.Target, error) {
 		if err := authorize(ctx, current, true); err != nil {
-			return err
+			return projectvisibility.Target{}, err
 		}
 		version, err := strconv.ParseInt(target.Revision, 10, 64)
 		if err != nil || version < 1 {
-			return datatug.ErrProjectUsageIncomplete
+			return projectvisibility.Target{}, datatug.ErrProjectUsageIncomplete
 		}
+		expected := target
+		expected.Item.Archived = false
 		switch target.Item.Ref.Kind {
 		case "session":
-			_, err = service.Execute(ctx, principal, sessioncontext.Command{OpID: operation, Action: "transitionSession", SessionID: target.Item.Ref.ID, DatabaseID: principal.DatabaseID, ProjectID: principal.ProjectID, ExpectedVersion: version, Transition: "restore"})
-			return err
+			result, err := service.Execute(ctx, principal, sessioncontext.Command{OpID: operation, Action: "transitionSession", SessionID: target.Item.Ref.ID, DatabaseID: principal.DatabaseID, ProjectID: principal.ProjectID, ExpectedVersion: version, Transition: "restore"})
+			receipt := result.Receipt
+			if err != nil {
+				if !errors.Is(err, sessioncontext.ErrConflict) && !errors.Is(err, sessioncontext.ErrInvalid) && !errors.Is(err, sessioncontext.ErrNotFound) {
+					return projectvisibility.Target{}, err
+				}
+				recovered, readErr := service.ReadOperation(ctx, principal, operation)
+				if errors.Is(readErr, sessioncontext.ErrNotFound) {
+					return projectvisibility.Target{}, projectvisibility.ErrRestoreConflict
+				}
+				if readErr != nil {
+					return projectvisibility.Target{}, readErr
+				}
+				receipt = recovered
+			}
+			if receipt.Actor != principal.Actor || receipt.OpID != operation || receipt.Action != "transitionSession" || receipt.SessionID != target.Item.Ref.ID || receipt.SessionVersion != version+1 {
+				return projectvisibility.Target{}, projectvisibility.ErrRestoreConflict
+			}
+			expected.Revision = strconv.FormatInt(receipt.SessionVersion, 10)
+			return expected, nil
 		case "case":
-			_, err = detective.RestoreVisibilityCase(ctx, target.Item.Ref.ID, current.ActorID, operation, version)
-			return err
+			restored, err := detective.RestoreVisibilityCase(ctx, target.Item.Ref.ID, current.ActorID, operation, version)
+			if errors.Is(err, detectivePackage.ErrVisibilityRestoreConflict) {
+				return projectvisibility.Target{}, projectvisibility.ErrRestoreConflict
+			}
+			if err != nil {
+				return projectvisibility.Target{}, err
+			}
+			expected.Revision = strconv.FormatInt(restored.Version, 10)
+			return expected, nil
 		default:
-			return datatug.ErrProjectUsageIncomplete
+			return projectvisibility.Target{}, datatug.ErrProjectUsageIncomplete
 		}
 	}
+
 	return projectvisibility.Runtime{Inventory: inventory, Restore: restore, Authorize: authorize}, nil
 }
 
@@ -179,7 +210,7 @@ func filterLocalVisible[T any](project, kind string, items []T, id func(T) strin
 	}
 	return visible, nil
 }
-func annotateDetectiveVisibility(project string, state detective.State) (map[string]any, error) {
+func annotateDetectiveVisibility(project string, state detectivePackage.State) (map[string]any, error) {
 	root, ok := api.ProjectDir(project)
 	if !ok {
 		return nil, sessioncontext.ErrForbidden
@@ -192,8 +223,8 @@ func annotateDetectiveVisibility(project string, state detective.State) (map[str
 	if err != nil {
 		return nil, err
 	}
-	var response map[string]any
-	if err = json.Unmarshal(body, &response); err != nil {
+	response, err := decodeVisibilityProjection(body)
+	if err != nil {
 		return nil, err
 	}
 	kinds := map[string]string{"checks": "check", "validators": "validator", "queryValidators": "query-validator", "scenarios": "scenario", "cases": "case"}
@@ -248,4 +279,14 @@ func filterLocalQueryVisibility(project string, folder *datatug.QueriesFolder, p
 	}
 	filter(folder, prefix)
 	return nil
+}
+
+func decodeVisibilityProjection(body []byte) (map[string]any, error) {
+	var response map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	if err := decoder.Decode(&response); err != nil {
+		return nil, err
+	}
+	return response, nil
 }

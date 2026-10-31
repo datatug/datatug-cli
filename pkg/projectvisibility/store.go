@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/datatug/datatug-cli/pkg/privateadmission"
 	"github.com/datatug/datatug-cli/pkg/sessionstore"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/gofrs/flock"
@@ -28,20 +29,22 @@ type Target struct {
 }
 type Runtime struct {
 	Inventory func(context.Context, datatug.ProjectLifecycleScope) ([]Target, error)
-	Restore   func(context.Context, datatug.ProjectLifecycleScope, Target, string) error
+	Restore   func(context.Context, datatug.ProjectLifecycleScope, Target, string) (Target, error)
 	Authorize func(context.Context, datatug.ProjectLifecycleScope, bool) error
 }
 type Store struct {
 	provider datatug.ProjectLifecycleStore
 	scope    datatug.ProjectLifecycleScope
 	private  string
+	binding  string
 	runtime  Runtime
 }
 
+var ErrRestoreConflict = errors.New("native restore was rejected or superseded")
 var ErrOutcomeUncertain = errors.New("native visibility restoration is pending; retry the same operation")
 var fault func(string) error
 
-func NewStore(provider datatug.ProjectLifecycleStore, scope datatug.ProjectLifecycleScope, private string, native Runtime) (*Store, error) {
+func NewStore(provider datatug.ProjectLifecycleStore, scope datatug.ProjectLifecycleScope, private, projectRoot string, native Runtime) (*Store, error) {
 	if provider == nil || scope.ActorID == "" || native.Inventory == nil || native.Authorize == nil {
 		return nil, datatug.ErrProjectUsageIncomplete
 	}
@@ -49,7 +52,11 @@ func NewStore(provider datatug.ProjectLifecycleStore, scope datatug.ProjectLifec
 	if err != nil {
 		return nil, err
 	}
-	return &Store{provider: provider, scope: scope, private: filepath.Join(root, "project-visibility", hash(struct{ Storage, Project string }{scope.Storage, scope.Project})), runtime: native}, nil
+	binding, err := privateadmission.PhysicalDirectory(projectRoot)
+	if err != nil {
+		return nil, err
+	}
+	return &Store{provider: provider, scope: scope, binding: binding, private: filepath.Join(root, "project-visibility", hash(struct{ Storage, Project, Binding string }{scope.Storage, scope.Project, binding})), runtime: native}, nil
 }
 func hash(v any) string {
 	body, _ := json.Marshal(v)
@@ -105,8 +112,9 @@ func (s *Store) snapshot(ctx context.Context, scope datatug.ProjectLifecycleScop
 	out.Revision = hash(struct {
 		Scope    datatug.ProjectLifecycleScope
 		Metadata string
+		Binding  string
 		Native   []Target
-	}{scope, base.Revision, targets})
+	}{scope, base.Revision, s.binding, targets})
 	return out, base, targets, nil
 }
 func (s *Store) ListProjectLifecycle(ctx context.Context, scope datatug.ProjectLifecycleScope, includeArchived bool) (datatug.ProjectLifecycleCatalog, error) {
@@ -134,11 +142,14 @@ func (s *Store) ReviewProjectLifecycle(ctx context.Context, scope datatug.Projec
 }
 
 type operation struct {
+	Binding         string                         `json:"binding"`
 	Version         int                            `json:"version"`
 	Scope           datatug.ProjectLifecycleScope  `json:"scope"`
 	Original        datatug.ProjectLifecycleWrite  `json:"original"`
 	Digest          string                         `json:"digest"`
 	Native          *Target                        `json:"native,omitempty"`
+	ExpectedNative  *Target                        `json:"expectedNative,omitempty"`
+	Terminal        string                         `json:"terminal,omitempty"`
 	NativeOperation string                         `json:"nativeOperation,omitempty"`
 	Translated      *datatug.ProjectLifecycleWrite `json:"translated,omitempty"`
 	Result          *datatug.ProjectLifecycleAck   `json:"result,omitempty"`
@@ -179,16 +190,17 @@ func (s *Store) ChangeProjectLifecycle(ctx context.Context, scope datatug.Projec
 	defer root.Close()
 	name := hash(struct{ Actor, Operation string }{scope.ActorID, write.OperationID}) + ".json"
 	digest := hash(struct {
-		Scope datatug.ProjectLifecycleScope
-		Write datatug.ProjectLifecycleWrite
-	}{scope, write})
+		Binding string
+		Scope   datatug.ProjectLifecycleScope
+		Write   datatug.ProjectLifecycleWrite
+	}{s.binding, scope, write})
 	var op operation
 	err = readOperation(root, name, &op)
 	if errors.Is(err, os.ErrNotExist) {
 		err = readOperation(root, strings.TrimSuffix(name, ".json")+".done.json", &op)
 	}
 	if err == nil {
-		if op.Version != 1 || op.Scope != scope || op.Digest != digest || hash(op.Original) != hash(write) {
+		if op.Version != 1 || op.Binding != s.binding || op.Scope != scope || op.Digest != digest || hash(op.Original) != hash(write) {
 			return ack, datatug.ErrProjectLifecycleConflict
 		}
 		if op.Translated != nil && (op.Translated.Validate() != nil || op.Translated.OperationID != write.OperationID || op.Translated.Change != write.Change) {
@@ -196,6 +208,12 @@ func (s *Store) ChangeProjectLifecycle(ctx context.Context, scope datatug.Projec
 		}
 		if op.Native != nil && (write.Change.Action != "restore" || op.Native.Item.Ref != write.Change.Object || !op.Native.Item.Archived || op.Native.Revision == "" || op.Native.Item.Restricted || op.Native.Item.Historical || op.NativeOperation != "visibility-restore-"+digest[:40]) {
 			return ack, ErrOutcomeUncertain
+		}
+		if op.Terminal != "" {
+			if op.Terminal != "conflict" && op.Terminal != "superseded" {
+				return ack, ErrOutcomeUncertain
+			}
+			return ack, datatug.ErrProjectLifecycleConflict
 		}
 		if op.Result != nil {
 			if op.Result.OperationID != write.OperationID || op.Result.Change != write.Change || op.Result.Revision == "" {
@@ -216,7 +234,7 @@ func (s *Store) ChangeProjectLifecycle(ctx context.Context, scope datatug.Projec
 		if _, e = datatug.PlanProjectVisibility(current, write); e != nil {
 			return ack, e
 		}
-		op = operation{Version: 1, Scope: scope, Original: write, Digest: digest}
+		op = operation{Version: 1, Binding: s.binding, Scope: scope, Original: write, Digest: digest}
 		if write.Change.Action == "restore" {
 			for _, target := range targets {
 				if target.Item.Ref == write.Change.Object && target.Item.Archived {
@@ -252,27 +270,47 @@ func (s *Store) finishOperation(ctx context.Context, scope datatug.ProjectLifecy
 	if err = s.authorize(ctx, scope, true); err != nil {
 		return ack, err
 	}
-	if op.Translated == nil {
-		if op.Native == nil || op.NativeOperation == "" || s.runtime.Restore == nil {
-			return ack, ErrOutcomeUncertain
+
+	if op.Native != nil {
+		if op.ExpectedNative == nil {
+			if op.NativeOperation == "" || s.runtime.Restore == nil {
+				return ack, ErrOutcomeUncertain
+			}
+			expected, e := s.runtime.Restore(ctx, scope, *op.Native, op.NativeOperation)
+			if e != nil {
+				if errors.Is(e, ErrRestoreConflict) {
+					return ack, s.terminalOperation(root, name, op, "conflict")
+				}
+				return ack, errors.Join(ErrOutcomeUncertain, e)
+			}
+			if expected.Item.Ref != op.Native.Item.Ref || expected.Item.Archived || expected.Revision == "" || expected.Item.Restricted || expected.Item.Historical {
+				return ack, ErrOutcomeUncertain
+			}
+			op.ExpectedNative = &expected
+			if err = step("native-restored"); err != nil {
+				return ack, ErrOutcomeUncertain
+			}
 		}
-		if err = s.runtime.Restore(ctx, scope, *op.Native, op.NativeOperation); err != nil {
-			return ack, errors.Join(ErrOutcomeUncertain, err)
-		}
-		if err = step("native-restored"); err != nil {
-			return ack, ErrOutcomeUncertain
-		}
-		_, base, _, e := s.snapshot(ctx, scope)
+		_, base, targets, e := s.snapshot(ctx, scope)
 		if e != nil {
 			return ack, errors.Join(ErrOutcomeUncertain, e)
 		}
-		translated := write
-		translated.ExpectedRevision = base.Revision
-		op.Translated = &translated
+		if !nativeOutcomeMatches(targets, op.ExpectedNative) {
+			return ack, s.terminalOperation(root, name, op, "superseded")
+		}
+		if op.Translated == nil {
+			translated := write
+			translated.ExpectedRevision = base.Revision
+			op.Translated = &translated
+		}
 		if err = writeOperation(root, name, *op); err != nil {
 			return ack, errors.Join(ErrOutcomeUncertain, err)
 		}
 	}
+	if op.Translated == nil {
+		return ack, ErrOutcomeUncertain
+	}
+
 	if err = s.authorize(ctx, scope, true); err != nil {
 		return ack, err
 	}
@@ -286,9 +324,12 @@ func (s *Store) finishOperation(ctx context.Context, scope datatug.ProjectLifecy
 	if err = step("metadata-restored"); err != nil {
 		return ack, ErrOutcomeUncertain
 	}
-	current, _, _, err := s.snapshot(ctx, scope)
+	current, _, targets, err := s.snapshot(ctx, scope)
 	if err != nil {
 		return ack, errors.Join(ErrOutcomeUncertain, err)
+	}
+	if op.ExpectedNative != nil && !nativeOutcomeMatches(targets, op.ExpectedNative) {
+		return ack, s.terminalOperation(root, name, op, "superseded")
 	}
 	ack = datatug.ProjectLifecycleAck{OperationID: write.OperationID, Change: write.Change, Revision: current.Revision}
 	op.Result = &ack
@@ -322,10 +363,11 @@ func (s *Store) recoverPending(ctx context.Context, scope datatug.ProjectLifecyc
 		if err = readOperation(root, name, &pending); err != nil {
 			return err
 		}
-		if pending.Version != 1 || pending.Scope != scope || pending.Original.Validate() != nil || pending.Digest != hash(struct {
-			Scope datatug.ProjectLifecycleScope
-			Write datatug.ProjectLifecycleWrite
-		}{scope, pending.Original}) {
+		if pending.Version != 1 || pending.Binding != s.binding || pending.Scope != scope || pending.Original.Validate() != nil || pending.Digest != hash(struct {
+			Binding string
+			Scope   datatug.ProjectLifecycleScope
+			Write   datatug.ProjectLifecycleWrite
+		}{s.binding, scope, pending.Original}) {
 			return ErrOutcomeUncertain
 		}
 		if name != hash(struct{ Actor, Operation string }{scope.ActorID, pending.Original.OperationID})+".json" {
@@ -336,6 +378,15 @@ func (s *Store) recoverPending(ctx context.Context, scope datatug.ProjectLifecyc
 		}
 		if pending.Native != nil && (pending.Original.Change.Action != "restore" || pending.Native.Item.Ref != pending.Original.Change.Object || !pending.Native.Item.Archived || pending.Native.Revision == "" || pending.Native.Item.Restricted || pending.Native.Item.Historical || pending.NativeOperation != "visibility-restore-"+pending.Digest[:40]) {
 			return ErrOutcomeUncertain
+		}
+		if pending.Terminal != "" {
+			if pending.Terminal != "conflict" && pending.Terminal != "superseded" {
+				return ErrOutcomeUncertain
+			}
+			if err = completeOperation(root, name); err != nil {
+				return err
+			}
+			continue
 		}
 		if pending.Result != nil {
 			if err = completeOperation(root, name); err != nil {
@@ -365,6 +416,24 @@ func completeOperation(root *os.Root, name string) error {
 	}
 	defer dir.Close()
 	return dir.Sync()
+}
+func nativeOutcomeMatches(targets []Target, expected *Target) bool {
+	for _, target := range targets {
+		if target.Item.Ref == expected.Item.Ref {
+			return !target.Item.Archived && target.Revision == expected.Revision && target.Item.Title == expected.Item.Title
+		}
+	}
+	return false
+}
+func (s *Store) terminalOperation(root *os.Root, name string, op *operation, status string) error {
+	op.Terminal = status
+	if err := writeOperation(root, name, *op); err != nil {
+		return errors.Join(ErrOutcomeUncertain, err)
+	}
+	if err := completeOperation(root, name); err != nil {
+		return errors.Join(ErrOutcomeUncertain, err)
+	}
+	return datatug.ErrProjectLifecycleConflict
 }
 func step(stage string) error {
 	if fault != nil {

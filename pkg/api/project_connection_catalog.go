@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -260,7 +261,9 @@ func (catalog LocalConnectionCatalog) MarshalJSON() ([]byte, error) {
 		return nil, err
 	}
 	var response map[string]any
-	if err = json.Unmarshal(body, &response); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	if err = decoder.Decode(&response); err != nil {
 		return nil, err
 	}
 	for _, collection := range []string{"connections", "bigQueryEditions", "bigQueryPlans"} {

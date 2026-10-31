@@ -208,3 +208,36 @@ func TestRegistryRefusesTamperedStateAndRevokedWriter(t *testing.T) {
 		t.Fatalf("tampered state accepted: %v", err)
 	}
 }
+
+func TestRegistryLegacyMinimalProjectAndWirePrivacy(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "datatug-project.json")
+	original := []byte(`{"title":"Legacy project","credentials":{"password":"private-project-password"},"databases":[{"id":"db","password":"private-db-password"}],"custom":{"token":"private-token"}}`)
+	if err := os.WriteFile(path, original, 0600); err != nil {
+		t.Fatal(err)
+	}
+	registry, err := Open("", map[string]string{"legacy-alias": root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projects, err := registry.List()
+	if err != nil || len(projects) != 1 || projects[0].ID != "legacy-alias" {
+		t.Fatalf("minimal registered legacy project stopped listing: %+v %v", projects, err)
+	}
+	encoded, err := json.Marshal(projects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"credentials", "private-project-password", "private-db-password", "private-token", "custom", "databases"} {
+		if strings.Contains(string(encoded), secret) {
+			t.Fatalf("registry disclosed opaque native metadata: %s", encoded)
+		}
+	}
+	if _, err = registry.SetArchived(context.Background(), Archive{Storage: "local", Project: "legacy-alias", Archived: true, OperationID: "archive-legacy"}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || string(after) != string(original) {
+		t.Fatalf("archive rewrote legacy project metadata: %s %v", after, err)
+	}
+}

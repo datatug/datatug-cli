@@ -82,7 +82,7 @@ func assertNativeGuardFixtureUnchanged(t *testing.T, rawURL string) {
 	t.Helper()
 	observer, err := sql.Open("pgx", rawURL)
 	require.NoError(t, err)
-	defer observer.Close()
+	defer func() { require.NoError(t, observer.Close()) }()
 	var count int
 	var note string
 	require.NoError(t, observer.QueryRow(`SELECT count(*) FROM native_guard_probe`).Scan(&count))
@@ -122,7 +122,7 @@ func TestPostgresNativeReadonlyRoleCannotWriteOutsideDataTug(t *testing.T) {
 	parsed.User = url.UserPassword(role, password)
 	raw, err := sql.Open("pgx", parsed.String())
 	require.NoError(t, err)
-	defer raw.Close()
+	defer func() { require.NoError(t, raw.Close()) }()
 	var count int
 	require.NoError(t, raw.QueryRow(`SELECT count(*) FROM native_role_probe`).Scan(&count))
 	require.Equal(t, 1, count)

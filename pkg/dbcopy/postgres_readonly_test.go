@@ -113,7 +113,10 @@ func TestVerifiedPostgresReadonlyErrorsAndCancellation(t *testing.T) {
 	for _, coordinator := range []dal.ReadTransactionCoordinator{nil, &modeCoordinator{}, &modeCoordinator{tx: &modeTransaction{}}, &modeCoordinator{tx: &modeTransaction{err: errors.New("SHOW failed")}}} {
 		require.ErrorIs(t, RunVerifiedPostgresReadonly(context.Background(), coordinator, worker), ErrPostgresReadOnlyUnverified)
 	}
-	require.ErrorIs(t, RunVerifiedPostgresReadonly(nil, &modeCoordinator{}, worker), ErrPostgresReadOnlyUnverified)
+	// Deliberately verify the public guard refuses a missing context.
+	var missingContext context.Context
+	require.Nil(t, missingContext)
+	require.ErrorIs(t, RunVerifiedPostgresReadonly(missingContext, &modeCoordinator{}, worker), ErrPostgresReadOnlyUnverified)
 	require.ErrorIs(t, RunVerifiedPostgresReadonly(context.Background(), &modeCoordinator{}, nil), ErrPostgresReadOnlyUnverified)
 	beginErr := errors.New("begin failed")
 	require.ErrorIs(t, RunVerifiedPostgresReadonly(context.Background(), &modeCoordinator{err: beginErr}, worker), beginErr)
@@ -130,7 +133,11 @@ func TestVerifiedPostgresReadonlyErrorsAndCancellation(t *testing.T) {
 func TestVerifiedPostgresReadonlyRejectsLegacyReadWriteDowngrade(t *testing.T) {
 	raw, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer raw.Close()
+	t.Cleanup(func() {
+		mock.ExpectClose()
+		require.NoError(t, raw.Close())
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
 	mock.ExpectBegin().WillReturnError(errors.New("sql: driver does not support read-only transactions"))
 	mock.ExpectBegin()
 	mock.ExpectQuery("SHOW transaction_read_only").WillReturnRows(sqlmock.NewRows([]string{"transaction_read_only"}).AddRow("off"))

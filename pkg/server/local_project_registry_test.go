@@ -3,13 +3,19 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/datatug/datatug-cli/pkg/detective"
+	"github.com/datatug/datatug-cli/pkg/privateadmission"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
 	"github.com/datatug/datatug-core/pkg/sessioncontext"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/api"
@@ -142,6 +148,66 @@ func TestServeHTTPLocalCreateOpensImmediatelyAndArchiveOnlyHidesDiscovery(t *tes
 	get(listPath, &sessionPage)
 	if len(sessionPage.Items) != 1 {
 		t.Fatalf("restored session missing: %s", fmt.Sprint(sessionPage))
+	}
+
+	// A retained native archive is restored through the owning service, while
+	// generic metadata receipts remain recoverable and never restart execution.
+	snapshot, err := service.GetSnapshot(context.Background(), principal, "kept-session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.Execute(context.Background(), principal, sessioncontext.Command{OpID: "legacy-native-archive", Action: "transitionSession", SessionID: "kept-session", DatabaseID: principal.DatabaseID, ProjectID: principal.ProjectID, ExpectedVersion: snapshot.Session.Version, Transition: "archive"}); err != nil {
+		t.Fatal(err)
+	}
+	get("projects/lifecycle/catalog?storage=local&project="+created.ID+"&archived=true", &archivedItems)
+	if len(archivedItems.Items) != 1 || archivedItems.Items[0].Ref.Kind != "session" {
+		t.Fatalf("legacy native archive missing: %+v", archivedItems)
+	}
+	get("projects/lifecycle/review?storage=local&project="+created.ID+"&projectApi=local&branch=main&kind=session&id=kept-session", &review)
+	if !review.CanRestore || !review.Target.Archived {
+		t.Fatalf("legacy native archive cannot restore: %+v", review)
+	}
+	change("restore", "restore-native-session", review.Revision)
+	nativeRestored, err := service.GetSnapshot(context.Background(), principal, "kept-session")
+	if err != nil || nativeRestored.Session.State != "stopped" {
+		t.Fatalf("native archive restore did not preserve stopped execution: %+v %v", nativeRestored.Session, err)
+	}
+	get(listPath, &sessionPage)
+	if len(sessionPage.Items) != 1 {
+		t.Fatal("native restored session missing from active list")
+	}
+
+	// Seed a retained native Case using the actual owning storage namespace,
+	// then restore through the public lifecycle route.
+	projectDirectory, _ := api.ProjectDir(created.ID)
+	physicalProject, err := privateadmission.PhysicalDirectory(projectDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectDigest := sha256.Sum256([]byte(physicalProject))
+	casesDirectory := filepath.Join(api.GetCapabilities().EvidencePrivateDir, "detective", hex.EncodeToString(projectDigest[:16]), "cases")
+	if err = os.MkdirAll(casesDirectory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	legacyCase := detective.Case{ID: "legacy-case", Title: "Archived legacy Case", Status: "archived", Version: 2, RunRefs: []string{"kept-run"}}
+	caseBody, _ := json.Marshal(legacyCase)
+	casePath := filepath.Join(casesDirectory, "legacy-case.json")
+	if err = os.WriteFile(casePath, caseBody, 0600); err != nil {
+		t.Fatal(err)
+	}
+	get("projects/lifecycle/review?storage=local&project="+created.ID+"&projectApi=local&branch=main&kind=case&id=legacy-case", &review)
+	if !review.CanRestore || !review.Target.Archived {
+		t.Fatalf("legacy native Case cannot restore: %+v", review)
+	}
+	caseRestoreBody, _ := json.Marshal(map[string]any{"storage": "local", "project": created.ID, "projectApi": "local", "branch": "main", "operationId": "restore-native-case", "expectedRevision": review.Revision, "change": map[string]any{"object": map[string]string{"kind": "case", "id": "legacy-case"}, "action": "restore"}})
+	post("projects/lifecycle/change", string(caseRestoreBody))
+	restoredCaseBody, err := os.ReadFile(casePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restoredCase detective.Case
+	if err = json.Unmarshal(restoredCaseBody, &restoredCase); err != nil || restoredCase.Status != "active" || restoredCase.Version != 3 || len(restoredCase.RunRefs) != 1 {
+		t.Fatalf("legacy Case restoration changed history: %+v %v", restoredCase, err)
 	}
 	post("projects/archive_project", `{"storage":"local","project":"created-through-http","archived":true,"operationId":"archive-http"}`)
 	var active []map[string]any

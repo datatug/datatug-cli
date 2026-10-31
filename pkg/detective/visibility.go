@@ -2,6 +2,7 @@ package detective
 
 import (
 	"context"
+	"strconv"
 
 	"github.com/datatug/datatug-core/pkg/datatug"
 )
@@ -9,8 +10,13 @@ import (
 // VisibilityItems reads current definitions and Cases only. Completed runs,
 // evidence, timeline membership and execution snapshots are not an inventory
 // of objects the user may archive.
-func (s *LocalStore) VisibilityItems(ctx context.Context) (items []datatug.ProjectUsageItem, err error) {
-	items = []datatug.ProjectUsageItem{}
+type VisibilityItem struct {
+	datatug.ProjectUsageItem
+	Revision string
+}
+
+func (s *LocalStore) VisibilityItems(ctx context.Context) (items []VisibilityItem, err error) {
+	items = []VisibilityItem{}
 	err = s.withLock(ctx, func() error {
 		checks, e := readItems[Check](s.definitionDir("checks"))
 		if e != nil {
@@ -32,24 +38,27 @@ func (s *LocalStore) VisibilityItems(ctx context.Context) (items []datatug.Proje
 		if e != nil {
 			return e
 		}
-		add := func(kind, id, title string) {
-			items = append(items, datatug.ProjectUsageItem{Ref: datatug.ProjectObjectRef{Kind: kind, ID: id}, Title: title})
+		add := func(kind, id, title string, version int64, archived bool) {
+			if title == "" {
+				title = id
+			}
+			items = append(items, VisibilityItem{ProjectUsageItem: datatug.ProjectUsageItem{Ref: datatug.ProjectObjectRef{Kind: kind, ID: id}, Title: title, Archived: archived}, Revision: strconv.FormatInt(version, 10)})
 		}
 		for _, item := range checks {
-			add("check", item.ID, item.Title)
+			add("check", item.ID, item.Title, item.Version, false)
 		}
 		for _, item := range validators {
-			add("validator", item.ID, item.Title)
+			add("validator", item.ID, item.Title, item.Version, false)
 		}
 		for _, item := range queryValidators {
-			add("query-validator", item.QueryID, item.QueryID+" validators")
+			add("query-validator", item.QueryID, item.QueryID, item.Version, false)
 		}
 		for _, item := range scenarios {
-			add("scenario", item.ID, item.Title)
+			add("scenario", item.ID, item.Title, item.Version, false)
 		}
 		for _, item := range cases {
 			if item.WorkItemID == "" {
-				add("case", item.ID, item.Title)
+				add("case", item.ID, item.Title, item.Version, item.Status == "archived")
 			}
 		}
 		return nil

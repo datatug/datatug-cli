@@ -104,7 +104,13 @@ func sessionContextHandler(w http.ResponseWriter, r *http.Request) {
 			page, listErr := service.ListSessions(r.Context(), principal, q.Get("cursor"), limit)
 			err = listErr
 			if err == nil {
-				page.Items, err = filterLocalVisible(q.Get("project"), "session", page.Items, func(item sessioncontext.Session) string { return item.ID })
+				active := page.Items[:0]
+				for _, item := range page.Items {
+					if item.State != "archived" {
+						active = append(active, item)
+					}
+				}
+				page.Items, err = filterLocalVisible(q.Get("project"), "session", active, func(item sessioncontext.Session) string { return item.ID })
 			}
 			result = page
 		case strings.Contains(r.URL.Path, "/operations/"):

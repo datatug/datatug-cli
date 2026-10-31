@@ -3,6 +3,8 @@ package endpoints
 import (
 	"context"
 	"encoding/json"
+	"github.com/datatug/datatug-cli/pkg/projectvisibility"
+	"strconv"
 	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/detective"
@@ -17,18 +19,18 @@ import (
 // PrepareLocalVisibilityItems uses the same owning services as their normal
 // list endpoints. A registered project or private history record alone never
 // grants access to another actor's working context.
-func PrepareLocalVisibilityItems(ctx context.Context, scope datatug.ProjectLifecycleScope) (func(context.Context, datatug.ProjectLifecycleScope) ([]datatug.ProjectUsageItem, error), error) {
+func PrepareLocalVisibilityItems(ctx context.Context, scope datatug.ProjectLifecycleScope) (projectvisibility.Runtime, error) {
 	generation := api.SecurityContextID()
 	if !api.SecureLocalProjectOwner() || api.SecurePrincipalID() != scope.ActorID {
-		return nil, sessioncontext.ErrForbidden
+		return projectvisibility.Runtime{}, sessioncontext.ErrForbidden
 	}
 	service, principal, _, err := api.ResolveSessionContext(ctx, scope.Storage, scope.Project)
 	if err != nil {
-		return nil, err
+		return projectvisibility.Runtime{}, err
 	}
 	detective, _, err := detectiveStore(scope.Project, generation)
 	if err != nil {
-		return nil, err
+		return projectvisibility.Runtime{}, err
 	}
 	// Incident stores are explicit server routes. Qualify IDs so a dedicated
 	// store cannot collide with the project's primary repository.
@@ -38,19 +40,25 @@ func PrepareLocalVisibilityItems(ctx context.Context, scope datatug.ProjectLifec
 			storeIDs = append(storeIDs, configured.StoreID)
 		}
 	}
-	return func(ctx context.Context, current datatug.ProjectLifecycleScope) ([]datatug.ProjectUsageItem, error) {
+	inventory := func(ctx context.Context, current datatug.ProjectLifecycleScope) ([]projectvisibility.Target, error) {
 		if current != scope || !api.ValidateSecurityContext(generation) || !api.SecureLocalProjectOwner() || api.SecurePrincipalID() != scope.ActorID {
 			return nil, sessioncontext.ErrForbidden
 		}
-		items, err := detective.VisibilityItems(ctx)
+		definitions, err := detective.VisibilityItems(ctx)
 		if err != nil {
 			return nil, err
+		}
+		items := make([]projectvisibility.Target, 0, len(definitions))
+		for _, item := range definitions {
+			items = append(items, projectvisibility.Target{Item: item.ProjectUsageItem, Revision: item.Revision})
 		}
 		meanings, err := api.LocalProjectMeaningVisibilityItems(scope.Project)
 		if err != nil {
 			return nil, err
 		}
-		items = append(items, meanings...)
+		for _, item := range meanings {
+			items = append(items, projectvisibility.Target{Item: item, Revision: "meaning"})
+		}
 		cursor := ""
 		for {
 			page, err := service.ListSessions(ctx, principal, cursor, 100)
@@ -58,7 +66,7 @@ func PrepareLocalVisibilityItems(ctx context.Context, scope datatug.ProjectLifec
 				return nil, err
 			}
 			for _, item := range page.Items {
-				items = append(items, datatug.ProjectUsageItem{Ref: datatug.ProjectObjectRef{Kind: "session", ID: item.ID}, Title: item.Title})
+				items = append(items, projectvisibility.Target{Item: datatug.ProjectUsageItem{Ref: datatug.ProjectObjectRef{Kind: "session", ID: item.ID}, Title: item.Title, Archived: item.State == "archived"}, Revision: strconv.FormatInt(item.Version, 10)})
 			}
 			if len(items) > 10000 {
 				return nil, datatug.ErrProjectUsageIncomplete
@@ -104,14 +112,43 @@ func PrepareLocalVisibilityItems(ctx context.Context, scope datatug.ProjectLifec
 				if !belongs || view.WorkItemID != "" {
 					continue
 				}
-				items = append(items, datatug.ProjectUsageItem{Ref: datatug.ProjectObjectRef{Kind: "incident", ID: view.Ref.StoreID + "/" + view.Ref.IncidentID}, Title: view.Title})
+				items = append(items, projectvisibility.Target{Item: datatug.ProjectUsageItem{Ref: datatug.ProjectObjectRef{Kind: "incident", ID: view.Ref.StoreID + "/" + view.Ref.IncidentID}, Title: view.Title}, Revision: strconv.FormatUint(view.LastSeq, 10)})
 				if len(items) > 10000 {
 					return nil, datatug.ErrProjectUsageIncomplete
 				}
 			}
 		}
 		return items, nil
-	}, nil
+	}
+	authorize := func(ctx context.Context, current datatug.ProjectLifecycleScope, write bool) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if current != scope || !api.ValidateSecurityContext(generation) || !api.SecureLocalProjectOwner() || api.SecurePrincipalID() != scope.ActorID || write && !api.GetCapabilities().AllowWrites {
+			return sessioncontext.ErrForbidden
+		}
+		return nil
+	}
+	restore := func(ctx context.Context, current datatug.ProjectLifecycleScope, target projectvisibility.Target, operation string) error {
+		if err := authorize(ctx, current, true); err != nil {
+			return err
+		}
+		version, err := strconv.ParseInt(target.Revision, 10, 64)
+		if err != nil || version < 1 {
+			return datatug.ErrProjectUsageIncomplete
+		}
+		switch target.Item.Ref.Kind {
+		case "session":
+			_, err = service.Execute(ctx, principal, sessioncontext.Command{OpID: operation, Action: "transitionSession", SessionID: target.Item.Ref.ID, DatabaseID: principal.DatabaseID, ProjectID: principal.ProjectID, ExpectedVersion: version, Transition: "restore"})
+			return err
+		case "case":
+			_, err = detective.RestoreVisibilityCase(ctx, target.Item.Ref.ID, current.ActorID, operation, version)
+			return err
+		default:
+			return datatug.ErrProjectUsageIncomplete
+		}
+	}
+	return projectvisibility.Runtime{Inventory: inventory, Restore: restore, Authorize: authorize}, nil
 }
 
 func localVisibilityHidden(project, kind, id string) (bool, error) {
@@ -171,7 +208,7 @@ func annotateDetectiveVisibility(project string, state detective.State) (map[str
 			if kind == "query-validator" {
 				id, _ = fields["queryId"].(string)
 			}
-			fields["archived"] = hidden[datatug.ProjectObjectRef{Kind: kind, ID: id}]
+			fields["archived"] = hidden[datatug.ProjectObjectRef{Kind: kind, ID: id}] || kind == "case" && fields["status"] == "archived"
 		}
 	}
 	return response, nil

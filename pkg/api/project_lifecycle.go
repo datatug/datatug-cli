@@ -2,9 +2,12 @@ package api
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 
+	"github.com/datatug/datatug-cli/pkg/executionstore"
+	"github.com/datatug/datatug-cli/pkg/projectvisibility"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
@@ -27,7 +30,7 @@ var lifecycleMutationScope = SecureProjectMutationScope
 
 // LocalVisibilityInventoryFactory prepares native services before Core takes
 // its environment lock. Core invokes the returned callback outside that lock.
-type LocalVisibilityInventoryFactory func(context.Context, datatug.ProjectLifecycleScope) (func(context.Context, datatug.ProjectLifecycleScope) ([]datatug.ProjectUsageItem, error), error)
+type LocalVisibilityInventoryFactory func(context.Context, datatug.ProjectLifecycleScope) (projectvisibility.Runtime, error)
 
 var visibilityInventoryFactory LocalVisibilityInventoryFactory
 
@@ -77,7 +80,7 @@ func localLifecycleStore(ctx context.Context, selection LocalLifecycleSelection,
 	factory := visibilityInventoryFactory
 	secureMu.RUnlock()
 	if factory != nil {
-		inventory, err := factory(ctx, scope)
+		native, err := factory(ctx, scope)
 		if err != nil {
 			return nil, scope, err
 		}
@@ -85,7 +88,28 @@ func localLifecycleStore(ctx context.Context, selection LocalLifecycleSelection,
 		if !ok {
 			return nil, scope, secureread.ErrAccessDenied
 		}
-		store = filestore.NewProjectStoreWithVisibilityItems(selection.ProjectID, root, inventory)
+		provider := filestore.NewProjectStoreWithVisibilityItems(selection.ProjectID, root, func(ctx context.Context, scope datatug.ProjectLifecycleScope) ([]datatug.ProjectUsageItem, error) {
+			targets, err := native.Inventory(ctx, scope)
+			if err != nil {
+				return nil, err
+			}
+			items := make([]datatug.ProjectUsageItem, 0, len(targets))
+			for _, target := range targets {
+				item := target.Item
+				item.Archived = false
+				items = append(items, item)
+			}
+			return items, nil
+		}).(datatug.ProjectLifecycleStore)
+		private, err := executionstore.ResolvePrivateDir(GetCapabilities().EvidencePrivateDir)
+		if err != nil {
+			return nil, scope, err
+		}
+		wrapped, err := projectvisibility.NewStore(provider, scope, private, native)
+		if err != nil {
+			return nil, scope, err
+		}
+		return wrapped, scope, nil
 	}
 	provider, ok := store.(datatug.ProjectLifecycleStore)
 	if !ok {
@@ -139,6 +163,9 @@ func localProjectLifecycleChange(ctx context.Context, request LocalLifecycleWrit
 	// provider boundary. A prior client/server review is never a write grant.
 	out, err = provider.ChangeProjectLifecycle(ctx, scope, request.ProjectLifecycleWrite)
 	if err != nil {
+		if errors.Is(err, projectvisibility.ErrOutcomeUncertain) {
+			return datatug.ProjectLifecycleAck{}, errors.Join(ErrProjectMutationOutcomeUncertain, err)
+		}
 		return datatug.ProjectLifecycleAck{}, err
 	}
 	if out.OperationID != request.OperationID || out.Change != request.Change || out.Revision == "" || len(out.Revision) > 512 {

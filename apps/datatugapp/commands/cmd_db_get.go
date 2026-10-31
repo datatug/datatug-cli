@@ -3,6 +3,9 @@ package commands
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -10,6 +13,7 @@ import (
 	"time"
 
 	"github.com/datatug/datatug-cli/pkg/auth/device"
+	"github.com/datatug/datatug-core/pkg/dataaccess"
 	"github.com/sneat-co/sneat-go-core/sneatauth"
 	"github.com/spf13/cobra"
 )
@@ -29,8 +33,10 @@ type protectedReadOptions struct {
 }
 
 type protectedReadDependencies struct {
-	bearer func(context.Context, device.ProductOptions) (string, error)
-	client *http.Client
+	credential func(context.Context, device.ProductOptions) (device.ProductReadCredential, error)
+	client     *http.Client
+	entropy    io.Reader
+	request    func(context.Context, string, string, io.Reader) (*http.Request, error)
 }
 
 func newProtectedReadHTTPClient() *http.Client {
@@ -38,7 +44,7 @@ func newProtectedReadHTTPClient() *http.Client {
 }
 
 func dbGetCommand() *cobra.Command {
-	return protectedReadCommand(protectedReadDependencies{bearer: device.ProductBearer, client: newProtectedReadHTTPClient()})
+	return protectedReadCommand(protectedReadDependencies{credential: device.ProductCredentialForRead, client: newProtectedReadHTTPClient()})
 }
 
 func protectedReadCommand(dependencies protectedReadDependencies) *cobra.Command {
@@ -48,9 +54,9 @@ func protectedReadCommand(dependencies protectedReadDependencies) *cobra.Command
 		if err != nil {
 			return err
 		}
-		return json.NewEncoder(command.OutOrStdout()).Encode(struct {
-			Record map[string]any `json:"record"`
-		}{record})
+		defer record.cancel()
+		defer record.result.Close()
+		return record.result.WritePayload(record.ctx, command.OutOrStdout())
 	}}
 	flags := command.Flags()
 	flags.StringVar(&options.request.Space, "space", "", "Space containing the protected connection")
@@ -77,7 +83,16 @@ func validProtectedSelector(value string) bool {
 	return true
 }
 
-func readProtectedRecord(ctx context.Context, options protectedReadOptions, dependencies protectedReadDependencies) (map[string]any, error) {
+type protectedRecord struct {
+	result *dataaccess.Result
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func readProtectedRecord(ctx context.Context, options protectedReadOptions, dependencies protectedReadDependencies) (*protectedRecord, error) {
+	if ctx == nil {
+		return nil, errors.New("protected read context is required")
+	}
 	for _, value := range []string{options.request.Space, options.request.Project, options.request.Connection, options.request.Collection, options.request.ID} {
 		if !validProtectedSelector(value) {
 			return nil, Exit("protected read requires valid --space, --project, --connection, --collection and --id", exitCodeUsage)
@@ -86,29 +101,59 @@ func readProtectedRecord(ctx context.Context, options protectedReadOptions, depe
 	if validateAIAPIURL(options.baseURL) != nil {
 		return nil, Exit("protected read requires an HTTPS API /v0/ base URL, or loopback development", exitCodeUsage)
 	}
-	if dependencies.bearer == nil || dependencies.client == nil {
+	if dependencies.credential == nil || dependencies.client == nil {
 		return nil, errors.New("protected read is not configured")
 	}
-	token, err := dependencies.bearer(ctx, options.auth)
+	credential, err := dependencies.credential(ctx, options.auth)
 	if err != nil {
 		return nil, err
 	}
-	if _, err = sneatauth.ProductDelegationDigest(token); err != nil {
+	if _, err = sneatauth.ProductDelegationDigest(credential.Bearer); err != nil {
 		return nil, errors.New("protected read requires a product-only login")
 	}
+	if credential.Subject == "" || credential.Realm == "" || !time.Now().Before(credential.ExpiresAt) {
+		return nil, errors.New("protected read requires an active product identity")
+	}
+	ctx, cancel := context.WithDeadline(ctx, credential.ExpiresAt)
+	success := false
+	defer func() {
+		if !success {
+			cancel()
+		}
+	}()
+	nonceBytes := make([]byte, 16)
+	entropy := dependencies.entropy
+	if entropy == nil {
+		entropy = rand.Reader
+	}
+	if _, err := io.ReadFull(entropy, nonceBytes); err != nil {
+		return nil, err
+	}
+	nonce := hex.EncodeToString(nonceBytes)
 	body, _ := json.Marshal(options.request) // A fixed string-only wire DTO cannot fail JSON encoding.
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, options.baseURL+"datatug/access/read", bytes.NewReader(body))
+	newRequest := dependencies.request
+	if newRequest == nil {
+		newRequest = http.NewRequestWithContext
+	}
+	req, err := newRequest(ctx, http.MethodPost, options.baseURL+"datatug/access/read", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Authorization", "Bearer "+credential.Bearer)
+	req.Header.Set("X-DataTug-Result-Nonce", nonce)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	started := time.Now()
 	response, err := dependencies.client.Do(req)
 	if err != nil {
 		return nil, errors.New("protected read service unavailable")
 	}
-	defer func() { _ = response.Body.Close() }()
+	closed := false
+	defer func() {
+		if !closed {
+			_ = response.Body.Close()
+		}
+	}()
 	if response.StatusCode != http.StatusOK {
 		if response.StatusCode == http.StatusForbidden || response.StatusCode == http.StatusUnauthorized {
 			return nil, Exit("protected read denied", exitCodeAccessDenied)
@@ -116,20 +161,98 @@ func readProtectedRecord(ctx context.Context, options protectedReadOptions, depe
 		return nil, Exit("protected read unavailable or unsupported; no record returned", exitCodeDatabase)
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, (1<<20)+1))
+	defer clear(raw)
 	if err != nil || len(raw) > 1<<20 {
 		return nil, errors.New("invalid protected record response")
 	}
-	var out struct {
-		Record map[string]any `json:"record"`
+	envelope, err := dataaccess.DecodeResultEnvelope(raw)
+	clear(raw)
+	if err != nil {
+		return nil, errors.New("invalid protected record response")
+	}
+	defer clear(envelope.Payload)
+	if !validProtectedPayload(envelope.Payload) {
+		return nil, errors.New("invalid protected record response")
+	}
+	subject := dataaccess.Subject{Realm: credential.Realm, Kind: dataaccess.User, ID: credential.Subject}
+	if envelope.Lease.Connection.Space != options.request.Space {
+		return nil, errors.New("protected read binding mismatch")
+	}
+	// The authenticated host owns actual-source identity. Pin that initial
+	// identity; subsequent resolution must match it inside shared Core.
+	authority, err := dataaccess.NewAuthority(subject, envelope.Lease.Connection, func(ctx context.Context, _ dataaccess.ResolveRequest) (dataaccess.Resolution, error) {
+		return resolveProtectedRecord(ctx, options, dependencies.client, credential.Bearer)
+	})
+	if err != nil {
+		return nil, err
+	}
+	digest := sha256.Sum256(body)
+	result, err := authority.ImportResult(ctx, dataaccess.ResultRequest{Nonce: nonce, RequestSHA256: hex.EncodeToString(digest[:])}, started, envelope)
+	if err != nil {
+		return nil, err
+	}
+	// The Core-owned buffer has expiry/cancellation watchers before Close.
+	// An uncooperative body closer cannot postpone purging retained values.
+	err = response.Body.Close()
+	closed = true
+	if err != nil {
+		result.Close()
+		return nil, errors.New("invalid protected record response")
+	}
+	if err = ctx.Err(); err != nil {
+		result.Close()
+		return nil, err
+	}
+	success = true
+	return &protectedRecord{result: result, ctx: ctx, cancel: cancel}, nil
+}
+
+func resolveProtectedRecord(ctx context.Context, options protectedReadOptions, client *http.Client, token string) (dataaccess.Resolution, error) {
+	var result dataaccess.Resolution
+	body, _ := json.Marshal(struct {
+		Space      string `json:"spaceID"`
+		Project    string `json:"projectId"`
+		Connection string `json:"connectionId"`
+	}{options.request.Space, options.request.Project, options.request.Connection})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, options.baseURL+"datatug/access/resolve", bytes.NewReader(body))
+	if err != nil {
+		return result, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	response, err := client.Do(req)
+	if err != nil {
+		return result, errors.New("protected read authority unavailable")
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK {
+		return result, errors.New("protected read authority unavailable")
+	}
+	raw, err := io.ReadAll(io.LimitReader(response.Body, (1<<20)+1))
+	if err != nil || len(raw) > 1<<20 {
+		return result, errors.New("invalid protected authority response")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.UseNumber()
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&out) != nil || out.Record == nil {
-		return nil, errors.New("invalid protected record response")
+	if decoder.Decode(&result) != nil || decoder.Decode(new(any)) != io.EOF {
+		return dataaccess.Resolution{}, errors.New("invalid protected authority response")
 	}
-	if decoder.Decode(new(any)) != io.EOF {
-		return nil, errors.New("invalid protected record response")
+	return result, nil
+}
+
+// Core already validates the complete JSON document. Check the closed record
+// wrapper without retaining decoded values across fresh authorization I/O.
+func validProtectedPayload(data []byte) bool {
+	var wrapper map[string]json.RawMessage
+	defer func() {
+		for _, raw := range wrapper {
+			clear(raw)
+		}
+	}()
+	if json.Unmarshal(data, &wrapper) != nil || len(wrapper) != 1 {
+		return false
 	}
-	return out.Record, nil
+	record := bytes.TrimSpace(wrapper["record"])
+	return len(record) > 0 && record[0] == '{'
 }

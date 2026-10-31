@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/localprojects"
 	"github.com/sneat-co/sneat-go-core/apicore"
 )
 
@@ -14,14 +15,27 @@ import (
 type ProjectAgentEndpoints struct {
 }
 
-// createProjectNotImplementedSentence is the answer of projects/create_project, which this agent
-// does not implement: the store of the files has no way to create a project.
-const createProjectNotImplementedSentence = "creating a project is not implemented by this agent yet"
+// Older serve invocations have no operator-approved creation root. They retain
+// their explicit refusal instead of deriving a writable path from a browser.
+const createProjectNotImplementedSentence = "start the agent with --projects-root and --allow-writes to create local projects"
 
-// createProject is not implemented: it answers 501 with a built sentence, and reads nothing of the
-// request. (The route stays behind the write capability: see projectsRoutes.)
 func (ProjectAgentEndpoints) createProject(w http.ResponseWriter, r *http.Request) {
-	writeNotImplemented(w, r, createProjectNotImplementedSentence)
+	w.Header().Set("Cache-Control", "no-store, no-transform")
+	if !api.CanCreateLocalProject() {
+		writeNotImplemented(w, r, createProjectNotImplementedSentence)
+		return
+	}
+	var request localprojects.Create
+	if err := decodeLocalProjectRequest(r, &request); err != nil {
+		writeLocalRegistryError(w, r, err)
+		return
+	}
+	project, err := api.CreateLocalProject(r.Context(), request)
+	if err != nil {
+		writeLocalRegistryError(w, r, err)
+		return
+	}
+	writeProjectMutationJSON(w, r, http.StatusOK, project)
 }
 
 // deleteProject deletes project

@@ -389,3 +389,44 @@ func TestPublicOVDBConnectionAPIRealDemoDirectoryCatalogStateCreateReload(t *tes
 		t.Fatal("unknown log extension silently skipped")
 	}
 }
+
+func TestArchivedConnectionCatalogRetainsExplicitResolverEntry(t *testing.T) {
+	_, _, root := publicConnectionAPIFixture(t)
+	if err := os.Mkdir(filepath.Join(root, "connections"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join("testdata", "connection-directory", "demo-db.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(root, "connections", "demo-db.json"), body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	ref := dto.ProjectRef{StoreID: LocalStoreID, ProjectID: "p"}
+	before, err := LocalProjectConnectionCatalog(context.Background(), ref)
+	if err != nil || len(before.Connections) == 0 {
+		t.Fatal(err)
+	}
+	id := before.Connections[0].ID
+	metadata, _ := json.Marshal(map[string]any{"version": 1, "archived": []map[string]string{{"kind": "connection", "id": id}}})
+	if err = os.WriteFile(filepath.Join(root, ".datatug-visibility.json"), metadata, 0600); err != nil {
+		t.Fatal(err)
+	}
+	after, err := LocalProjectConnectionCatalog(context.Background(), ref)
+	if err != nil || len(after.Connections) != len(before.Connections) || after.Connections[0].ID != id {
+		t.Fatalf("explicit resolver entry disappeared: %+v %v", after, err)
+	}
+	encoded, err := json.Marshal(after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire struct {
+		Connections []struct {
+			ID       string `json:"id"`
+			Archived bool   `json:"archived"`
+		}
+	}
+	if err = json.Unmarshal(encoded, &wire); err != nil || len(wire.Connections) == 0 || !wire.Connections[0].Archived {
+		t.Fatalf("missing discovery flag: %s %v", encoded, err)
+	}
+}

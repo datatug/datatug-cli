@@ -112,11 +112,9 @@ func postCreateProject(t *testing.T, baseURL string) (*http.Response, error) {
 	return testHTTPClient.Post(baseURL+"/datatug/projects/create_project?store=files", "application/json", bytes.NewReader(body))
 }
 
-// TestServeHTTP_CreateProject_IsNotImplemented: the store of the files has no way to create a
-// project, so with writes allowed the route answers 501 with a built sentence, whoever asks, and
-// does not stop the connection with no answer (the file store's CreateProject panics). Without
-// writes it is refused with the write capability's own 403, as every write route is.
-func TestServeHTTP_CreateProject_IsNotImplemented(t *testing.T) {
+// A legacy invocation without --projects-root cannot create a browser-selected
+// path. Without --allow-writes it remains behind the write-capability gate.
+func TestServeHTTP_CreateProject_RequiresCreationRoot(t *testing.T) {
 	pathsByID := authHookProjectFixture(t, "auth-hook-project")
 	session, err := secureread.NewSession(secureread.SessionOptions{As: "agent1", NoPolicies: true})
 	if err != nil {
@@ -134,7 +132,7 @@ func TestServeHTTP_CreateProject_IsNotImplemented(t *testing.T) {
 		if resp.StatusCode != http.StatusNotImplemented {
 			t.Fatalf("status = %d, want 501 (%s)", resp.StatusCode, body)
 		}
-		if want := `{"error":"creating a project is not implemented by this agent yet","code":"NOT_IMPLEMENTED"}` + "\n"; string(body) != want {
+		if want := `{"error":"start the agent with --projects-root and --allow-writes to create local projects","code":"NOT_IMPLEMENTED"}` + "\n"; string(body) != want {
 			t.Errorf("body = %q, want %q", body, want)
 		}
 	})

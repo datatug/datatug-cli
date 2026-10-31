@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,11 +19,15 @@ import (
 
 var errConnectionCatalogUnavailable = errors.New("project connection catalog unavailable")
 
+// Defaults to the real codec; tests exercise refusal without partial output.
+var marshalLocalConnectionVisibility = json.Marshal
+
 var browserFixtureAssetURL = regexp.MustCompile(`^/assets/showcase/[a-z0-9][a-z0-9-]*\.sqlite$`)
 
 // LocalConnectionCatalog exposes declaration metadata, never connection profiles
 // or arbitrary files. Public-source executors must independently admit its pins.
 type LocalConnectionCatalog struct {
+	ArchivedItems    map[string]bool             `json:"-"`
 	Format           string                      `json:"format"`
 	Connections      []LocalCatalogConnection    `json:"connections"`
 	BigQueryEditions []datatug.EditionConnection `json:"bigQueryEditions,omitempty"`
@@ -73,6 +78,9 @@ func LocalProjectConnectionCatalog(ctx context.Context, ref dto.ProjectRef) (res
 		result, e = readMergedLocalConnectionCatalog(reader)
 		return e
 	})
+	if err == nil {
+		err = filterLocalConnectionVisibility(dir, result)
+	}
 	return result, err
 }
 
@@ -90,6 +98,9 @@ func LocalProjectConnectionCatalogForBranch(ctx context.Context, ref dto.Project
 			result, e = readMergedLocalConnectionCatalog(reader)
 			return e
 		})
+		if err == nil {
+			err = filterLocalConnectionVisibility(dir, result)
+		}
 		return result, err
 	})
 	if err != nil {
@@ -223,4 +234,51 @@ func isCatalogRemoteURL(rawURL string) bool {
 	parsed, err := url.Parse(rawURL)
 	return err == nil && (parsed.Scheme == "https" || parsed.Scheme == "http") && parsed.Host != "" &&
 		parsed.User == nil && parsed.RawQuery == "" && !parsed.ForceQuery && parsed.Fragment == ""
+}
+
+// Discovery receives visibility flags alongside the complete declarations.
+// Saved references continue to resolve through the complete owning catalog.
+func filterLocalConnectionVisibility(root string, catalog *LocalConnectionCatalog) error {
+	if catalog == nil {
+		return nil
+	}
+	hidden, err := filestore.ReadProjectArchivedItems(root)
+	if err != nil {
+		return err
+	}
+	catalog.ArchivedItems = map[string]bool{}
+	for ref, value := range hidden {
+		if value && ref.Kind == "connection" {
+			catalog.ArchivedItems[ref.ID] = true
+		}
+	}
+	return nil
+}
+
+// Discovery flags stay alongside the complete resolver declarations. Browser
+// execution may still resolve an archived connection explicitly by ID.
+func (catalog LocalConnectionCatalog) MarshalJSON() ([]byte, error) {
+	type plain LocalConnectionCatalog
+	body, err := marshalLocalConnectionVisibility(plain(catalog))
+	if err != nil {
+		return nil, err
+	}
+	var response map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	if err = decoder.Decode(&response); err != nil {
+		return nil, err
+	}
+	for _, collection := range []string{"connections", "bigQueryEditions", "bigQueryPlans"} {
+		items, _ := response[collection].([]any)
+		for _, item := range items {
+			fields, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			id, _ := fields["id"].(string)
+			fields["archived"] = catalog.ArchivedItems[id]
+		}
+	}
+	return json.Marshal(response)
 }

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"strconv"
@@ -37,6 +38,9 @@ func TestPostgresNativeReadonlyGuardAndMutationEffects(t *testing.T) {
 	require.NoError(t, err)
 	db, err := ref.Open(ctx)
 	require.NoError(t, err)
+	if closer, ok := dal.As[io.Closer](db); ok {
+		t.Cleanup(func() { require.NoError(t, closer.Close()) })
+	}
 	attempts := []struct{ name, text string }{
 		{"N-PG1-insert", `INSERT INTO native_guard_probe VALUES(2,'insert') RETURNING id`},
 		{"N-PG1-update", `UPDATE native_guard_probe SET note='updated' WHERE id=1 RETURNING id`},

@@ -140,3 +140,11 @@ func TestVerifiedPostgresReadonlyRejectsLegacyReadWriteDowngrade(t *testing.T) {
 	require.ErrorIs(t, err, ErrPostgresReadOnlyUnverified)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestVerifiedPostgresReadonlyClosesPartialReaderOnQueryFailure(t *testing.T) {
+	reader := &modeReader{closeErr: errors.New("cleanup failed")}
+	coordinator := &modeCoordinator{tx: &modeTransaction{reader: reader, err: errors.New("query failed after allocation")}}
+	err := RunVerifiedPostgresReadonly(context.Background(), coordinator, func(context.Context, dal.ReadTransaction) error { t.Fatal("worker dispatched"); return nil })
+	require.ErrorIs(t, err, ErrPostgresReadOnlyUnverified)
+	require.Equal(t, 1, reader.closed)
+}

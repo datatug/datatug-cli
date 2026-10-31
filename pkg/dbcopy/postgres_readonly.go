@@ -28,7 +28,13 @@ func RunVerifiedPostgresReadonly(ctx context.Context, coordinator dal.ReadTransa
 			return ErrPostgresReadOnlyUnverified
 		}
 		reader, err := tx.ExecuteQueryToRecordsReader(ctx, dal.NewTextQuery("SHOW transaction_read_only", nil))
-		if err != nil || reader == nil {
+		if err != nil {
+			if reader != nil {
+				_ = reader.Close()
+			}
+			return ErrPostgresReadOnlyUnverified
+		}
+		if reader == nil {
 			return ErrPostgresReadOnlyUnverified
 		}
 		// Close exactly once, including every malformed/failed verification path.

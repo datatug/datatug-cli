@@ -109,6 +109,10 @@ func (s *sharedPostgres) RunReadonlyTransaction(ctx context.Context, f dal.ROTxW
 	return guardPostgresError(s.hint, s.Database.RunReadonlyTransaction(ctx, f, opts...))
 }
 
+func (s *sharedPostgres) RunReadonlySchemaTransaction(ctx context.Context, f func(context.Context, dbschema.SchemaReader) error) error {
+	return guardPostgresError(s.hint, s.Database.RunReadonlySchemaTransaction(ctx, f))
+}
+
 func (s *sharedPostgres) RunReadwriteTransaction(ctx context.Context, f dal.RWTxWorker, opts ...dal.TransactionOption) error {
 	return guardPostgresError(s.hint, s.Database.RunReadwriteTransaction(ctx, f, opts...))
 }

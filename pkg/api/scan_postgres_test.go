@@ -171,6 +171,10 @@ type fakeScanDB struct {
 
 func (f *fakeScanDB) Close() error { f.closed++; return nil }
 
+func (f *fakeScanDB) RunReadonlySchemaTransaction(ctx context.Context, worker func(context.Context, dbschema.SchemaReader) error) error {
+	return worker(ctx, f)
+}
+
 func (f *fakeScanDB) ListCollections(context.Context, *record.Key) ([]dal.CollectionRef, error) {
 	if f.listErr != nil {
 		return nil, f.listErr

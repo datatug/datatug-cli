@@ -14,9 +14,10 @@ import (
 
 func restoreVisibilityIO(t *testing.T) {
 	t.Helper()
-	list, execute, read, store, view := visibilityListSessions, visibilityExecuteSession, visibilityReadOperation, visibilityIncidentStoreByID, visibilityIncidentView
+	list, execute, read, store, view, accepted := visibilityListSessions, visibilityExecuteSession, visibilityReadOperation, visibilityIncidentStoreByID, visibilityIncidentView, visibilityAcceptedSessionContext
 	t.Cleanup(func() {
 		visibilityListSessions, visibilityExecuteSession, visibilityReadOperation, visibilityIncidentStoreByID, visibilityIncidentView = list, execute, read, store, view
+		visibilityAcceptedSessionContext = accepted
 	})
 }
 
@@ -24,6 +25,10 @@ func TestVisibilitySessionInventoryRequiresBoundedAdvancingCompletePages(t *test
 	runtime, scope, _, _, _, _ := localVisibilityTransportFixture(t)
 	restoreVisibilityIO(t)
 	failure := errors.New("owning session list unavailable")
+	largePage := make([]sessioncontext.Session, 10001)
+	for i := range largePage {
+		largePage[i].ID = "same-known-session"
+	}
 	for _, test := range []struct {
 		name string
 		page sessioncontext.Page[sessioncontext.Session]
@@ -32,7 +37,7 @@ func TestVisibilitySessionInventoryRequiresBoundedAdvancingCompletePages(t *test
 		{"storage failure", sessioncontext.Page[sessioncontext.Session]{}, failure},
 		{"empty advancing cursor", sessioncontext.Page[sessioncontext.Session]{HasMore: true}, nil},
 		{"repeated cursor", sessioncontext.Page[sessioncontext.Session]{HasMore: true, NextCursor: "same"}, nil},
-		{"inventory budget", sessioncontext.Page[sessioncontext.Session]{Items: make([]sessioncontext.Session, 10001)}, nil},
+		{"inventory budget", sessioncontext.Page[sessioncontext.Session]{Items: largePage}, nil},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			calls := 0
@@ -59,7 +64,7 @@ func TestVisibilitySessionInventoryRequiresBoundedAdvancingCompletePages(t *test
 func TestVisibilitySessionRestoreRequiresAnExactOwningReceipt(t *testing.T) {
 	runtime, scope, _, principal, _, _ := localVisibilityTransportFixture(t)
 	restoreVisibilityIO(t)
-	target := projectvisibility.Target{Item: datatug.ProjectUsageItem{Ref: datatug.ProjectObjectRef{Kind: "session", ID: "s"}, Archived: true}, Revision: "4"}
+	target := projectvisibility.Target{Item: datatug.ProjectUsageItem{Ref: visibilitySessionRef(t, "s"), Archived: true}, Revision: "4"}
 	failure := errors.New("private operation storage unavailable")
 	visibilityExecuteSession = func(_ *sessioncontext.Service, _ context.Context, _ sessioncontext.Principal, command sessioncontext.Command) (sessioncontext.CommandResult, error) {
 		require.Equal(t, "restore", command.Transition)

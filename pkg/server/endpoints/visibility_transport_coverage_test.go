@@ -30,6 +30,19 @@ type visibilityFailedBody struct{}
 func (visibilityFailedBody) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
 func (visibilityFailedBody) Close() error             { return nil }
 
+func visibilitySessionRef(t *testing.T, id string) datatug.ProjectObjectRef {
+	t.Helper()
+	_, _, repo, err := api.ResolveAcceptedSessionContext(context.Background(), "local", "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	qualified, err := sessioncontext.SessionLifecycleID(repo.NativeNamespace(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return datatug.ProjectObjectRef{Kind: "session", ID: qualified}
+}
+
 func TestLocalArchiveTransportRejectsAmbiguousAndUnreadableRequests(t *testing.T) {
 	for _, test := range []struct{ name, target, content, body string }{
 		{"content type", "/", "text/plain", `{}`},
@@ -182,7 +195,7 @@ func TestLocalVisibilityRuntimeUsesOwningInventoryAndSessionRestoreReceipt(t *te
 			target = item
 		}
 	}
-	for _, ref := range []datatug.ProjectObjectRef{{Kind: "check", ID: "check-a"}, {Kind: "meaning", ID: "project/customer"}, {Kind: "meaning", ID: "project/customer-id"}, {Kind: "session", ID: command.SessionID}} {
+	for _, ref := range []datatug.ProjectObjectRef{{Kind: "check", ID: "check-a"}, {Kind: "meaning", ID: "project/customer"}, {Kind: "meaning", ID: "project/customer-id"}, visibilitySessionRef(t, command.SessionID)} {
 		if !seen[ref] {
 			t.Fatalf("owning inventory lost %+v: %+v", ref, items)
 		}

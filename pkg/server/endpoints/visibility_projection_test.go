@@ -53,7 +53,8 @@ func TestSessionVisibilityListKeepsExplicitPrivateReadAvailable(t *testing.T) {
 		}
 	}
 	metadata := filepath.Join(root, ".datatug-visibility.json")
-	require.NoError(t, os.WriteFile(metadata, []byte(`{"version":1,"archived":[{"kind":"session","id":"overlay-hidden"}]}`), 0600))
+	qualified := visibilitySessionRef(t, "overlay-hidden")
+	require.NoError(t, os.WriteFile(metadata, []byte(`{"version":1,"archived":[{"kind":"session","id":"`+qualified.ID+`"}]}`), 0600))
 	query := url.Values{"storage": {"local"}, "project": {"p"}, "databaseId": {principal.DatabaseID}, "projectId": {principal.ProjectID}}
 	w := httptest.NewRecorder()
 	sessionContextHandler(w, httptest.NewRequest(http.MethodGet, "/session-context/sessions?"+query.Encode(), nil))

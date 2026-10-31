@@ -110,7 +110,7 @@ func sessionContextHandler(w http.ResponseWriter, r *http.Request) {
 						active = append(active, item)
 					}
 				}
-				page.Items, err = filterLocalVisible(q.Get("project"), "session", active, func(item sessioncontext.Session) string { return item.ID })
+				page.Items, err = filterLocalVisibleSessions(r.Context(), q.Get("project"), principal, active)
 			}
 			result = page
 		case strings.Contains(r.URL.Path, "/operations/"):

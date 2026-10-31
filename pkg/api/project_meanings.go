@@ -510,7 +510,7 @@ func LocalProjectMeaningVisibilityItems(project string) ([]datatug.ProjectUsageI
 	if err != nil {
 		return nil, err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	document, err := readLocalMeanings(root)
 	if err != nil {
 		return nil, err

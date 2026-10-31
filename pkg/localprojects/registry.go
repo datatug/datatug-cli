@@ -4,7 +4,6 @@ package localprojects
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -12,10 +11,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -24,7 +21,6 @@ import (
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
 	"github.com/datatug/datatug-core/pkg/storage"
-	"github.com/gofrs/flock"
 )
 
 var ErrRootRequired = errors.New("start the agent with --projects-root and --allow-writes to create local projects")
@@ -44,7 +40,7 @@ type Project struct {
 func (p Project) MarshalJSON() ([]byte, error) {
 	// Registry discovery never exposes opaque project metadata, connection
 	// profiles or credentials retained in legacy native project documents.
-	return json.Marshal(struct {
+	return registryIO.marshal(struct {
 		ID               string                  `json:"id"`
 		Title            string                  `json:"title"`
 		Archived         bool                    `json:"archived"`
@@ -54,13 +50,13 @@ func (p Project) MarshalJSON() ([]byte, error) {
 }
 
 func (p *Project) UnmarshalJSON(body []byte) error {
-	if err := json.Unmarshal(body, &p.ProjectSummary); err != nil {
+	if err := registryIO.unmarshal(body, &p.ProjectSummary); err != nil {
 		return err
 	}
 	var flags struct {
 		Archived bool `json:"archived"`
 	}
-	if err := json.Unmarshal(body, &flags); err != nil {
+	if err := registryIO.unmarshal(body, &flags); err != nil {
 		return err
 	}
 	p.Archived = flags.Archived
@@ -97,31 +93,31 @@ type projectDocument struct {
 }
 
 func (p projectDocument) MarshalJSON() ([]byte, error) {
-	body, err := json.Marshal(p.ProjectFile)
+	body, err := registryIO.marshal(p.ProjectFile)
 	if err != nil {
 		return nil, err
 	}
 	var fields map[string]json.RawMessage
-	if err = json.Unmarshal(body, &fields); err != nil {
+	if err = registryIO.unmarshal(body, &fields); err != nil {
 		return nil, err
 	}
 	if p.LocalCreation != nil {
-		fields["localCreation"], err = json.Marshal(p.LocalCreation)
+		fields["localCreation"], err = registryIO.marshal(p.LocalCreation)
 	}
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(fields)
+	return registryIO.marshal(fields)
 }
 
 func (p *projectDocument) UnmarshalJSON(body []byte) error {
-	if err := json.Unmarshal(body, &p.ProjectFile); err != nil {
+	if err := registryIO.unmarshal(body, &p.ProjectFile); err != nil {
 		return err
 	}
 	var metadata struct {
 		LocalCreation *creation `json:"localCreation"`
 	}
-	if err := json.Unmarshal(body, &metadata); err != nil {
+	if err := registryIO.unmarshal(body, &metadata); err != nil {
 		return err
 	}
 	p.LocalCreation = metadata.LocalCreation
@@ -152,14 +148,14 @@ func Open(root string, configured map[string]string) (*Registry, error) {
 		r.dirs[id] = dir
 	}
 	if root != "" {
-		if err := os.MkdirAll(root, 0700); err != nil {
+		if err := registryIO.mkdirAll(root, 0700); err != nil {
 			return nil, err
 		}
-		resolved, err := filepath.EvalSymlinks(root)
+		resolved, err := registryIO.eval(root)
 		if err != nil {
 			return nil, err
 		}
-		r.root, err = filepath.Abs(resolved)
+		r.root, err = registryIO.abs(resolved)
 		if err != nil {
 			return nil, err
 		}
@@ -183,7 +179,7 @@ func (r *Registry) Paths() map[string]string {
 }
 
 func (r *Registry) discover() error {
-	entries, err := os.ReadDir(r.root)
+	entries, err := registryIO.readDir(r.root)
 	if err != nil {
 		return err
 	}
@@ -267,12 +263,12 @@ func (r *Registry) Create(ctx context.Context, request Create, authorize ...func
 		if _, exists := r.dirs[request.ID]; exists {
 			return ErrConflict
 		}
-		root, err := os.OpenRoot(r.root)
+		root, err := registryIO.openRoot(r.root)
 		if err != nil {
 			return err
 		}
 		defer root.Close()
-		if _, err = root.Lstat(request.ID); !errors.Is(err, os.ErrNotExist) {
+		if _, err = registryIO.rootLstat(root, request.ID); !errors.Is(err, os.ErrNotExist) {
 			if err == nil {
 				return ErrConflict
 			}
@@ -283,18 +279,18 @@ func (r *Registry) Create(ctx context.Context, request Create, authorize ...func
 		if err != nil {
 			return err
 		}
-		if err = root.Mkdir(staging, 0700); err != nil {
+		if err = registryIO.rootMkdir(root, staging, 0700); err != nil {
 			return err
 		}
 		defer root.RemoveAll(staging)
-		stagingRoot, err := root.OpenRoot(staging)
+		stagingRoot, err := registryIO.rootOpenRoot(root, staging)
 		if err != nil {
 			return err
 		}
 		defer stagingRoot.Close()
 		file := projectDocument{ProjectFile: datatug.ProjectFile{
 			ProjectItem:      datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: request.ID, Title: request.Title}, Access: "private"},
-			Created:          &datatug.ProjectCreated{At: time.Now().UTC()},
+			Created:          &datatug.ProjectCreated{At: registryIO.now().UTC()},
 			EnvironmentOrder: []string{"dev"},
 		}, LocalCreation: &wantCreation}
 		if err = file.ProjectFile.Validate(); err != nil {
@@ -306,14 +302,14 @@ func (r *Registry) Create(ctx context.Context, request Create, authorize ...func
 		// Initial files share the whole-project staging transaction. Existing
 		// environment mutation journals are bound to a stable project path and
 		// must not be created in a directory that is about to be published.
-		if err = stagingRoot.Mkdir(storage.EnvironmentsFolder, 0700); err != nil {
+		if err = registryIO.rootMkdir(stagingRoot, storage.EnvironmentsFolder, 0700); err != nil {
 			return err
 		}
 		envDir := filepath.Join(storage.EnvironmentsFolder, "dev")
-		if err = stagingRoot.Mkdir(envDir, 0700); err != nil {
+		if err = registryIO.rootMkdir(stagingRoot, envDir, 0700); err != nil {
 			return err
 		}
-		envRoot, err := stagingRoot.OpenRoot(envDir)
+		envRoot, err := registryIO.rootOpenRoot(stagingRoot, envDir)
 		if err != nil {
 			return err
 		}
@@ -322,7 +318,7 @@ func (r *Registry) Create(ctx context.Context, request Create, authorize ...func
 		if err != nil {
 			return err
 		}
-		environmentsRoot, err := stagingRoot.OpenRoot(storage.EnvironmentsFolder)
+		environmentsRoot, err := registryIO.rootOpenRoot(stagingRoot, storage.EnvironmentsFolder)
 		if err != nil {
 			return err
 		}
@@ -340,7 +336,7 @@ func (r *Registry) Create(ctx context.Context, request Create, authorize ...func
 		if err = checkAuthority(authorize); err != nil {
 			return err
 		}
-		if err = root.Rename(staging, request.ID); err != nil {
+		if err = registryIO.rootRename(root, staging, request.ID); err != nil {
 			return err
 		}
 		dir := filepath.Join(r.root, request.ID)
@@ -445,32 +441,32 @@ func readState(dir string) (projectState, error) {
 }
 
 func readJSON(dir, name string, value any) error {
-	root, err := os.OpenRoot(dir)
+	root, err := registryIO.openRoot(dir)
 	if err != nil {
 		return err
 	}
 	defer root.Close()
-	info, err := root.Lstat(name)
+	info, err := registryIO.rootLstat(root, name)
 	if err != nil {
 		return err
 	}
 	if !info.Mode().IsRegular() || info.Size() > maxMetadata {
 		return ErrConflict
 	}
-	file, err := root.OpenFile(name, os.O_RDONLY|noFollowFlags, 0)
+	file, err := registryIO.rootOpenFile(root, name, os.O_RDONLY|noFollowFlags, 0)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
-	body, err := io.ReadAll(io.LimitReader(file, maxMetadata+1))
+	body, err := readMetadata(file)
 	if err != nil || len(body) > maxMetadata {
 		return ErrConflict
 	}
-	return json.Unmarshal(body, value)
+	return registryIO.unmarshal(body, value)
 }
 
 func writeJSON(dir, name string, value any) error {
-	root, err := os.OpenRoot(dir)
+	root, err := registryIO.openRoot(dir)
 	if err != nil {
 		return err
 	}
@@ -479,7 +475,7 @@ func writeJSON(dir, name string, value any) error {
 }
 
 func writeJSONRoot(root *os.Root, name string, value any) error {
-	body, err := json.Marshal(value)
+	body, err := registryIO.marshal(value)
 	if err != nil {
 		return err
 	}
@@ -490,7 +486,7 @@ func writeJSONRoot(root *os.Root, name string, value any) error {
 	if err != nil {
 		return err
 	}
-	file, err := root.OpenFile(temp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	file, err := registryIO.rootOpenFile(root, temp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		return err
 	}
@@ -502,7 +498,7 @@ func writeJSONRoot(root *os.Root, name string, value any) error {
 	if err != nil {
 		return err
 	}
-	if err = root.Rename(temp, name); err != nil {
+	if err = registryIO.rootRename(root, temp, name); err != nil {
 		return err
 	}
 	return syncRootDirectory(root)
@@ -510,7 +506,7 @@ func writeJSONRoot(root *os.Root, name string, value any) error {
 
 func temporaryName(prefix string) (string, error) {
 	var bytes [16]byte
-	if _, err := rand.Read(bytes[:]); err != nil {
+	if _, err := registryIO.read(bytes[:]); err != nil {
 		return "", err
 	}
 	return prefix + hex.EncodeToString(bytes[:]), nil
@@ -521,15 +517,18 @@ func withLock(ctx context.Context, dir, name string, fn func() error) error {
 		return err
 	}
 	lockPath := filepath.Join(dir, name)
-	if info, err := os.Lstat(lockPath); err == nil && !info.Mode().IsRegular() {
+	if info, err := registryIO.lstat(lockPath); err == nil && !info.Mode().IsRegular() {
 		return ErrConflict
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	lock := flock.New(lockPath, flock.SetFlag(os.O_CREATE|os.O_RDWR|noFollowFlags), flock.SetPermissions(0600))
+	lock := registryIO.lock(lockPath)
 	locked, err := lock.TryLockContext(ctx, 20*time.Millisecond)
-	if err != nil || !locked {
+	if err != nil {
 		return errors.Join(err, ctx.Err())
+	}
+	if !locked {
+		return errors.Join(context.DeadlineExceeded, ctx.Err())
 	}
 	defer lock.Close()
 	if err := ctx.Err(); err != nil {
@@ -539,10 +538,10 @@ func withLock(ctx context.Context, dir, name string, fn func() error) error {
 }
 
 func syncRootDirectory(root *os.Root) error {
-	if runtime.GOOS == "windows" {
+	if registryIO.platform == "windows" {
 		return nil
 	}
-	file, err := root.Open(".")
+	file, err := registryIO.rootOpen(root, ".")
 	if err != nil {
 		return err
 	}
@@ -557,11 +556,18 @@ func initializeProjectGit(ctx context.Context, dir string) error {
 	defer cancel()
 	commands := [][]string{{"init", "--quiet", "--initial-branch=main"}, {"add", "--", "datatug-project.json", "environments"}, {"-c", "user.name=DataTug", "-c", "user.email=local@datatug.app", "commit", "--quiet", "-m", "Create DataTug project"}}
 	for _, args := range commands {
-		command := exec.CommandContext(ctx, "git", args...)
+		command := registryIO.command(ctx, "git", args...)
 		command.Dir = dir
 		if output, err := command.CombinedOutput(); err != nil {
 			return fmt.Errorf("initialize local project repository: %w (%s)", err, strings.TrimSpace(string(output)))
 		}
 	}
 	return nil
+}
+
+func readMetadata(file *os.File) ([]byte, error) {
+	if registryIO.readAll != nil {
+		return registryIO.readAll(file)
+	}
+	return io.ReadAll(io.LimitReader(file, maxMetadata+1))
 }

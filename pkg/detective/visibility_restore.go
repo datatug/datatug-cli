@@ -10,6 +10,8 @@ import (
 	core "github.com/datatug/datatug-core/pkg/detective"
 )
 
+var visibilityRestoreCase = core.RestoreCase
+
 var ErrVisibilityRestoreConflict = errors.New("native Case restore was superseded")
 
 // RestoreVisibilityCase reverses a legacy native archive using Core's owning
@@ -25,7 +27,7 @@ func (s *LocalStore) RestoreVisibilityCase(ctx context.Context, id, actor, opera
 	}
 	err = s.withLock(ctx, func() error {
 		var op actionOperation
-		body, e := safeReadFile(s.privateItemDir("action-operations"), operationID)
+		body, e := actionSafeReadFile(s.privateItemDir("action-operations"), operationID)
 		if e == nil {
 			if json.Unmarshal(body, &op) != nil || op.Kind != "cases" || op.ID != id || op.Response.Case == nil || !op.Produced {
 				return ErrOutcomeUncertain
@@ -38,7 +40,7 @@ func (s *LocalStore) RestoreVisibilityCase(ctx context.Context, id, actor, opera
 				return nil
 			}
 		} else if errors.Is(e, os.ErrNotExist) {
-			before, e := safeReadFile(s.privateItemDir("cases"), id)
+			before, e := actionSafeReadFile(s.privateItemDir("cases"), id)
 			if errors.Is(e, os.ErrNotExist) {
 				return ErrVisibilityRestoreConflict
 			}
@@ -52,18 +54,18 @@ func (s *LocalStore) RestoreVisibilityCase(ctx context.Context, id, actor, opera
 			if old.ID != id || old.Version != expectedVersion || old.WorkItemID != "" {
 				return ErrVisibilityRestoreConflict
 			}
-			next, audit, e := core.RestoreCase(old, actor, time.Now().UTC())
+			next, audit, e := visibilityRestoreCase(old, actor, time.Now().UTC())
 			if errors.Is(e, core.ErrConflict) || errors.Is(e, core.ErrInvalid) {
 				return ErrVisibilityRestoreConflict
 			}
 			if e != nil {
 				return e
 			}
-			after, e := json.Marshal(next)
+			after, e := stateMarshal(next)
 			if e != nil {
 				return e
 			}
-			receipt, e := core.NewOperationReceipt(operationID, binding, next.Version, time.Now().UTC())
+			receipt, e := actionNewOperationReceipt(operationID, binding, next.Version, time.Now().UTC())
 			if e != nil {
 				return e
 			}

@@ -202,15 +202,29 @@ func (p *productClient) token(ctx context.Context) (*oauth2.Token, productIdenti
 // ProductBearer validates current product state for each request. No cached
 // credential or successful earlier call can extend the original hard expiry.
 func ProductBearer(ctx context.Context, options ProductOptions) (string, error) {
+	credential, err := ProductCredentialForRead(ctx, options)
+	return credential.Bearer, err
+}
+
+// ProductReadCredential preserves the verified login identity and its original
+// hard expiry through buffered reads. It is never an authorization decision.
+type ProductReadCredential struct {
+	Bearer    string
+	Subject   string
+	Realm     string
+	ExpiresAt time.Time
+}
+
+func ProductCredentialForRead(ctx context.Context, options ProductOptions) (ProductReadCredential, error) {
 	p, err := newProductClient(options)
 	if err != nil {
-		return "", err
+		return ProductReadCredential{}, err
 	}
-	token, _, err := p.token(ctx)
+	token, identity, err := p.token(ctx)
 	if err != nil {
-		return "", err
+		return ProductReadCredential{}, err
 	}
-	return token.AccessToken, nil
+	return ProductReadCredential{Bearer: token.AccessToken, Subject: identity.Subject, Realm: identity.Realm, ExpiresAt: token.Expiry}, nil
 }
 
 // ProductCommand is additive: the existing auth login/status/logout retain

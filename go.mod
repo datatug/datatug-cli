@@ -46,7 +46,7 @@ require (
 	github.com/dal-go/dalgo2typesense v0.0.0-20261028075318-b1ba445d3434
 	github.com/dal-go/record v0.1.5
 	github.com/datatug/cliformat v0.0.3
-	github.com/datatug/datatug-core v0.129.0
+	github.com/datatug/datatug-core v0.131.0
 	github.com/datatug/sql2csv v0.0.1
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/go-sql-driver/mysql v1.10.0

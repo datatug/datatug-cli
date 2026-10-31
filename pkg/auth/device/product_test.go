@@ -143,6 +143,12 @@ func TestProductOnlyLoginStatusLogoutAndCurrentState(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, token.AccessToken, bearer)
 	require.Greater(t, identityCalls, before)
+	readCredential, err := ProductCredentialForRead(context.Background(), options)
+	require.NoError(t, err)
+	require.Equal(t, credential.Expiry, readCredential.ExpiresAt)
+	require.Equal(t, identity.Subject, readCredential.Subject)
+	require.Equal(t, identity.Realm, readCredential.Realm)
+	require.Equal(t, token.AccessToken, readCredential.Bearer)
 	redirectIdentity = true
 	_, err = ProductBearer(context.Background(), options)
 	require.Error(t, err, "product bearer must never follow an identity redirect")

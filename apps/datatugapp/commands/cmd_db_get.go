@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/datatug/datatug-cli/pkg/auth/device"
+	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/dataaccess"
 	"github.com/sneat-co/sneat-go-core/sneatauth"
 	"github.com/spf13/cobra"
@@ -29,6 +30,7 @@ type protectedRecordRequest struct {
 type protectedReadOptions struct {
 	request protectedRecordRequest
 	baseURL string
+	agent   bool
 	auth    device.ProductOptions
 }
 
@@ -49,7 +51,7 @@ func dbGetCommand() *cobra.Command {
 
 func protectedReadCommand(dependencies protectedReadDependencies) *cobra.Command {
 	options := protectedReadOptions{baseURL: defaultAIAPIURL}
-	command := &cobra.Command{Use: "get", Short: "Read one protected record through connection authority", Long: "Read one record through the server-owned source binding and shared core authority. Uses only 'datatug auth product login'; no legacy credential fallback. Protected recordsets and object-grant execution remain unavailable in this profile.", Args: cobra.NoArgs, SilenceUsage: true, RunE: func(command *cobra.Command, _ []string) error {
+	command := &cobra.Command{Use: "get", Short: "Read one protected record through connection authority", Long: "Read one record through the server-owned source binding and shared core authority. Uses only 'datatug auth product login'; no legacy credential fallback. Use --agent to select the agent baseline; human grants are never inherited. Protected recordsets and object-grant execution remain unavailable in this profile.", Args: cobra.NoArgs, SilenceUsage: true, RunE: func(command *cobra.Command, _ []string) error {
 		record, err := readProtectedRecord(command.Context(), options, dependencies)
 		if err != nil {
 			return err
@@ -67,8 +69,18 @@ func protectedReadCommand(dependencies protectedReadDependencies) *cobra.Command
 	flags.StringVar(&options.baseURL, "base-url", defaultAIAPIURL, "API /v0/ base URL (HTTPS, or loopback development)")
 	flags.StringVar(&options.auth.Issuer, "auth-host", "", "Versioned HTTPS product authorization issuer")
 	flags.StringVar(&options.auth.Realm, "realm", "", "Exact server credential realm")
+	flags.BoolVar(&options.agent, "agent", false, "Use the agent baseline without human grants; unsupported servers fail closed")
 	flags.BoolVar(&options.auth.InsecureStorage, "insecure-storage", false, "Use the plaintext product credential created with auth product login --insecure-storage")
 	return command
+}
+
+// The mode is copied with options for this request and its resolver closure.
+// It selects fixed endpoints, never a caller-supplied subject or fallback URL.
+func protectedAccessPrefix(agent bool) string {
+	if agent {
+		return "datatug/access/agent/"
+	}
+	return "datatug/access/"
 }
 
 func validProtectedSelector(value string) bool {
@@ -114,6 +126,12 @@ func readProtectedRecord(ctx context.Context, options protectedReadOptions, depe
 	if credential.Subject == "" || credential.Realm == "" || !time.Now().Before(credential.ExpiresAt) {
 		return nil, errors.New("protected read requires an active product identity")
 	}
+	// Fix expected identity from the verified credential before receiving any
+	// server envelope. Route and release checks use this same immutable mode.
+	subject := dataaccess.Subject{Realm: credential.Realm, Kind: dataaccess.User, ID: credential.Subject}
+	if options.agent {
+		subject.Kind = dataaccess.Agent
+	}
 	ctx, cancel := context.WithDeadline(ctx, credential.ExpiresAt)
 	success := false
 	defer func() {
@@ -135,7 +153,7 @@ func readProtectedRecord(ctx context.Context, options protectedReadOptions, depe
 	if newRequest == nil {
 		newRequest = http.NewRequestWithContext
 	}
-	req, err := newRequest(ctx, http.MethodPost, options.baseURL+"datatug/access/read", bytes.NewReader(body))
+	req, err := newRequest(ctx, http.MethodPost, options.baseURL+protectedAccessPrefix(options.agent)+"read", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +192,6 @@ func readProtectedRecord(ctx context.Context, options protectedReadOptions, depe
 	if !validProtectedPayload(envelope.Payload) {
 		return nil, errors.New("invalid protected record response")
 	}
-	subject := dataaccess.Subject{Realm: credential.Realm, Kind: dataaccess.User, ID: credential.Subject}
 	if envelope.Lease.Connection.Space != options.request.Space {
 		return nil, errors.New("protected read binding mismatch")
 	}
@@ -214,7 +231,7 @@ func resolveProtectedRecord(ctx context.Context, options protectedReadOptions, c
 		Project    string `json:"projectId"`
 		Connection string `json:"connectionId"`
 	}{options.request.Space, options.request.Project, options.request.Connection})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, options.baseURL+"datatug/access/resolve", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, options.baseURL+protectedAccessPrefix(options.agent)+"resolve", bytes.NewReader(body))
 	if err != nil {
 		return result, err
 	}
@@ -230,13 +247,17 @@ func resolveProtectedRecord(ctx context.Context, options protectedReadOptions, c
 		return result, errors.New("protected read authority unavailable")
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, (1<<20)+1))
+	defer clear(raw)
 	if err != nil || len(raw) > 1<<20 {
 		return result, errors.New("invalid protected authority response")
 	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if decoder.Decode(&result) != nil || decoder.Decode(new(any)) != io.EOF {
+	if apicontract.DecodeStrict(raw, &result) != nil {
 		return dataaccess.Resolution{}, errors.New("invalid protected authority response")
+	}
+	// The fixed agent route has one closed zero-grant representation. Null,
+	// missing or human grant lists cannot become agent authority or a fallback.
+	if options.agent && (result.Grants == nil || len(result.Grants) != 0) {
+		return dataaccess.Resolution{}, errors.New("invalid agent authority response")
 	}
 	return result, nil
 }

@@ -12,7 +12,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -20,7 +19,6 @@ import (
 	"github.com/datatug/datatug-cli/pkg/privateadmission"
 	"github.com/datatug/datatug-cli/pkg/sessionstore"
 	"github.com/datatug/datatug-core/pkg/datatug"
-	"github.com/gofrs/flock"
 )
 
 type Target struct {
@@ -90,7 +88,7 @@ func (s *Store) snapshot(ctx context.Context, scope datatug.ProjectLifecycleScop
 	}
 	native := map[datatug.ProjectObjectRef]Target{}
 	for _, target := range targets {
-		if target.Item.Ref.Validate() != nil || target.Item.Restricted || target.Item.Historical || len(target.Revision) > 512 {
+		if (datatug.ProjectLifecycleWrite{OperationID: "inventory", ExpectedRevision: "inventory", Change: datatug.ProjectLifecycleChange{Object: target.Item.Ref, Action: "archive"}}).Validate() != nil || target.Item.Restricted || target.Item.Historical || len(target.Revision) > 512 {
 			return empty, empty, nil, datatug.ErrProjectUsageIncomplete
 		}
 		if _, ok := native[target.Item.Ref]; ok {
@@ -134,11 +132,19 @@ func (s *Store) ListProjectLifecycle(ctx context.Context, scope datatug.ProjectL
 	return out, nil
 }
 func (s *Store) ReviewProjectLifecycle(ctx context.Context, scope datatug.ProjectLifecycleScope, ref datatug.ProjectObjectRef) (datatug.ProjectLifecycleReview, error) {
-	out, _, _, err := s.snapshot(ctx, scope)
+	out, _, targets, err := s.snapshot(ctx, scope)
 	if err != nil {
 		return datatug.ProjectLifecycleReview{}, err
 	}
-	return datatug.ReviewProjectVisibility(out, ref)
+	review, err := datatug.ReviewProjectVisibility(out, ref)
+	if err == nil && s.runtime.Restore == nil {
+		for _, target := range targets {
+			if target.Item.Ref == ref && target.Item.Archived {
+				review.CanRestore = false
+			}
+		}
+	}
+	return review, err
 }
 
 type operation struct {
@@ -165,13 +171,20 @@ func (s *Store) ChangeProjectLifecycle(ctx context.Context, scope datatug.Projec
 	if write.Change.Action == "delete" {
 		return s.provider.ChangeProjectLifecycle(ctx, scope, write)
 	}
+	resolved, resolveErr := sessionstore.ResolvePrivateDirectory(s.private)
+	if resolveErr != nil {
+		return ack, resolveErr
+	}
+	if resolved != s.private {
+		return ack, ErrOutcomeUncertain
+	}
 	if err = durablePrivateDirectory(s.private); err != nil {
 		return ack, err
 	}
 	if _, err = sessionstore.ResolvePrivateDirectory(s.private); err != nil {
 		return ack, err
 	}
-	lock := flock.New(filepath.Join(s.private, "coordinator.lock"))
+	lock := journalOS.lock(filepath.Join(s.private, "coordinator.lock"))
 	locked, err := lock.TryLockContext(ctx, 10*time.Millisecond)
 	if err != nil {
 		return ack, err
@@ -183,7 +196,7 @@ func (s *Store) ChangeProjectLifecycle(ctx context.Context, scope datatug.Projec
 	if err = s.authorize(ctx, scope, true); err != nil {
 		return ack, err
 	}
-	root, err := os.OpenRoot(s.private)
+	root, err := journalOS.openRoot(s.private)
 	if err != nil {
 		return ack, err
 	}
@@ -207,6 +220,9 @@ func (s *Store) ChangeProjectLifecycle(ctx context.Context, scope datatug.Projec
 			return ack, ErrOutcomeUncertain
 		}
 		if op.Native != nil && (write.Change.Action != "restore" || op.Native.Item.Ref != write.Change.Object || !op.Native.Item.Archived || op.Native.Revision == "" || op.Native.Item.Restricted || op.Native.Item.Historical || op.NativeOperation != "visibility-restore-"+digest[:40]) {
+			return ack, ErrOutcomeUncertain
+		}
+		if op.ExpectedNative != nil && (op.Native == nil || op.ExpectedNative.Item.Ref != op.Native.Item.Ref || op.ExpectedNative.Item.Archived || op.ExpectedNative.Item.Restricted || op.ExpectedNative.Item.Historical || op.ExpectedNative.Revision == "" || len(op.ExpectedNative.Revision) > 512) {
 			return ack, ErrOutcomeUncertain
 		}
 		if op.Terminal != "" {
@@ -315,6 +331,9 @@ func (s *Store) finishOperation(ctx context.Context, scope datatug.ProjectLifecy
 		return ack, err
 	}
 	nativeAck, err := s.provider.ChangeProjectLifecycle(ctx, scope, *op.Translated)
+	if errors.Is(err, datatug.ErrProjectLifecycleConflict) {
+		return ack, s.terminalOperation(root, name, op, "conflict")
+	}
 	if err != nil {
 		return ack, errors.Join(ErrOutcomeUncertain, err)
 	}
@@ -342,11 +361,11 @@ func (s *Store) finishOperation(ctx context.Context, scope datatug.ProjectLifecy
 	return ack, nil
 }
 func (s *Store) recoverPending(ctx context.Context, scope datatug.ProjectLifecycleScope, root *os.Root) error {
-	dir, err := root.Open(".")
+	dir, err := journalOS.rootOpen(root, ".")
 	if err != nil {
 		return err
 	}
-	names, err := dir.Readdirnames(10003)
+	names, err := journalOS.readNames(dir, 10003)
 	_ = dir.Close()
 	if err != nil && err != io.EOF {
 		return err
@@ -379,6 +398,9 @@ func (s *Store) recoverPending(ctx context.Context, scope datatug.ProjectLifecyc
 		if pending.Native != nil && (pending.Original.Change.Action != "restore" || pending.Native.Item.Ref != pending.Original.Change.Object || !pending.Native.Item.Archived || pending.Native.Revision == "" || pending.Native.Item.Restricted || pending.Native.Item.Historical || pending.NativeOperation != "visibility-restore-"+pending.Digest[:40]) {
 			return ErrOutcomeUncertain
 		}
+		if pending.ExpectedNative != nil && (pending.Native == nil || pending.ExpectedNative.Item.Ref != pending.Native.Item.Ref || pending.ExpectedNative.Item.Archived || pending.ExpectedNative.Item.Restricted || pending.ExpectedNative.Item.Historical || pending.ExpectedNative.Revision == "" || len(pending.ExpectedNative.Revision) > 512) {
+			return ErrOutcomeUncertain
+		}
 		if pending.Terminal != "" {
 			if pending.Terminal != "conflict" && pending.Terminal != "superseded" {
 				return ErrOutcomeUncertain
@@ -404,13 +426,13 @@ func completeOperation(root *os.Root, name string) error {
 	if strings.HasSuffix(name, ".done.json") {
 		return nil
 	}
-	if err := root.Rename(name, strings.TrimSuffix(name, ".json")+".done.json"); err != nil {
+	if err := journalOS.rootRename(root, name, strings.TrimSuffix(name, ".json")+".done.json"); err != nil {
 		return err
 	}
-	if runtime.GOOS == "windows" {
+	if journalOS.platform == "windows" {
 		return nil
 	}
-	dir, err := root.Open(".")
+	dir, err := journalOS.rootOpen(root, ".")
 	if err != nil {
 		return err
 	}
@@ -442,19 +464,19 @@ func step(stage string) error {
 	return nil
 }
 func readOperation(root *os.Root, name string, op *operation) error {
-	info, err := root.Lstat(name)
+	info, err := journalOS.rootLstat(root, name)
 	if err != nil {
 		return err
 	}
 	if !info.Mode().IsRegular() || info.Size() > 1<<20 {
 		return ErrOutcomeUncertain
 	}
-	file, err := root.Open(name)
+	file, err := journalOS.rootOpen(root, name)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
-	actual, err := file.Stat()
+	actual, err := journalOS.stat(file)
 	if err != nil || !os.SameFile(info, actual) || actual.Size() > 1<<20 || actual.Size() != info.Size() {
 		return ErrOutcomeUncertain
 	}
@@ -473,11 +495,11 @@ func writeOperation(root *os.Root, name string, op operation) error {
 	if err != nil || len(body) > 1<<20 {
 		return ErrOutcomeUncertain
 	}
-	entries, err := root.Open(".")
+	entries, err := journalOS.rootOpen(root, ".")
 	if err != nil {
 		return err
 	}
-	names, err := entries.Readdirnames(10003)
+	names, err := journalOS.readNames(entries, 10003)
 	_ = entries.Close()
 	if err != nil && err != io.EOF {
 		return err
@@ -486,7 +508,7 @@ func writeOperation(root *os.Root, name string, op operation) error {
 		return datatug.ErrProjectUsageIncomplete
 	}
 	temp := ".write-" + strings.TrimSuffix(name, ".json") + "-" + strconvNano()
-	file, err := root.OpenFile(temp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	file, err := journalOS.rootOpenFile(root, temp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		return err
 	}
@@ -498,13 +520,13 @@ func writeOperation(root *os.Root, name string, op operation) error {
 	if err != nil {
 		return err
 	}
-	if err = root.Rename(temp, name); err != nil {
+	if err = journalOS.rootRename(root, temp, name); err != nil {
 		return err
 	}
-	if runtime.GOOS == "windows" {
+	if journalOS.platform == "windows" {
 		return nil
 	}
-	dir, err := root.Open(".")
+	dir, err := journalOS.rootOpen(root, ".")
 	if err != nil {
 		return err
 	}
@@ -515,9 +537,16 @@ func strconvNano() string { return time.Now().UTC().Format("20060102150405.00000
 
 // Persist newly created directory entries before an accepted native mutation.
 func durablePrivateDirectory(path string) error {
+	resolved, err := sessionstore.ResolvePrivateDirectory(path)
+	if err != nil {
+		return err
+	}
+	if resolved != filepath.Clean(path) {
+		return ErrOutcomeUncertain
+	}
 	missing := []string{}
 	for current := path; ; current = filepath.Dir(current) {
-		_, err := os.Lstat(current)
+		_, err := journalOS.lstat(current)
 		if err == nil {
 			break
 		}
@@ -529,18 +558,49 @@ func durablePrivateDirectory(path string) error {
 		}
 		missing = append(missing, current)
 	}
-	if err := os.MkdirAll(path, 0700); err != nil {
+	if err := journalOS.mkdirAll(path, 0700); err != nil {
 		return err
 	}
-	if err := os.Chmod(path, 0700); err != nil {
+	info, err := journalOS.lstat(path)
+	if err != nil {
 		return err
 	}
-	if runtime.GOOS == "windows" {
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return ErrOutcomeUncertain
+	}
+	directory, err := journalOS.open(path)
+	if err != nil {
+		return err
+	}
+	actual, err := journalOS.stat(directory)
+	if err != nil || !os.SameFile(info, actual) {
+		_ = directory.Close()
+		return ErrOutcomeUncertain
+	}
+	// An ancestor may have changed while directories were created/opened. The
+	// descriptor must still belong to the accepted canonical private path before
+	// changing its mode; matching Lstat/Open alone can agree on a foreign target.
+	resolved, err = sessionstore.ResolvePrivateDirectory(path)
+	if err != nil || resolved != filepath.Clean(path) {
+		_ = directory.Close()
+		return ErrOutcomeUncertain
+	}
+	current, err := journalOS.lstat(path)
+	if err != nil || !os.SameFile(current, actual) {
+		_ = directory.Close()
+		return ErrOutcomeUncertain
+	}
+	err = journalOS.chmod(directory, 0700)
+	err = errors.Join(err, directory.Close())
+	if err != nil {
+		return err
+	}
+	if journalOS.platform == "windows" {
 		return nil
 	}
 	for _, created := range missing {
 		for _, directory := range []string{created, filepath.Dir(created)} {
-			file, err := os.Open(directory)
+			file, err := journalOS.open(directory)
 			if err != nil {
 				return err
 			}

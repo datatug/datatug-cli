@@ -187,7 +187,14 @@ func incidentListHandler(w http.ResponseWriter, r *http.Request) {
 			var view incidents.IncidentView
 			view, _, err = incidentViewHook(r.Context(), candidate, events)
 			if err == nil && incidents.MatchesListQuery(view, listQuery) {
-				response.Incidents = append(response.Incidents, view)
+				hidden, visibilityErr := localVisibilityHidden(req.Project, "incident", view.Ref.StoreID+"/"+view.Ref.IncidentID)
+				if visibilityErr != nil {
+					err = visibilityErr
+					break
+				}
+				if !hidden {
+					response.Incidents = append(response.Incidents, view)
+				}
 			}
 		}
 	}

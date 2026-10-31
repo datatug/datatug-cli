@@ -213,7 +213,7 @@ func pathInsideGitRepository(path string) (bool, error) {
 
 // ProjectStore opens the primary project-repository evidence route.
 func (m *Manager) ProjectStore(projectID string) (*Store, error) {
-	location, ok := m.locations[projectID]
+	location, ok := m.location(projectID)
 	if !ok || location.Kind != incidents.StoreLocationProjectRepository {
 		return nil, fmt.Errorf("project evidence store %q is not configured", projectID)
 	}
@@ -226,7 +226,7 @@ func (m *Manager) RoutedStore(projectID string, incident *apicontract.IncidentRe
 	if incident == nil {
 		return m.ProjectStore(projectID)
 	}
-	location, ok := m.locations[incident.StoreID]
+	location, ok := m.location(incident.StoreID)
 	if !ok {
 		return nil, fmt.Errorf("incident evidence store %q is not configured", incident.StoreID)
 	}
@@ -239,11 +239,51 @@ func (m *Manager) StoreByID(projectID, storeID string) (*Store, error) {
 	if storeID == "" {
 		storeID = projectID
 	}
-	location, ok := m.locations[storeID]
+	location, ok := m.location(storeID)
 	if !ok {
 		return nil, fmt.Errorf("evidence store %q is not configured", storeID)
 	}
 	return m.Store(location)
+}
+
+func (m *Manager) location(id string) (incidents.StoreLocation, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	location, ok := m.locations[id]
+	return location, ok
+}
+
+// RegisterProject adds a newly created, operator-rooted project without closing
+// existing evidence stores or changing their routes. HTTP never supplies dir.
+func (m *Manager) RegisterProject(projectID, dir string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	project := incidents.ProjectRef{StoreID: projectID, ProjectID: projectID}
+	location := incidents.StoreLocation{StoreID: projectID, Kind: incidents.StoreLocationProjectRepository, Project: &project}
+	if err := location.Validate(); err != nil {
+		return err
+	}
+	if previous, exists := m.locations[projectID]; exists {
+		if previous.Kind != location.Kind || previous.Project == nil || *previous.Project != project || m.roots.Projects[project] != dir {
+			return errors.New("project evidence route is already configured")
+		}
+		return nil
+	}
+	roots := m.roots
+	roots.Projects = make(map[incidents.ProjectRef]string, len(m.roots.Projects)+1)
+	for ref, path := range m.roots.Projects {
+		roots.Projects[ref] = path
+	}
+	roots.Projects[project] = dir
+	if err := validatePrivateDir(m.options.PrivateDir, roots); err != nil {
+		return err
+	}
+	m.roots = roots
+	if m.locations == nil {
+		m.locations = map[string]incidents.StoreLocation{}
+	}
+	m.locations[projectID] = location
+	return nil
 }
 
 // IncidentStoreByID exposes the canonical incident provider already owned by

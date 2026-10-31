@@ -25,6 +25,7 @@ const (
 	serveHostFlag               = "host"
 	servePortFlag               = "port"
 	serveProjectFlag            = "project"
+	serveProjectsRootFlag       = "projects-root"
 	serveAsFlag                 = "as"
 	serveRoleFlag               = "role"
 	serveGroupFlag              = "group"
@@ -53,6 +54,7 @@ type serveFlags struct {
 	host               string
 	port               int
 	projectDir         string
+	projectsRoot       string
 	as                 string
 	roles              []string
 	groups             []string
@@ -82,6 +84,9 @@ func readServeFlags(cmd *cobra.Command) (serveFlags, error) {
 		return f, err
 	}
 	if f.projectDir, err = flags.GetString(serveProjectFlag); err != nil {
+		return f, err
+	}
+	if f.projectsRoot, err = flags.GetString(serveProjectsRootFlag); err != nil {
 		return f, err
 	}
 	if f.as, err = flags.GetString(serveAsFlag); err != nil {
@@ -287,6 +292,7 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 	httpServer := server.NewHttpServer()
 	httpServer.IdleTimeout = flags.idleTimeout
 	caps := api.Capabilities{
+		ProjectsRoot:                flags.projectsRoot,
 		NativeSessionDetective:      nativeContextFixtureEnabled,
 		Access:                      agentaccess.New(secret),
 		AllowWrites:                 flags.allowWrites,
@@ -392,6 +398,7 @@ func serveCommandArgs() *cobra.Command {
 	flags.String(serveHostFlag, "", "Host to bind the agent HTTP server to (default: localhost, or the server.host setting)")
 	flags.Int(servePortFlag, 0, "Port to bind the agent HTTP server to (default: 8989, or the server.port setting)")
 	flags.String(serveProjectFlag, "", "Path to a single DataTug project directory to serve")
+	flags.String(serveProjectsRootFlag, "", "Directory containing local projects; enables root-bound project creation with --allow-writes")
 	flags.Bool(serveOpenBrowserFlag, false, "Open the web UI in a browser (off by default; the URL is always printed)")
 	flags.String(serveAsFlag, "", "Principal user ID to serve as; required when the project has a policies/ set (or $HOME/"+accesspolicies.DefaultDir+")")
 	flags.StringArray(serveRoleFlag, nil, "Principal role, repeatable")

@@ -35,6 +35,28 @@ func GetProjects(ctx context.Context, storeID string) ([]datatug.ProjectBrief, e
 		log.Printf("api: %s: %s", projectsNotListed, dbcopy.RedactText(err.Error()))
 		return nil, errors.New(projectsNotListed)
 	}
+	// Archive changes discovery only: old project-list clients also hide archived
+	// projects, while direct summary and execution routes retain access.
+	secureMu.RLock()
+	registry := localProjectRegistry
+	secureMu.RUnlock()
+	if registry != nil {
+		entries, listErr := registry.List()
+		if listErr != nil {
+			return nil, errors.New(projectsNotListed)
+		}
+		archived := make(map[string]bool, len(entries))
+		for _, entry := range entries {
+			archived[entry.ID] = entry.Archived
+		}
+		active := projects[:0]
+		for _, project := range projects {
+			if !archived[project.ID] {
+				active = append(active, project)
+			}
+		}
+		projects = active
+	}
 	return projects, nil
 }
 
@@ -65,6 +87,7 @@ func GetProjectSummary(ctx context.Context, ref dto.ProjectRef) (projSummary *da
 	if err != nil {
 		return nil, itemNotFound("project", dbcopy.SourceIDDisplay(ref.ProjectID), err)
 	}
+
 	return &datatug.ProjectSummary{ProjectFile: projectFile}, err
 }
 

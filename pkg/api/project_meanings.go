@@ -309,7 +309,10 @@ func LocalProjectMeaningsCatalog(ctx context.Context, ref dto.ProjectRef, branch
 			return err
 		}
 		result, err = datatug.BuildProjectMeaningsCatalog(d, q, b, scope, authorizeMeaningWrite(ctx, ref.ProjectID) == nil, true)
-		return err
+		if err != nil {
+			return err
+		}
+		return nil
 	})
 	return result, err
 }
@@ -494,4 +497,30 @@ func stageLocalMeaningDocument(ctx context.Context, root *os.Root, state gitStat
 		return ErrProjectMutationOutcomeUncertain
 	}
 	return nil
+}
+
+// LocalProjectMeaningVisibilityItems inventories canonical identities without
+// consulting execution or private retained-history membership.
+func LocalProjectMeaningVisibilityItems(project string) ([]datatug.ProjectUsageItem, error) {
+	dir, ok := ProjectDir(project)
+	if !ok {
+		return nil, secureread.ErrAccessDenied
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	document, err := readLocalMeanings(root)
+	if err != nil {
+		return nil, err
+	}
+	items := []datatug.ProjectUsageItem{}
+	for _, entity := range document.Entities {
+		items = append(items, datatug.ProjectUsageItem{Ref: datatug.ProjectObjectRef{Kind: "meaning", ID: "project/" + entity.ConceptID}, Title: entity.Name})
+		for _, field := range entity.Fields {
+			items = append(items, datatug.ProjectUsageItem{Ref: datatug.ProjectObjectRef{Kind: "meaning", ID: "project/" + field.ConceptID}, Title: entity.Name + " / " + field.Name})
+		}
+	}
+	return items, nil
 }

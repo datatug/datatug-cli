@@ -52,6 +52,9 @@ type EntitlementChecker interface {
 }
 
 type Server struct {
+	// ActiveDefinitions applies project discovery visibility after owning Store
+	// authorization. It never affects GetDefinition, scheduling or execution.
+	ActiveDefinitions func(context.Context, watch.Actor, []watch.Definition) ([]watch.Definition, error)
 	// Display/discovery metadata supplied by the trusted hosted facade. It never
 	// selects authentication destinations or grants transport authority.
 	Coordination *CoordinatorReference
@@ -221,6 +224,9 @@ func (s *Server) userRequest(w http.ResponseWriter, r *http.Request, path string
 	case path == "definitions" && r.Method == "GET":
 		var list []watch.Definition
 		list, err = s.Store.ListDefinitions(r.Context(), a)
+		if err == nil && s.ActiveDefinitions != nil {
+			list, err = s.ActiveDefinitions(r.Context(), a, list)
+		}
 		result = map[string]any{"definitions": list}
 	case path == "definition" && r.Method == "GET":
 		var d watch.Definition

@@ -35,6 +35,15 @@ func ConfigureExecutionEvidence(pathsByID map[string]string, configured []incide
 	return nil
 }
 
+func registerExecutionEvidenceProject(projectID, dir string) error {
+	evidenceMu.RLock()
+	defer evidenceMu.RUnlock()
+	if evidenceManager == nil {
+		return nil
+	} // Non-serving API callers own no evidence manager.
+	return evidenceManager.RegisterProject(projectID, dir)
+}
+
 // ExecutionEvidenceStore resolves the configured primary project evidence
 // store. Dedicated and application routes are opened explicitly by services
 // that have a qualified IncidentRef.

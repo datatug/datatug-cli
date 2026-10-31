@@ -41,6 +41,9 @@ var (
 // such grant". Both default false: Phase 1's read journey is safe-by-default
 // unless an operator explicitly opts a serve process into either capability.
 type Capabilities struct {
+	// ProjectsRoot is an operator-approved directory for HTTP project creation.
+	// Empty keeps existing serve invocations unable to create filesystem paths.
+	ProjectsRoot string
 	// EnvironmentMetadataPolicies explicitly grants the fixed principal project metadata access.
 	EnvironmentMetadataPolicies map[string]EnvironmentMetadataPolicy
 	EnvironmentPrivateDir       string
@@ -127,7 +130,15 @@ func ConfigureSecureSession(session secureread.Session, pathsByID map[string]str
 	session.AllowOpaqueSQL = caps.AllowOpaqueSQL
 	secureSession = session
 	secureExecutor = secureread.NewExecutor(session)
-	projectDirs = pathsByID
+	projectDirs = nil
+	if pathsByID != nil {
+		projectDirs = make(map[string]string, len(pathsByID))
+		for id, dir := range pathsByID {
+			projectDirs[id] = dir
+		}
+	}
+	localProjectRegistry = nil
+	visibilityInventoryFactory = nil
 	capabilities = caps
 	policyFingerprint = accesspolicies.Fingerprint(session.Policies, session.DatabaseProfile.PolicyFreeReads(), session.Principal)
 	securityContextID = ""

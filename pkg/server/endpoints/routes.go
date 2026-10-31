@@ -152,6 +152,7 @@ func cardsRoutes(path string, router router, wrap wrapper, writeOnly bool, caps 
 
 func projectsRoutes(path string, router router, wrap wrapper, writeOnly bool, caps Capabilities) {
 	if !writeOnly {
+		route(router, wrap, http.MethodGet, path+"/projects/registry", getLocalProjectRegistry)
 		route(router, wrap, http.MethodGet, path+"/projects/projects_summary", getProjects)
 		route(router, wrap, http.MethodGet, path+"/projects/project_summary", getProjectSummary)
 		route(router, wrap, http.MethodGet, path+"/projects/project_full", getProjectFull)
@@ -163,6 +164,7 @@ func projectsRoutes(path string, router router, wrap wrapper, writeOnly bool, ca
 	route(router, wrap, http.MethodPut, path+"/projects/item_tags", requireWriteCapability(caps, saveProjectItemTags))
 	projectEndpoints := ProjectAgentEndpoints{}
 	route(router, wrap, http.MethodPost, path+"/projects/create_project", requireWriteCapability(caps, projectEndpoints.createProject))
+	route(router, wrap, http.MethodPost, path+"/projects/archive_project", requireWriteCapability(caps, archiveLocalProject))
 	route(router, wrap, http.MethodDelete, path+"/projects/delete_project", requireWriteCapability(caps, rejectUnreviewedProjectLifecycle))
 }
 

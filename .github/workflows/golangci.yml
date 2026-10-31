@@ -231,6 +231,9 @@ jobs:
         ports:
           - 54329:5432
         options: >-
+          --memory 1g
+          --cpus 1
+          --pids-limit 128
           --health-cmd "pg_isready -U postgres"
           --health-interval 5s
           --health-timeout 5s
@@ -238,6 +241,7 @@ jobs:
     env:
       DATATUG_TEST_POSTGRES_URL: postgres://postgres:ci-only-service-password@127.0.0.1:54329/postgres?sslmode=disable
       DATATUG_TEST_POSTGRES_MAJOR: ${{ matrix.postgres }}
+      DATATUG_NATIVE_ASSURANCE_CI: '1'
     steps:
       - uses: actions/checkout@v7
       - name: Authenticate private Core dependency

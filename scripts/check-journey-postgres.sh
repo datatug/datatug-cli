@@ -19,6 +19,7 @@ set -euo pipefail
 required_tests=(
 	TestPostgresNativeReadonlyGuardAndMutationEffects
 	TestPostgresNativeReadonlyRoleCannotWriteOutsideDataTug
+	TestPostgresNativeReadonlySchemaUsesOneTransactionForAllMetadata
 	TestPostgresScanJourney
 	TestPostgresScanJourneyFailures
 	TestPostgresQueryJourneyOrdersNullsByDALgosRule

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/dalgo/dbschema"
 	"github.com/dal-go/dalgo/recordset"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/datatug"
@@ -57,6 +58,10 @@ func (c *nativeCountScanDB) countsSent() int32 { return c.counts.Load() }
 type nativeCountScanDB struct {
 	*fakeScanDB
 	counts atomic.Int32
+}
+
+func (c *nativeCountScanDB) RunReadonlySchemaTransaction(ctx context.Context, worker func(context.Context, dbschema.SchemaReader) error) error {
+	return worker(ctx, c)
 }
 
 func (*nativeCountScanDB) QueryCapabilities() dal.QueryCapabilities {

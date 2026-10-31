@@ -146,8 +146,8 @@ github.com/dal-go/dalgo2openvaultdb v0.4.1 h1:wXw1czdfoIRAUugU6qwVoTecmxvMOG/PpX
 github.com/dal-go/dalgo2openvaultdb v0.4.1/go.mod h1:Lezh1ZI9vr6qp+T+P+GDD5JrrtvGe7kujAMpU7yz4HM=
 github.com/dal-go/dalgo2oracle v0.0.1 h1:cc8j+jMCFAsmNNktGDc96S9P952cPWisFRWnLlIYvFM=
 github.com/dal-go/dalgo2oracle v0.0.1/go.mod h1:hzQAEs9V6OqUKHElzC08UFPubZkXkmjfwjJGrncTQk0=
-github.com/dal-go/dalgo2postgres v0.9.4 h1:WMki+YsCbzwnl4mCU70Og3DzQWJfqzlCPZVf2beypVI=
-github.com/dal-go/dalgo2postgres v0.9.4/go.mod h1:Z9tl9l/M/A90UrKKuEWnCzOoP3U66oV7dQkUJ4A6A+Q=
+github.com/dal-go/dalgo2postgres v0.10.0 h1:GAzZl8iiZEC1jYodd44XLhGnuQR8lLuAkMsIxpa+n4I=
+github.com/dal-go/dalgo2postgres v0.10.0/go.mod h1:jiwyaLzKeICdOjju15i6qXr3/keDbtuQVVIHPJP4+58=
 github.com/dal-go/dalgo2postgrest v0.0.0-20261027200821-d952c8fc3279 h1:s26W3F4E8CVnc+2N3f3iRJhJMlrDzGxNF+DV7o//IJQ=
 github.com/dal-go/dalgo2postgrest v0.0.0-20261027200821-d952c8fc3279/go.mod h1:fvTdA6Qk3cQFnBH3VT4/5P1/EUDfVs+1SQBSepJfkgk=
 github.com/dal-go/dalgo2redis v0.1.0 h1:+tqsnvap/k3BCZdpIdYr3V4qQwtD46MNvuPUrZkiEcM=

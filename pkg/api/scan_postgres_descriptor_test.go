@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/dalgo/dbschema"
 	"github.com/dal-go/dalgo/recordset"
 	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/internal/plainfs"
@@ -274,6 +275,10 @@ type countingScanDB struct {
 	err    error
 	views  []string
 	counts atomic.Int32
+}
+
+func (c *countingScanDB) RunReadonlySchemaTransaction(ctx context.Context, worker func(context.Context, dbschema.SchemaReader) error) error {
+	return worker(ctx, c)
 }
 
 func (c *countingScanDB) QueryCapabilities() dal.QueryCapabilities {

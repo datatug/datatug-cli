@@ -51,6 +51,11 @@ func (s *lifecycleTestStore) ListProjectLifecycle(_ context.Context, scope datat
 }
 func lifecycleAPISetup(t *testing.T, writable bool) (LocalLifecycleSelection, *lifecycleTestStore) {
 	t.Helper()
+	originalGuard := lifecycleBranchGuard
+	t.Cleanup(func() { lifecycleBranchGuard = originalGuard })
+	lifecycleBranchGuard = func(ctx context.Context, ref dto.ProjectRef, branch string, mutating bool, fn func(*os.Root, gitState) error) error {
+		return fn(nil, gitState{})
+	}
 	configureWriteSession(t, secureread.SessionOptions{As: "alice", NoPolicies: true}, map[string]string{"p": t.TempDir()}, Capabilities{AllowWrites: writable})
 	provider := &lifecycleTestStore{snapshot: datatug.ProjectUsageSnapshot{Revision: "r1", Complete: true, Objects: []datatug.ProjectObjectUsage{{Ref: datatug.ProjectObjectRef{Kind: "query", ID: "q"}, ContentRevision: "q1"}}}}
 	original := storage.NewDatatugStore
@@ -69,7 +74,7 @@ func TestLocalProjectLifecycleBindsScopeAndKeepsDeleteReferenceSafe(t *testing.T
 	if err != nil || !review.CanArchive {
 		t.Fatalf("review: %+v %v", review, err)
 	}
-	if provider.scope.ActorID == "" || provider.scope.Storage != LocalStoreID || provider.scope.Project != "p" || provider.scope.Branch != "feature/x" {
+	if provider.scope.ActorID == "" || provider.scope.Storage != LocalStoreID || provider.scope.Project != "p" || provider.scope.Branch != "" {
 		t.Fatalf("scope lost: %+v", provider.scope)
 	}
 	// Visibility preserves references. Destructive Delete still checks the

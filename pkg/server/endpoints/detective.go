@@ -99,12 +99,14 @@ func detectiveStateHandler(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		state.Environments, err = detectiveEnvironments(r.Context(), r.URL.Query().Get("project"))
 	}
-	if err == nil {
-		err = filterDetectiveVisibility(r.URL.Query().Get("project"), &state)
-	}
+
 	state.Capabilities.CanWrite = api.GetCapabilities().AllowWrites
 	state.Capabilities.CanRun = api.GetCapabilities().AllowWrites
-	writeContractResponse(w, r, detectiveError(err), state)
+	var response any = state
+	if err == nil {
+		response, err = annotateDetectiveVisibility(r.URL.Query().Get("project"), state)
+	}
+	writeContractResponse(w, r, detectiveError(err), response)
 }
 
 func detectiveEnvironments(ctx context.Context, project string) ([]string, error) {

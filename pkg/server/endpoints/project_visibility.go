@@ -2,6 +2,7 @@ package endpoints
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/detective"
@@ -141,21 +142,39 @@ func filterLocalVisible[T any](project, kind string, items []T, id func(T) strin
 	}
 	return visible, nil
 }
-func filterDetectiveVisibility(project string, state *detective.State) (err error) {
-	if state.Checks, err = filterLocalVisible(project, "check", state.Checks, func(v detective.Check) string { return v.ID }); err != nil {
-		return
+func annotateDetectiveVisibility(project string, state detective.State) (map[string]any, error) {
+	root, ok := api.ProjectDir(project)
+	if !ok {
+		return nil, sessioncontext.ErrForbidden
 	}
-	if state.Validators, err = filterLocalVisible(project, "validator", state.Validators, func(v detective.PublishedValidator) string { return v.ID }); err != nil {
-		return
+	hidden, err := filestore.ReadProjectArchivedItems(root)
+	if err != nil {
+		return nil, err
 	}
-	if state.QueryValidators, err = filterLocalVisible(project, "query-validator", state.QueryValidators, func(v detective.QueryValidators) string { return v.QueryID }); err != nil {
-		return
+	body, err := json.Marshal(state)
+	if err != nil {
+		return nil, err
 	}
-	if state.Scenarios, err = filterLocalVisible(project, "scenario", state.Scenarios, func(v detective.Scenario) string { return v.ID }); err != nil {
-		return
+	var response map[string]any
+	if err = json.Unmarshal(body, &response); err != nil {
+		return nil, err
 	}
-	state.Cases, err = filterLocalVisible(project, "case", state.Cases, func(v detective.Case) string { return v.ID })
-	return
+	kinds := map[string]string{"checks": "check", "validators": "validator", "queryValidators": "query-validator", "scenarios": "scenario", "cases": "case"}
+	for collection, kind := range kinds {
+		items, _ := response[collection].([]any)
+		for _, item := range items {
+			fields, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			id, _ := fields["id"].(string)
+			if kind == "query-validator" {
+				id, _ = fields["queryId"].(string)
+			}
+			fields["archived"] = hidden[datatug.ProjectObjectRef{Kind: kind, ID: id}]
+		}
+	}
+	return response, nil
 }
 func filterLocalQueryVisibility(project string, folder *datatug.QueriesFolder, prefix string) error {
 	root, ok := api.ProjectDir(project)

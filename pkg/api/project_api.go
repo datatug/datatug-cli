@@ -10,7 +10,6 @@ import (
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
 	"github.com/datatug/datatug-core/pkg/storage"
-	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/strongo/validation"
 )
 
@@ -88,19 +87,7 @@ func GetProjectSummary(ctx context.Context, ref dto.ProjectRef) (projSummary *da
 	if err != nil {
 		return nil, itemNotFound("project", dbcopy.SourceIDDisplay(ref.ProjectID), err)
 	}
-	if root, ok := ProjectDir(ref.ProjectID); ok {
-		hidden, visibilityErr := filestore.ReadProjectArchivedItems(root)
-		if visibilityErr != nil {
-			return nil, visibilityErr
-		}
-		order := projectFile.EnvironmentOrder[:0]
-		for _, id := range projectFile.EnvironmentOrder {
-			if !hidden[datatug.ProjectObjectRef{Kind: "environment", ID: id}] {
-				order = append(order, id)
-			}
-		}
-		projectFile.EnvironmentOrder = order
-	}
+
 	return &datatug.ProjectSummary{ProjectFile: projectFile}, err
 }
 
@@ -139,7 +126,7 @@ func GetProjectFull(ctx context.Context, ref dto.ProjectRef) (*datatug.Project, 
 	if err != nil {
 		return nil, err
 	}
-	loaded, err := project.LoadProject(ctx, datatug.ActiveItemsOnly())
+	loaded, err := project.LoadProject(ctx)
 	if err != nil {
 		return nil, itemNotFound("project", dbcopy.SourceIDDisplay(ref.ProjectID), err)
 	}

@@ -23,6 +23,7 @@ var browserFixtureAssetURL = regexp.MustCompile(`^/assets/showcase/[a-z0-9][a-z0
 // LocalConnectionCatalog exposes declaration metadata, never connection profiles
 // or arbitrary files. Public-source executors must independently admit its pins.
 type LocalConnectionCatalog struct {
+	ArchivedItems    map[string]bool             `json:"-"`
 	Format           string                      `json:"format"`
 	Connections      []LocalCatalogConnection    `json:"connections"`
 	BigQueryEditions []datatug.EditionConnection `json:"bigQueryEditions,omitempty"`
@@ -241,19 +242,37 @@ func filterLocalConnectionVisibility(root string, catalog *LocalConnectionCatalo
 	if err != nil {
 		return err
 	}
-	connections := catalog.Connections[:0]
-	for _, connection := range catalog.Connections {
-		if !hidden[datatug.ProjectObjectRef{Kind: "connection", ID: connection.ID}] {
-			connections = append(connections, connection)
+	catalog.ArchivedItems = map[string]bool{}
+	for ref, value := range hidden {
+		if value && ref.Kind == "connection" {
+			catalog.ArchivedItems[ref.ID] = true
 		}
 	}
-	catalog.Connections = connections
-	editions := catalog.BigQueryEditions[:0]
-	for _, edition := range catalog.BigQueryEditions {
-		if !hidden[datatug.ProjectObjectRef{Kind: "connection", ID: edition.ID}] {
-			editions = append(editions, edition)
-		}
-	}
-	catalog.BigQueryEditions = editions
 	return nil
+}
+
+// Discovery flags stay alongside the complete resolver declarations. Browser
+// execution may still resolve an archived connection explicitly by ID.
+func (catalog LocalConnectionCatalog) MarshalJSON() ([]byte, error) {
+	type plain LocalConnectionCatalog
+	body, err := json.Marshal(plain(catalog))
+	if err != nil {
+		return nil, err
+	}
+	var response map[string]any
+	if err = json.Unmarshal(body, &response); err != nil {
+		return nil, err
+	}
+	for _, collection := range []string{"connections", "bigQueryEditions", "bigQueryPlans"} {
+		items, _ := response[collection].([]any)
+		for _, item := range items {
+			fields, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			id, _ := fields["id"].(string)
+			fields["archived"] = catalog.ArchivedItems[id]
+		}
+	}
+	return json.Marshal(response)
 }

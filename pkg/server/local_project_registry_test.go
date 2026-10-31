@@ -83,17 +83,26 @@ func TestServeHTTPLocalCreateOpensImmediatelyAndArchiveOnlyHidesDiscovery(t *tes
 		t.Fatal(err)
 	}
 	var review datatug.ProjectLifecycleReview
-	get("projects/lifecycle/review?storage=local&project="+created.ID+"&kind=session&id=kept-session", &review)
+	get("projects/lifecycle/review?storage=local&project="+created.ID+"&projectApi=local&branch=main&kind=session&id=kept-session", &review)
 	if !review.ArchiveSupported || !review.CanArchive || review.Complete {
 		t.Fatalf("runtime session not archivable: %+v", review)
 	}
 	change := func(action, operation, revision string) {
 		t.Helper()
-		body, err := json.Marshal(map[string]any{"storage": "local", "project": created.ID, "operationId": operation, "expectedRevision": revision, "change": map[string]any{"object": map[string]string{"kind": "session", "id": "kept-session"}, "action": action}})
+		body, err := json.Marshal(map[string]any{"storage": "local", "project": created.ID, "projectApi": "local", "branch": "main", "operationId": operation, "expectedRevision": revision, "change": map[string]any{"object": map[string]string{"kind": "session", "id": "kept-session"}, "action": action}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		post("projects/lifecycle/change", string(body))
+	}
+	mismatchBody, _ := json.Marshal(map[string]any{"storage": "local", "project": created.ID, "projectApi": "local", "branch": "different-branch", "operationId": "wrong-branch", "expectedRevision": review.Revision, "change": map[string]any{"object": map[string]string{"kind": "session", "id": "kept-session"}, "action": "archive"}})
+	mismatch, err := testHTTPClient.Post(base+"/datatug/projects/lifecycle/change", "application/json", bytes.NewReader(mismatchBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = mismatch.Body.Close()
+	if mismatch.StatusCode != http.StatusConflict {
+		t.Fatalf("mismatched branch admitted: %d", mismatch.StatusCode)
 	}
 	change("archive", "hide-session", review.Revision)
 	var archivedItems datatug.ProjectLifecycleCatalog
@@ -121,7 +130,7 @@ func TestServeHTTPLocalCreateOpensImmediatelyAndArchiveOnlyHidesDiscovery(t *tes
 	if err != nil || afterSession.Session.Version != beforeSession.Session.Version || afterSession.Session.State != beforeSession.Session.State || afterSession.Session.NativeFenceGeneration != beforeSession.Session.NativeFenceGeneration {
 		t.Fatalf("archive changed native session execution state: %+v %v", afterSession, err)
 	}
-	get("projects/lifecycle/review?storage=local&project="+created.ID+"&kind=session&id=kept-session", &review)
+	get("projects/lifecycle/review?storage=local&project="+created.ID+"&projectApi=local&branch=main&kind=session&id=kept-session", &review)
 	if !review.CanRestore {
 		t.Fatalf("hidden session cannot restore: %+v", review)
 	}

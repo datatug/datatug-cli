@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"os"
 	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
@@ -94,7 +95,7 @@ func localLifecycleStore(ctx context.Context, selection LocalLifecycleSelection,
 	return provider, scope, nil
 }
 
-func LocalProjectLifecycleReview(ctx context.Context, selection LocalLifecycleSelection, object datatug.ProjectObjectRef) (datatug.ProjectLifecycleReview, error) {
+func localProjectLifecycleReview(ctx context.Context, selection LocalLifecycleSelection, object datatug.ProjectObjectRef) (datatug.ProjectLifecycleReview, error) {
 	var out datatug.ProjectLifecycleReview
 	if err := object.Validate(); err != nil {
 		return out, err
@@ -125,7 +126,7 @@ func LocalProjectLifecycleReview(ctx context.Context, selection LocalLifecycleSe
 	return out, nil
 }
 
-func LocalProjectLifecycleChange(ctx context.Context, request LocalLifecycleWrite) (datatug.ProjectLifecycleAck, error) {
+func localProjectLifecycleChange(ctx context.Context, request LocalLifecycleWrite) (datatug.ProjectLifecycleAck, error) {
 	var out datatug.ProjectLifecycleAck
 	if err := request.Validate(); err != nil {
 		return out, err
@@ -146,7 +147,7 @@ func LocalProjectLifecycleChange(ctx context.Context, request LocalLifecycleWrit
 	return out, nil
 }
 
-func LocalProjectLifecycleCatalog(ctx context.Context, selection LocalLifecycleSelection, archived bool) (datatug.ProjectLifecycleCatalog, error) {
+func localProjectLifecycleCatalog(ctx context.Context, selection LocalLifecycleSelection, archived bool) (datatug.ProjectLifecycleCatalog, error) {
 	provider, scope, err := localLifecycleStore(ctx, selection, false)
 	if err != nil {
 		return datatug.ProjectLifecycleCatalog{}, err
@@ -168,4 +169,43 @@ func LocalProjectLifecycleCatalog(ctx context.Context, selection LocalLifecycleS
 	}
 	out.Items = items
 	return out, nil
+}
+
+var lifecycleBranchGuard = withLocalProjectFiles
+
+func guardLocalLifecycleBranch(ctx context.Context, selection LocalLifecycleSelection, write bool, fn func(LocalLifecycleSelection) error) error {
+	if selection.ProjectAPI != "" && (selection.ProjectAPI != "local" || selection.Branch == "") || len(selection.Branch) > 256 || strings.TrimSpace(selection.Branch) != selection.Branch || strings.ContainsAny(selection.Branch, "\x00\r\n") {
+		return datatug.ErrProjectLifecycleInvalid
+	}
+	if selection.Branch == "" {
+		return fn(selection)
+	}
+	return lifecycleBranchGuard(ctx, selection.ProjectRef, selection.Branch, write, func(_ *os.Root, _ gitState) error {
+		// The host owns branch admission. Visibility belongs to this registered
+		// local checkout, while the surrounding guard fences branch/HEAD changes.
+		selection.Branch, selection.ProjectAPI = "", ""
+		return fn(selection)
+	})
+}
+func LocalProjectLifecycleReview(ctx context.Context, selection LocalLifecycleSelection, object datatug.ProjectObjectRef) (out datatug.ProjectLifecycleReview, err error) {
+	err = guardLocalLifecycleBranch(ctx, selection, false, func(selected LocalLifecycleSelection) error {
+		out, err = localProjectLifecycleReview(ctx, selected, object)
+		return err
+	})
+	return
+}
+func LocalProjectLifecycleCatalog(ctx context.Context, selection LocalLifecycleSelection, archived bool) (out datatug.ProjectLifecycleCatalog, err error) {
+	err = guardLocalLifecycleBranch(ctx, selection, false, func(selected LocalLifecycleSelection) error {
+		out, err = localProjectLifecycleCatalog(ctx, selected, archived)
+		return err
+	})
+	return
+}
+func LocalProjectLifecycleChange(ctx context.Context, request LocalLifecycleWrite) (out datatug.ProjectLifecycleAck, err error) {
+	err = guardLocalLifecycleBranch(ctx, request.LocalLifecycleSelection, true, func(selected LocalLifecycleSelection) error {
+		request.LocalLifecycleSelection = selected
+		out, err = localProjectLifecycleChange(ctx, request)
+		return err
+	})
+	return
 }

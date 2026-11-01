@@ -43,6 +43,16 @@ import (
 // the sink cannot be what keeps it out.
 func TestProperty_ServeNeverEchoesASourceSecret(t *testing.T) {
 	ctx := context.Background()
+	// Correlation IDs are independent random metadata. Control their existing
+	// entropy seam so a random ID cannot accidentally contain a secret fragment.
+	// All source-derived errors, bodies, stderr and logs are still scanned below.
+	originalRandom := randRead
+	randRead = func(dst []byte) (int, error) {
+		clear(dst)
+		return len(dst), nil
+	}
+	t.Cleanup(func() { randRead = originalRandom })
+	correlationID := newRequestID()
 	projectDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(projectDir, "queries"), 0o755); err != nil {
 		t.Fatal(err)
@@ -75,6 +85,9 @@ func TestProperty_ServeNeverEchoesASourceSecret(t *testing.T) {
 	cases := sourcecases.CommandCases()
 	failed := 0
 	for _, c := range cases {
+		if leaked := sourcecases.Leaks(c, correlationID); len(leaked) != 0 {
+			t.Fatalf("the fixed correlation ID collides with source fixture %s", c.Name)
+		}
 		var texts []string
 		note := func(err error) {
 			if err != nil {

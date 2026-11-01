@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -52,7 +53,7 @@ func TestOrdinaryDiscoveryRejectsInvalidOriginalAuthority(t *testing.T) {
 
 func TestOrdinaryDiscoveryDoesNotReleaseAfterLateAuthorityChange(t *testing.T) {
 	for _, kind := range []string{"server", "meaning"} {
-		for _, change := range []string{"cancel", "session"} {
+		for _, change := range []string{"cancel", "session", "cancel-read-error", "session-read-error"} {
 			t.Run(kind+"/"+change, func(t *testing.T) {
 				dir, branch, ref := ordinaryDiscoveryFixture(t)
 				require.NoError(t, os.Mkdir(filepath.Join(dir, "dbs"), 0o700))
@@ -65,12 +66,15 @@ func TestOrdinaryDiscoveryDoesNotReleaseAfterLateAuthorityChange(t *testing.T) {
 					state, err := original(ctx, root)
 					calls++
 					if calls == 3 && err == nil {
-						if change == "cancel" {
+						if change == "cancel" || change == "cancel-read-error" {
 							cancel()
 						} else {
 							secureMu.Lock()
 							securityContextID = "replacement-session"
 							secureMu.Unlock()
+						}
+						if change == "cancel-read-error" || change == "session-read-error" {
+							return gitState{}, errors.New("Git read failed after authority change")
 						}
 					}
 					return state, err
@@ -91,7 +95,7 @@ func TestOrdinaryDiscoveryDoesNotReleaseAfterLateAuthorityChange(t *testing.T) {
 					}
 				}
 				require.GreaterOrEqual(t, calls, 3)
-				if change == "cancel" {
+				if change == "cancel" || change == "cancel-read-error" {
 					require.ErrorIs(t, err, context.Canceled)
 				} else {
 					require.ErrorIs(t, err, secureread.ErrAccessDenied)

@@ -49,17 +49,17 @@ func projectMeaningDiscoveryHandler(w http.ResponseWriter, r *http.Request) {
 func projectDbServerDiscoveryHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store, no-transform")
 	if err := api.RequireLocalReadPrincipal(); err != nil {
-		writeProjectMutationError(w, r, err)
+		writeMeaningError(w, r, err)
 		return
 	}
 	ref, branch, err := projectDiscoveryScope(r)
 	if err != nil {
-		writeProjectMutationError(w, r, err)
+		writeMeaningError(w, r, err)
 		return
 	}
 	servers, err := api.LocalProjectDbServerDiscovery(r.Context(), ref, branch)
 	if err != nil {
-		writeProjectMutationError(w, r, err)
+		writeMeaningError(w, r, err)
 		return
 	}
 	writeProjectMutationJSON(w, r, http.StatusOK, servers)

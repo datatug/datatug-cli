@@ -160,7 +160,9 @@ func loadItemTagsDocument(reader *qualifiedProjectReader, s ItemTagsSelector) (s
 		}
 		// The row decoder merges case variants and repeated objects. Its effective
 		// identity must equal the canonical object validated against the owning path.
-		var decoded datatug.ProjDbServer
+		var decoded struct {
+			Server datatug.ServerRef `json:"server"`
+		}
 		if itemTagsJSONUnmarshal(body, &decoded) != nil || decoded.Server != server {
 			return "", nil, nil, dto.ErrUnsupportedCapability
 		}
@@ -393,7 +395,6 @@ func localProjectDbServers(ctx context.Context, ref dto.ProjectRef, branch strin
 				server.SetID(id)
 				loaded++
 				if discovery {
-					// Both decodings must agree with the validated owning identity.
 					if archived[datatug.ProjectObjectRef{Kind: "server", ID: driver.Name() + "/" + id}] {
 						continue
 					}

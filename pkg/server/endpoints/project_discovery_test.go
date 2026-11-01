@@ -67,7 +67,8 @@ func TestOrdinaryDiscoveryHTTPStrictSelectedScopeAndProjection(t *testing.T) {
 	for _, handler := range []http.HandlerFunc{projectDbServerDiscoveryHandler, projectMeaningDiscoveryHandler} {
 		response := httptest.NewRecorder()
 		handler(response, httptest.NewRequest(http.MethodGet, "/?"+query, nil))
-		require.GreaterOrEqual(t, response.Code, 400)
+		require.Equal(t, http.StatusServiceUnavailable, response.Code)
+		require.Contains(t, response.Body.String(), "REFERENCES_INCOMPLETE")
 		require.NotContains(t, response.Body.String(), "mysql:active:3306")
 		require.NotContains(t, response.Body.String(), "Hidden")
 	}

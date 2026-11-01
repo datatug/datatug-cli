@@ -113,3 +113,26 @@ func TestOrdinaryMeaningDiscoveryPreservesExplicitReferences(t *testing.T) {
 	require.Error(t, err)
 	require.Empty(t, after.Entities)
 }
+
+func TestOrdinaryMeaningDiscoveryArchivedNestedQueryKeepsFullCatalog(t *testing.T) {
+	dir, branch, ref := ordinaryDiscoveryFixture(t)
+	var model datatug.QuerySemanticModel
+	require.NoError(t, json.Unmarshal([]byte(localMeaningSemanticFixture), &model))
+	query := datatug.QueryDef{ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "q", Title: "Nested query"}}, Type: datatug.QueryTypeSQL, Text: "select 1", SemanticModel: &model}
+	body, err := json.Marshal(query)
+	require.NoError(t, err)
+	writeDiscoveryFixture(t, dir, "queries/folder/q.query.json", body)
+	before, err := LocalProjectMeaningDiscovery(t.Context(), ref, branch)
+	require.NoError(t, err)
+	require.Len(t, before.Entities, 1)
+	require.Equal(t, datatug.QueryMeaningDocumentID("folder/q", "query"), before.Entities[0].DocumentID)
+	writeDiscoveryFixture(t, dir, ".datatug-visibility.json", []byte(`{"version":1,"archived":[{"kind":"query","id":"folder/q"}]}`))
+	active, err := LocalProjectMeaningDiscovery(t.Context(), ref, branch)
+	require.NoError(t, err)
+	require.Empty(t, active.Entities)
+	full, err := LocalProjectMeaningsCatalog(t.Context(), ref, branch)
+	require.NoError(t, err)
+	require.Len(t, full.Entities, 1)
+	require.Equal(t, before.Revision, active.Revision)
+	require.Equal(t, before.Revision, full.Revision)
+}

@@ -34,3 +34,14 @@ func TestOrdinaryServerDiscoveryRejectsMergedForeignIdentity(t *testing.T) {
 		})
 	}
 }
+
+func TestOrdinaryServerTagsKeepOpaqueNonIdentityFields(t *testing.T) {
+	dir, branch, ref := ordinaryDiscoveryFixture(t)
+	writeDiscoveryFixture(t, dir, "dbs/mysql/mysql:active:3306.dbserver.json", []byte(`{"id":"mysql:active:3306","server":{"driver":"mysql","host":"active","port":3306},"title":5,"catalogs":{"future":true},"tags":["retained"]}`))
+	tags, err := LocalProjectItemTags(t.Context(), ItemTagsSelector{ProjectRef: ref, Branch: branch, Kind: "dbserver", Driver: "mysql", ID: "mysql:active:3306"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"retained"}, tags.Tags)
+	rows, err := LocalProjectDbServerDiscovery(t.Context(), ref, branch)
+	require.Error(t, err, "a full native DTO must still be valid for discovery")
+	require.Nil(t, rows)
+}

@@ -17,6 +17,7 @@ set -euo pipefail
 
 # The tests this job requires, by name. A test added to the journey is added here.
 required_tests=(
+	TestPostgresNativeReadonlyThroughTransactionPooler
 	TestPostgresNativeReadonlyGuardAndMutationEffects
 	TestPostgresNativeReadonlyRoleCannotWriteOutsideDataTug
 	TestPostgresNativeReadonlySchemaUsesOneTransactionForAllMetadata

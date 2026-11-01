@@ -99,6 +99,11 @@ func execAll(t *testing.T, rawURL string, statements ...string) {
 }
 
 func firstLine(text string) string {
+	// Role provisioning includes a generated credential. Even a failed fixture
+	// statement must not print it in a test diagnostic.
+	if strings.Contains(strings.ToUpper(text), "PASSWORD") {
+		return "credential statement [redacted]"
+	}
 	line, _, _ := strings.Cut(strings.TrimSpace(text), "\n")
 	return line
 }

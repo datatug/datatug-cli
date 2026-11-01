@@ -219,6 +219,7 @@ jobs:
   journey-postgres:
     name: Journey (PostgreSQL ${{ matrix.postgres }})
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -242,6 +243,7 @@ jobs:
       DATATUG_TEST_POSTGRES_URL: postgres://postgres:ci-only-service-password@127.0.0.1:54329/postgres?sslmode=disable
       DATATUG_TEST_POSTGRES_MAJOR: ${{ matrix.postgres }}
       DATATUG_NATIVE_ASSURANCE_CI: '1'
+      DATATUG_NATIVE_POOLER_CI: '1'
     steps:
       - uses: actions/checkout@v7
       - name: Authenticate private Core dependency
@@ -253,12 +255,19 @@ jobs:
           # Must be >= go.mod's `go` directive, same constraint as release.yml.
           go-version: '1.27.3'
           cache: true
+      - name: Check native pooler ownership without services
+        run: python3 -B scripts/native-postgres/test_fixture.py
+      - name: Build the pinned bounded PgBouncer fixture
+        run: bash scripts/native-postgres/build-fixture.sh
       - name: Scan and query a real PostgreSQL server
         env:
           # The test binary of the commands package links the cgo SQLite driver, as in
           # strongo_workflow above.
           CGO_ENABLED: '1'
         run: ./scripts/check-journey-postgres.sh
+      - name: Remove only owned native pooler resources
+        if: always()
+        run: bash scripts/native-postgres/cleanup-fixture.sh
 
   # Runs in the always-present Go CI workflow so exact-commit release gating
   # observes browser/asset regressions as well as Go tests. No path filter/skip.

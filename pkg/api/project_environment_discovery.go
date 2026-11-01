@@ -118,7 +118,7 @@ func readActiveEnvironmentBriefs(reader *qualifiedProjectReader) ([]LocalEnviron
 	if err != nil {
 		return nil, err
 	}
-	archived, err := filestore.ReadProjectArchivedItems(reader.root.Name())
+	archived, err := filestore.ReadProjectArchivedItemsFromRoot(reader.root)
 	if err != nil {
 		return nil, err
 	}

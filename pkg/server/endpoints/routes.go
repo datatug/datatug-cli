@@ -34,6 +34,7 @@ func registerRoutesOn(path string, router router, wrapper wrapper, writeOnly boo
 	queriesRoutes(path, router, wrapper, writeOnly, caps)
 	if !writeOnly {
 		route(router, wrapper, http.MethodGet, path+"/meanings/catalog", projectMeaningsCatalogHandler)
+		route(router, wrapper, http.MethodGet, path+"/meanings/discovery", projectMeaningDiscoveryHandler)
 	}
 	route(router, wrapper, http.MethodPost, path+"/meanings/change", requireWriteCapability(caps, projectMeaningChangeHandler))
 	if !writeOnly {
@@ -189,6 +190,7 @@ func dbServerRoutes(path string, router router, wrap wrapper, writeOnly bool, ca
 	if !writeOnly {
 		route(router, wrap, http.MethodGet, path+"/dbserver-summary", getDbServerSummary)
 		route(router, wrap, http.MethodGet, path+"/dbservers/all_dbservers", getProjectDbServers)
+		route(router, wrap, http.MethodGet, path+"/dbservers/discovery", projectDbServerDiscoveryHandler)
 		route(router, wrap, http.MethodGet, path+"/dbserver-databases", requireLiveConnections(caps, getServerDatabases))
 	}
 	route(router, wrap, http.MethodPost, path+"/dbserver-add", requireWriteCapability(caps, addDbServer))

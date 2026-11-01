@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"cloud.google.com/go/firestore"
 	"github.com/dal-go/dalgo/dal"
@@ -115,14 +116,39 @@ func TestFirestoreOpenCacheAndFailureHermetic(t *testing.T) {
 }
 
 func TestMongoDBOpenCanceledContextHermetic(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	ref, err := Parse("mongodb://127.0.0.1:1/hermetic")
+	const uri = "mongodb://synthetic-secret-user:synthetic-secret-password@127.0.0.1:1/hermetic?authSource=synthetic-secret-auth"
+	ref, err := Parse(uri)
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := ref.OpenProtected(ctx)
-	if db != nil || err == nil || !strings.Contains(err.Error(), "could not open") {
-		t.Fatalf("canceled open: db=%v error=%v", db, err)
+	cause := errors.New("synthetic-secret-context-cause")
+	canceled, cancel := context.WithCancelCause(context.Background())
+	cancel(cause)
+	// A past deadline is already expired, so this case needs no sleep or RPC.
+	expired, stopDeadline := context.WithDeadlineCause(context.Background(), time.Unix(1, 0), cause)
+	defer stopDeadline()
+	for _, tc := range []struct {
+		name  string
+		ctx   context.Context
+		want  error
+		other error
+	}{
+		{"canceled", canceled, context.Canceled, context.DeadlineExceeded},
+		{"deadline", expired, context.DeadlineExceeded, context.Canceled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, err := ref.OpenProtected(tc.ctx)
+			if db != nil || !errors.Is(err, tc.want) || errors.Is(err, tc.other) {
+				t.Fatalf("context failure lost: db=%v error=%v", db, err)
+			}
+			if errors.Is(err, cause) {
+				t.Fatal("custom context cause escaped the provider boundary")
+			}
+			for _, secret := range []string{uri, "synthetic-secret-user", "synthetic-secret-password", "synthetic-secret-auth", cause.Error()} {
+				if strings.Contains(err.Error(), secret) {
+					t.Fatal("context failure exposed a credential or custom cause")
+				}
+			}
+		})
 	}
 }

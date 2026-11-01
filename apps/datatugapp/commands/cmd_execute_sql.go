@@ -262,6 +262,7 @@ func (handler writerHandler) Process(columnTypes []*sql.ColumnType, rows *sql.Ro
 }
 
 func updateUrlConfigCommandAction(cmd *cobra.Command, _ []string) error {
+	_, _ = fmt.Fprintln(cmd.ErrOrStderr(), legacySQLRetirementNotice)
 	driver, _ := cmd.Flags().GetString("driver")
 	host, _ := cmd.Flags().GetString("host")
 	mode, _ := cmd.Flags().GetString("mode")

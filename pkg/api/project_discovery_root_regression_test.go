@@ -70,9 +70,8 @@ func TestDiscoveryArchiveStaysWithOpenedProject(t *testing.T) {
 			n, e = callArchiveDiscovery(t.Context(), ref, branch, kind)
 			t.Logf("root rotated=%v returned=%d error=%v", rotated, n, e)
 			require.True(t, rotated)
-			if e == nil && n != 0 {
-				t.Fatalf("original archived %s became active using replacement pathname archive state", kind)
-			}
+			require.NoError(t, e)
+			require.Zero(t, n, "opened-root archive must remain authoritative after pathname replacement")
 		})
 	}
 }

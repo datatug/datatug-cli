@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/stretchr/testify/require"
 )
@@ -85,4 +86,18 @@ func TestOrdinaryDiscoveryRoutesKeepTheRequestGuard(t *testing.T) {
 		require.Equal(t, http.StatusForbidden, response.Code)
 	}
 	require.Len(t, found, 2)
+}
+
+func TestDiscoveryHTTPRejectsAnonymousBeforeSelectorResolution(t *testing.T) {
+	api.ConfigureSecureSession(secureread.Session{}, map[string]string{"known": t.TempDir()}, api.Capabilities{})
+	t.Cleanup(func() { api.ConfigureSecureSession(secureread.Session{}, nil, api.Capabilities{}) })
+	for _, handler := range []http.HandlerFunc{projectMeaningDiscoveryHandler, projectDbServerDiscoveryHandler} {
+		for _, query := range []string{"", "?project=unknown&branch=main", "?storage=local&project=missing&branch=main", "?storage=local&project=known&branch=main"} {
+			response := httptest.NewRecorder()
+			handler(response, httptest.NewRequest(http.MethodGet, "/"+query, nil))
+			if response.Code != http.StatusForbidden {
+				t.Fatal("anonymous selector resolution preceded principal check", query, response.Code, response.Body)
+			}
+		}
+	}
 }

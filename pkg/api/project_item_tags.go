@@ -158,6 +158,12 @@ func loadItemTagsDocument(reader *qualifiedProjectReader, s ItemTagsSelector) (s
 		if itemTagsJSONUnmarshal(fields["server"], &server) != nil || server.Driver != s.Driver || server.GetID() != s.ID {
 			return "", nil, nil, dto.ErrUnsupportedCapability
 		}
+		// The row decoder merges case variants and repeated objects. Its effective
+		// identity must equal the canonical object validated against the owning path.
+		var decoded datatug.ProjDbServer
+		if itemTagsJSONUnmarshal(body, &decoded) != nil || decoded.Server != server {
+			return "", nil, nil, dto.ErrUnsupportedCapability
+		}
 		if err := validateDbServer(server); err != nil {
 			return "", nil, nil, err
 		}
@@ -387,8 +393,7 @@ func localProjectDbServers(ctx context.Context, ref dto.ProjectRef, branch strin
 				server.SetID(id)
 				loaded++
 				if discovery {
-					// loadItemTagsDocument already validates the declared ID,
-					// driver and ServerRef against this physical owning path.
+					// Both decodings must agree with the validated owning identity.
 					if archived[datatug.ProjectObjectRef{Kind: "server", ID: driver.Name() + "/" + id}] {
 						continue
 					}

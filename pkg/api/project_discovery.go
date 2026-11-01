@@ -17,8 +17,8 @@ func LocalProjectDbServerDiscovery(ctx context.Context, ref dto.ProjectRef, bran
 		return nil, err
 	}
 	rows, err := localProjectDbServers(ctx, ref, branch, true)
-	if err == nil {
-		err = check()
+	if freshnessErr := check(); freshnessErr != nil {
+		err = freshnessErr
 	}
 	if err != nil {
 		return nil, err
@@ -28,15 +28,16 @@ func LocalProjectDbServerDiscovery(ctx context.Context, ref dto.ProjectRef, bran
 
 // LocalProjectMeaningDiscovery is a display projection of the complete catalog.
 // Its revision still names that complete snapshot; saved-reference resolution
-// and mutation validation continue to read the unfiltered definitions.
+// and mutation validation continue to read the unfiltered definitions. This
+// revision is not an active-view cache key. Archive changes affect display only.
 func LocalProjectMeaningDiscovery(ctx context.Context, ref dto.ProjectRef, branch string) (datatug.ProjectMeaningsCatalog, error) {
 	check, err := beginProjectDiscovery(ctx, branch)
 	if err != nil {
 		return datatug.ProjectMeaningsCatalog{}, err
 	}
 	value, err := localProjectMeaningsCatalog(ctx, ref, branch, true)
-	if err == nil {
-		err = check()
+	if freshnessErr := check(); freshnessErr != nil {
+		err = freshnessErr
 	}
 	if err != nil {
 		return datatug.ProjectMeaningsCatalog{}, err
@@ -74,14 +75,40 @@ func projectMeaningDiscovery(full datatug.ProjectMeaningsCatalog, archived map[d
 		if archived[datatug.ProjectObjectRef{Kind: "meaning", ID: entity.DocumentID + "/" + entity.ConceptID}] {
 			continue
 		}
+
+		hiddenQuery := false
+		if entity.Origin == "query" {
+			for _, resource := range entity.Resources {
+				if resource.Kind == "query" && archived[datatug.ProjectObjectRef{Kind: "query", ID: resource.ID}] {
+					hiddenQuery = true
+					break
+				}
+			}
+		}
+		if hiddenQuery {
+			continue
+		}
+		entity.Resources = meaningDiscoveryResources(entity.Resources, archived)
 		fields := make([]datatug.MeaningField, 0, len(entity.Fields))
 		for _, field := range entity.Fields {
 			if !archived[datatug.ProjectObjectRef{Kind: "meaning", ID: field.DocumentID + "/" + field.ConceptID}] {
+				field.Resources = meaningDiscoveryResources(field.Resources, archived)
 				fields = append(fields, field)
 			}
 		}
 		entity.Fields = fields
 		out.Entities = append(out.Entities, entity)
+	}
+	return out
+}
+
+// Archive affects discovery only; retained catalogs still contain every reference.
+func meaningDiscoveryResources(resources []datatug.MeaningResource, archived map[datatug.ProjectObjectRef]bool) []datatug.MeaningResource {
+	out := make([]datatug.MeaningResource, 0, len(resources))
+	for _, resource := range resources {
+		if !archived[datatug.ProjectObjectRef{Kind: resource.Kind, ID: resource.ID}] {
+			out = append(out, resource)
+		}
 	}
 	return out
 }

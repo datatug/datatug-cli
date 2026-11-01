@@ -29,6 +29,10 @@ func projectDiscoveryScope(r *http.Request) (dto.ProjectRef, string, error) {
 
 func projectMeaningDiscoveryHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store, no-transform")
+	if err := api.RequireLocalReadPrincipal(); err != nil {
+		writeProjectMutationError(w, r, err)
+		return
+	}
 	ref, branch, err := projectDiscoveryScope(r)
 	if err != nil {
 		writeMeaningError(w, r, err)
@@ -44,6 +48,10 @@ func projectMeaningDiscoveryHandler(w http.ResponseWriter, r *http.Request) {
 
 func projectDbServerDiscoveryHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store, no-transform")
+	if err := api.RequireLocalReadPrincipal(); err != nil {
+		writeProjectMutationError(w, r, err)
+		return
+	}
 	ref, branch, err := projectDiscoveryScope(r)
 	if err != nil {
 		writeProjectMutationError(w, r, err)

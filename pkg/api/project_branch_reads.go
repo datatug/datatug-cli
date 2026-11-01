@@ -320,33 +320,20 @@ func LocalProjectSummary(ctx context.Context, ref dto.ProjectRef, branch string)
 // particular, the Environment model's dbServers and connection declarations
 // are never serialized by this response.
 func LocalProjectEnvironments(ctx context.Context, ref dto.ProjectRef, branch string) ([]LocalEnvironmentBrief, error) {
+	if branch == "" {
+		return localNonGitProjectEnvironments(ctx, ref)
+	}
 	value, err := withCurrentBranchRead(ctx, ref, branch, func(reader *qualifiedProjectReader) (any, error) {
 		// Only the environment read waits for an environment mutation in progress (and its
 		// recovery); other branch reads never take the environment-file lock.
-		var environments []qualifiedEnvironmentData
+		var briefs []LocalEnvironmentBrief
 		err := filestore.ReadEnvironmentFiles(ctx, reader.root.Name(), func(*filestore.EnvironmentFiles) error {
 			var e error
-			environments, e = readQualifiedEnvironments(reader)
+			briefs, e = readActiveEnvironmentBriefs(reader)
 			return e
 		})
 		if err != nil {
 			return nil, itemsNotLoaded("environments", ref.ProjectID, err)
-		}
-		briefs := make([]LocalEnvironmentBrief, 0, len(environments))
-		for _, environment := range environments {
-			env := environment.env
-			hidden, err := filestore.ProjectItemArchived(reader.root.Name(), datatug.ProjectObjectRef{Kind: "environment", ID: env.ID})
-			if err != nil {
-				return nil, err
-			}
-			if hidden {
-				continue
-			}
-			title := env.Title
-			if title == "" {
-				title = env.ID
-			}
-			briefs = append(briefs, LocalEnvironmentBrief{ID: env.ID, Title: title, Presentation: environment.presentation})
 		}
 		return briefs, nil
 	})

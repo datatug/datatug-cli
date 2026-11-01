@@ -32,6 +32,76 @@ func nonGitDiscoveryFixture(t *testing.T) (dto.EnvironmentScope, Capabilities, s
 	return scope, caps, root
 }
 
+func TestNonGitEnvironmentDiscoveryRefusesLateCancellation(t *testing.T) {
+	for _, stage := range []string{"before-start", "after-open", "during-final-git"} {
+		t.Run(stage, func(t *testing.T) {
+			scope, _, _ := nonGitDiscoveryFixture(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if stage == "before-start" {
+				cancel()
+			}
+			originalOpen, originalGit := openQualifiedProjectReaderSeam, localGitStateSeam
+			t.Cleanup(func() {
+				openQualifiedProjectReaderSeam, localGitStateSeam = originalOpen, originalGit
+			})
+			openQualifiedProjectReaderSeam = func(dir string) (*qualifiedProjectReader, error) {
+				reader, err := originalOpen(dir)
+				if stage == "after-open" && err == nil {
+					cancel()
+				}
+				return reader, err
+			}
+			probes := 0
+			localGitStateSeam = func(ctx context.Context, root string) (gitState, error) {
+				state, err := originalGit(ctx, root)
+				probes++
+				if stage == "during-final-git" && probes == 2 {
+					cancel()
+				}
+				return state, err
+			}
+			rows, err := LocalProjectEnvironments(ctx, dto.ProjectRef{StoreID: LocalStoreID, ProjectID: scope.ProjectID}, "")
+			require.ErrorIs(t, err, context.Canceled)
+			require.Nil(t, rows, "canceled discovery must not publish even a partial presentation")
+		})
+	}
+}
+
+func TestNonGitEnvironmentDiscoveryKeepsOriginalPreflightSession(t *testing.T) {
+	for _, stage := range []string{"after-root-stat", "after-owning-read"} {
+		t.Run(stage, func(t *testing.T) {
+			scope, caps, root := nonGitDiscoveryFixture(t)
+			paths := map[string]string{scope.ProjectID: root}
+			ConfigureSecureSession(secureread.Session{Principal: &access.Principal{ID: "actor-A"}}, paths, caps)
+			changeSession := func() {
+				ConfigureSecureSession(secureread.Session{Principal: &access.Principal{ID: "actor-B"}}, paths, caps)
+			}
+			originalStat, originalRead := nonGitDiscoveryRootStat, environmentReadFilesSeam
+			t.Cleanup(func() {
+				nonGitDiscoveryRootStat, environmentReadFilesSeam = originalStat, originalRead
+			})
+			nonGitDiscoveryRootStat = func(path string) (os.FileInfo, error) {
+				info, err := originalStat(path)
+				if err == nil && stage == "after-root-stat" {
+					changeSession()
+				}
+				return info, err
+			}
+			environmentReadFilesSeam = func(ctx context.Context, root string, read func(*filestore.EnvironmentFiles) error) error {
+				err := originalRead(ctx, root, read)
+				if err == nil && stage == "after-owning-read" {
+					changeSession()
+				}
+				return err
+			}
+			rows, err := LocalProjectEnvironments(context.Background(), dto.ProjectRef{StoreID: LocalStoreID, ProjectID: scope.ProjectID}, "")
+			require.Error(t, err, "a later serving session must not replace the original discovery authority")
+			require.Nil(t, rows)
+		})
+	}
+}
+
 func TestNonGitEnvironmentDiscoveryReaderAndOwnerVisibility(t *testing.T) {
 	scope, caps, root := nonGitDiscoveryFixture(t)
 	ctx := context.Background()

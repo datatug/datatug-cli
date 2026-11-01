@@ -1,8 +1,10 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -73,14 +75,32 @@ Examples:
 			if err != nil {
 				return Exit(err.Error(), exitCodeDatabase)
 			}
-			if err := ctx.Err(); err != nil {
-				return Exit(err.Error(), exitCodeDatabase)
-			}
-			return json.NewEncoder(cmd.OutOrStdout()).Encode(value)
+			return writeRedisResult(ctx, cmd.OutOrStdout(), value)
 		},
 	}
 	cmd.Flags().StringVar(&source, "db", "", "Redis URL (redis:// or rediss://), or env:NAME containing the URL")
 	cmd.Flags().BoolVar(&lossless, "lossless", false, "Preserve Redis bulk bytes and int64 values with tagged JSON")
 	cmd.Flags().StringVar(&scanPrefix, "scan-prefix", "", "Trusted literal prefix enabling one SCAN page; Redis ACLs still govern key reads")
 	return cmd
+}
+
+// Serialize into bounded read-derived memory before the final delivery check.
+// A cancellation during JSON marshaling must not emit a success payload. Once
+// Write commits bytes, preserve its outcome rather than reporting a late abort.
+func writeRedisResult(ctx context.Context, output io.Writer, value any) error {
+	var encoded bytes.Buffer
+	if err := json.NewEncoder(&encoded).Encode(value); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return Exit(err.Error(), exitCodeDatabase)
+	}
+	n, err := output.Write(encoded.Bytes())
+	if err != nil {
+		return err
+	}
+	if n < encoded.Len() {
+		return io.ErrShortWrite
+	}
+	return nil
 }

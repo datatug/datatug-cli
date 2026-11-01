@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -272,5 +273,122 @@ func TestQueryRedisCancellationAfterDispatch(t *testing.T) {
 				t.Fatal("CLI did not promptly cancel the dispatched read")
 			}
 		})
+	}
+}
+
+type redisMarshalFunc func() ([]byte, error)
+
+func (f redisMarshalFunc) MarshalJSON() ([]byte, error) { return f() }
+
+type redisWriterFunc func([]byte) (int, error)
+
+func (f redisWriterFunc) Write(data []byte) (int, error) { return f(data) }
+
+func TestRedisResultCancellationDuringSerializationWritesNothing(t *testing.T) {
+	for _, deadline := range []bool{false, true} {
+		t.Run(fmt.Sprintf("deadline=%v", deadline), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			want := "context canceled"
+			if deadline {
+				cancel()
+				ctx, cancel = context.WithTimeout(context.Background(), 10*time.Millisecond)
+				want = "context deadline exceeded"
+			}
+			defer cancel()
+			marshaled := false
+			value := redisMarshalFunc(func() ([]byte, error) {
+				marshaled = true
+				if deadline {
+					// Wait for the real context's notification; no scheduling
+					// assumption or sleep determines the interleaving.
+					<-ctx.Done()
+				} else {
+					cancel()
+				}
+				return []byte(`{"secret":"synthetic-private-payload"}`), nil
+			})
+			var out bytes.Buffer
+			err := writeRedisResult(ctx, &out, value)
+			if !marshaled || err == nil || !strings.Contains(err.Error(), want) || out.Len() != 0 {
+				t.Fatalf("late serialization result leaked: marshaled=%v output=%q error=%v", marshaled, out.String(), err)
+			}
+			if strings.Contains(err.Error(), "synthetic-private-payload") {
+				t.Fatal("cancellation disclosed payload")
+			}
+		})
+	}
+}
+
+func TestRedisResultEncoderAndWriterOutcomes(t *testing.T) {
+	t.Run("unchanged newline and escaping", func(t *testing.T) {
+		var out bytes.Buffer
+		err := writeRedisResult(context.Background(), &out, map[string]any{"html": "<tag>&"})
+		if err != nil || out.String() != `{"html":"\u003ctag\u003e\u0026"}`+"\n" {
+			t.Fatalf("encoded output changed: %q %v", out.String(), err)
+		}
+	})
+	t.Run("serialization failure never reaches writer", func(t *testing.T) {
+		want := errors.New("synthetic encoding failure")
+		var out bytes.Buffer
+		value := redisMarshalFunc(func() ([]byte, error) { return nil, want })
+		err := writeRedisResult(context.Background(), &out, value)
+		if !errors.Is(err, want) || out.Len() != 0 {
+			t.Fatalf("encoding failure output=%q error=%v", out.String(), err)
+		}
+	})
+	t.Run("partial write retains original error", func(t *testing.T) {
+		want := errors.New("synthetic output failure")
+		written := 0
+		output := redisWriterFunc(func(data []byte) (int, error) {
+			written = len(data) / 2
+			return written, want
+		})
+		err := writeRedisResult(context.Background(), output, "payload")
+		if written == 0 || !errors.Is(err, want) {
+			t.Fatalf("partial write outcome changed: bytes=%d error=%v", written, err)
+		}
+	})
+	t.Run("short write without an error is refused", func(t *testing.T) {
+		output := redisWriterFunc(func(data []byte) (int, error) { return len(data) - 1, nil })
+		if err := writeRedisResult(context.Background(), output, "payload"); !errors.Is(err, io.ErrShortWrite) {
+			t.Fatalf("short write accepted: %v", err)
+		}
+	})
+	t.Run("cancellation after committed write keeps success", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		var out bytes.Buffer
+		output := redisWriterFunc(func(data []byte) (int, error) {
+			n, err := out.Write(data)
+			cancel()
+			return n, err
+		})
+		if err := writeRedisResult(ctx, output, "payload"); err != nil || out.String() != "\"payload\"\n" || ctx.Err() == nil {
+			t.Fatalf("committed outcome changed: output=%q error=%v", out.String(), err)
+		}
+	})
+}
+
+func TestQueryRedisMalformedScanRepliesWriteNothing(t *testing.T) {
+	for _, reply := range []string{
+		"*1\r\n$1\r\n0\r\n",
+		"*2\r\n$20\r\n18446744073709551616\r\n*0\r\n",
+		"*2\r\n$1\r\n0\r\n*1\r\n:1\r\n",
+	} {
+		for _, lossless := range []bool{false, true} {
+			source := redisCommandPeer(t, reply)
+			cmd := queryCommand()
+			var out bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetErr(io.Discard)
+			args := []string{"redis", "--db", source, "--scan-prefix", "tenant:"}
+			if lossless {
+				args = append(args, "--lossless")
+			}
+			cmd.SetArgs(append(args, "--", "SCAN", "0"))
+			if err := cmd.Execute(); err == nil || out.Len() != 0 {
+				t.Fatalf("malformed SCAN success (lossless=%v): %q %v", lossless, out.String(), err)
+			}
+		}
 	}
 }

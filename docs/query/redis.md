@@ -14,6 +14,53 @@ The URL path selects the numeric Redis database. `rediss://` verifies TLS;
 Redis ACL user restricted to intended key patterns and allowed reads.
 Environment variables keep connection credentials out of shell arguments.
 
+## Upstash REST
+
+Select the REST transport explicitly; a plain `https://` source is never inferred
+to be Upstash. An `env:NAME` source may contain the same `upstash+https://` form.
+
+```sh
+export UPSTASH_SOURCE='upstash+https://example.upstash.io'
+# Set UPSTASH_READ_TOKEN securely in the environment; do not pass its value as a flag.
+datatug query redis --db env:UPSTASH_SOURCE --rest-token-env UPSTASH_READ_TOKEN --lossless -- GET customer:42
+```
+
+The endpoint must be a root HTTPS origin, without URL credentials, query,
+fragment or command path. TLS certificates are verified. The token is obtained
+from the named environment variable inside each bounded operation and sent only
+in the Authorization header. Redirects are refused. No raw token argument,
+insecure HTTP/TLS mode, URL credential or fallback credential is supported.
+The token flags take uppercase environment variable **names**, such as
+`UPSTASH_READ_TOKEN`, rather than token values. REST flags are rejected with
+`redis://` and `rediss://` sources.
+
+The default Upstash read-only token **does not permit SCAN**. For enumeration,
+explicitly supply a separately scoped ACL-user REST token that permits SCAN:
+
+```sh
+datatug query redis --db env:UPSTASH_SOURCE --scan-token-env UPSTASH_SCAN_TOKEN --scan-prefix 'customer:' --lossless -- SCAN 0 COUNT 100
+```
+
+SCAN uses only `--scan-token-env`; other reads use only `--rest-token-env`.
+Neither falls back to the other. SCAN still requires a literal prefix and
+validates every returned key: ACL key patterns alone do not filter SCAN output.
+Grant only the intended commands and key rights; the CLI cannot certify a token's
+server-side grants. There is no KEYS fallback.
+
+The REST path posts one JSON command array and requests raw RESP2 replies to
+retain binary values and exact integers. JSON command arguments and prefixes
+must be valid UTF-8; binary input keys are refused. Both admitted command text
+and the encoded JSON request are capped at 64 KiB, so escaping can make a
+request exceed the limit. Complete responses retain the 1 MiB, 256-element and
+16-level bounds described below. Token lookup, fetch, body and final output
+share the ten-second deadline. A failed or cancelled read emits no JSON prefix.
+Caller cancellation closes only the owned HTTP read, and client shutdown closes
+its owned transport. This is native read-only compatibility, without DataTug
+application policy enforcement or multi-request transactions. Local protocol
+fixtures do not establish hosted Upstash or browser CORS qualification.
+
+## Output and command limits
+
 Output is one JSON value: strings for GET/HGET, ordered arrays for MGET/HMGET,
 integers for metadata, and `null` for absent values. WRONGTYPE, ACL denials and
 connection failures exit nonzero. URLs, passwords and server errors are omitted

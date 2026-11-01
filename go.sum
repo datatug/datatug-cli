@@ -150,8 +150,8 @@ github.com/dal-go/dalgo2postgres v0.10.1 h1:M3Vpd2LhpkNP8RRQZa4wb36ihyhn+EEPWkMt
 github.com/dal-go/dalgo2postgres v0.10.1/go.mod h1:jiwyaLzKeICdOjju15i6qXr3/keDbtuQVVIHPJP4+58=
 github.com/dal-go/dalgo2postgrest v0.0.0-20261027200821-d952c8fc3279 h1:s26W3F4E8CVnc+2N3f3iRJhJMlrDzGxNF+DV7o//IJQ=
 github.com/dal-go/dalgo2postgrest v0.0.0-20261027200821-d952c8fc3279/go.mod h1:fvTdA6Qk3cQFnBH3VT4/5P1/EUDfVs+1SQBSepJfkgk=
-github.com/dal-go/dalgo2redis v0.1.1-0.20261101153501-5a0bddba4620 h1:N0s3tzlVp0veXIG5jVbJ5oKZNKzp7wiiYRsypyQd4/k=
-github.com/dal-go/dalgo2redis v0.1.1-0.20261101153501-5a0bddba4620/go.mod h1:jNyexpYOr5/0gRlJTFXMSTDMSlyxjHIwoLqSkWmUw+k=
+github.com/dal-go/dalgo2redis v0.1.1-0.20261101204022-41f1ab510f15 h1:IBInvq5jU0di9f+R3GPzUpC8lwptHyNR0KtDJm3L/LQ=
+github.com/dal-go/dalgo2redis v0.1.1-0.20261101204022-41f1ab510f15/go.mod h1:jNyexpYOr5/0gRlJTFXMSTDMSlyxjHIwoLqSkWmUw+k=
 github.com/dal-go/dalgo2sql v0.31.0 h1:HPIEtlxrPkg1DvuRQ/Zsv1/otFY7T/CWGPfUm+yCjsw=
 github.com/dal-go/dalgo2sql v0.31.0/go.mod h1:q/L7EXw7f1nnfn4aKfm3G5s0AJAkX0FNPyK3CdbLR28=
 github.com/dal-go/dalgo2sqlite v0.5.1 h1:fFrAnKRlYtSbUSBvzyWRFbLyhNIVesh5r1RiRnKzeuI=

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestWatchEmailSinkCrashRecoveryCollisionAndSymlinks(t *testing.T) {
@@ -24,6 +25,20 @@ func TestWatchEmailSinkCrashRecoveryCollisionAndSymlinks(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sink.Path, ".pending-interrupted"), []byte(`{"id":`), 0600); err != nil {
 		t.Fatal(err)
 	}
+	// Every writer must observe the absent target before any publishes it.
+	// Otherwise scheduling can serialize all eight sends and miss collisions.
+	arrived := make(chan struct{}, 8)
+	release := make(chan struct{})
+	linkResults := make(chan error, 8)
+	originalLink := sinkLink
+	sinkLink = func(old, target string) error {
+		arrived <- struct{}{}
+		<-release
+		err := originalLink(old, target)
+		linkResults <- err
+		return err
+	}
+	defer func() { sinkLink = originalLink }()
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
@@ -34,7 +49,34 @@ func TestWatchEmailSinkCrashRecoveryCollisionAndSymlinks(t *testing.T) {
 			}
 		}()
 	}
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	for i := 0; i < 8; i++ {
+		select {
+		case <-arrived:
+		case <-deadline.C:
+			close(release)
+			wg.Wait()
+			t.Fatal("email writers did not reach the publication barrier")
+		}
+	}
+	close(release)
 	wg.Wait()
+	published, collided := 0, 0
+	for i := 0; i < 8; i++ {
+		err := <-linkResults
+		switch {
+		case err == nil:
+			published++
+		case os.IsExist(err):
+			collided++
+		default:
+			t.Fatalf("unexpected publication error: %v", err)
+		}
+	}
+	if published != 1 || collided != 7 {
+		t.Fatalf("expected one publication and seven idempotent collisions, got %d/%d", published, collided)
+	}
 	if err := (&FileEmailSink{Path: sink.Path}).Send(context.Background(), m); err != nil {
 		t.Fatal("restart retry", err)
 	}

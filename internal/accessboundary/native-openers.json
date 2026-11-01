@@ -22,7 +22,7 @@
     "apps/datatugapp/commands/cmd_query_bigquery.go:package:github.com/dal-go/dalgo2bigquery.NewFileLedger": 1,
     "apps/datatugapp/commands/cmd_query_bigquery.go:runBigQueryCommand:github.com/dal-go/dalgo2bigquery.NewClient": 1,
     "apps/datatugapp/commands/cmd_query_redis.go:import:github.com/dal-go/dalgo2redis": 1,
-    "apps/datatugapp/commands/cmd_query_redis.go:queryRedisCommand:github.com/dal-go/dalgo2redis.Open": 1,
+    "apps/datatugapp/commands/cmd_query_redis.go:queryRedisCommand:github.com/dal-go/dalgo2redis.OpenWithOptions": 1,
     "apps/datatugapp/commands/cmd_session_dashboard.go:import:database/sql": 1,
     "apps/datatugapp/commands/cmd_session_dashboard.go:package:database/sql.Open": 1,
     "apps/datatugapp/commands/cmd_session_import.go:import:database/sql": 1,

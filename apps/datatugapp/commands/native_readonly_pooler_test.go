@@ -31,6 +31,47 @@ func TestNativePoolerCIBarrier(t *testing.T) {
 	require.False(t, poolerCI("windows", get))
 }
 
+func TestNativePoolerEndpointBeforeProvisioning(t *testing.T) {
+	const valid = "postgres://postgres:fixture-only@127.0.0.1:54329/postgres?sslmode=disable"
+	calls := 0
+	creator := func() realPgServer { calls++; return realPgServer{user: "owned"} }
+	server, err := createOwnedPoolerServer(valid, creator)
+	require.NoError(t, err)
+	require.Equal(t, "owned", server.user)
+	require.Equal(t, 1, calls)
+	_, err = createOwnedPoolerServer(valid, nil)
+	require.Error(t, err)
+	for _, test := range []struct{ name, raw string }{
+		{"missing", ""},
+		{"parse-error", "postgres://%"},
+		{"remote-host", strings.Replace(valid, "127.0.0.1", "remote.example", 1)},
+		{"host-alias", strings.Replace(valid, "127.0.0.1", "localhost", 1)},
+		{"wrong-port", strings.Replace(valid, ":54329", ":5432", 1)},
+		{"wrong-database", strings.Replace(valid, "/postgres?", "/other?", 1)},
+		{"encoded-database", strings.Replace(valid, "/postgres?", "/post%67res?", 1)},
+		{"wrong-scheme", strings.Replace(valid, "postgres://", "postgresql://", 1)},
+		{"missing-password", strings.Replace(valid, ":fixture-only@", "@", 1)},
+		{"empty-password", strings.Replace(valid, ":fixture-only@", ":@", 1)},
+		{"fragment", valid + "#other"},
+		{"empty-fragment", valid + "#"},
+		{"host-override", valid + "&host=remote.example"},
+		{"hostaddr-override", valid + "&hostaddr=192.0.2.1"},
+		{"port-override", valid + "&port=5432"},
+		{"database-override", valid + "&dbname=other"},
+		{"service-override", valid + "&service=other"},
+		{"encoded-override", valid + "&%68ost=remote.example"},
+		{"options-override", valid + "&options=other"},
+		{"duplicate-setting", valid + "&sslmode=disable"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			before := calls
+			_, refusal := createOwnedPoolerServer(test.raw, creator)
+			require.EqualError(t, refusal, "native pooler: canonical owned CI admin endpoint required")
+			require.Equal(t, before, calls, "invalid destination must never call the fixture creator")
+		})
+	}
+}
+
 func TestNativePoolerCleanupRequiresExactOwnership(t *testing.T) {
 	id := strings.Repeat("a", 64)
 	image := "sha256:" + strings.Repeat("b", 64)

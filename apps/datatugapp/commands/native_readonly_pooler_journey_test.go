@@ -41,11 +41,14 @@ func TestPostgresNativeReadonlyThroughTransactionPooler(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	server := newRealPgServer(t)
+	server, err := createOwnedPoolerServer(os.Getenv(realPgAdminVar), func() realPgServer {
+		return newRealPgServer(t)
+	})
+	poolerCheck(t, err == nil, "canonical owned PostgreSQL endpoint before provisioning")
 	poolerCheck(t, server.host == "127.0.0.1" && server.port == "54329", "owned PostgreSQL endpoint")
 	poolerCheck(t, strconv.Itoa(realPgServerMajor(t, server.scanURL)) == os.Getenv(realPgMajorVar), "actual PostgreSQL major")
 	observer := poolerSQL(t, server.scanURL)
-	_, err := observer.ExecContext(ctx, `CREATE TABLE pooler_guard_probe(id integer PRIMARY KEY, note text); INSERT INTO pooler_guard_probe VALUES(1,'original')`)
+	_, err = observer.ExecContext(ctx, `CREATE TABLE pooler_guard_probe(id integer PRIMARY KEY, note text); INSERT INTO pooler_guard_probe VALUES(1,'original')`)
 	poolerCheck(t, err == nil, "create owned mutation probe")
 	endpoint := startNativePooler(t, ctx, server)
 	applicationA, applicationB := "dt_pool_a_"+randomHex(t, 6), "dt_pool_b_"+randomHex(t, 6)
@@ -199,6 +202,25 @@ func TestPostgresNativeReadonlyThroughTransactionPooler(t *testing.T) {
 func poolerCI(goos string, getenv func(string) string) bool {
 	major := getenv(realPgMajorVar)
 	return goos == "linux" && getenv("GITHUB_ACTIONS") == "true" && getenv("RUNNER_OS") == "Linux" && getenv("DATATUG_NATIVE_POOLER_CI") == "1" && (major == "17" || major == "18")
+}
+
+// Validate before the creator can provision roles/databases. A numeric loopback
+// authority alone is insufficient: pgx accepts routing overrides in the query.
+// This closed profile is the existing CI maintenance URL, with only its secret
+// password variable. Neither invalid input nor parser errors leave diagnostics.
+func createOwnedPoolerServer(raw string, create func() realPgServer) (realPgServer, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme != "postgres" || parsed.Opaque != "" ||
+		parsed.Host != "127.0.0.1:54329" || parsed.Path != "/postgres" || parsed.RawPath != "" ||
+		parsed.RawQuery != "sslmode=disable" || parsed.ForceQuery || parsed.Fragment != "" || parsed.RawFragment != "" ||
+		parsed.User == nil || parsed.User.Username() != "postgres" || parsed.String() != raw || create == nil {
+		return realPgServer{}, errors.New("native pooler: canonical owned CI admin endpoint required")
+	}
+	password, present := parsed.User.Password()
+	if !present || password == "" {
+		return realPgServer{}, errors.New("native pooler: canonical owned CI admin endpoint required")
+	}
+	return create(), nil
 }
 
 func poolerCheck(t *testing.T, condition bool, stage string) {

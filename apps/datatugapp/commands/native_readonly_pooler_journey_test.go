@@ -116,14 +116,25 @@ func TestPostgresNativeReadonlyThroughTransactionPooler(t *testing.T) {
 	poolerCheck(t, checkRead(applicationB) == firstPID, "two independently opened clients reuse one actual backend")
 	assertWriteDenied()
 
-	// With server_reset_query_always=0 this deliberate session pollution really
-	// survives a transaction-pool handoff. The next guard must still say ON.
+	// PgBouncer 1.26 tracks this reported GUC even without a reset query.
+	// Prove client restoration on the same backend, then explicitly return it
+	// with a writable default. Every following guarded transaction must say ON.
+	checkDefault := func(query, expected, stage string) {
+		var pid int
+		queryErr := raw.QueryRowContext(ctx, query).Scan(&pid, &mode)
+		poolerCheck(t, queryErr == nil, stage+": query succeeded")
+		poolerCheck(t, mode == "on" || mode == "off", stage+": fixed mode enum")
+		poolerCheck(t, mode == expected, stage+": expected default")
+		poolerCheck(t, pid == firstPID, stage+": same actual backend")
+	}
 	raw = poolerSQL(t, clientURL(applicationA))
-	poolerCheck(t, raw.QueryRowContext(ctx, `SELECT set_config('default_transaction_read_only','on',false)`).Scan(&mode) == nil && mode == "on", "set owned pooled session default")
+	checkDefault(`SELECT pg_backend_pid(),set_config('default_transaction_read_only','on',false)`, "on", "client A explicit ON")
 	poolerCheck(t, raw.Close() == nil, "close session-pollution client")
 	raw = poolerSQL(t, clientURL(applicationB))
-	poolerCheck(t, raw.QueryRowContext(ctx, `SHOW default_transaction_read_only`).Scan(&mode) == nil && mode == "on", "N-PG10 actual default survives handoff")
-	poolerCheck(t, raw.QueryRowContext(ctx, `SELECT set_config('default_transaction_read_only','off',false)`).Scan(&mode) == nil && mode == "off", "pollute pooled session to writable default")
+	checkDefault(`SELECT pg_backend_pid(),current_setting('default_transaction_read_only')`, "off", "client B restored OFF after handoff")
+	checkDefault(`SELECT pg_backend_pid(),set_config('default_transaction_read_only','on',false)`, "on", "client B explicit ON")
+	checkDefault(`SELECT pg_backend_pid(),set_config('default_transaction_read_only','off',false)`, "off", "client B explicit OFF")
+	checkDefault(`SELECT pg_backend_pid(),current_setting('default_transaction_read_only')`, "off", "N-PG10 writable default before return")
 	poolerCheck(t, raw.Close() == nil, "close writable-default client")
 	poolerCheck(t, checkRead(applicationB) == firstPID, "verified transaction after real pooled mode change")
 	assertWriteDenied()

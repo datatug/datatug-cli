@@ -27,12 +27,16 @@ reported using fixed stage labels. No customer database or saved credentials
 participate.
 
 `ignore_startup_parameters` deliberately discards the client's read-only
-default. One backend and `server_reset_query_always=0` deliberately preserve
-session pollution. These adversarial settings must not be copied into a
-production configuration. The tests must observe the unsafe default and actual
-backend reuse before accepting the verified-transaction result. The owned test
-role can write outside a read-only transaction; it is not labelled a read-only
-credential.
+startup default. PgBouncer 1.26 still tracks PostgreSQL's reported
+`default_transaction_read_only` changes and restores each client's default,
+independently of `server_reset_query_always=0`; see the pinned
+[release notes](https://github.com/pgbouncer/pgbouncer/blob/f03e9bf263d7ccd5d1d152a61811bf3258dd6b87/NEWS.md#L23)
+and [variable restoration](https://github.com/pgbouncer/pgbouncer/blob/f03e9bf263d7ccd5d1d152a61811bf3258dd6b87/src/objects.c#L962).
+The test requires the same backend across client restoration, explicit ON/OFF
+changes, and an observed OFF default before returning the connection. The next
+guarded transaction must be ON and refuse writes natively. These adversarial
+settings must not be copied into production. The owned test role can write
+outside a read-only transaction; it is not labelled a read-only credential.
 
 Cleanup validates exact name, ID, task label and immutable image before removing
 the owned container, verifies listener absence, then removes private files. A

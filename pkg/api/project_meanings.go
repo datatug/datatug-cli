@@ -19,6 +19,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
+	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/gofrs/flock"
 	"github.com/strongo/validation"
 )
@@ -298,6 +299,10 @@ func randomMeaningSuffix() string {
 	return strings.ReplaceAll(time.Now().UTC().Format("20060102150405.000000000"), ".", "")
 }
 func LocalProjectMeaningsCatalog(ctx context.Context, ref dto.ProjectRef, branch string) (datatug.ProjectMeaningsCatalog, error) {
+	return localProjectMeaningsCatalog(ctx, ref, branch, false)
+}
+
+func localProjectMeaningsCatalog(ctx context.Context, ref dto.ProjectRef, branch string, discovery bool) (datatug.ProjectMeaningsCatalog, error) {
 	var result datatug.ProjectMeaningsCatalog
 	err := withLocalMeanings(ctx, ref, branch, false, func(root *os.Root, scope datatug.MeaningScope, _ gitState) error {
 		d, err := readLocalMeanings(root)
@@ -311,6 +316,13 @@ func LocalProjectMeaningsCatalog(ctx context.Context, ref dto.ProjectRef, branch
 		result, err = datatug.BuildProjectMeaningsCatalog(d, q, b, scope, authorizeMeaningWrite(ctx, ref.ProjectID) == nil, true)
 		if err != nil {
 			return err
+		}
+		if discovery {
+			archived, err := filestore.ReadProjectArchivedItems(root.Name())
+			if err != nil {
+				return err
+			}
+			result = projectMeaningDiscovery(result, archived)
 		}
 		return nil
 	})

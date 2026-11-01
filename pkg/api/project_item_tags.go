@@ -341,7 +341,7 @@ func localProjectDbServers(ctx context.Context, ref dto.ProjectRef, branch strin
 		var archived map[datatug.ProjectObjectRef]bool
 		if discovery {
 			var err error
-			archived, err = filestore.ReadProjectArchivedItems(reader.root.Name())
+			archived, err = filestore.ReadProjectArchivedItemsFromRoot(reader.root)
 			if err != nil {
 				return nil, err
 			}

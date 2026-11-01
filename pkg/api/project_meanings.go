@@ -318,7 +318,7 @@ func localProjectMeaningsCatalog(ctx context.Context, ref dto.ProjectRef, branch
 			return err
 		}
 		if discovery {
-			archived, err := filestore.ReadProjectArchivedItems(root.Name())
+			archived, err := filestore.ReadProjectArchivedItemsFromRoot(root)
 			if err != nil {
 				return err
 			}

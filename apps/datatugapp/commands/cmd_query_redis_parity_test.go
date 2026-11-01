@@ -48,7 +48,11 @@ func TestQueryRedisNativeParityIntegration(t *testing.T) {
 		t.Fatal("invalid fixture URL")
 	}
 	admin := redis.NewClient(options)
-	defer admin.Close()
+	t.Cleanup(func() {
+		if err := admin.Close(); err != nil {
+			t.Errorf("close Redis fixture admin: %v", err)
+		}
+	})
 	prefix := fmt.Sprintf("cli-parity-%d:", time.Now().UnixNano())
 	keys := []string{prefix + "binary", prefix + "integer", prefix + "empty"}
 	for i := 0; i < 31; i++ {

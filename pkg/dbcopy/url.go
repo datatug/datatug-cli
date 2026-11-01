@@ -641,10 +641,10 @@ func (r BackendRef) openForTransfer(ctx context.Context, postgresSchema string) 
 }
 
 // OpenForWrite is Open for the one connection that is written through: the target of
-// `datatug db copy --to`. It differs from Open only for a postgres source, which Open and
-// OpenProtected open with a read-only session and refuse when the URL turns that off (see
-// postgresConnectionString); this opens it without the read-only default and keeps the URL's own
-// setting. Nothing else opens a PostgreSQL source for writing.
+// `datatug db copy --to`. SQLite targets may create and write their file; source opens are
+// native read-only. PostgreSQL sources use a read-only session and refuse when the URL turns
+// that off (see postgresConnectionString); a target keeps the URL's own setting instead.
+// Nothing else opens a PostgreSQL source for writing.
 func (r BackendRef) OpenForWrite(ctx context.Context) (dal.DB, error) {
 	return r.open(ctx, openMode{forWrite: true})
 }
@@ -798,8 +798,8 @@ func (r BackendRef) openSource(ctx context.Context, mode openMode) (dal.DB, erro
 		return OpenOpenVaultDBSource(r.Path)
 	case "sqlite":
 		// A SQLite file that is written (the target of `db copy`) is created when it is missing;
-		// one that is read must exist.
-		fileMode := SQLiteReadWrite
+		// one that is read must exist and is native read-only, independently of policies.
+		fileMode := SQLiteReadOnly
 		if mode.forWrite {
 			if err := r.prepareNewSQLiteFile(); err != nil {
 				return nil, err

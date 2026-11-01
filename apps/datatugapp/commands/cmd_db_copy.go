@@ -81,6 +81,7 @@ func dbCopyAction(cmd *cobra.Command, _ []string) error {
 		if ref.ProjectID != target.ProjectID || ref.DatasetID != target.DatasetID || ref.Location != target.Location {
 			return Exit("--recover-job-ref destination does not match --to", 2)
 		}
+		warnRemoteCopyTarget(errWriter, target)
 		client, err := bqGoogleDefaultClient(ctx, bqwriter.BigqueryScope)
 		if err != nil {
 			return Exit("open Google credentials from the local application default credentials", 4)
@@ -124,6 +125,7 @@ func dbCopyAction(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return keepExit(err, func(err error) error { return Exit(fmt.Sprintf("--to: %v", err), 2) })
 	}
+	warnRemoteCopyTarget(errWriter, tgtRef)
 	// A failure of a PostgreSQL side says which flag its connection string is read from (or its variable).
 	srcRef, tgtRef = srcRef.WithFlag("--from"), tgtRef.WithFlag("--to")
 	if fromSchema != "" && srcRef.Scheme != "postgres" {

@@ -4,6 +4,7 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/dal-go/dalgo2duckdb"
 	"github.com/stretchr/testify/require"
 	"path/filepath"
@@ -23,6 +24,37 @@ func TestQueryDuckDBParquet(t *testing.T) {
 	require.Contains(t, stdout, "Parquet")
 	_, stderr, code = runQuery(t, "", "--db", "duckdb://:memory:", "--sql", "SELECT 1; COPY (SELECT 1) TO '/tmp/forbidden.parquet' (FORMAT PARQUET)", "--no-policies")
 	require.NotEqual(t, 0, code, stderr)
+}
+
+func TestQueryDuckDBParquetExactValuesAndBoundedOutput(t *testing.T) {
+	db, err := dalgo2duckdb.NewDatabase("")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	path := filepath.Join(t.TempDir(), "exact.parquet")
+	_, err = db.SQLDB().Exec("COPY (SELECT i, (9007199254740993+i)::BIGINT AS exact, (12.0034)::DECIMAL(12,4) AS amount, CASE i WHEN 0 THEN false WHEN 1 THEN true ELSE NULL END AS flag, (-2+i)::TINYINT AS negative FROM range(3) t(i)) TO '" + strings.ReplaceAll(path, "'", "''") + "' (FORMAT PARQUET)")
+	require.NoError(t, err)
+	stdout, stderr, code := runQuery(t, "", "--db", "duckdb://:memory:", "--sql", "SELECT exact, amount, flag, negative FROM read_parquet('"+strings.ReplaceAll(path, "'", "''")+"') ORDER BY i", "--format", "json", "--no-policies")
+	require.Equal(t, 0, code, stderr)
+	var rows []map[string]any
+	decoder := json.NewDecoder(strings.NewReader(stdout))
+	decoder.UseNumber()
+	require.NoError(t, decoder.Decode(&rows))
+	require.Len(t, rows, 3)
+	for i, exact := range []string{"9007199254740993", "9007199254740994", "9007199254740995"} {
+		require.Equal(t, json.Number(exact), rows[i]["exact"], "a JS float decoder would round this value")
+		require.Equal(t, []any{false, true, nil}[i], rows[i]["flag"])
+		require.Equal(t, []json.Number{"-2", "-1", "0"}[i], rows[i]["negative"])
+		require.Equal(t, map[string]any{"Width": json.Number("12"), "Scale": json.Number("4"), "Value": json.Number("120034")}, rows[i]["amount"])
+	}
+	for _, text := range []string{"SELECT i FROM range(10001) t(i)", "SELECT repeat('x',4000001) AS huge"} {
+		stdout, stderr, code = runQuery(t, "", "--db", "duckdb://:memory:", "--sql", text, "--format", "json", "--no-policies")
+		require.NotEqual(t, 0, code, stderr)
+		require.Empty(t, stdout, "overflow must not emit a partial JSON result")
+		require.Contains(t, stderr, "DuckDB native result exceeds row or byte budget")
+	}
+	stdout, stderr, code = runQuery(t, "", "--db", "duckdb://:memory:", "--sql", "SELECT 42 AS answer", "--format", "json", "--no-policies")
+	require.Equal(t, 0, code, stderr)
+	require.Equal(t, "[\n{\"$key\":\"\",\"answer\":42}\n]\n", stdout, "ordinary native output retains its existing shape")
 }
 
 func TestQueryDuckDBDatabaseReadOnly(t *testing.T) {

@@ -226,7 +226,7 @@ func openReadOnlySQLiteDB(ctx context.Context, path string) (dal.DB, *sql.DB, fu
 
 // DuckDB native SQL uses a read-only transaction. File databases are opened
 // read-only too; in-memory sessions still allow Parquet SELECTs.
-func (e *Executor) runDuckDBNativeSQL(ctx context.Context, ref dbcopy.BackendRef, text string, args []dal.QueryArg) (Result, error) {
+func (e *Executor) runDuckDBNativeSQL(ctx context.Context, ref dbcopy.BackendRef, text string, args []dal.QueryArg) (result Result, err error) {
 	// DuckDB queries can read external files and URLs. A policy on a database
 	// cannot bound those resources, so this native surface requires the
 	// policy-free read profile and no loaded policies.
@@ -242,18 +242,36 @@ func (e *Executor) runDuckDBNativeSQL(ctx context.Context, ref dbcopy.BackendRef
 	if path != "" {
 		path += "?access_mode=read_only"
 	}
-	db, err := dbcopy.OpenReadOnlyDuckDB(path)
+	if err = ctx.Err(); err != nil {
+		return Result{}, err
+	}
+	db, err := openDuckDBNativeFn(path)
 	if err != nil {
 		return Result{}, ref.OpenFailure(err)
 	}
-	defer func() { _ = db.Close() }()
+	defer func() {
+		closeErr := db.Close()
+		// Delivery is after cleanup: cancellation during Close must not turn
+		// into a successful result, even if the driver returned nil earlier.
+		if contextErr := ctx.Err(); contextErr != nil {
+			result, err = Result{}, contextErr
+		} else if err == nil && closeErr != nil {
+			result, err = Result{}, closeErr
+		}
+	}()
 	if err = db.ValidateReadQuery(ctx, text); err != nil {
 		return Result{}, err
 	}
-	result, err := e.runThroughPolicies(ctx, db, dal.NewTextQuery(text, nil, args...), nil)
+	result, err = e.runDuckDBThroughPolicies(ctx, db, dal.NewTextQuery(text, nil, args...))
 	if err != nil {
 		return Result{}, err
 	}
-	result.ColumnOrder = selectListOrder(ctx, db.SQLDB(), text, args)
+	result.ColumnOrder = duckDBColumnOrderFn(ctx, db.SQLDB(), text, args)
+	if err = ctx.Err(); err != nil {
+		return Result{}, err
+	}
+	if err = checkDuckDBResultBudget(result); err != nil {
+		return Result{}, err
+	}
 	return result, nil
 }

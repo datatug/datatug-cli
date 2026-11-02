@@ -150,6 +150,8 @@ github.com/dal-go/dalgo2firestore v0.10.41 h1:drYcKl+0dOYhkditP1YnlwyCgkj7dxksP/
 github.com/dal-go/dalgo2firestore v0.10.41/go.mod h1:b5XGSypRMQWN4dPtOxwrToFrKIbC0IliB2Yr6RLy9i8=
 github.com/dal-go/dalgo2http v0.4.0 h1:vtkwd8x88kP4XLEZCt7kTFa5xJfQojJWJRKBHGEBg0k=
 github.com/dal-go/dalgo2http v0.4.0/go.mod h1:9D70F2oimIPSz9r5iKki5xuepReCAMSSla9TmgmuVcs=
+github.com/dal-go/dalgo2influxdb v0.0.0-20261101231321-deba4dd49915 h1:X83X8VBudHpurLWxWt8a6Y6+qr/9ffJveCeROP1YgBI=
+github.com/dal-go/dalgo2influxdb v0.0.0-20261101231321-deba4dd49915/go.mod h1:gq7BHzw4ZvsEqhyyg9l6XIff6iqdKf0zxMzTmcyo1F0=
 github.com/dal-go/dalgo2libsql v0.0.0-20261028000517-7d8187759a51 h1:wNIXBhXuA3GWR0tEEuZtzU7XMCBcm6dO5N+enH7K5Gk=
 github.com/dal-go/dalgo2libsql v0.0.0-20261028000517-7d8187759a51/go.mod h1:qEefPrjNb5DWSq3cPUqlHhfwDIJN+qrVE4Xlc2K4OLQ=
 github.com/dal-go/dalgo2mongodb v0.0.0-20261027130616-1c6549d8dc1e h1:o7QTjYTpj6yanCM5LB7VyJCHQbMgxDRGFbsyHFhP0uc=

@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -128,7 +129,19 @@ func TestQueryDynamoRedirectAndOversizeRepliesFailClosed(t *testing.T) {
 	t.Cleanup(target.Close)
 	for _, mode := range []string{"redirect", "oversize", "foreign", "malformed"} {
 		t.Run(mode, func(t *testing.T) {
+			handlerDone := make(chan struct{})
 			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				defer close(handlerDone)
+				// Read the complete bounded POST before observing peer cancellation.
+				// This distinguishes a real admitted TLS response from a failed input.
+				if r.TLS == nil || r.ContentLength < 1 || r.ContentLength > dynamoDocumentBytes {
+					t.Error("owned TLS request contract changed")
+					return
+				}
+				if _, err := io.Copy(io.Discard, http.MaxBytesReader(w, r.Body, dynamoDocumentBytes)); err != nil {
+					t.Error("owned bounded request could not be drained")
+					return
+				}
 				w.Header().Set("Content-Type", "application/x-amz-json-1.0")
 				switch mode {
 				case "redirect":
@@ -136,7 +149,14 @@ func TestQueryDynamoRedirectAndOversizeRepliesFailClosed(t *testing.T) {
 					w.WriteHeader(302)
 				case "oversize":
 					if err := json.NewEncoder(w).Encode(map[string]any{"Item": map[string]any{"account": map[string]any{"S": "one"}, "large": map[string]any{"S": strings.Repeat("x", 1<<20)}}}); err != nil {
-						t.Error(err)
+						// A client that refuses the oversized reply can close while
+						// the server is still writing it. Accept only a concrete
+						// peer-close error with the request cancellation witness.
+						if !errors.Is(err, syscall.EPIPE) && !errors.Is(err, syscall.ECONNRESET) {
+							t.Error("unexpected oversized fixture response write failure")
+						} else if !errors.Is(r.Context().Err(), context.Canceled) {
+							t.Error("peer-close write error lacked request cancellation")
+						}
 					}
 				case "foreign":
 					_, _ = w.Write([]byte(`{"Item":{"account":{"S":"other-secret"}}}`))
@@ -146,9 +166,21 @@ func TestQueryDynamoRedirectAndOversizeRepliesFailClosed(t *testing.T) {
 			}))
 			t.Cleanup(server.Close)
 			config := dynamoTestConfig(t, server)
+			completedBy := time.Now().Add(2 * time.Second)
 			output, diagnostic, err := dynamoTestCommand(t, context.Background(), config, `{"operation":"get","collection":"items","key":{"account":{"S":"one"}}}`, "2s")
 			if err == nil || output != "" || strings.Contains(err.Error()+diagnostic, "secret") {
 				t.Fatal("unsafe reply delivered or leaked")
+			}
+			// A positive handler acknowledgement is required within the original
+			// two-second budget, including any expected peer-close write error.
+			select {
+			case <-handlerDone:
+			default:
+				select {
+				case <-handlerDone:
+				case <-time.After(time.Until(completedBy)):
+					t.Fatal("owned negative-response handler did not complete")
+				}
 			}
 		})
 	}

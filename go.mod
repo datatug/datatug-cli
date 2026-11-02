@@ -35,6 +35,7 @@ require (
 	github.com/dal-go/dalgo2dynamodb v0.0.0-20261101230446-46c9938f48ef
 	github.com/dal-go/dalgo2firestore v0.10.41
 	github.com/dal-go/dalgo2http v0.4.0
+	github.com/dal-go/dalgo2influxdb v0.0.0-20261101231321-deba4dd49915
 	github.com/dal-go/dalgo2libsql v0.0.0-20261028000517-7d8187759a51
 	github.com/dal-go/dalgo2mongodb v0.0.0-20261027130616-1c6549d8dc1e
 	github.com/dal-go/dalgo2mssql v0.0.1

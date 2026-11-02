@@ -143,6 +143,11 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 		return fmt.Errorf("configure local project registry: %w", err)
 	}
 	pathsByID = registry.Paths()
+	// Discovery may add projects absent from the command's configured map.
+	// Validate this exact final registry before factories, capabilities or listener.
+	if err := session.ValidateBoundServer(pathsByID, caps.AllowWrites, caps.AllowOpaqueSQL, caps.AllowLiveConnections); err != nil {
+		return err
+	}
 	storage.NewDatatugStore = newDatatugStoreFactory(pathsByID)
 	if err := api.ConfigureExecutionEvidence(pathsByID, caps.IncidentStores, executionstore.Options{
 		PrivateDir: caps.EvidencePrivateDir,

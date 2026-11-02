@@ -3,6 +3,7 @@ package endpoints
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"strings"
 	"unicode/utf8"
@@ -70,13 +71,33 @@ func getCatalogTablesHandler(w http.ResponseWriter, r *http.Request) {
 		writeContractError(w, r, newContractError(apicontract.ErrCodeAccessDenied, "access denied", ""))
 		return
 	}
+	var tables *api.CatalogTables
+	loadTables := func() bool {
+		var loadErr error
+		tables, loadErr = getCatalogTablesFunc(projectDir, environmentID, catalogID)
+		if loadErr != nil {
+			returnJSON(w, r, http.StatusOK, loadErr, nil)
+			return false
+		}
+		if tables == nil {
+			writeContractError(w, r, newContractError(codeInternal, "catalog permissions could not be verified", ""))
+			return false
+		}
+		return true
+	}
+	bound := api.SourceBoundProfile()
+	// Legacy metadata preserves its stored catalog lookup/404 behavior. Bound
+	// metadata must first verify the exact source, before reading its catalog.
+	if !bound && !loadTables() {
+		return
+	}
 	store, err := relatedProjectStoreFor(ref.ProjectID)
 	if err != nil {
 		writeContractError(w, r, newSourceUnavailable("the source cannot be read"))
 		return
 	}
 	var driver string
-	if api.SourceBoundProfile() {
+	if bound {
 		// The configured profile must resolve its exact validated native target.
 		registered, err := apiResolveSource(r.Context(), store, projectDir, environmentID, catalogID)
 		if err != nil {
@@ -95,7 +116,11 @@ func getCatalogTablesHandler(w http.ResponseWriter, r *http.Request) {
 		// the same default-schema identity used by reads; policies still intersect.
 		catalog, err := store.LoadEnvDbCatalog(r.Context(), environmentID, "", catalogID)
 		if err != nil {
-			writeContractError(w, r, newSourceUnavailable("the source cannot be read"))
+			if errors.Is(err, fs.ErrNotExist) {
+				handleError(fmt.Errorf("%w: catalog is not registered", api.ErrCatalogNotFound), w, r)
+			} else {
+				writeContractError(w, r, newSourceUnavailable("the source cannot be read"))
+			}
 			return
 		}
 		driver = catalog.Driver
@@ -104,13 +129,7 @@ func getCatalogTablesHandler(w http.ResponseWriter, r *http.Request) {
 	if dbcopy.IsLibSQLScheme(driver) {
 		driver = api.DriverLibSQL
 	}
-	tables, err := getCatalogTablesFunc(projectDir, environmentID, catalogID)
-	if err != nil {
-		returnJSON(w, r, http.StatusOK, err, nil)
-		return
-	}
-	if tables == nil {
-		writeContractError(w, r, newContractError(codeInternal, "catalog permissions could not be verified", ""))
+	if bound && !loadTables() {
 		return
 	}
 	filter := func(items []api.CatalogTable) ([]api.CatalogTable, error) {

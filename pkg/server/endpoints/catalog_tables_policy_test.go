@@ -211,7 +211,7 @@ func TestCatalogTablesLegacyEnvironmentDriverAndQualifiedMandatoryPolicies(t *te
 	}
 	absent := httptest.NewRecorder()
 	getCatalogTablesHandler(absent, httptest.NewRequest(http.MethodGet, "/datatug/catalog-tables?project="+project+"&environment=local&catalog=not-registered", nil))
-	if absent.Code != http.StatusServiceUnavailable {
+	if absent.Code != http.StatusNotFound {
 		t.Fatalf("missing stored catalog granted metadata: %d %s", absent.Code, absent.Body.String())
 	}
 	w := request(access.WithPolicy(context.Background(), access.MustPolicy("bare-customer", access.Collection("Customer", access.Allow(access.Query)))))
@@ -244,5 +244,51 @@ func TestCatalogTablesLoaderAndInvalidIdentityNeverReturnPartialSuccess(t *testi
 		if w.Code == http.StatusOK || strings.Contains(w.Body.String(), "Customer") || strings.Contains(w.Body.String(), "Hidden") {
 			t.Fatalf("partial %s metadata result: %d %s", kind, w.Code, w.Body.String())
 		}
+	}
+}
+
+// A stored scan is only provisional until its catalog definition has also been
+// loaded. Exercise actual file changes in that interval, without live discovery.
+func TestCatalogTablesChangedDefinitionAfterStoredScanNeverReturnsNames(t *testing.T) {
+	for _, kind := range []string{"removed", "malformed"} {
+		t.Run(kind, func(t *testing.T) {
+			dir, project := writeSemanticTestProject(t)
+			configureSemanticSession(t, dir, project, "bob", []string{"support"})
+			if err := os.MkdirAll(filepath.Join(dir, "dbmodels", semanticTestSource, "main", "tables", "Customer"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			catalogPath := filepath.Join(dir, "environments", semanticTestEnv, "catalogs", "chinook-local", "chinook-local.db.json")
+			if _, err := os.Stat(catalogPath); err != nil {
+				t.Fatal(err)
+			}
+			original := getCatalogTablesFunc
+			t.Cleanup(func() { getCatalogTablesFunc = original })
+			scans := 0
+			getCatalogTablesFunc = func(projectDir, environment, catalog string) (*api.CatalogTables, error) {
+				tables, err := original(projectDir, environment, catalog)
+				if err != nil || tables == nil || len(tables.Tables) != 1 || tables.Tables[0].Name != "Customer" {
+					t.Fatalf("actual stored scan did not first succeed: %+v %v", tables, err)
+				}
+				scans++
+				if kind == "removed" {
+					err = os.Remove(catalogPath)
+				} else {
+					err = os.WriteFile(catalogPath, []byte(`private-catalog-detail:{`), 0600)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				return tables, nil
+			}
+			w := httptest.NewRecorder()
+			getCatalogTablesHandler(w, httptest.NewRequest(http.MethodGet, "/datatug/catalog-tables?project="+project+"&environment=local&catalog=chinook-local", nil))
+			want := http.StatusNotFound
+			if kind == "malformed" {
+				want = http.StatusServiceUnavailable
+			}
+			if w.Code != want || scans != 1 || strings.Contains(w.Body.String(), "Customer") || strings.Contains(w.Body.String(), "private-catalog-detail") || strings.Contains(w.Body.String(), dir) {
+				t.Fatalf("changed %s catalog released scan or diagnostic: status=%d scans=%d body=%s", kind, w.Code, scans, w.Body.String())
+			}
+		})
 	}
 }

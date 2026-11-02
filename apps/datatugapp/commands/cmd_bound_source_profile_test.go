@@ -137,9 +137,8 @@ func TestBoundSourceServePreListenerRegisteredProjectFence(t *testing.T) {
 	if err = os.WriteFile(settings, []byte("projects:\n  - id: chat-run-test\n    path: "+dir+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	previous := dtconfig.GetConfigFilePath()
 	dtconfig.SetConfigFilePath(settings)
-	t.Cleanup(func() { dtconfig.SetConfigFilePath(previous) })
+	t.Cleanup(func() { dtconfig.SetConfigFilePath("") })
 	noPoliciesFallbackDir(t)
 	t.Setenv(agentaccess.DirEnv, t.TempDir())
 	call, _ := cov100eSeams(t, nil)
@@ -167,7 +166,7 @@ func TestBoundSourceServePreListenerRegisteredProjectFence(t *testing.T) {
 	if err = serveCommandAction(cmd, nil); !errors.Is(err, secureread.ErrSourceBinding) || keyWrites != 0 || call.paths != nil {
 		t.Fatalf("project mismatch reached listener: %v writes=%d", err, keyWrites)
 	}
-	if err = refuseImplicitSourceBindings(map[string]string{"remote": "https://example.invalid/project", "legacy": t.TempDir()}); err != nil {
+	if err = (secureread.Session{}).ValidateBoundServer(map[string]string{"remote": "https://example.invalid/project", "legacy": t.TempDir()}, false, false, false); err != nil {
 		t.Fatalf("legacy no-declaration startup changed: %v", err)
 	}
 }

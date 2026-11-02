@@ -488,11 +488,29 @@ func (s Session) ValidateBoundProjects(paths map[string]string) error {
 
 func (s Session) ValidateBoundServer(paths map[string]string, writes, opaque, live bool) error {
 	if s.binding == nil {
-		return nil
+		return validateUnboundSourceRegistry(paths)
 	}
 	if writes || opaque || live || s.ValidateBoundProjects(paths) != nil {
 		s.binding.invalid.Store(true)
 		return ErrSourceBinding
 	}
 	return s.CheckSourceBinding(context.Background())
+}
+
+// Use the exact served registry at each startup boundary; callers must not
+// normalize paths differently from the store or omit discovered child projects.
+func validateUnboundSourceRegistry(paths map[string]string) error {
+	for id, root := range paths {
+		if strings.Contains(root, "://") {
+			continue
+		}
+		_, declared, err := LoadBoundSession(context.Background(), root, BoundSessionOptions{})
+		if err != nil {
+			return fmt.Errorf("%w: cannot inspect security configuration for project %q; select --project and correct the configuration", ErrSourceBinding, dbcopy.SourceIDDisplay(id))
+		}
+		if declared {
+			return fmt.Errorf("%w: project %q declares security; select it with --project", ErrSourceBinding, dbcopy.SourceIDDisplay(id))
+		}
+	}
+	return nil
 }

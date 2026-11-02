@@ -229,22 +229,6 @@ func resolveServeSession(projectDir string, flags serveFlags) (secureread.Sessio
 	}
 }
 
-// Global registry startup cannot silently ignore a local project declaration.
-// This profile supports one explicitly selected project, never an implicit
-// multi-project authority union. Remote project URLs keep their legacy route.
-func refuseImplicitSourceBindings(paths map[string]string) error {
-	for _, root := range paths {
-		if strings.Contains(root, "://") {
-			continue
-		}
-		_, declared, err := secureread.LoadBoundSession(context.Background(), root, secureread.BoundSessionOptions{})
-		if declared || err != nil {
-			return fmt.Errorf("%w: select the configured project with --project", secureread.ErrSourceBinding)
-		}
-	}
-	return nil
-}
-
 // unrestrictedServeLog is the startup line when no policy files were found. It names the
 // principal the session really runs as, never the (possibly empty) --as flag.
 func unrestrictedServeLog(session secureread.Session) string {
@@ -309,11 +293,6 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 		pathsByID = getProjPathsByID(config)
 	}
 
-	if flags.projectDir == "" {
-		if err := refuseImplicitSourceBindings(pathsByID); err != nil {
-			return err
-		}
-	}
 	if err := session.ValidateBoundServer(pathsByID, flags.allowWrites, flags.allowOpaqueSQL, flags.allowLiveConns); err != nil {
 		return err
 	}

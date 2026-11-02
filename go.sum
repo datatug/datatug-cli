@@ -140,6 +140,8 @@ github.com/dal-go/dalgo2bigquery v0.3.2 h1:1csPB0KBMZVCuK7jYTo0RT9GDvGnAn/26tDEI
 github.com/dal-go/dalgo2bigquery v0.3.2/go.mod h1:HSFmmveLpuU56sYBmnubGMReGqyWBzU883ckm1l4MyI=
 github.com/dal-go/dalgo2clickhouse v0.0.0-20261030135300-99a44064132e h1:koN3TRsNRluxQ9QR7exDNQMOGVo4saWIS5hckBkaDJg=
 github.com/dal-go/dalgo2clickhouse v0.0.0-20261030135300-99a44064132e/go.mod h1:akinhX7G2dMQf0THKz2jFlXYW+QnuyX+PsiKcfiF5rk=
+github.com/dal-go/dalgo2convex v0.0.0-20261102043632-9c8a437f4c85 h1:736fQyZDnTh1U5zCjTPyBqFitkRnWDWtJwrY1FGSPv4=
+github.com/dal-go/dalgo2convex v0.0.0-20261102043632-9c8a437f4c85/go.mod h1:kuAMcFRdjcnNVpivoFfX+4x0vvNiY/8G/y+C/GnVVIY=
 github.com/dal-go/dalgo2cosmosdb v0.0.0-20261102042954-234d09879876 h1:2YstDUW/VXELWsWppqpbUinMB3OPF4wt+FR+opGn4yk=
 github.com/dal-go/dalgo2cosmosdb v0.0.0-20261102042954-234d09879876/go.mod h1:wfhH4GpPUazUl6vtE/Afbm45Kq0sT7sKB8jQkrcY1ng=
 github.com/dal-go/dalgo2couchdb v0.0.0-20261027213543-120b25e81833 h1:iXzRdMr4f/thKHO6AKbCcLbPhekpUNbm1hupkyvTNng=

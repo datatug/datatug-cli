@@ -30,7 +30,7 @@ permissions:
 jobs:
   release:
     # Pin the released private-dependency and macOS signing contract.
-    uses: strongo/cicd/.github/workflows/release.yml@e9d8156d4d20c4faef7b7b5f01ba3c3c10ba5abc # verified native-build contract
+    uses: strongo/cicd/.github/workflows/release.yml@751025d2bac74e10f666325a39e76d849adcfa0c # exact-tag native retry and publication gates
     permissions:
       contents: write
       # Read exact-head CI results and dispatch the exact-tag native build.

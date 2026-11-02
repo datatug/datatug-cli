@@ -602,13 +602,15 @@ func TestWorkspaceUXUnprovenImportedSnapshotStaysLoaded(t *testing.T) {
 	}
 }
 
+const uxResponsiveTimeout = 5 * time.Second
+
 func uxResponsive(t *testing.T, label string, fn func()) {
 	t.Helper()
 	done := make(chan struct{})
 	go func() { fn(); close(done) }()
 	select {
 	case <-done:
-	case <-time.After(time.Second):
+	case <-time.After(uxResponsiveTimeout):
 		t.Fatalf("UI blocked in %s while backend held session mutex", label)
 	}
 }

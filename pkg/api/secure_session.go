@@ -139,7 +139,11 @@ func ConfigureSecureSessionChecked(session secureread.Session, pathsByID map[str
 	}
 	if sessionErr != nil {
 		// Invalid configuration cannot retain file, metadata or identity power.
-		session = secureread.RefusedSession(sessionErr)
+		// Bound validation already latches its refusal. Preserve the binding so
+		// the profile's route allowlist cannot fall back to legacy handling.
+		if !session.SourceBound() {
+			session = secureread.RefusedSession(sessionErr)
+		}
 		caps = Capabilities{}
 		pathsByID = map[string]string{}
 	}

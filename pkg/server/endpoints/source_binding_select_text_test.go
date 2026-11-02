@@ -2,8 +2,10 @@ package endpoints
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/secureread"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -13,7 +15,35 @@ import (
 )
 
 func TestBoundSelectQueryTextNeverReadsDeniedTable(t *testing.T) {
-	_, project := aliasEndpointFixture(t)
+	root, project := aliasEndpointFixture(t)
+	const deniedSentinel = 987654321
+	native, err := sql.Open("sqlite", filepath.Join(root, "chinook.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = native.Exec(`INSERT INTO Invoice(InvoiceId,CustomerId,InvoiceDate,Total) SELECT ?,CustomerId,InvoiceDate,Total FROM Invoice LIMIT 1`, deniedSentinel); err != nil {
+		t.Fatal(err)
+	}
+	var customerMatches, invoiceMatches int
+	if err = native.QueryRow(`SELECT COUNT(*) FROM Customer WHERE CustomerId = ?`, deniedSentinel).Scan(&customerMatches); err != nil {
+		t.Fatal(err)
+	}
+	if err = native.QueryRow(`SELECT COUNT(*) FROM Invoice WHERE InvoiceId = ?`, deniedSentinel).Scan(&invoiceMatches); err != nil {
+		t.Fatal(err)
+	}
+	if customerMatches != 0 || invoiceMatches != 1 {
+		t.Fatal("sentinel must be unique to denied Invoice", customerMatches, invoiceMatches)
+	}
+	if err = native.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Admit a fresh profile only after constructing the owned native fixture.
+	session, declared, err := secureread.LoadBoundSession(context.Background(), root, secureread.BoundSessionOptions{Required: true})
+	if err != nil || !declared {
+		t.Fatal("quote fixture admission", declared, err)
+	}
+	api.ConfigureSecureSession(session, map[string]string{project: root}, api.Capabilities{})
+	t.Logf("owned Invoice sentinel=%d, Customer matches=%d, Invoice matches=%d", deniedSentinel, customerMatches, invoiceMatches)
 	for _, tc := range []struct {
 		name, where, cols string
 		positive, literal bool
@@ -26,6 +56,12 @@ func TestBoundSelectQueryTextNeverReadsDeniedTable(t *testing.T) {
 		{name: "where-value-is-bound-literal", where: "CustomerId:1 OR CustomerId IN (SELECT InvoiceId FROM Invoice)", literal: true},
 		{name: "cols-subselect", cols: "(SELECT InvoiceId FROM Invoice LIMIT 1)"},
 		{name: "cols-mixed-subselect", cols: "CustomerId,(SELECT InvoiceId FROM Invoice LIMIT 1) AS InvoiceId"},
+		{name: "cols-doublequote-breakout", cols: "CustomerId\" FROM Customer UNION SELECT InvoiceId FROM Invoice --"},
+		{name: "cols-backtick-breakout", cols: "CustomerId` FROM Customer UNION SELECT InvoiceId FROM Invoice --"},
+		{name: "cols-bracket-breakout", cols: "CustomerId] FROM Customer UNION SELECT InvoiceId FROM Invoice --"},
+		{name: "where-doublequote-breakout", where: "CustomerId\" IN (SELECT InvoiceId FROM Invoice) OR \"CustomerId:1"},
+		{name: "where-backtick-breakout", where: "CustomerId` IN (SELECT InvoiceId FROM Invoice) OR `CustomerId:1"},
+		{name: "where-bracket-breakout", where: "CustomerId] IN (SELECT InvoiceId FROM Invoice) OR [CustomerId:1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			q := url.Values{"project": {project}, "env": {"local"}, "db": {"chinook-local"}, "from": {"Customer"}, "limit": {"1"}}
@@ -38,6 +74,11 @@ func TestBoundSelectQueryTextNeverReadsDeniedTable(t *testing.T) {
 			w := httptest.NewRecorder()
 			executeSelectHandler(w, httptest.NewRequest(http.MethodGet, "/datatug/exec/select?"+q.Encode(), nil))
 			t.Logf("status=%d body=%s", w.Code, w.Body.String())
+			// UNION can label denied Invoice IDs as CustomerId. Inspect the unique
+			// denied value independently of every response column/key name.
+			if strings.Contains(w.Body.String(), "987654321") {
+				t.Fatal("denied sentinel released", w.Code, w.Body.String())
+			}
 			if tc.positive {
 				assertBoundNativeIdentityResponse(t, w, true)
 				return

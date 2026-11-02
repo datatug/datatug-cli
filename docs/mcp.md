@@ -147,7 +147,8 @@ snapshot and mutation routes refuse.
 
 Named project CLI source paths currently refuse a declared profile because they
 do not install this server session. Direct ad-hoc source URLs and legacy projects
-without the declaration retain their existing behavior; they are outside this
+without the declaration retain their existing behavior except for the compatibility
+limits below; they are outside this
 profile. This is a trusted local configuration boundary, not an OS sandbox or
 protection against a credential holder editing files and starting another process.
 It does not provide Agent-only identity, enrolled grants, retained-stream expiry,
@@ -155,7 +156,8 @@ named-schema rules or an approval workflow.
 
 The configured profile currently qualifies canonical macOS/Linux local paths;
 Windows drive-letter paths are unsupported. The cross-platform legacy commands
-retain their existing behavior. An implicit global `serve` registry containing a
+retain their existing behavior except for the compatibility limits below. An
+implicit global `serve` registry containing a
 local security declaration refuses startup and requires explicit `--project`.
 Any filesystem error conservatively invalidates a bound session; recovery requires
 new validation. Required policy objects and digests come from the same owned
@@ -172,7 +174,7 @@ startup. Adding a security declaration does not change that running session:
 stop it and restart with the declared project selected. Do not treat writing
 `security.json` as activation of restrictions in an existing legacy process.
 
-Governed catalog discovery refuses the complete listing when a stored table or
+Legacy and configured governed catalog discovery refuses the complete listing when a stored table or
 view is outside the driver's supported default schema or its identity cannot be
 verified. It does not return a partially filtered listing. Global legacy `serve`
 also refuses startup when a registered local path is a regular file or its

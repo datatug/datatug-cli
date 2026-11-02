@@ -110,10 +110,21 @@ type Capabilities struct {
 // every scoped handler validates a request's securityContextId against
 // (see ValidateSecurityContext).
 //
+// Configuration failure installs a refused session. This compatibility wrapper
+// keeps its original signature; startup callers use ConfigureSecureSessionChecked
+// to stop instead of starting a listener or worker.
+//
 // Every request-handling call site MUST go through SecureExecutor rather
 // than open a source or run a query directly, so every read really does
 // pass through the one policy-enforced path (REQ:server-acl-all-reads).
 func ConfigureSecureSession(session secureread.Session, pathsByID map[string]string, caps Capabilities) {
+	_ = ConfigureSecureSessionChecked(session, pathsByID, caps)
+}
+
+// ConfigureSecureSessionChecked installs the same fixed CLI session and returns
+// a startup validation failure. On failure it installs a refused session and an
+// empty served registry; callers must not start a listener or worker.
+func ConfigureSecureSessionChecked(session secureread.Session, pathsByID map[string]string, caps Capabilities) error {
 	secureMu.Lock()
 	defer secureMu.Unlock()
 	// session.AllowOpaqueSQL is the single point secureread.Executor.
@@ -128,8 +139,9 @@ func ConfigureSecureSession(session secureread.Session, pathsByID map[string]str
 	}
 	if sessionErr != nil {
 		// Invalid configuration cannot retain file, metadata or identity power.
+		session = secureread.RefusedSession(sessionErr)
 		caps = Capabilities{}
-		pathsByID = nil
+		pathsByID = map[string]string{}
 	}
 	session.AllowOpaqueSQL = caps.AllowOpaqueSQL
 	secureSession = session
@@ -152,6 +164,7 @@ func ConfigureSecureSession(session secureread.Session, pathsByID map[string]str
 	if sessionErr == nil {
 		securityContextID = newSecurityContextID()
 	}
+	return sessionErr
 }
 
 // SecurePolicyFingerprint identifies the exact policy session that decided

@@ -47,6 +47,16 @@ type Session struct {
 	configurationErr error
 }
 
+// RefusedSession returns a session without authority that retains a failed
+// trusted configuration decision. No caller-supplied policy or principal can
+// restore authority to it; a fresh successful configuration is required.
+func RefusedSession(err error) Session {
+	if err == nil {
+		err = ErrInvalidSession
+	}
+	return Session{configurationErr: err}
+}
+
 // NormalizeSession translates legacy construction input and validates profiles.
 // On error the returned session retains no authority. Explicit profiles never
 // rederive ownership or identity from the legacy compatibility echo.

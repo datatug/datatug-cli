@@ -166,3 +166,16 @@ replacement while a native handle opens.
 The existing explicit opaque-SQL grant also permits the read-only `table_list`
 metadata pragma. Its native authorizer still refuses writes, attachment and
 unsafe pragmas; this does not grant opaque SQL to the configured profile.
+
+A running legacy `serve` process or Watch daemon keeps the session selected at
+startup. Adding a security declaration does not change that running session:
+stop it and restart with the declared project selected. Do not treat writing
+`security.json` as activation of restrictions in an existing legacy process.
+
+Governed catalog discovery refuses the complete listing when a stored table or
+view is outside the driver's supported default schema or its identity cannot be
+verified. It does not return a partially filtered listing. Global legacy `serve`
+also refuses startup when a registered local path is a regular file or its
+security configuration cannot be inspected because of permissions. A missing
+path retains its legacy handling. Correct or remove an invalid registration
+before retrying.

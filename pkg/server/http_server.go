@@ -161,7 +161,9 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 		api.LogCompareCacheSkip("configure", err)
 	}
 	defer func() { _ = api.CloseCompareCache() }()
-	api.ConfigureSecureSession(session, pathsByID, caps)
+	if err = api.ConfigureSecureSessionChecked(session, pathsByID, caps); err != nil {
+		return err
+	}
 	api.ConfigureLocalProjectRegistry(registry)
 	api.ConfigureLocalVisibilityInventory(endpoints.PrepareLocalVisibilityItems)
 	// Every request receives an immutable map snapshot. A successful create

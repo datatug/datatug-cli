@@ -1,6 +1,6 @@
 module github.com/datatug/datatug-cli
 
-go 1.27.1
+go 1.27.3
 
 // All sibling deps now ship the upstream changes db-copy depends on
 // at tagged versions:
@@ -48,6 +48,7 @@ require (
 	github.com/dal-go/dalgo2postgres v0.10.1
 	github.com/dal-go/dalgo2postgrest v0.0.0-20261027200821-d952c8fc3279
 	github.com/dal-go/dalgo2redis v0.1.0
+	github.com/dal-go/dalgo2snowflake v0.0.0-20261102131450-918fc72d4976
 	github.com/dal-go/dalgo2sql v0.31.0
 	github.com/dal-go/dalgo2sqlite v0.5.1
 	github.com/dal-go/dalgo2typesense v0.0.0-20261028075318-b1ba445d3434

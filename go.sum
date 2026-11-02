@@ -176,6 +176,8 @@ github.com/dal-go/dalgo2postgrest v0.0.0-20261027200821-d952c8fc3279 h1:s26W3F4E
 github.com/dal-go/dalgo2postgrest v0.0.0-20261027200821-d952c8fc3279/go.mod h1:fvTdA6Qk3cQFnBH3VT4/5P1/EUDfVs+1SQBSepJfkgk=
 github.com/dal-go/dalgo2redis v0.1.0 h1:+tqsnvap/k3BCZdpIdYr3V4qQwtD46MNvuPUrZkiEcM=
 github.com/dal-go/dalgo2redis v0.1.0/go.mod h1:/R1BNL+dUgQ54CJlFVkxYx/T/Dg9mkPNgUrkdxJqHu4=
+github.com/dal-go/dalgo2snowflake v0.0.0-20261102131450-918fc72d4976 h1:XtUnIVOc2pcLp8KpBgFA3OpkIv+w78fGvnFB7jz/TOA=
+github.com/dal-go/dalgo2snowflake v0.0.0-20261102131450-918fc72d4976/go.mod h1:bzvbFc2Fr5zbFF8mL3M3J6Ed/RKz86VvwAWOM8b9ac4=
 github.com/dal-go/dalgo2sql v0.31.0 h1:HPIEtlxrPkg1DvuRQ/Zsv1/otFY7T/CWGPfUm+yCjsw=
 github.com/dal-go/dalgo2sql v0.31.0/go.mod h1:q/L7EXw7f1nnfn4aKfm3G5s0AJAkX0FNPyK3CdbLR28=
 github.com/dal-go/dalgo2sqlite v0.5.1 h1:fFrAnKRlYtSbUSBvzyWRFbLyhNIVesh5r1RiRnKzeuI=

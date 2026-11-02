@@ -21,9 +21,13 @@ var errAuthorized = errors.New("secureread: authorized")
 // collection the query names, so it does not depend on the collection existing: a denied
 // principal gets the same answer for a collection that is there and one that is not.
 func (e *Executor) Authorize(ctx context.Context, query dal.Query, variables map[string]any) error {
+	if err := e.session.CheckSourceBinding(ctx); err != nil {
+		return err
+	}
 	if err := e.session.configurationErr; err != nil {
 		return err
 	}
+
 	_, err := accesspolicies.Run(ctx, authorizeSession{}, query, accesspolicies.Options{
 		Principal:    e.session.Principal,
 		Variables:    variables,

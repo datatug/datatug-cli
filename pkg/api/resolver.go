@@ -82,6 +82,9 @@ func ResolveSource(ctx context.Context, projStore datatug.ProjectStore, projectD
 	if source == "" {
 		return ResolvedSource{}, fmt.Errorf("resolver: source is required")
 	}
+	if resolved, bound, err := boundResolvedSource(ctx, projStore, projectDir, environment, source); bound {
+		return resolved, err
+	}
 	all, err := ListSources(ctx, projStore, projectDir, environment)
 	if err != nil {
 		return ResolvedSource{}, err
@@ -104,6 +107,12 @@ func ResolveSource(ctx context.Context, projStore datatug.ProjectStore, projectD
 // then ID) so a Candidate's target list and an "unknown source" error's
 // implied option set are stable across calls.
 func ListSources(ctx context.Context, projStore datatug.ProjectStore, projectDir, environment string) ([]ResolvedSource, error) {
+	if resolved, bound, err := boundResolvedSource(ctx, projStore, projectDir, environment, ""); bound {
+		if err != nil {
+			return nil, err
+		}
+		return []ResolvedSource{resolved}, nil
+	}
 	var out []ResolvedSource
 
 	if environment != "" {
@@ -154,6 +163,12 @@ func ListSources(ctx context.Context, projStore datatug.ProjectStore, projectDir
 // catalog), or whose path or environment variable does not resolve, is
 // skipped rather than failing the whole listing.
 func catalogSources(ctx context.Context, projStore datatug.ProjectStore, projectDir, environment string) ([]ResolvedSource, error) {
+	if resolved, bound, err := boundResolvedSource(ctx, projStore, projectDir, environment, ""); bound {
+		if err != nil {
+			return nil, err
+		}
+		return []ResolvedSource{resolved}, nil
+	}
 	catalogs, err := projStore.LoadEnvDbCatalogs(ctx, environment)
 	if err != nil {
 		// The store's error quotes the path it built from the project folder, which is no part

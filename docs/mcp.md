@@ -41,8 +41,8 @@ Homebrew promotion can lag the directly downloadable release.
 | `datatug_agent_info` | none | Effective principal and agent capabilities |
 | `datatug_list_projects` | none | Configured project IDs |
 | `datatug_describe_project` | `project` | Environment, source and entity IDs |
-| `datatug_list_queries` | `project` | Saved SQL query IDs and parameter declarations |
-| `datatug_get_query` | `project`, `queryId` | SQL text and parameter declarations |
+| `datatug_list_queries` | `project` | Saved SQL or TugQL query IDs and parameter declarations |
+| `datatug_get_query` | `project`, `queryId` | SQL or TugQL text and parameter declarations |
 | `datatug_list_tables` | `project`, `environment`, `source` | Scanned table and view names |
 | `datatug_describe_table` | `project`, `environment`, `source`, `schema`, `table` | Live columns, primary key and allowed relationships |
 | `datatug_run_query` | `project`, `environment`, `source`, `queryId`, `parameters`, optional `limit` | Typed rows, applied bindings, limitations and provenance |
@@ -58,10 +58,13 @@ Strings bind literally; integer and decimal text retains precision. Boolean
 text is `true` or `false`; dates use `YYYY-MM-DD` and datetimes use UTC RFC3339.
 Multi-value and credential parameters are not supported by this release.
 Parameter defaults and raw connection targets are omitted from metadata.
+Client parameters named `currentUser`, `principal.*` or `path.*` are refused;
+they cannot replace the fixed policy principal or structural bindings.
 
-Execution supports saved SQL queries against SQLite through the existing
-agent API. It provides no arbitrary SQL, project mutation, query-builder UI,
-MCP Views, or TugQL execution tools. SQLite opens the source read-only and its
+Execution supports saved SQL and TugQL queries against SQLite through the existing
+agent API. Saved TugQL uses the protected structured-query path and the configured
+policies; saved SQL retains its separate opaque-query grant and result profile.
+It provides no arbitrary SQL, project mutation, query-builder UI or MCP Views. SQLite opens the source read-only and its
 native authorizer blocks writes, attachments and changes that disable the
 read-only guard. Native SQL has `opaque-privileged` provenance: source-level
 policy decisions apply, while row and column policies do not rewrite SQL.
@@ -88,3 +91,56 @@ Run this from a datatug-cli checkout. The test requires a real demo-project-1
 checkout at `DATATUG_DEMO_PROJECT_DIR`. It copies the project and
 SQLite data into temporary directories and removes its child processes,
 temporary agent key and loopback fixture on completion.
+
+## Configured exact-table SQLite reads
+
+The optional `exact-table-readonly-v1` server profile binds one registered SQLite
+catalog and a fixed principal to required project policy files. Its declaration
+is `<project>/.datatug/security.json`:
+
+```json
+{
+  "profile": "exact-table-readonly-v1",
+  "project": "my-project",
+  "environment": "local",
+  "catalog": "my-catalog",
+  "sqliteFile": "/absolute/canonical/existing/database.sqlite",
+  "requiredPolicies": ["policies/tables.yaml"],
+  "principal": {"id": "reader"}
+}
+```
+
+Required policy sets must be present, nonempty and valid AccessPolicy documents.
+They always intersect with other project policies and any explicitly added
+`--policy`/`--policies-dir` documents. A global/default policy directory cannot
+replace a required set. An explicit `--security-profile exact-table-readonly-v1`
+requires the declaration; a present declaration is also loaded without that flag.
+Principal flags must agree with it. Writes, raw SQL and live-server capabilities
+are incompatible with this profile.
+
+The selected catalog ID is the only accepted source ID. Existing canonical files
+are required; symlinks, environment substitution, SQLite URI options and aliases
+are refused. Changes to the declaration, required policies, registered catalogs
+or target file identity invalidate the session, including cached result context.
+A new validated session is required. Table/view listing and column details apply
+the same policy session; unavailable authority refuses the complete request.
+Only structured TugQL reads and the listed discovery/detail routes are enabled;
+artifact, Watch, live-server, snapshot and mutation routes refuse.
+
+Named project CLI source paths currently refuse a declared profile because they
+do not install this server session. Direct ad-hoc source URLs and legacy projects
+without the declaration retain their existing behavior; they are outside this
+profile. This is a trusted local configuration boundary, not an OS sandbox or
+protection against a credential holder editing files and starting another process.
+It does not provide Agent-only identity, enrolled grants, retained-stream expiry,
+named-schema rules or an approval workflow.
+
+The configured profile currently qualifies canonical macOS/Linux local paths;
+Windows drive-letter paths are unsupported. The cross-platform legacy commands
+retain their existing behavior. An implicit global `serve` registry containing a
+local security declaration refuses startup and requires explicit `--project`.
+Any filesystem error conservatively invalidates a bound session; recovery requires
+new validation. Required policy objects and digests come from the same owned
+bytes; ordinary registry changes during its shared loader are rejected. This
+provides no atomic pathname guarantee against a filesystem owner performing ABA
+replacement while a native handle opens.

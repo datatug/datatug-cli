@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"github.com/datatug/datatug-cli/pkg/agentaccess"
@@ -122,6 +123,9 @@ func ConfigureSecureSession(session secureread.Session, pathsByID map[string]str
 	// per-endpoint is what makes the refusal apply uniformly).
 	var sessionErr error
 	session, sessionErr = secureread.NormalizeSession(session)
+	if sessionErr == nil {
+		sessionErr = session.ValidateBoundServer(pathsByID, caps.AllowWrites, caps.AllowOpaqueSQL, caps.AllowLiveConnections)
+	}
 	if sessionErr != nil {
 		// Invalid configuration cannot retain file, metadata or identity power.
 		caps = Capabilities{}
@@ -141,6 +145,9 @@ func ConfigureSecureSession(session secureread.Session, pathsByID map[string]str
 	visibilityInventoryFactory = nil
 	capabilities = caps
 	policyFingerprint = accesspolicies.Fingerprint(session.Policies, session.DatabaseProfile.PolicyFreeReads(), session.Principal)
+	if session.SourceBound() {
+		policyFingerprint += ":source:" + session.SourceBindingFingerprint()
+	}
 	securityContextID = ""
 	if sessionErr == nil {
 		securityContextID = newSecurityContextID()
@@ -181,8 +188,9 @@ func SecurityContextID() string {
 // closed rather than accepting any value.
 func ValidateSecurityContext(id string) bool {
 	secureMu.RLock()
-	defer secureMu.RUnlock()
-	return securityContextID != "" && id == securityContextID
+	session, expected := secureSession, securityContextID
+	secureMu.RUnlock()
+	return expected != "" && id == expected && session.CheckSourceBinding(context.Background()) == nil
 }
 
 // GetCapabilities returns this process's configured Capabilities.

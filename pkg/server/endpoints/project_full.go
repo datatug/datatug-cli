@@ -16,9 +16,21 @@ func getProjectFull(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		handleError(err, w, r)
 	}
+	boundProject, boundEnvironment, boundCatalog, bound, bindingErr := api.BoundReadScope(ctx)
+	if bound {
+		if bindingErr != nil || r.URL.Query().Get(urlParamID) != boundProject {
+			writeContractError(w, r, contractErrAccessDenied("configured source read is unavailable"))
+			return
+		}
+	}
 	ref, err := projectRefByID(r.URL.Query())
 	if err != nil {
 		handleError(err, w, r)
+		return
+	}
+	if bound {
+		// A discovery projection, not the project's raw connection descriptors.
+		writeContractResponse(w, r, nil, map[string]any{"id": boundProject, "environments": []any{map[string]any{"id": boundEnvironment, "dbServers": []any{map[string]any{"catalogs": []string{boundCatalog}}}}}, "dbModels": []any{}, "entities": []any{}})
 		return
 	}
 	project, err := api.GetProjectFull(ctx, ref)

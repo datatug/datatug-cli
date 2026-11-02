@@ -63,10 +63,15 @@ func (e *Executor) RunStructuredInsecureForTest(ctx context.Context, sourceURL s
 }
 
 func (e *Executor) runStructured(ctx context.Context, sourceURL string, query dal.Query, variables map[string]any, insecureAllowLoopback bool) (Result, error) {
+	if e.session.SourceBound() {
+		if _, ok := query.(dal.StructuredQuery); !ok {
+			return Result{}, ErrOpaqueSQLNotGranted
+		}
+	}
 	if err := e.session.configurationErr; err != nil {
 		return Result{}, err
 	}
-	db, closeSource, err := openSourceFn(ctx, sourceURL, insecureAllowLoopback, len(e.session.Policies))
+	db, closeSource, err := e.openSource(ctx, sourceURL, insecureAllowLoopback)
 	if err != nil {
 		return Result{}, err
 	}
@@ -80,6 +85,9 @@ func (e *Executor) runStructured(ctx context.Context, sourceURL string, query da
 	rec := dalgo2http.NewRecorder()
 	result, err := e.runThroughPolicies(rec.WithContext(ctx), db, query, variables)
 	if err != nil {
+		return Result{}, err
+	}
+	if err := e.session.CheckSourceBinding(ctx); err != nil {
 		return Result{}, err
 	}
 	if prov, ok := rec.Last(); ok {
@@ -177,6 +185,35 @@ func openSource(ctx context.Context, sourceURL string, insecureAllowLoopback boo
 	} else {
 		db, err = ref.OpenProtected(ctx)
 	}
+	if err != nil {
+		return nil, nil, err
+	}
+	return db, dbcopy.SourceCloser(db), nil
+}
+
+func (e *Executor) openSource(ctx context.Context, sourceURL string, insecure bool) (dal.DB, func(), error) {
+	ref, bound, err := e.session.BoundBackend(ctx, sourceURL)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !bound {
+		return openSourceFn(ctx, sourceURL, insecure, len(e.session.Policies))
+	}
+	db, closeSource, err := openBoundSourceFn(ctx, ref)
+	if err != nil {
+		return nil, closeSource, err
+	}
+	if err := e.session.CheckSourceBinding(ctx); err != nil {
+		closeSource()
+		return nil, nil, err
+	}
+	return db, closeSource, nil
+}
+
+// The trusted constructor receives the same already-validated value as the
+// binding check; there is no later environment lookup or URL reparse.
+var openBoundSourceFn = func(ctx context.Context, ref dbcopy.BackendRef) (dal.DB, func(), error) {
+	db, err := ref.OpenProtected(ctx)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -625,3 +625,47 @@ func requireBindingPathPlatform(t *testing.T) {
 		t.Skip("exact-table-readonly-v1 drive-letter paths are unsupported")
 	}
 }
+
+func TestBoundSourceScopeAndServerAdmissionRemainFixed(t *testing.T) {
+	requireBindingPathPlatform(t)
+	f := newBindingFixture(t)
+	s := f.load(t)
+	project, environment, catalog, bound := s.BoundScope()
+	if !bound || project != "bound" || environment != "local" || catalog != "one" {
+		t.Fatalf("scope: %q %q %q %v", project, environment, catalog, bound)
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if source, bound, err := s.BoundSource(cancelled, project, f.root, environment, catalog); err == nil || !bound || source != "" {
+		t.Fatalf("cancelled resolver released target: %q %v %v", source, bound, err)
+	}
+	for _, paths := range []map[string]string{nil, {"bound": f.root, "extra": f.root}} {
+		if err := f.load(t).ValidateBoundProjects(paths); !errors.Is(err, ErrSourceBinding) {
+			t.Fatalf("ambiguous project registry accepted: %v", err)
+		}
+	}
+	for _, mode := range []string{"writes", "opaque", "live"} {
+		s = f.load(t)
+		if err := s.ValidateBoundServer(map[string]string{"bound": f.root}, mode == "writes", mode == "opaque", mode == "live"); !errors.Is(err, ErrSourceBinding) {
+			t.Fatalf("bound %s capability accepted: %v", mode, err)
+		}
+		if err := s.CheckSourceBinding(context.Background()); err == nil {
+			t.Fatalf("invalid %s session revived", mode)
+		}
+	}
+	legacy, err := NewSession(SessionOptions{NoPolicies: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.ValidateBoundServer(map[string]string{"remote": "https://example.invalid/project", "legacy": t.TempDir()}, false, false, false); err != nil {
+		t.Fatalf("undeclared legacy registry changed: %v", err)
+	}
+	if err := legacy.ValidateBoundServer(map[string]string{"declared": f.root}, false, false, false); !errors.Is(err, ErrSourceBinding) {
+		t.Fatalf("unbound server admitted declared profile: %v", err)
+	}
+	malformed := t.TempDir()
+	writeBindingFile(t, filepath.Join(malformed, ".datatug", "security.json"), []byte(`{`))
+	if err := legacy.ValidateBoundServer(map[string]string{"unreadable": malformed}, false, false, false); !errors.Is(err, ErrSourceBinding) {
+		t.Fatalf("declaration inspection failure became legacy: %v", err)
+	}
+}

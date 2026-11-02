@@ -141,3 +141,28 @@ func TestBoundSourceInvalidServerCannotFallBack(t *testing.T) {
 		})
 	}
 }
+
+func TestBoundReadScopeAndCatalogProjectionKeepOriginalIdentity(t *testing.T) {
+	root, store, session := apiBoundFixture(t)
+	ConfigureSecureSession(session, map[string]string{"binding": root}, Capabilities{})
+	t.Cleanup(func() { ConfigureSecureSession(secureread.Session{}, nil, Capabilities{}) })
+	project, environment, catalog, bound, err := BoundReadScope(context.Background())
+	if err != nil || !bound || project != "binding" || environment != "local" || catalog != "selected" {
+		t.Fatalf("original scope: %q %q %q %v %v", project, environment, catalog, bound, err)
+	}
+	items, err := catalogSources(context.Background(), store, root, environment)
+	if err != nil || len(items) != 1 || items[0].ID != catalog || items[0].ID == "other" {
+		t.Fatalf("catalog projection escaped selected source: %+v %v", items, err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "policies", "read.yaml"), []byte("changed"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, bound, err := BoundReadScope(context.Background()); !bound || !errors.Is(err, secureread.ErrSourceBinding) {
+		t.Fatalf("changed policy kept discovery authority: bound=%v err=%v", bound, err)
+	}
+	ConfigureSecureSession(secureread.Session{}, nil, Capabilities{})
+	project, environment, catalog, bound, err = BoundReadScope(context.Background())
+	if err != nil || bound || project != "" || environment != "" || catalog != "" {
+		t.Fatalf("legacy session invented a binding: %q %q %q %v %v", project, environment, catalog, bound, err)
+	}
+}

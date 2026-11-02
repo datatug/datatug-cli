@@ -24,10 +24,6 @@ func (e *Executor) Authorize(ctx context.Context, query dal.Query, variables map
 	if err := e.session.CheckSourceBinding(ctx); err != nil {
 		return err
 	}
-	if err := e.session.configurationErr; err != nil {
-		return err
-	}
-
 	_, err := accesspolicies.Run(ctx, authorizeSession{}, query, accesspolicies.Options{
 		Principal:    e.session.Principal,
 		Variables:    variables,

@@ -94,6 +94,16 @@ temporary agent key and loopback fixture on completion.
 
 ## Configured exact-table SQLite reads
 
+This profile is a candidate feature. Use it for security enforcement only with a
+named CLI release that has passed this profile's acceptance checks; no published
+release is qualified here yet. An older CLI may ignore `security.json`. Launch
+with the explicit profile flag so a binary without the feature rejects the flag
+instead of silently starting an unprotected session:
+
+```sh
+datatug serve --project /absolute/canonical/project --security-profile exact-table-readonly-v1
+```
+
 The optional `exact-table-readonly-v1` server profile binds one registered SQLite
 catalog and a fixed principal to required project policy files. Its declaration
 is `<project>/.datatug/security.json`:

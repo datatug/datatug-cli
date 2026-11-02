@@ -30,6 +30,7 @@ require (
 	github.com/dal-go/dalgo v0.97.0
 	github.com/dal-go/dalgo2bigquery v0.3.2
 	github.com/dal-go/dalgo2clickhouse v0.0.0-20261030135300-99a44064132e
+	github.com/dal-go/dalgo2cosmosdb v0.0.0-20261102042954-234d09879876
 	github.com/dal-go/dalgo2couchdb v0.0.0-20261027213543-120b25e81833
 	github.com/dal-go/dalgo2duckdb v0.1.0
 	github.com/dal-go/dalgo2dynamodb v0.0.0-20261101230446-46c9938f48ef

@@ -23,6 +23,8 @@ require (
 	github.com/NimbleMarkets/ntcharts/v2 v2.2.0
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/atotto/clipboard v0.1.4
+	github.com/aws/aws-sdk-go-v2 v1.47.5
+	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.72.3
 	github.com/charmbracelet/ultraviolet v0.0.0-20260812204455-68fa937c71be
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/dal-go/dalgo v0.97.0
@@ -30,6 +32,7 @@ require (
 	github.com/dal-go/dalgo2clickhouse v0.0.0-20261030135300-99a44064132e
 	github.com/dal-go/dalgo2couchdb v0.0.0-20261027213543-120b25e81833
 	github.com/dal-go/dalgo2duckdb v0.1.0
+	github.com/dal-go/dalgo2dynamodb v0.0.0-20261101230446-46c9938f48ef
 	github.com/dal-go/dalgo2firestore v0.10.41
 	github.com/dal-go/dalgo2http v0.4.0
 	github.com/dal-go/dalgo2libsql v0.0.0-20261028000517-7d8187759a51
@@ -113,6 +116,11 @@ require (
 	github.com/RoaringBitmap/roaring/v2 v2.30.0 // indirect
 	github.com/andybalholm/brotli v1.2.6 // indirect
 	github.com/apache/arrow-go/v18 v18.5.1 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.5.8 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.8.8 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.23 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/endpoint-discovery v1.13.8 // indirect
+	github.com/aws/smithy-go v1.28.7 // indirect
 	github.com/axgle/mahonia v0.0.0-20180208002826-3358181d7394 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/bits-and-blooms/bitset v1.24.6 // indirect

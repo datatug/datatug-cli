@@ -1,6 +1,7 @@
 package secureread
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/dal-go/dalgo/access"
@@ -29,6 +30,7 @@ func (p DatabaseProfile) PolicyFreeReads() bool { return p == DatabasePolicyFree
 // Database requests use DatabaseProfile and the existing policy evaluator;
 // project-file and asset operations use LocalProjectOwner.
 type Session struct {
+	binding           *sourceBinding
 	Principal         *access.Principal
 	Policies          []accesspolicies.Loaded
 	LocalProjectOwner bool
@@ -45,10 +47,27 @@ type Session struct {
 	configurationErr error
 }
 
+// RefusedSession returns a session without authority that retains a failed
+// trusted configuration decision. No caller-supplied policy or principal can
+// restore authority to it; a fresh successful configuration is required.
+func RefusedSession(err error) Session {
+	if err == nil {
+		err = ErrInvalidSession
+	}
+	return Session{configurationErr: err}
+}
+
 // NormalizeSession translates legacy construction input and validates profiles.
 // On error the returned session retains no authority. Explicit profiles never
 // rederive ownership or identity from the legacy compatibility echo.
 func NormalizeSession(s Session) (Session, error) {
+	if s.binding != nil {
+		if err := s.CheckSourceBinding(context.Background()); err != nil {
+			return Session{binding: s.binding, configurationErr: err}, err
+		}
+		s.Principal = cloneBindingPrincipal(s.binding.principal)
+		s.Policies = append([]accesspolicies.Loaded(nil), s.binding.policies...)
+	}
 	if s.configurationErr != nil {
 		return Session{configurationErr: s.configurationErr}, s.configurationErr
 	}

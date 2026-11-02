@@ -64,6 +64,11 @@ func writeSemanticTestProject(t *testing.T) (projectDir, projectID string) {
 func writeSemanticTestProjectWithSetup(t *testing.T, setup func(string)) (projectDir, projectID string) {
 	t.Helper()
 	dir := t.TempDir()
+	canonicalRoot, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir = canonicalRoot
 	if setup != nil {
 		setup(dir)
 	}

@@ -86,6 +86,14 @@ func CreateLocalProject(ctx context.Context, request localprojects.Create) (loca
 	if err = registryWriteAuthority(registry)(); err != nil {
 		return localprojects.Project{}, err
 	}
+	secureMu.RLock()
+	session, caps := secureSession, capabilities
+	secureMu.RUnlock()
+	// A replay can discover an existing declared project after startup. Check
+	// the prospective served registry before evidence or path registration.
+	if err = session.ValidateBoundServer(paths, caps.AllowWrites, caps.AllowOpaqueSQL, caps.AllowLiveConnections); err != nil {
+		return localprojects.Project{}, err
+	}
 	if err = registerCreatedProjectEvidence(project.ID, path); err != nil {
 		return localprojects.Project{}, err
 	}

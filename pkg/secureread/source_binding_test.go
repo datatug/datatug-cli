@@ -663,7 +663,10 @@ func TestBoundSourceScopeAndServerAdmissionRemainFixed(t *testing.T) {
 	if err := legacy.ValidateBoundServer(map[string]string{"declared": f.root}, false, false, false); !errors.Is(err, ErrSourceBinding) {
 		t.Fatalf("unbound server admitted declared profile: %v", err)
 	}
-	malformed := t.TempDir()
+	malformed, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	writeBindingFile(t, filepath.Join(malformed, ".datatug", "security.json"), []byte(`{`))
 	if err := legacy.ValidateBoundServer(map[string]string{"unreadable": malformed}, false, false, false); !errors.Is(err, ErrSourceBinding) {
 		t.Fatalf("declaration inspection failure became legacy: %v", err)

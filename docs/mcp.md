@@ -134,8 +134,16 @@ are refused. Changes to the declaration, required policies, registered catalogs
 or target file identity invalidate the session, including cached result context.
 A new validated session is required. Table/view listing and column details apply
 the same policy session; unavailable authority refuses the complete request.
+Table references must use their exact native spelling in the ordinary `main`
+namespace. Legacy collection-path policy selectors are also byte-exact: use
+`/Invoice` for a native table named `Invoice`; `/invoice` does not constrain it.
+Views, virtual/shadow tables and ambiguous source identities are
+unsupported, including discovery/detail admission. A listed object whose
+admitted identity cannot be verified makes the catalog request refuse rather
+than return a partial success.
 Only structured TugQL reads and the listed discovery/detail routes are enabled;
-artifact, Watch, live-server, snapshot and mutation routes refuse.
+subqueries and derived sources are unsupported. Artifact, Watch, live-server,
+snapshot and mutation routes refuse.
 
 Named project CLI source paths currently refuse a declared profile because they
 do not install this server session. Direct ad-hoc source URLs and legacy projects
@@ -154,3 +162,7 @@ new validation. Required policy objects and digests come from the same owned
 bytes; ordinary registry changes during its shared loader are rejected. This
 provides no atomic pathname guarantee against a filesystem owner performing ABA
 replacement while a native handle opens.
+
+The existing explicit opaque-SQL grant also permits the read-only `table_list`
+metadata pragma. Its native authorizer still refuses writes, attachment and
+unsafe pragmas; this does not grant opaque SQL to the configured profile.

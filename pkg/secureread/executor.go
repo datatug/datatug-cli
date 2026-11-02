@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/dal-go/dalgo/access"
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/tugql"
 	"github.com/dal-go/dalgo2clickhouse"
@@ -64,8 +65,12 @@ func (e *Executor) RunStructuredInsecureForTest(ctx context.Context, sourceURL s
 
 func (e *Executor) runStructured(ctx context.Context, sourceURL string, query dal.Query, variables map[string]any, insecureAllowLoopback bool) (Result, error) {
 	if e.session.SourceBound() {
-		if _, ok := query.(dal.StructuredQuery); !ok {
+		structured, ok := query.(dal.StructuredQuery)
+		if !ok {
 			return Result{}, ErrOpaqueSQLNotGranted
+		}
+		if dal.HasSubquery(structured) {
+			return Result{}, unsupportedBoundIdentity()
 		}
 	}
 	if err := e.session.configurationErr; err != nil {
@@ -114,6 +119,13 @@ func (e *Executor) RunTugQL(ctx context.Context, sourceURL string, tugqlDoc []by
 // the admitted rows, and translate the policy Explain lines into Result
 // Limitations.
 func (e *Executor) runThroughPolicies(ctx context.Context, db dal.DB, query dal.Query, variables map[string]any) (Result, error) {
+	if e.session.SourceBound() {
+		var err error
+		ctx, err = access.WithNativeTableNamespace(ctx, "main")
+		if err != nil {
+			return Result{}, err
+		}
+	}
 	if validator, ok := dal.As[dalgo2clickhouse.StructuredQueryValidator](db); ok {
 		return e.runClickHouseStructured(ctx, db, query, variables, validator)
 	}
@@ -153,13 +165,11 @@ func (e *Executor) runThroughPolicies(ctx context.Context, db dal.DB, query dal.
 // handle at most once through DALgo's optional-capability lookup, which sees
 // the backend behind the framework's sealed DB wrapper (CouchDB, PostgREST).
 //
-// Every Executor call — RunStructured, RunTugQL, RunNativeSQL — runs the
-// result through accesspolicies.Run before a caller ever sees a row (see
-// runThroughPolicies), so openSource always opens through
-// dbcopy.BackendRef.OpenProtected/OpenProtectedForTest, never plain
-// Open/OpenForTest: this is the "protected read" OpenProtected's doc
-// comment describes, and it is what wires dalgo2ingitdb v0.4.0's
-// WithStoredOnlyReads() option in for every source this package opens.
+// Every Executor result passes through accesspolicies.Run before callers see
+// rows. Legacy source URLs use OpenProtected/OpenProtectedForTest here, never
+// plain Open/OpenForTest; inGitDB therefore retains WithStoredOnlyReads().
+// Configured exact-table reads use their dedicated fixed read-only SQLite
+// constructor instead of this URL-opener helper, with the same shared policies.
 //
 // policies is how many access policies the session reads through. A PostgreSQL,
 // MySQL, Oracle or SQL Server source read through one or more of them is refused
@@ -213,9 +223,5 @@ func (e *Executor) openSource(ctx context.Context, sourceURL string, insecure bo
 // The trusted constructor receives the same already-validated value as the
 // binding check; there is no later environment lookup or URL reparse.
 var openBoundSourceFn = func(ctx context.Context, ref dbcopy.BackendRef) (dal.DB, func(), error) {
-	db, err := ref.OpenProtected(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	return db, dbcopy.SourceCloser(db), nil
+	return openBoundSQLiteIdentityDB(ctx, ref)
 }

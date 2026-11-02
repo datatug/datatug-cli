@@ -140,6 +140,16 @@ func resolveSQLSourceURL(ctx context.Context, sourceID, sourceURL, collection st
 	}
 	if bound {
 		ref = boundRef
+		// Metadata uses the same fixed session and mandatory policies as data.
+		// Refuse before native schema discovery; the source URL was already
+		// matched to this session by BoundSourceBackend above.
+		executor, configured := secureExecutorHook()
+		if !configured {
+			return resolvedSource{}, newContractError(codeInternal, "server has no policy-enforced session configured", "")
+		}
+		if err := executor.Authorize(ctx, authorizeQuery(collection), nil); err != nil {
+			return resolvedSource{}, err
+		}
 	}
 	var db dal.DB
 	if bound {

@@ -21,7 +21,9 @@ import (
 // the server today, so a change in the server (or in what the copy asks) shows.
 
 // pgText is the text of one value of a query on a PostgreSQL database, "<NULL>" for NULL.
-func pgText(t testing.TB, db *sql.DB, query string, args ...any) string {
+func pgText(t testing.TB, db interface {
+	QueryRow(string, ...any) *sql.Row
+}, query string, args ...any) string {
 	t.Helper()
 	var s sql.NullString
 	if err := db.QueryRow(query, args...).Scan(&s); err != nil {
@@ -305,16 +307,40 @@ func TestPostgresStatementTimeoutDoesNotCutOrMislabelTheCopy(t *testing.T) {
 		`WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 20000) INSERT INTO child SELECT x, x, 'w' || (x % 13) FROM c`)
 	pg := newPGDatabase(t)
 	pg = pgSetDatabase(t, pg, `statement_timeout = '25ms'`)
+	if got := pgText(t, pg.DB, `SHOW statement_timeout`); got != "25ms" {
+		t.Fatalf("destination copy timeout: %s", got)
+	}
 	rep := mustCopy(t, src, pg, Options{})
 	if len(rep.Warnings) != 0 {
 		t.Errorf("a copy under a statement timeout: %v", rep.Warnings)
 	}
-	if got := pgText(t, pg.DB, `SELECT count(*) FROM pg_indexes WHERE schemaname = 'public' AND indexname IN ('parent_v', 'child_w')`); got != "2" {
+	// Verification catalogue reads are not the copy under test. Disable the
+	// deliberately tiny timeout only inside this transaction, never on the pool
+	// or database; rollback restores the original source-copy configuration.
+	verification, err := pg.DB.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = verification.Rollback() }()
+	if _, err = verification.Exec(`SET LOCAL statement_timeout = 0`); err != nil {
+		t.Fatal(err)
+	}
+	if got := pgText(t, verification, `SHOW statement_timeout`); got != "0" {
+		t.Fatalf("verification timeout: %s", got)
+	}
+	if got := pgText(t, verification, `SELECT count(*) FROM pg_indexes WHERE schemaname = 'public' AND indexname IN ('parent_v', 'child_w')`); got != "2" {
 		t.Errorf("indexes: %s", got)
 	}
-	if got := pgText(t, pg.DB, `SELECT convalidated::text FROM pg_constraint WHERE conrelid = 'child'::regclass AND contype = 'f'`); got != "true" {
+	if got := pgText(t, verification, `SELECT convalidated::text FROM pg_constraint WHERE conrelid = 'child'::regclass AND contype = 'f'`); got != "true" {
 		t.Errorf("the key is validated: %s", got)
 	}
+	if err = verification.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if got := pgText(t, pg.DB, `SHOW statement_timeout`); got != "25ms" {
+		t.Fatalf("source copy timeout after verification rollback: %s", got)
+	}
+	t.Log("both copy directions retain configured 25ms; catalogue verification alone uses transaction-local zero timeout")
 	// The same server as a source.
 	mustCopy(t, pg, newSQLite(t), Options{})
 }

@@ -471,6 +471,181 @@ func TestProtectedTableExactGrantImportAndRevocation(t *testing.T) {
 	}
 }
 
+// The server fixture owns the private snapshot and binds its recording source.
+// The normal CLI sees only serialized public HTTP resolutions and v2 envelopes.
+// This is a consumer contract test, not native database or login integration.
+func TestProtectedTablePublicExactProjectionConsumer(t *testing.T) {
+	for _, scenario := range []struct {
+		name          string
+		table         string
+		emptyBaseline bool
+		grant         bool
+		deny          bool
+		hold          string
+	}{
+		{name: "baseline-A", table: "Customer"},
+		{name: "B-before-approval", table: "Order", deny: true},
+		{name: "approved-B", table: "Order", grant: true},
+		{name: "mandatory-denied-C-despite-grant", table: "Secret", grant: true, deny: true},
+		{name: "empty-baseline-denies-A", table: "Customer", emptyBaseline: true, deny: true},
+		{name: "empty-baseline-approved-B", table: "Order", emptyBaseline: true, grant: true},
+		{name: "held-B-revoked", table: "Order", grant: true, hold: "revoke"},
+		{name: "held-B-real-expiry", table: "Order", grant: true, hold: "expire"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			options, deps, token := protectedTableFixture(t)
+			options.request.Operation.Object.Name = scenario.table
+			credential, err := deps.credential(context.Background(), options.auth)
+			require.NoError(t, err)
+			// Keep the original verified fixture identity/expiry across every read.
+			deps.credential = func(context.Context, device.ProductOptions) (device.ProductReadCredential, error) {
+				return credential, nil
+			}
+			base := protectedResolution()
+			base.Protection.ReadPosture = dataaccess.ReadExact
+			base.Protection.ReadOnly = true
+			a := dataaccess.ObjectRef{Namespace: "main", Name: "Customer"}
+			b := dataaccess.ObjectRef{Namespace: "main", Name: "Order"}
+			c := dataaccess.ObjectRef{Namespace: "main", Name: "Secret"}
+			standing := []map[string]any{}
+			if !scenario.emptyBaseline {
+				// C is a declared native object but its mandatory denial wins.
+				standing = append(standing, map[string]any{"subject": base.Subject, "objects": []dataaccess.ObjectRef{a, c}})
+			}
+			private, err := json.Marshal(map[string]any{
+				"version": 1, "connection": base.Connection, "generation": 1,
+				"nativeNamespace": "main", "objects": []dataaccess.ObjectRef{a, b, c},
+				"standing": standing, "requestable": []dataaccess.ObjectRef{b},
+				"denials": []map[string]any{{"object": c}},
+			})
+			require.NoError(t, err)
+			snapshot, err := dataaccess.DecodeExactReadSnapshot(private)
+			require.NoError(t, err)
+			expires := time.Now().Add(time.Minute)
+			if scenario.hold == "expire" {
+				expires = time.Now().Add(500 * time.Millisecond)
+			}
+			grantObject := options.request.Operation.Object
+			var revoked atomic.Bool
+			var opens, resolves atomic.Int32
+			project := func(ctx context.Context) dataaccess.Resolution {
+				fresh := base
+				fresh.ServerTime = time.Now()
+				fresh.ValidUntil = fresh.ServerTime.Add(time.Minute)
+				if scenario.grant && !revoked.Load() {
+					owner := base.Subject
+					owner.ID = "owner"
+					fresh.Grants = []dataaccess.Grant{{ID: "approved-table", Subject: base.Subject, RequestedBy: base.Subject, Permissions: []dataaccess.Permission{dataaccess.DataRead}, Scope: dataaccess.GrantScope{Connection: base.Connection.ID, Objects: []dataaccess.ObjectRef{grantObject}, Requires: []string{dataaccess.ObjectsExact}}, Reason: "Inspect owned fixture", ExpiresAt: expires, State: dataaccess.Approved, Decision: &dataaccess.Decision{By: owner, At: base.ServerTime}, Revision: 1}}
+				}
+				projection, projectErr := dataaccess.ProjectExactRead(ctx, fresh, snapshot)
+				require.NoError(t, projectErr)
+				require.NotNil(t, projection.ExactRead.Baseline)
+				if scenario.emptyBaseline {
+					require.Empty(t, projection.ExactRead.Baseline)
+				} else {
+					require.Equal(t, []dataaccess.ObjectRef{a}, projection.ExactRead.Baseline)
+				}
+				return projection
+			}
+			deps.client.Transport = protectedReadRoundTrip(func(r *http.Request) (*http.Response, error) {
+				require.Equal(t, http.MethodPost, r.Method)
+				require.Equal(t, "Bearer "+token, r.Header.Get("Authorization"))
+				deadline, ok := r.Context().Deadline()
+				require.True(t, ok)
+				require.False(t, deadline.After(credential.ExpiresAt))
+				var wire []byte
+				status := http.StatusOK
+				switch r.URL.Path {
+				case "/v0/datatug/access/resolve":
+					resolves.Add(1)
+					require.Empty(t, r.Header.Get("X-DataTug-Result-Nonce"))
+					var scope map[string]string
+					require.NoError(t, json.NewDecoder(r.Body).Decode(&scope))
+					require.Equal(t, map[string]string{"spaceID": "space", "projectId": "project", "connectionId": "catalog"}, scope)
+					encoded, marshalErr := json.Marshal(project(r.Context()))
+					require.NoError(t, marshalErr)
+					wire = encoded
+				case "/v0/datatug/access/table/read":
+					body, readErr := io.ReadAll(r.Body)
+					require.NoError(t, readErr)
+					var command protectedTableRequest
+					require.NoError(t, json.Unmarshal(body, &command))
+					require.Equal(t, options.request, command)
+					nonce := r.Header.Get("X-DataTug-Result-Nonce")
+					require.Len(t, nonce, 32)
+					nonceBytes, nonceErr := hex.DecodeString(nonce)
+					require.NoError(t, nonceErr)
+					require.Len(t, nonceBytes, 16)
+					serverCtx, bindErr := snapshot.BindContext(r.Context(), base.Subject)
+					require.NoError(t, bindErr)
+					authority, authorityErr := dataaccess.NewAuthority(base.Subject, base.Connection, func(ctx context.Context, _ dataaccess.ResolveRequest) (dataaccess.Resolution, error) {
+						return project(ctx), nil
+					})
+					require.NoError(t, authorityErr)
+					digest := sha256.Sum256(body)
+					result, produceErr := authority.ReadTableResult(serverCtx, dataaccess.ResultRequest{Nonce: nonce, RequestSHA256: hex.EncodeToString(digest[:])}, command.Operation, tableTransportSource(func(context.Context, dataaccess.TableIdentityRequest) (dataaccess.TableReadSpan, error) {
+						opens.Add(1)
+						rs := recordset.NewColumnarRecordset("public-exact", recordset.NewTypedColumn[any]("name", nil))
+						require.NoError(t, rs.NewRow().SetValueByIndex(0, "row-"+command.Operation.Object.Name, rs))
+						return tableTransportSpan{session: tableTransportSession{reader: &tableTransportReader{rs: rs}}, facts: dataaccess.TableIdentityFacts{Connection: base.Connection, Table: access.TableName{Schema: "main", Name: command.Operation.Object.Name}}}, nil
+					}))
+					if produceErr != nil {
+						status = http.StatusForbidden
+						break
+					}
+					defer result.Close()
+					var output bytes.Buffer
+					require.NoError(t, result.WriteEnvelope(serverCtx, &output))
+					wire = bytes.Clone(output.Bytes())
+				default:
+					t.Fatalf("unexpected or fallback route %s", r.URL.Path)
+				}
+				return &http.Response{StatusCode: status, Body: io.NopCloser(bytes.NewReader(wire))}, nil
+			})
+			if scenario.hold == "" {
+				output, runErr := executeTablePreview(t, context.Background(), deps, "--base-url", options.baseURL, "--table", scenario.table)
+				if scenario.deny {
+					require.Error(t, runErr)
+					require.Empty(t, output)
+					require.Zero(t, opens.Load(), "denial must precede source dispatch")
+				} else {
+					require.NoError(t, runErr)
+					require.Contains(t, output, "row-"+scenario.table)
+					require.EqualValues(t, 1, opens.Load())
+					require.GreaterOrEqual(t, resolves.Load(), int32(2), "import and stdout require fresh HTTP resolve")
+				}
+				return
+			}
+			held, readErr := readProtectedTable(context.Background(), options, deps)
+			require.NoError(t, readErr)
+			defer held.cancel()
+			defer held.result.Close()
+			deadline, ok := held.ctx.Deadline()
+			require.True(t, ok)
+			require.Equal(t, credential.ExpiresAt, deadline)
+			if scenario.hold == "revoke" {
+				revoked.Store(true)
+			} else {
+				time.Sleep(time.Until(expires) + 5*time.Millisecond)
+			}
+			var output bytes.Buffer
+			require.Error(t, held.result.WritePayload(held.ctx, &output))
+			require.Empty(t, output.String())
+			require.EqualValues(t, 1, opens.Load())
+			require.GreaterOrEqual(t, resolves.Load(), int32(1))
+			freshOutput, runErr := executeTablePreview(t, context.Background(), deps, "--base-url", options.baseURL, "--table", scenario.table)
+			require.Error(t, runErr)
+			require.Empty(t, freshOutput)
+			require.EqualValues(t, 1, opens.Load(), "fresh denied B must not reopen its source")
+			options.request.Operation.Object = a
+			baselineOutput, runErr := executeTablePreview(t, context.Background(), deps, "--base-url", options.baseURL, "--table", a.Name)
+			require.NoError(t, runErr)
+			require.Contains(t, baselineOutput, "row-Customer", "baseline A survives B revocation or expiry")
+			require.EqualValues(t, 2, opens.Load())
+		})
+	}
+}
+
 func TestProtectedTableCommandWithholdsValidationErrors(t *testing.T) {
 	_, deps, _ := protectedTableFixture(t)
 	cmd := protectedTableCommand(deps)

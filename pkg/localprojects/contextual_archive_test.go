@@ -69,3 +69,43 @@ func TestContextualArchiveIOFailureIsNotActive(t *testing.T) {
 	_, err = ReadArchivedFromRoot(root)
 	require.Error(t, err)
 }
+
+func TestContextualArchiveReadCustodyFailures(t *testing.T) {
+	for _, kind := range []string{"open-denied", "closed-open-file", "read-failure", "decode-failure", "replaced-state"} {
+		t.Run(kind, func(t *testing.T) {
+			dir := t.TempDir()
+			name := filepath.Join(dir, stateName)
+			require.NoError(t, os.WriteFile(name, []byte(`{"version":1,"archived":true,"operations":{}}`), 0600))
+			root, err := os.OpenRoot(dir)
+			require.NoError(t, err)
+			defer func() { _ = root.Close() }()
+			original := registryIO
+			t.Cleanup(func() { registryIO = original })
+			switch kind {
+			case "open-denied":
+				registryIO.rootOpenFile = func(*os.Root, string, int, os.FileMode) (*os.File, error) { return nil, os.ErrPermission }
+			case "closed-open-file":
+				registryIO.rootOpenFile = func(r *os.Root, n string, flags int, mode os.FileMode) (*os.File, error) {
+					f, err := original.rootOpenFile(r, n, flags, mode)
+					require.NoError(t, err)
+					require.NoError(t, f.Close())
+					return f, nil
+				}
+			case "read-failure":
+				registryIO.readAll = func(*os.File) ([]byte, error) { return nil, os.ErrPermission }
+			case "decode-failure":
+				require.NoError(t, os.WriteFile(name, []byte(`{"version":1,"archived":true,"operations":[]}`), 0600))
+			case "replaced-state":
+				registryIO.readAll = func(f *os.File) ([]byte, error) {
+					body, err := os.ReadFile(name)
+					require.NoError(t, err)
+					require.NoError(t, os.Rename(name, name+"-old"))
+					require.NoError(t, os.WriteFile(name, []byte(`{"version":1,"archived":false,"operations":{}}`), 0600))
+					return body, nil
+				}
+			}
+			_, err = ReadArchivedFromRoot(root)
+			require.Error(t, err)
+		})
+	}
+}

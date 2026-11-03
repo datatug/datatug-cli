@@ -12,6 +12,7 @@ import (
 
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/localprojects"
+	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/stretchr/testify/require"
 )
@@ -72,5 +73,35 @@ func TestBoundProjectFullContextualWireKeepsRawAndGuard(t *testing.T) {
 		guard.Wrap(func(http.ResponseWriter, *http.Request) { called = true })(w, httptest.NewRequest(http.MethodGet, path, nil))
 		require.Equal(t, http.StatusForbidden, w.Code)
 		require.False(t, called)
+	}
+}
+
+func TestBoundProjectFullContextualFinalAdmissionFence(t *testing.T) {
+	for _, kind := range []string{"read-canceled", "session-replaced"} {
+		t.Run(kind, func(t *testing.T) {
+			oldStore, oldContext, oldRead := storage.NewDatatugStore, getContextFromRequest, boundContextualEnvironments
+			t.Cleanup(func() {
+				storage.NewDatatugStore, getContextFromRequest, boundContextualEnvironments = oldStore, oldContext, oldRead
+			})
+			getContextFromRequest = func(r *http.Request) (context.Context, error) { return r.Context(), nil }
+			root, project := boundEndpointFixture(t)
+			mustWriteFile(t, filepath.Join(root, "datatug-project.json"), `{"id":"`+project+`"}`)
+			boundContextualEnvironments = func(ctx context.Context, scope api.ContextualEnvironmentScope) (api.ContextualEnvironments, error) {
+				if kind == "read-canceled" {
+					expired, cancel := context.WithCancel(ctx)
+					cancel()
+					return oldRead(expired, scope)
+				}
+				view, err := oldRead(ctx, scope)
+				// Replacement after a complete metadata read must not publish under the previous visit.
+				api.ConfigureSecureSession(secureread.Session{}, nil, api.Capabilities{})
+				return view, err
+			}
+			w := httptest.NewRecorder()
+			getProjectFull(w, httptest.NewRequest(http.MethodGet, "/datatug/projects/project_full?"+url.Values{"id": {project}}.Encode(), nil))
+			require.Equal(t, http.StatusForbidden, w.Code)
+			require.Contains(t, w.Body.String(), "ACCESS_DENIED")
+			require.NotContains(t, w.Body.String(), "contextualEnvironments")
+		})
 	}
 }

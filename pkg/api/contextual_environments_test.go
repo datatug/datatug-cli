@@ -159,3 +159,119 @@ func TestBoundContextualRefusesLateBranchChange(t *testing.T) {
 	require.Equal(t, "unavailable", view.Status)
 	require.Nil(t, view.Items)
 }
+
+func TestBoundContextualGitProbeRechecksAuthorityOnMetadataFailure(t *testing.T) {
+	for _, revoked := range []bool{false, true} {
+		t.Run(map[bool]string{false: "metadata-only", true: "source-revoked"}[revoked], func(t *testing.T) {
+			root, _, scope := contextualFixture(t)
+			old := localGitStateSeam
+			t.Cleanup(func() { localGitStateSeam = old })
+			localGitStateSeam = func(context.Context, string) (gitState, error) {
+				if revoked {
+					require.NoError(t, os.WriteFile(filepath.Join(root, "policies", "read.yaml"), []byte("revoked"), 0600))
+				}
+				return gitState{}, environmentError("TEMPORARILY_UNAVAILABLE", 503)
+			}
+			view, err := BoundContextualEnvironments(context.Background(), scope)
+			if revoked {
+				require.ErrorIs(t, err, secureread.ErrAccessDenied)
+			} else {
+				require.NoError(t, err)
+			}
+			require.Equal(t, "unavailable", view.Status)
+			require.Nil(t, view.Items)
+		})
+	}
+}
+
+func TestBoundContextualUnavailableSourceDocuments(t *testing.T) {
+	for _, kind := range []string{"null-parent", "invalid-environment", "invalid-presentation"} {
+		t.Run(kind, func(t *testing.T) {
+			root, _, scope := contextualFixture(t)
+			if kind == "null-parent" {
+				require.NoError(t, os.WriteFile(filepath.Join(root, "datatug-project.json"), []byte("null"), 0600))
+			} else {
+				file := filepath.Join(root, "environments", "local", "local.env.json")
+				body, err := os.ReadFile(file)
+				require.NoError(t, err)
+				var fields map[string]any
+				require.NoError(t, json.Unmarshal(body, &fields))
+				if kind == "invalid-environment" {
+					fields["id"] = "foreign"
+				} else {
+					fields["presentation"] = map[string]any{"label": 42}
+				}
+				body, err = json.Marshal(fields)
+				require.NoError(t, err)
+				require.NoError(t, os.WriteFile(file, body, 0600))
+				session, declared, err := secureread.LoadBoundSession(context.Background(), root, secureread.BoundSessionOptions{Required: true})
+				require.NoError(t, err)
+				require.True(t, declared)
+				ConfigureSecureSession(session, map[string]string{"binding": root}, Capabilities{})
+			}
+			view, err := BoundContextualEnvironments(context.Background(), scope)
+			require.NoError(t, err)
+			require.Equal(t, "unavailable", view.Status)
+			require.Nil(t, view.Items)
+		})
+	}
+}
+func TestBoundContextualFilesystemAndAuthorityBoundaries(t *testing.T) {
+	for _, kind := range []string{"unregistered", "stat-denied", "not-directory", "wrong-registered-inode", "waiting-read-revoked", "read-denied", "after-git-revoked", "after-git-error-revoked"} {
+		t.Run(kind, func(t *testing.T) {
+			root, _, scope := contextualFixture(t)
+			switch kind {
+			case "unregistered":
+				secureMu.Lock()
+				delete(projectDirs, "binding")
+				secureMu.Unlock()
+			case "stat-denied", "not-directory", "wrong-registered-inode":
+				old := nonGitDiscoveryRootStat
+				t.Cleanup(func() { nonGitDiscoveryRootStat = old })
+				nonGitDiscoveryRootStat = func(string) (os.FileInfo, error) {
+					if kind == "stat-denied" {
+						return nil, os.ErrPermission
+					}
+					if kind == "not-directory" {
+						return os.Stat(filepath.Join(root, "datatug-project.json"))
+					}
+					return os.Stat(t.TempDir())
+				}
+			case "waiting-read-revoked", "read-denied":
+				old := environmentReadFilesSeam
+				t.Cleanup(func() { environmentReadFilesSeam = old })
+				environmentReadFilesSeam = func(ctx context.Context, dir string, work func(*filestore.EnvironmentFiles) error) error {
+					if kind == "read-denied" {
+						return secureread.ErrAccessDenied
+					}
+					return old(ctx, dir, func(f *filestore.EnvironmentFiles) error {
+						require.NoError(t, os.WriteFile(filepath.Join(root, "policies", "read.yaml"), []byte("revoked"), 0600))
+						return work(f)
+					})
+				}
+			case "after-git-revoked", "after-git-error-revoked":
+				oldRead, oldGit := environmentReadFilesSeam, localGitStateSeam
+				t.Cleanup(func() { environmentReadFilesSeam, localGitStateSeam = oldRead, oldGit })
+				readDone := false
+				environmentReadFilesSeam = func(ctx context.Context, dir string, work func(*filestore.EnvironmentFiles) error) error {
+					err := oldRead(ctx, dir, work)
+					readDone = true
+					return err
+				}
+				localGitStateSeam = func(context.Context, string) (gitState, error) {
+					if readDone {
+						require.NoError(t, os.WriteFile(filepath.Join(root, "policies", "read.yaml"), []byte("revoked"), 0600))
+					}
+					if readDone && kind == "after-git-error-revoked" {
+						return gitState{}, environmentError("TEMPORARILY_UNAVAILABLE", 503)
+					}
+					return gitState{}, errors.New("not a Git checkout")
+				}
+			}
+			view, err := BoundContextualEnvironments(context.Background(), scope)
+			require.ErrorIs(t, err, secureread.ErrAccessDenied)
+			require.NotEqual(t, "available", view.Status)
+			require.Nil(t, view.Items)
+		})
+	}
+}

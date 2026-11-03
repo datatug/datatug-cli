@@ -65,82 +65,90 @@ func BoundContextualEnvironments(ctx context.Context, scope ContextualEnvironmen
 	}
 	before, gitErr := environmentGitState(ctx, root)
 	var gitFailure *EnvironmentError
-	if errors.As(gitErr, &gitFailure) {
-		return out, nil
-	}
+
 	var parent bool
 	items := make([]LocalEnvironmentBrief, 0, 1)
-	readErr := environmentReadFilesSeam(ctx, root, func(files *filestore.EnvironmentFiles) error {
+	readErr := gitErr
+	if !errors.As(gitErr, &gitFailure) {
+		readErr = environmentReadFilesSeam(ctx, root, func(files *filestore.EnvironmentFiles) error {
+			if err := verify(); err != nil {
+				return err
+			}
+			reader, err := openQualifiedProjectReaderSeam(files.Root)
+			if err != nil {
+				return err
+			}
+			defer reader.close()
+			checkRoot := func() error {
+				opened, openErr := reader.root.Stat(".")
+				current, pathErr := os.Stat(root)
+				if openErr != nil || pathErr != nil || !os.SameFile(registered, opened) || !os.SameFile(registered, current) {
+					return secureread.ErrAccessDenied
+				}
+				return verify()
+			}
+			if err := checkRoot(); err != nil {
+				return err
+			}
+			// Require the real parent document; registered aliases remain authoritative,
+			// just as in localprojects.readProjectState. Never emit opaque metadata.
+			var document map[string]json.RawMessage
+			if _, err = reader.readJSON("datatug-project.json", &document); err != nil {
+				return err
+			}
+			if document == nil {
+				return localprojects.ErrConflict
+			}
+			parent, err = localprojects.ReadArchivedFromRoot(reader.root)
+			if err != nil {
+				return err
+			}
+			archived, err := filestore.ReadProjectArchivedItemsFromRoot(reader.root)
+			if err != nil {
+				return err
+			}
+			env, body, err := readQualifiedEnvironment(reader, scope.EnvironmentID)
+			if err != nil || body == nil {
+				return localprojects.ErrConflict
+			}
+			presentation, err := parseEnvironmentPresentation(body)
+			if err != nil {
+				return err
+			}
+			if !archived[datatug.ProjectObjectRef{Kind: "environment", ID: scope.EnvironmentID}] {
+				title := env.Title
+				if title == "" {
+					title = env.ID
+				}
+				items = append(items, LocalEnvironmentBrief{ID: env.ID, Title: title, Presentation: presentation})
+			}
+			return checkRoot()
+		})
+	}
+	// Metadata failures never skip the final authority/root checks, including
+	// changes made while either Git probe is in flight.
+	verifyRoot := func() error {
 		if err := verify(); err != nil {
 			return err
 		}
-		reader, err := openQualifiedProjectReaderSeam(files.Root)
-		if err != nil {
-			return err
+		current, pathErr := os.Stat(root)
+		if pathErr != nil || !os.SameFile(registered, current) {
+			return secureread.ErrAccessDenied
 		}
-		defer reader.close()
-		checkRoot := func() error {
-			opened, openErr := reader.root.Stat(".")
-			current, pathErr := os.Stat(root)
-			if openErr != nil || pathErr != nil || !os.SameFile(registered, opened) || !os.SameFile(registered, current) {
-				return secureread.ErrAccessDenied
-			}
-			return verify()
-		}
-		if err := checkRoot(); err != nil {
-			return err
-		}
-		// Require the real parent document; registered aliases remain authoritative,
-		// just as in localprojects.readProjectState. Never emit opaque metadata.
-		var document map[string]json.RawMessage
-		if _, err = reader.readJSON("datatug-project.json", &document); err != nil {
-			return err
-		}
-		if document == nil {
-			return localprojects.ErrConflict
-		}
-		parent, err = localprojects.ReadArchivedFromRoot(reader.root)
-		if err != nil {
-			return err
-		}
-		archived, err := filestore.ReadProjectArchivedItemsFromRoot(reader.root)
-		if err != nil {
-			return err
-		}
-		env, body, err := readQualifiedEnvironment(reader, scope.EnvironmentID)
-		if err != nil || body == nil {
-			return localprojects.ErrConflict
-		}
-		presentation, err := parseEnvironmentPresentation(body)
-		if err != nil {
-			return err
-		}
-		if !archived[datatug.ProjectObjectRef{Kind: "environment", ID: scope.EnvironmentID}] {
-			title := env.Title
-			if title == "" {
-				title = env.ID
-			}
-			items = append(items, LocalEnvironmentBrief{ID: env.ID, Title: title, Presentation: presentation})
-		}
-		return checkRoot()
-	})
-	// A source/root/session replacement is an actual read-admission failure.
-	if err := verify(); err != nil {
-		return out, err
+		return nil
 	}
-	current, pathErr := os.Stat(root)
-	if pathErr != nil || !os.SameFile(registered, current) {
-		return out, secureread.ErrAccessDenied
+	if err := verifyRoot(); err != nil {
+		return out, err
 	}
 	if errors.Is(readErr, secureread.ErrAccessDenied) {
 		return out, readErr
 	}
 	after, afterErr := environmentGitState(ctx, root)
+	if err := verifyRoot(); err != nil {
+		return out, err
+	}
 	if readErr != nil || (gitErr == nil) != (afterErr == nil) || gitErr == nil && (before.branch != after.branch || before.head != after.head) || errors.As(afterErr, &gitFailure) {
 		return out, nil
-	}
-	if err := verify(); err != nil {
-		return out, err
 	}
 	out.Status = "available"
 	out.ReasonCode = ""

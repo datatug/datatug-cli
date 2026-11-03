@@ -11,6 +11,8 @@ import (
 // getProjectFull returns full info about a project. The web client
 // (project.service.ts's getFull) sends the project id as `?id=`, not
 // `?project=` — see projectRefByID.
+var boundContextualEnvironments = api.BoundContextualEnvironments
+
 func getProjectFull(w http.ResponseWriter, r *http.Request) {
 	ctx, err := getContextFromRequest(r)
 	if err != nil {
@@ -30,7 +32,7 @@ func getProjectFull(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if bound {
-		contextual, err := api.BoundContextualEnvironments(ctx, api.ContextualEnvironmentScope{ProjectID: boundProject, EnvironmentID: boundEnvironment, CatalogID: boundCatalog})
+		contextual, err := boundContextualEnvironments(ctx, api.ContextualEnvironmentScope{ProjectID: boundProject, EnvironmentID: boundEnvironment, CatalogID: boundCatalog})
 		if err != nil {
 			writeContractError(w, r, contractErrAccessDenied("configured source read is unavailable"))
 			return

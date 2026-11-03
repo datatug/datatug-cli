@@ -11,11 +11,14 @@ import (
 // getProjectFull returns full info about a project. The web client
 // (project.service.ts's getFull) sends the project id as `?id=`, not
 // `?project=` — see projectRefByID.
+var boundContextualEnvironments = api.BoundContextualEnvironments
+
 func getProjectFull(w http.ResponseWriter, r *http.Request) {
 	ctx, err := getContextFromRequest(r)
 	if err != nil {
 		handleError(err, w, r)
 	}
+	generation := api.SecurityContextID()
 	boundProject, boundEnvironment, boundCatalog, bound, bindingErr := api.BoundReadScope(ctx)
 	if bound {
 		if bindingErr != nil || r.URL.Query().Get(urlParamID) != boundProject {
@@ -29,8 +32,24 @@ func getProjectFull(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if bound {
+		contextual, err := boundContextualEnvironments(ctx, api.ContextualEnvironmentScope{ProjectID: boundProject, EnvironmentID: boundEnvironment, CatalogID: boundCatalog})
+		if err != nil {
+			writeContractError(w, r, contractErrAccessDenied("configured source read is unavailable"))
+			return
+		}
+		// Qualified selections are not silently downgraded to this unqualified view.
+		for _, selector := range []string{"branch", "spaceID", "projectApi", "environment", "catalog"} {
+			if _, exists := r.URL.Query()[selector]; exists {
+				contextual.Status, contextual.ReasonCode = "unavailable", "INVALID_REQUEST"
+				contextual.Parent, contextual.Items = nil, nil
+			}
+		}
+		if !api.ValidateSecurityContext(generation) {
+			writeContractError(w, r, contractErrAccessDenied("configured source read is unavailable"))
+			return
+		}
 		// A discovery projection, not the project's raw connection descriptors.
-		writeContractResponse(w, r, nil, map[string]any{"id": boundProject, "environments": []any{map[string]any{"id": boundEnvironment, "dbServers": []any{map[string]any{"catalogs": []string{boundCatalog}}}}}, "dbModels": []any{}, "entities": []any{}})
+		writeContractResponse(w, r, nil, map[string]any{"contextualEnvironments": contextual, "id": boundProject, "environments": []any{map[string]any{"id": boundEnvironment, "dbServers": []any{map[string]any{"catalogs": []string{boundCatalog}}}}}, "dbModels": []any{}, "entities": []any{}})
 		return
 	}
 	project, err := api.GetProjectFull(ctx, ref)

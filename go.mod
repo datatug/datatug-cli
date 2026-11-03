@@ -33,7 +33,7 @@ require (
 	github.com/dal-go/dalgo2firestore v0.10.41
 	github.com/dal-go/dalgo2http v0.4.0
 	github.com/dal-go/dalgo2libsql v0.0.0-20261028000517-7d8187759a51
-	github.com/dal-go/dalgo2mongodb v0.0.0-20261027130616-1c6549d8dc1e
+	github.com/dal-go/dalgo2mongodb v0.1.1-0.20261101192608-4aa0be74adc7
 	github.com/dal-go/dalgo2mssql v0.0.1
 	github.com/dal-go/dalgo2mysql v0.2.2
 	github.com/dal-go/dalgo2openvaultdb v0.4.1
@@ -86,7 +86,7 @@ require (
 	github.com/xo/dburl v0.24.2
 	github.com/xuri/excelize/v2 v2.11.0
 	github.com/zalando/go-keyring v0.2.8
-	go.mongodb.org/mongo-driver/v2 v2.5.0
+	go.mongodb.org/mongo-driver/v2 v2.9.2
 	golang.org/x/oauth2 v0.37.0
 	golang.org/x/sys v0.49.0
 	golang.org/x/term v0.47.0
@@ -174,7 +174,7 @@ require (
 	//github.com/jackc/pgx/v5 v5.7.6 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
 	github.com/kevinburke/ssh_config v1.6.0 // indirect
-	github.com/klauspost/compress v1.19.1 // indirect
+	github.com/klauspost/compress v1.19.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
 	github.com/lrstanley/bubblezone/v2 v2.0.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect

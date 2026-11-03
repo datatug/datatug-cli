@@ -66,6 +66,7 @@ func getCatalogTablesHandler(w http.ResponseWriter, r *http.Request) {
 		handleError(err, w, r)
 		return
 	}
+	generation := api.SecurityContextID()
 	executor, configured := secureExecutorHook()
 	if !configured {
 		writeContractError(w, r, newContractError(apicontract.ErrCodeAccessDenied, "access denied", ""))
@@ -168,7 +169,12 @@ func getCatalogTablesHandler(w http.ResponseWriter, r *http.Request) {
 		writeContractError(w, r, newContractError(codeInternal, "catalog permissions could not be verified", ""))
 		return
 	}
-	returnJSON(w, r, http.StatusOK, nil, &api.CatalogTables{Tables: allowedTables, Views: allowedViews})
+	hosted, err := api.HostedTableRead(r.Context(), ref.ProjectID, environmentID, catalogID)
+	if err != nil || !api.ValidateSecurityContext(generation) || r.Context().Err() != nil {
+		writeContractError(w, r, newContractError(apicontract.ErrCodeAccessDenied, "access denied", ""))
+		return
+	}
+	returnJSON(w, r, http.StatusOK, nil, &api.CatalogTables{Tables: allowedTables, Views: allowedViews, HostedTableRead: hosted})
 }
 
 // A policy evaluation failure is not evidence that one relation is invisible.

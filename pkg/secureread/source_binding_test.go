@@ -398,7 +398,13 @@ func (r bindingCloseReader) Close() error { err := r.RecordsReader.Close(); r.on
 func TestBoundSourceFinalGateAndAdditionalPolicyIntersection(t *testing.T) {
 	requireBindingPathPlatform(t)
 	f := newBindingFixture(t)
-	extra := filepath.Join(t.TempDir(), "extra.yaml")
+	// The source binding deliberately refuses symlink spellings. macOS's
+	// default temporary root may be /var (a symlink to /private/var).
+	extraDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	extra := filepath.Join(extraDir, "extra.yaml")
 	allow := "apiVersion: dalgo.io/access/v1\nkind: AccessPolicy\nmetadata: {name: extra}\ndefault: deny\nscopes: [{path: '/**', rules: [{id: extra, effect: allow, operations: [query]}]}]\n"
 	writeBindingFile(t, extra, []byte(allow))
 	s, declared, err := LoadBoundSession(context.Background(), f.root, BoundSessionOptions{ExtraPolicyFiles: []string{extra}, As: "operator"})

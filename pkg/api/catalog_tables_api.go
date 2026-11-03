@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/storage"
 )
 
@@ -62,8 +63,9 @@ type CatalogTable struct {
 // (pkg/server/endpoints/semantic_project.go) already use for an identical
 // ProjectStore-incompleteness gap.
 type CatalogTables struct {
-	Tables []CatalogTable `json:"tables"`
-	Views  []CatalogTable `json:"views"`
+	HostedTableRead *secureread.HostedTableRead `json:"hostedTableRead,omitempty"`
+	Tables          []CatalogTable              `json:"tables"`
+	Views           []CatalogTable              `json:"views"`
 }
 
 // CatalogColumn is the compact, model-facing description of one stored

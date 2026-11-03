@@ -56,3 +56,12 @@ func boundResolvedSource(ctx context.Context, store datatug.ProjectStore, root, 
 	_, _, catalog, _ := session.BoundScope()
 	return ResolvedSource{ID: catalog, Label: catalog, Kind: SourceKindSQL, URL: url}, true, nil
 }
+
+// HostedTableRead binds routing metadata to the current fixed local selection.
+// It does not assert current hosted catalogue equality or data permission.
+func HostedTableRead(ctx context.Context, project, environment, catalog string) (*secureread.HostedTableRead, error) {
+	secureMu.RLock()
+	session := secureSession
+	secureMu.RUnlock()
+	return session.HostedTableRead(ctx, project, environment, catalog)
+}

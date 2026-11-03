@@ -40,12 +40,13 @@ type BoundSessionOptions struct {
 }
 
 type boundSourceConfig struct {
-	Profile          string   `json:"profile"`
-	Project          string   `json:"project"`
-	Environment      string   `json:"environment"`
-	Catalog          string   `json:"catalog"`
-	SQLiteFile       string   `json:"sqliteFile"`
-	RequiredPolicies []string `json:"requiredPolicies"`
+	HostedTableRead  json.RawMessage `json:"hostedTableRead,omitempty"`
+	Profile          string          `json:"profile"`
+	Project          string          `json:"project"`
+	Environment      string          `json:"environment"`
+	Catalog          string          `json:"catalog"`
+	SQLiteFile       string          `json:"sqliteFile"`
+	RequiredPolicies []string        `json:"requiredPolicies"`
 	Principal        struct {
 		ID     string   `json:"id"`
 		Roles  []string `json:"roles"`
@@ -54,6 +55,7 @@ type boundSourceConfig struct {
 }
 
 type sourceBinding struct {
+	hosted                         *hostedTableRegistration
 	config                         boundSourceConfig
 	root, target, url, registry    string
 	ref                            dbcopy.BackendRef
@@ -103,6 +105,10 @@ func LoadBoundSession(ctx context.Context, projectDir string, options BoundSessi
 	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) || apicontract.DecodeStrict(data, &config) != nil || config.Profile != ExactTableReadProfile || !dbcopy.IsPlainSourceID(config.Project) || !dbcopy.IsPlainSourceID(config.Environment) || !dbcopy.IsPlainSourceID(config.Catalog) || config.Principal.ID == "" || len(config.RequiredPolicies) == 0 {
 		return Session{}, true, ErrSourceBinding
 	}
+	hosted, err := decodeHostedTableRegistration(config.HostedTableRead)
+	if err != nil {
+		return Session{}, true, ErrSourceBinding
+	}
 	if options.As != "" && options.As != config.Principal.ID || len(options.Roles) > 0 && !sameBindingNames(options.Roles, config.Principal.Roles) || len(options.Groups) > 0 && !sameBindingNames(options.Groups, config.Principal.Groups) {
 		return Session{}, true, ErrSourceBinding
 	}
@@ -114,7 +120,7 @@ func LoadBoundSession(ctx context.Context, projectDir string, options BoundSessi
 	if err != nil || ref.Scheme != "sqlite" {
 		return Session{}, true, ErrSourceBinding
 	}
-	binding := &sourceBinding{config: config, root: root, target: target, ref: ref, url: dbcopy.LocalSourceURL("sqlite", target), files: make(map[string][sha256.Size]byte), directories: make(map[string][sha256.Size]byte)}
+	binding := &sourceBinding{hosted: hosted, config: config, root: root, target: target, ref: ref, url: dbcopy.LocalSourceURL("sqlite", target), files: make(map[string][sha256.Size]byte), directories: make(map[string][sha256.Size]byte)}
 	binding.files[configPath] = sha256.Sum256(data)
 	binding.file, err = bindingStat(target)
 	if err != nil {

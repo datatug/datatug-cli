@@ -44,6 +44,18 @@ func decodeHostedTableRegistration(raw json.RawMessage) (*hostedTableRegistratio
 	if len(raw) == 0 {
 		return nil, nil
 	}
+	// Registration keys are literal decoded names, not encoding/json's field aliases.
+	var keys map[string]json.RawMessage
+	if json.Unmarshal(raw, &keys) != nil {
+		return nil, ErrSourceBinding
+	}
+	for key := range keys {
+		switch key {
+		case "version", "spaceID", "projectId", "connectionId", "catalogSHA256", "fileSHA256", "database":
+		default:
+			return nil, ErrSourceBinding
+		}
+	}
 	var c hostedTableRegistration
 	if apicontract.DecodeStrict(raw, &c) != nil || c.Version != 1 || !dbcopy.IsPlainSourceID(c.SpaceID) || !dbcopy.IsPlainSourceID(c.ProjectID) || !dbcopy.IsPlainSourceID(c.ConnectionID) || !utf8.ValidString(c.Database) || c.Database == "" || len(c.Database) > 256 || strings.TrimSpace(c.Database) != c.Database || strings.IndexFunc(c.Database, unicode.IsControl) >= 0 {
 		return nil, ErrSourceBinding

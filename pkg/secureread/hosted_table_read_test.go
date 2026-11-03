@@ -38,6 +38,21 @@ func TestHostedTableReadRegistrationClosed(t *testing.T) {
 			}
 		})
 	}
+	for _, pair := range [][2]string{{"version", "Version"}, {"spaceID", "spaceId"}, {"projectId", "ProjectId"}, {"connectionId", "ConnectionId"}, {"catalogSHA256", "CatalogSHA256"}, {"fileSHA256", "FileSHA256"}, {"database", "Database"}} {
+		t.Run("singleton-"+pair[1], func(t *testing.T) {
+			raw := strings.Replace(valid, `"`+pair[0]+`":`, `"`+pair[1]+`":`, 1)
+			if _, err := decodeHostedTableRegistration([]byte(raw)); err == nil {
+				t.Fatal("accepted noncanonical singleton key")
+			}
+		})
+	}
+	if _, err := decodeHostedTableRegistration([]byte("{")); err == nil {
+		t.Fatal("accepted malformed JSON")
+	}
+	escaped := strings.Replace(valid, `"spaceID":`, `"\u0073paceID":`, 1)
+	if c, err := decodeHostedTableRegistration([]byte(escaped)); err != nil || c.SpaceID != "S1" {
+		t.Fatal("canonical escaped key refused", err)
+	}
 	writeBindingFile(t, f.config, []byte(strings.Replace(string(mustHostedConfig(t, f)), `"version":1`, `"version":2`, 1)))
 	if _, _, e := LoadBoundSession(context.Background(), f.root, BoundSessionOptions{Required: true}); e == nil {
 		t.Fatal("unsupported config downgraded")

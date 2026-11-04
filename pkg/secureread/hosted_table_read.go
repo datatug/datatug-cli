@@ -38,6 +38,8 @@ type hostedTableRegistration struct {
 	CatalogSHA256 string `json:"catalogSHA256"`
 	FileSHA256    string `json:"fileSHA256"`
 	Database      string `json:"database"`
+	// HostedEngineIdentity is a trusted operator association, not a local derivation.
+	HostedEngineIdentity string `json:"hostedEngineIdentity"`
 }
 
 func decodeHostedTableRegistration(raw json.RawMessage) (*hostedTableRegistration, error) {
@@ -51,16 +53,20 @@ func decodeHostedTableRegistration(raw json.RawMessage) (*hostedTableRegistratio
 	}
 	for key := range keys {
 		switch key {
-		case "version", "spaceID", "projectId", "connectionId", "catalogSHA256", "fileSHA256", "database":
+		case "version", "spaceID", "projectId", "connectionId", "catalogSHA256", "fileSHA256", "database", "hostedEngineIdentity":
 		default:
 			return nil, ErrSourceBinding
 		}
 	}
 	var c hostedTableRegistration
-	if apicontract.DecodeStrict(raw, &c) != nil || c.Version != 1 || !dbcopy.IsPlainSourceID(c.SpaceID) || !dbcopy.IsPlainSourceID(c.ProjectID) || !dbcopy.IsPlainSourceID(c.ConnectionID) || !utf8.ValidString(c.Database) || c.Database == "" || len(c.Database) > 256 || strings.TrimSpace(c.Database) != c.Database || strings.IndexFunc(c.Database, unicode.IsControl) >= 0 {
+	if apicontract.DecodeStrict(raw, &c) != nil || c.Version != 2 || !dbcopy.IsPlainSourceID(c.SpaceID) || !dbcopy.IsPlainSourceID(c.ProjectID) || !dbcopy.IsPlainSourceID(c.ConnectionID) || !utf8.ValidString(c.Database) || c.Database == "" || len(c.Database) > 256 || strings.TrimSpace(c.Database) != c.Database || strings.IndexFunc(c.Database, unicode.IsControl) >= 0 {
 		return nil, ErrSourceBinding
 	}
-	for _, s := range []string{c.CatalogSHA256, c.FileSHA256} {
+	const hostedIdentityPrefix = "sqlite-file-route-v1:"
+	if !strings.HasPrefix(c.HostedEngineIdentity, hostedIdentityPrefix) {
+		return nil, ErrSourceBinding
+	}
+	for _, s := range []string{c.CatalogSHA256, c.FileSHA256, strings.TrimPrefix(c.HostedEngineIdentity, hostedIdentityPrefix)} {
 		b, e := hex.DecodeString(s)
 		if e != nil || len(b) != sha256.Size || hex.EncodeToString(b) != s {
 			return nil, ErrSourceBinding
@@ -73,7 +79,9 @@ var hostedSourceOpen = os.Open
 var hostedSourceRead = func(f *os.File, p []byte) (int, error) { return f.Read(p) }
 
 // HostedTableRead inspects only the already fixed source, bracketed by current
-// session checks. Content equality is independently rechecked by the hosted API.
+// session checks. The hash independently checks the local file witness. A trusted
+// operator associates it with the hosted route identity; this is not cross-machine
+// content proof. Consumers must separately compare the full hosted fingerprint.
 func (s Session) HostedTableRead(ctx context.Context, project, environment, catalog string) (*HostedTableRead, error) {
 	if s.binding == nil {
 		return nil, nil
@@ -97,7 +105,7 @@ func (s Session) HostedTableRead(ctx context.Context, project, environment, cata
 	if err = s.CheckSourceBinding(ctx); err != nil {
 		return nil, err
 	}
-	return &HostedTableRead{Version: 1, Status: "available", SpaceID: c.SpaceID, ProjectID: c.ProjectID, ConnectionID: c.ConnectionID, Fingerprint: &dataaccess.Fingerprint{Engine: "sqlite", Database: c.Database, EngineIdentity: "sha256:" + digest}}, nil
+	return &HostedTableRead{Version: 1, Status: "available", SpaceID: c.SpaceID, ProjectID: c.ProjectID, ConnectionID: c.ConnectionID, Fingerprint: &dataaccess.Fingerprint{Engine: "sqlite", Database: c.Database, EngineIdentity: c.HostedEngineIdentity}}, nil
 }
 
 func (b *sourceBinding) hostedSourceDigest(ctx context.Context) (string, error) {

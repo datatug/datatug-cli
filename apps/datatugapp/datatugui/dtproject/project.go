@@ -28,11 +28,17 @@ const (
 
 // projectPage is the page of an open project: its menu on the left and the
 // section the menu points at on the right.
-func projectPage(data projectData) nav.Page {
+func projectPage(data projectData) nav.Page { return projectPageAt(data, sectionProject) }
+
+// projectPageAt is the page of an open project showing section s, its menu
+// cursor on that section.
+func projectPageAt(data projectData, s section) nav.Page {
+	menu := newProjectMenu(data)
+	menu.tree.Select(string(s))
 	return nav.Page{
 		Title:   data.title(),
-		Menu:    newProjectMenu(data),
-		Content: newSectionScreen(data, sectionProject),
+		Menu:    menu,
+		Content: newSectionScreen(data, s),
 		Focus:   nav.FocusToMenu,
 	}
 }

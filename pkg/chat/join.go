@@ -583,6 +583,15 @@ func qualifyJoinCondition(condition dal.Condition, source string, single bool) (
 			}
 		}
 		return dal.NewGroupCondition(value.Operator(), items...), nil
+	case dal.IsNullCondition:
+		operand, err := qualifyJoinExpression(value.Operand(), source, single)
+		if err != nil {
+			return nil, err
+		}
+		if value.Negated() {
+			return dal.NewIsNotNullCondition(operand), nil
+		}
+		return dal.NewIsNullCondition(operand), nil
 	default:
 		return nil, fmt.Errorf("unsupported condition %T", condition)
 	}

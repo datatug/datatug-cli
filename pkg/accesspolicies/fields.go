@@ -46,6 +46,13 @@ func referencedFields(query dal.StructuredQuery) ([]string, error) {
 			return walkGroup(c, walkCondition)
 		case *dal.GroupCondition:
 			return walkGroup(*c, walkCondition)
+		case dal.IsNullCondition:
+			// A null test reveals whether a field is set, so its operand is a
+			// reference like any other: allowed only when every field it
+			// names is visible.
+			return walkExpression(c.Operand())
+		case *dal.IsNullCondition:
+			return walkExpression(c.Operand())
 		default:
 			return fmt.Errorf("unsupported condition %T", condition)
 		}

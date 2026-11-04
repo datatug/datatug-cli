@@ -207,22 +207,32 @@ func countNativeInBindings(condition dal.Condition, field, parameter string) (in
 		if value != nil {
 			return countNativeInBindings(*value, field, parameter)
 		}
+	case dal.IsNullCondition:
+		// A null test never binds the cohort; it is safe unless it reads the
+		// cohort field or parameter itself.
+		if expressionMentionsCohortBinding(value.Operand(), field, parameter) {
+			return 0, false
+		}
+		return 0, true
+	case *dal.IsNullCondition:
+		if value != nil {
+			return countNativeInBindings(*value, field, parameter)
+		}
 	}
 	return 0, false
 }
 
 func comparisonMentionsCohortBinding(comparison dal.Comparison, field, parameter string) bool {
-	for _, expression := range []dal.Expression{comparison.Left, comparison.Right} {
-		switch value := expression.(type) {
-		case dal.FieldRef:
-			if value.Source() == "" && value.Name() == field {
-				return true
-			}
-		case dal.Param:
-			if value.Name == parameter {
-				return true
-			}
-		}
+	return expressionMentionsCohortBinding(comparison.Left, field, parameter) ||
+		expressionMentionsCohortBinding(comparison.Right, field, parameter)
+}
+
+func expressionMentionsCohortBinding(expression dal.Expression, field, parameter string) bool {
+	switch value := expression.(type) {
+	case dal.FieldRef:
+		return value.Source() == "" && value.Name() == field
+	case dal.Param:
+		return value.Name == parameter
 	}
 	return false
 }

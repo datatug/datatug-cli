@@ -142,6 +142,12 @@ func walkParams(condition dal.Condition, skipRight bool, visit func(dal.Expressi
 		for _, member := range c.Conditions() {
 			walkParams(member, skipRight, visit)
 		}
+	case dal.IsNullCondition:
+		// A null test has no right-hand side: a parameter in its operand is
+		// always misplaced.
+		visit(c.Operand())
+	case *dal.IsNullCondition:
+		visit(c.Operand())
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -29,10 +30,12 @@ type accessClientOptions struct {
 type accessCommandDependencies struct {
 	credential func(context.Context, device.ProductOptions) (device.ProductReadCredential, error)
 	client     *http.Client
+	// sessions resolves agent sessions (D29); nil means none.
+	sessions *agentSessions
 }
 
 func accessCommand() *cobra.Command {
-	return accessCommandWith(accessCommandDependencies{credential: device.ProductCredentialForRead, client: newProtectedReadHTTPClient()})
+	return accessCommandWith(accessCommandDependencies{credential: device.ProductCredentialForRead, client: newProtectedReadHTTPClient(), sessions: defaultAgentSessions()})
 }
 
 func accessCommandWith(dependencies accessCommandDependencies) *cobra.Command {
@@ -55,6 +58,12 @@ func safeDenialCode(code string) bool {
 		}
 	}
 	return true
+}
+
+// accessRefusal is a server refusal; code is its safe error code.
+type accessRefusal struct {
+	*exitError
+	code string
 }
 
 func addAccessClientFlags(command *cobra.Command, options *accessClientOptions) {
@@ -85,8 +94,8 @@ func (s accessScopeFlags) valid(connection bool) bool {
 
 // accessCall sends one access-control API call with the product login and
 // prints the server's JSON answer. It never retries or falls back.
-func accessCall(command *cobra.Command, dependencies accessCommandDependencies, options accessClientOptions, method, path string, query url.Values, body any, agentID string) error {
-	raw, err := accessDo(command.Context(), dependencies, options, method, path, query, body, agentID)
+func accessCall(command *cobra.Command, dependencies accessCommandDependencies, options accessClientOptions, method, path string, query url.Values, body any, caller agentCaller) error {
+	raw, err := accessDo(command.Context(), dependencies, options, method, path, query, body, caller)
 	if err != nil {
 		return err
 	}
@@ -99,7 +108,7 @@ func accessCall(command *cobra.Command, dependencies accessCommandDependencies, 
 	return err
 }
 
-func accessDo(ctx context.Context, dependencies accessCommandDependencies, options accessClientOptions, method, path string, query url.Values, body any, agentID string) ([]byte, error) {
+func accessDo(ctx context.Context, dependencies accessCommandDependencies, options accessClientOptions, method, path string, query url.Values, body any, caller agentCaller) ([]byte, error) {
 	if validateAIAPIURL(options.baseURL) != nil {
 		return nil, Exit("access requires an HTTPS API /v0/ base URL, or loopback development", exitCodeUsage)
 	}
@@ -128,7 +137,7 @@ func accessDo(ctx context.Context, dependencies accessCommandDependencies, optio
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	setProtectedAgentHeader(req, agentID)
+	setProtectedAgentHeader(req, caller.id, caller.session)
 	response, err := dependencies.client.Do(req)
 	if err != nil {
 		return nil, errors.New("access service unavailable")
@@ -150,9 +159,9 @@ func accessDo(ctx context.Context, dependencies accessCommandDependencies, optio
 			code = http.StatusText(response.StatusCode)
 		}
 		if response.StatusCode == http.StatusForbidden || response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusBadRequest {
-			return nil, Exit("access refused: "+code, exitCodeAccessDenied)
+			return nil, &accessRefusal{exitError: &exitError{msg: "access refused: " + code, code: exitCodeAccessDenied}, code: code}
 		}
-		return nil, Exit("access unavailable: "+code, exitCodeDatabase)
+		return nil, &accessRefusal{exitError: &exitError{msg: "access unavailable: " + code, code: exitCodeDatabase}, code: code}
 	}
 	return raw, nil
 }
@@ -164,7 +173,7 @@ func accessAgentsListCommand(dependencies accessCommandDependencies) *cobra.Comm
 		if !scope.valid(false) {
 			return Exit("agents list requires valid --space and --project", exitCodeUsage)
 		}
-		return accessCall(command, dependencies, options, http.MethodGet, "agents", url.Values{"spaceID": {scope.space}, "projectId": {scope.project}}, nil, "")
+		return accessCall(command, dependencies, options, http.MethodGet, "agents", url.Values{"spaceID": {scope.space}, "projectId": {scope.project}}, nil, agentCaller{})
 	}}
 	addAccessScopeFlags(command, &scope, false)
 	addAccessClientFlags(command, &options)
@@ -179,7 +188,7 @@ func accessAgentsDisableCommand(dependencies accessCommandDependencies) *cobra.C
 		if !scope.valid(false) || !validProtectedSelector(args[0]) || revision < 1 {
 			return Exit("agents disable requires valid --space, --project, agent ID and --revision", exitCodeUsage)
 		}
-		return accessCall(command, dependencies, options, http.MethodPost, "agents/"+args[0]+"/disable", nil, map[string]any{"spaceID": scope.space, "projectId": scope.project, "expectedRevision": revision}, "")
+		return accessCall(command, dependencies, options, http.MethodPost, "agents/"+args[0]+"/disable", nil, map[string]any{"spaceID": scope.space, "projectId": scope.project, "expectedRevision": revision}, agentCaller{})
 	}}
 	addAccessScopeFlags(command, &scope, false)
 	command.Flags().Int64Var(&revision, "revision", 0, "The agent's current revision (from agents list)")
@@ -188,24 +197,43 @@ func accessAgentsDisableCommand(dependencies accessCommandDependencies) *cobra.C
 }
 
 type accessRequestFlags struct {
-	scope   accessScopeFlags
-	agent   bool
-	agentID string
-	tables  []string
-	reason  string
-	seconds int
+	scope    accessScopeFlags
+	agent    bool
+	agentID  string
+	harness  string
+	lifetime string
+	tables   []string
+	reason   string
+	seconds  int
 }
 
 func accessRequestCommand(dependencies accessCommandDependencies) *cobra.Command {
 	var options accessClientOptions
 	var flags accessRequestFlags
-	command := &cobra.Command{Use: "request", Short: "Request read access for yourself, or as your agent ask your user", Long: "Files a self-request. With --agent, the agent asks its user first: the person who registered it (--agent-id) or you. The agent never names anyone else, and never decides.", Args: cobra.NoArgs, SilenceUsage: true, RunE: func(command *cobra.Command, _ []string) error {
+	command := &cobra.Command{Use: "request", Short: "Request read access for yourself, or as your agent ask your user", Long: "Files a self-request. With --agent, the agent asks its user first: the person who registered it (--agent-id) or you. The agent never names anyone else, and never decides. An agent request asks for 'This session' (--lifetime session, the default when the harness session has an agent session: --harness-session or " + harnessSessionEnv + ") or for a deadline (--lifetime deadline, --seconds; the default without an agent session).\n\n" + agentSessionHonestLimit, Args: cobra.NoArgs, SilenceUsage: true, RunE: func(command *cobra.Command, _ []string) error {
 		if err := flags.validate(); err != nil {
 			return err
 		}
+		caller := agentCaller{}
+		if flags.agent {
+			session, err := dependencies.sessions.forAgentCall(command.Context(), dependencies, options, flags.harness, &flags.agentID)
+			if err != nil {
+				return err
+			}
+			switch {
+			case flags.lifetime == "session" && session == "":
+				return Exit("a 'This session' request needs an agent session: start one with 'datatug agent session start' and pass --harness-session (or set "+harnessSessionEnv+"), or pass --lifetime deadline", exitCodeUsage)
+			case flags.lifetime == "" && session != "":
+				flags.lifetime = "session"
+			case flags.lifetime == "":
+				flags.lifetime = "deadline"
+				_, _ = fmt.Fprintln(command.ErrOrStderr(), "Note: no agent session is active, so the approval will be \"Until a deadline\" (--seconds).")
+			}
+			caller = agentCaller{id: flags.agentID, session: session}
+		}
 		// The grant scope names the connection's protection, as the server
 		// reports it; the catalog ID alone is not a grant scope.
-		raw, err := accessDo(command.Context(), dependencies, options, http.MethodGet, "protection", url.Values{"spaceID": {flags.scope.space}, "projectId": {flags.scope.project}, "connectionId": {flags.scope.connection}}, nil, "")
+		raw, err := accessDo(command.Context(), dependencies, options, http.MethodGet, "protection", url.Values{"spaceID": {flags.scope.space}, "projectId": {flags.scope.project}, "connectionId": {flags.scope.connection}}, nil, agentCaller{})
 		if err != nil {
 			return err
 		}
@@ -220,12 +248,14 @@ func accessRequestCommand(dependencies accessCommandDependencies) *cobra.Command
 		if flags.agent {
 			path = "agent/requests"
 		}
-		return accessCall(command, dependencies, options, http.MethodPost, path, nil, body, flags.agentID)
+		return accessCall(command, dependencies, options, http.MethodPost, path, nil, body, caller)
 	}}
 	addAccessScopeFlags(command, &flags.scope, true)
 	f := command.Flags()
 	f.BoolVar(&flags.agent, "agent", false, "File the request as your agent")
-	f.StringVar(&flags.agentID, "agent-id", "", "With --agent: the registered agent on its own account")
+	f.StringVar(&flags.agentID, "agent-id", "", "With --agent: the registered agent on its own account (default: the agent of the harness session)")
+	addHarnessSessionFlag(command, &flags.harness)
+	f.StringVar(&flags.lifetime, "lifetime", "", "With --agent: session (default with an agent session; needs one) or deadline (default without)")
 	f.StringSliceVar(&flags.tables, "table", nil, "Exact table as namespace.name (repeatable); omit for the whole connection")
 	f.StringVar(&flags.reason, "reason", "", "Why access is needed")
 	f.IntVar(&flags.seconds, "seconds", 300, "Requested duration in seconds")
@@ -236,6 +266,9 @@ func accessRequestCommand(dependencies accessCommandDependencies) *cobra.Command
 func (f accessRequestFlags) validate() error {
 	if !f.scope.valid(true) || f.reason == "" || len(f.reason) > 256 || f.seconds < 1 || !validProtectedAgent(f.agent, f.agentID) {
 		return Exit("access request requires valid --space, --project, --connection, --reason and --seconds; --agent-id needs --agent", exitCodeUsage)
+	}
+	if f.lifetime != "" && (!f.agent || f.lifetime != "session" && f.lifetime != "deadline") {
+		return Exit("--lifetime needs --agent and is session or deadline", exitCodeUsage)
 	}
 	for _, table := range f.tables {
 		if _, _, ok := cutTable(table); !ok {
@@ -252,8 +285,11 @@ func (f accessRequestFlags) body(connection string, now time.Time) any {
 		scope.Objects = append(scope.Objects, dataaccess.ObjectRef{Namespace: namespace, Name: name})
 		scope.Requires = []string{dataaccess.ObjectsExact}
 	}
-	return map[string]any{"spaceID": f.scope.space, "projectId": f.scope.project,
-		"request": map[string]any{"permissions": []dataaccess.Permission{dataaccess.DataRead}, "scope": scope, "reason": f.reason, "expiresAt": now.Add(time.Duration(f.seconds) * time.Second).UTC().Format(time.RFC3339Nano)}}
+	request := map[string]any{"permissions": []dataaccess.Permission{dataaccess.DataRead}, "scope": scope, "reason": f.reason, "expiresAt": now.Add(time.Duration(f.seconds) * time.Second).UTC().Format(time.RFC3339Nano)}
+	if f.lifetime != "" {
+		request["lifetime"] = f.lifetime
+	}
+	return map[string]any{"spaceID": f.scope.space, "projectId": f.scope.project, "request": request}
 }
 
 func cutTable(value string) (string, string, bool) {
@@ -272,7 +308,7 @@ func accessInboxCommand(dependencies accessCommandDependencies) *cobra.Command {
 		if !scope.valid(true) {
 			return Exit("access inbox requires valid --space, --project and --connection", exitCodeUsage)
 		}
-		return accessCall(command, dependencies, options, http.MethodGet, "agent-requests", url.Values{"spaceID": {scope.space}, "projectId": {scope.project}, "connectionId": {scope.connection}}, nil, "")
+		return accessCall(command, dependencies, options, http.MethodGet, "agent-requests", url.Values{"spaceID": {scope.space}, "projectId": {scope.project}, "connectionId": {scope.connection}}, nil, agentCaller{})
 	}}
 	addAccessScopeFlags(command, &scope, true)
 	addAccessClientFlags(command, &options)

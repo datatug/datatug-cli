@@ -19,6 +19,16 @@ import (
 // route that answers does not know which source it was asked for.
 const sourceFileMissingSentence = "the data file of a source does not exist"
 
+// catalogNotFoundError adds absence metadata only at the catalog route's proven
+// absence branches, retaining the original error text and normal error handling.
+type catalogNotFoundError struct {
+	err   error
+	field string
+}
+
+func (e *catalogNotFoundError) Error() string { return e.err.Error() }
+func (e *catalogNotFoundError) Unwrap() error { return e.err }
+
 func handleError(err error, w http.ResponseWriter, r *http.Request) bool {
 	if err == nil {
 		return false
@@ -93,6 +103,11 @@ func handleError(err error, w http.ResponseWriter, r *http.Request) bool {
 	// clean-404 treatment as ErrQueryNotFound above, never a raw
 	// filesystem error.
 	case errors.Is(err, api.ErrCatalogNotFound):
+		var absent *catalogNotFoundError
+		if errors.As(err, &absent) {
+			response.Code = "NOT_FOUND"
+			response.Field = absent.field
+		}
 		w.WriteHeader(http.StatusNotFound)
 	// A delete of a project item the project does not have (api.ErrItemNotFound):
 	// the answer of dbserver-delete, as a 404 with the sentence that says the item is

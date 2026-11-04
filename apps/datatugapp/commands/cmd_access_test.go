@@ -67,11 +67,9 @@ func TestAccessCommandsCallTheAccessAPI(t *testing.T) {
 	server, calls := accessTestServer(t, http.StatusOK, `{"ok":true}`)
 	d := accessTestDependencies(t)
 	base := server.URL + "/v0/"
-	out, err := runAccess(t, d, "agents", "register", "--space", "s", "--project", "p", "--name", "helper", "--base-url", base)
+	out, err := runAccess(t, d, "agents", "list", "--space", "s", "--project", "p", "--base-url", base)
 	require.NoError(t, err)
 	require.Contains(t, out, `"ok": true`)
-	_, err = runAccess(t, d, "agents", "list", "--space", "s", "--project", "p", "--base-url", base)
-	require.NoError(t, err)
 	_, err = runAccess(t, d, "agents", "disable", "a1", "--space", "s", "--project", "p", "--revision", "1", "--base-url", base)
 	require.NoError(t, err)
 	_, err = runAccess(t, d, "request", "--agent", "--agent-id", "a1", "--space", "s", "--project", "p", "--connection", "c", "--table", "main.customers", "--reason", "Investigate", "--seconds", "60", "--base-url", base)
@@ -80,48 +78,40 @@ func TestAccessCommandsCallTheAccessAPI(t *testing.T) {
 	require.NoError(t, err)
 	_, err = runAccess(t, d, "inbox", "--space", "s", "--project", "p", "--connection", "c", "--base-url", base)
 	require.NoError(t, err)
-	_, err = runAccess(t, d, "forward", "g1", "--space", "s", "--project", "p", "--revision", "2", "--note", "please", "--base-url", base)
-	require.NoError(t, err)
 
 	got := *calls
-	require.Len(t, got, 9)
-	require.Equal(t, "POST /v0/datatug/access/agents", got[0].method+" "+got[0].path)
-	require.Equal(t, "helper", got[0].body["name"])
+	require.Len(t, got, 7)
+	require.Equal(t, "GET /v0/datatug/access/agents", got[0].method+" "+got[0].path)
+	require.Equal(t, "projectId=p&spaceID=s", got[0].query)
 	require.True(t, strings.HasPrefix(got[0].bearer, "Bearer "))
-	require.Equal(t, "GET /v0/datatug/access/agents", got[1].method+" "+got[1].path)
-	require.Equal(t, "projectId=p&spaceID=s", got[1].query)
-	require.Equal(t, "/v0/datatug/access/agents/a1/disable", got[2].path)
-	require.EqualValues(t, 1, got[2].body["expectedRevision"])
-	require.Equal(t, "/v0/datatug/access/protection", got[3].path)
-	require.Equal(t, "connectionId=c&projectId=p&spaceID=s", got[3].query)
-	require.Equal(t, "/v0/datatug/access/agent/requests", got[4].path)
-	require.Equal(t, "a1", got[4].agent)
-	request := got[4].body["request"].(map[string]any)
+	require.Equal(t, "/v0/datatug/access/agents/a1/disable", got[1].path)
+	require.EqualValues(t, 1, got[1].body["expectedRevision"])
+	require.Equal(t, "/v0/datatug/access/protection", got[2].path)
+	require.Equal(t, "connectionId=c&projectId=p&spaceID=s", got[2].query)
+	require.Equal(t, "/v0/datatug/access/agent/requests", got[3].path)
+	require.Equal(t, "a1", got[3].agent)
+	request := got[3].body["request"].(map[string]any)
 	scope := request["scope"].(map[string]any)
 	require.Equal(t, "ap-1", scope["connection"])
 	require.Equal(t, []any{"objects.exact"}, scope["requires"])
 	require.Equal(t, []any{map[string]any{"namespace": "main", "name": "customers"}}, scope["objects"])
 	require.Equal(t, "Investigate", request["reason"])
-	require.NotContains(t, got[4].body, "connectionId")
-	require.Equal(t, "/v0/datatug/access/requests", got[6].path)
-	require.Empty(t, got[6].agent)
-	require.Equal(t, []any{}, got[6].body["request"].(map[string]any)["scope"].(map[string]any)["requires"])
-	require.Equal(t, "GET /v0/datatug/access/agent-requests", got[7].method+" "+got[7].path)
-	require.Equal(t, "/v0/datatug/access/grants/g1/forward", got[8].path)
-	require.Equal(t, "please", got[8].body["note"])
+	require.NotContains(t, got[3].body, "connectionId")
+	require.Equal(t, "/v0/datatug/access/requests", got[5].path)
+	require.Empty(t, got[5].agent)
+	require.Equal(t, []any{}, got[5].body["request"].(map[string]any)["scope"].(map[string]any)["requires"])
+	require.Equal(t, "GET /v0/datatug/access/agent-requests", got[6].method+" "+got[6].path)
 }
 
 func TestAccessCommandsRefuseBadInputAndReportDenials(t *testing.T) {
 	d := accessTestDependencies(t)
 	usage := [][]string{
-		{"agents", "register", "--space", "s", "--project", "p"},
 		{"agents", "list", "--space", "s"},
 		{"agents", "disable", "a1", "--space", "s", "--project", "p"},
 		{"request", "--space", "s", "--project", "p", "--connection", "c"},
 		{"request", "--agent-id", "a1", "--space", "s", "--project", "p", "--connection", "c", "--reason", "x"},
 		{"request", "--space", "s", "--project", "p", "--connection", "c", "--reason", "x", "--table", "nodot"},
 		{"inbox", "--space", "s", "--project", "p"},
-		{"forward", "g1", "--space", "s", "--project", "p"},
 		{"agents", "list", "--space", "s", "--project", "p", "--base-url", "http://example.com/v0/"},
 	}
 	for _, args := range usage {

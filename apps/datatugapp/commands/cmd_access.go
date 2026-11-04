@@ -17,9 +17,9 @@ import (
 )
 
 // Perimeter access commands (D23, D25, D27). An agent files requests for
-// itself only, through its user's product login; its user sees them first,
-// may forward them to approvers, and decides in the web app (decisions need a
-// recent interactive sign-in, so this CLI never approves).
+// itself only, through its user's product login; its user sees them first.
+// Registering an agent, forwarding a request and every decision happen in the
+// web app: a product (CLI) credential only reads and files self-requests.
 
 type accessClientOptions struct {
 	baseURL string
@@ -36,10 +36,10 @@ func accessCommand() *cobra.Command {
 }
 
 func accessCommandWith(dependencies accessCommandDependencies) *cobra.Command {
-	command := &cobra.Command{Use: "access", Short: "Request data access for yourself or your agent, and manage your agents", Args: cobra.NoArgs}
-	agents := &cobra.Command{Use: "agents", Short: "Register, list and disable your agents on their own account", Args: cobra.NoArgs}
-	agents.AddCommand(accessAgentsRegisterCommand(dependencies), accessAgentsListCommand(dependencies), accessAgentsDisableCommand(dependencies))
-	command.AddCommand(agents, accessRequestCommand(dependencies), accessInboxCommand(dependencies), accessForwardCommand(dependencies))
+	command := &cobra.Command{Use: "access", Short: "Request data access for yourself or your agent, and see your agents", Long: "Register agents, forward their requests and decide in the DataTug web app; from the CLI you list and disable your agents, file self-requests and see your agents' requests.", Args: cobra.NoArgs}
+	agents := &cobra.Command{Use: "agents", Short: "List and disable your agents on their own account", Args: cobra.NoArgs}
+	agents.AddCommand(accessAgentsListCommand(dependencies), accessAgentsDisableCommand(dependencies))
+	command.AddCommand(agents, accessRequestCommand(dependencies), accessInboxCommand(dependencies))
 	return command
 }
 
@@ -141,22 +141,6 @@ func accessDo(ctx context.Context, dependencies accessCommandDependencies, optio
 		return nil, Exit("access unavailable: "+code, exitCodeDatabase)
 	}
 	return raw, nil
-}
-
-func accessAgentsRegisterCommand(dependencies accessCommandDependencies) *cobra.Command {
-	var options accessClientOptions
-	var scope accessScopeFlags
-	var name string
-	command := &cobra.Command{Use: "register", Short: "Register an agent on its own account; you become its user", Args: cobra.NoArgs, SilenceUsage: true, RunE: func(command *cobra.Command, _ []string) error {
-		if !scope.valid(false) || name == "" || len(name) > 64 {
-			return Exit("agents register requires valid --space, --project and --name (1..64 characters)", exitCodeUsage)
-		}
-		return accessCall(command, dependencies, options, http.MethodPost, "agents", nil, map[string]string{"spaceID": scope.space, "projectId": scope.project, "name": name}, "")
-	}}
-	addAccessScopeFlags(command, &scope, false)
-	command.Flags().StringVar(&name, "name", "", "Agent display name")
-	addAccessClientFlags(command, &options)
-	return command
 }
 
 func accessAgentsListCommand(dependencies accessCommandDependencies) *cobra.Command {
@@ -277,24 +261,6 @@ func accessInboxCommand(dependencies accessCommandDependencies) *cobra.Command {
 		return accessCall(command, dependencies, options, http.MethodGet, "agent-requests", url.Values{"spaceID": {scope.space}, "projectId": {scope.project}, "connectionId": {scope.connection}}, nil, "")
 	}}
 	addAccessScopeFlags(command, &scope, true)
-	addAccessClientFlags(command, &options)
-	return command
-}
-
-func accessForwardCommand(dependencies accessCommandDependencies) *cobra.Command {
-	var options accessClientOptions
-	var scope accessScopeFlags
-	var revision int64
-	var note string
-	command := &cobra.Command{Use: "forward <grant-id>", Short: "Forward your agent's request to approvers (not a decision)", Args: cobra.ExactArgs(1), SilenceUsage: true, RunE: func(command *cobra.Command, args []string) error {
-		if !scope.valid(false) || !validProtectedSelector(args[0]) || revision < 1 || len(note) > 256 {
-			return Exit("access forward requires valid --space, --project, grant ID and --revision", exitCodeUsage)
-		}
-		return accessCall(command, dependencies, options, http.MethodPost, "grants/"+args[0]+"/forward", nil, map[string]any{"spaceID": scope.space, "projectId": scope.project, "expectedRevision": revision, "note": note}, "")
-	}}
-	addAccessScopeFlags(command, &scope, false)
-	command.Flags().Int64Var(&revision, "revision", 0, "The request's current revision (from access inbox)")
-	command.Flags().StringVar(&note, "note", "", "Optional note for the approvers")
 	addAccessClientFlags(command, &options)
 	return command
 }

@@ -136,6 +136,16 @@ datatug tui
 ```
 For details on widget layouts and keybindings, see [TUI Screens](docs/tui-screens.md).
 
+#### Open a page of the web app in the terminal
+
+The web app at [datatug.app](https://datatug.app) shows a command for the page you are on. Pass its address to `--deep-link` and the terminal UI opens on the matching project and screen:
+
+```bash
+datatug ui --deep-link https://datatug.app/project/github.com/acme/repo/some/dir/-/queries
+```
+
+A GitHub project is cloned to `~/datatug/github.com/<owner>/<repo>` the first time and added to your projects; a project of the local `datatug serve` agent opens by its id in your settings. Queries, boards, databases and environments pages open their section of the project; other pages open the project itself. DataTug Cloud projects and projects stored in the browser can't be opened in the terminal yet: the Projects screen says so. See [spec/features/cli/ui](spec/features/cli/ui/README.md#req-deep-link-flag).
+
 ### Local Server (`datatug serve`)
 Run the local DataTug HTTP agent daemon to serve the Web UI, REST endpoints, and IDE integrations:
 ```bash
@@ -245,7 +255,7 @@ Help wanted to [get test coverage to 100%](https://github.com/datatug/datatug-cl
 ### macOS / Linux — curl
 
 ```bash
-(p=$(mktemp) && trap 'rm -f "$p"' EXIT && curl -fsSL https://datatug.app/install/get-cli -o "$p" && sh "$p")
+(p=$(mktemp) && trap 'rm -f "$p"' EXIT && curl -fsSL https://datatug.app/get-cli -o "$p" && sh "$p")
 ```
 
 Environment overrides: `DATATUG_VERSION` (default: latest release), `DATATUG_INSTALL_DIR` (default: `~/.local/bin`).
@@ -255,10 +265,22 @@ When the install directory is not on `PATH`, the installer appends one line that
 ### Windows — PowerShell
 
 ```powershell
-$p=Join-Path $env:TEMP ("datatug-"+[guid]::NewGuid()+".ps1"); try { irm https://datatug.app/install/get-cli.ps1 -OutFile $p -EA Stop; & $p } finally { Remove-Item $p -EA SilentlyContinue }
+$p=Join-Path $env:TEMP ("datatug-"+[guid]::NewGuid()+".ps1"); try { irm https://datatug.app/get-cli.ps1 -OutFile $p -EA Stop; & $p } finally { Remove-Item $p -EA SilentlyContinue }
 ```
 
 Environment overrides: `DATATUG_VERSION`, `DATATUG_INSTALL_DIR` (default: `%LOCALAPPDATA%\DataTug\bin`). Current Windows releases support amd64.
+
+### Run without installing
+
+`https://datatug.app/run-cli` runs the CLI with the arguments you give it, so the command the web app shows works on a machine without DataTug:
+
+```bash
+curl -fsSL https://datatug.app/run-cli | sh -s -- ui --deep-link <address>
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://datatug.app/run-cli.ps1))) ui --deep-link '<address>'
+```
 
 ### macOS / Linux — Homebrew ([tap](https://github.com/datatug/homebrew-tap))
 

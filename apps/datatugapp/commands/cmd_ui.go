@@ -13,6 +13,7 @@ import (
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers/clouds/azure/azureui"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers/clouds/gcloud/gcloudui"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers/dbviewer"
+	"github.com/datatug/datatug-cli/pkg/deeplink"
 	"github.com/datatug/datatug-cli/pkg/dtio"
 	"github.com/datatug/datatug-cli/pkg/dtstate"
 	"github.com/spf13/cobra"
@@ -24,8 +25,29 @@ func uiCommandArgs() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "ui",
 		Short: "Starts Command Line UI",
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Long: `Starts the terminal UI.
+
+--deep-link opens the project and page of a DataTug web app address, the
+command the web app shows for the page you are on:
+
+  datatug ui --deep-link https://datatug.app/project/github.com/<owner>/<repo>[/<dir>…][/-/<page>…]
+
+A GitHub project is cloned to ~/datatug/github.com/<owner>/<repo> when it is
+not there yet. A project of the local ` + "`datatug serve`" + ` agent opens by its id in
+your settings. DataTug Cloud projects and projects stored in the browser
+cannot be opened in the terminal yet; the Projects screen says so.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				return Exit("datatug ui takes no positional arguments; open a web app address with --deep-link <address>", exitCodeUsage)
+			}
 			filePath, _ := cmd.Flags().GetString("file")
+			if cmd.Flags().Changed("deep-link") {
+				if filePath != "" || cmd.Flags().Changed("result") {
+					return Exit("--deep-link, --file and --result are mutually exclusive", exitCodeUsage)
+				}
+				address, _ := cmd.Flags().GetString("deep-link")
+				return runUIDeepLink(address)
+			}
 			if cmd.Flags().Changed("result") {
 				if filePath != "" {
 					return Exit("--result and --file are mutually exclusive", exitCodeUsage)
@@ -41,6 +63,7 @@ func uiCommandArgs() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringP("file", "f", "", "Specify a DB file to open")
+	cmd.Flags().String("deep-link", "", "Open the project and page of a DataTug web app address (https://datatug.app/...)")
 	cmd.Flags().String("result", "", "Open a result of `query run --result-id <id>` with its loaded rows, without running the query again")
 	cmd.Flags().String("as", "", "Principal ID for the project's access policies (with --result)")
 	cmd.Flags().StringSlice("role", nil, "Principal role (with --result; repeatable)")
@@ -75,6 +98,20 @@ func runUI(filePath string) error {
 		opts.Initial = &page
 	}
 	return runApp(modules, opts)
+}
+
+// runUIDeepLink launches the terminal UI on the project and page of a web app
+// address. An address that names no project starts the UI as runUI does; one
+// that is not an address of the web app is a usage error, before the UI starts.
+func runUIDeepLink(address string) error {
+	link, err := deeplink.Parse(address)
+	if err != nil {
+		return Exit("--deep-link: "+err.Error(), exitCodeUsage)
+	}
+	if link.Kind == deeplink.KindNone {
+		return runUI("")
+	}
+	return runApp(uiModules(), datatugui.Options{Start: datatugui.ScreenProjects, Then: dtproject.OpenDeepLink(link)})
 }
 
 // openFile returns the page that shows the database in filePath.

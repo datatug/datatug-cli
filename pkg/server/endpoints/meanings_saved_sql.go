@@ -141,8 +141,8 @@ var (
 	sqlCountStar  = regexp.MustCompile(`(?i)\bcount\s*\(\s*\*\s*\)`)
 	sqlRegexStar  = regexp.MustCompile(`~\*`)
 	sqlPrevToken  = regexp.MustCompile(`([\p{L}\p{M}\p{N}_$]+|[)\]"\x60])\s*$`)
-	sqlNextToken  = regexp.MustCompile(`^\s*([\p{L}\p{M}\p{N}_$]+|[(\["\x60@:$?+-])`)
-	sqlWholeTable = regexp.MustCompile(`(?i)(?:^|;|\()\s*table\b`)
+	sqlNextToken  = regexp.MustCompile(`^\s*([\p{L}\p{M}\p{N}_$]+|[(\["\x60@:$?+.-])`)
+	sqlWholeTable = regexp.MustCompile(`(?i)(?:(?:^|;|\()\s*(?:table|from)\b|\b(?:union|except|intersect)(?:\s+(?:all|distinct))?\s+table\b|\bcolumns\s*\()`)
 )
 
 // sqlLeadWords may come right before a projection *; sqlFollowWords right after.
@@ -150,7 +150,7 @@ var (
 	sqlLeadWords   = map[string]bool{"select": true, "distinct": true, "all": true, "returning": true}
 	sqlFollowWords = map[string]bool{"from": true, "into": true, "except": true, "exclude": true, "replace": true, "rename": true,
 		"ilike": true, "like": true, "where": true, "union": true, "intersect": true, "order": true, "group": true, "having": true,
-		"limit": true, "window": true, "qualify": true}
+		"limit": true, "window": true, "qualify": true, "apply": true}
 )
 
 // isMultiplication says whether the * at i in code multiplies two operands.

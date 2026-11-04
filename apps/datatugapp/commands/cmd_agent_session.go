@@ -99,7 +99,7 @@ func validHarnessSessionID(id string) bool {
 
 // validSessionCredential keeps a server credential safe to send as a header.
 func validSessionCredential(credential string) bool {
-	if len(credential) == 0 || len(credential) > 4096 {
+	if len(credential) == 0 || len(credential) > 512 {
 		return false
 	}
 	for _, c := range credential {
@@ -180,17 +180,22 @@ func (s *agentSessions) updateIndex(change func(map[string]time.Time)) {
 	_ = s.set(agentSessionService, agentSessionIndexAccount, string(data))
 }
 
-// sessionGone reports a server refusal that means the stored session can
-// never be used again.
-func sessionGone(err error) bool {
+const (
+	codeSessionEnded   = "AGENT_SESSION_ENDED"
+	codeSessionInvalid = "AGENT_SESSION_INVALID"
+)
+
+// refusedWith reports a server refusal with the given code.
+func refusedWith(err error, code string) bool {
 	var refusal *accessRefusal
-	return errors.As(err, &refusal) && (refusal.code == "AGENT_SESSION_ENDED" || refusal.code == "AGENT_SESSION_INVALID")
+	return errors.As(err, &refusal) && refusal.code == code
 }
 
 // sessionCall posts one agent-session lifecycle call with the session's own
-// credential and decodes the answer.
-func sessionCall(ctx context.Context, dependencies accessCommandDependencies, options accessClientOptions, entry *agentSessionEntry, action string, body map[string]any, answer any) error {
-	raw, err := accessDo(ctx, dependencies, options, http.MethodPost, "agent/sessions/"+entry.AgentSessionID+"/"+action, nil, body, agentCaller{id: entry.AgentID, session: entry.Credential})
+// credential, to the API and login the session was started with, and decodes
+// the answer.
+func sessionCall(ctx context.Context, dependencies accessCommandDependencies, entry *agentSessionEntry, action string, body map[string]any, answer any) error {
+	raw, err := accessDo(ctx, dependencies, entry.clientOptions(), http.MethodPost, "agent/sessions/"+entry.AgentSessionID+"/"+action, nil, body, agentCaller{id: entry.AgentID, session: entry.Credential})
 	if err != nil {
 		return err
 	}
@@ -198,6 +203,34 @@ func sessionCall(ctx context.Context, dependencies accessCommandDependencies, op
 		return errors.New("invalid agent session response")
 	}
 	return nil
+}
+
+// callWithStored makes a lifecycle call. Another process (a concurrent start)
+// may have stored a newer credential since entry was read: when the call is
+// refused as AGENT_SESSION_INVALID and the keyring now holds a different
+// credential, it retries once with the stored entry, which then replaces
+// *entry.
+func (s *agentSessions) callWithStored(ctx context.Context, dependencies accessCommandDependencies, harnessID string, entry *agentSessionEntry, action string, body map[string]any, answer any) error {
+	err := sessionCall(ctx, dependencies, entry, action, body, answer)
+	if !refusedWith(err, codeSessionInvalid) {
+		return err
+	}
+	stored, loadErr := s.load(harnessID)
+	if loadErr != nil || stored == nil || stored.Credential == entry.Credential {
+		return err
+	}
+	*entry = *stored
+	return sessionCall(ctx, dependencies, entry, action, body, answer)
+}
+
+// forgetIfStored deletes the entry only while it still holds credential: a
+// refused credential never deletes one another process stored since.
+func (s *agentSessions) forgetIfStored(harnessID, credential string) error {
+	stored, err := s.load(harnessID)
+	if err != nil || stored == nil || stored.Credential != credential {
+		return err
+	}
+	return s.forget(harnessID)
 }
 
 // forAgentCall resolves the agent session of one agent call: the harness
@@ -237,11 +270,14 @@ func (s *agentSessions) forAgentCall(ctx context.Context, dependencies accessCom
 		Credential          string    `json:"credential"`
 		CredentialExpiresAt time.Time `json:"credentialExpiresAt"`
 	}
-	err = sessionCall(ctx, dependencies, options, entry, "refresh", map[string]any{"spaceID": entry.SpaceID, "projectId": entry.ProjectID}, &answer)
+	err = s.callWithStored(ctx, dependencies, harnessID, entry, "refresh", map[string]any{"spaceID": entry.SpaceID, "projectId": entry.ProjectID}, &answer)
 	switch {
-	case sessionGone(err):
+	case refusedWith(err, codeSessionEnded):
 		_ = s.forget(harnessID)
 		return "", Exit("agent session ended; start a new one with 'datatug agent session start'", exitCodeAccessDenied)
+	case refusedWith(err, codeSessionInvalid):
+		_ = s.forgetIfStored(harnessID, entry.Credential)
+		return "", Exit("agent session credential refused; start a new one with 'datatug agent session start'", exitCodeAccessDenied)
 	case err != nil:
 		if s.now().Before(entry.CredentialExpiresAt) {
 			return entry.Credential, nil // Still valid: refresh again on the next call.
@@ -334,14 +370,20 @@ func agentSessionEndCommand(dependencies accessCommandDependencies) *cobra.Comma
 		var answer struct {
 			EndedAt time.Time `json:"endedAt"`
 		}
-		err = sessionCall(command.Context(), dependencies, entry.clientOptions(), entry, "end", map[string]any{"spaceID": entry.SpaceID, "projectId": entry.ProjectID, "reason": reason}, &answer)
-		if err != nil && !sessionGone(err) {
+		// The server accepts an expired credential of a live session here, so
+		// no refresh comes first.
+		err = dependencies.sessions.callWithStored(command.Context(), dependencies, harnessID, entry, "end", map[string]any{"spaceID": entry.SpaceID, "projectId": entry.ProjectID, "reason": reason}, &answer)
+		message := "Agent session %s ended\n"
+		switch {
+		case refusedWith(err, codeSessionInvalid):
+			message = "Agent session %s could not be confirmed ended (credential refused); the server expires it\n"
+		case err != nil && !refusedWith(err, codeSessionEnded):
 			return err
 		}
 		if err = dependencies.sessions.forget(harnessID); err != nil {
 			return err
 		}
-		_, err = fmt.Fprintf(command.OutOrStdout(), "Agent session %s ended\n", entry.AgentSessionID)
+		_, err = fmt.Fprintf(command.OutOrStdout(), message, entry.AgentSessionID)
 		return err
 	}}
 	addHarnessSessionFlag(command, &harnessFlag)

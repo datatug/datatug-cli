@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/datatug/datatug-cli/pkg/auth/device"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 	"github.com/zalando/go-keyring"
@@ -306,13 +307,15 @@ func TestHarnessSessionAndCredentialValidation(t *testing.T) {
 		require.False(t, validHarnessSessionID(bad), bad)
 	}
 	require.True(t, validSessionCredential("eyJ.abc-_~"))
-	for _, bad := range []string{"", strings.Repeat("a", 4097), "a b", "a\nb", "é"} {
+	for _, bad := range []string{"", strings.Repeat("a", 513), "a b", "a\nb", "é"} {
 		require.False(t, validSessionCredential(bad), bad)
 	}
 	require.False(t, validHarnessName(strings.Repeat("a", 65)))
 	require.NotEqual(t, agentSessionAccount("a"), agentSessionAccount("b"))
-	require.False(t, sessionGone(errors.New("AGENT_SESSION_ENDED")))
-	require.False(t, sessionGone(&accessRefusal{exitError: &exitError{msg: "x"}, code: "OTHER"}))
+	require.False(t, refusedWith(errors.New("AGENT_SESSION_ENDED"), codeSessionEnded))
+	require.False(t, refusedWith(&accessRefusal{exitError: &exitError{msg: "x"}, code: "OTHER"}, codeSessionEnded))
+	require.True(t, validSessionCredential(strings.Repeat("a", 512)))
+	require.False(t, validSessionCredential(strings.Repeat("a", 513)))
 }
 
 func TestForAgentCallResolvesTheHarnessSession(t *testing.T) {
@@ -494,4 +497,157 @@ func TestAgentCallsSendTheSessionCredential(t *testing.T) {
 		}
 	}
 	require.Equal(t, []string{"/v0/datatug/access/agent/read ag-1 cred-1", "/v0/datatug/access/agent/table/read ag-1 cred-1"}, headers)
+}
+
+// rotatingServer refuses every credential but current as AGENT_SESSION_INVALID;
+// onStale runs when a stale credential arrives (a concurrent process).
+func rotatingServer(t *testing.T, current *string, onStale func(), success string) (*httptest.Server, *[]string) {
+	t.Helper()
+	sent := &[]string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		credential := r.Header.Get(agentSessionHeader)
+		*sent = append(*sent, credential)
+		if credential != *current {
+			if onStale != nil {
+				onStale()
+			}
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":{"code":"AGENT_SESSION_INVALID"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(success))
+	}))
+	t.Cleanup(server.Close)
+	return server, sent
+}
+
+// Two processes refresh one harness session at once: the other one's start
+// rotated the credential, so this one's stale credential is refused. It
+// retries with the stored credential and never forgets the session.
+func TestConcurrentRefreshRetriesWithTheStoredCredential(t *testing.T) {
+	ctx := context.Background()
+	sessions, _ := testAgentSessions(nil)
+	d := accessTestDependencies(t)
+	current := "cred-1"
+	var server *httptest.Server
+	entry := agentSessionEntry{AgentSessionID: "as-1", Credential: "cred-1", CredentialExpiresAt: sessionTestNow.Add(time.Minute), AgentID: "ag-1", SpaceID: "s", ProjectID: "p"}
+	other := func() {
+		// The other process stores its rotated credential.
+		rotated := entry
+		rotated.Credential, rotated.CredentialExpiresAt = "cred-2", sessionTestNow.Add(time.Minute)
+		require.NoError(t, sessions.save("h", rotated))
+	}
+	server, sent := rotatingServer(t, &current, nil, `{"credential":"cred-2","credentialExpiresAt":"2026-11-04T12:30:00Z"}`)
+	entry.BaseURL = server.URL + "/v0/"
+	storeEntry(t, sessions, "h", entry)
+	loaded, err := sessions.load("h") // This process reads cred-1 ...
+	require.NoError(t, err)
+	current = "cred-2"
+	other() // ... and the other one rotates it before this refresh arrives.
+	agentID := ""
+	refreshed := *loaded
+	err = sessions.callWithStored(ctx, d, "h", &refreshed, "refresh", map[string]any{}, &struct{}{})
+	require.NoError(t, err)
+	require.Equal(t, []string{"cred-1", "cred-2"}, *sent)
+	require.Equal(t, "cred-2", refreshed.Credential)
+
+	// Through forAgentCall: the stale entry is refused, the stored one used.
+	*sent = nil
+	current = "cred-2"
+	storeEntry(t, sessions, "h", entry) // cred-1 again
+	server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		credential := r.Header.Get(agentSessionHeader)
+		*sent = append(*sent, credential)
+		if credential != current {
+			other()
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":{"code":"AGENT_SESSION_INVALID"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"credential":"cred-2","credentialExpiresAt":"2026-11-04T12:30:00Z"}`))
+	})
+	credential, err := sessions.forAgentCall(ctx, d, accessClientOptions{baseURL: entry.BaseURL}, "h", &agentID)
+	require.NoError(t, err)
+	require.Equal(t, "cred-2", credential)
+	require.Equal(t, []string{"cred-1", "cred-2"}, *sent)
+	stored, _ := sessions.load("h")
+	require.Equal(t, time.Date(2026, 11, 4, 12, 30, 0, 0, time.UTC), stored.CredentialExpiresAt)
+
+	// The refused credential is the stored one: forgotten.
+	current = "none"
+	server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":{"code":"AGENT_SESSION_INVALID"}}`))
+	})
+	storeEntry(t, sessions, "h", entry)
+	_, err = sessions.forAgentCall(ctx, d, accessClientOptions{baseURL: entry.BaseURL}, "h", &agentID)
+	require.ErrorContains(t, err, "credential refused")
+	gone, _ := sessions.load("h")
+	require.Nil(t, gone)
+}
+
+func TestForgetIfStoredAndCallWithStoredKeepOthersCredentials(t *testing.T) {
+	ctx := context.Background()
+	sessions, k := testAgentSessions(nil)
+	entry := agentSessionEntry{AgentSessionID: "as-1", Credential: "cred-2", CredentialExpiresAt: sessionTestNow.Add(time.Hour), AgentID: "ag-1"}
+	storeEntry(t, sessions, "h", entry)
+	require.NoError(t, sessions.forgetIfStored("h", "cred-1"))
+	kept, _ := sessions.load("h")
+	require.Equal(t, "cred-2", kept.Credential)
+	require.NoError(t, sessions.forgetIfStored("missing", "cred-1"))
+	k.getErr = errors.New("locked")
+	require.EqualError(t, sessions.forgetIfStored("h", "cred-2"), agentSessionStoreUnavailable)
+
+	// A refusal with an unreadable or emptied keyring is returned as is.
+	current := "x"
+	server, sent := rotatingServer(t, &current, nil, `{}`)
+	refused := agentSessionEntry{AgentSessionID: "as-1", Credential: "cred-1", AgentID: "ag-1", BaseURL: server.URL + "/v0/"}
+	d := accessTestDependencies(t)
+	require.Error(t, sessions.callWithStored(ctx, d, "h", &refused, "refresh", nil, &struct{}{}))
+	k.getErr = nil
+	require.Error(t, sessions.callWithStored(ctx, d, "missing", &refused, "refresh", nil, &struct{}{}))
+	require.Len(t, *sent, 2)
+}
+
+// Refresh inside an agent read uses the session's stored login options.
+func TestRefreshUsesTheStoredAuthOptions(t *testing.T) {
+	sessions, _ := testAgentSessions(nil)
+	d := accessTestDependencies(t)
+	var used []string
+	credential := d.credential
+	d.credential = func(ctx context.Context, options device.ProductOptions) (device.ProductReadCredential, error) {
+		used = append(used, options.Issuer+" "+options.Realm)
+		return credential(ctx, options)
+	}
+	server, _ := sessionTestServer(t, map[string][2]string{"/refresh": {"200", `{"credential":"cred-2","credentialExpiresAt":"2026-11-04T12:30:00Z"}`}})
+	storeEntry(t, sessions, "h", agentSessionEntry{AgentSessionID: "as-1", Credential: "cred-1", CredentialExpiresAt: sessionTestNow.Add(time.Minute), AgentID: "ag-1", BaseURL: server.URL + "/v0/", AuthIssuer: "https://auth.test/v1", AuthRealm: "stored"})
+	agentID := ""
+	got, err := sessions.forAgentCall(context.Background(), d, accessClientOptions{baseURL: server.URL + "/v0/", auth: device.ProductOptions{Realm: "call"}}, "h", &agentID)
+	require.NoError(t, err)
+	require.Equal(t, "cred-2", got)
+	require.Equal(t, []string{"https://auth.test/v1 stored"}, used)
+}
+
+// end sends an expired credential as is, retries a rotated one, and never
+// says "ended" for a refused credential.
+func TestAgentSessionEndWithExpiredOrRefusedCredential(t *testing.T) {
+	sessions, _ := testAgentSessions(nil)
+	d := accessTestDependencies(t)
+	d.sessions = sessions
+	current := "cred-1"
+	server, sent := rotatingServer(t, &current, nil, `{"endedAt":"2026-11-04T12:01:00Z"}`)
+	expired := agentSessionEntry{AgentSessionID: "as-1", Credential: "cred-1", CredentialExpiresAt: sessionTestNow.Add(-time.Hour), AgentID: "ag-1", BaseURL: server.URL + "/v0/"}
+	storeEntry(t, sessions, "h", expired)
+	out, err := runAgent(t, d, "session", "end", "--harness-session", "h")
+	require.NoError(t, err)
+	require.Equal(t, "Agent session as-1 ended\n", out)
+	require.Equal(t, []string{"cred-1"}, *sent)
+
+	current = "cred-9"
+	storeEntry(t, sessions, "h", expired)
+	out, err = runAgent(t, d, "session", "end", "--harness-session", "h")
+	require.NoError(t, err)
+	require.Equal(t, "Agent session as-1 could not be confirmed ended (credential refused); the server expires it\n", out)
+	gone, _ := sessions.load("h")
+	require.Nil(t, gone)
 }

@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
+	"github.com/datatug/datatug-cli/pkg/cloudproject"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/strongo/cli-helpers/fsutil"
@@ -21,6 +22,13 @@ type projectData struct {
 	envsErr      error
 	databases    datatug.ProjDbDrivers
 	dbsErr       error
+	// hasQueries is set when queries were loaded: a cloud project lists them,
+	// a project on disk keeps the placeholder screen.
+	hasQueries bool
+	queries    []cloudproject.Item
+	queriesErr error
+	// readOnly marks a DataTug Cloud project: it is edited on datatug.app.
+	readOnly bool
 }
 
 // title is the project's own title, or the one of its reference.

@@ -115,24 +115,11 @@ func loginCommand(rawIssuer *string, insecure *bool, deps dependencies) *cobra.C
 			if *insecure {
 				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Warning: --insecure-storage writes the Firebase session unencrypted to %s.\n", description)
 			}
-			auth, err := client.DeviceLoginAndStore(context.WithValue(cmd.Context(), oauth2.HTTPClient, deps.httpClient), deviceauth.DeviceLoginOptions{
-				DeviceInfo: deviceInfo(), OpenBrowser: deps.openBrowser, Output: cmd.OutOrStdout(), ErrorOutput: cmd.ErrOrStderr(),
-				TokenTransformer: func(ctx context.Context, token *oauth2.Token) (*oauth2.Token, error) {
-					if !strings.EqualFold(token.TokenType, customTokenType) {
-						return nil, errors.New("authorization server returned an unexpected token type")
-					}
-					sess, err := deps.exchange(ctx, token.AccessToken)
-					if err != nil {
-						return nil, fmt.Errorf("exchange device login for Firebase session: %w", err)
-					}
-					return &oauth2.Token{AccessToken: sess.IDToken, TokenType: "Bearer", RefreshToken: sess.RefreshToken, Expiry: sess.ExpiresAt}, nil
-				},
-			}, store)
+			subject, err := deviceLogin(cmd.Context(), client, store, deps, cmd.OutOrStdout(), cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
-			printWarnings(cmd.ErrOrStderr(), auth.Warnings)
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Logged in to %s as %s.\nToken storage: %s\n", client.Issuer(), auth.Identity.Subject, description)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Logged in to %s as %s.\nToken storage: %s\n", client.Issuer(), subject, description)
 			return nil
 		},
 	}
@@ -177,6 +164,29 @@ func logoutCommand(rawIssuer *string, insecure *bool, deps dependencies) *cobra.
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Logged out of %s.\n", client.Issuer())
 		return nil
 	}}
+}
+
+// deviceLogin runs the browser device flow, exchanges its custom token for a
+// Firebase session and stores it. It returns the signed-in subject.
+func deviceLogin(ctx context.Context, client *deviceauth.Client, store deviceauth.Store, deps dependencies, out, errOut io.Writer) (string, error) {
+	auth, err := client.DeviceLoginAndStore(context.WithValue(ctx, oauth2.HTTPClient, deps.httpClient), deviceauth.DeviceLoginOptions{
+		DeviceInfo: deviceInfo(), OpenBrowser: deps.openBrowser, Output: out, ErrorOutput: errOut,
+		TokenTransformer: func(ctx context.Context, token *oauth2.Token) (*oauth2.Token, error) {
+			if !strings.EqualFold(token.TokenType, customTokenType) {
+				return nil, errors.New("authorization server returned an unexpected token type")
+			}
+			sess, err := deps.exchange(ctx, token.AccessToken)
+			if err != nil {
+				return nil, fmt.Errorf("exchange device login for Firebase session: %w", err)
+			}
+			return &oauth2.Token{AccessToken: sess.IDToken, TokenType: "Bearer", RefreshToken: sess.RefreshToken, Expiry: sess.ExpiresAt}, nil
+		},
+	}, store)
+	if err != nil {
+		return "", err
+	}
+	printWarnings(errOut, auth.Warnings)
+	return auth.Identity.Subject, nil
 }
 
 func printWarnings(output io.Writer, warnings []error) {

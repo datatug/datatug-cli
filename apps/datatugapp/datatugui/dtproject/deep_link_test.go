@@ -62,8 +62,8 @@ func TestOpenDeepLinkWithoutAProjectDoesNothing(t *testing.T) {
 
 func TestOpenDeepLinkNoticesForProjectsTheTerminalCannotOpen(t *testing.T) {
 	for address, want := range map[string]string{
-		"https://datatug.app/store/firestore/project/p1":                     cloudNotice,
-		"https://datatug.app/space/s1/store/firestore/project/p1/queries":    cloudNotice,
+		"https://datatug.app/store/firestore/project/p1":                     cloudDeepLinkNotice,
+		"https://datatug.app/space/s1/store/firestore/project/p1/queries":    cloudDeepLinkNotice,
 		"https://datatug.app/store/local/project/mine":                       browserNotice,
 		"https://datatug.app/store/http-example.com:8989/project/mine/query": otherStoreNotice,
 	} {

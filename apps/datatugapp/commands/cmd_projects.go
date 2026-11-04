@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/datatug/cliformat"
+	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtproject"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/spf13/cobra"
 )
@@ -13,6 +14,8 @@ type projectEntry struct {
 	ID     string `json:"id"     yaml:"id"`
 	Title  string `json:"title"  yaml:"title,omitempty"`
 	Origin string `json:"origin" yaml:"origin,omitempty"`
+	// Kind is "cloud" for a DataTug Cloud project, which has no folder.
+	Kind string `json:"kind,omitempty" yaml:"kind,omitempty"`
 }
 
 func projectsCommandAction(cmd *cobra.Command, _ []string) error {
@@ -23,9 +26,18 @@ func projectsCommandAction(cmd *cobra.Command, _ []string) error {
 	}
 	entries := make([]projectEntry, 0, len(settings.Projects))
 	for _, p := range settings.Projects {
-		entries = append(entries, projectEntry{ID: p.ID, Title: p.Title, Origin: p.Url})
+		entry := projectEntry{ID: p.ID, Title: p.Title, Origin: p.Url}
+		if dtproject.IsCloudRef(*p) {
+			entry.Kind = "cloud"
+		}
+		entries = append(entries, entry)
 	}
-	return cliformat.WriteList(os.Stdout, format, entries, func(e projectEntry) string { return e.ID })
+	return cliformat.WriteList(os.Stdout, format, entries, func(e projectEntry) string {
+		if e.Kind != "" {
+			return e.ID + " (" + e.Kind + ")"
+		}
+		return e.ID
+	})
 }
 
 func projectsCommandArgs() *cobra.Command {

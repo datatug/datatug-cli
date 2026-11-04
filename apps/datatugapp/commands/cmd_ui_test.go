@@ -117,7 +117,7 @@ func usageError(t *testing.T, err error) string {
 
 func TestUICommandDeepLinkOpensTheProjectOverTheProjectsScreen(t *testing.T) {
 	_, opts := stubUI(t, &dtstate.DatatugState{CurrentScreenPath: "settings"}, nil)
-	if err := runUIDeepLinkCommand("--deep-link", "https://datatug.app/store/firestore/project/p1"); err != nil {
+	if err := runUIDeepLinkCommand("--deep-link", "https://datatug.app/store/local/project/p1"); err != nil {
 		t.Fatal(err)
 	}
 	if opts.Start != datatugui.ScreenProjects || opts.Then == nil || opts.Initial != nil {

@@ -1,13 +1,13 @@
 ---
 format: https://specscore.md/feature-specification
-status: Approved
+status: Implementing
 ---
 
 # Feature: Open DataTug Cloud projects in the CLI
 
 > [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/cloud-projects?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/cloud-projects?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/cloud-projects?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/cloud-projects?op=request-change) |
 
-**Status:** Approved
+**Status:** Implementing
 **Date:** 2026-11-04
 **Owner:** Alexander Trakhimenok
 **Source Ideas:** —
@@ -40,7 +40,7 @@ The address side is already solved. The deep-link parser (`pkg/deeplink`, being 
 | `device.SavedTokenSource`, which supplies a bearer and refreshes it a minute before expiry | `pkg/auth/device/token_source.go`, already used by `chat --model cloud` | The bearer on every read |
 | Cloud API base `https://api.sneat.cloud/v0/` (`defaultAIAPIURLs`), host failover in `pkg/cloudapi`, redirects disabled | `apps/datatugapp/commands/chat_cloud.go` | The base URL and transport |
 | Backend admission of CLI tokens on GET reads: product `datatug`, audiences `datatug-cli` and `datatug-web`, scope `datatug:projects:read` | `datatug/datatug-cloud` `internal/accesspolicy/accesspolicy.go`, enforced by `sneat-go-host` `firebasehost.ValidateOAuthAccess` | Why a CLI token is accepted |
-| Space project reads, each taking `storage=firestore&spaceID=<space>&project=<project>` | `datatug/backend` `api4datatug/routes.go`: `projects/project_summary`, `queries/all_queries`, `projects/connection_catalog`, `environments/state`, plus `entities/all_entities` with `environment=<env>` | Reading the project |
+| Space project reads, each taking `storage=firestore&spaceID=<space>&project=<project>` | `datatug/backend` `api4datatug/routes.go`: `projects/project_summary`, `queries/all_queries`, `projects/connection_catalog`, `environments/state` | Reading the project |
 | Project screens over a `datatug.ProjectStore` | `apps/datatugapp/datatugui/dtproject` (`loadProjectData`, `projectPage`) | Showing the project: only the store is new |
 
 ## Behavior
@@ -61,7 +61,7 @@ Before any network call, the cloud path MUST check `SpaceID` and `ProjectID` aga
 
 #### REQ: cloud-page
 
-`Link.Page` uses datatug.app's page names. When the TUI has a screen for the page, it MUST open on that screen. In this version those pages are the project home (no page, or `overview`), `queries`, and `query/<id>`. A `query` page with more than one segment after `query` (`query/reports/top`) names query `top` in folder `reports`. The encoded form `query/reports%2Ftop` exits `2` from the deep-link parser until that parser accepts it, which is not this feature's change. For any other page the TUI MUST open on the project home with the deep link's existing `noPageScreenNotice`. A page never makes the command fail.
+`Link.Page` uses datatug.app's page names. The TUI MUST open on the screen for that page, or, when it has none, on the closest section of the project menu, using the deep link's existing `linkSection`: `query/…` and `queries` open Queries, `board/…` and `boards` open Dashboards, `database/…` and `browser-db/…` open Databases, `env/…` and `environments` open Environments, and no page or `overview` opens the project overview. Any other page opens the project overview with the deep link's existing `noPageScreenNotice` (founder, 2026-11-04: "If no screen exists in TUI open most closest or project overview"). The encoded form `query/reports%2Ftop` exits `2` from the deep-link parser until that parser accepts it, which is not this feature's change. A page never makes the command fail.
 
 ### Sign-in and credentials
 
@@ -89,17 +89,16 @@ The base URL MUST be the cloud API host list that `chat --model cloud` uses (`de
 
 #### REQ: cloud-project-store
 
-The CLI MUST add a read-only cloud store for the `dtproject` screens. It embeds a base that answers every `datatug.ProjectStore` method with `ErrNotAvailableForCloudProject` ("not available for DataTug Cloud projects in the terminal"). It implements only the reads the v1 screens call, and builds the project with `datatug.NewProjectWithStore(id, store)` so `Project.GetDBs` and `Project.GetEnvironments` reach it:
+The CLI MUST read the project with a read-only cloud reader (`pkg/cloudproject`) and give the existing `dtproject` project page the data it shows, without a `datatug.ProjectStore`: the page only needs the title, environments, databases and queries, so no store methods are stubbed. The reads are:
 
-| Read | Endpoint (`storage=firestore&spaceID=…&project=…`) | Conversion |
+| Shown as | Endpoint (`storage=firestore&spaceID=…&project=…`) | Conversion |
 |---|---|---|
-| `LoadProjectFile`, `LoadProject` (id, title, description) | `GET projects/project_summary` | The summary's id, title and description |
-| `LoadQueries(folderPath)`, `LoadQuery` | `GET queries/all_queries` | Queries filtered by id from the list, with no per-query request |
-| `LoadProjDbDrivers` (behind `Project.GetDBs`) | `GET projects/connection_catalog` | One `ProjDbDriver` per catalog connection, with the item's `ID` set to the connection id (the id REQ: run-queries-locally matches on) and its title to the connection's title. A catalog that comes without an `ETag` is the backend's public fallback, sent when the project has no catalog of its own, and MUST be shown as an empty list |
-| `LoadEnvironments` (behind `Project.GetEnvironments`) | `GET environments/state` | One `Environment` per `EnvironmentBrief` (id, title) |
-| `LoadEntities`, `LoadEntity` | `GET entities/all_entities&environment=dev` | Entities filtered by id from the list. `dev` is the environment datatug.app reads entities in |
+| Project id and title | `GET projects/project_summary` | The summary's id (the project id when absent) and title |
+| Queries list | `GET queries/all_queries` | One row per query, `<folder>/<id>` for a query in a folder, sorted by id |
+| Databases list | `GET projects/connection_catalog` | One row per catalog connection with its id and title. A catalog that comes without an `ETag` is the backend's public fallback, sent when the project has no catalog of its own, and MUST be shown as an empty list |
+| Environments list | `GET environments/state` | One row per `EnvironmentBrief` (id, title) |
 
-A failing list MUST show in its own panel, as `loadProjectData` already does for a project on disk. Answers are held in memory for the TUI session only. The CLI MUST NOT write a cloud project's definition, queries or rows to disk, and MUST NOT register it as a folder.
+Entities are not read: the TUI has no entities screen. A failing list MUST show in its own panel, as `loadProjectData` already does for a project on disk. Answers are held in memory for the TUI session only. The CLI MUST NOT write a cloud project's definition, queries or rows to disk, and MUST NOT register it as a folder.
 
 #### REQ: recent-cloud-projects
 
@@ -107,11 +106,7 @@ After a successful open, the CLI MUST record the project in its recent projects 
 
 #### REQ: read-only-in-v1
 
-In this version, every save, rename, delete or create action on a cloud project MUST be disabled with the hint `Edit this project on datatug.app`. When a later version adds edits, they MUST go to the backend's existing write endpoints, which already take `storage=firestore` (`queries/save_query`, `entities/save_entity`), and never to Firestore.
-
-#### REQ: run-queries-locally
-
-Running a cloud project's query MUST use the CLI's existing secure executor against a connection on this machine. The connection is matched to the catalog by connection id. When no local connection has that id, the query panel MUST say `No connection to <database> on this machine. Add one with: datatug db add` and run nothing.
+In this version a cloud project is read-only in the terminal. The project page has no save, rename, delete or create action, and its overview MUST say `DataTug Cloud project, read-only here. Edit this project on datatug.app.` When a later version adds edits, they MUST go to the backend's existing write endpoints, which already take `storage=firestore` (`queries/save_query`, `entities/save_entity`), and never to Firestore.
 
 ### Personal cloud projects
 
@@ -148,6 +143,8 @@ datatug ui --deep-link https://datatug.app/space/<spaceID>/store/firestore/proje
 - **Hosted query runs.** Running a query through the backend's `queries/run_query` when there is no local connection is a separate decision: the route's audience admission and billing.
 - **Boards and cards.** The TUI has no board screen, so `boards/all_boards` is not read.
 - **Edits.** See REQ: read-only-in-v1.
+- **Running a cloud project's queries.** The project page has no query screen that runs a query, for any project. Running a cloud project's query against a local connection matched by catalog connection id is a follow-up, specified with that screen.
+- **Entities.** The TUI has no entities screen, so `entities/all_entities` is not read.
 
 ## Interaction with Other Features
 
@@ -178,8 +175,8 @@ datatug ui --deep-link https://datatug.app/space/<spaceID>/store/firestore/proje
 **Requirements:** cloud-projects#req:cloud-page
 
 **Given** the same project with query `top` in folder `reports`
-**When** the person opens the link with page `/query/reports/top`, then with page `/board/b1`
-**Then** the first opens that query's screen, and the second opens the project home with `noPageScreenNotice`. Both exit `0` on quit.
+**When** the person opens the link with page `/query/reports/top`, then with page `/chat`
+**Then** the first opens the project on its Queries section listing `reports/top`, and the second opens the project overview with `noPageScreenNotice`. Both exit `0` on quit.
 
 ### AC: bad-id-before-network
 
@@ -225,9 +222,9 @@ datatug ui --deep-link https://datatug.app/space/<spaceID>/store/firestore/proje
 
 **Requirements:** cloud-projects#req:cloud-project-store
 
-**Given** fake answers for `environments/state`, a project catalog, the public fallback catalog, and `entities/all_entities`
-**When** the store's `LoadEnvironments`, `LoadProjDbDrivers` and `LoadEntity` run, and then `SaveQuery`
-**Then** the environments and DB drivers carry the briefs' ids and titles, the fallback catalog (no `ETag`) becomes an empty list, the project catalog's drivers carry the connection ids, the entity request carries `environment=dev`, and `SaveQuery` returns `ErrNotAvailableForCloudProject` with no request. This AC shares AC space-link-opens-project's fake backend fixture.
+**Given** fake answers for the summary, `environments/state`, a project catalog with an `ETag`, the public fallback catalog without one, and a query folder tree
+**When** the cloud reader loads the project against each catalog
+**Then** the environments and databases carry the ids and titles, the fallback catalog becomes an empty list, the queries are `<folder>/<id>` rows, and every request is a `GET` with the bearer. This AC shares AC space-link-opens-project's fake backend fixture.
 
 ### AC: nothing-written-to-disk
 
@@ -242,16 +239,8 @@ datatug ui --deep-link https://datatug.app/space/<spaceID>/store/firestore/proje
 **Requirements:** cloud-projects#req:read-only-in-v1
 
 **Given** an open cloud project
-**When** the person tries to save, rename or delete a query, or create an entity
-**Then** each action is disabled with the hint `Edit this project on datatug.app`, and no non-`GET` request is recorded.
-
-### AC: queries-run-on-local-connection
-
-**Requirements:** cloud-projects#req:run-queries-locally
-
-**Given** a cloud project whose catalog names connections `warehouse` and `crm`, and a machine that has a local connection with id `warehouse` only
-**When** the person runs a saved query on `warehouse`, then one on `crm`
-**Then** the first runs through the secure executor and shows rows, and the second shows `No connection to crm on this machine…` and runs nothing.
+**When** the person looks at its overview
+**Then** it says the project is read-only here and to edit it on datatug.app, and no non-`GET` request is recorded.
 
 ### AC: personal-project-notice
 

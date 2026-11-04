@@ -17,7 +17,6 @@ import (
 // Notices of `datatug ui --deep-link` for projects the terminal cannot open.
 const (
 	deepLinkTitle      = "Open DataTug link"
-	cloudNotice        = "DataTug Cloud projects can't be opened in the terminal yet — coming soon"
 	browserNotice      = "This project is stored in your browser; export it or push it to GitHub to open it here"
 	otherStoreNotice   = "Projects of this store can't be opened in the terminal yet"
 	noPageScreenNotice = "This page has no terminal screen yet; showing the project"
@@ -28,12 +27,13 @@ const (
 // only explains why.
 type deepLinkResolver func(link deeplink.Link) tea.Cmd
 
-// deepLinkResolvers has one resolver per kind of link. A DataTug Cloud
-// resolver replaces the notice once the terminal can read cloud projects.
+// deepLinkResolvers has one resolver per kind of link. A DataTug Cloud link is
+// opened before the UI starts (it needs a sign-in and maps failures to exit
+// codes), so its resolver only explains how to open one.
 var deepLinkResolvers = map[deeplink.Kind]deepLinkResolver{
 	deeplink.KindGitHub:     openGitHubLink,
 	deeplink.KindAgent:      openAgentLink,
-	deeplink.KindCloud:      deepLinkNotice(cloudNotice),
+	deeplink.KindCloud:      deepLinkNotice(cloudDeepLinkNotice),
 	deeplink.KindBrowser:    deepLinkNotice(browserNotice),
 	deeplink.KindOtherStore: deepLinkNotice(otherStoreNotice),
 }

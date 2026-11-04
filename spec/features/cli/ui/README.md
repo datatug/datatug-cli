@@ -78,7 +78,7 @@ An address that names no project (`/`, `/home`, …) MUST start the TUI as a bar
 
 - a GitHub project MUST open from `~/datatug/github.com/<owner>/<repo>[/<dir>]`, cloning the repository there first when it is missing; a project that is not in the settings yet MUST be added to them once it loads (the demo project, which is never added, opens as the demo project). The terminal opens the checked-out branch: a `?ref=` names a ref the TUI cannot select yet, so the TUI says so after opening the project;
 - a project of the local `datatug serve` agent (`http-localhost:<port>`, `localhost:<port>`, `http-127.0.0.1:<port>`) MUST open the project of the settings whose id is the address's project id, or say that no project of that id is registered;
-- a DataTug Cloud (`firestore`) project MUST show "DataTug Cloud projects can't be opened in the terminal yet — coming soon"; a project stored in the browser (`local`) MUST show "This project is stored in your browser; export it or push it to GitHub to open it here"; a project of any other store MUST say its store cannot be opened yet. Each kind of project has one resolver, so a cloud resolver replaces the notice when the CLI learns cloud projects.
+- a DataTug Cloud project of a Space (`/space/<spaceId>/store/firestore/project/<projectId>`) MUST open as [cloud-projects](../cloud-projects/README.md) specifies: sign-in and the first read happen before the TUI starts, and failures exit with that feature's codes; a personal DataTug Cloud project (`/store/firestore/project/<projectId>`) MUST exit `1` with that feature's personal-project line; a project stored in the browser (`local`) MUST show "This project is stored in your browser; export it or push it to GitHub to open it here"; a project of any other store MUST say its store cannot be opened yet. Each kind of project has one resolver.
 
 The page of the address MUST open its section of the project: `queries`, `query/<id>` → Queries; `boards`, `board/<id>` → Dashboards; `database/…`, `browser-db/…` → Databases; `environments`, `env/<id>` → Environments; none, `overview`, `project` → the project. Any other page MUST open the project and say that the page has no terminal screen yet.
 
@@ -104,6 +104,7 @@ The TUI registers viewers (database, GCloud, AWS, Azure), settings, and the API 
 | `--result` | string | `""` | Id of a result of `query run --result-id` to open with its loaded rows. |
 | `--as`, `--role`, `--group` | string | `""` | Principal for a project with access policies (with `--result`). |
 | `--deep-link` | string | `""` | Address of a page of the web app (`https://datatug.app/…`) to open. |
+| `--no-sign-in`, `--insecure-storage`, `--auth-host`, `--api-url` | bool/string | | With `--deep-link` to a DataTug Cloud project; see [cloud-projects](../cloud-projects/README.md). |
 | `--tui` (parent) | bool | `false` | Parent-level flag, reserved for forcing TUI mode from other commands. |
 
 ## Exit codes

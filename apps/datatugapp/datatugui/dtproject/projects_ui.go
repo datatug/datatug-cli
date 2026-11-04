@@ -171,6 +171,9 @@ func selectProjectNode(node widgets.TreeNode) tea.Cmd {
 		if ref.ID == demoProject1LocalID {
 			return openDemoProject()
 		}
+		if IsCloudRef(*ref) {
+			return openCloudRef(*ref)
+		}
 		return openProject(*ref)
 	case projectsAction:
 		switch ref {

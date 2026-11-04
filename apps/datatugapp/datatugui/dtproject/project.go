@@ -6,6 +6,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
+	"github.com/datatug/datatug-cli/pkg/cloudproject"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/tuigoff/tuigoff/pkg/nav"
 	"github.com/tuigoff/tuigoff/pkg/widgets"
@@ -49,6 +50,9 @@ func newSectionScreen(data projectData, s section) nav.Screen {
 	case sectionDashboards:
 		return newTextScreen("Dashboards", "List of dashboards here")
 	case sectionQueries:
+		if data.hasQueries {
+			return newItemList("Queries", queryItems(data.queries), data.queriesErr)
+		}
 		return newTextScreen("Queries", "List of queries here")
 	case sectionEnvironments:
 		return newItemList("Environments", environmentItems(data.environments), data.envsErr)
@@ -67,6 +71,9 @@ func projectSummary(data projectData) string {
 	if data.ref.Url != "" {
 		text += "\nURL: " + data.ref.Url
 	}
+	if data.readOnly {
+		text += "\n\nDataTug Cloud project, read-only here. " + ReadOnlyHint + "."
+	}
 	return text
 }
 
@@ -74,6 +81,14 @@ func environmentItems(environments datatug.Environments) []widgets.MenuItem {
 	items := make([]widgets.MenuItem, len(environments))
 	for i, e := range environments {
 		items[i] = idTitleItem(e.ID, e.Title)
+	}
+	return items
+}
+
+func queryItems(queries []cloudproject.Item) []widgets.MenuItem {
+	items := make([]widgets.MenuItem, len(queries))
+	for i, q := range queries {
+		items[i] = idTitleItem(q.ID, q.Title)
 	}
 	return items
 }

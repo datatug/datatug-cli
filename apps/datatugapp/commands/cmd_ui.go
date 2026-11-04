@@ -46,7 +46,12 @@ cannot be opened in the terminal yet; the Projects screen says so.`,
 					return Exit("--deep-link, --file and --result are mutually exclusive", exitCodeUsage)
 				}
 				address, _ := cmd.Flags().GetString("deep-link")
-				return runUIDeepLink(address)
+				var cloud cloudOptions
+				cloud.noSignIn, _ = cmd.Flags().GetBool("no-sign-in")
+				cloud.insecure, _ = cmd.Flags().GetBool("insecure-storage")
+				cloud.authHost, _ = cmd.Flags().GetString("auth-host")
+				cloud.apiURL, _ = cmd.Flags().GetString("api-url")
+				return runUIDeepLink(address, cloud)
 			}
 			if cmd.Flags().Changed("result") {
 				if filePath != "" {
@@ -64,6 +69,10 @@ cannot be opened in the terminal yet; the Projects screen says so.`,
 	}
 	cmd.Flags().StringP("file", "f", "", "Specify a DB file to open")
 	cmd.Flags().String("deep-link", "", "Open the project and page of a DataTug web app address (https://datatug.app/...)")
+	cmd.Flags().Bool("no-sign-in", false, "With --deep-link to a DataTug Cloud project: fail instead of signing in when there is no saved login")
+	cmd.Flags().Bool("insecure-storage", false, "With --deep-link: keep the DataTug login in a plaintext 0600 file, as `datatug auth login --insecure-storage`")
+	cmd.Flags().String("auth-host", "", "With --deep-link: DataTug authorization server URL (testing; default as `datatug auth login`)")
+	cmd.Flags().String("api-url", "", "With --deep-link: DataTug Cloud API base URL ending in /v0/ (development)")
 	cmd.Flags().String("result", "", "Open a result of `query run --result-id <id>` with its loaded rows, without running the query again")
 	cmd.Flags().String("as", "", "Principal ID for the project's access policies (with --result)")
 	cmd.Flags().StringSlice("role", nil, "Principal role (with --result; repeatable)")
@@ -82,6 +91,7 @@ var (
 // bare `datatug` invocation). The UI starts on the screen the user left, and
 // a file to open is shown on top of it.
 func runUI(filePath string) error {
+	configureCloudUILoader()
 	modules := uiModules()
 	opts := datatugui.Options{}
 	if state, err := getDatatugState(); err != nil {
@@ -103,7 +113,7 @@ func runUI(filePath string) error {
 // runUIDeepLink launches the terminal UI on the project and page of a web app
 // address. An address that names no project starts the UI as runUI does; one
 // that is not an address of the web app is a usage error, before the UI starts.
-func runUIDeepLink(address string) error {
+func runUIDeepLink(address string, cloud cloudOptions) error {
 	link, err := deeplink.Parse(address)
 	if err != nil {
 		return Exit("--deep-link: "+err.Error(), exitCodeUsage)
@@ -111,6 +121,10 @@ func runUIDeepLink(address string) error {
 	if link.Kind == deeplink.KindNone {
 		return runUI("")
 	}
+	if link.Kind == deeplink.KindCloud {
+		return openCloudLink(link, cloud)
+	}
+	configureCloudUILoader()
 	return runApp(uiModules(), datatugui.Options{Start: datatugui.ScreenProjects, Then: dtproject.OpenDeepLink(link)})
 }
 

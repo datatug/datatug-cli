@@ -398,3 +398,20 @@ func TestMeaningMCPTools(t *testing.T) {
 		}
 	}
 }
+
+func TestMeaningClientSendsRevealAll(t *testing.T) {
+	var body string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		body = string(raw)
+		_, _ = w.Write([]byte(`{"recordset":{"columns":[],"rows":[]},"provenance":{"source":"chinook"}}`))
+	}))
+	defer srv.Close()
+	c, err := NewClient(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ReadTable(context.Background(), TableReadRequest{Project: "demo", Environment: "local", Source: "chinook", Table: "Customer", Reveal: []string{"*"}}); err != nil || !strings.Contains(body, `"reveal":["*"]`) {
+		t.Fatalf("%v %s", err, body)
+	}
+}

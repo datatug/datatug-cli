@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -346,7 +347,7 @@ func TestMeaningsLabelsListAndChange(t *testing.T) {
 	for body, want := range map[string]int{
 		`{` + src(project) + `,"ifRevision":"` + doc.Revision + `","change":{"action":"set","target":{"source":"other","table":"Cards"},"class":"pii","reason":"r"}}`:            400,
 		`{"project":"nope","env":"local","source":"chinook","ifRevision":"","change":{"action":"set","target":{"source":"chinook","table":"Cards"},"class":"pii","reason":"r"}}`: 404,
-		`{` + src(project) + `,"ifRevision":"","change":{"action":"set","target":{"source":"chinook","table":"Cards"},"class":"x","reason":"r"}}`:                                400,
+		`{` + src(project) + `,"ifRevision":"` + doc.Revision + `","change":{"action":"set","target":{"source":"chinook","table":"Cards"},"class":"x","reason":"r"}}`:            400,
 		`{` + src(project) + `,"ifRevision":"` + doc.Revision + `","change":{"action":"class","target":{"source":"chinook"},"class":"pii","nonRevealable":true,"reason":"r"}}`:   200,
 	} {
 		if code, raw := change(body, false); code != want {
@@ -394,7 +395,9 @@ func TestAgentGuards(t *testing.T) {
 		"from: {name: Genre}\n":                                           "",
 		"::":                                                              "INVALID_REQUEST",
 		"from: {name: NoSuch}\ncolumns: [{field: Id}]\n":                  meaninglabels.CodeRawRefused,
-		"from:\n  name: Cards\n  alias: k\n  joins:\n    - from: {name: Customer, alias: c}\n      on: [{left: {field: CustomerId, source: k}, op: '==', right: {field: CustomerId, source: c}}]\ncolumns: [{field: Id, source: k}]\n": meaninglabels.CodeRawRefused,
+		"from:\n  name: Cards\n  alias: k\n  joins:\n    - from: {name: Customer, alias: c}\n      on: [{left: {field: CustomerId, source: k}, op: '==', right: {field: CustomerId, source: c}}]\ncolumns: [{field: Id, source: k}]\n":   meaninglabels.CodeFieldProtected,
+		"from:\n  name: Album\n  alias: al\n  joins:\n    - from: {name: Artist, alias: ar}\n      on: [{left: {field: ArtistId, source: al}, op: '==', right: {field: ArtistId, source: ar}}]\ncolumns: [{field: Title, source: al}]\n": "",
+		"from:\n  name: Album\n  alias: al\n  joins:\n    - from: {name: NoSuch, alias: ar}\n      on: [{left: {field: ArtistId, source: al}, op: '==', right: {field: ArtistId, source: ar}}]\ncolumns: [{field: Title, source: al}]\n": meaninglabels.CodeRawRefused,
 	} {
 		err := tugql(doc)
 		if (want == "") != (err == nil) || (want != "" && !strings.Contains(err.Error(), want)) {
@@ -499,5 +502,147 @@ func TestAgentTugQLGuardKeepsPolicyDenial(t *testing.T) {
 	err := agentTugQLGuard(context.Background(), project, "local", "chinook", []byte("from: {name: Invoice}\ncolumns: [{field: InvoiceId}]\n"))
 	if err == nil || !strings.Contains(err.Error(), "ACCESS_DENIED") {
 		t.Fatalf("want ACCESS_DENIED, got %v", err)
+	}
+}
+
+func TestAgentRawRefusalSeesEveryTable(t *testing.T) {
+	project, dir := labelsFixture(t)
+	ctx := context.Background()
+	prevList, prevResolve := listSourceObjectsHook, resolveSourceTableHook
+	t.Cleanup(func() { listSourceObjectsHook, resolveSourceTableHook = prevList, prevResolve })
+	plain := func(context.Context, string) ([]sourceObject, error) {
+		return []sourceObject{{Name: "a"}, {Name: "b"}, {Name: "v", View: true, Columns: []string{"x"}}}, nil
+	}
+	describe := func(failing string) func(context.Context, datatug.ProjectStore, string, string, string, string) (resolvedSource, error) {
+		return func(_ context.Context, _ datatug.ProjectStore, _, _, _, table string) (resolvedSource, error) {
+			if table == failing {
+				return resolvedSource{}, errors.New("cannot describe")
+			}
+			return resolvedSource{Columns: []semantic.Column{{Name: "id", Type: "int"}}}, nil
+		}
+	}
+	setLabel(t, dir, meaninglabels.Change{Action: meaninglabels.ActionSet, Target: meaninglabels.Target{Source: "chinook", Table: "v"}, Class: meaninglabels.ClassNone, Reason: "reviewed"})
+	listSourceObjectsHook, resolveSourceTableHook = plain, describe("")
+	if err := agentRawRefusal(ctx, project, "local", "chinook"); err != nil {
+		t.Fatalf("unlabelled source: %v", err)
+	}
+	// a table that cannot be described refuses (fail closed)
+	resolveSourceTableHook = describe("b")
+	if err := agentRawRefusal(ctx, project, "local", "chinook"); err == nil {
+		t.Fatal("an undescribable table must refuse")
+	}
+	// a view that cannot be described falls back to its column names
+	resolveSourceTableHook = describe("v")
+	if err := agentRawRefusal(ctx, project, "local", "chinook"); err != nil {
+		t.Fatalf("view fallback: %v", err)
+	}
+	// a suggestion on any table refuses, however many tables come first
+	listSourceObjectsHook = func(context.Context, string) ([]sourceObject, error) {
+		out := make([]sourceObject, 0, 302)
+		for i := 0; i < 301; i++ {
+			out = append(out, sourceObject{Name: fmt.Sprintf("t%03d", i)})
+		}
+		return append(out, sourceObject{Name: "zz_users"}), nil
+	}
+	resolveSourceTableHook = func(_ context.Context, _ datatug.ProjectStore, _, _, _, table string) (resolvedSource, error) {
+		if table == "zz_users" {
+			return resolvedSource{Columns: []semantic.Column{{Name: "password_hash", Type: "text"}}}, nil
+		}
+		return resolvedSource{Columns: []semantic.Column{{Name: "id", Type: "int"}}}, nil
+	}
+	if err := agentRawRefusal(ctx, project, "local", "chinook"); err == nil {
+		t.Fatal("password_hash after 301 tables must refuse")
+	}
+	listSourceObjectsHook = func(context.Context, string) ([]sourceObject, error) { return nil, errors.New("down") }
+	if err := agentRawRefusal(ctx, project, "local", "chinook"); err == nil {
+		t.Fatal("an unlistable source must refuse")
+	}
+	// a stored protected label refuses before anything is listed
+	setLabel(t, dir, meaninglabels.Change{Action: meaninglabels.ActionSet, Target: meaninglabels.Target{Source: "chinook", Table: "a"}, Class: meaninglabels.ClassPII, Reason: "r"})
+	if err := agentRawRefusal(ctx, project, "local", "chinook"); err == nil {
+		t.Fatal("stored label must refuse")
+	}
+}
+
+func TestRefuseAgentRows(t *testing.T) {
+	called := false
+	h := refuseAgentRows(func(http.ResponseWriter, *http.Request) { called = true })
+	if code, raw := post(t, h, `{}`, true); code != http.StatusForbidden || called || !strings.Contains(raw, meaninglabels.CodeRawRefused) {
+		t.Fatalf("agent: %d %s", code, raw)
+	}
+	post(t, h, `{}`, false)
+	if !called {
+		t.Fatal("a person passes through")
+	}
+}
+
+func TestLabelChangeRefusesStaleRevisionBeforeApplying(t *testing.T) {
+	project, dir := labelsFixture(t)
+	setLabel(t, dir, meaninglabels.Change{Action: meaninglabels.ActionSet, Target: meaninglabels.Target{Source: "chinook", Table: "Cards"}, Class: meaninglabels.ClassPII, Reason: "r"})
+	body := `{` + src(project) + `,"ifRevision":"not-current","change":{"action":"set","target":{"source":"chinook","table":"Invoice"},"class":"pii","reason":"r"}}`
+	if code, raw := post(t, meaningsLabelsChangeHandler, body, false); code != http.StatusConflict {
+		t.Fatalf("%d %s", code, raw)
+	}
+}
+
+func TestFindMultiWord(t *testing.T) {
+	project, _ := labelsFixture(t)
+	code, raw := post(t, meaningsFindHandler, `{`+src(project)+`,"text":"customer email"}`, true)
+	if code != http.StatusOK || !strings.Contains(raw, `"table":"Customer","column":"Email"`) || strings.Contains(raw, `"column":"Country"`) {
+		t.Fatalf("%d %s", code, raw)
+	}
+}
+
+type failingSave struct{ meaninglabelsfile.Store }
+
+func (failingSave) Save(context.Context, meaninglabels.Document, string) error {
+	return errors.New("disk full")
+}
+
+func TestLabelChangeSaveFailureAndNonSQLRaw(t *testing.T) {
+	project, dir := labelsFixture(t)
+	prevStore, prevResolve := labelsStoreFor, apiResolveSource
+	t.Cleanup(func() { labelsStoreFor, apiResolveSource = prevStore, prevResolve })
+	labelsStoreFor = func(string) labelStore { return failingSave{meaninglabelsfile.Store{Dir: dir}} }
+	body := `{` + src(project) + `,"ifRevision":"","change":{"action":"set","target":{"source":"chinook","table":"Cards"},"class":"pii","reason":"r"}}`
+	if code, _ := post(t, meaningsLabelsChangeHandler, body, false); code != http.StatusInternalServerError {
+		t.Fatalf("save failure: %d", code)
+	}
+	labelsStoreFor = prevStore
+	apiResolveSource = func(context.Context, datatug.ProjectStore, string, string, string) (api.ResolvedSource, error) {
+		return api.ResolvedSource{ID: "chinook", Kind: api.SourceKindHTTP}, nil
+	}
+	if err := agentRawRefusal(context.Background(), project, "local", "chinook"); err == nil {
+		t.Fatal("a non-SQL source must refuse")
+	}
+}
+
+func TestCollectionOf(t *testing.T) {
+	ref := dal.NewRootCollectionRef("a", "")
+	if c, ok := collectionOf(&ref); !ok || c.Name() != "a" {
+		t.Fatal("pointer ref")
+	}
+	if _, ok := collectionOf(nil); ok {
+		t.Fatal("nil source")
+	}
+}
+
+func TestAgentQueryGuardShapes(t *testing.T) {
+	project, _ := labelsFixture(t)
+	ctx := context.Background()
+	q := dal.NewQueryBuilder(dal.From(notACollection{})).SelectColumns(dal.Column{Expression: dal.Field("Id")})
+	prevExec := secureExecutorHook
+	secureExecutorHook = func() (*secureread.Executor, bool) { return nil, false }
+	err := agentQueryGuard(ctx, project, "local", "chinook", q)
+	secureExecutorHook = prevExec
+	if err == nil {
+		t.Fatal("a non-collection base must be refused on a labelled source")
+	}
+	base := dal.NewRootCollectionRef("Album", "")
+	if err := agentJoinGuard(ctx, "nope", "local", "chinook", base, nil); err == nil {
+		t.Fatal("unknown project")
+	}
+	if err := agentJoinGuard(ctx, project, "local", "chinook", base, []dal.JoinedSource{{RecordsetSource: notACollection{}}}); err == nil {
+		t.Fatal("a joined non-collection must refuse")
 	}
 }

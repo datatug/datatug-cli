@@ -536,7 +536,14 @@ func computeFind(ctx context.Context, req findRequest) (findResponse, error) {
 			if c.Label != nil {
 				parts = append(parts, string(c.Label.Kind))
 			}
-			if matches(c.Name) || (c.Meaning != nil && matches(parts...)) || (c.Label != nil && c.Label.Kind != "" && matches(string(c.Label.Kind))) {
+			own := []string{c.Name}
+			if c.Meaning != nil {
+				own = append(own, c.Meaning.Field, c.Meaning.Title)
+			}
+			if c.Label != nil {
+				own = append(own, string(c.Label.Kind))
+			}
+			if matches(parts...) && anyWord(words, own) {
 				resp.Matches = append(resp.Matches, findMatch{Table: t.Name, Column: c.Name, Type: c.Type, Label: c.Label, Meaning: c.Meaning})
 			}
 		}
@@ -840,6 +847,9 @@ func computeLabelChange(ctx context.Context, req labelChangeRequest, agent bool)
 	if err != nil {
 		return labelChangeResponse{}, err
 	}
+	if req.IfRevision != m.doc.Revision {
+		return labelChangeResponse{}, labelContractError(meaninglabels.CheckRevision(m.doc, req.IfRevision))
+	}
 	doc, event, err := meaninglabels.Apply(m.doc, req.Change, localActor(agent), nowUTC())
 	if err != nil {
 		return labelChangeResponse{}, labelContractError(err)
@@ -854,7 +864,7 @@ func computeLabelChange(ctx context.Context, req labelChangeRequest, agent bool)
 		}
 	}
 	if doc.Revision != m.doc.Revision || event.Type != "meaning.label.proposal_ignored" {
-		if err := m.store.Save(ctx, doc, req.IfRevision); err != nil {
+		if err := m.store.Save(ctx, doc, m.doc.Revision); err != nil {
 			return labelChangeResponse{}, labelContractError(err)
 		}
 	}
@@ -891,6 +901,17 @@ func (m *meaningSource) reportedTables(ctx context.Context, table string) (map[s
 	return out, nil
 }
 
+// anyWord reports whether any word occurs in any of parts, ignoring case.
+func anyWord(words, parts []string) bool {
+	hay := strings.ToLower(strings.Join(parts, " "))
+	for _, w := range words {
+		if strings.Contains(hay, w) {
+			return true
+		}
+	}
+	return false
+}
+
 // labelContractError maps a label error to the contract envelope.
 func labelContractError(err error) error {
 	code := meaninglabels.ErrorCode(err)
@@ -920,24 +941,42 @@ func labelHTTPStatus(code apicontract.ErrorCode) int {
 // agentRawRefusal refuses an agent's saved SQL on a source with protected
 // columns (spec REQ:raw-and-labels).
 func agentRawRefusal(ctx context.Context, project, env, source string) error {
-	described, err := computeDescribe(ctx, meaningSourceRequest{Project: project, Env: env, Source: source})
-	if err != nil {
-		return labelContractError(meaninglabels.RawRefusal(meaninglabels.Document{}, source, nil, true))
-	}
+	refused := labelContractError(meaninglabels.RawRefusal(meaninglabels.Document{}, source, nil, true))
 	m, err := openMeaningSource(ctx, meaningSourceRequest{Project: project, Env: env, Source: source})
 	if err != nil {
-		return err
+		return refused
+	}
+	if meaninglabels.AnyProtected(m.doc, source, nil) {
+		return refused
+	}
+	if m.registered.Kind != api.SourceKindSQL {
+		return refused
+	}
+	// Every object, with no cap and no policy filter: raw SQL is governed by
+	// its own grant, so a table hidden from structured reads still counts.
+	objects, err := listSourceObjectsHook(ctx, m.registered.URL)
+	if err != nil {
+		return refused
 	}
 	tables := map[string][]meaninglabels.Column{}
-	for _, t := range described.Tables {
-		cols := []meaninglabels.Column{}
-		for _, c := range t.Columns {
-			cols = append(cols, meaninglabels.Column{Name: c.Name, DbType: c.Type})
-			if c.Label != nil && c.Label.Class != meaninglabels.ClassNone {
-				return labelContractError(meaninglabels.RawRefusal(m.doc, source, map[string][]meaninglabels.Column{t.Name: {{Name: c.Name}}}, true))
+	for _, o := range objects {
+		var columns []meaninglabels.Column
+		if resolved, err := resolveSourceTableHook(ctx, m.projStore, m.projectDir, env, source, o.Name); err == nil {
+			columns = labelColumns(resolved.Columns)
+		} else {
+			for _, name := range o.Columns {
+				columns = append(columns, meaninglabels.Column{Name: name})
 			}
 		}
-		tables[t.Name] = cols
+		if len(columns) == 0 {
+			return refused // a table that cannot be described refuses (fail closed)
+		}
+		tables[o.Name] = columns
+		for _, l := range meaninglabels.EffectiveObject(m.doc, source, o.Name, o.View, columns) {
+			if l.Protected() {
+				return refused
+			}
+		}
 	}
 	return labelContractError(meaninglabels.RawRefusal(m.doc, source, tables, true))
 }
@@ -966,6 +1005,11 @@ func agentTugQLGuard(ctx context.Context, project, env, source string, doc []byt
 	if err != nil {
 		return newInvalidRequest("tugql", "the TugQL document cannot be parsed")
 	}
+	return agentQueryGuard(ctx, project, env, source, query)
+}
+
+// agentQueryGuard is agentTugQLGuard for a parsed query.
+func agentQueryGuard(ctx context.Context, project, env, source string, query dal.Query) error {
 	// A query the policy denies gets the policy's own answer, never a
 	// masking one that would confirm what the denied tables hold.
 	if executor, configured := secureExecutorHook(); configured {
@@ -978,8 +1022,11 @@ func agentTugQLGuard(ctx context.Context, project, env, source string, doc []byt
 	if ok {
 		base, ok = baseCollectionOf(structured)
 	}
-	if !ok || len(structured.From().Joins()) > 0 {
+	if !ok {
 		return agentRawRefusal(ctx, project, env, source)
+	}
+	if joins := structured.From().Joins(); len(joins) > 0 {
+		return agentJoinGuard(ctx, project, env, source, base, joins)
 	}
 	m, err := openMeaningSource(ctx, meaningSourceRequest{Project: project, Env: env, Source: source})
 	if err != nil {
@@ -1013,13 +1060,7 @@ func agentTugQLGuard(ctx context.Context, project, env, source string, doc []byt
 }
 
 func baseCollectionOf(query dal.StructuredQuery) (dal.CollectionRef, bool) {
-	switch source := query.From().Base().(type) {
-	case dal.CollectionRef:
-		return source, true
-	case *dal.CollectionRef:
-		return *source, true
-	}
-	return dal.CollectionRef{}, false
+	return collectionOf(query.From().Base())
 }
 
 // schemaColumnLabels is the effective labels of one table's columns for the
@@ -1031,4 +1072,57 @@ func schemaColumnLabels(ctx context.Context, req recordsTableRequest, collection
 		return nil, err
 	}
 	return meaninglabels.EffectiveObject(m.doc, req.Source, collection, m.isView(ctx, collection), labelColumns(columns)), nil
+}
+
+// refuseAgentRows guards a route that returns rows without Meaning Graph
+// masking: a declared agent is refused there and pointed at the masking
+// routes (records/read, TugQL through exec/run_query).
+func refuseAgentRows(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if isAgentRequest(r) {
+			writeContractError(w, r, newContractError(meaninglabels.CodeRawRefused, "this route returns rows without field masking; agents read rows through records/read or TugQL", ""))
+			return
+		}
+		next(w, r)
+	}
+}
+
+// agentJoinGuard refuses an agent's TugQL join when any table it touches has
+// a protected column, or when one of them cannot be described. The policy
+// has already admitted the query, so only these tables matter.
+func agentJoinGuard(ctx context.Context, project, env, source string, base dal.CollectionRef, joins []dal.JoinedSource) error {
+	m, err := openMeaningSource(ctx, meaningSourceRequest{Project: project, Env: env, Source: source})
+	if err != nil {
+		return err
+	}
+	names := []string{base.Name()}
+	for _, j := range joins {
+		ref, ok := collectionOf(j.RecordsetSource)
+		if !ok {
+			return labelContractError(meaninglabels.RawRefusal(m.doc, source, nil, true))
+		}
+		names = append(names, ref.Name())
+	}
+	for _, name := range names {
+		resolved, err := resolveSourceTableHook(ctx, m.projStore, m.projectDir, env, source, name)
+		if err != nil || len(resolved.Columns) == 0 {
+			return labelContractError(meaninglabels.RawRefusal(m.doc, source, nil, true))
+		}
+		for _, l := range meaninglabels.EffectiveObject(m.doc, source, name, m.isView(ctx, name), labelColumns(resolved.Columns)) {
+			if l.Protected() {
+				return newContractError(meaninglabels.CodeFieldProtected, fmt.Sprintf("%s has masked columns; agents join labelled tables through separate records/read calls", name), "")
+			}
+		}
+	}
+	return nil
+}
+
+func collectionOf(source dal.RecordsetSource) (dal.CollectionRef, bool) {
+	switch s := source.(type) {
+	case dal.CollectionRef:
+		return s, true
+	case *dal.CollectionRef:
+		return *s, true
+	}
+	return dal.CollectionRef{}, false
 }

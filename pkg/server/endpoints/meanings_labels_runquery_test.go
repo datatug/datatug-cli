@@ -69,8 +69,8 @@ func TestRunQueryAgentGuards(t *testing.T) {
 
 	// an agent's saved SQL that names no protected column runs (TestAgentSavedSQL covers refusals)
 	_, err := computeRunQuery(agentCtx, agentRunRequest(project, "agent-sql", ""))
-	if code := errCode(err); code == meaninglabels.CodeRawRefused {
-		t.Fatalf("saved SQL: %v", err) // past the guard, the session's own opaque-SQL grant decides
+	if !errors.Is(err, secureread.ErrOpaqueSQLNotGranted) && errCode(err) != "UNSUPPORTED_PROTECTED_EXECUTION" {
+		t.Fatalf("saved SQL must pass the guard and reach the opaque-SQL grant: %v", err)
 	}
 	// ad-hoc TugQL: a wildcard is refused, an explicit non-masked list runs
 	_, err = computeRunQuery(agentCtx, agentRunRequest(project, "", "from: {name: Cards}\n"))

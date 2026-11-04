@@ -128,9 +128,9 @@ func queriesRoutes(path string, router router, wrap wrapper, writeOnly bool, cap
 		route(router, wrap, http.MethodGet, path+"/queries/get_query", getQueryHandler)
 		route(router, wrap, http.MethodGet, path+"/queries/query_revision", getProjectQueryRevisionHandler)
 	}
-	route(router, wrap, http.MethodPost, path+"/queries/save_query", requireWriteCapability(caps, saveProjectQueryHandler))
-	route(router, wrap, http.MethodPost, path+"/queries/create_query", requireWriteCapability(caps, createQuery))
-	route(router, wrap, http.MethodPut, path+"/queries/update_query", requireWriteCapability(caps, updateQuery))
+	route(router, wrap, http.MethodPost, path+"/queries/save_query", refuseAgentQueryWrites(requireWriteCapability(caps, saveProjectQueryHandler)))
+	route(router, wrap, http.MethodPost, path+"/queries/create_query", refuseAgentQueryWrites(requireWriteCapability(caps, createQuery)))
+	route(router, wrap, http.MethodPut, path+"/queries/update_query", refuseAgentQueryWrites(requireWriteCapability(caps, updateQuery)))
 	route(router, wrap, http.MethodDelete, path+"/queries/delete_query", requireWriteCapability(caps, rejectUnreviewedProjectLifecycle))
 	// queries/capture: "Save as project query" (Phase 2 task 2). Behind the
 	// process write capability here, then authorized for the serving

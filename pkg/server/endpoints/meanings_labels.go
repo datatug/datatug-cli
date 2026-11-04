@@ -938,8 +938,9 @@ func labelHTTPStatus(code apicontract.ErrorCode) int {
 	return 0
 }
 
-// agentRawRefusal refuses an agent's saved SQL on a source with protected
-// columns (spec REQ:raw-and-labels).
+// agentRawRefusal refuses an agent's own raw read (ad-hoc SQL, or TugQL that
+// cannot be inspected) on a source with protected columns (spec
+// REQ:raw-and-labels). Saved SQL has its own guard, agentSavedSQLRefusal.
 func agentRawRefusal(ctx context.Context, project, env, source string) error {
 	refused := labelContractError(meaninglabels.RawRefusal(meaninglabels.Document{}, source, nil, true))
 	m, err := openMeaningSource(ctx, meaningSourceRequest{Project: project, Env: env, Source: source})

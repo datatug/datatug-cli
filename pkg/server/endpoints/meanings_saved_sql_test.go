@@ -3,8 +3,11 @@ package endpoints
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dal-go/dalgo/dal"
@@ -15,28 +18,61 @@ import (
 	"github.com/datatug/datatug-core/pkg/semantic"
 )
 
-func TestSavedSQLDisclosure(t *testing.T) {
-	protected := map[string]bool{"card_number": true, "email": true, "v_contacts": true}
+func TestScanSQL(t *testing.T) {
 	for text, want := range map[string]string{
-		"SELECT Id, Note FROM Cards":                                        "",
-		"SELECT COUNT(*), Id * 2 FROM Cards GROUP BY Id":                    "",
-		"SELECT Note FROM Cards WHERE Note <> 'card_number' -- card_number": "",
-		"SELECT Note /* email */ FROM Cards WHERE Note = 'it''s email'":     "",
-		"SELECT c.card_number FROM Cards c":                                 "names protected card_number",
-		`SELECT "Card_Number", [EMAIL] FROM Cards`:                          "names protected card_number, email",
-		"SELECT `email`, email FROM Customer":                               "names protected email",
-		`SELECT "a""b" FROM Cards`:                                          "",
-		"SELECT Country FROM v_contacts":                                    "names protected v_contacts",
-		"SELECT * FROM Cards":                                               "selects a wildcard",
-		"select distinct * from Cards":                                      "selects a wildcard",
-		"SELECT Id, c.* FROM Cards c":                                       "selects a wildcard",
-		"SELECT Id, * FROM Cards":                                           "selects a wildcard",
-		"EXEC dump_cards":                                                   "calls a procedure",
-		"call dump_cards()":                                                 "calls a procedure",
-		`SELECT "call" FROM Cards`:                                          "",
+		"SELECT Id, Note FROM Cards":                                  "",
+		"SELECT COUNT(*), Id * 2, Id*Id FROM Cards GROUP BY Id":       "",
+		"SELECT count( * ) FROM Cards":                                "",
+		"SELECT * FROM Cards":                                         "selects a wildcard",
+		"select distinct * from Cards":                                "selects a wildcard",
+		"SELECT Id, c.* FROM Cards c":                                 "selects a wildcard",
+		"SELECT Id, * FROM Cards":                                     "selects a wildcard",
+		"SELECT TOP 10 * FROM Customer":                               "selects a wildcard",
+		"SELECT TOP (10) *\nFROM Customer":                            "selects a wildcard",
+		"SELECT*FROM Customer":                                        "selects a wildcard",
+		"SELECT DISTINCT ON (Country) * FROM Customer":                "selects a wildcard",
+		"UPDATE Customer SET Note = 'x' RETURNING *":                  "selects a wildcard",
+		"SELECT * EXCEPT (Email) FROM Customer":                       "selects a wildcard",
+		"SELECT Id FROM (SELECT *) AS t":                              "selects a wildcard",
+		"SELECT Note FROM Cards WHERE Note <> '*' -- SELECT * FROM x": "",
+		"EXEC dump_cards":                                             "calls a procedure",
+		"call dump_cards()":                                           "calls a procedure",
+		`SELECT "call" FROM Cards`:                                    "",
+		"SELECT Id /*! , Email */ FROM Customer":                      "uses an executable comment",
 	} {
-		if got := savedSQLDisclosure(text, protected); got != want {
+		if got := scanSQL(text).shape; got != want {
 			t.Errorf("%q: got %q, want %q", text, got, want)
+		}
+	}
+	for text, want := range map[string]string{
+		"SELECT c.Card_Number FROM Cards c":                             "c card_number cards from select",
+		`SELECT "a""b", [EMAIL], ` + "`x`" + ` FROM t`:                  "a\"b email from select t x",
+		"SELECT Note /* email */ FROM Cards WHERE Note = 'it''s email'": "cards from note select where",
+		"SELECT correo_electrónico FROM clientes":                       "clientes correo_electrónico from select",
+		// a backslash-escaped quote: the standard reading sees Email after it
+		`SELECT 'O\'Brien' UNION SELECT Email FROM Customer`: "brien customer email from select union",
+		// a trailing backslash: the escaping reading would swallow Email
+		`SELECT 'C:\' AS p, Email FROM Customer`: "as c customer email from p select",
+	} {
+		if got := strings.Join(scanSQL(text).words, " "); got != want {
+			t.Errorf("%q: got %q, want %q", text, got, want)
+		}
+	}
+}
+
+func TestRefuseAgentQueryWrites(t *testing.T) {
+	called := false
+	h := refuseAgentQueryWrites(func(http.ResponseWriter, *http.Request) { called = true })
+	for agent, want := range map[bool]bool{true: false, false: true} {
+		called = false
+		r := httptest.NewRequest(http.MethodPost, "/datatug/queries/create_query", nil)
+		if agent {
+			r.Header.Set(agentHeader, "1")
+		}
+		w := httptest.NewRecorder()
+		h(w, r)
+		if called != want || agent && !strings.Contains(w.Body.String(), meaninglabels.CodeRawRefused) {
+			t.Fatalf("agent=%v: called=%v %d %s", agent, called, w.Code, w.Body.String())
 		}
 	}
 }
@@ -59,6 +95,7 @@ func TestAgentSavedSQL(t *testing.T) {
 	write("safe", "SELECT Id, Note FROM Cards ORDER BY Id")
 	write("card", "SELECT Id, card_number FROM Cards")
 	write("contacts", "SELECT Country FROM v_contacts")
+	write("wild", "SELECT * FROM Cards")
 	agentCtx := withAgentContext(context.Background(), true)
 	prevRun := runNativeSQLHook
 	t.Cleanup(func() { runNativeSQLHook = prevRun })
@@ -71,7 +108,7 @@ func TestAgentSavedSQL(t *testing.T) {
 	if _, err := computeRunQuery(agentCtx, agentRunRequest(project, "safe", "")); err != nil || len(ran) != 1 {
 		t.Fatalf("safe saved SQL: %v %v", err, ran)
 	}
-	for _, id := range []string{"card", "contacts"} {
+	for _, id := range []string{"card", "contacts", "wild"} {
 		if _, err := computeRunQuery(agentCtx, agentRunRequest(project, id, "")); errCode(err) != meaninglabels.CodeRawRefused {
 			t.Fatalf("%s: %v", id, err)
 		}
@@ -148,7 +185,7 @@ func TestSourceProtectedNames(t *testing.T) {
 		return api.ResolvedSource{ID: "chinook", Kind: api.SourceKindHTTP}, nil
 	}
 	refuses("non-SQL source")
-	if err := agentSavedSQLRefusal(ctx, project, "local", "chinook", "SELECT 1"); errCode(err) != meaninglabels.CodeRawRefused {
+	if err := agentSavedSQLRefusal(ctx, project, "local", "chinook", "SELECT 1"); errCode(err) != meaninglabels.CodeRawRefused || !strings.Contains(err.Error(), "protected columns") {
 		t.Fatalf("guard passes the refusal on: %v", err)
 	}
 }

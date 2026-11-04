@@ -3,6 +3,7 @@ package endpoints
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"regexp"
 	"sort"
 	"strings"
@@ -13,23 +14,52 @@ import (
 )
 
 // agentSavedSQLRefusal guards an agent's run of a saved native SQL query
-// (REQ:raw-and-labels). A saved query is written by the project owner, not by
-// the agent, so it runs unless its text names something the boundary would
-// mask: a protected column, an object masked whole (an unreviewed view, a
-// table that cannot be described, a table-level label), a wildcard
-// projection, or a procedure call. Like every agent guard this is accident
-// prevention for honest agents, not a sandbox for hostile SQL; an agent's own
-// ad-hoc raw SQL stays refused on any labelled source (agentRawRefusal).
+// (REQ:raw-and-labels). Agents cannot write saved queries through serve
+// (refuseAgentQueryWrites), so a saved query is the owner's, and it runs
+// unless its text could disclose what the boundary would mask: a wildcard
+// projection, a procedure call or an executable comment (checked first, with
+// no source access), or a protected column or an object masked whole (an
+// unreviewed view, a table that cannot be described, a table-level label).
+// This is accident prevention for honest agents, not a sandbox: a whole-row
+// reference (json_agg(c)), a function that reads protected columns, or a view
+// the owner reviewed are the owner's own disclosure. An agent's own ad-hoc
+// raw SQL stays refused on any labelled source (agentRawRefusal).
 func agentSavedSQLRefusal(ctx context.Context, project, env, source, text string) error {
+	scan := scanSQL(text)
+	refuse := func(reason string) error {
+		return newContractError(apicontract.ErrorCode(meaninglabels.CodeRawRefused),
+			fmt.Sprintf("saved SQL on source %s %s; agents read protected columns with table reads or TugQL, which mask", source, reason), "")
+	}
+	if scan.shape != "" {
+		return refuse(scan.shape)
+	}
 	names, err := sourceProtectedNames(ctx, project, env, source)
 	if err != nil {
 		return err
 	}
-	if reason := savedSQLDisclosure(text, names); reason != "" {
-		return newContractError(apicontract.ErrorCode(meaninglabels.CodeRawRefused),
-			fmt.Sprintf("saved SQL on source %s %s; agents read protected columns with table reads or TugQL, which mask", source, reason), "")
+	var named []string
+	for _, w := range scan.words {
+		if names[w] {
+			named = append(named, w)
+		}
+	}
+	if len(named) > 0 {
+		return refuse("names protected " + strings.Join(named, ", "))
 	}
 	return nil
+}
+
+// refuseAgentQueryWrites keeps saved queries the owner's: an agent request may
+// not create, save or update one (REQ:raw-and-labels).
+func refuseAgentQueryWrites(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if isAgentRequest(r) {
+			writeContractError(w, r, newContractError(meaninglabels.CodeRawRefused,
+				"agents do not write saved queries: a saved SQL query runs for an agent because its owner wrote it", ""))
+			return
+		}
+		next(w, r)
+	}
 }
 
 // sourceProtectedNames is the lower-cased bare names an agent's saved SQL may
@@ -90,55 +120,76 @@ func (m *meaningSource) objectColumns(ctx context.Context, o sourceObject) []mea
 	return columns
 }
 
-// sqlToken matches, in one left-to-right pass, a string literal, a comment, a
-// quoted identifier ("", “, []) or a bare word. Literals and comments are
-// skipped, so a name inside them is not a reference.
-var sqlToken = regexp.MustCompile("(?s)'(?:[^']|'')*'|--[^\\n]*|/\\*.*?\\*/|\"((?:[^\"]|\"\")*)\"|`([^`]*)`|\\[([^\\]]*)\\]|([A-Za-z_][A-Za-z0-9_$]*)")
+// sqlTokenStandard and sqlTokenEscaping each match, left to right, a string
+// literal, a comment, a quoted identifier ("", backticks, []) or a bare word.
+// They differ only in whether a backslash escapes a quote inside a literal
+// (MySQL, Postgres E”); scanSQL runs both and keeps every word either finds,
+// so neither dialect can hide a name inside what the other reads as a literal.
+var (
+	sqlTokenStandard = regexp.MustCompile(sqlTokenPattern(`'(?:[^']|'')*'`))
+	sqlTokenEscaping = regexp.MustCompile(sqlTokenPattern(`'(?:[^'\\]|''|\\.)*'`))
+)
 
-// sqlWildcard is a projection wildcard: SELECT *, SELECT DISTINCT *, , * and t.*.
-// Multiplication (a * b) and COUNT(*) are not.
-var sqlWildcard = regexp.MustCompile(`(?i)\bselect\s+(?:(?:distinct|all)\s+)?\*|,\s*\*|\.\s*\*`)
+func sqlTokenPattern(literal string) string {
+	return "(?s)" + literal + "|--[^\\n]*|/\\*.*?\\*/|\"((?:[^\"]|\"\")*)\"|`([^`]*)`|\\[([^\\]]*)\\]|([\\p{L}_][\\p{L}\\p{N}_$]*)"
+}
+
+// sqlCountStar is COUNT(*)'s argument; sqlWildcard is then any other * that
+// ends a projection item (SELECT *, SELECT TOP 10 *, t.*, RETURNING *).
+// Multiplication (a * b) is followed by an operand, so it does not match.
+var (
+	sqlCountStar = regexp.MustCompile(`\(\s*\*\s*\)`)
+	sqlWildcard  = regexp.MustCompile(`(?i)\.\s*\*|\*\s*(?:from\b|into\b|except\b|,|;|\)|$)`)
+)
 
 var sqlProcedureWords = map[string]bool{"exec": true, "execute": true, "call": true}
 
-// savedSQLDisclosure says how text could disclose a protected value, or "".
-func savedSQLDisclosure(text string, protected map[string]bool) string {
-	var code strings.Builder
-	var named []string
+// sqlScan is what a saved SQL text could disclose before the source is known:
+// shape (a wildcard, a procedure call, an executable comment) or "", and the
+// lower-cased words it names, sorted and unique.
+type sqlScan struct {
+	shape string
+	words []string
+}
+
+func scanSQL(text string) sqlScan {
 	seen := map[string]bool{}
-	last := 0
-	for _, loc := range sqlToken.FindAllStringSubmatchIndex(text, -1) {
-		code.WriteString(text[last:loc[0]])
-		last = loc[1]
-		group := 0
-		for g := 1; g <= 4; g++ {
-			if loc[2*g] >= 0 {
-				group = g
-				break
+	var out sqlScan
+	for _, token := range []*regexp.Regexp{sqlTokenStandard, sqlTokenEscaping} {
+		var code strings.Builder
+		last := 0
+		for _, loc := range token.FindAllStringSubmatchIndex(text, -1) {
+			code.WriteString(text[last:loc[0]])
+			last = loc[1]
+			group := 0
+			for g := 1; g <= 4; g++ {
+				if loc[2*g] >= 0 {
+					group = g
+					break
+				}
+			}
+			if group == 0 {
+				if strings.HasPrefix(text[loc[0]:], "/*!") && out.shape == "" {
+					out.shape = "uses an executable comment"
+				}
+				code.WriteString(" ") // a literal or a comment
+				continue
+			}
+			code.WriteString(text[loc[0]:loc[1]])
+			word := strings.ToLower(strings.ReplaceAll(text[loc[2*group]:loc[2*group+1]], `""`, `"`))
+			if group == 4 && sqlProcedureWords[word] && out.shape == "" {
+				out.shape = "calls a procedure"
+			}
+			if !seen[word] {
+				seen[word] = true
+				out.words = append(out.words, word)
 			}
 		}
-		if group == 0 {
-			code.WriteString(" ") // a literal or a comment
-			continue
-		}
-		code.WriteString(text[loc[0]:loc[1]])
-		ident := text[loc[2*group]:loc[2*group+1]]
-		word := strings.ToLower(strings.ReplaceAll(ident, `""`, `"`))
-		if group == 4 && sqlProcedureWords[word] {
-			return "calls a procedure"
-		}
-		if protected[word] && !seen[word] {
-			seen[word] = true
-			named = append(named, word)
+		code.WriteString(text[last:])
+		if out.shape == "" && sqlWildcard.MatchString(sqlCountStar.ReplaceAllString(code.String(), " ")) {
+			out.shape = "selects a wildcard"
 		}
 	}
-	code.WriteString(text[last:])
-	if sqlWildcard.MatchString(code.String()) {
-		return "selects a wildcard"
-	}
-	if len(named) > 0 {
-		sort.Strings(named)
-		return "names protected " + strings.Join(named, ", ")
-	}
-	return ""
+	sort.Strings(out.words)
+	return out
 }

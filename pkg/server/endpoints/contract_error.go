@@ -225,6 +225,9 @@ func httpStatusFor(code apicontract.ErrorCode) int {
 	if code == "OUTCOME_UNCERTAIN" {
 		return http.StatusConflict
 	}
+	if status := labelHTTPStatus(code); status != 0 {
+		return status
+	}
 	if status := code.HTTPStatus(); status != 0 {
 		return status
 	}

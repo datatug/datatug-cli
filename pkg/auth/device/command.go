@@ -197,6 +197,13 @@ func printWarnings(output io.Writer, warnings []error) {
 	}
 }
 
+// refreshRefused reports whether a refresh answer means the refresh token
+// itself was refused. 408 (timeout) and 429 (rate limited) are 4xx too, but
+// they pass with time, so they never send the person to sign in again.
+func refreshRefused(status int) bool {
+	return status >= 400 && status < 500 && status != http.StatusRequestTimeout && status != http.StatusTooManyRequests
+}
+
 func exchangeCustomToken(ctx context.Context, token string) (session, error) {
 	body, _ := json.Marshal(map[string]any{"token": token, "returnSecureToken": true})
 	endpoint := "https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=" + url.QueryEscape(firebaseAPIKey)
@@ -243,7 +250,7 @@ func refreshFirebaseSession(ctx context.Context, refreshToken string) (session, 
 		return session{}, err
 	}
 	defer func() { _ = response.Body.Close() }()
-	if response.StatusCode >= 400 && response.StatusCode < 500 {
+	if refreshRefused(response.StatusCode) {
 		// The refresh token was refused (revoked, expired): only a new
 		// sign-in helps.
 		return session{}, fmt.Errorf("%w: firebase session refresh returned HTTP %d", errRefreshRefused, response.StatusCode)

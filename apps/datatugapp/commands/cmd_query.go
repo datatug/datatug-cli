@@ -97,7 +97,7 @@ func queryCommand() *cobra.Command {
 		Use:   "query",
 		Short: "Run queries through your access policies",
 	}
-	cmd.AddCommand(queryRunCommand(), queryBigQueryCommand(), queryRedisCommand(), queryDynamoDBCommand(), queryInfluxDBCommand(), queryCosmosDBCommand(), queryConvexCommand(), queryCloudflareKVCommand(), querySnowflakeCommand(), queryTypesenseCommand(), queryResultsCommand())
+	cmd.AddCommand(queryRunCommand(), queryBigQueryCommand(), queryRedisCommand(), queryDynamoDBCommand(), queryInfluxDBCommand(), queryCosmosDBCommand(), queryConvexCommand(), queryCloudflareKVCommand(), querySnowflakeCommand(), queryAthenaCommand(), queryTypesenseCommand(), queryResultsCommand())
 	return cmd
 }
 

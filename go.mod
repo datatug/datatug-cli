@@ -28,6 +28,7 @@ require (
 	github.com/charmbracelet/ultraviolet v0.0.0-20260812204455-68fa937c71be
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/dal-go/dalgo v0.97.0
+	github.com/dal-go/dalgo2athena v0.0.0-20261102200104-46e11a38e44b
 	github.com/dal-go/dalgo2bigquery v0.3.2
 	github.com/dal-go/dalgo2clickhouse v0.0.0-20261030135300-99a44064132e
 	github.com/dal-go/dalgo2cloudflarekv v0.0.0-20261102080843-209a16cff7f5

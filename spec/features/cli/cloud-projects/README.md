@@ -123,7 +123,7 @@ Failures before the TUI starts MUST exit with the CLI's exit codes ([cli](../REA
 | Failure | Exit | Line |
 |---|---|---|
 | Bad space or project id | `2` | which part is invalid |
-| `404` | `3` | `Project not found, or it was deleted.` Today the backend answers a missing Space project with `503 shared_query_unavailable`, so it shows as the next row until the backend maps not-found to `404` |
+| `404` | `3` | `Project not found, or it was deleted.` The backend answers a Space member's read of a missing project with `404 project_not_found` (datatug/backend#153); a non-member gets the same `403` as for an existing project |
 | Network failure, or `5xx` after failover | `4` | `Can't reach DataTug Cloud: <reason>` |
 | `401`, or no login with `--no-sign-in` | `5` | `Sign in with: datatug auth login` |
 | `403` | `5` | `<email> has no access to this project. Ask a Space admin to invite you.` |

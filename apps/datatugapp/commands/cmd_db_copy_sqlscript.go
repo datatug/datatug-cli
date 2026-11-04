@@ -313,7 +313,7 @@ func createExclusive(dir, prefix string) (*os.File, error) {
 	if err := randomBytes(rnd[:]); err != nil {
 		return nil, err
 	}
-	return os.OpenFile(filepath.Join(dir, prefix+hex.EncodeToString(rnd[:])), os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o666)
+	return os.OpenFile(filepath.Join(dir, prefix+hex.EncodeToString(rnd[:])), os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 }
 
 // copyContents copies the script into its destination; a test replaces it to fail the copy or to move a file onto the

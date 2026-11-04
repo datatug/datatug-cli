@@ -75,6 +75,7 @@ func writeSemanticTestProjectWithSetup(t *testing.T, setup func(string)) (projec
 	projectID = "semantic-test-" + strings.NewReplacer("/", "-", " ", "-").Replace(t.Name())
 	filestore.SetProjectPath(projectID, dir)
 
+	mustWriteFile(t, filepath.Join(dir, "datatug-project.json"), `{"title":"Semantic fixture","created":{"at":"2026-01-01T00:00:00Z"},"access":"private"}`)
 	writeCustomerEntity(t, dir)
 	dbPath := copyChinookDB(t, dir)
 	registerChinookEnvironment(t, dir, projectID, dbPath)

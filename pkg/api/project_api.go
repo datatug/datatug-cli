@@ -85,7 +85,7 @@ func GetProjectSummary(ctx context.Context, ref dto.ProjectRef) (projSummary *da
 	}
 	projectFile, err := project.LoadProjectFile(ctx)
 	if err != nil {
-		return nil, itemNotFound("project", dbcopy.SourceIDDisplay(ref.ProjectID), err)
+		return nil, projectLoadError(ref.ProjectID, err)
 	}
 
 	return &datatug.ProjectSummary{ProjectFile: projectFile}, err
@@ -126,9 +126,28 @@ func GetProjectFull(ctx context.Context, ref dto.ProjectRef) (*datatug.Project, 
 	if err != nil {
 		return nil, err
 	}
+	if _, err := project.LoadProjectFile(ctx); err != nil {
+		return nil, projectLoadError(ref.ProjectID, err)
+	}
 	loaded, err := project.LoadProject(ctx)
 	if err != nil {
 		return nil, itemNotFound("project", dbcopy.SourceIDDisplay(ref.ProjectID), err)
 	}
 	return loaded, nil
+}
+
+// Only the store's definite missing project definition is public absence. Other
+// read failures retain the existing sanitized message without an absence marker.
+func projectLoadError(projectID string, cause error) error {
+	safe := itemNotFound("project", dbcopy.SourceIDDisplay(projectID), cause)
+	if errors.Is(cause, datatug.ErrProjectDoesNotExist) {
+		return missingProjectDefinition{safe}
+	}
+	return safe
+}
+
+type missingProjectDefinition struct{ error }
+
+func (missingProjectDefinition) Is(target error) bool {
+	return target == datatug.ErrProjectDoesNotExist
 }

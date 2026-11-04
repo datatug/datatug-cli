@@ -50,6 +50,10 @@ func ServiceConnectionSource(connectionID string) (CloudBundleSource, error) {
 // separately binds the complete accepted Watch intent. Query/default codecs are
 // shared by client/server. Bounds are FIXED, not inferred from Detective's500
 // row limit. Core still owns query admission, policy compilation and output.
+// This helper does not validate Check-step bindings or derive parameters from
+// retained root inputs and nested Check occurrences. Server integration must
+// independently derive and compare parameters for the accepted occurrence using
+// the existing engine's mapping rules, never admit request.Parameters directly.
 func BuildServiceReadIntent(ctx context.Context, b ServiceReadBinding, parameters map[string]apicontract.TypedValueOrSet, nonce string) (ServiceReadIntent, error) {
 	var zero ServiceReadIntent
 	d := b.Claim.Definition

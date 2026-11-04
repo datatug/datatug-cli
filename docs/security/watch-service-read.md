@@ -30,6 +30,13 @@ canonical set order and nil-versus-empty retained root inputs keep their existin
 Go JSON semantics. Invalid UTF-8 is refused before it can be replaced during
 encoding. These helpers bind intent; they do not attest worker execution.
 
+Query presence and typed/defaulted parameter normalization do not validate a
+Check step's bindings or derive its actual parameters from retained root inputs
+and nested Check occurrences. The future server integration must independently
+derive and compare the operation parameters for the accepted Check occurrence,
+using its retained inputs and the existing engine's mapping rules. It must never
+pass request.Parameters directly to this helper as admitted intent.
+
 The connection source ID is a hash of the existing descriptor shape, not an access
 connection ID or grant. No Service identity, caller principal, role, private policy
 generation, credential or native-proof assertion is accepted in the request.

@@ -23,7 +23,7 @@ func (s *Store) WithClaim(ctx context.Context, id RunnerIdentity, runID string, 
 			return e
 		}
 		d.SourceFingerprint = obs.SourceFingerprint
-		return fn(ctx, session.reader, Claim{ClaimID: r.ID, RunID: r.ID, Fence: r.Fence, LeaseUntil: r.LeaseUntil, Definition: d})
+		return fn(ctx, session.reader, Claim{ClaimID: r.ID, RunID: r.ID, Fence: r.Fence, LeaseUntil: r.LeaseUntil, Deadline: r.Deadline, Definition: d})
 	})
 }
 

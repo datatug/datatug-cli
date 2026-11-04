@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"github.com/datatug/datatug-cli/pkg/agentaccess"
@@ -109,10 +110,21 @@ type Capabilities struct {
 // every scoped handler validates a request's securityContextId against
 // (see ValidateSecurityContext).
 //
+// Configuration failure installs a refused session. This compatibility wrapper
+// keeps its original signature; startup callers use ConfigureSecureSessionChecked
+// to stop instead of starting a listener or worker.
+//
 // Every request-handling call site MUST go through SecureExecutor rather
 // than open a source or run a query directly, so every read really does
 // pass through the one policy-enforced path (REQ:server-acl-all-reads).
 func ConfigureSecureSession(session secureread.Session, pathsByID map[string]string, caps Capabilities) {
+	_ = ConfigureSecureSessionChecked(session, pathsByID, caps)
+}
+
+// ConfigureSecureSessionChecked installs the same fixed CLI session and returns
+// a startup validation failure. On failure it installs a refused session and an
+// empty served registry; callers must not start a listener or worker.
+func ConfigureSecureSessionChecked(session secureread.Session, pathsByID map[string]string, caps Capabilities) error {
 	secureMu.Lock()
 	defer secureMu.Unlock()
 	// session.AllowOpaqueSQL is the single point secureread.Executor.
@@ -122,10 +134,18 @@ func ConfigureSecureSession(session secureread.Session, pathsByID map[string]str
 	// per-endpoint is what makes the refusal apply uniformly).
 	var sessionErr error
 	session, sessionErr = secureread.NormalizeSession(session)
+	if sessionErr == nil {
+		sessionErr = session.ValidateBoundServer(pathsByID, caps.AllowWrites, caps.AllowOpaqueSQL, caps.AllowLiveConnections)
+	}
 	if sessionErr != nil {
 		// Invalid configuration cannot retain file, metadata or identity power.
+		// Bound validation already latches its refusal. Preserve the binding so
+		// the profile's route allowlist cannot fall back to legacy handling.
+		if !session.SourceBound() {
+			session = secureread.RefusedSession(sessionErr)
+		}
 		caps = Capabilities{}
-		pathsByID = nil
+		pathsByID = map[string]string{}
 	}
 	session.AllowOpaqueSQL = caps.AllowOpaqueSQL
 	secureSession = session
@@ -141,10 +161,14 @@ func ConfigureSecureSession(session secureread.Session, pathsByID map[string]str
 	visibilityInventoryFactory = nil
 	capabilities = caps
 	policyFingerprint = accesspolicies.Fingerprint(session.Policies, session.DatabaseProfile.PolicyFreeReads(), session.Principal)
+	if session.SourceBound() {
+		policyFingerprint += ":source:" + session.SourceBindingFingerprint()
+	}
 	securityContextID = ""
 	if sessionErr == nil {
 		securityContextID = newSecurityContextID()
 	}
+	return sessionErr
 }
 
 // SecurePolicyFingerprint identifies the exact policy session that decided
@@ -181,8 +205,9 @@ func SecurityContextID() string {
 // closed rather than accepting any value.
 func ValidateSecurityContext(id string) bool {
 	secureMu.RLock()
-	defer secureMu.RUnlock()
-	return securityContextID != "" && id == securityContextID
+	session, expected := secureSession, securityContextID
+	secureMu.RUnlock()
+	return expected != "" && id == expected && session.CheckSourceBinding(context.Background()) == nil
 }
 
 // GetCapabilities returns this process's configured Capabilities.

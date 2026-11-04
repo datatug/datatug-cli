@@ -94,13 +94,13 @@ func LocalProjectBoards(ctx context.Context, ref dto.ProjectRef, branch string) 
 		if err != nil {
 			return nil, itemsNotLoaded("boards", ref.ProjectID, err)
 		}
+		archived, err := filestore.ReadProjectArchivedItemsFromRoot(reader.root)
+		if err != nil {
+			return nil, err
+		}
 		briefs := make([]datatug.ProjBoardBrief, 0, len(boards))
 		for _, board := range boards {
-			hidden, err := filestore.ProjectItemArchived(reader.root.Name(), datatug.ProjectObjectRef{Kind: "board", ID: board.ID})
-			if err != nil {
-				return nil, err
-			}
-			if hidden {
+			if archived[datatug.ProjectObjectRef{Kind: "board", ID: board.ID}] {
 				continue
 			}
 			briefs = append(briefs, datatug.ProjBoardBrief{ProjItemBrief: datatug.ProjItemBrief{ID: board.ID, Title: board.Title, Folder: board.Folder, ListOfTags: board.ListOfTags}, Parameters: board.Parameters, RequiredParams: board.RequiredParams})
@@ -138,14 +138,14 @@ func LocalProjectCards(ctx context.Context, ref dto.ProjectRef, branch string) (
 		if err != nil {
 			return nil, itemsNotLoaded("cards", ref.ProjectID, err)
 		}
+		archived, err := filestore.ReadProjectArchivedItemsFromRoot(reader.root)
+		if err != nil {
+			return nil, err
+		}
 		briefs := cards.Briefs()
 		active := briefs[:0]
 		for _, card := range briefs {
-			hidden, err := filestore.ProjectItemArchived(reader.root.Name(), datatug.ProjectObjectRef{Kind: "card", ID: card.ID})
-			if err != nil {
-				return nil, err
-			}
-			if !hidden {
+			if !archived[datatug.ProjectObjectRef{Kind: "card", ID: card.ID}] {
 				active = append(active, card)
 			}
 		}
@@ -182,13 +182,13 @@ func LocalProjectEntities(ctx context.Context, ref dto.ProjectRef, branch string
 		if err != nil {
 			return nil, itemsNotLoaded("entities", ref.ProjectID, err)
 		}
+		archived, err := filestore.ReadProjectArchivedItemsFromRoot(reader.root)
+		if err != nil {
+			return nil, err
+		}
 		briefs := make([]datatug.ProjEntityBrief, 0, len(entities))
 		for _, entity := range entities {
-			hidden, err := filestore.ProjectItemArchived(reader.root.Name(), datatug.ProjectObjectRef{Kind: "entity", ID: entity.ID})
-			if err != nil {
-				return nil, err
-			}
-			if hidden {
+			if archived[datatug.ProjectObjectRef{Kind: "entity", ID: entity.ID}] {
 				continue
 			}
 			briefs = append(briefs, datatug.ProjEntityBrief{ProjItemBrief: datatug.ProjItemBrief{ID: entity.ID, Title: entity.Title, Folder: entity.Folder, ListOfTags: entity.ListOfTags}})
@@ -297,13 +297,13 @@ func LocalProjectSummary(ctx context.Context, ref dto.ProjectRef, branch string)
 		if err != nil {
 			return nil, itemsNotLoaded("entities", ref.ProjectID, err)
 		}
+		archived, err := filestore.ReadProjectArchivedItemsFromRoot(reader.root)
+		if err != nil {
+			return nil, err
+		}
 		summary := &datatug.ProjectSummary{ProjectFile: projectFile, Entities: make([]*datatug.ProjEntityBrief, 0, len(entities))}
 		for _, entity := range entities {
-			hidden, err := filestore.ProjectItemArchived(reader.root.Name(), datatug.ProjectObjectRef{Kind: "entity", ID: entity.ID})
-			if err != nil {
-				return nil, err
-			}
-			if hidden {
+			if archived[datatug.ProjectObjectRef{Kind: "entity", ID: entity.ID}] {
 				continue
 			}
 			summary.Entities = append(summary.Entities, &datatug.ProjEntityBrief{ProjItemBrief: datatug.ProjItemBrief{ID: entity.ID, Title: entity.Title, Folder: entity.Folder, ListOfTags: entity.ListOfTags}})

@@ -17,6 +17,9 @@ import (
 // leaf reads. The caller supplies source URLs from its project environment.
 // No joined query is delegated to a database or to an OVDB server.
 func (e *Executor) RunFederatedTugQL(ctx context.Context, document []byte, sourceURLs map[string]string, variables map[string]any) (Result, error) {
+	if e.session.SourceBound() {
+		return Result{}, ErrSourceBinding
+	}
 	stream, err := streamFederatedTugQLFn(e, ctx, document, sourceURLs, variables)
 	if err != nil {
 		return Result{}, err
@@ -71,6 +74,9 @@ func (s *FederatedStream) Limitations() []Limitation {
 
 // StreamFederatedTugQL exposes the secured DALgo reader without collecting rows.
 func (e *Executor) StreamFederatedTugQL(ctx context.Context, document []byte, sourceURLs map[string]string, variables map[string]any) (*FederatedStream, error) {
+	if e.session.SourceBound() {
+		return nil, ErrSourceBinding
+	}
 	if err := e.session.configurationErr; err != nil {
 		return nil, err
 	}

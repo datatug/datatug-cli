@@ -44,7 +44,7 @@ func authorizeReadOnlySQL(action sqlite.AuthorizerActionCode, arg1, arg2, _, _ s
 		}
 	case sqlite.AuthPragma:
 		switch strings.ToLower(arg1) {
-		case "table_info", "table_xinfo", "index_list", "index_info", "index_xinfo", "foreign_key_list":
+		case "table_info", "table_xinfo", "table_list", "index_list", "index_info", "index_xinfo", "foreign_key_list":
 			return sqlite.AuthorizerOK
 		case "query_only":
 			if arg2 == "" || strings.EqualFold(arg2, "ON") || arg2 == "1" {
@@ -218,8 +218,9 @@ func openReadOnlySQLiteDB(ctx context.Context, path string) (dal.DB, *sql.DB, fu
 	}
 	// The sqlite structured-query dialect is set like on every other SQLite
 	// open in this CLI, so no structured read can reach dalgo2sql's legacy
-	// text emitter. RunNativeSQL — this connection's only caller — always
-	// executes a dal.TextQuery, which the dialect does not touch.
+	// text emitter. Native SQL uses a dal.TextQuery, which the dialect does not
+	// touch. Configured exact-table reads reuse this connection through the
+	// SQLite structured dialect and the bound native-identity leaf.
 	db := newNativeSQLDatabase(sqlDB, dal.NewSchema(nil, nil), dalgo2sql.DbOptions{StructuredQueryDialect: "sqlite"})
 	return db, sqlDB, func() { _ = sqlDB.Close() }, nil
 }

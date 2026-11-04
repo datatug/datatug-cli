@@ -209,6 +209,11 @@ func resolveQueryProject(project string) (projectDir string, projStore datatug.P
 	if v.ProjectDir == "" {
 		return "", nil, fmt.Errorf("--project %q resolved to no directory", project)
 	}
+	// This process has not installed the configured server session. A named
+	// project must not silently fall back to the legacy source profile.
+	if _, declared, err := secureread.LoadBoundSession(context.Background(), v.ProjectDir, secureread.BoundSessionOptions{}); declared || err != nil {
+		return "", nil, secureread.ErrSourceBinding
+	}
 	return v.ProjectDir, v.store.GetProjectStore(v.projectID), nil
 }
 

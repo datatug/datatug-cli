@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/dal-go/dalgo/access"
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/recordset"
 	"github.com/dal-go/record"
@@ -46,10 +45,7 @@ func prepareRecordset(ctx context.Context, query dal.Query, o Options, guard fun
 		return result, err
 	}
 	capture := &recordsetCapture{guard: guard}
-	var session dal.ReadSession = capture
-	if len(o.Policies) > 0 {
-		session = access.SecureReadSession(capture, Policies(o.Policies)...)
-	}
+	session := secureReadSession(capture, o)
 	session = wrapRecordsetSession(session)
 	_, err = session.ExecuteQueryToRecordsetReader(ctx, result.Query)
 	if err != nil {

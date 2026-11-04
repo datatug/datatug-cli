@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/dal-go/dalgo/access"
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/recordset"
 	"github.com/dal-go/record"
@@ -14,24 +15,42 @@ import (
 // source: the decision is made, and nothing was read.
 var errAuthorized = errors.New("secureread: authorized")
 
-// Authorize makes the access decision of the session for a read of query, the same decision
-// RunStructured makes (accesspolicies.Run with the same principal and policies), without opening a
-// source or reading a row. It returns nil when the policies let the query reach the source and an
-// error wrapping ErrAccessDenied (or the policy's own refusal) when they do not. It is made on the
-// collection the query names, so it does not depend on the collection existing: a denied
-// principal gets the same answer for a collection that is there and one that is not.
+// Authorize applies the same shared policies as RunStructured without
+// dispatching a data query or reading data rows. Legacy profiles use a data-less
+// session and perform no source I/O. The configured SQLite profile opens its
+// fixed read-only source, then verifies native identity metadata after policy
+// admission. Supported bound tables must exist with exact ordinary main names.
+// A policy denial itself never depends on whether the collection exists.
 func (e *Executor) Authorize(ctx context.Context, query dal.Query, variables map[string]any) error {
-	if err := e.session.configurationErr; err != nil {
+	if err := e.session.CheckSourceBinding(ctx); err != nil {
 		return err
 	}
-	_, err := accesspolicies.Run(ctx, authorizeSession{}, query, accesspolicies.Options{
+	var session dal.ReadSession = authorizeSession{}
+	if e.session.SourceBound() {
+		var err error
+		ctx, err = access.WithNativeTableNamespace(ctx, "main")
+		if err != nil {
+			return err
+		}
+		if structured, ok := query.(dal.StructuredQuery); !ok || dal.HasSubquery(structured) {
+			return unsupportedBoundIdentity()
+		}
+		db, closeDB, err := e.openSource(ctx, e.session.binding.url, false)
+		if err != nil {
+			return err
+		}
+		defer closeDB()
+		session = db
+		ctx = context.WithValue(ctx, boundIdentityNoDataKey{}, true)
+	}
+	_, err := accesspolicies.Run(ctx, session, query, accesspolicies.Options{
 		Principal:    e.session.Principal,
 		Variables:    variables,
 		Policies:     e.session.Policies,
 		Unrestricted: e.session.DatabaseProfile.PolicyFreeReads(),
 	})
 	if errors.Is(err, errAuthorized) {
-		return nil
+		return e.session.CheckSourceBinding(ctx)
 	}
 	return err
 }

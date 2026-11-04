@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/dal-go/dalgo/access"
+	"github.com/dal-go/dalgo/dal"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/incidents"
@@ -39,7 +40,7 @@ func TestSessionSplitOwnershipAndReadAuthorityRemainIndependent(t *testing.T) {
 			require.Equal(t, owner, err == nil)
 			executor, ok := SecureExecutor()
 			require.True(t, ok)
-			err = executor.Authorize(context.Background(), nil, nil)
+			err = executor.Authorize(context.Background(), dal.From(dal.NewRootCollectionRef("customers", "")).NewQuery().SelectIntoRecord(nil), nil)
 			require.Equal(t, free, err == nil)
 			scope := investigation.ProjectScope{StoreID: LocalStoreID, ProjectID: "p", Environment: "prod"}
 			fact := investigation.Fact{Scope: &scope, Entity: "customers", Field: "name"}

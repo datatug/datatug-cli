@@ -49,7 +49,7 @@ func runQueryHandler(w http.ResponseWriter, r *http.Request) {
 		writeContractError(w, r, newInvalidRequest("", err.Error()))
 		return
 	}
-	result, err := computeRunQuery(r.Context(), req)
+	result, err := computeRunQuery(withAgentContext(r.Context(), isAgentRequest(r)), req)
 	writeContractResponse(w, r, err, result)
 }
 
@@ -250,13 +250,24 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 	var profile string
 	var collection string
 
+	agent := agentFromContext(ctx)
 	switch {
 	case req.TugQL != "":
 		profile = apicontract.ExecutionProfileProtected
+		if agent {
+			if err := agentTugQLGuard(ctx, req.Project, req.Environment, resolved.ID, []byte(req.TugQL)); err != nil {
+				return apicontract.Result{}, err
+			}
+		}
 		result, err = runTugQLHook(executor, runCtx, resolved.URL, []byte(req.TugQL), variables)
 	case queryDef.Type == datatug.QueryTypeTugQL:
 		var doc string
 		doc, err = executionQueryDocument(req.Project, req.QueryID, queryDef, queryRevision)
+		if err == nil && agent {
+			if err := agentTugQLGuard(ctx, req.Project, req.Environment, resolved.ID, []byte(doc)); err != nil {
+				return apicontract.Result{}, err
+			}
+		}
 		if err == nil {
 			profile = apicontract.ExecutionProfileProtected
 			result, err = runTugQLHook(executor, runCtx, resolved.URL, []byte(doc), variables)
@@ -270,6 +281,11 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 		// "All legacy routes obey the same rule"). A missing grant surfaces
 		// below as secureread.ErrOpaqueSQLNotGranted, mapped to
 		// UNSUPPORTED_PROTECTED_EXECUTION.
+		if agent {
+			if err := agentRawRefusal(ctx, req.Project, req.Environment, resolved.ID); err != nil {
+				return apicontract.Result{}, err
+			}
+		}
 		var text string
 		text, err = executionQueryDocumentHook(req.Project, req.QueryID, queryDef, queryRevision)
 		if err == nil {

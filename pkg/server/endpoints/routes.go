@@ -105,6 +105,13 @@ func semanticRoutes(path string, router router, wrap wrapper, writeOnly bool) {
 	route(router, wrap, http.MethodPost, path+"/records/lookup", recordsLookupHandler)
 	// records/schema: the live schema of one table of a registered, not scanned source.
 	route(router, wrap, http.MethodPost, path+"/records/schema", recordsSchemaHandler)
+	// Meaning Graph sensitivity (backstage spec features/meaning-sensitivity): describe, find,
+	// a masked table read, and the label document's list and change routes.
+	route(router, wrap, http.MethodPost, path+"/meanings/describe", meaningsDescribeHandler)
+	route(router, wrap, http.MethodPost, path+"/meanings/find", meaningsFindHandler)
+	route(router, wrap, http.MethodPost, path+"/records/read", recordsReadHandler)
+	route(router, wrap, http.MethodPost, path+"/meanings/labels", meaningsLabelsHandler)
+	route(router, wrap, http.MethodPost, path+"/meanings/labels/change", meaningsLabelsChangeHandler)
 }
 
 // foldersRoutes: both routes mutate the project's query-folder tree and are

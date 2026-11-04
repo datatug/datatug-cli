@@ -237,7 +237,7 @@ func (s *agentSessions) forAgentCall(ctx context.Context, dependencies accessCom
 		Credential          string    `json:"credential"`
 		CredentialExpiresAt time.Time `json:"credentialExpiresAt"`
 	}
-	err = sessionCall(ctx, dependencies, options, entry, "refresh", map[string]any{"spaceId": entry.SpaceID, "projectId": entry.ProjectID}, &answer)
+	err = sessionCall(ctx, dependencies, options, entry, "refresh", map[string]any{"spaceID": entry.SpaceID, "projectId": entry.ProjectID}, &answer)
 	switch {
 	case sessionGone(err):
 		_ = s.forget(harnessID)
@@ -286,7 +286,7 @@ func agentSessionStartCommand(dependencies accessCommandDependencies) *cobra.Com
 		if !scope.valid(false) || !validHarnessName(harness) || !validHarnessSessionID(harnessID) || agentID == "" || !validProtectedAgent(true, agentID) {
 			return Exit("agent session start requires valid --space, --project, --harness, --harness-session and --agent-id (ag-...)", exitCodeUsage)
 		}
-		raw, err := accessDo(command.Context(), dependencies, options, http.MethodPost, "agent/sessions", nil, map[string]any{"spaceId": scope.space, "projectId": scope.project, "harness": harness, "harnessSessionId": harnessID}, agentCaller{id: agentID})
+		raw, err := accessDo(command.Context(), dependencies, options, http.MethodPost, "agent/sessions", nil, map[string]any{"spaceID": scope.space, "projectId": scope.project, "harness": harness, "harnessSessionId": harnessID}, agentCaller{id: agentID})
 		if err != nil {
 			return err
 		}
@@ -334,7 +334,7 @@ func agentSessionEndCommand(dependencies accessCommandDependencies) *cobra.Comma
 		var answer struct {
 			EndedAt time.Time `json:"endedAt"`
 		}
-		err = sessionCall(command.Context(), dependencies, entry.clientOptions(), entry, "end", map[string]any{"spaceId": entry.SpaceID, "projectId": entry.ProjectID, "reason": reason}, &answer)
+		err = sessionCall(command.Context(), dependencies, entry.clientOptions(), entry, "end", map[string]any{"spaceID": entry.SpaceID, "projectId": entry.ProjectID, "reason": reason}, &answer)
 		if err != nil && !sessionGone(err) {
 			return err
 		}

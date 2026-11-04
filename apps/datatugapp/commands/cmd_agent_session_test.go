@@ -128,7 +128,7 @@ func TestAgentSessionLifecycle(t *testing.T) {
 	require.Equal(t, "/v0/datatug/access/agent/sessions", start.path)
 	require.Equal(t, "ag-1", start.agent)
 	require.Empty(t, start.session)
-	require.Equal(t, map[string]any{"spaceId": "s", "projectId": "p", "harness": "claude-code", "harnessSessionId": "h-1"}, start.body)
+	require.Equal(t, map[string]any{"spaceID": "s", "projectId": "p", "harness": "claude-code", "harnessSessionId": "h-1"}, start.body)
 	entry, err := sessions.load("h-1")
 	require.NoError(t, err)
 	require.Equal(t, agentSessionEntry{AgentSessionID: "as-1", Credential: "cred-1", CredentialExpiresAt: time.Date(2026, 11, 4, 12, 15, 0, 0, time.UTC), AgentID: "ag-1", SpaceID: "s", ProjectID: "p", Harness: "claude-code", BaseURL: base, AuthRealm: "demo"}, *entry)
@@ -151,7 +151,7 @@ func TestAgentSessionLifecycle(t *testing.T) {
 	require.Equal(t, "/v0/datatug/access/agent/sessions/as-1/end", end.path)
 	require.Equal(t, "cred-1", end.session)
 	require.Equal(t, "ag-1", end.agent)
-	require.Equal(t, map[string]any{"spaceId": "s", "projectId": "p", "reason": "harness-ended"}, end.body)
+	require.Equal(t, map[string]any{"spaceID": "s", "projectId": "p", "reason": "harness-ended"}, end.body)
 	require.NotContains(t, k.items, agentSessionService+"/"+agentSessionAccount("h-1"))
 
 	// No entry: end and status say so; the ID falls back to the environment.
@@ -370,7 +370,7 @@ func TestForAgentCallResolvesTheHarnessSession(t *testing.T) {
 	credential, err = resolve("h", &agentID)
 	require.NoError(t, err)
 	require.Equal(t, "cred-2", credential)
-	require.Equal(t, sessionServerCall{path: "/v0/datatug/access/agent/sessions/as-1/refresh", agent: "ag-1", session: "cred-1", body: map[string]any{"spaceId": "s", "projectId": "p"}}, (*calls)[0])
+	require.Equal(t, sessionServerCall{path: "/v0/datatug/access/agent/sessions/as-1/refresh", agent: "ag-1", session: "cred-1", body: map[string]any{"spaceID": "s", "projectId": "p"}}, (*calls)[0])
 	stored, _ := sessions.load("h")
 	require.Equal(t, "cred-2", stored.Credential)
 

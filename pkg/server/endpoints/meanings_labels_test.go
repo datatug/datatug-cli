@@ -344,14 +344,18 @@ func TestMeaningsLabelsListAndChange(t *testing.T) {
 			t.Fatalf("propose over owner: %d %s", code, raw)
 		}
 	}
-	for body, want := range map[string]int{
-		`{` + src(project) + `,"ifRevision":"` + doc.Revision + `","change":{"action":"set","target":{"source":"other","table":"Cards"},"class":"pii","reason":"r"}}`:            400,
-		`{"project":"nope","env":"local","source":"chinook","ifRevision":"","change":{"action":"set","target":{"source":"chinook","table":"Cards"},"class":"pii","reason":"r"}}`: 404,
-		`{` + src(project) + `,"ifRevision":"` + doc.Revision + `","change":{"action":"set","target":{"source":"chinook","table":"Cards"},"class":"x","reason":"r"}}`:            400,
-		`{` + src(project) + `,"ifRevision":"` + doc.Revision + `","change":{"action":"class","target":{"source":"chinook"},"class":"pii","nonRevealable":true,"reason":"r"}}`:   200,
+	// Ordered: the class case saves, so it runs last.
+	for _, c := range []struct {
+		body string
+		want int
+	}{
+		{`{` + src(project) + `,"ifRevision":"` + doc.Revision + `","change":{"action":"set","target":{"source":"other","table":"Cards"},"class":"pii","reason":"r"}}`, 400},
+		{`{"project":"nope","env":"local","source":"chinook","ifRevision":"","change":{"action":"set","target":{"source":"chinook","table":"Cards"},"class":"pii","reason":"r"}}`, 404},
+		{`{` + src(project) + `,"ifRevision":"` + doc.Revision + `","change":{"action":"set","target":{"source":"chinook","table":"Cards"},"class":"x","reason":"r"}}`, 400},
+		{`{` + src(project) + `,"ifRevision":"` + doc.Revision + `","change":{"action":"class","target":{"source":"chinook"},"class":"pii","nonRevealable":true,"reason":"r"}}`, 200},
 	} {
-		if code, raw := change(body, false); code != want {
-			t.Fatalf("%s: %d %s", body, code, raw)
+		if code, raw := change(c.body, false); code != c.want {
+			t.Fatalf("%s: %d %s", c.body, code, raw)
 		}
 	}
 	if code, _ := post(t, meaningsLabelsHandler, `{"project":"nope","env":"local","source":"chinook"}`, false); code != 404 {

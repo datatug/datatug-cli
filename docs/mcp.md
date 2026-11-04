@@ -1,6 +1,6 @@
 # Local MCP server
 
-`datatug mcp` exposes read-only tools over stdio using the official MCP Go SDK.
+`datatug mcp` exposes read-only tools, plus one label-proposal tool, over stdio using the official MCP Go SDK.
 It connects to a separately running `datatug serve` agent; it does not start or
 stop that agent. The agent chooses the effective principal, policies and native
 SQL grant. The MCP client cannot override them.
@@ -46,6 +46,10 @@ Homebrew promotion can lag the directly downloadable release.
 | `datatug_list_tables` | `project`, `environment`, `source` | Scanned table and view names |
 | `datatug_describe_table` | `project`, `environment`, `source`, `schema`, `table` | Live columns, primary key and allowed relationships |
 | `datatug_run_query` | `project`, `environment`, `source`, `queryId`, `parameters`, optional `limit` | Typed rows, applied bindings, limitations and provenance |
+| `datatug_describe_meaning` | `project`, `environment`, `source`, optional `tables` | Each table's kind and meanings, each column's type, nullability, meaning and effective sensitivity label, and the joins between tables; no values |
+| `datatug_find_meaning` | `project`, `environment`, `source`, `text` | Tables and columns whose names, entities or fields match `text`, with their labels |
+| `datatug_read_table` | `project`, `environment`, `source`, optional `schema`, `table`, optional `columns`, `where`, `orderBy`, `limit` | Rows from the structured read boundary; labelled columns masked, with `protection` and `notice` |
+| `datatug_propose_label` | `project`, `environment`, `source`, `table`, optional `column`, `class`, optional `kind`, `reason` | The new labels revision and the `meaning.label.proposed` event. The only tool that writes; agents can only propose |
 
 Discover identifiers before using them. Query IDs include their folders, such
 as `customers/customer-purchases-by-genre`. For SQLite, `schema` is an empty
@@ -64,7 +68,7 @@ they cannot replace the fixed policy principal or structural bindings.
 Execution supports saved SQL and TugQL queries against SQLite through the existing
 agent API. Saved TugQL uses the protected structured-query path and the configured
 policies; saved SQL retains its separate opaque-query grant and result profile.
-It provides no arbitrary SQL, project mutation, query-builder UI or MCP Views. SQLite opens the source read-only and its
+It provides no arbitrary SQL, query-builder UI or MCP Views, and no project mutation other than label proposals. SQLite opens the source read-only and its
 native authorizer blocks writes, attachments and changes that disable the
 read-only guard. Native SQL has `opaque-privileged` provenance: source-level
 policy decisions apply, while row and column policies do not rewrite SQL.
@@ -91,6 +95,61 @@ Run this from a datatug-cli checkout. The test requires a real demo-project-1
 checkout at `DATATUG_DEMO_PROJECT_DIR`. It copies the project and
 SQLite data into temporary directories and removes its child processes,
 temporary agent key and loopback fixture on completion.
+
+## Meaning and sensitive fields
+
+The Meaning Graph knows what each table and column of a source means and how
+sensitive it is. A sensitivity label has a class, `secret`, `financial` or
+`pii`, and an optional kind such as `email` or `card-number`. Owners set and
+confirm labels; DataTug suggests labels from column names and types. A pending
+suggestion or proposal masks the field just like a confirmed label.
+
+`datatug_describe_meaning` answers what a source means in one call, optionally
+narrowed to named tables. Each table comes with its kind, `table` or `view`,
+and the semantic-layer entities that name it. Each column comes with its type,
+nullability, meaning and effective `label` (`class`, `kind`, `origin`, `state`,
+`rule`, `revealable`). Joins come from declared foreign keys (`foreign-key`) and
+from columns mapped to the same entity key field (`meaning`). The answer holds
+no row values, defaults or database comments. `datatug_find_meaning` answers
+"where is the customer's email?" with matching tables and columns and their
+labels. `datatug_describe_table` also returns each column's `label` and, when
+the column is masked for the caller, its `protection`.
+
+`datatug_read_table` reads one table through the same structured read boundary
+as the CLI's table read. `where` is a list of `{column, op, value}`, where `op`
+is one of `=`, `!=`, `<`, `<=`, `>` or `>=` and `value` is a JSON string,
+number or boolean. Conditions are combined with AND. `orderBy` is a list of
+`{column, desc}`. A masked column stays in `recordset.columns`, but every one
+of its cells is `null`. Its entry in `protection` gives the class, kind,
+`state: "masked"`, whether it is revealable, and `ask`: how to ask the user for
+an elevated approval. Filtering or sorting on a masked column is refused with
+`FIELD_PROTECTED`. On a source with any protected column, a saved SQL query run
+through `datatug_run_query` is refused with `FIELD_PROTECTION_RAW_REFUSED`,
+because DataTug cannot mask inside raw SQL. Use `datatug_read_table` or a saved
+TugQL query instead.
+
+`datatug_propose_label` records a pending proposal, which masks the field at
+once. Only the project owner can confirm or dismiss it, with
+`datatug meaning label confirm` or `dismiss`. Agents cannot set, confirm,
+dismiss or clear labels (`LABEL_CHANGE_NOT_ALLOWED_FOR_AGENT`). Label errors
+(`LABEL_*`, `LABELS_REVISION_CONFLICT`) and field-protection errors keep their
+code and a short redacted message.
+
+The MCP server sends `X-DataTug-Agent: 1` on every request, so `datatug serve`
+treats every MCP call as an agent call. The same answers are available from the
+CLI: `datatug meaning describe`, `find`, `read` and
+`datatug meaning label list|set|confirm|dismiss|clear|propose|class`, each
+with `--project`, `--env`, `--source` and `--format json|text`. In text output a
+masked cell shows `••••`, and the protection lines follow the table. A CLI
+command declares an agent context only with `--agent`, or when
+`DATATUG_AGENT_SESSION` is set.
+
+**Local masking is accident prevention for honest agents.** On a local
+connection the agent context is self-declared. An agent that runs the CLI as its
+person, without declaring itself, is that person. It can also edit
+`datatug-labels.json` directly. Only a control plane with a server-verified agent
+identity guarantees that an agent reaches a protected field only through an
+elevated approval.
 
 ## Configured exact-table SQLite reads
 

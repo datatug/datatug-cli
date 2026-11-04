@@ -12,6 +12,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/querywrite"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/meaninglabels"
 )
 
 type noInput struct{}
@@ -319,8 +320,10 @@ type schemaResponse struct {
 	Schema  string `json:"schema"`
 	Table   string `json:"table"`
 	Columns []struct {
-		Name string `json:"name"`
-		Type string `json:"type"`
+		Name       string                    `json:"name"`
+		Type       string                    `json:"type"`
+		Label      *EffectiveLabel           `json:"label,omitempty"`
+		Protection *meaninglabels.Protection `json:"protection,omitempty"`
 	} `json:"columns"`
 	PrimaryKey   []string `json:"primaryKey"`
 	ReferencedBy []string `json:"referencedBy"`
@@ -354,6 +357,11 @@ func (c *Client) describeTable(ctx context.Context, input tableInput) (any, erro
 	for i := range out.Columns {
 		out.Columns[i].Name = safeText(out.Columns[i].Name)
 		out.Columns[i].Type = safeText(out.Columns[i].Type)
+		out.Columns[i].Label = safeLabel(out.Columns[i].Label)
+		if p := out.Columns[i].Protection; p != nil {
+			safe := safeProtection(*p)
+			out.Columns[i].Protection = &safe
+		}
 	}
 	out.PrimaryKey = safeTexts(out.PrimaryKey)
 	out.ReferencedBy = safeTexts(out.ReferencedBy)

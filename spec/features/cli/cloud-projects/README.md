@@ -1,13 +1,13 @@
 ---
 format: https://specscore.md/feature-specification
-status: Draft
+status: Approved
 ---
 
 # Feature: Open DataTug Cloud projects in the CLI
 
 > [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/cloud-projects?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/cloud-projects?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/cloud-projects?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/cloud-projects?op=request-change) |
 
-**Status:** Draft
+**Status:** Approved
 **Date:** 2026-11-04
 **Owner:** Alexander Trakhimenok
 **Source Ideas:** —

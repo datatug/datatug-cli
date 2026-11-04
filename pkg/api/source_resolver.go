@@ -240,6 +240,33 @@ func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, er
 			return "", fmt.Errorf("catalog %q: environment variable %s must hold a typesense:// URL, not a %s source", catalog.ID, strings.TrimPrefix(source, "env:"), ref.Scheme)
 		}
 		return source, nil
+	case "mongodb":
+		// A MongoDB catalog records a connection descriptor (a project file that
+		// names an environment variable and nothing else), exactly as a PostgreSQL
+		// catalog does. The URI and its credentials come only from the operator's
+		// environment, so a project cannot point the operator's credentials at a
+		// host of its own choosing; a project that records a literal URI is
+		// refused before anything is opened.
+		if strings.Contains(catalog.Path, "://") {
+			return "", fmt.Errorf("catalog %q: the MongoDB connection descriptor path must name a file inside the project, not a URL", catalog.ID)
+		}
+		source, err := descriptorSource(catalog, projDir, "MongoDB", dbcopy.ReadMongoDBDescriptor)
+		if err != nil {
+			return "", err
+		}
+		// Resolving the variable refuses one that is not set, and the scheme check
+		// refuses a variable that holds another engine: a catalog labelled mongodb
+		// whose variable held another source would otherwise be opened as that
+		// engine while policy naming still used the mongodb label. No error names
+		// the value, only the variable and the scheme.
+		ref, err := dbcopyParse(source)
+		if err != nil {
+			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
+		}
+		if ref.Scheme != "mongodb" && ref.Scheme != "mongodb+srv" {
+			return "", fmt.Errorf("catalog %q: environment variable %s must hold a mongodb:// or mongodb+srv:// URL, not a %s source", catalog.ID, strings.TrimPrefix(source, "env:"), ref.Scheme)
+		}
+		return source, nil
 	case "firestore", DriverPostgres, DriverMySQL, DriverOracle, DriverSQLServer:
 		// The catalog's path names a connection descriptor, a project file that
 		// names an environment variable and nothing else; the variable holds the
@@ -265,7 +292,7 @@ func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, er
 		}
 		return source, nil
 	default:
-		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3, ingitdb, openvaultdb, postgres, mysql, oracle, sqlserver, firestore, couchdb, postgrest, libsql or typesense)", catalog.Driver)
+		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3, ingitdb, openvaultdb, postgres, mysql, oracle, sqlserver, firestore, mongodb, couchdb, postgrest, libsql or typesense)", catalog.Driver)
 	}
 }
 

@@ -72,7 +72,7 @@ func TestAccessCommandsCallTheAccessAPI(t *testing.T) {
 	require.Contains(t, out, `"ok": true`)
 	_, err = runAccess(t, d, "agents", "disable", "a1", "--space", "s", "--project", "p", "--revision", "1", "--base-url", base)
 	require.NoError(t, err)
-	_, err = runAccess(t, d, "request", "--agent", "--agent-id", "a1", "--space", "s", "--project", "p", "--connection", "c", "--table", "main.customers", "--reason", "Investigate", "--seconds", "60", "--base-url", base)
+	_, err = runAccess(t, d, "request", "--agent", "--agent-id", "ag-1", "--space", "s", "--project", "p", "--connection", "c", "--table", "main.customers", "--reason", "Investigate", "--seconds", "60", "--base-url", base)
 	require.NoError(t, err)
 	_, err = runAccess(t, d, "request", "--space", "s", "--project", "p", "--connection", "c", "--reason", "Myself", "--base-url", base)
 	require.NoError(t, err)
@@ -89,7 +89,7 @@ func TestAccessCommandsCallTheAccessAPI(t *testing.T) {
 	require.Equal(t, "/v0/datatug/access/protection", got[2].path)
 	require.Equal(t, "connectionId=c&projectId=p&spaceID=s", got[2].query)
 	require.Equal(t, "/v0/datatug/access/agent/requests", got[3].path)
-	require.Equal(t, "a1", got[3].agent)
+	require.Equal(t, "ag-1", got[3].agent)
 	request := got[3].body["request"].(map[string]any)
 	scope := request["scope"].(map[string]any)
 	require.Equal(t, "ap-1", scope["connection"])
@@ -109,7 +109,7 @@ func TestAccessCommandsRefuseBadInputAndReportDenials(t *testing.T) {
 		{"agents", "list", "--space", "s"},
 		{"agents", "disable", "a1", "--space", "s", "--project", "p"},
 		{"request", "--space", "s", "--project", "p", "--connection", "c"},
-		{"request", "--agent-id", "a1", "--space", "s", "--project", "p", "--connection", "c", "--reason", "x"},
+		{"request", "--agent-id", "ag-1", "--space", "s", "--project", "p", "--connection", "c", "--reason", "x"},
 		{"request", "--space", "s", "--project", "p", "--connection", "c", "--reason", "x", "--table", "nodot"},
 		{"inbox", "--space", "s", "--project", "p"},
 		{"agents", "list", "--space", "s", "--project", "p", "--base-url", "http://example.com/v0/"},
@@ -185,13 +185,13 @@ func TestProtectedReadsSelectARegisteredAgent(t *testing.T) {
 		headers = append(headers, r.URL.Path+" "+r.Header.Get("X-DataTug-Agent"))
 		return &http.Response{StatusCode: http.StatusForbidden, Body: io.NopCloser(strings.NewReader("")), Header: http.Header{}}, nil
 	})}
-	options.agentID = "a1"
+	options.agentID = "ag-1"
 	_, err := readProtectedRecord(context.Background(), options, dependencies)
 	require.ErrorContains(t, err, "--agent-id requires --agent")
 	options.agent = true
 	_, err = readProtectedRecord(context.Background(), options, dependencies)
 	require.ErrorContains(t, err, "protected read denied")
-	table := protectedTableOptions{request: protectedTableRequest{Space: "space", Project: "project", Connection: "catalog"}, baseURL: options.baseURL, agentID: "a1", auth: options.auth}
+	table := protectedTableOptions{request: protectedTableRequest{Space: "space", Project: "project", Connection: "catalog"}, baseURL: options.baseURL, agentID: "ag-1", auth: options.auth}
 	table.request.Operation.Object.Namespace, table.request.Operation.Object.Name = "main", "customers"
 	table.request.Operation.MaxRows, table.request.Operation.MaxBytes = 1, 1024
 	_, err = readProtectedTable(context.Background(), table, dependencies)
@@ -199,5 +199,17 @@ func TestProtectedReadsSelectARegisteredAgent(t *testing.T) {
 	table.agent = true
 	_, err = readProtectedTable(context.Background(), table, dependencies)
 	require.Error(t, err)
-	require.Equal(t, []string{"/v0/datatug/access/agent/read a1", "/v0/datatug/access/agent/table/read a1"}, headers)
+	require.Equal(t, []string{"/v0/datatug/access/agent/read ag-1", "/v0/datatug/access/agent/table/read ag-1"}, headers)
+}
+
+func TestSafeDenialCodeAndAgentIDPrefix(t *testing.T) {
+	require.True(t, safeDenialCode("AGENT_USER_LACKS_ACCESS"))
+	for _, bad := range []string{"", "x", "A\u001b[2J", strings.Repeat("A", 65)} {
+		require.False(t, safeDenialCode(bad), bad)
+	}
+	require.False(t, validProtectedAgent(true, "a1"))
+	require.True(t, validProtectedAgent(true, "ag-1"))
+	server, _ := accessTestServer(t, http.StatusForbidden, `{"error":{"code":"\u001b[2Jx"}}`)
+	_, err := runAccess(t, accessTestDependencies(t), "inbox", "--space", "s", "--project", "p", "--connection", "c", "--base-url", server.URL+"/v0/")
+	require.EqualError(t, err, "access refused: Forbidden")
 }

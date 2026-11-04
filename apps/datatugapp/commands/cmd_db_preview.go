@@ -62,7 +62,7 @@ func protectedTableCommand(dependencies protectedReadDependencies) *cobra.Comman
 	flags.StringVar(&options.auth.Issuer, "auth-host", "", "Versioned HTTPS product authorization issuer")
 	flags.StringVar(&options.auth.Realm, "realm", "", "Exact server credential realm")
 	flags.BoolVar(&options.agent, "agent", false, "Read as your agent: its own approvals, never beyond your access; unsupported servers fail closed")
-	flags.StringVar(&options.agentID, "agent-id", "", "With --agent: the registered agent on its own account (datatug access agents register)")
+	flags.StringVar(&options.agentID, "agent-id", "", "With --agent: the registered agent on its own account (registered in the DataTug web app; IDs start with ag-)")
 	flags.BoolVar(&options.auth.InsecureStorage, "insecure-storage", false, "Use the plaintext product credential created with auth product login --insecure-storage")
 	return command
 }
@@ -170,7 +170,7 @@ func readProtectedTable(ctx context.Context, options protectedTableOptions, depe
 	}
 	// The initial authenticated server source is pinned; fresh resolution must
 	// match it. The expected operation always comes from our original local DTO.
-	resolveOptions := protectedReadOptions{request: protectedRecordRequest{Space: options.request.Space, Project: options.request.Project, Connection: options.request.Connection}, baseURL: options.baseURL, agent: options.agent, agentID: options.agentID}
+	resolveOptions := protectedReadOptions{request: protectedRecordRequest{Space: options.request.Space, Project: options.request.Project, Connection: options.request.Connection}, baseURL: options.baseURL, agent: options.agent, agentID: options.agentID, person: dataaccess.Subject{Realm: credential.Realm, Kind: dataaccess.User, ID: credential.Subject}}
 	authority, err := dataaccess.NewAuthority(subject, envelope.Lease.Connection, func(ctx context.Context, _ dataaccess.ResolveRequest) (dataaccess.Resolution, error) {
 		return resolveProtectedRecord(ctx, resolveOptions, dependencies.client, credential.Bearer)
 	})

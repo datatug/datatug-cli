@@ -43,6 +43,20 @@ func accessCommandWith(dependencies accessCommandDependencies) *cobra.Command {
 	return command
 }
 
+// safeDenialCode keeps only a plain server code; anything else is never
+// printed, so a response cannot inject terminal control sequences.
+func safeDenialCode(code string) bool {
+	if code == "" || len(code) > 64 {
+		return false
+	}
+	for _, c := range code {
+		if (c < 'A' || c > 'Z') && c != '_' {
+			return false
+		}
+	}
+	return true
+}
+
 func addAccessClientFlags(command *cobra.Command, options *accessClientOptions) {
 	flags := command.Flags()
 	options.baseURL = defaultAIAPIURL
@@ -132,7 +146,7 @@ func accessDo(ctx context.Context, dependencies accessCommandDependencies, optio
 		}
 		_ = json.Unmarshal(raw, &denial)
 		code := denial.Error.Code
-		if code == "" {
+		if !safeDenialCode(code) {
 			code = http.StatusText(response.StatusCode)
 		}
 		if response.StatusCode == http.StatusForbidden || response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusBadRequest {
@@ -239,7 +253,7 @@ func (f accessRequestFlags) body(connection string, now time.Time) any {
 		scope.Requires = []string{dataaccess.ObjectsExact}
 	}
 	return map[string]any{"spaceID": f.scope.space, "projectId": f.scope.project,
-		"request": map[string]any{"permissions": []dataaccess.Permission{dataaccess.DataRead}, "scope": scope, "reason": f.reason, "expiresAt": now.Add(time.Duration(f.seconds) * time.Second).UTC().Format(time.RFC3339)}}
+		"request": map[string]any{"permissions": []dataaccess.Permission{dataaccess.DataRead}, "scope": scope, "reason": f.reason, "expiresAt": now.Add(time.Duration(f.seconds) * time.Second).UTC().Format(time.RFC3339Nano)}}
 }
 
 func cutTable(value string) (string, string, bool) {

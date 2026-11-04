@@ -39,6 +39,20 @@ func TestScanSQL(t *testing.T) {
 		"call dump_cards()":                                           "calls a procedure",
 		`SELECT "call" FROM Cards`:                                    "",
 		"SELECT Id /*! , Email */ FROM Customer":                      "uses an executable comment",
+		"SELECT * EXCLUDE (Phone) FROM Customer":                      "selects a wildcard",
+		"SELECT * REPLACE (upper(Name) AS Name) FROM Customer":        "selects a wildcard",
+		"SELECT * RENAME (Email AS e) FROM Customer":                  "selects a wildcard",
+		"SELECT * ILIKE '%e%' FROM Customer":                          "selects a wildcard",
+		"SELECT COLUMNS(*) FROM Customer":                             "selects a wildcard",
+		"SELECT TOP 10 * EXCLUDE (x) FROM Customer":                   "selects a wildcard",
+		"SELECT Id FROM Customer WHERE Name ~* 'abc'":                 "",
+		"SELECT Id FROM Customer WHERE Name !~* 'abc'":                "",
+		"SELECT Id * 'x', Id * -1, (Id)*[n], Id * @p, 2*:q FROM t":    "",
+		"TABLE Customer":                                              "reads a whole table",
+		"SELECT 1; table Customer":                                    "reads a whole table",
+		"SELECT x FROM (TABLE Customer) t":                            "reads a whole table",
+		"SELECT table_name FROM information_schema.tables":            "",
+		"SELECT /*! 1 */ * FROM t":                                    "uses an executable comment",
 	} {
 		if got := scanSQL(text).shape; got != want {
 			t.Errorf("%q: got %q, want %q", text, got, want)
@@ -49,6 +63,7 @@ func TestScanSQL(t *testing.T) {
 		`SELECT "a""b", [EMAIL], ` + "`x`" + ` FROM t`:                  "a\"b email from select t x",
 		"SELECT Note /* email */ FROM Cards WHERE Note = 'it''s email'": "cards from note select where",
 		"SELECT correo_electrónico FROM clientes":                       "clientes correo_electrónico from select",
+		"SELECT ईमेल FROM t":                                            "from select t ईमेल",
 		// a backslash-escaped quote: the standard reading sees Email after it
 		`SELECT 'O\'Brien' UNION SELECT Email FROM Customer`: "brien customer email from select union",
 		// a trailing backslash: the escaping reading would swallow Email

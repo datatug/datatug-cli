@@ -131,16 +131,48 @@ var (
 )
 
 func sqlTokenPattern(literal string) string {
-	return "(?s)" + literal + "|--[^\\n]*|/\\*.*?\\*/|\"((?:[^\"]|\"\")*)\"|`([^`]*)`|\\[([^\\]]*)\\]|([\\p{L}_][\\p{L}\\p{N}_$]*)"
+	return "(?s)" + literal + "|--[^\\n]*|/\\*.*?\\*/|\"((?:[^\"]|\"\")*)\"|`([^`]*)`|\\[([^\\]]*)\\]|([\\p{L}_][\\p{L}\\p{M}\\p{N}_$]*)"
 }
 
-// sqlCountStar is COUNT(*)'s argument; sqlWildcard is then any other * that
-// ends a projection item (SELECT *, SELECT TOP 10 *, t.*, RETURNING *).
-// Multiplication (a * b) is followed by an operand, so it does not match.
+// sqlCountStar is COUNT(*)'s argument and sqlRegexStar Postgres's ~* and !~*
+// operators; every other * is a projection wildcard unless it multiplies two
+// operands (isMultiplication).
 var (
-	sqlCountStar = regexp.MustCompile(`\(\s*\*\s*\)`)
-	sqlWildcard  = regexp.MustCompile(`(?i)\.\s*\*|\*\s*(?:from\b|into\b|except\b|,|;|\)|$)`)
+	sqlCountStar  = regexp.MustCompile(`(?i)\bcount\s*\(\s*\*\s*\)`)
+	sqlRegexStar  = regexp.MustCompile(`~\*`)
+	sqlPrevToken  = regexp.MustCompile(`([\p{L}\p{M}\p{N}_$]+|[)\]"\x60])\s*$`)
+	sqlNextToken  = regexp.MustCompile(`^\s*([\p{L}\p{M}\p{N}_$]+|[(\["\x60@:$?+-])`)
+	sqlWholeTable = regexp.MustCompile(`(?i)(?:^|;|\()\s*table\b`)
 )
+
+// sqlLeadWords may come right before a projection *; sqlFollowWords right after.
+var (
+	sqlLeadWords   = map[string]bool{"select": true, "distinct": true, "all": true, "returning": true}
+	sqlFollowWords = map[string]bool{"from": true, "into": true, "except": true, "exclude": true, "replace": true, "rename": true,
+		"ilike": true, "like": true, "where": true, "union": true, "intersect": true, "order": true, "group": true, "having": true,
+		"limit": true, "window": true, "qualify": true}
+)
+
+// isMultiplication says whether the * at i in code multiplies two operands.
+func isMultiplication(code string, i int) bool {
+	prev := sqlPrevToken.FindStringSubmatch(code[:i])
+	next := sqlNextToken.FindStringSubmatch(code[i+1:])
+	if prev == nil || next == nil {
+		return false
+	}
+	return !sqlLeadWords[strings.ToLower(prev[1])] && !sqlFollowWords[strings.ToLower(next[1])]
+}
+
+// hasWildcard says whether code has a * that is not COUNT(*), ~* or a product.
+func hasWildcard(code string) bool {
+	code = sqlRegexStar.ReplaceAllString(sqlCountStar.ReplaceAllString(code, "count(0)"), "~ ")
+	for i, r := range code {
+		if r == '*' && !isMultiplication(code, i) {
+			return true
+		}
+	}
+	return false
+}
 
 var sqlProcedureWords = map[string]bool{"exec": true, "execute": true, "call": true}
 
@@ -169,10 +201,14 @@ func scanSQL(text string) sqlScan {
 				}
 			}
 			if group == 0 {
-				if strings.HasPrefix(text[loc[0]:], "/*!") && out.shape == "" {
+				switch {
+				case strings.HasPrefix(text[loc[0]:], "'"):
+					code.WriteString(" 0 ") // a literal is an operand
+				case strings.HasPrefix(text[loc[0]:], "/*!") && out.shape == "":
 					out.shape = "uses an executable comment"
+				default:
+					code.WriteString(" ") // a comment
 				}
-				code.WriteString(" ") // a literal or a comment
 				continue
 			}
 			code.WriteString(text[loc[0]:loc[1]])
@@ -186,8 +222,12 @@ func scanSQL(text string) sqlScan {
 			}
 		}
 		code.WriteString(text[last:])
-		if out.shape == "" && sqlWildcard.MatchString(sqlCountStar.ReplaceAllString(code.String(), " ")) {
+		switch {
+		case out.shape != "":
+		case hasWildcard(code.String()):
 			out.shape = "selects a wildcard"
+		case sqlWholeTable.MatchString(code.String()):
+			out.shape = "reads a whole table"
 		}
 	}
 	sort.Strings(out.words)

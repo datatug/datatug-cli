@@ -43,6 +43,11 @@ func getCatalogTablesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
+	boundProject, _, _, bound, bindingErr := api.BoundReadScope(r.Context())
+	if bound && (bindingErr != nil || paramAlias(q, "project", "proj") != boundProject) {
+		writeContractError(w, r, contractErrAccessDenied("configured source read is unavailable"))
+		return
+	}
 	ref, err := newProjectRef(q)
 	if err != nil {
 		handleError(err, w, r)
@@ -89,11 +94,16 @@ func getCatalogTablesHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		return true
 	}
-	bound := api.SourceBoundProfile()
 	// Legacy metadata preserves its stored catalog lookup/404 behavior. Bound
 	// metadata must first verify the exact source, before reading its catalog.
-	if !bound && !loadTables() {
-		return
+	if !bound {
+		if _, err := api.GetProjectSummary(r.Context(), ref); err != nil {
+			handleError(err, w, r)
+			return
+		}
+		if !loadTables() {
+			return
+		}
 	}
 	store, err := relatedProjectStoreFor(ref.ProjectID)
 	if err != nil {

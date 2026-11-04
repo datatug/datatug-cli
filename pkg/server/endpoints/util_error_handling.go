@@ -12,6 +12,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/personalqueries"
 	"github.com/datatug/datatug-cli/pkg/secureread"
+	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/strongo/validation"
 )
 
@@ -96,6 +97,9 @@ func handleError(err error, w http.ResponseWriter, r *http.Request) bool {
 	// saved-query id to a clean 404 (never the store's own raw filesystem
 	// error text) and an ambiguous bare id to 400 INVALID_REQUEST naming the
 	// "query" parameter and every candidate.
+	case errors.Is(err, datatug.ErrProjectDoesNotExist):
+		response.Code, response.Field = "NOT_FOUND", "project"
+		w.WriteHeader(http.StatusNotFound)
 	case errors.Is(err, api.ErrQueryNotFound):
 		w.WriteHeader(http.StatusNotFound)
 	// api.GetCatalogTables (S121, Task 17 item A.2): an unknown project or a

@@ -518,7 +518,7 @@ type proposeLabelInput struct {
 }
 
 func (c *Client) describeMeaning(ctx context.Context, in describeMeaningInput) (any, error) {
-	return c.DescribeMeaning(ctx, MeaningScope{in.Project, in.Environment, in.Source, in.Tables})
+	return c.DescribeMeaning(ctx, MeaningScope(in))
 }
 
 func (c *Client) findMeaning(ctx context.Context, in findMeaningInput) (any, error) {

@@ -62,9 +62,14 @@ func ensureSignedIn(ctx context.Context, opts SignInOptions, deps dependencies) 
 	}
 	tokens := newTokenSource(ctx, client, store, deps.refresh)
 	token, err := tokens.TokenContext(ctx)
-	if errors.Is(err, deviceauth.ErrCredentialNotFound) {
+	if err != nil {
+		// No login, or one whose refresh was refused (revoked, expired): a
+		// new sign-in is the remedy either way.
 		if !opts.Interactive {
-			return Session{}, ErrNotSignedIn
+			if errors.Is(err, deviceauth.ErrCredentialNotFound) {
+				return Session{}, ErrNotSignedIn
+			}
+			return Session{}, fmt.Errorf("%w: %v", ErrNotSignedIn, err)
 		}
 		if opts.Insecure && opts.ErrOut != nil {
 			_, _ = fmt.Fprintf(opts.ErrOut, "Warning: --insecure-storage writes the Firebase session unencrypted to %s.\n", description)

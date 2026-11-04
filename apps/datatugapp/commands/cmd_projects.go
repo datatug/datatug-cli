@@ -54,6 +54,9 @@ func projectsCommandArgs() *cobra.Command {
 func getProjPathsByID(config dtconfig.Settings) (pathsByID map[string]string) {
 	pathsByID = make(map[string]string, len(config.Projects))
 	for _, p := range config.Projects {
+		if dtproject.IsCloudRef(*p) {
+			continue // a DataTug Cloud project has no folder for a file store
+		}
 		if p.Path != "" {
 			pathsByID[p.ID] = p.Path // locally-added projects store a local Path
 		} else {

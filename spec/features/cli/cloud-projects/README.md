@@ -41,7 +41,7 @@ The address side is already solved. The deep-link parser (`pkg/deeplink`, being 
 | Cloud API base `https://api.sneat.cloud/v0/` (`defaultAIAPIURLs`), host failover in `pkg/cloudapi`, redirects disabled | `apps/datatugapp/commands/chat_cloud.go` | The base URL and transport |
 | Backend admission of CLI tokens on GET reads: product `datatug`, audiences `datatug-cli` and `datatug-web`, scope `datatug:projects:read` | `datatug/datatug-cloud` `internal/accesspolicy/accesspolicy.go`, enforced by `sneat-go-host` `firebasehost.ValidateOAuthAccess` | Why a CLI token is accepted |
 | Space project reads, each taking `storage=firestore&spaceID=<space>&project=<project>` | `datatug/backend` `api4datatug/routes.go`: `projects/project_summary`, `queries/all_queries`, `projects/connection_catalog`, `environments/state` | Reading the project |
-| Project screens over a `datatug.ProjectStore` | `apps/datatugapp/datatugui/dtproject` (`loadProjectData`, `projectPage`) | Showing the project: only the store is new |
+| Project screens over a `datatug.ProjectStore` | `apps/datatugapp/datatugui/dtproject` (`loadProjectData`, `projectPage`) | Showing the project: only the cloud reader that feeds it is new |
 
 ## Behavior
 
@@ -49,11 +49,11 @@ The address side is already solved. The deep-link parser (`pkg/deeplink`, being 
 
 #### REQ: open-before-tui
 
-For a `KindCloud` link, `runUIDeepLink` MUST do three steps before `runApp` takes the screen: sign in if needed (REQ: sign-in-on-demand), read `projects/project_summary`, and map a failed read to an exit code (REQ: error-mapping). Only after a successful summary does it start the TUI. The cloud resolver in `deepLinkResolvers` then pushes the project page from the summary that was already loaded, together with a store for the remaining reads. Errors that happen after the TUI is up appear in place, and the TUI stays open.
+For a `KindCloud` link, `runUIDeepLink` MUST do three steps before `runApp` takes the screen: sign in if needed (REQ: sign-in-on-demand), read the project (the summary, then its three lists in parallel), and map a failed summary to an exit code (REQ: error-mapping). Only after a successful summary does it start the TUI, with a first command that pushes the project page from what was already read. A failed list shows in its own panel. Errors that happen after the TUI is up, such as reopening the project from the projects screen, appear in place, and the TUI stays open.
 
 #### REQ: replaces-coming-soon
 
-The cloud resolver MUST take the place of `deepLinkNotice(cloudNotice)` for Space links. GitHub, agent, browser and other-store links MUST resolve exactly as before.
+The "coming soon" notice MUST be gone: a cloud link is opened by REQ: open-before-tui before the resolver map is reached, so `deepLinkResolvers[KindCloud]` only explains how to open a cloud link if it is ever reached another way. GitHub, agent, browser and other-store links MUST resolve exactly as before.
 
 #### REQ: identifiers-checked
 
@@ -71,11 +71,11 @@ When no login is saved, `runUIDeepLink` MUST start the same device flow as `data
 
 #### REQ: credential-storage
 
-The login MUST be stored only where `datatug auth login` stores it: the OS keyring by default, or the 0600 plaintext file when `--insecure-storage` is given. `datatug ui` MUST accept `--insecure-storage` and `--auth-host` and pass them through. This feature MUST NOT add a second credential store or cache a bearer anywhere else. It MUST NOT put a token in a URL, argument, log line, telemetry event or error message, and MUST NOT borrow a Sneat web, Google or GitHub credential. The issuer is whichever one `pkg/auth/device` names, and `DATATUG_AUTH_HOST` keeps working for testing.
+The login MUST be stored only where `datatug auth login` stores it: the OS keyring by default, or the 0600 plaintext file when `--insecure-storage` is given. `datatug ui` MUST accept `--insecure-storage` and `--auth-host` and pass them through. This feature MUST NOT add a second credential store or cache a bearer anywhere else. It MUST NOT put a token in a URL, argument, log line, telemetry event or error message, and MUST NOT borrow a Sneat web, Google or GitHub credential. The issuer is whichever one `pkg/auth/device` names, and `DATATUG_AUTH_HOST` keeps working for testing. The store choice is not remembered: a person who signed in with `--insecure-storage` passes it again on `datatug ui --deep-link`, and reopening a recent cloud project from a bare `datatug ui` uses the keyring login and the default API host.
 
 #### REQ: token-refresh
 
-Every request MUST take its bearer from `device.SavedTokenSource`, so a TUI left open for hours keeps reading. When a refresh is refused, or the backend answers `401`, the TUI MUST show one line, `Your DataTug sign-in expired. Run: datatug auth login`, keep what is on screen, and send no further request for that project.
+Every request MUST take its bearer from the saved login's token source, which refreshes the Firebase session a minute before it expires, so reopening a cloud project from the projects screen hours later still reads. Before the TUI starts, a login whose refresh is refused counts as no login: the device flow runs again, or with `--no-sign-in` the command exits `5`. Inside the TUI, a refused refresh or a `401` answer to a reopen MUST show one line, `Your DataTug sign-in expired. Run: datatug auth login`, and keep what is on screen.
 
 ### Reading the project
 
@@ -123,7 +123,7 @@ Failures before the TUI starts MUST exit with the CLI's exit codes ([cli](../REA
 | Failure | Exit | Line |
 |---|---|---|
 | Bad space or project id | `2` | which part is invalid |
-| `404`, or the summary says the project is missing | `3` | `Project not found, or it was deleted.` |
+| `404` | `3` | `Project not found, or it was deleted.` Today the backend answers a missing Space project with `503 shared_query_unavailable`, so it shows as the next row until the backend maps not-found to `404` |
 | Network failure, or `5xx` after failover | `4` | `Can't reach DataTug Cloud: <reason>` |
 | `401`, or no login with `--no-sign-in` | `5` | `Sign in with: datatug auth login` |
 | `403` | `5` | `<email> has no access to this project. Ask a Space admin to invite you.` |
@@ -166,7 +166,7 @@ datatug ui --deep-link https://datatug.app/space/<spaceID>/store/firestore/proje
 
 **Requirements:** cloud-projects#req:open-before-tui, cloud-projects#req:replaces-coming-soon, cloud-projects#req:cloud-project-store
 
-**Given** a saved login and a fake backend serving Space `acme` project `sales` with a summary, two queries, a catalog with connection `warehouse`, one environment and one entity
+**Given** a saved login and a fake backend serving Space `acme` project `sales` with a summary, two queries, a catalog with connection `warehouse` and one environment
 **When** the person runs `datatug ui --deep-link https://datatug.app/space/acme/store/firestore/project/sales`
 **Then** the summary is read before the TUI starts, the TUI opens the `sales` project home with its title and lists, `cloudNotice` is not shown, and a GitHub link still opens as before.
 
@@ -198,17 +198,17 @@ datatug ui --deep-link https://datatug.app/space/<spaceID>/store/firestore/proje
 
 **Requirements:** cloud-projects#req:reads-through-backend-only
 
-**Given** the cloud store package and its tests run against a recording transport
-**When** `go list -deps` of that package is inspected and the store's reads run
-**Then** no `cloud.google.com/go/firestore` or `firebase.google.com/go` database package is a dependency, and every recorded request is a `GET` to `<base>datatug/…` with `Authorization: Bearer`.
+**Given** the cloud reader package (`pkg/cloudproject`) and its tests run against a recording backend
+**When** its imports are parsed and its reads run
+**Then** none of its files imports a Firestore or Firebase package, and every recorded request is a `GET` to `<base>datatug/…` with `Authorization: Bearer`.
 
 ### AC: expired-token-refreshes-or-asks
 
 **Requirements:** cloud-projects#req:token-refresh
 
-**Given** an open cloud project whose saved token expires in 30 seconds
-**When** the person opens the queries list
-**Then** the token refreshes before the request and the list loads. If the refresh is refused instead, the TUI shows `Your DataTug sign-in expired. Run: datatug auth login`, keeps the screen, and records no further request for that project.
+**Given** a saved login whose token has expired
+**When** the person opens a cloud link, and separately when the refresh is refused
+**Then** the token is refreshed before the first read and the project opens; with a refused refresh the device flow runs again (or `--no-sign-in` exits `5`), and inside the TUI a reopen answered `401` shows `Your DataTug sign-in expired. Run: datatug auth login`.
 
 ### AC: failures-map-to-exit-codes
 

@@ -87,8 +87,26 @@ func TestEnsureSignedIn_Errors(t *testing.T) {
 	store := &memoryStore{credential: deviceauth.Credential{AccessToken: "old", RefreshToken: "r", Expiry: time.Now().Add(-time.Hour), Issuer: server.URL, ClientID: clientID, Scopes: scopes}}
 	deps = testDependencies(server, store)
 	deps.refresh = func(context.Context, string) (session, error) { return session{}, errors.New("revoked") }
-	if _, err := ensureSignedIn(context.Background(), SignInOptions{Issuer: server.URL}, deps); err == nil || !strings.Contains(err.Error(), "load DataTug login") {
-		t.Fatalf("err = %v", err)
+	if _, err := ensureSignedIn(context.Background(), SignInOptions{Issuer: server.URL}, deps); !errors.Is(err, ErrNotSignedIn) || !strings.Contains(err.Error(), "revoked") {
+		t.Fatalf("refused refresh without interaction: err = %v", err)
+	}
+	var out bytes.Buffer
+	s, err := ensureSignedIn(context.Background(), SignInOptions{Issuer: server.URL, Interactive: true, Out: &out, ErrOut: &out}, deps)
+	if err != nil || !strings.Contains(out.String(), "ABCD-EFGH") || store.credential.AccessToken != "firebase-id" {
+		t.Fatalf("refused refresh with interaction must sign in again: err = %v, out %q, stored %+v", err, out.String(), store.credential)
+	}
+	if token, _ := s.Token(context.Background()); token != "firebase-id" {
+		t.Fatalf("token after new sign-in = %q", token)
+	}
+
+	store = &memoryStore{credential: deviceauth.Credential{AccessToken: "t", RefreshToken: "r", Expiry: time.Now().Add(time.Hour), Issuer: server.URL, ClientID: clientID, Scopes: scopes}}
+	deps = testDependencies(server, store)
+	deps.newClient = func(issuer string, _ bool) (*deviceauth.Client, deviceauth.Store, string, error) {
+		client, err := deviceauth.NewClient(deviceauth.ClientConfig{Issuer: issuer, ClientID: clientID, Scopes: scopes, RequiredScopes: scopes})
+		return client, &loadThenFail{memoryStore: store}, "test keyring", err
+	}
+	if _, err := ensureSignedIn(context.Background(), SignInOptions{Issuer: server.URL, Interactive: true, Out: &out, ErrOut: &out}, deps); err == nil || !strings.Contains(err.Error(), "load DataTug login") {
+		t.Fatalf("login that cannot be read back: err = %v", err)
 	}
 
 	deps = testDependencies(server, &memoryStore{})
@@ -147,4 +165,19 @@ func TestEmailClaim(t *testing.T) {
 			t.Errorf("emailClaim(%q) = %q, want %q", token, got, want)
 		}
 	}
+}
+
+// loadThenFail reports no login to the first read and to the device flow, then
+// fails, so a fresh sign-in cannot be read back.
+type loadThenFail struct {
+	*memoryStore
+	loads int
+}
+
+func (s *loadThenFail) Load() (deviceauth.Credential, error) {
+	s.loads++
+	if s.loads <= 2 { // our first read and the device flow's own check
+		return deviceauth.Credential{}, deviceauth.ErrCredentialNotFound
+	}
+	return deviceauth.Credential{}, errors.New("keyring locked")
 }

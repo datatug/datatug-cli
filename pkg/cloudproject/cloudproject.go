@@ -16,6 +16,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
+	"unicode"
 )
 
 // Errors of a read. Each maps to one exit code and one line of the CLI.
@@ -158,10 +160,32 @@ func Load(ctx context.Context, c *Client, ref Ref) (Project, error) {
 	if summary.ID != "" {
 		p.ID = summary.ID
 	}
-	p.Environments, p.EnvsErr = environments(ctx, c, ref)
-	p.Databases, p.DBsErr = databases(ctx, c, ref)
-	p.Queries, p.QueriesErr = queries(ctx, c, ref)
+	p.Title = clean(p.Title)
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() { defer wg.Done(); p.Environments, p.EnvsErr = environments(ctx, c, ref) }()
+	go func() { defer wg.Done(); p.Databases, p.DBsErr = databases(ctx, c, ref) }()
+	go func() { defer wg.Done(); p.Queries, p.QueriesErr = queries(ctx, c, ref) }()
+	wg.Wait()
 	return p, nil
+}
+
+// clean drops control characters from text other Space members wrote, so a
+// title cannot carry terminal escape sequences.
+func clean(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+func cleanItems(items []Item) []Item {
+	for i := range items {
+		items[i] = Item{ID: clean(items[i].ID), Title: clean(items[i].Title)}
+	}
+	return items
 }
 
 func environments(ctx context.Context, c *Client, ref Ref) ([]Item, error) {
@@ -171,7 +195,7 @@ func environments(ctx context.Context, c *Client, ref Ref) ([]Item, error) {
 	if _, err := c.get(ctx, "environments/state", ref, &state); err != nil {
 		return nil, err
 	}
-	return state.Environments, nil
+	return cleanItems(state.Environments), nil
 }
 
 // databases are the connections of the project's own catalog. The backend
@@ -180,12 +204,14 @@ func environments(ctx context.Context, c *Client, ref Ref) ([]Item, error) {
 func databases(ctx context.Context, c *Client, ref Ref) ([]Item, error) {
 	var catalog struct {
 		Connections []Item `json:"connections"`
+		// Revision is sent only with a project's own catalog, as its ETag.
+		Revision *int64 `json:"connectionsRevision"`
 	}
 	header, err := c.get(ctx, "projects/connection_catalog", ref, &catalog)
 	if err != nil {
 		return nil, err
 	}
-	if header.Get("ETag") == "" {
+	if header.Get("ETag") == "" && catalog.Revision == nil {
 		return []Item{}, nil
 	}
 	items := make([]Item, 0, len(catalog.Connections))
@@ -194,7 +220,7 @@ func databases(ctx context.Context, c *Client, ref Ref) ([]Item, error) {
 			items = append(items, connection)
 		}
 	}
-	return items, nil
+	return cleanItems(items), nil
 }
 
 type queryFolder struct {
@@ -226,5 +252,5 @@ func queries(ctx context.Context, c *Client, ref Ref) ([]Item, error) {
 	}
 	walk(&root, nil)
 	sort.SliceStable(items, func(i, j int) bool { return items[i].ID < items[j].ID })
-	return items, nil
+	return cleanItems(items), nil
 }

@@ -10,12 +10,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtproject"
 	"github.com/datatug/datatug-cli/pkg/auth/device"
 	"github.com/datatug/datatug-cli/pkg/cloudproject"
 	"github.com/datatug/datatug-cli/pkg/dtstate"
+	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -25,6 +27,7 @@ const spaceLink = "https://datatug.app/space/acme/store/firestore/project/sales"
 // cloudWorld stubs the sign-in, the UI and the backend, and records what the
 // backend was asked and what the UI was started with.
 type cloudWorld struct {
+	mu        sync.Mutex
 	server    *httptest.Server
 	requests  []*http.Request
 	summary   func(w http.ResponseWriter)
@@ -38,7 +41,9 @@ func newCloudWorld(t *testing.T) *cloudWorld {
 	t.Helper()
 	w := &cloudWorld{}
 	w.server = httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		w.mu.Lock()
 		w.requests = append(w.requests, r)
+		w.mu.Unlock()
 		switch strings.TrimPrefix(r.URL.Path, "/v0/datatug/") {
 		case "projects/project_summary":
 			if w.summary != nil {
@@ -245,4 +250,27 @@ func TestProjectsCommandLabelsCloudProjects(t *testing.T) {
 	assert.Contains(t, out, "datatug.app/space/acme/sales (cloud)")
 	assert.Contains(t, out, "local\n")
 	assert.NotContains(t, out, "local (cloud)")
+}
+
+func TestCloudProjectsAreNotFolderProjects(t *testing.T) {
+	cloud := &dtconfig.ProjectRef{ID: "datatug.app/space/acme/sales", Url: "https://datatug.app/space/acme/store/firestore/project/sales"}
+	local := &dtconfig.ProjectRef{ID: "local", Path: "~/p"}
+	paths := getProjPathsByID(dtconfig.Settings{Projects: []*dtconfig.ProjectRef{cloud, local}})
+	assert.Equal(t, map[string]string{"local": "~/p"}, paths)
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Chdir(t.TempDir())
+	settings := "projects:\n  - id: datatug.app/space/acme/sales\n    url: https://datatug.app/space/acme/store/firestore/project/sales\n  - id: local\n    path: ~/p\n"
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".datatug.yaml"), []byte(settings), 0o600))
+	project, dir, err := projectNameOf("")
+	require.NoError(t, err)
+	assert.Equal(t, "local", project)
+	assert.Empty(t, dir)
+}
+
+func TestUIClientHasNoFailoverNotice(t *testing.T) {
+	c, err := newCloudProjectClient(cloudOptions{inUI: true, apiURL: "http://127.0.0.1:1/v0/,http://127.0.0.1:2/v0/"})
+	require.NoError(t, err)
+	assert.NotNil(t, c.HTTP.Transport)
 }

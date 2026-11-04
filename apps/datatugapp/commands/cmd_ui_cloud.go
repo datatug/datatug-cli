@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
@@ -23,6 +24,8 @@ type cloudOptions struct {
 	insecure bool
 	authHost string
 	apiURL   string
+	// inUI leaves out the failover notice, which would print over the UI.
+	inUI bool
 }
 
 // Seams for tests: the sign-in, the HTTP client and where the device flow
@@ -53,7 +56,10 @@ func openCloudLink(link deeplink.Link, opts cloudOptions) error {
 	if err != nil {
 		return Exit("--api-url: "+err.Error(), exitCodeUsage)
 	}
-	ctx := context.Background()
+	// Ctrl+C while waiting for the device flow or the reads exits 1 with
+	// nothing saved; the UI handles its own keys once it starts.
+	ctx, _, stop := interruptContext(context.Background())
+	defer stop()
 	session, err := cloudSignIn(ctx, device.SignInOptions{
 		Issuer: opts.authHost, Insecure: opts.insecure, Interactive: !opts.noSignIn,
 		Out: cloudSignInOut, ErrOut: cloudSignInErr,
@@ -65,7 +71,11 @@ func openCloudLink(link deeplink.Link, opts cloudOptions) error {
 		return Exit(err.Error(), 1)
 	}
 	client.Token = session.Token
-	setCloudUILoader(client, session.Email)
+	uiOpts := opts
+	uiOpts.inUI = true
+	uiClient, _ := newCloudProjectClient(uiOpts) // opts were validated above
+	uiClient.Token = session.Token
+	setCloudUILoader(uiClient, session.Email)
 	readCtx, cancel := context.WithTimeout(ctx, cloudOpenTimeout)
 	defer cancel()
 	project, err := cloudproject.Load(readCtx, client, ref)
@@ -76,6 +86,7 @@ func openCloudLink(link deeplink.Link, opts cloudOptions) error {
 		}
 		return Exit(line, cloudExitCode(err))
 	}
+	stop()
 	return runCloudProjectInUIApp(project, link.Page)
 }
 
@@ -99,7 +110,11 @@ func newCloudProjectClient(opts cloudOptions) (*cloudproject.Client, error) {
 		httpClient.Transport = cloudHTTPTransport
 	}
 	if len(baseURLs) > 1 {
-		httpClient.Transport = cloudapi.NewTransport(cloudapi.Config{BaseURLs: baseURLs, Notice: cloudFailoverNotice})
+		notice := cloudFailoverNotice
+		if opts.inUI {
+			notice = nil
+		}
+		httpClient.Transport = cloudapi.NewTransport(cloudapi.Config{BaseURLs: baseURLs, Notice: notice})
 	}
 	return &cloudproject.Client{BaseURL: baseURLs[0], HTTP: httpClient}, nil
 }
@@ -113,13 +128,22 @@ func setCloudUILoader(client *cloudproject.Client, email string) {
 	dtproject.CloudErrorLine = func(err error) string { return cloudErrorLine(err, email) }
 }
 
+// uiSessionEmail is the email of the login the bare UI's loader last used.
+// The loader runs in a UI command goroutine while error lines are worded in
+// others, so it is kept atomically rather than in a reassigned function.
+var uiSessionEmail atomic.Value
+
 // configureCloudUILoader sets the projects screen's loader for a UI started
 // without --deep-link, using the saved login only (no device flow inside the
 // UI).
 func configureCloudUILoader() {
-	dtproject.CloudErrorLine = func(err error) string { return cloudErrorLine(err, "") }
+	uiSessionEmail.Store("")
+	dtproject.CloudErrorLine = func(err error) string {
+		email, _ := uiSessionEmail.Load().(string)
+		return cloudErrorLine(err, email)
+	}
 	dtproject.CloudLoader = func(ctx context.Context, ref cloudproject.Ref) (cloudproject.Project, error) {
-		client, err := newCloudProjectClient(cloudOptions{})
+		client, err := newCloudProjectClient(cloudOptions{inUI: true})
 		if err != nil {
 			return cloudproject.Project{}, err
 		}
@@ -128,7 +152,7 @@ func configureCloudUILoader() {
 			return cloudproject.Project{}, err
 		}
 		client.Token = session.Token
-		dtproject.CloudErrorLine = func(err error) string { return cloudErrorLine(err, session.Email) }
+		uiSessionEmail.Store(session.Email)
 		return cloudproject.Load(ctx, client, ref)
 	}
 }

@@ -3,9 +3,12 @@ package cloudproject
 import (
 	"context"
 	"errors"
+	"go/parser"
+	"go/token"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -245,5 +248,53 @@ func TestRef(t *testing.T) {
 	}
 	if ValidIdentifier("") || !ValidIdentifier("a_B-1") {
 		t.Fatal("ValidIdentifier")
+	}
+}
+
+func TestOwnCatalogRecognisedByRevisionWithoutETag(t *testing.T) {
+	server := backend(t, &recorded{}, map[string]func(http.ResponseWriter){
+		"projects/connection_catalog": func(w http.ResponseWriter) { _, _ = io.WriteString(w, catalogJSON) },
+	})
+	defer server.Close()
+	p, err := Load(context.Background(), client(server), ref)
+	if err != nil || len(p.Databases) != 1 || p.Databases[0].ID != "warehouse" {
+		t.Fatalf("databases = %+v, %v", p.Databases, err)
+	}
+}
+
+func TestTitlesLoseControlCharacters(t *testing.T) {
+	server := backend(t, &recorded{}, map[string]func(http.ResponseWriter){
+		"projects/project_summary": func(w http.ResponseWriter) { _, _ = io.WriteString(w, `{"title":"Sa\u001b[31mles\u0007"}`) },
+		"environments/state": func(w http.ResponseWriter) {
+			_, _ = io.WriteString(w, `{"environments":[{"id":"dev","title":"D\u009bev"}]}`)
+		},
+	})
+	defer server.Close()
+	p, err := Load(context.Background(), client(server), ref)
+	if err != nil || p.Title != "Sa[31mles" || p.Environments[0].Title != "Dev" {
+		t.Fatalf("title %q, env %+v, %v", p.Title, p.Environments, err)
+	}
+}
+
+// TestNoFirestoreClient proves the package reads only through HTTP: none of
+// its files imports a Firestore or Firebase client.
+func TestNoFirestoreClient(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".go") {
+			continue
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), e.Name(), nil, parser.ImportsOnly)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, imp := range file.Imports {
+			if strings.Contains(imp.Path.Value, "firestore") || strings.Contains(imp.Path.Value, "firebase") {
+				t.Errorf("%s imports %s", e.Name(), imp.Path.Value)
+			}
+		}
 	}
 }

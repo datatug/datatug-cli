@@ -20,6 +20,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
+	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/strongo/validation"
 )
 
@@ -155,6 +156,14 @@ func loadItemTagsDocument(reader *qualifiedProjectReader, s ItemTagsSelector) (s
 	if s.Kind == "dbserver" {
 		var server datatug.ServerRef
 		if itemTagsJSONUnmarshal(fields["server"], &server) != nil || server.Driver != s.Driver || server.GetID() != s.ID {
+			return "", nil, nil, dto.ErrUnsupportedCapability
+		}
+		// The row decoder merges case variants and repeated objects. Its effective
+		// identity must equal the canonical object validated against the owning path.
+		var decoded struct {
+			Server datatug.ServerRef `json:"server"`
+		}
+		if itemTagsJSONUnmarshal(body, &decoded) != nil || decoded.Server != server {
 			return "", nil, nil, dto.ErrUnsupportedCapability
 		}
 		if err := validateDbServer(server); err != nil {
@@ -332,12 +341,25 @@ func SaveLocalProjectItemTags(ctx context.Context, request SaveItemTagsRequest) 
 // LocalProjectDbServers returns persisted server metadata on the selected
 // current branch without opening live database connections.
 func LocalProjectDbServers(ctx context.Context, ref dto.ProjectRef, branch string) ([]datatug.ProjDbServer, error) {
+	return localProjectDbServers(ctx, ref, branch, false)
+}
+
+func localProjectDbServers(ctx context.Context, ref dto.ProjectRef, branch string, discovery bool) ([]datatug.ProjDbServer, error) {
 	value, err := withCurrentBranchRead(ctx, ref, branch, func(reader *qualifiedProjectReader) (any, error) {
+		var archived map[datatug.ProjectObjectRef]bool
+		if discovery {
+			var err error
+			archived, err = filestore.ReadProjectArchivedItemsFromRoot(reader.root)
+			if err != nil {
+				return nil, err
+			}
+		}
 		drivers, err := reader.dirEntries("dbs")
 		if err != nil {
 			return nil, err
 		}
 		result := make([]datatug.ProjDbServer, 0)
+		loaded := 0
 		for _, driver := range drivers {
 			if !driver.IsDir() {
 				continue
@@ -352,7 +374,7 @@ func LocalProjectDbServers(ctx context.Context, ref dto.ProjectRef, branch strin
 			ids := itemIDs(entries, "dbserver")
 			sort.Strings(ids)
 			for _, id := range ids {
-				if len(result) >= maxQualifiedProjectItems {
+				if loaded >= maxQualifiedProjectItems {
 					return nil, dto.ErrUnsupportedCapability
 				}
 				selector := ItemTagsSelector{ProjectRef: ref, Branch: branch, Kind: "dbserver", Driver: driver.Name(), ID: id}
@@ -371,6 +393,12 @@ func LocalProjectDbServers(ctx context.Context, ref dto.ProjectRef, branch strin
 					return nil, err
 				}
 				server.SetID(id)
+				loaded++
+				if discovery {
+					if archived[datatug.ProjectObjectRef{Kind: "server", ID: driver.Name() + "/" + id}] {
+						continue
+					}
+				}
 				result = append(result, server)
 			}
 		}

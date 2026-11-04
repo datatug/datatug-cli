@@ -12,6 +12,7 @@ import (
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/querybody"
+	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/storage"
 )
@@ -29,6 +30,12 @@ import (
 // directory, needed to resolve a catalog path that is relative rather than
 // "~"/"$HOME"-prefixed or already absolute — see ResolveCatalogPath.
 func resolveSourceURL(ctx context.Context, projStore datatug.ProjectStore, environment, database, projDir string) (sourceURL, driver string, err error) {
+	if SourceBoundProfile() && database == "" {
+		return "", "", secureread.ErrSourceBinding
+	}
+	if resolved, bound, bindingErr := boundResolvedSource(ctx, projStore, projDir, environment, database); bound {
+		return resolved.URL, "sqlite3", bindingErr
+	}
 	env, err := projStore.LoadEnvironment(ctx, environment)
 	if err != nil {
 		return "", "", sourceLookupFailed(`environment %q not found`, "load environment %q", err, environment)

@@ -181,6 +181,17 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 		}
 	}
 
+	// The configured SQLite profile admits only structured reads. Route-level
+	// admission alone cannot qualify saved HTTP, raw SQL or artifact execution.
+	if api.SourceBoundProfile() {
+		if api.CheckSourceBinding(ctx) != nil {
+			return apicontract.Result{}, contractErrAccessDenied("configured source read is unavailable")
+		}
+		if req.Mode == apicontract.ProvenanceModeSnapshot || req.Record || queryDef != nil && queryDef.Type != datatug.QueryTypeTugQL {
+			return apicontract.Result{}, newUnsupportedProtectedExecution("configured source supports structured TugQL reads only")
+		}
+	}
+
 	// A context variable is bound only by the DataTug web app for a signed-in
 	// user: a saved or ad-hoc query using one is refused before its source is
 	// resolved or opened (backstage spec/features/my-data-project).

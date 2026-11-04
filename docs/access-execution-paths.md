@@ -16,7 +16,7 @@ connection protection, an Agent subject, or retained-result expiration.
 | `updateUrlConfig` | Legacy execution, warning-only compatibility period | Retire after at least two weeks of published notice; it is outside unified grants |
 | SQLite TUI | Native read-only data and schema handles | Unified protected-source authority; read-only is not permission to read every table |
 | Schema/scan/table metadata | Existing source-read paths and local capabilities | Apply the same connection and exact-object authority before live metadata I/O |
-| MCP TugQL | Not implemented by this checkpoint | Separate Agent identity/token, generic Core query/result contract, governed tool and native acceptance |
+| MCP saved TugQL | Existing structured policy path; optional exact-table SQLite profile binds one catalog, fixed principal and required policy files | Separate Agent identity/token, generic Core query/result contract and governed native acceptance remain open |
 | Checks and Watches | Existing local-owner/capability gates; no new standing authority is granted here | Standing Service subject/policy, protected TugQL-only execution and lifetime proof |
 | Local result/session/artifact stores | DataTug-owned local persistence, not source-write permission | Grant-bound retained-data ownership, purge and replay proof |
 | Owned demos and pinned public fixtures | Explicit fixture paths, not production protection evidence | Keep fixture and real-source acceptance separate |
@@ -46,3 +46,22 @@ ratchet. Existing command-tree tests independently track CLI registration.
 The required generic Core query integration must preserve supported TugQL
 filters, projections, joins, aggregates, ordering and limits. A table-preview
 tool or blanket denial is not a replacement for the required governed read tool.
+
+## Optional exact-table local SQLite profile
+
+`exact-table-readonly-v1` is a single configured source profile, separate from the
+legacy unbound rows above. `docs/mcp.md` describes its declaration and limits.
+
+| Route | Profile disposition |
+|---|---|
+| MCP saved TugQL and POST `exec/run_query` structured/saved TugQL | Secured by fixed required policies and the exact registered target; SQL, HTTP and other executable kinds refuse before dispatch |
+| GET `exec/select`, POST `records/lookup` | Existing structured policy execution with the same pinned source |
+| `catalog-tables`, `records/schema` | Same source binding and shared policy decisions; unauthorized names omitted, authority/identity errors refuse the request |
+| Agent info/project/query discovery and query definitions | Selected project/source projection; MCP omits credentials and raw connection targets |
+| Watch, artifacts, result replay, snapshots, live-server, semantic exploration, mutations, `exec/execute_commands` | Refused by the configured profile route guard |
+| Named/project/environment CLI resolution in a separate process | Refused when a security declaration is present; no silent legacy session |
+| Ad-hoc direct `--db`, legacy project with no declaration, `db get`/Core authority routes | Separate existing paths, outside this profile's claims |
+
+The shared CLI policy-free query baseline is static database authority only;
+context and underlying database/provider policies remain mandatory, including
+RequireContextPolicy. It grants no write operation and creates no context policy.

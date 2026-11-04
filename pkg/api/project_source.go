@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dbconnection"
 )
@@ -207,6 +208,11 @@ func nameTaken(req ProjectSourceRequest, taken *datatug.DbCatalog, known bool) e
 // that is not there is a ProjectSourceNotFoundError; one that cannot be resolved is a
 // SourceUnresolvedError.
 func ResolveProjectSourceURL(ctx context.Context, store datatug.ProjectStore, projectDir, environment, sourceID string) (string, error) {
+	// Named CLI resolution has no configured server executor. Refuse a declared
+	// binding instead of opening it through the legacy descriptor route.
+	if _, declared, err := secureread.LoadBoundSession(ctx, projectDir, secureread.BoundSessionOptions{}); declared || err != nil {
+		return "", secureread.ErrSourceBinding
+	}
 	notFound := func() error {
 		if environment == "" {
 			return &ProjectSourceNotFoundError{message: LookupError("source %q not found in any environment of the project", nil, sourceID).Error()}

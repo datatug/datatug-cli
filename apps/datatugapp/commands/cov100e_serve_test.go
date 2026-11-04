@@ -70,10 +70,14 @@ func TestCov100eReadServeFlags_EachFlagMissing(t *testing.T) {
 		add  func(*cobra.Command)
 	}
 	defs := []def{
+		{serveSecurityProfileFlag, func(c *cobra.Command) { c.Flags().String(serveSecurityProfileFlag, "", "") }},
+		{queryPolicyFlag, func(c *cobra.Command) { c.Flags().StringArray(queryPolicyFlag, nil, "") }},
+		{queryPoliciesDirFlag, func(c *cobra.Command) { c.Flags().String(queryPoliciesDirFlag, "", "") }},
 		{serveHostFlag, func(c *cobra.Command) { c.Flags().String(serveHostFlag, "", "") }},
 		{servePortFlag, func(c *cobra.Command) { c.Flags().Int(servePortFlag, 0, "") }},
 		{serveOpenBrowserFlag, func(c *cobra.Command) { c.Flags().Bool(serveOpenBrowserFlag, false, "") }},
 		{serveProjectFlag, func(c *cobra.Command) { c.Flags().String(serveProjectFlag, "", "") }},
+		{serveProjectsRootFlag, func(c *cobra.Command) { c.Flags().String(serveProjectsRootFlag, "", "") }},
 		{serveAsFlag, func(c *cobra.Command) { c.Flags().String(serveAsFlag, "", "") }},
 		{serveRoleFlag, func(c *cobra.Command) { c.Flags().StringArray(serveRoleFlag, nil, "") }},
 		{serveGroupFlag, func(c *cobra.Command) { c.Flags().StringArray(serveGroupFlag, nil, "") }},
@@ -93,8 +97,8 @@ func TestCov100eReadServeFlags_EachFlagMissing(t *testing.T) {
 		for _, d := range defs[:k] {
 			d.add(cmd)
 		}
-		if _, err := readServeFlags(cmd); err == nil {
-			t.Errorf("flags before %q defined: want error", defs[k].name)
+		if _, err := readServeFlags(cmd); err == nil || !strings.Contains(err.Error(), defs[k].name) {
+			t.Errorf("missing flag %q: want its getter error, got %v", defs[k].name, err)
 		}
 	}
 }

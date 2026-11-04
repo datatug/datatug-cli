@@ -154,10 +154,13 @@ type Run struct {
 	FinishedAt        time.Time `json:"finishedAt,omitempty"`
 }
 type Claim struct {
-	ClaimID    string     `json:"claimId"`
-	RunID      string     `json:"runId"`
-	Fence      int64      `json:"fence"`
-	LeaseUntil time.Time  `json:"leaseUntil"`
+	ClaimID    string    `json:"claimId"`
+	RunID      string    `json:"runId"`
+	Fence      int64     `json:"fence"`
+	LeaseUntil time.Time `json:"leaseUntil"`
+	// Deadline is copied from the stored Run on admission. It is the original
+	// execution ceiling for this fenced attempt; heartbeat never extends it.
+	Deadline   time.Time  `json:"deadline,omitempty"`
 	Definition Definition `json:"definition"`
 }
 type Completion struct {

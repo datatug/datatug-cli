@@ -75,3 +75,10 @@ bindings:
 		t.Fatalf("recordset reader: %v", err)
 	}
 }
+
+func TestExecutorAuthorizeRefusesInvalidSessionAtOriginalBindingCheck(t *testing.T) {
+	executor := NewExecutor(Session{DatabaseProfile: DatabasePolicyGoverned, Unrestricted: true})
+	if err := executor.Authorize(context.Background(), authorizeQuery("Customer"), nil); !errors.Is(err, ErrInvalidSession) {
+		t.Fatalf("contradictory session reached authorization: %v", err)
+	}
+}

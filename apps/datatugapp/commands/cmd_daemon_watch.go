@@ -332,7 +332,9 @@ func configureWatchExecution(cfg watchdaemon.Config, projectID string) (func(), 
 		}
 		evidence = filepath.Join(home, ".datatug", "watch-evidence")
 	}
-	api.ConfigureSecureSession(session, paths, api.Capabilities{EvidencePrivateDir: evidence, AllowOpaqueSQL: cfg.Runner.AllowOpaqueSQL})
+	if err = api.ConfigureSecureSessionChecked(session, paths, api.Capabilities{EvidencePrivateDir: evidence, AllowOpaqueSQL: cfg.Runner.AllowOpaqueSQL}); err != nil {
+		return nil, err
+	}
 	if err = api.ConfigureExecutionEvidence(paths, nil, executionstore.Options{PrivateDir: evidence}); err != nil {
 		return nil, errors.New("watch execution evidence unavailable")
 	}

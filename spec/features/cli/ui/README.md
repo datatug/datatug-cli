@@ -21,6 +21,7 @@ datatug
 datatug ui [--file <path>]
 datatug ui -f <path>
 datatug ui --result <id> [--as <user>] [--role <role>]... [--group <group>]...
+datatug ui --deep-link <datatug.app address>
 ```
 
 ## Problem
@@ -63,6 +64,24 @@ The `--file` flag opens a database file directly, bypassing the project selector
 
 `datatug ui --result <id>` MUST open the unified workspace on a result written by `query run --result-id <id>` (see [query](../query/README.md)), as an immutable chat RecordSet: its rows come from `data.json`, its TugQL (or, for a saved query, the saved query's id and its text) and parameters from `meta.json`, and no query is run to open it. The project is the one `meta.json` names, found only as a project id of the user's project registry, at the absolute folder registered for it (never a folder of that name in the current directory, nor a relative or remote location), so the command works from any folder; the result appears as a new chat session of that project, under one line that says it was loaded from its files. Join candidates come from the source's schema metadata, as for any chat result; a later refresh, Related preview or JOIN is the person's explicit action through the existing secure executor. `--as`, `--role` and `--group` name the principal for a project with access policies. Opening a result leaves the saved last chat choices unchanged. A result whose `data.json` does not have the key column first and rows as long as its columns, or whose parameters are not each a scalar or a set, is incomplete. A missing, expired, incomplete or unknown-version result, and a project that is not registered on the machine, exit 3 with one line that names no path; a result whose database is not a source of a registered project, a malformed id and `--result` with `--file` exit 2.
 
+### Opening a page of the web app
+
+The web app at `https://datatug.app` shows the command for the page the user is on; pasted into a terminal, it opens the same project and screen in the TUI. The address is a named flag, not a positional argument (founder, 2026-11-04): `datatug ui` takes no positional argument.
+
+#### REQ: deep-link-flag
+
+`datatug ui --deep-link <address>` MUST accept an address of the web app, `https://datatug.app/…` or, for a development build of the web app, `http://localhost:<port>/…` (also `127.0.0.1` and `[::1]`), read in the shapes of the web app's project-address library (`datatug/datatug-apps` `libs/datatug/project-address`): `/project/github.com/<owner>/<repo>[/<dir>…][/-/<page>…][?ref=<ref>]`, its legacy `…/tree/<ref>/…` and `…/blob/<ref>/…/datatug-project.json` forms, `/store/<storeId>/project/<projectId>[/<page>…]` and `/space/<spaceId>/store/firestore/project/<projectId>[/<page>…]`. Any other host or scheme, an address with credentials, and a malformed address MUST exit `2` before the TUI starts, with one line that names the expected form and never repeats the address. `--deep-link` with `--file` or `--result`, and any positional argument, MUST exit `2`.
+
+#### REQ: deep-link-targets
+
+An address that names no project (`/`, `/home`, …) MUST start the TUI as a bare `datatug ui` does. Every project address MUST start on the Projects screen and then:
+
+- a GitHub project MUST open from `~/datatug/github.com/<owner>/<repo>[/<dir>]`, cloning the repository there first when it is missing; a project that is not in the settings yet MUST be added to them once it loads (the demo project, which is never added, opens as the demo project). The terminal opens the checked-out branch: a `?ref=` names a ref the TUI cannot select yet, so the TUI says so after opening the project;
+- a project of the local `datatug serve` agent (`http-localhost:<port>`, `localhost:<port>`, `http-127.0.0.1:<port>`) MUST open the project of the settings whose id is the address's project id, or say that no project of that id is registered;
+- a DataTug Cloud project of a Space (`/space/<spaceId>/store/firestore/project/<projectId>`) MUST open as [cloud-projects](../cloud-projects/README.md) specifies: sign-in and the first read happen before the TUI starts, and failures exit with that feature's codes; a personal DataTug Cloud project (`/store/firestore/project/<projectId>`) MUST exit `1` with that feature's personal-project line; a project stored in the browser (`local`) MUST show "This project is stored in your browser; export it or push it to GitHub to open it here"; a project of any other store MUST say its store cannot be opened yet. Each kind of project has one resolver.
+
+The page of the address MUST open its section of the project: `queries`, `query/<id>` → Queries; `boards`, `board/<id>` → Dashboards; `database/…`, `browser-db/…` → Databases; `environments`, `env/<id>` → Environments; none, `overview`, `project` → the project. Any other page MUST open the project and say that the page has no terminal screen yet.
+
 ### Terminal restoration on panic
 
 #### REQ: restore-terminal-on-panic
@@ -84,6 +103,8 @@ The TUI registers viewers (database, GCloud, AWS, Azure), settings, and the API 
 | `--file`, `-f` | string | `""` | Path to a database file to open directly. Currently SQLite-only. |
 | `--result` | string | `""` | Id of a result of `query run --result-id` to open with its loaded rows. |
 | `--as`, `--role`, `--group` | string | `""` | Principal for a project with access policies (with `--result`). |
+| `--deep-link` | string | `""` | Address of a page of the web app (`https://datatug.app/…`) to open. |
+| `--no-sign-in`, `--insecure-storage`, `--auth-host`, `--api-url` | bool/string | | With `--deep-link` to a DataTug Cloud project; see [cloud-projects](../cloud-projects/README.md). |
 | `--tui` (parent) | bool | `false` | Parent-level flag, reserved for forcing TUI mode from other commands. |
 
 ## Exit codes
@@ -91,7 +112,7 @@ The TUI registers viewers (database, GCloud, AWS, Azure), settings, and the API 
 | Exit code | Meaning |
 |---|---|
 | `0` | TUI exited cleanly |
-| `2` | Invalid `--file` value (e.g., non-SQLite file); with `--result`, a malformed id or a result outside a registered project |
+| `2` | Invalid `--file` value (e.g., non-SQLite file); with `--result`, a malformed id or a result outside a registered project; an address that `--deep-link` does not accept, `--deep-link` with `--file` or `--result`, or a positional argument |
 | `3` | With `--result`, the result is missing, expired, incomplete or of an unknown version, or its project is not registered |
 | `10` | Unhandled panic (caught by top-level recovery) |
 
@@ -128,6 +149,12 @@ If `dtstate` cannot be read (missing file, corrupt YAML), the TUI still launches
 **Given** a result written by `query run --db datatug://<project>/<db> --from Item --result-id t4`, after which the table's rows are deleted
 **When** the user runs `datatug ui --result t4` from a folder that is not a project
 **Then** the workspace opens on a session of that project holding the RecordSet with the two rows of the files and the result's TugQL, so no query ran; `datatug ui --result nope`, an expired result and an incomplete one exit 3, and a result of a database opened by path exits 2.
+
+### AC: deep-link-opens-the-page (verifies REQ:deep-link-flag, REQ:deep-link-targets)
+
+**Given** the repository `acme/repo` cloned at `~/datatug/github.com/acme/repo` with a project in `some/dir`
+**When** the user runs `datatug ui --deep-link https://datatug.app/project/github.com/acme/repo/some/dir/-/queries`
+**Then** the TUI opens that project on its Queries section and adds it to the settings; the same command for a repository that is not cloned yet clones it first; a `--deep-link` to a DataTug Cloud project (`/store/firestore/project/p1`) opens the Projects screen with the DataTug Cloud notice; `--deep-link https://example.com/x`, an address with credentials, `--deep-link <address> --file x.db` and a positional `datatug ui <address>` exit 2 without starting the TUI.
 
 ## Open Questions
 

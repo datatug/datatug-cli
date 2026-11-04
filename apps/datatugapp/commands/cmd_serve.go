@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"github.com/datatug/datatug-cli/pkg/agentaccess"
@@ -22,6 +23,7 @@ import (
 )
 
 const (
+	serveSecurityProfileFlag    = "security-profile"
 	serveHostFlag               = "host"
 	servePortFlag               = "port"
 	serveProjectFlag            = "project"
@@ -50,6 +52,9 @@ const serveOpenBrowserFlag = "open-browser"
 // --as/--role/--group fix the principal every policy-enforced read in this
 // process runs as (REQ:principal-selection) — see resolveServeSession.
 type serveFlags struct {
+	securityProfile    string
+	policyFiles        []string
+	policiesDir        string
 	openBrowser        bool
 	host               string
 	port               int
@@ -74,6 +79,18 @@ func readServeFlags(cmd *cobra.Command) (serveFlags, error) {
 	flags := cmd.Flags()
 	var f serveFlags
 	var err error
+	if f.securityProfile, err = flags.GetString(serveSecurityProfileFlag); err != nil {
+		return f, err
+	}
+	if f.policyFiles, err = flags.GetStringArray(queryPolicyFlag); err != nil {
+		return f, err
+	}
+	if len(f.policyFiles) == 0 {
+		f.policyFiles = nil
+	}
+	if f.policiesDir, err = flags.GetString(queryPoliciesDirFlag); err != nil {
+		return f, err
+	}
 	if f.host, err = flags.GetString(serveHostFlag); err != nil {
 		return f, err
 	}
@@ -170,6 +187,23 @@ func resolveServeAddr(host string, port int, config dtconfig.Settings) (string, 
 // at all runs Unrestricted, defaulting the reported principal to "admin"
 // unless the caller named one explicitly.
 func resolveServeSession(projectDir string, flags serveFlags) (secureread.Session, error) {
+	if flags.securityProfile != "" && flags.securityProfile != secureread.ExactTableReadProfile {
+		return secureread.Session{}, errors.New("serve: unsupported security profile")
+	}
+	bound, declared, bindingErr := secureread.LoadBoundSession(context.Background(), projectDir, secureread.BoundSessionOptions{Required: flags.securityProfile != "", As: flags.as, Roles: flags.roles, Groups: flags.groups, ExtraPolicyFiles: flags.policyFiles, ExtraPoliciesDir: flags.policiesDir})
+	if declared {
+		if bindingErr != nil {
+			return secureread.Session{}, bindingErr
+		}
+		if flags.allowWrites || flags.allowOpaqueSQL || flags.allowLiveConns || flags.projectsRoot != "" {
+			return secureread.Session{}, secureread.ErrSourceBinding
+		}
+		return bound, nil
+	}
+	if len(flags.policyFiles) != 0 || flags.policiesDir != "" {
+		return secureread.Session{}, errors.New("serve: extra policy flags require the configured source profile")
+	}
+
 	policiesDir := accesspolicies.ServePoliciesDir(projectDir)
 	hasPrincipal := flags.as != "" || len(flags.roles) > 0 || len(flags.groups) > 0
 
@@ -259,6 +293,9 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 		pathsByID = getProjPathsByID(config)
 	}
 
+	if err := session.ValidateBoundServer(pathsByID, flags.allowWrites, flags.allowOpaqueSQL, flags.allowLiveConns); err != nil {
+		return err
+	}
 	host, port := resolveServeAddr(flags.host, flags.port, config)
 
 	agentURL, url := serveAgentURLs(bannerAddr(host, flags.host), port)
@@ -397,6 +434,9 @@ func serveCommandArgs() *cobra.Command {
 	flags := cmd.Flags()
 	flags.String(serveHostFlag, "", "Host to bind the agent HTTP server to (default: localhost, or the server.host setting)")
 	flags.Int(servePortFlag, 0, "Port to bind the agent HTTP server to (default: 8989, or the server.port setting)")
+	flags.String(serveSecurityProfileFlag, "", "Require the project exact-table-readonly-v1 security profile")
+	flags.StringArray(queryPolicyFlag, nil, "Additional mandatory policy file for the configured source profile")
+	flags.String(queryPoliciesDirFlag, "", "Additional mandatory policy directory for the configured source profile")
 	flags.String(serveProjectFlag, "", "Path to a single DataTug project directory to serve")
 	flags.String(serveProjectsRootFlag, "", "Directory containing local projects; enables root-bound project creation with --allow-writes")
 	flags.Bool(serveOpenBrowserFlag, false, "Open the web UI in a browser (off by default; the URL is always printed)")

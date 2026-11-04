@@ -1022,7 +1022,9 @@ func agentQueryGuard(ctx context.Context, project, env, source string, query dal
 	if ok {
 		base, ok = baseCollectionOf(structured)
 	}
-	if !ok {
+	// A subquery (exists, in, a derived source) can test values in any
+	// table, masked columns included: it is judged like raw SQL.
+	if !ok || dal.HasSubquery(structured) {
 		return agentRawRefusal(ctx, project, env, source)
 	}
 	if joins := structured.From().Joins(); len(joins) > 0 {

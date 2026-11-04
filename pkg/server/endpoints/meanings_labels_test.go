@@ -646,3 +646,12 @@ func TestAgentQueryGuardShapes(t *testing.T) {
 		t.Fatal("a joined non-collection must refuse")
 	}
 }
+
+func TestAgentGuardRefusesSubqueries(t *testing.T) {
+	project, _ := labelsFixture(t)
+	doc := "from: {name: Genre}\ncolumns: [{field: GenreId}]\nwhere: {exists: {query: {from: {name: Cards}, where: {op: '==', left: {field: card_number}, right: {value: '4111111111111111'}}}}}\n"
+	err := agentTugQLGuard(context.Background(), project, "local", "chinook", []byte(doc))
+	if err == nil || !strings.Contains(err.Error(), meaninglabels.CodeRawRefused) {
+		t.Fatalf("an exists subquery over a masked column must be refused, got %v", err)
+	}
+}

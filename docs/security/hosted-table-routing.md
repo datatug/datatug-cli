@@ -1,17 +1,25 @@
 # Optional hosted table routing
 
 A source-bound CLI session can register `hostedTableRead` in its existing private
-`.datatug/security.json`. It is absent by default. The closed version 1 object
+`.datatug/security.json`. It is absent by default. The closed private version 2 object
 contains `version`, `spaceID`, `projectId`, `connectionId`, `catalogSHA256`,
-`fileSHA256` and `database`. IDs refer to the operator-recorded hosted Space,
+`fileSHA256`, `database` and `hostedEngineIdentity`. IDs refer to the operator-recorded hosted Space,
 project and saved connection, not local project/environment/catalog aliases.
 Both SHA witnesses are lowercase SHA-256. The catalog witness records registration
 provenance; the CLI does not read or certify the current hosted catalogue.
 
+The trusted operator records the actual hosted source identity in the exact form
+`sqlite-file-route-v1:<64 lowercase hex characters>`. The CLI independently checks
+its local file against `fileSHA256`, then emits that recorded hosted identity.
+This operator association is not cryptographic cross-machine content proof, and
+the CLI cannot derive or verify the hosted path association offline. Present
+private version 1 registrations are unsupported and fail closed; they never
+become absent or trigger native fallback. The public marker remains version 1.
+
 After the existing source/session checks, `catalog-tables` may return:
 
 ```json
-{"hostedTableRead":{"version":1,"status":"available","spaceID":"S1","projectId":"P1","connectionId":"C1","fingerprint":{"engine":"sqlite","database":"controlled","engineIdentity":"sha256:<actual-current-file-sha256>"}}}
+{"hostedTableRead":{"version":1,"status":"available","spaceID":"S1","projectId":"P1","connectionId":"C1","fingerprint":{"engine":"sqlite","database":"controlled","engineIdentity":"sqlite-file-route-v1:<recorded-hosted-route-sha256>"}}}
 ```
 
 The CLI hashes its already fixed source with a 64 MiB limit, cancellation and

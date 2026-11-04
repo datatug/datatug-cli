@@ -34,7 +34,7 @@ func TestCatalogTablesHostedMarkerAndFinalGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(content)
-	config["hostedTableRead"] = map[string]any{"version": 1, "spaceID": "S1", "projectId": "P1", "connectionId": "C1", "catalogSHA256": strings.Repeat("a", 64), "fileSHA256": hex.EncodeToString(sum[:]), "database": "controlled"}
+	config["hostedTableRead"] = map[string]any{"version": 2, "spaceID": "S1", "projectId": "P1", "connectionId": "C1", "catalogSHA256": strings.Repeat("a", 64), "fileSHA256": hex.EncodeToString(sum[:]), "database": "controlled", "hostedEngineIdentity": "sqlite-file-route-v1:" + strings.Repeat("b", 64)}
 	data, _ = json.Marshal(config)
 	mustWriteFile(t, configPath, string(data))
 	session, _, err := secureread.LoadBoundSession(context.Background(), root, secureread.BoundSessionOptions{Required: true})
@@ -49,7 +49,7 @@ func TestCatalogTablesHostedMarkerAndFinalGeneration(t *testing.T) {
 		return w
 	}
 	w := get()
-	if w.Code != 200 || !strings.Contains(w.Body.String(), `"status":"available"`) || !strings.Contains(w.Body.String(), `"schema":"main"`) || strings.Contains(w.Body.String(), "sqliteFile") {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"status":"available"`) || !strings.Contains(w.Body.String(), `"engineIdentity":"sqlite-file-route-v1:`+strings.Repeat("b", 64)+`"`) || !strings.Contains(w.Body.String(), `"schema":"main"`) || strings.Contains(w.Body.String(), "sqliteFile") {
 		t.Fatalf("available %d %s", w.Code, w.Body.String())
 	}
 	db, err := sql.Open("sqlite", source)

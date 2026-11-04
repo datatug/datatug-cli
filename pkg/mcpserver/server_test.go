@@ -192,7 +192,11 @@ func TestTransportFailsClosed(t *testing.T) {
 }
 
 func TestRedirectCannotLeakAgentKey(t *testing.T) {
-	t.Setenv(agentaccess.DirEnv, t.TempDir())
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(agentaccess.DirEnv, dir)
 	seen := false
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { seen = true; t.Error("followed redirect") }))
 	defer target.Close()

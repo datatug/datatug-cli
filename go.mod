@@ -1,6 +1,6 @@
 module github.com/datatug/datatug-cli
 
-go 1.27.1
+go 1.27.3
 
 // All sibling deps now ship the upstream changes db-copy depends on
 // at tagged versions:
@@ -23,15 +23,22 @@ require (
 	github.com/NimbleMarkets/ntcharts/v2 v2.2.0
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/atotto/clipboard v0.1.4
+	github.com/aws/aws-sdk-go-v2 v1.47.5
+	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.72.3
 	github.com/charmbracelet/ultraviolet v0.0.0-20260812204455-68fa937c71be
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/dal-go/dalgo v0.99.0
 	github.com/dal-go/dalgo2bigquery v0.3.2
 	github.com/dal-go/dalgo2clickhouse v0.0.0-20261030135300-99a44064132e
+	github.com/dal-go/dalgo2cloudflarekv v0.0.0-20261102080843-209a16cff7f5
+	github.com/dal-go/dalgo2convex v0.0.0-20261102043632-9c8a437f4c85
+	github.com/dal-go/dalgo2cosmosdb v0.0.0-20261102042954-234d09879876
 	github.com/dal-go/dalgo2couchdb v0.0.0-20261027215721-2c03679be8a7
 	github.com/dal-go/dalgo2duckdb v0.1.0
+	github.com/dal-go/dalgo2dynamodb v0.0.0-20261101230446-46c9938f48ef
 	github.com/dal-go/dalgo2firestore v0.10.45
 	github.com/dal-go/dalgo2http v0.4.3
+	github.com/dal-go/dalgo2influxdb v0.0.0-20261101231321-deba4dd49915
 	github.com/dal-go/dalgo2libsql v0.0.0-20261028000517-7d8187759a51
 	github.com/dal-go/dalgo2mongodb v0.1.0
 	github.com/dal-go/dalgo2mssql v0.0.1
@@ -41,6 +48,7 @@ require (
 	github.com/dal-go/dalgo2postgres v0.10.1
 	github.com/dal-go/dalgo2postgrest v0.0.0-20261027220602-b8d31e8c335c
 	github.com/dal-go/dalgo2redis v0.1.0
+	github.com/dal-go/dalgo2snowflake v0.0.0-20261102131450-918fc72d4976
 	github.com/dal-go/dalgo2sql v0.32.2
 	github.com/dal-go/dalgo2sqlite v0.6.1
 	github.com/dal-go/dalgo2typesense v0.0.0-20261028075318-b1ba445d3434
@@ -113,6 +121,11 @@ require (
 	github.com/RoaringBitmap/roaring/v2 v2.30.0 // indirect
 	github.com/andybalholm/brotli v1.2.6 // indirect
 	github.com/apache/arrow-go/v18 v18.5.1 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.5.8 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.8.8 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.23 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/endpoint-discovery v1.13.8 // indirect
+	github.com/aws/smithy-go v1.28.7 // indirect
 	github.com/axgle/mahonia v0.0.0-20180208002826-3358181d7394 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/bits-and-blooms/bitset v1.24.6 // indirect

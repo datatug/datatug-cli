@@ -312,6 +312,9 @@ func TestRoutes_AStoreFailureAnswersOneBuiltSentenceWhateverIsAtThePath(t *testi
 				if status == 0 {
 					status = http.StatusInternalServerError
 				}
+				if name == "missing" && (route.name == "projects/project_summary" || route.name == "projects/project_full") {
+					status = http.StatusNotFound
+				}
 				var w *httptest.ResponseRecorder
 				if route.body != nil {
 					w = sendBody(t, route.handler, method, route.path+"?"+route.query(project).Encode(), route.body(project))

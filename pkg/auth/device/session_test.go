@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -86,7 +87,9 @@ func TestEnsureSignedIn_Errors(t *testing.T) {
 
 	store := &memoryStore{credential: deviceauth.Credential{AccessToken: "old", RefreshToken: "r", Expiry: time.Now().Add(-time.Hour), Issuer: server.URL, ClientID: clientID, Scopes: scopes}}
 	deps = testDependencies(server, store)
-	deps.refresh = func(context.Context, string) (session, error) { return session{}, errors.New("revoked") }
+	deps.refresh = func(context.Context, string) (session, error) {
+		return session{}, fmt.Errorf("%w: HTTP 400 revoked", errRefreshRefused)
+	}
 	if _, err := ensureSignedIn(context.Background(), SignInOptions{Issuer: server.URL}, deps); !errors.Is(err, ErrNotSignedIn) || !strings.Contains(err.Error(), "revoked") {
 		t.Fatalf("refused refresh without interaction: err = %v", err)
 	}
@@ -97,6 +100,12 @@ func TestEnsureSignedIn_Errors(t *testing.T) {
 	}
 	if token, _ := s.Token(context.Background()); token != "firebase-id" {
 		t.Fatalf("token after new sign-in = %q", token)
+	}
+
+	store.credential.Expiry = time.Now().Add(-time.Hour)
+	deps.refresh = func(context.Context, string) (session, error) { return session{}, errors.New("offline") }
+	if _, err := ensureSignedIn(context.Background(), SignInOptions{Issuer: server.URL, Interactive: true, Out: &out, ErrOut: &out}, deps); err == nil || errors.Is(err, ErrNotSignedIn) || !strings.Contains(err.Error(), "offline") {
+		t.Fatalf("offline refresh must pass through without a new sign-in: err = %v", err)
 	}
 
 	store = &memoryStore{credential: deviceauth.Credential{AccessToken: "t", RefreshToken: "r", Expiry: time.Now().Add(time.Hour), Issuer: server.URL, ClientID: clientID, Scopes: scopes}}

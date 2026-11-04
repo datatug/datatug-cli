@@ -243,6 +243,11 @@ func refreshFirebaseSession(ctx context.Context, refreshToken string) (session, 
 		return session{}, err
 	}
 	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode >= 400 && response.StatusCode < 500 {
+		// The refresh token was refused (revoked, expired): only a new
+		// sign-in helps.
+		return session{}, fmt.Errorf("%w: firebase session refresh returned HTTP %d", errRefreshRefused, response.StatusCode)
+	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return session{}, fmt.Errorf("firebase session refresh returned HTTP %d", response.StatusCode)
 	}

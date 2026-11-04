@@ -278,6 +278,15 @@ func TestRefreshFirebaseSession_AllBranches(t *testing.T) {
 	}
 	_, err = refreshFirebaseSession(ctx, "refresh-tok")
 	require.ErrorContains(t, err, "returned HTTP 401")
+	require.ErrorIs(t, err, errRefreshRefused)
+
+	// 2b. A 5xx is not a refusal: signing in again would not help.
+	httpDo = func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 503, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+	}
+	_, err = refreshFirebaseSession(ctx, "refresh-tok")
+	require.ErrorContains(t, err, "returned HTTP 503")
+	require.NotErrorIs(t, err, errRefreshRefused)
 
 	// 3. Decode error (bad JSON)
 	httpDo = func(req *http.Request) (*http.Response, error) {

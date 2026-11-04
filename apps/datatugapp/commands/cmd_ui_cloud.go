@@ -79,6 +79,9 @@ func openCloudLink(link deeplink.Link, opts cloudOptions) error {
 	readCtx, cancel := context.WithTimeout(ctx, cloudOpenTimeout)
 	defer cancel()
 	project, err := cloudproject.Load(readCtx, client, ref)
+	if err != nil && ctx.Err() != nil {
+		return Exit("interrupted", 1)
+	}
 	if err != nil {
 		line := cloudErrorLine(err, session.Email)
 		if errors.Is(err, cloudproject.ErrUnauthorized) {

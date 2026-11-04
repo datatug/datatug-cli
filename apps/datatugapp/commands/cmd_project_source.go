@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtproject"
 	"os"
 	"path/filepath"
 
+	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtproject"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/dtconfig"

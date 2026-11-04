@@ -160,7 +160,7 @@ func Load(ctx context.Context, c *Client, ref Ref) (Project, error) {
 	if summary.ID != "" {
 		p.ID = summary.ID
 	}
-	p.Title = clean(p.Title)
+	p.ID, p.Title = clean(p.ID), clean(p.Title)
 	var wg sync.WaitGroup
 	wg.Add(3)
 	go func() { defer wg.Done(); p.Environments, p.EnvsErr = environments(ctx, c, ref) }()

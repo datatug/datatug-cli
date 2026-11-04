@@ -18,6 +18,9 @@ import (
 // and signing in was not allowed.
 var ErrNotSignedIn = errors.New("not signed in to DataTug")
 
+// errRefreshRefused marks a refresh the identity service refused with a 4xx.
+var errRefreshRefused = errors.New("refresh refused")
+
 // SignInOptions say where the login is kept and whether EnsureSignedIn may
 // start the device flow.
 type SignInOptions struct {
@@ -62,9 +65,10 @@ func ensureSignedIn(ctx context.Context, opts SignInOptions, deps dependencies) 
 	}
 	tokens := newTokenSource(ctx, client, store, deps.refresh)
 	token, err := tokens.TokenContext(ctx)
-	if err != nil {
+	if errors.Is(err, deviceauth.ErrCredentialNotFound) || errors.Is(err, errRefreshRefused) {
 		// No login, or one whose refresh was refused (revoked, expired): a
-		// new sign-in is the remedy either way.
+		// new sign-in is the remedy either way. Other failures (offline, a
+		// keyring that cannot save) are passed through.
 		if !opts.Interactive {
 			if errors.Is(err, deviceauth.ErrCredentialNotFound) {
 				return Session{}, ErrNotSignedIn

@@ -274,3 +274,18 @@ func TestUIClientHasNoFailoverNotice(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, c.HTTP.Transport)
 }
+
+func TestCloudLinkInterruptedDuringReadsExitsOne(t *testing.T) {
+	w := newCloudWorld(t)
+	orig := interruptContext
+	t.Cleanup(func() { interruptContext = orig })
+	interruptContext = func(parent context.Context) (context.Context, func() os.Signal, func()) {
+		ctx, cancel := context.WithCancel(parent)
+		cancel() // Ctrl+C already pressed
+		return ctx, func() os.Signal { return os.Interrupt }, func() {}
+	}
+	code, line := exitCode(t, w.run("--deep-link", spaceLink))
+	assert.Equal(t, 1, code)
+	assert.Equal(t, "interrupted", line)
+	assert.Nil(t, w.opened)
+}

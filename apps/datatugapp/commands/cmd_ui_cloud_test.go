@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtproject"
 	"github.com/datatug/datatug-cli/pkg/auth/device"
 	"github.com/datatug/datatug-cli/pkg/cloudproject"
@@ -288,4 +289,11 @@ func TestCloudLinkInterruptedDuringReadsExitsOne(t *testing.T) {
 	assert.Equal(t, 1, code)
 	assert.Equal(t, "interrupted", line)
 	assert.Nil(t, w.opened)
+}
+
+func TestRunCloudProjectInUIAppStartsOnProjectsWithTheProject(t *testing.T) {
+	_, opts := stubUI(t, &dtstate.DatatugState{}, nil)
+	require.NoError(t, runCloudProjectInUIApp(cloudproject.Project{Title: "Sales"}, nil))
+	assert.Equal(t, datatugui.ScreenProjects, opts.Start)
+	assert.NotNil(t, opts.Then)
 }

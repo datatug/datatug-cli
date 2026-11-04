@@ -67,10 +67,10 @@ func TestRunQueryAgentGuards(t *testing.T) {
 	agentQueries(t, dir)
 	agentCtx := withAgentContext(context.Background(), true)
 
-	// an agent's saved SQL is refused: the source has protected columns
+	// an agent's saved SQL that names no protected column runs (TestAgentSavedSQL covers refusals)
 	_, err := computeRunQuery(agentCtx, agentRunRequest(project, "agent-sql", ""))
-	if errCode(err) != meaninglabels.CodeRawRefused {
-		t.Fatalf("saved SQL: %v", err)
+	if code := errCode(err); code == meaninglabels.CodeRawRefused {
+		t.Fatalf("saved SQL: %v", err) // past the guard, the session's own opaque-SQL grant decides
 	}
 	// ad-hoc TugQL: a wildcard is refused, an explicit non-masked list runs
 	_, err = computeRunQuery(agentCtx, agentRunRequest(project, "", "from: {name: Cards}\n"))

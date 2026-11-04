@@ -960,14 +960,7 @@ func agentRawRefusal(ctx context.Context, project, env, source string) error {
 	}
 	tables := map[string][]meaninglabels.Column{}
 	for _, o := range objects {
-		var columns []meaninglabels.Column
-		if resolved, err := resolveSourceTableHook(ctx, m.projStore, m.projectDir, env, source, o.Name); err == nil {
-			columns = labelColumns(resolved.Columns)
-		} else {
-			for _, name := range o.Columns {
-				columns = append(columns, meaninglabels.Column{Name: name})
-			}
-		}
+		columns := m.objectColumns(ctx, o)
 		if len(columns) == 0 {
 			return refused // a table that cannot be described refuses (fail closed)
 		}

@@ -281,13 +281,13 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 		// "All legacy routes obey the same rule"). A missing grant surfaces
 		// below as secureread.ErrOpaqueSQLNotGranted, mapped to
 		// UNSUPPORTED_PROTECTED_EXECUTION.
-		if agent {
-			if err := agentRawRefusal(ctx, req.Project, req.Environment, resolved.ID); err != nil {
+		var text string
+		text, err = executionQueryDocumentHook(req.Project, req.QueryID, queryDef, queryRevision)
+		if err == nil && agent {
+			if err := agentSavedSQLRefusal(ctx, req.Project, req.Environment, resolved.ID, text); err != nil {
 				return apicontract.Result{}, err
 			}
 		}
-		var text string
-		text, err = executionQueryDocumentHook(req.Project, req.QueryID, queryDef, queryRevision)
 		if err == nil {
 			profile = apicontract.ExecutionProfileOpaquePrivileged
 			result, err = runNativeSQLHook(executor, runCtx, resolved.URL, text, sqlQueryArgs(queryDef, variables)...)

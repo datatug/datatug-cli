@@ -31,6 +31,7 @@ type protectedTableOptions struct {
 	request protectedTableRequest
 	baseURL string
 	agent   bool
+	agentID string
 	auth    device.ProductOptions
 }
 
@@ -60,7 +61,8 @@ func protectedTableCommand(dependencies protectedReadDependencies) *cobra.Comman
 	flags.StringVar(&options.baseURL, "base-url", defaultAIAPIURL, "API /v0/ base URL (HTTPS, or loopback development)")
 	flags.StringVar(&options.auth.Issuer, "auth-host", "", "Versioned HTTPS product authorization issuer")
 	flags.StringVar(&options.auth.Realm, "realm", "", "Exact server credential realm")
-	flags.BoolVar(&options.agent, "agent", false, "Use the agent baseline without human grants; unsupported servers fail closed")
+	flags.BoolVar(&options.agent, "agent", false, "Read as your agent: its own approvals, never beyond your access; unsupported servers fail closed")
+	flags.StringVar(&options.agentID, "agent-id", "", "With --agent: the registered agent on its own account (datatug access agents register)")
 	flags.BoolVar(&options.auth.InsecureStorage, "insecure-storage", false, "Use the plaintext product credential created with auth product login --insecure-storage")
 	return command
 }
@@ -73,6 +75,9 @@ func readProtectedTable(ctx context.Context, options protectedTableOptions, depe
 		if !validProtectedSelector(value) {
 			return nil, Exit("protected preview requires valid --space, --project, --connection, --namespace and --table", exitCodeUsage)
 		}
+	}
+	if !validProtectedAgent(options.agent, options.agentID) {
+		return nil, Exit("--agent-id requires --agent and a valid agent ID", exitCodeUsage)
 	}
 	operation := options.request.Operation
 	if operation.MaxRows < 1 || operation.MaxRows > 100 || operation.MaxBytes < 1 || operation.MaxBytes > 262144 {
@@ -97,6 +102,9 @@ func readProtectedTable(ctx context.Context, options protectedTableOptions, depe
 	subject := dataaccess.Subject{Realm: credential.Realm, Kind: dataaccess.User, ID: credential.Subject}
 	if options.agent {
 		subject.Kind = dataaccess.Agent
+		if options.agentID != "" {
+			subject.ID = options.agentID
+		}
 	}
 	ctx, cancel := context.WithDeadline(ctx, credential.ExpiresAt)
 	success := false
@@ -124,6 +132,7 @@ func readProtectedTable(ctx context.Context, options protectedTableOptions, depe
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+credential.Bearer)
+	setProtectedAgentHeader(req, options.agentID)
 	req.Header.Set("X-DataTug-Result-Nonce", nonce)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
@@ -161,7 +170,7 @@ func readProtectedTable(ctx context.Context, options protectedTableOptions, depe
 	}
 	// The initial authenticated server source is pinned; fresh resolution must
 	// match it. The expected operation always comes from our original local DTO.
-	resolveOptions := protectedReadOptions{request: protectedRecordRequest{Space: options.request.Space, Project: options.request.Project, Connection: options.request.Connection}, baseURL: options.baseURL, agent: options.agent}
+	resolveOptions := protectedReadOptions{request: protectedRecordRequest{Space: options.request.Space, Project: options.request.Project, Connection: options.request.Connection}, baseURL: options.baseURL, agent: options.agent, agentID: options.agentID}
 	authority, err := dataaccess.NewAuthority(subject, envelope.Lease.Connection, func(ctx context.Context, _ dataaccess.ResolveRequest) (dataaccess.Resolution, error) {
 		return resolveProtectedRecord(ctx, resolveOptions, dependencies.client, credential.Bearer)
 	})

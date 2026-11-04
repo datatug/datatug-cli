@@ -70,6 +70,10 @@ func TestProtectedAgentCoreCaptureImportAndTypedMutationConformance(t *testing.T
 				human.Kind = dataaccess.User
 				resolution.Grants = []dataaccess.Grant{{ID: "human-grant", Subject: human, RequestedBy: human, Permissions: []dataaccess.Permission{dataaccess.DataRead}, Scope: dataaccess.GrantScope{Connection: resolution.Connection.ID, Requires: []string{}}, Reason: "investigate", ExpiresAt: resolution.ServerTime.Add(time.Minute), State: dataaccess.Approved, Decision: &dataaccess.Decision{By: dataaccess.Subject{Realm: human.Realm, Kind: dataaccess.User, ID: "reviewer"}, At: resolution.ServerTime}, Revision: 1}}
 			}
+			// The user's side follows the same connection and protection.
+			user := *resolution.AgentUser
+			user.Connection, user.Protection = resolution.Connection, resolution.Protection
+			resolution.AgentUser = &user
 			authority, err := dataaccess.NewAuthority(resolution.Subject, resolution.Connection, func(context.Context, dataaccess.ResolveRequest) (dataaccess.Resolution, error) {
 				return resolution, nil
 			})

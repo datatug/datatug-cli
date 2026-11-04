@@ -31,6 +31,9 @@ type protectedReadOptions struct {
 	request protectedRecordRequest
 	baseURL string
 	agent   bool
+	// agentID selects a registered agent on its own account (Perimeter D23);
+	// empty means the agent acting for the signed-in person.
+	agentID string
 	auth    device.ProductOptions
 }
 
@@ -69,7 +72,8 @@ func protectedReadCommand(dependencies protectedReadDependencies) *cobra.Command
 	flags.StringVar(&options.baseURL, "base-url", defaultAIAPIURL, "API /v0/ base URL (HTTPS, or loopback development)")
 	flags.StringVar(&options.auth.Issuer, "auth-host", "", "Versioned HTTPS product authorization issuer")
 	flags.StringVar(&options.auth.Realm, "realm", "", "Exact server credential realm")
-	flags.BoolVar(&options.agent, "agent", false, "Use the agent baseline without human grants; unsupported servers fail closed")
+	flags.BoolVar(&options.agent, "agent", false, "Read as your agent: its own approvals, never beyond your access; unsupported servers fail closed")
+	flags.StringVar(&options.agentID, "agent-id", "", "With --agent: the registered agent on its own account (datatug access agents register)")
 	flags.BoolVar(&options.auth.InsecureStorage, "insecure-storage", false, "Use the plaintext product credential created with auth product login --insecure-storage")
 	return command
 }
@@ -81,6 +85,18 @@ func protectedAccessPrefix(agent bool) string {
 		return "datatug/access/agent/"
 	}
 	return "datatug/access/"
+}
+
+// setProtectedAgentHeader selects a registered agent on agent routes only.
+func setProtectedAgentHeader(req *http.Request, agentID string) {
+	if agentID != "" {
+		req.Header.Set("X-DataTug-Agent", agentID)
+	}
+}
+
+// validProtectedAgent requires --agent with --agent-id, and a safe ID.
+func validProtectedAgent(agent bool, agentID string) bool {
+	return agentID == "" || agent && validProtectedSelector(agentID)
 }
 
 func validProtectedSelector(value string) bool {
@@ -110,6 +126,9 @@ func readProtectedRecord(ctx context.Context, options protectedReadOptions, depe
 			return nil, Exit("protected read requires valid --space, --project, --connection, --collection and --id", exitCodeUsage)
 		}
 	}
+	if !validProtectedAgent(options.agent, options.agentID) {
+		return nil, Exit("--agent-id requires --agent and a valid agent ID", exitCodeUsage)
+	}
 	if validateAIAPIURL(options.baseURL) != nil {
 		return nil, Exit("protected read requires an HTTPS API /v0/ base URL, or loopback development", exitCodeUsage)
 	}
@@ -131,6 +150,9 @@ func readProtectedRecord(ctx context.Context, options protectedReadOptions, depe
 	subject := dataaccess.Subject{Realm: credential.Realm, Kind: dataaccess.User, ID: credential.Subject}
 	if options.agent {
 		subject.Kind = dataaccess.Agent
+		if options.agentID != "" {
+			subject.ID = options.agentID
+		}
 	}
 	ctx, cancel := context.WithDeadline(ctx, credential.ExpiresAt)
 	success := false
@@ -158,6 +180,7 @@ func readProtectedRecord(ctx context.Context, options protectedReadOptions, depe
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+credential.Bearer)
+	setProtectedAgentHeader(req, options.agentID)
 	req.Header.Set("X-DataTug-Result-Nonce", nonce)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
@@ -236,6 +259,7 @@ func resolveProtectedRecord(ctx context.Context, options protectedReadOptions, c
 		return result, err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
+	setProtectedAgentHeader(req, options.agentID)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	response, err := client.Do(req)
@@ -254,9 +278,10 @@ func resolveProtectedRecord(ctx context.Context, options protectedReadOptions, c
 	if apicontract.DecodeStrict(raw, &result) != nil {
 		return dataaccess.Resolution{}, errors.New("invalid protected authority response")
 	}
-	// The fixed agent route has one closed zero-grant representation. Null,
-	// missing or human grant lists cannot become agent authority or a fallback.
-	if options.agent && (result.Grants == nil || len(result.Grants) != 0) {
+	// An agent holds only its own approvals and carries its user's resolution;
+	// shared Core refuses any grant or user not bound to this agent. A null or
+	// missing grant list never becomes agent authority or a fallback.
+	if options.agent && (result.Grants == nil || result.AgentUser == nil) {
 		return dataaccess.Resolution{}, errors.New("invalid agent authority response")
 	}
 	return result, nil

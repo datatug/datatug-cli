@@ -21,8 +21,12 @@ import (
 
 func protectedAgentResolution() dataaccess.Resolution {
 	resolution := protectedResolution()
+	user := resolution
+	user.Grants = []dataaccess.Grant{}
 	resolution.Subject.Kind = dataaccess.Agent
 	resolution.Grants = []dataaccess.Grant{}
+	// Every agent answer carries its user's resolution (Perimeter D27).
+	resolution.AgentUser = &user
 	return resolution
 }
 

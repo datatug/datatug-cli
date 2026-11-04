@@ -82,6 +82,7 @@ func DatatugCommand() *cobra.Command {
 		testCommandArgs(),
 		consoleCommandArgs(),
 		dbCommand(),
+		accessCommand(),
 		entityCommand(),
 		executionCommand(),
 		compareCommand(),

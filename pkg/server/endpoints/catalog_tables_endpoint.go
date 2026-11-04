@@ -54,7 +54,7 @@ func getCatalogTablesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	projectDir, ok := catalogProjectDir(ref.ProjectID)
 	if !ok {
-		handleError(fmt.Errorf("%w: unknown project %q", api.ErrCatalogNotFound, dbcopy.SourceIDDisplay(ref.ProjectID)), w, r)
+		handleError(&catalogNotFoundError{err: fmt.Errorf("%w: unknown project %q", api.ErrCatalogNotFound, dbcopy.SourceIDDisplay(ref.ProjectID)), field: "project"}, w, r)
 		return
 	}
 	environmentID := paramAlias(q, "environment", "env")
@@ -77,6 +77,9 @@ func getCatalogTablesHandler(w http.ResponseWriter, r *http.Request) {
 		var loadErr error
 		tables, loadErr = getCatalogTablesFunc(projectDir, environmentID, catalogID)
 		if loadErr != nil {
+			if errors.Is(loadErr, api.ErrCatalogNotFound) {
+				loadErr = &catalogNotFoundError{err: loadErr, field: "source"}
+			}
 			returnJSON(w, r, http.StatusOK, loadErr, nil)
 			return false
 		}

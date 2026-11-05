@@ -23,9 +23,9 @@
 <table>
   <tr>
     <td valign="top">
-      <a href="https://youtu.be/tjOzdzB_PGA"><img src="https://datatug.app/static/illustrations/intro-video-poster-1280.webp" alt="DataTug in one minute — watch the intro (1:01)" width="420"></a><br>
-      ▶ <b><a href="https://youtu.be/tjOzdzB_PGA">Watch the DataTug intro (1:01)</a></b><br>
-      The DataTug intro.
+      <a href="https://youtu.be/Dkq1uoMZa5E"><img src="https://datatug.app/static/illustrations/datatug-in-30-poster-1280.webp" alt="DataTug in 30 seconds: every database, one workspace (0:30)" width="420"></a><br>
+      ▶ <b><a href="https://youtu.be/Dkq1uoMZa5E">Watch DataTug in 30 seconds (0:30)</a></b><br>
+      Sources, browsing, column meanings, the suggested join, cards and Perimeter. Longer: the <a href="https://youtu.be/tjOzdzB_PGA">intro (1:01)</a>.
     </td>
     <td valign="top">
       <a href="https://youtu.be/_mla67RoPWY"><img src="https://datatug.app/static/illustrations/explainer-sales-per-capita-poster-1280.webp" alt="Where are we underselling? Sales per capita across three sources (1:30)" width="420"></a><br>

@@ -468,7 +468,7 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		query = fromQuery(o, pagingOrder(ctx, db, backend.Scheme, o.from))
 	}
 	if o.sink != nil {
-		o.sink.describeAdHoc(ctx, o, backend, db, queryText, variables)
+		o.sink.describeAdHoc(ctx, o, backend, db, queryText, variables, project)
 	}
 	stderr := cmd.ErrOrStderr()
 	if defaultedSourceLimit != "" {
@@ -522,6 +522,7 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		if err = o.sink.collectAndWrite(cmd.OutOrStdout(), result.Reader, result.Query); err != nil {
 			return queryFailureFor(backend, err)
 		}
+		writeMaskedNote(stderr, o, project)
 		return nil
 	}
 	rows, err := collectRows(result.Reader)
@@ -539,12 +540,17 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	if err := writeQueryRows(cmd.OutOrStdout(), o.format, columns, rows, provenance); err != nil {
 		return Exit(err.Error(), 1)
 	}
+	writeMaskedNote(stderr, o, project)
+	return nil
+}
+
+// writeMaskedNote names the columns a project read masked, on stderr.
+func writeMaskedNote(stderr io.Writer, o queryOptions, project *projectRead) {
 	if project != nil && !o.quiet {
 		if note := project.maskedNote(); note != "" {
 			_, _ = fmt.Fprintln(stderr, note)
 		}
 	}
-	return nil
 }
 
 // closeReader closes a reader that will not be read.

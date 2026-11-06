@@ -56,7 +56,7 @@ const policyExceptionLong = "A local policy exception is a time-boxed allow rule
 func policyCommand() *cobra.Command {
 	cmd := &cobra.Command{Use: "policy", Short: "Local access policies of a project", Args: cobra.NoArgs}
 	exception := &cobra.Command{Use: "exception", Short: "Propose and decide time-boxed local policy exceptions", Long: policyExceptionLong, Args: cobra.NoArgs}
-	exception.AddCommand(exceptionProposeCommand(), exceptionStatusCommand(), exceptionListCommand(), exceptionApplyCommand(), exceptionRejectCommand(), exceptionRevokeCommand(), exceptionAuditCommand())
+	exception.AddCommand(exceptionProposeCommand(), exceptionStatusCommand(), exceptionListCommand(), exceptionApplyCommand(), exceptionRejectCommand(), exceptionRevokeCommand(), exceptionAuditCommand(), exceptionEndSessionCommand())
 	cmd.AddCommand(exception)
 	return cmd
 }
@@ -70,6 +70,15 @@ func detectCaller() *callercontext.Caller {
 		return nil
 	}
 	return &c
+}
+
+// lifetimeOf is an exception's lifetime; one stored before lifetimes is a
+// deadline one.
+func lifetimeOf(e policyexceptions.Exception) string {
+	if e.IsSession() {
+		return policyexceptions.LifetimeSession
+	}
+	return policyexceptions.LifetimeDeadline
 }
 
 // exceptionProject is the project an exception command works on.
@@ -106,32 +115,34 @@ func (p exceptionProject) command(verb, id string) string {
 
 // exceptionView is the JSON shape of one exception.
 type exceptionView struct {
-	ID               string                     `json:"id"`
-	Kind             string                     `json:"kind"`
-	State            policyexceptions.State     `json:"state"`
-	ProjectID        string                     `json:"projectId"`
-	Env              string                     `json:"env"`
-	Source           string                     `json:"source"`
-	SourceIdentity   string                     `json:"sourceIdentity"`
-	Caller           *callercontext.Caller      `json:"caller,omitempty"`
-	Policy           policyexceptions.PolicyRef `json:"policy"`
-	Role             string                     `json:"role"`
-	Table            string                     `json:"table"`
-	Rows             string                     `json:"rows"`
-	Fields           []string                   `json:"fields"`
-	AppliedFields    []string                   `json:"appliedFields,omitempty"`
-	Reason           string                     `json:"reason"`
-	DurationSeconds  int64                      `json:"durationSeconds"`
-	ProposedAt       time.Time                  `json:"proposedAt"`
-	PendingExpiresAt time.Time                  `json:"pendingExpiresAt"`
-	DecidedAt        *time.Time                 `json:"decidedAt,omitempty"`
-	ExpiresAt        *time.Time                 `json:"expiresAt,omitempty"`
-	Next             map[string]string          `json:"next,omitempty"`
-	Note             string                     `json:"note"`
+	ID               string                           `json:"id"`
+	Kind             string                           `json:"kind"`
+	State            policyexceptions.State           `json:"state"`
+	ProjectID        string                           `json:"projectId"`
+	Env              string                           `json:"env"`
+	Source           string                           `json:"source"`
+	SourceIdentity   string                           `json:"sourceIdentity"`
+	Caller           *callercontext.Caller            `json:"caller,omitempty"`
+	Lifetime         string                           `json:"lifetime"`
+	Session          *policyexceptions.SessionBinding `json:"session,omitempty"`
+	Policy           policyexceptions.PolicyRef       `json:"policy"`
+	Role             string                           `json:"role"`
+	Table            string                           `json:"table"`
+	Rows             string                           `json:"rows"`
+	Fields           []string                         `json:"fields"`
+	AppliedFields    []string                         `json:"appliedFields,omitempty"`
+	Reason           string                           `json:"reason"`
+	DurationSeconds  int64                            `json:"durationSeconds"`
+	ProposedAt       time.Time                        `json:"proposedAt"`
+	PendingExpiresAt time.Time                        `json:"pendingExpiresAt"`
+	DecidedAt        *time.Time                       `json:"decidedAt,omitempty"`
+	ExpiresAt        *time.Time                       `json:"expiresAt,omitempty"`
+	Next             map[string]string                `json:"next,omitempty"`
+	Note             string                           `json:"note"`
 }
 
 func viewOf(e policyexceptions.Exception, now time.Time) exceptionView {
-	return exceptionView{ID: e.ID, Kind: e.Kind, State: e.Status(now), ProjectID: e.ProjectID, Env: e.Env, Source: e.Source, SourceIdentity: e.SourceIdentity, Caller: e.Caller, Policy: e.Policy, Role: e.Role, Table: e.Table,
+	return exceptionView{ID: e.ID, Kind: e.Kind, State: e.Status(now), ProjectID: e.ProjectID, Env: e.Env, Source: e.Source, SourceIdentity: e.SourceIdentity, Caller: e.Caller, Lifetime: lifetimeOf(e), Session: e.BoundSession, Policy: e.Policy, Role: e.Role, Table: e.Table,
 		Rows: "all rows of " + e.Table, Fields: e.Fields, AppliedFields: e.AppliedFields, Reason: e.Reason, DurationSeconds: e.DurationSeconds,
 		ProposedAt: e.ProposedAt, PendingExpiresAt: e.PendingExpiresAt, DecidedAt: e.DecidedAt, ExpiresAt: e.ExpiresAt, Note: policyexceptions.HonestLimit}
 }
@@ -328,7 +339,8 @@ func exceptionProposeCommand() *cobra.Command {
 	f.StringSlice("fields", nil, "Exact column names, comma-separated; no patterns (required)")
 	f.String("role", "", "Role the exception is for (required)")
 	f.String("policy", "", "Policy of the project the exception is added to, by metadata name or file name (default: the project's only policy)")
-	f.Duration("for", policyexceptions.DefaultDuration, "How long the exception lasts once applied (at most 8h)")
+	f.Duration("for", policyexceptions.DefaultDuration, "How long the exception lasts once applied (at most 8h); it also caps a session exception")
+	f.String("lifetime", "", "session (only the harness session that proposes it, self-reported; the default when a harness session is detected) or deadline (until --for runs out; the default otherwise)")
 	f.String("reason", "", "Why the access is needed (required)")
 	return cmd
 }
@@ -343,6 +355,10 @@ func exceptionProposeAction(cmd *cobra.Command, _ []string) error {
 	policyName, _ := f.GetString("policy")
 	duration, _ := f.GetDuration("for")
 	reason, _ := f.GetString("reason")
+	lifetime, _ := f.GetString("lifetime")
+	if lifetime != "" && lifetime != policyexceptions.LifetimeSession && lifetime != policyexceptions.LifetimeDeadline {
+		return Exit("--lifetime is session or deadline", exitCodeUsage)
+	}
 	for _, check := range []struct{ what, value string }{{"--source", source}, {"--table", table}, {"--role", role}} {
 		if err := policyexceptions.CheckName(check.what, check.value); err != nil {
 			return Exit(err.Error(), exitCodeUsage)
@@ -365,6 +381,21 @@ func exceptionProposeAction(cmd *cobra.Command, _ []string) error {
 	project, format, err := readExceptionCommon(cmd)
 	if err != nil {
 		return err
+	}
+	var bound *policyexceptions.SessionBinding
+	if caller := project.store.Caller; caller != nil && caller.Harness != "" && caller.Session != "" {
+		bound = &policyexceptions.SessionBinding{Harness: caller.Harness, Session: caller.Session}
+	}
+	switch {
+	case lifetime == "" && bound != nil:
+		lifetime = policyexceptions.LifetimeSession
+	case lifetime == "":
+		lifetime = policyexceptions.LifetimeDeadline
+	case lifetime == policyexceptions.LifetimeSession && bound == nil:
+		return Exit("no harness session detected; use --lifetime deadline", exitCodeUsage)
+	}
+	if lifetime == policyexceptions.LifetimeDeadline {
+		bound = nil
 	}
 	ctx := cmd.Context()
 	store := project.projStore
@@ -400,7 +431,7 @@ func exceptionProposeAction(cmd *cobra.Command, _ []string) error {
 		Policy: policyexceptions.PolicyRef{Name: policy.name, Path: policy.rel, SHA256: policyexceptions.Fingerprint(policy.data)},
 		Role:   role, Table: canonical, Fields: fields, Reason: reason, DurationSeconds: int64(duration / time.Second),
 		State: policyexceptions.StatePending, ProposedAt: now, PendingExpiresAt: now.Add(policyexceptions.PendingTTL),
-		Caller: project.store.Caller,
+		Caller: project.store.Caller, Lifetime: lifetime, BoundSession: bound,
 	}
 	if err = project.store.Propose(e); err != nil {
 		return err
@@ -468,9 +499,12 @@ func exceptionListCommand() *cobra.Command {
 				return err
 			}
 			state, _ := cmd.Flags().GetString("state")
-			all, err := project.store.List()
+			all, unreadable, err := project.store.List()
 			if err != nil {
 				return err
+			}
+			for _, name := range unreadable {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: local policy exception %s is unreadable and is not applied\n", name)
 			}
 			now := exceptionNow()
 			views := []exceptionView{}
@@ -510,6 +544,9 @@ func exceptionAuditCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if session, _ := cmd.Flags().GetString("session"); session != "" {
+				events = eventsOfSession(events, session)
+			}
 			if format == "json" {
 				return writeJSONLine(cmd.OutOrStdout(), map[string]any{"kind": policyexceptions.Kind, "events": events})
 			}
@@ -525,6 +562,7 @@ func exceptionAuditCommand() *cobra.Command {
 			return err
 		},
 	}
+	cmd.Flags().String("session", "", "Only events of this harness session: the session an exception was given to, or the session that used it")
 	addExceptionCommonFlags(cmd)
 	return cmd
 }
@@ -665,7 +703,7 @@ func exceptionRejectCommand() *cobra.Command {
 					return err
 				}
 			}
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Rejecting exception %s: role %s on %s.%s, fields %s\n  %s\n", e.ID, e.Role, e.Source, e.Table, strings.Join(e.Fields, ", "), e.ProposedBy())
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Rejecting exception %s: role %s on %s.%s, fields %s\n  %s\n  %s\n", e.ID, e.Role, e.Source, e.Table, strings.Join(e.Fields, ", "), e.LifetimeLine(nil), e.ProposedBy())
 			err := project.store.Commit(e.ID, raw, func(current *policyexceptions.Exception) (policyexceptions.Event, error) {
 				at := exceptionNow().UTC()
 				current.State, current.DecidedAt, current.DecisionReason = policyexceptions.StateRejected, &at, reason
@@ -699,4 +737,52 @@ func exceptionRevokeCommand() *cobra.Command {
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Revoked exception %s: its rule no longer applies.\n", e.ID)
 			return err
 		})
+}
+
+// eventsOfSession keeps the events about one harness session: the session an
+// exception was bound to, or the session of the process that wrote it.
+func eventsOfSession(events []policyexceptions.Event, session string) []policyexceptions.Event {
+	kept := []policyexceptions.Event{}
+	for _, e := range events {
+		if (e.BoundSession != nil && e.BoundSession.Session == session) || (e.Caller != nil && e.Caller.Session == session) {
+			kept = append(kept, e)
+		}
+	}
+	return kept
+}
+
+// exceptionEndSessionCommand ends the session exceptions of one harness
+// session. It only narrows access, so it needs no terminal: the person, or a
+// harness's session-end hook, may run it.
+func exceptionEndSessionCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:          "end-session",
+		Short:        "End the session exceptions of one harness session (narrows access only; no terminal needed)",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			project, format, err := readExceptionCommon(cmd)
+			if err != nil {
+				return err
+			}
+			harness, _ := cmd.Flags().GetString("harness")
+			session, _ := cmd.Flags().GetString("session")
+			if harness == "" || session == "" {
+				return Exit("--harness and --session are required", exitCodeUsage)
+			}
+			ended, err := project.store.EndSession(policyexceptions.SessionBinding{Harness: harness, Session: session}, exceptionNow())
+			if err != nil {
+				return err
+			}
+			if format == "json" {
+				return writeJSONLine(cmd.OutOrStdout(), map[string]any{"kind": policyexceptions.Kind, "ended": ended})
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Ended %d session exception(s) of %s.\n", len(ended), policyexceptions.SessionBinding{Harness: harness, Session: session}.Short())
+			return err
+		},
+	}
+	addExceptionCommonFlags(cmd)
+	cmd.Flags().String("harness", "", "Harness of the session (required)")
+	cmd.Flags().String("session", "", "Session id (required)")
+	return cmd
 }

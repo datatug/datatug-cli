@@ -47,6 +47,9 @@ func demoForTest(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	// The harness the tests run under is not a caller of these commands.
+	restoreVar(t, &callerLookup)
+	callerLookup = func(string) (string, bool) { return "", false }
 	require.NoError(t, os.MkdirAll(filepath.Join(home, ".datatug", "policies"), 0o700), "an empty ~/.datatug/policies")
 	stdout, stderr, code := runCLI(t, "", "demo", "install", "--format", "json")
 	require.Equal(t, 0, code, stderr)
@@ -364,7 +367,28 @@ func TestPerimeterFailClosed(t *testing.T) {
 	assert.Contains(t, stderr, "cannot be written to the audit log")
 	require.NoError(t, os.Chmod(filepath.Join(storeDir, policyexceptions.AuditFile), 0o600))
 
+	// An unreadable file contributes nothing; the readable exceptions still apply.
 	require.NoError(t, os.WriteFile(filepath.Join(storeDir, "ffffffffffffffff.json"), []byte("{"), 0o600))
+	_, stderr, code = readAs(t, "", "--source", "chinook", "--from", "Employee")
+	assert.Equal(t, 0, code, stderr)
+	assert.Contains(t, stderr, "warning: local policy exception ffffffffffffffff.json is unreadable and is not applied")
+
+	// A tampered exception file (a field the store does not know, as an
+	// older or hand-edited one has) grants nothing.
+	tampered := propose(t, "--source", "chinook", "--role", "agent", "--table", "Track", "--fields", "TrackId,Name")
+	_, stderr, code = runCLI(t, "Track\n", "policy", "exception", "apply", tampered.ID, "--project", "datatug-demo")
+	require.Equal(t, 0, code, stderr)
+	path := filepath.Join(storeDir, tampered.ID+".json")
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, []byte(strings.Replace(string(data), "{", `{"scopeHash":"x",`, 1)), 0o600))
+	_, stderr, code = readAs(t, "", "--source", "chinook", "--from", "Track")
+	assert.Equal(t, exitCodeAccessDenied, code)
+	assert.Contains(t, stderr, tampered.ID+".json is unreadable")
+
+	// The store folder cannot be listed: no exception applies.
+	require.NoError(t, os.Chmod(storeDir, 0o300))
+	t.Cleanup(func() { _ = os.Chmod(storeDir, 0o700) })
 	_, stderr, code = readAs(t, "", "--source", "chinook", "--from", "Employee")
 	assert.Equal(t, exitCodeAccessDenied, code)
 	assert.Contains(t, stderr, "warning: local policy exceptions are not applied")

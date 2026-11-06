@@ -104,7 +104,7 @@ func (s *resultSink) discardUnlessWritten() {
 }
 
 // describeAdHoc records the database and the query of an ad-hoc run.
-func (s *resultSink) describeAdHoc(ctx context.Context, o queryOptions, backend dbcopy.BackendRef, db dal.DB, queryText string, variables map[string]any) {
+func (s *resultSink) describeAdHoc(ctx context.Context, o queryOptions, backend dbcopy.BackendRef, db dal.DB, queryText string, variables map[string]any, project *projectRead) {
 	sources := tugqlSources{
 		open: func(context.Context, string) (dal.DB, string, func(), error) {
 			return db, backend.Scheme, func() {}, nil
@@ -112,6 +112,9 @@ func (s *resultSink) describeAdHoc(ctx context.Context, o queryOptions, backend 
 	}
 	if ref, ok := fullDatatugRef(ctx, o.db); ok {
 		sources.scanned = scannedColumns(projectDirOfRef(o.db), ref.Env, ref.DB)
+	}
+	if project != nil {
+		sources.scanned = scannedColumns(project.projectDir, project.env, project.source)
 	}
 	s.describe = func(columns []string) resultDescription {
 		return describeTugQL(ctx, queryText, columns, sources)
@@ -121,6 +124,11 @@ func (s *resultSink) describeAdHoc(ctx context.Context, o queryOptions, backend 
 		s.meta.DB = projectDB(ref, backend.Scheme)
 	}
 	s.meta.Query = queryresults.Query{Kind: queryresults.QueryKindTugQL, TugQL: queryText, Parameters: typedParameters(variables), Policy: adHocPolicy(o)}
+	if project != nil {
+		// A project read: the project's own source and policies.
+		s.meta.DB = projectDB(dbcopy.DatatugRef{Project: project.projectID, Env: project.env, DB: project.source}, backend.Scheme)
+		s.meta.Query.Policy = queryresults.PolicyProject
+	}
 	if o.from != "" {
 		s.meta.Query.Kind, s.meta.Query.From = queryresults.QueryKindFrom, o.from
 	}

@@ -177,8 +177,13 @@ func TestPolicyExceptionCommandEdges(t *testing.T) {
 	_, stderr, code = runCLI(t, "", "policy", "exception", "status", "ffffffffffffffff", "--project", "datatug-demo")
 	assert.Equal(t, 1, code)
 	assert.Contains(t, stderr, "unreadable")
+	_, stderr, code = runCLI(t, "", "policy", "exception", "list", "--project", "datatug-demo")
+	assert.Equal(t, 0, code)
+	assert.Contains(t, stderr, "ffffffffffffffff.json is unreadable")
+	require.NoError(t, os.Chmod(storeDir, 0o300))
 	_, _, code = runCLI(t, "", "policy", "exception", "list", "--project", "datatug-demo")
 	assert.Equal(t, 1, code)
+	require.NoError(t, os.Chmod(storeDir, 0o700))
 	require.NoError(t, os.Remove(filepath.Join(storeDir, "ffffffffffffffff.json")))
 	audit := filepath.Join(storeDir, "audit.jsonl")
 	good, _ := os.ReadFile(audit)
@@ -742,4 +747,134 @@ func TestPerimeterCallerAttribution(t *testing.T) {
 	assert.Nil(t, byEvent["applied"], "the person's terminal reported no harness")
 	require.NotNil(t, byEvent["used"], "the agent's read is attributed")
 	assert.Equal(t, "claude-code", byEvent["used"].Harness)
+}
+
+const testSession = "0f88afc6-1234-4abc-9def-0123456789ab"
+
+func inSession(t *testing.T, session string) {
+	t.Helper()
+	withCaller(t, map[string]string{"CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": session, "AI_AGENT": "claude-code_2-1-317_agent"})
+}
+
+// A session exception applies only to the harness session that proposed it.
+func TestSessionExceptions(t *testing.T) {
+	demoForTest(t)
+	asPerson(t)
+	inSession(t, testSession)
+	view := propose(t, "--source", "chinook", "--role", "agent", "--table", "Employee", "--fields", "EmployeeId,Title")
+	assert.Equal(t, policyexceptions.LifetimeSession, view.Lifetime, "the default with a detected session")
+	assert.Equal(t, &policyexceptions.SessionBinding{Harness: "claude-code", Session: testSession}, view.Session)
+
+	withCaller(t, nil)
+	stdout, stderr, code := runCLI(t, "Employee\n", "policy", "exception", "apply", view.ID, "--project", "datatug-demo")
+	require.Equal(t, 0, code, stderr)
+	assert.Contains(t, stdout, "Lifetime: this session only (claude-code session 0f88afc6…, self-reported), at most until ")
+
+	inSession(t, testSession)
+	_, stderr, code = readAs(t, "", "--source", "chinook", "--from", "Employee")
+	assert.Equal(t, 0, code, stderr)
+	inSession(t, "another-session")
+	_, _, code = readAs(t, "", "--source", "chinook", "--from", "Employee")
+	assert.Equal(t, exitCodeAccessDenied, code, "another session")
+	withCaller(t, nil)
+	_, _, code = readAs(t, "", "--source", "chinook", "--from", "Employee")
+	assert.Equal(t, exitCodeAccessDenied, code, "no session")
+	withCaller(t, map[string]string{"DATATUG_CALLER_HARNESS": "codex", "DATATUG_CALLER_SESSION": testSession})
+	_, _, code = readAs(t, "", "--source", "chinook", "--from", "Employee")
+	assert.Equal(t, exitCodeAccessDenied, code, "another harness")
+
+	// The audit alone says which session got the permission and used it.
+	auditOut, _, code := runCLI(t, "", "policy", "exception", "audit", "--project", "datatug-demo", "--format", "json", "--session", testSession)
+	require.Equal(t, 0, code)
+	var audit struct {
+		Events []policyexceptions.Event `json:"events"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(auditOut), &audit))
+	kinds := []string{}
+	for _, e := range audit.Events {
+		kinds = append(kinds, e.Event)
+		assert.Equal(t, policyexceptions.LifetimeSession, e.Lifetime)
+		require.NotNil(t, e.BoundSession)
+		assert.Equal(t, testSession, e.BoundSession.Session)
+	}
+	assert.Equal(t, []string{"proposed", "applied", "used"}, kinds)
+	used := audit.Events[2]
+	assert.Equal(t, view.ID, used.ID)
+	assert.Equal(t, testSession, used.Caller.Session)
+	none, _, _ := runCLI(t, "", "policy", "exception", "audit", "--project", "datatug-demo", "--format", "json", "--session", "nobody")
+	assert.Contains(t, none, `"events":[]`)
+
+	// end-session narrows without a terminal.
+	withCaller(t, nil)
+	restoreVar(t, &exceptionStdinIsTerminal)
+	exceptionStdinIsTerminal = func(io.Reader) bool { return false }
+	_, _, code = runCLI(t, "", "policy", "exception", "end-session", "--project", "datatug-demo", "--harness", "claude-code")
+	assert.Equal(t, exitCodeUsage, code)
+	stdout, stderr, code = runCLI(t, "", "policy", "exception", "end-session", "--project", "datatug-demo", "--harness", "claude-code", "--session", testSession, "--format", "json")
+	require.Equal(t, 0, code, stderr)
+	assert.Equal(t, `{"ended":["`+view.ID+`"],"kind":"local-exception"}`+"\n", stdout)
+	stdout, _, code = runCLI(t, "", "policy", "exception", "end-session", "--project", "datatug-demo", "--harness", "claude-code", "--session", testSession)
+	require.Equal(t, 0, code)
+	assert.Contains(t, stdout, "Ended 0 session exception(s) of claude-code session 0f88afc6…")
+	inSession(t, testSession)
+	_, _, code = readAs(t, "", "--source", "chinook", "--from", "Employee")
+	assert.Equal(t, exitCodeAccessDenied, code, "an ended session exception grants nothing")
+	statusOut, _, _ := runCLI(t, "", "policy", "exception", "status", view.ID, "--project", "datatug-demo", "--format", "json")
+	assert.Contains(t, statusOut, `"state":"ended"`)
+	_, _, code = runCLI(t, "", "policy", "exception", "end-session", "--project", "nope", "--harness", "claude-code", "--session", testSession)
+	assert.Equal(t, exitCodeUsage, code)
+	require.NoError(t, os.Chmod(filepath.Join(os.Getenv("HOME"), "datatug", "datatug-demo", ".datatug", "policy-exceptions"), 0o300))
+	t.Cleanup(func() {
+		_ = os.Chmod(filepath.Join(os.Getenv("HOME"), "datatug", "datatug-demo", ".datatug", "policy-exceptions"), 0o700)
+	})
+	_, _, code = runCLI(t, "", "policy", "exception", "end-session", "--project", "datatug-demo", "--harness", "claude-code", "--session", testSession)
+	assert.Equal(t, 1, code)
+}
+
+func TestSessionLifetimeSelection(t *testing.T) {
+	demoForTest(t)
+	asPerson(t)
+	base := []string{"policy", "exception", "propose", "--project", "datatug-demo", "--source", "chinook", "--role", "agent", "--table", "Employee", "--fields", "Title", "--reason", "why"}
+	_, stderr, code := runCLI(t, "", append(base, "--lifetime", "session")...)
+	assert.Equal(t, exitCodeUsage, code)
+	assert.Contains(t, stderr, "no harness session detected; use --lifetime deadline")
+	_, stderr, code = runCLI(t, "", append(base, "--lifetime", "forever")...)
+	assert.Equal(t, exitCodeUsage, code)
+	assert.Contains(t, stderr, "--lifetime is session or deadline")
+	deadline := propose(t, "--source", "chinook", "--role", "agent", "--table", "Employee", "--fields", "Title")
+	assert.Equal(t, policyexceptions.LifetimeDeadline, deadline.Lifetime)
+	assert.Nil(t, deadline.Session)
+	inSession(t, testSession)
+	explicit := propose(t, "--source", "chinook", "--role", "agent", "--table", "Track", "--fields", "Name", "--lifetime", "deadline")
+	assert.Equal(t, policyexceptions.LifetimeDeadline, explicit.Lifetime)
+	assert.Nil(t, explicit.Session)
+	assert.NotNil(t, explicit.Caller, "the proposer is still recorded")
+	session := propose(t, "--source", "chinook", "--role", "agent", "--table", "Album", "--fields", "Title", "--lifetime", "session")
+	stdout, _, code := runCLI(t, "", "policy", "exception", "reject", session.ID, "--project", "datatug-demo")
+	require.Equal(t, 0, code)
+	assert.Contains(t, stdout, "Lifetime: this session only (claude-code session 0f88afc6…, self-reported), at most 15m0s once applied")
+	stdout, _, _ = runCLI(t, "", "policy", "exception", "list", "--project", "datatug-demo", "--format", "json")
+	assert.Contains(t, stdout, `"lifetime":"deadline"`)
+	assert.Contains(t, stdout, `"lifetime":"session","session":{"harness":"claude-code","session":"`+testSession+`"}`)
+}
+
+// The result card of a project read records the project source and policies.
+func TestProjectReadResultCardMetadata(t *testing.T) {
+	home := filepath.Dir(filepath.Dir(demoForTest(t)))
+	_, stderr, code := runCLI(t, "", "query", "run", "--project", "datatug-demo", "--source", "chinook", "--from", "Customer",
+		"--as", "agent", "--role", "agent", "--limit", "2", "--format", "json", "--result-id", "card-meta")
+	require.Equal(t, 0, code, stderr)
+	assert.Contains(t, stderr, "masked: Customer.Email (pii)")
+	meta := ""
+	require.NoError(t, filepath.WalkDir(home, func(path string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.Contains(path, "card-meta") && strings.HasSuffix(path, "meta.json") {
+			data, _ := os.ReadFile(path)
+			meta = string(data)
+		}
+		return nil
+	}))
+	require.NotEmpty(t, meta)
+	assert.Contains(t, meta, `"policy":"project"`)
+	assert.Contains(t, meta, `"project":"datatug-demo"`)
+	assert.Contains(t, meta, `"source":"chinook"`)
 }

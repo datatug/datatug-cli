@@ -92,17 +92,22 @@ func errNoProjectPolicies() error {
 // be read contributes nothing (with a warning), so it never widens a read.
 func (r *projectRead) loadPolicies(stderr io.Writer) ([]accesspolicies.Loaded, error) {
 	r.now = projectReadNow()
-	all, err := r.exceptions.List()
+	all, unreadable, err := r.exceptions.List()
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "warning: local policy exceptions are not applied: %v\n", err)
-		all = nil
-	} else {
-		r.exceptions.RecordExpiries(all, r.now)
+	}
+	for _, name := range unreadable {
+		_, _ = fmt.Fprintf(stderr, "warning: local policy exception %s is unreadable and is not applied\n", name)
+	}
+	r.exceptions.RecordExpiries(all, r.now)
+	var reader policyexceptions.SessionBinding
+	if caller := r.exceptions.Caller; caller != nil {
+		reader = policyexceptions.SessionBinding{Harness: caller.Harness, Session: caller.Session}
 	}
 	r.applied = map[string]policyexceptions.Exception{}
 	overlay := func(path string, data []byte, codec access.Codec) ([]byte, error) {
 		rel, _ := filepath.Rel(r.projectDir, path) // both are paths of the project folder
-		binding := policyexceptions.Binding{ProjectID: r.projectID, Env: r.env, Source: r.source, SourceIdentity: policyexceptions.SourceFingerprint(r.sourceURL), PolicyPath: filepath.ToSlash(rel)}
+		binding := policyexceptions.Binding{ProjectID: r.projectID, Env: r.env, Source: r.source, SourceIdentity: policyexceptions.SourceFingerprint(r.sourceURL), PolicyPath: filepath.ToSlash(rel), Reader: reader}
 		out, ids, err := policyexceptions.Overlay(data, codec, binding, all, r.now)
 		for _, id := range ids {
 			for _, e := range all {

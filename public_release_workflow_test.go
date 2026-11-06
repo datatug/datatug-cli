@@ -88,7 +88,7 @@ func TestPublicReleasePublisherUsesExactRepositoryAppToken(t *testing.T) {
 func TestDependencyReleaseClassifierAndGateWiring(t *testing.T) {
 	workflow := readWorkflow(t, "release.yml")
 	classifier := workflow.Jobs["dependency-release"]
-	if classifier.Timeout != 2 || !reflect.DeepEqual(classifier.Permissions, map[string]string{"contents": "read"}) || len(classifier.Secrets) != 0 {
+	if classifier.Timeout != 2 || !reflect.DeepEqual(classifier.Permissions, map[string]string{"contents": "read"}) || classifier.Secrets != nil {
 		t.Fatal("classifier must be bounded, read-only and carry no secrets")
 	}
 	if len(classifier.Steps) != 2 || classifier.Steps[0].Uses != "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" || !strings.Contains(classifier.Steps[1].Run, `python3 scripts/release-dependency-bump.py < "$GITHUB_EVENT_PATH"`) {

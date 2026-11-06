@@ -23,13 +23,13 @@
 <table>
   <tr>
     <td valign="top">
-      <a href="https://youtu.be/Dkq1uoMZa5E"><img src="https://datatug.app/static/illustrations/datatug-in-30-poster-1280.webp" alt="DataTug in 30 seconds: every database, one workspace (0:30)" width="420"></a><br>
-      ▶ <b><a href="https://youtu.be/Dkq1uoMZa5E">Watch DataTug in 30 seconds (0:30)</a></b><br>
-      Sources, browsing, column meanings, the suggested join, cards and Perimeter. Longer: the <a href="https://youtu.be/tjOzdzB_PGA">intro (1:01)</a>.
+      <a href="https://youtu.be/P8c-uw29XyE"><img src="https://datatug.app/static/illustrations/datatug-in-30-poster-1280.webp" alt="DataTug in 30 seconds: every database, one workspace (0:30)" width="420"></a><br>
+      ▶ <b><a href="https://youtu.be/P8c-uw29XyE">Watch DataTug in 30 seconds (0:30)</a></b><br>
+      Sources, browsing, column meanings, the suggested join, cards and Perimeter. Longer: the <a href="https://youtu.be/8-KHMVIe1S0">intro (1:01)</a>.
     </td>
     <td valign="top">
-      <a href="https://youtu.be/_mla67RoPWY"><img src="https://datatug.app/static/illustrations/explainer-sales-per-capita-poster-1280.webp" alt="Where are we underselling? Sales per capita across three sources (1:30)" width="420"></a><br>
-      ▶ <b><a href="https://youtu.be/_mla67RoPWY">Where are we underselling? (1:30)</a></b><br>
+      <a href="https://youtu.be/ENjhplq2SQ0"><img src="https://datatug.app/static/illustrations/explainer-sales-per-capita-poster-1280.webp" alt="Where are we underselling? Sales per capita across three sources (1:30)" width="420"></a><br>
+      ▶ <b><a href="https://youtu.be/ENjhplq2SQ0">Where are we underselling? (1:30)</a></b><br>
       The sales-per-capita query in this explainer runs with the DataTug CLI.
     </td>
   </tr>
@@ -288,7 +288,7 @@ curl -fsSL https://datatug.app/run-cli | sh -s -- ui --deep-link <address>
 brew install --cask datatug/tap/datatug
 ```
 
-Homebrew gets a release only when the maintainers promote it, so it can be behind the direct installers (curl and PowerShell, which always take the latest release). `brew list --cask --versions datatug` shows the version installed.
+Every release updates the Homebrew cask a few minutes after it is published, so Homebrew carries the same version as the direct installers (curl and PowerShell). `brew list --cask --versions datatug` shows the version installed.
 
 The direct installers and Homebrew package do not require Go. See the full
 [installation guide](https://datatug.io/install/) or the official

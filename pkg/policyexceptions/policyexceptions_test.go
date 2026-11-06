@@ -210,3 +210,53 @@ type failingEncodeCodec struct{ access.YAMLCodec }
 func (failingEncodeCodec) Encode(io.Writer, access.Document) error {
 	return errors.New("cannot encode")
 }
+
+func TestSessionExceptionsApplyOnlyToTheirSession(t *testing.T) {
+	data := []byte(principalPolicy)
+	e := applied("0123456789abcdef", t0.Add(time.Hour))
+	e.Lifetime = LifetimeSession
+	e.BoundSession = &SessionBinding{Harness: "claude-code", Session: "s-1"}
+	readers := map[string]struct {
+		reader SessionBinding
+		want   int
+	}{
+		"same session":  {SessionBinding{Harness: "claude-code", Session: "s-1"}, 1},
+		"other session": {SessionBinding{Harness: "claude-code", Session: "s-2"}, 0},
+		"no session":    {SessionBinding{}, 0},
+		"other harness": {SessionBinding{Harness: "codex", Session: "s-1"}, 0},
+	}
+	for name, c := range readers {
+		t.Run(name, func(t *testing.T) {
+			binding := demoBinding
+			binding.Reader = c.reader
+			_, ids, err := Overlay(data, access.YAMLCodec{}, binding, []Exception{e}, t0)
+			require.NoError(t, err)
+			assert.Len(t, ids, c.want)
+		})
+	}
+	unbound := e
+	unbound.BoundSession = nil
+	binding := demoBinding
+	_, ids, _ := Overlay(data, access.YAMLCodec{}, binding, []Exception{unbound}, t0)
+	assert.Empty(t, ids, "a session exception without a session applies to nobody")
+	_, ids, _ = Overlay(data, access.YAMLCodec{}, binding, []Exception{applied("0123456789abcdef", t0.Add(time.Hour))}, t0)
+	assert.Len(t, ids, 1, "a deadline exception ignores the reader's session")
+	binding.Reader = SessionBinding{Harness: "claude-code", Session: "s-1"}
+	_, ids, _ = Overlay(data, access.YAMLCodec{}, binding, []Exception{e}, t0.Add(2*time.Hour))
+	assert.Empty(t, ids, "the deadline still caps a session exception")
+}
+
+func TestLifetimeLine(t *testing.T) {
+	until := t0.Add(15 * time.Minute)
+	e := applied("0123456789abcdef", until)
+	assert.Equal(t, "Lifetime: until 2026-11-06T12:15:00Z", e.LifetimeLine(&until))
+	assert.Equal(t, "Lifetime: at most 15m0s once applied", e.LifetimeLine(nil))
+	e.Lifetime = LifetimeSession
+	e.BoundSession = &SessionBinding{Harness: "claude-code", Session: "0f88afc6-1234"}
+	assert.Equal(t, "Lifetime: this session only (claude-code session 0f88afc6…, self-reported), at most until 2026-11-06T12:15:00Z", e.LifetimeLine(&until))
+	assert.Equal(t, "Lifetime: this session only (claude-code session 0f88afc6…, self-reported), at most 15m0s once applied", e.LifetimeLine(nil))
+	e.BoundSession = nil
+	assert.Contains(t, e.LifetimeLine(nil), "(no session, self-reported)")
+	assert.Equal(t, "codex session short", SessionBinding{Harness: "codex", Session: "short"}.Short())
+	assert.Contains(t, Scope(e, e.Fields, until), "Lifetime: this session only")
+}

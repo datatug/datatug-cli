@@ -28,7 +28,7 @@ func restore[T any](t *testing.T, target *T) {
 
 func TestStoreJourney(t *testing.T) {
 	s := Store{ProjectDir: t.TempDir()}
-	list, err := s.List()
+	list, _, err := s.List()
 	require.NoError(t, err)
 	assert.Empty(t, list)
 	events, err := s.Audit()
@@ -42,7 +42,7 @@ func TestStoreJourney(t *testing.T) {
 	assert.ErrorContains(t, s.Propose(first), "taken")
 	require.NoError(t, os.Mkdir(filepath.Join(s.dir(), "sub"), 0o700))
 
-	list, err = s.List()
+	list, _, err = s.List()
 	require.NoError(t, err)
 	require.Len(t, list, 2)
 	assert.Equal(t, first.ID, list[0].ID)
@@ -60,10 +60,10 @@ func TestStoreJourney(t *testing.T) {
 	assert.EqualError(t, s.Commit(first.ID, mustRaw(t, s, first.ID), func(*Exception) (Event, error) { return Event{}, errors.New("refused") }), "refused")
 
 	require.NoError(t, s.Record(NewEvent("used", got, got.Fields, t0)))
-	all, _ := s.List()
+	all, _, _ := s.List()
 	s.RecordExpiries(all, t0.Add(time.Hour))
 	s.RecordExpiries(all, t0.Add(time.Hour)) // a stale list: Get still works, nothing new is recorded twice
-	after, _ := s.List()
+	after, _, _ := s.List()
 	for _, e := range after {
 		assert.True(t, e.ExpiryRecorded, e.ID)
 	}
@@ -102,8 +102,10 @@ func TestStoreGetFailures(t *testing.T) {
 		_, _, err = s.Get(id)
 		assert.ErrorContains(t, err, "unreadable", id)
 	}
-	_, err = s.List()
-	assert.ErrorContains(t, err, "unreadable")
+	listed, unreadable, err := s.List()
+	require.NoError(t, err)
+	assert.Empty(t, listed, "an unreadable file contributes nothing")
+	assert.Len(t, unreadable, 3)
 	restore(t, &readFile)
 	readFile = func(string) ([]byte, error) { return nil, errors.New("disk") }
 	_, _, err = s.Get("0000000000000001")
@@ -115,7 +117,7 @@ func TestStoreGetFailures(t *testing.T) {
 func TestStoreListReadDirFailure(t *testing.T) {
 	restore(t, &readDir)
 	readDir = func(string) ([]os.DirEntry, error) { return nil, errors.New("denied") }
-	_, err := Store{ProjectDir: t.TempDir()}.List()
+	_, _, err := Store{ProjectDir: t.TempDir()}.List()
 	assert.ErrorContains(t, err, "denied")
 }
 
@@ -211,6 +213,9 @@ func TestStoreCommitFailures(t *testing.T) {
 		rename = func(string, string) error { return errors.New("cross-device") }
 		assert.ErrorContains(t, s.Commit("0000000000000001", raw, change), "cross-device")
 		assert.Equal(t, raw, mustRaw(t, s, "0000000000000001"))
+		events, err := s.Audit()
+		require.NoError(t, err)
+		assert.Equal(t, "rejected-failed", events[len(events)-1].Event, "the log says the decision did not take effect")
 	})
 }
 
@@ -265,4 +270,53 @@ func TestStoreStampsTheCaller(t *testing.T) {
 	assert.Equal(t, other, events[1].Caller)
 	assert.Contains(t, e.ProposedBy(), "claude-code")
 	assert.Equal(t, "Proposed by: not reported", pending("0000000000000002").ProposedBy())
+}
+
+func TestEndSession(t *testing.T) {
+	s := Store{ProjectDir: t.TempDir()}
+	bound := SessionBinding{Harness: "claude-code", Session: "s-1"}
+	mk := func(id string, lifetime string, binding *SessionBinding, state State) {
+		e := pending(id)
+		e.Lifetime, e.BoundSession = lifetime, binding
+		require.NoError(t, s.Propose(e))
+		if state != StatePending {
+			_, raw, _ := s.Get(id)
+			require.NoError(t, s.Commit(id, raw, func(c *Exception) (Event, error) {
+				c.State = state
+				expires := t0.Add(time.Hour)
+				c.ExpiresAt = &expires
+				return NewEvent(string(state), *c, nil, t0), nil
+			}))
+		}
+	}
+	other := SessionBinding{Harness: "claude-code", Session: "s-2"}
+	mk("0000000000000001", LifetimeSession, &bound, StatePending)
+	mk("0000000000000002", LifetimeSession, &bound, StateApplied)
+	mk("0000000000000003", LifetimeSession, &other, StateApplied)
+	mk("0000000000000004", LifetimeDeadline, nil, StateApplied)
+	mk("0000000000000005", LifetimeSession, &bound, StateRejected)
+	ended, err := s.EndSession(bound, t0)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"0000000000000001", "0000000000000002"}, ended)
+	got, _, _ := s.Get("0000000000000002")
+	assert.Equal(t, StateEnded, got.Status(t0))
+	assert.False(t, got.Active(t0))
+	again, err := s.EndSession(bound, t0)
+	require.NoError(t, err)
+	assert.Empty(t, again)
+
+	mk("0000000000000006", LifetimeSession, &bound, StatePending)
+	restore(t, &rename)
+	rename = func(string, string) error { return errors.New("cross-device") }
+	_, err = s.EndSession(bound, t0)
+	assert.ErrorContains(t, err, "cross-device")
+	rename = os.Rename
+	restore(t, &tryLock)
+	tryLock = func(context.Context, *flock.Flock) (bool, error) { return false, nil }
+	_, err = s.EndSession(bound, t0)
+	assert.ErrorContains(t, err, "locked")
+	restore(t, &readDir)
+	readDir = func(string) ([]os.DirEntry, error) { return nil, errors.New("denied") }
+	_, err = s.EndSession(bound, t0)
+	assert.ErrorContains(t, err, "denied")
 }

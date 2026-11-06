@@ -58,7 +58,35 @@ const (
 	StateRejected State = "rejected"
 	StateRevoked  State = "revoked"
 	StateExpired  State = "expired"
+	// StateEnded is a session exception whose session was ended explicitly.
+	StateEnded State = "ended"
 )
+
+// Lifetimes of an exception.
+const (
+	// LifetimeSession limits an exception to the harness session that
+	// proposed it (and its deadline): only a reader reporting the same
+	// harness and session gets it. The session is self-reported, so this
+	// narrows who can use an exception; it does not authenticate anyone.
+	LifetimeSession = "session"
+	// LifetimeDeadline limits an exception to its deadline only.
+	LifetimeDeadline = "deadline"
+)
+
+// SessionBinding is the harness session a session exception is bound to.
+type SessionBinding struct {
+	Harness string `json:"harness"`
+	Session string `json:"session"`
+}
+
+// Short is the binding as screens show it: "claude-code session 0f88afc6…".
+func (s SessionBinding) Short() string {
+	session := s.Session
+	if len(session) > 8 {
+		session = session[:8] + "…"
+	}
+	return s.Harness + " session " + session
+}
 
 // PolicyRef binds an exception to one policy document of the project.
 type PolicyRef struct {
@@ -95,6 +123,34 @@ type Exception struct {
 	// Caller is the self-reported harness the proposal came from:
 	// attribution only, never authority.
 	Caller *callercontext.Caller `json:"caller,omitempty"`
+	// Lifetime is session or deadline; an exception stored before lifetimes
+	// existed is a deadline one.
+	Lifetime string `json:"lifetime,omitempty"`
+	// BoundSession is the harness session a session exception applies to.
+	BoundSession *SessionBinding `json:"session,omitempty"`
+}
+
+// IsSession reports whether the exception is bound to a harness session.
+func (e Exception) IsSession() bool { return e.Lifetime == LifetimeSession }
+
+// LifetimeLine is the one line the apply and reject screens show about how
+// long the exception lasts; until is the deadline when it is known.
+func (e Exception) LifetimeLine(until *time.Time) string {
+	deadline := "at most " + e.Duration().String() + " once applied"
+	if until != nil {
+		deadline = "until " + until.UTC().Format(time.RFC3339)
+	}
+	if !e.IsSession() {
+		return "Lifetime: " + deadline
+	}
+	binding := "no session"
+	if e.BoundSession != nil {
+		binding = e.BoundSession.Short()
+	}
+	if until != nil {
+		deadline = "at most " + deadline
+	}
+	return "Lifetime: this session only (" + binding + ", self-reported), " + deadline
 }
 
 // ProposedBy is the one line the apply and reject screens show about who
@@ -197,6 +253,7 @@ func Scope(e Exception, fields []string, expires time.Time) string {
 	fmt.Fprintf(&b, "  Table:    %s (all rows of %s)\n", e.Table, e.Table)
 	fmt.Fprintf(&b, "  Fields:   %s\n", strings.Join(fields, ", "))
 	fmt.Fprintf(&b, "  Duration: %s, until %s\n", e.Duration(), expires.UTC().Format(time.RFC3339))
+	fmt.Fprintf(&b, "  %s\n", e.LifetimeLine(&expires))
 	fmt.Fprintf(&b, "  Reason:   %s\n", e.Reason)
 	fmt.Fprintf(&b, "  %s\n", e.ProposedBy())
 	b.WriteString(HonestLimit + "\n")
@@ -225,9 +282,15 @@ func Applicable(data []byte, codec access.Codec) error {
 // of the policy document being loaded.
 type Binding struct {
 	ProjectID, Env, Source, SourceIdentity, PolicyPath string
+	// Reader is the self-reported harness session of the reading process;
+	// a session exception applies only to exactly the session it is bound to.
+	Reader SessionBinding
 }
 
 func (b Binding) matches(e Exception) bool {
+	if e.IsSession() && (e.BoundSession == nil || e.BoundSession.Session == "" || *e.BoundSession != b.Reader) {
+		return false
+	}
 	return e.ProjectID == b.ProjectID && e.Env == b.Env && e.Source == b.Source && e.SourceIdentity == b.SourceIdentity && e.Policy.Path == b.PolicyPath
 }
 

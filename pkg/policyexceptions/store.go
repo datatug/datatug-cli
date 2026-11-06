@@ -46,14 +46,19 @@ type Event struct {
 	Fields    []string   `json:"fields,omitempty"`
 	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
 	Reason    string     `json:"reason,omitempty"`
+	// Lifetime and BoundSession are the exception's: which harness session,
+	// if any, the permission was given to.
+	Lifetime     string          `json:"lifetime,omitempty"`
+	BoundSession *SessionBinding `json:"session,omitempty"`
 	// Caller is the self-reported harness of the process that wrote the
-	// event (Store.Caller): attribution only.
+	// event (Store.Caller): attribution only. On a used event it is the
+	// session that read under the exception.
 	Caller *callercontext.Caller `json:"caller,omitempty"`
 }
 
 // NewEvent is an event about e at at.
 func NewEvent(kind string, e Exception, fields []string, at time.Time) Event {
-	return Event{At: at.UTC(), Kind: Kind, Event: kind, ID: e.ID, ProjectID: e.ProjectID, Env: e.Env, Source: e.Source, Policy: e.Policy.Path, Role: e.Role, Table: e.Table, Fields: fields, ExpiresAt: e.ExpiresAt}
+	return Event{At: at.UTC(), Kind: Kind, Event: kind, ID: e.ID, ProjectID: e.ProjectID, Env: e.Env, Source: e.Source, Policy: e.Policy.Path, Role: e.Role, Table: e.Table, Fields: fields, ExpiresAt: e.ExpiresAt, Lifetime: e.Lifetime, BoundSession: e.BoundSession}
 }
 
 // Seams over the file system, for failure tests.
@@ -164,17 +169,17 @@ func decode(raw []byte) (Exception, error) {
 	return e, nil
 }
 
-// List reads every exception, sorted by proposal time. One unreadable file
-// fails the whole list: a caller applying exceptions then applies none.
-func (s Store) List() ([]Exception, error) {
+// List reads every exception, sorted by proposal time, and names the files
+// it could not read: an unreadable file contributes nothing, and the others
+// still count. Only a store folder that cannot be listed is an error.
+func (s Store) List() (exceptions []Exception, unreadable []string, err error) {
 	entries, err := readDir(s.dir())
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("policy exceptions: %w", err)
+		return nil, nil, fmt.Errorf("policy exceptions: %w", err)
 	}
-	var out []Exception
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasSuffix(name, ".json") {
@@ -182,12 +187,13 @@ func (s Store) List() ([]Exception, error) {
 		}
 		e, _, err := s.Get(strings.TrimSuffix(name, ".json"))
 		if err != nil {
-			return nil, fmt.Errorf("policy exceptions: %s is unreadable", name)
+			unreadable = append(unreadable, name)
+			continue
 		}
-		out = append(out, e)
+		exceptions = append(exceptions, e)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ProposedAt.Before(out[j].ProposedAt) })
-	return out, nil
+	sort.Slice(exceptions, func(i, j int) bool { return exceptions[i].ProposedAt.Before(exceptions[j].ProposedAt) })
+	return exceptions, unreadable, nil
 }
 
 // Commit changes one exception under the store's lock, only if its file still
@@ -219,7 +225,48 @@ func (s Store) commitLocked(id string, expected []byte, change func(*Exception) 
 	if err := s.appendAudit(event); err != nil {
 		return err
 	}
-	return s.write(current)
+	if err := s.write(current); err != nil {
+		// The event is already in the log: say it did not take effect.
+		failed := event
+		failed.Event = event.Event + "-failed"
+		_ = s.appendAudit(failed)
+		return err
+	}
+	return nil
+}
+
+// EndSession marks every pending or applied session exception bound to
+// exactly this harness session as ended, with one ended event each, under
+// the store's lock, and returns their ids. It only ever narrows access.
+func (s Store) EndSession(binding SessionBinding, now time.Time) ([]string, error) {
+	all, _, err := s.List()
+	if err != nil {
+		return nil, err
+	}
+	unlock, err := s.lock()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	ended := []string{}
+	for _, e := range all {
+		state := e.Status(now)
+		if !e.IsSession() || e.BoundSession == nil || *e.BoundSession != binding || (state != StatePending && state != StateApplied) {
+			continue
+		}
+		_, raw, err := s.Get(e.ID)
+		if err == nil {
+			err = s.commitLocked(e.ID, raw, func(current *Exception) (Event, error) {
+				current.State = StateEnded
+				return NewEvent("ended", *current, nil, now), nil
+			})
+		}
+		if err != nil {
+			return ended, err
+		}
+		ended = append(ended, e.ID)
+	}
+	return ended, nil
 }
 
 // Record appends one event to the audit log under the store's lock.

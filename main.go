@@ -164,6 +164,10 @@ var getCommand = func() (*cobra.Command, []fang.Option) {
 }
 
 func preserveErrorTextCase(w io.Writer, styles fang.Styles, err error) {
+	if commands.IsReported(err) {
+		// The command already wrote its refusal (one JSON object) to stderr.
+		return
+	}
 	styles.ErrorText = styles.ErrorText.UnsetTransform()
 	// Every error a command returns is printed here: redact it once, so a
 	// password inside a source URL never reaches the terminal whichever

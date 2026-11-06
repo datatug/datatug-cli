@@ -194,6 +194,13 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 // `render`/etc. already use for --project/-p, reused directly rather than
 // re-implemented here).
 func resolveQueryProject(project string) (projectDir string, projStore datatug.ProjectStore, err error) {
+	projectDir, _, projStore, err = resolveQueryProjectRef(project)
+	return projectDir, projStore, err
+}
+
+// resolveQueryProjectRef is resolveQueryProject that also returns the
+// project's ID.
+func resolveQueryProjectRef(project string) (projectDir, projectID string, projStore datatug.ProjectStore, err error) {
 	var v projectBaseCommand
 	if info, statErr := os.Stat(project); statErr == nil && info.IsDir() {
 		v.ProjectDir = project
@@ -202,19 +209,19 @@ func resolveQueryProject(project string) (projectDir string, projStore datatug.P
 	}
 	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
 		if errors.Is(err, ErrUnknownProjectName) {
-			return "", nil, fmt.Errorf("--project %q is neither an existing directory nor a registered project ID", project)
+			return "", "", nil, fmt.Errorf("--project %q is neither an existing directory nor a registered project ID", project)
 		}
-		return "", nil, err
+		return "", "", nil, err
 	}
 	if v.ProjectDir == "" {
-		return "", nil, fmt.Errorf("--project %q resolved to no directory", project)
+		return "", "", nil, fmt.Errorf("--project %q resolved to no directory", project)
 	}
 	// This process has not installed the configured server session. A named
 	// project must not silently fall back to the legacy source profile.
 	if _, declared, err := secureread.LoadBoundSession(context.Background(), v.ProjectDir, secureread.BoundSessionOptions{}); declared || err != nil {
-		return "", nil, secureread.ErrSourceBinding
+		return "", "", nil, secureread.ErrSourceBinding
 	}
-	return v.ProjectDir, v.store.GetProjectStore(v.projectID), nil
+	return v.ProjectDir, v.projectID, v.store.GetProjectStore(v.projectID), nil
 }
 
 // resolveQueryEnvironment picks the environment a saved SQL/TugQL query runs

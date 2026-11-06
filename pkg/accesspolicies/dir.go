@@ -113,6 +113,17 @@ func Load(o LoadOptions) ([]Loaded, error) {
 // LoadDir decodes every regular *.yaml, *.yml and *.json file in dir, in file
 // name order. A directory that does not exist is reported with fs.ErrNotExist.
 func LoadDir(dir string) ([]Loaded, error) {
+	return LoadDirWith(dir, nil)
+}
+
+// Overlay rewrites one policy document before it is decoded. path is the
+// file the document was read from and data its bytes, exactly as on disk. It
+// returns the document to decode: data itself when nothing applies.
+type Overlay func(path string, data []byte, codec access.Codec) ([]byte, error)
+
+// LoadDirWith is LoadDir with an overlay applied to every document before it
+// is decoded; a nil overlay is LoadDir. An overlay error fails the load.
+func LoadDirWith(dir string, overlay Overlay) ([]Loaded, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("read policies directory %s: %w", dir, err)
@@ -122,7 +133,7 @@ func LoadDir(dir string) ([]Loaded, error) {
 		if entry.IsDir() || codecFor(entry.Name()) == nil {
 			continue
 		}
-		item, err := LoadFile(filepath.Join(dir, entry.Name()))
+		item, err := loadFileWith(filepath.Join(dir, entry.Name()), overlay)
 		if err != nil {
 			return nil, err
 		}
@@ -133,6 +144,10 @@ func LoadDir(dir string) ([]Loaded, error) {
 
 // LoadFile decodes one access document; the codec follows the extension.
 func LoadFile(path string) (Loaded, error) {
+	return loadFileWith(path, nil)
+}
+
+func loadFileWith(path string, overlay Overlay) (Loaded, error) {
 	codec := codecFor(path)
 	if codec == nil {
 		return Loaded{}, fmt.Errorf("policy %s: unsupported extension, want .yaml, .yml or .json", path)
@@ -140,6 +155,11 @@ func LoadFile(path string) (Loaded, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Loaded{}, fmt.Errorf("policy %s: %w", path, err)
+	}
+	if overlay != nil {
+		if data, err = overlay(path, data, codec); err != nil {
+			return Loaded{}, fmt.Errorf("policy %s: %w", path, err)
+		}
 	}
 	loaded, err := DecodeLoaded(data, codec, path)
 	if err != nil {
@@ -212,3 +232,7 @@ func codecFor(name string) access.Codec {
 	}
 	return nil
 }
+
+// CodecFor is the policy codec a file name's extension selects, or nil when
+// the extension is not a policy document's.
+func CodecFor(name string) access.Codec { return codecFor(name) }

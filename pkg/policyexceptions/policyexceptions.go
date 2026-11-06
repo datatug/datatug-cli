@@ -1,0 +1,249 @@
+// Package policyexceptions keeps the local policy exceptions of one DataTug
+// project: time-boxed allow rules that the policy author adds to their own
+// local policy, on this machine, for one role, one table of one source and an
+// exact list of fields. An agent proposes one; the person applies, rejects or
+// revokes it in their own terminal. An exception is never an approval that is
+// valid anywhere else, and the policy files themselves are never changed: an
+// applied, unexpired exception is overlaid on the policy document it names
+// each time policies are loaded, and only while that document is byte for
+// byte the one the exception was bound to.
+//
+// The store lives at <project>/.datatug/policy-exceptions/: one JSON file per
+// exception and an append-only audit.jsonl, which records names and scopes
+// and never a row value.
+//
+// Local Perimeter keeps an honest agent inside the lines. A real security
+// boundary needs DB-native permissions or DataTug Cloud approvals.
+package policyexceptions
+
+import (
+	"bytes"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"regexp"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/dal-go/dalgo/access"
+)
+
+// Kind is the kind every exception and audit event carries.
+const Kind = "local-exception"
+
+// Limits of an exception.
+const (
+	DefaultDuration = 15 * time.Minute
+	MaxDuration     = 8 * time.Hour
+	// PendingTTL is how long a proposal waits for the person.
+	PendingTTL = 30 * time.Minute
+	// RulePrefix starts the id of the rule and rule set an exception adds.
+	RulePrefix = "exception-"
+)
+
+// HonestLimit is the sentence every exception screen carries.
+const HonestLimit = "A local policy exception is a time-boxed rule you add to your own local policy on this machine; it is not an approval valid anywhere else. Local Perimeter keeps an honest agent inside the lines. A real security boundary needs DB-native permissions or DataTug Cloud approvals."
+
+// State is where an exception is in its life.
+type State string
+
+// States of an exception.
+const (
+	StatePending  State = "pending"
+	StateApplied  State = "applied"
+	StateRejected State = "rejected"
+	StateRevoked  State = "revoked"
+	StateExpired  State = "expired"
+)
+
+// PolicyRef binds an exception to one policy document of the project.
+type PolicyRef struct {
+	Name   string `json:"name"`
+	Path   string `json:"path"` // relative to the project directory, slash-separated
+	SHA256 string `json:"sha256"`
+}
+
+// Exception is one stored local policy exception.
+type Exception struct {
+	ID               string     `json:"id"`
+	Kind             string     `json:"kind"`
+	ProjectID        string     `json:"projectId"`
+	Source           string     `json:"source"`
+	Policy           PolicyRef  `json:"policy"`
+	Role             string     `json:"role"`
+	Table            string     `json:"table"`
+	Fields           []string   `json:"fields"`
+	AppliedFields    []string   `json:"appliedFields,omitempty"`
+	Reason           string     `json:"reason"`
+	DurationSeconds  int64      `json:"durationSeconds"`
+	State            State      `json:"state"`
+	ProposedAt       time.Time  `json:"proposedAt"`
+	PendingExpiresAt time.Time  `json:"pendingExpiresAt"`
+	DecidedAt        *time.Time `json:"decidedAt,omitempty"`
+	ExpiresAt        *time.Time `json:"expiresAt,omitempty"`
+	DecisionReason   string     `json:"decisionReason,omitempty"`
+	ScopeHash        string     `json:"scopeHash,omitempty"`
+	ExpiryRecorded   bool       `json:"expiryRecorded,omitempty"`
+}
+
+// Duration is the time an applied exception lasts.
+func (e Exception) Duration() time.Duration { return time.Duration(e.DurationSeconds) * time.Second }
+
+// Status is the state at now: a pending proposal past its wait, or an applied
+// exception past its expiry, is expired.
+func (e Exception) Status(now time.Time) State {
+	switch {
+	case e.State == StatePending && !now.Before(e.PendingExpiresAt):
+		return StateExpired
+	case e.State == StateApplied && (e.ExpiresAt == nil || !now.Before(*e.ExpiresAt)):
+		return StateExpired
+	}
+	return e.State
+}
+
+// Active reports whether the exception adds its rule at now.
+func (e Exception) Active(now time.Time) bool { return e.Status(now) == StateApplied }
+
+// RuleID is the id of the rule (and of the rule set) the exception adds.
+func (e Exception) RuleID() string { return RulePrefix + e.ID }
+
+var idPattern = regexp.MustCompile(`^[0-9a-f]{16}$`)
+
+// ValidID reports whether id is an exception id: 16 lower-case hex digits.
+func ValidID(id string) bool { return idPattern.MatchString(id) }
+
+// randRead is crypto/rand.Read; a seam for tests.
+var randRead = rand.Read
+
+// NewID returns a random 64-bit id as 16 hex digits.
+func NewID() (string, error) {
+	var b [8]byte
+	if _, err := randRead(b[:]); err != nil {
+		return "", fmt.Errorf("policy exception id: %w", err)
+	}
+	return hex.EncodeToString(b[:]), nil
+}
+
+// CheckName refuses a name that is not one literal identifier: a pattern
+// (*, ?, [], {}), a path separator, white space or a control character could
+// widen an exception beyond the one table or field it names.
+func CheckName(what, name string) error {
+	if name == "" || len(name) > 128 || strings.TrimSpace(name) != name || strings.ContainsAny(name, "*?[]{}/\\$,. \t\r\n\x00") {
+		return fmt.Errorf("%s %q must be one literal name: no patterns (*, **, prefix*, {}), separators, dots or spaces", what, name)
+	}
+	return nil
+}
+
+// CheckDuration refuses a duration outside (0, MaxDuration].
+func CheckDuration(d time.Duration) error {
+	if d <= 0 || d > MaxDuration {
+		return fmt.Errorf("--for must be more than 0 and at most %s", MaxDuration)
+	}
+	return nil
+}
+
+// Subset reports whether every name of sub is in set.
+func Subset(sub, set []string) bool {
+	for _, name := range sub {
+		if !slices.Contains(set, name) {
+			return false
+		}
+	}
+	return true
+}
+
+// Fingerprint is the hex sha256 of a policy document's bytes.
+func Fingerprint(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+// Scope renders the exact scope screen apply shows before the person
+// confirms; ScopeHash is the hash of that text, recorded with the decision.
+func Scope(e Exception, fields []string, now time.Time) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Local policy exception %s (%s)\n", e.ID, Kind)
+	fmt.Fprintf(&b, "  Project:  %s\n", e.ProjectID)
+	fmt.Fprintf(&b, "  Source:   %s\n", e.Source)
+	fmt.Fprintf(&b, "  Policy:   %s (%s, sha256 %s)\n", e.Policy.Name, e.Policy.Path, e.Policy.SHA256)
+	fmt.Fprintf(&b, "  Role:     %s\n", e.Role)
+	fmt.Fprintf(&b, "  Table:    %s (all rows of %s)\n", e.Table, e.Table)
+	fmt.Fprintf(&b, "  Fields:   %s\n", strings.Join(fields, ", "))
+	fmt.Fprintf(&b, "  Duration: %s, until %s\n", e.Duration(), now.Add(e.Duration()).UTC().Format(time.RFC3339))
+	fmt.Fprintf(&b, "  Reason:   %s\n", e.Reason)
+	b.WriteString(HonestLimit + "\n")
+	return b.String()
+}
+
+// ScopeHash is the hex sha256 of a scope screen.
+func ScopeHash(scope string) string { return Fingerprint([]byte(scope)) }
+
+// ErrNotApplicable marks a policy document an exception cannot be added to:
+// it binds no roles to rule sets.
+var ErrNotApplicable = errors.New("the policy binds no roles to rule sets, so an exception cannot name a role in it")
+
+// Applicable reports whether a document can carry exceptions: it is a
+// principal policy set (rule sets bound to roles).
+func Applicable(data []byte, codec access.Codec) error {
+	var document access.Document
+	if err := codec.Decode(bytes.NewReader(data), &document); err != nil {
+		return err
+	}
+	if document.Bindings == nil || len(document.RuleSets) == 0 {
+		return ErrNotApplicable
+	}
+	return nil
+}
+
+// Overlay adds to the policy document data (read from the project-relative
+// path policyPath) one allow rule for each exception that is active at now,
+// names projectID and policyPath, and was bound to exactly these bytes. Each
+// rule is its own rule set, named like the rule, bound to the exception's
+// role: operations [query], path /<table>, fields as applied, and nothing
+// else. It returns data itself and no ids when nothing applies, else the
+// re-encoded document and the ids of the exceptions it added.
+func Overlay(data []byte, codec access.Codec, projectID, policyPath string, exceptions []Exception, now time.Time) ([]byte, []string, error) {
+	fingerprint := Fingerprint(data)
+	var matching []Exception
+	for _, e := range exceptions {
+		if e.Active(now) && e.ProjectID == projectID && e.Policy.Path == policyPath && e.Policy.SHA256 == fingerprint && len(e.AppliedFields) > 0 {
+			matching = append(matching, e)
+		}
+	}
+	if len(matching) == 0 {
+		return data, nil, nil
+	}
+	var document access.Document
+	if err := codec.Decode(bytes.NewReader(data), &document); err != nil {
+		return nil, nil, err
+	}
+	if document.Bindings == nil || len(document.RuleSets) == 0 {
+		return data, nil, nil
+	}
+	if document.Bindings.Roles == nil {
+		document.Bindings.Roles = map[string][]string{}
+	}
+	var applied []string
+	for _, e := range matching {
+		name := e.RuleID()
+		if _, taken := document.RuleSets[name]; taken {
+			continue
+		}
+		document.RuleSets[name] = []access.DocumentScope{{
+			Path: "/" + e.Table,
+			Rules: []access.DocumentRule{{
+				ID: name, Effect: "allow", Operations: []string{"query"}, Fields: append([]string(nil), e.AppliedFields...),
+			}},
+		}}
+		document.Bindings.Roles[e.Role] = append(document.Bindings.Roles[e.Role], name)
+		applied = append(applied, e.ID)
+	}
+	var out bytes.Buffer
+	if err := codec.Encode(&out, document); err != nil {
+		return nil, nil, err
+	}
+	return out.Bytes(), applied, nil
+}

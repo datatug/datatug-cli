@@ -96,7 +96,9 @@ type exceptionView struct {
 	Kind             string                     `json:"kind"`
 	State            policyexceptions.State     `json:"state"`
 	ProjectID        string                     `json:"projectId"`
+	Env              string                     `json:"env"`
 	Source           string                     `json:"source"`
+	SourceIdentity   string                     `json:"sourceIdentity"`
 	Policy           policyexceptions.PolicyRef `json:"policy"`
 	Role             string                     `json:"role"`
 	Table            string                     `json:"table"`
@@ -114,7 +116,7 @@ type exceptionView struct {
 }
 
 func viewOf(e policyexceptions.Exception, now time.Time) exceptionView {
-	return exceptionView{ID: e.ID, Kind: e.Kind, State: e.Status(now), ProjectID: e.ProjectID, Source: e.Source, Policy: e.Policy, Role: e.Role, Table: e.Table,
+	return exceptionView{ID: e.ID, Kind: e.Kind, State: e.Status(now), ProjectID: e.ProjectID, Env: e.Env, Source: e.Source, SourceIdentity: e.SourceIdentity, Policy: e.Policy, Role: e.Role, Table: e.Table,
 		Rows: "all rows of " + e.Table, Fields: e.Fields, AppliedFields: e.AppliedFields, Reason: e.Reason, DurationSeconds: e.DurationSeconds,
 		ProposedAt: e.ProposedAt, PendingExpiresAt: e.PendingExpiresAt, DecidedAt: e.DecidedAt, ExpiresAt: e.ExpiresAt, Note: policyexceptions.HonestLimit}
 }
@@ -379,7 +381,7 @@ func exceptionProposeAction(cmd *cobra.Command, _ []string) error {
 	}
 	now := exceptionNow().UTC()
 	e := policyexceptions.Exception{
-		ID: id, Kind: policyexceptions.Kind, ProjectID: project.id, Source: source,
+		ID: id, Kind: policyexceptions.Kind, ProjectID: project.id, Env: envID, Source: source, SourceIdentity: policyexceptions.SourceFingerprint(resolved.URL),
 		Policy: policyexceptions.PolicyRef{Name: policy.name, Path: policy.rel, SHA256: policyexceptions.Fingerprint(policy.data)},
 		Role:   role, Table: canonical, Fields: fields, Reason: reason, DurationSeconds: int64(duration / time.Second),
 		State: policyexceptions.StatePending, ProposedAt: now, PendingExpiresAt: now.Add(policyexceptions.PendingTTL),
@@ -572,7 +574,11 @@ func exceptionApplyCommand() *cobra.Command {
 				return errNotPending(e, now)
 			}
 			fields := e.Fields
-			if narrowed, _ := cmd.Flags().GetStringSlice("fields"); len(narrowed) > 0 {
+			narrowed, _ := cmd.Flags().GetStringSlice("fields")
+			if cmd.Flags().Changed("fields") && len(narrowed) == 0 {
+				return Exit("--fields is empty: name the proposed fields to apply, or leave --fields out to apply them all", exitCodeUsage)
+			}
+			if len(narrowed) > 0 {
 				if !policyexceptions.Subset(narrowed, e.Fields) {
 					return Exit(fmt.Sprintf("--fields may only narrow the proposal: pick from %s", strings.Join(e.Fields, ", ")), exitCodeUsage)
 				}
@@ -592,7 +598,10 @@ func exceptionApplyCommand() *cobra.Command {
 			}
 			// The policy is byte for byte the one the proposal was checked against
 			// (no rule of the role on the table), so that check still holds.
-			scope := policyexceptions.Scope(e, fields, now)
+			// The expiry is fixed before the screen is shown and committed as
+			// shown: never later than the time the person read.
+			expires := now.UTC().Add(e.Duration())
+			scope := policyexceptions.Scope(e, fields, expires)
 			out := cmd.OutOrStdout()
 			_, _ = fmt.Fprint(out, scope)
 			_, _ = fmt.Fprintf(out, "Type the table name (%s) to apply this exception; anything else cancels: ", e.Table)
@@ -600,22 +609,23 @@ func exceptionApplyCommand() *cobra.Command {
 			if strings.TrimRight(line, "\r\n") != e.Table {
 				return Exit("cancelled: nothing was applied", 1)
 			}
-			hash := policyexceptions.ScopeHash(scope)
-			var expires time.Time
+			// The commit only goes ahead while the file is byte for byte the one
+			// this screen was rendered from (Store.Commit), so what is recorded is
+			// exactly what was shown.
 			err = project.store.Commit(e.ID, raw, func(current *policyexceptions.Exception) (policyexceptions.Event, error) {
 				at := exceptionNow().UTC()
 				if current.Status(at) != policyexceptions.StatePending {
 					return policyexceptions.Event{}, errNotPending(*current, at)
 				}
-				expires = at.Add(current.Duration())
-				current.State, current.AppliedFields, current.DecidedAt, current.ExpiresAt, current.ScopeHash = policyexceptions.StateApplied, fields, &at, &expires, hash
+				if !at.Before(expires) {
+					return policyexceptions.Event{}, Exit("the time shown on the screen passed before it was confirmed: nothing was applied", exitCodeUsage)
+				}
+				current.State, current.AppliedFields, current.DecidedAt, current.ExpiresAt = policyexceptions.StateApplied, fields, &at, &expires
 				kind := "applied"
 				if len(fields) < len(current.Fields) {
 					kind = "narrowed"
 				}
-				event := policyexceptions.NewEvent(kind, *current, fields, at)
-				event.ScopeHash = hash
-				return event, nil
+				return policyexceptions.NewEvent(kind, *current, fields, at), nil
 			})
 			if err != nil {
 				return err

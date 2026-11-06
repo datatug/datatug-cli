@@ -14,6 +14,7 @@ import (
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
 	"github.com/dal-go/record"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/demofixtures"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/datatug/datatug-core/pkg/meaninglabels"
@@ -38,7 +39,7 @@ func TestPrepareMaskingRefusesShapesItCannotMask(t *testing.T) {
 	}
 	for name, query := range cases {
 		t.Run(name, func(t *testing.T) {
-			protected := r.prepareMasking(context.Background(), query)
+			protected := r.prepareMasking(context.Background(), nil, query)
 			require.NotNil(t, protected)
 			assert.NotEmpty(t, protected.Error())
 		})
@@ -83,6 +84,7 @@ func TestMaskingReader(t *testing.T) {
 	rec, err := reader.Next()
 	require.NoError(t, err)
 	assert.Equal(t, map[string]any{"Email": meaninglabels.MaskedValue, "City": "Halifax"}, rec.Data())
+	assert.Equal(t, meaninglabels.MaskedValue, rec.Key().ID, "a record without a key column gets a withheld key")
 	_, err = reader.Next()
 	assert.ErrorContains(t, err, "masking")
 	_, err = r.mask(&fakeReader{err: errors.New("read failed")}).Next()
@@ -448,4 +450,231 @@ func TestProjectReadRefusesClickHouse(t *testing.T) {
 	_, stderr, code = readAs(t, "", "--source", "warehouse", "--from", "events")
 	assert.Equal(t, exitCodeUsage, code)
 	assert.Contains(t, stderr, "ClickHouse source is not supported")
+}
+
+// The record key is shown only when it is the value of the table's single key
+// column, the policy lets the row carry that column, and it is not masked.
+func TestMaskingReaderKey(t *testing.T) {
+	doc, _, _ := meaninglabels.Apply(meaninglabels.NewDocument(), meaninglabels.Change{Action: meaninglabels.ActionSet,
+		Target: meaninglabels.Target{Source: "chinook", Table: "Secret", Column: "Code"}, Class: meaninglabels.ClassPII, Reason: "r"}, meaninglabels.Actor{ID: "o"}, time.Now())
+	read := func(table, key string, row map[string]any, id any) any {
+		r := &projectRead{source: "chinook", table: table, key: key, labels: doc, masked: map[string]meaninglabels.ColumnLabel{}}
+		rec, err := r.mask(&fakeReader{records: []record.Record{record.NewRecordWithData(record.NewKeyWithID(table, id), row)}}).Next()
+		require.NoError(t, err)
+		return rec.Key().ID
+	}
+	assert.Equal(t, 7, read("Employee", "EmployeeId", map[string]any{"EmployeeId": 7, "Title": "x"}, 7))
+	assert.Equal(t, meaninglabels.MaskedValue, read("Employee", "EmployeeId", map[string]any{"Title": "x"}, 7), "key column not allowed")
+	assert.Equal(t, meaninglabels.MaskedValue, read("Employee", "", map[string]any{"EmployeeId": 7}, 7), "no key column")
+	assert.Equal(t, meaninglabels.MaskedValue, read("Employee", "EmployeeId", map[string]any{"EmployeeId": 8}, 7), "the key is another value")
+	assert.Equal(t, meaninglabels.MaskedValue, read("Secret", "Code", map[string]any{"Code": "abc"}, "abc"), "a labelled key")
+}
+
+func TestDescribeObjectKind(t *testing.T) {
+	restoreVar(t, &listCollections)
+	restoreVar(t, &describeCollection)
+	restoreVar(t, &listSourceViews)
+	tables := func(context.Context, dal.DB, *record.Key) ([]dal.CollectionRef, error) {
+		return []dal.CollectionRef{dal.NewRootCollectionRef("Customer", ""), dal.NewRootCollectionRef("Recent", "")}, nil
+	}
+	listCollections = tables
+	listSourceViews = func(context.Context, dal.DB) ([]dbschema.SourceViewDef, error) {
+		return []dbschema.SourceViewDef{{Name: "Recent"}}, nil
+	}
+	describeCollection = func(context.Context, dal.DB, *dal.CollectionRef) (*dbschema.CollectionDef, error) {
+		return &dbschema.CollectionDef{PrimaryKey: []dal.FieldName{"CustomerId"}}, nil
+	}
+	kind := func(scheme, table string) (bool, string) {
+		r := &projectRead{table: table, backend: dbcopy.BackendRef{Scheme: scheme}}
+		r.describe(context.Background(), nil)
+		return r.view, r.key
+	}
+	view, key := kind("sqlite", "Customer")
+	assert.False(t, view)
+	assert.Equal(t, "CustomerId", key)
+	view, _ = kind("sqlite", "Recent")
+	assert.True(t, view, "a view")
+	view, _ = kind("sqlite", "Missing")
+	assert.True(t, view, "an object the source does not list")
+	view, _ = kind("ingitdb", "support-notes")
+	assert.True(t, view, "a document collection")
+	listSourceViews = func(context.Context, dal.DB) ([]dbschema.SourceViewDef, error) { return nil, errors.New("no views") }
+	view, _ = kind("sqlite", "Customer")
+	assert.True(t, view, "kind unknown")
+	listCollections = func(context.Context, dal.DB, *record.Key) ([]dal.CollectionRef, error) {
+		return nil, errors.New("no list")
+	}
+	view, _ = kind("sqlite", "Customer")
+	assert.True(t, view)
+	listCollections = tables
+	listSourceViews = func(context.Context, dal.DB) ([]dbschema.SourceViewDef, error) { return nil, nil }
+	describeCollection = func(context.Context, dal.DB, *dal.CollectionRef) (*dbschema.CollectionDef, error) {
+		return &dbschema.CollectionDef{PrimaryKey: []dal.FieldName{"A", "B"}}, nil
+	}
+	view, key = kind("sqlite", "Customer")
+	assert.False(t, view)
+	assert.Empty(t, key, "a composite key is not one column")
+}
+
+func TestListSourceViewsWithoutTheCapability(t *testing.T) {
+	views, err := listSourceViews(context.Background(), nil)
+	assert.NoError(t, err)
+	assert.Nil(t, views)
+}
+
+// H1: an exception is bound to the source the project resolved when it was
+// proposed: the same source id pointed at another database gets nothing.
+func TestExceptionBoundToSourceIdentity(t *testing.T) {
+	dir := demoForTest(t)
+	asPerson(t)
+	view := propose(t, "--source", "chinook", "--role", "agent", "--table", "Employee", "--fields", "EmployeeId,Title")
+	assert.Equal(t, "local", view.Env)
+	assert.Len(t, view.SourceIdentity, 64)
+	stdout, stderr, code := runCLI(t, "Employee\n", "policy", "exception", "apply", view.ID, "--project", "datatug-demo")
+	require.Equal(t, 0, code, stderr)
+	assert.Contains(t, stdout, "Env:      local")
+	assert.Contains(t, stdout, view.SourceIdentity)
+	_, _, code = readAs(t, "", "--source", "chinook", "--from", "Employee")
+	require.Equal(t, 0, code)
+
+	catalog := filepath.Join(dir, "environments", "local", "catalogs", "chinook", "chinook.db.json")
+	data, err := os.ReadFile(catalog)
+	require.NoError(t, err)
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(data, &doc))
+	other := filepath.Join(dir, "data", "other.sqlite")
+	fixture, _ := os.ReadFile(filepath.Join(dir, filepath.FromSlash(demofixtures.ChinookPath)))
+	require.NoError(t, os.WriteFile(other, fixture, 0o644))
+	doc["path"] = other
+	data, _ = json.Marshal(doc)
+	require.NoError(t, os.WriteFile(catalog, data, 0o644))
+	_, _, code = readAs(t, "", "--source", "chinook", "--from", "Employee")
+	assert.Equal(t, exitCodeAccessDenied, code)
+}
+
+// M1: the expiry the screen shows is the one recorded; a confirmation after
+// it applies nothing.
+func TestApplyCommitsTheExpiryItShows(t *testing.T) {
+	demoForTest(t)
+	asPerson(t)
+	view := propose(t, "--source", "chinook", "--role", "agent", "--table", "Employee", "--fields", "Title")
+	stdout, stderr, code := runCLI(t, "Employee\n", "policy", "exception", "apply", view.ID, "--project", "datatug-demo")
+	require.Equal(t, 0, code, stderr)
+	statusOut, _, _ := runCLI(t, "", "policy", "exception", "status", view.ID, "--project", "datatug-demo", "--format", "json")
+	var status exceptionView
+	require.NoError(t, json.Unmarshal([]byte(statusOut), &status))
+	assert.Contains(t, stdout, "until "+status.ExpiresAt.UTC().Format(time.RFC3339))
+
+	late := propose(t, "--source", "chinook", "--role", "agent", "--table", "Track", "--fields", "Name")
+	restoreVar(t, &exceptionNow)
+	calls := 0
+	exceptionNow = func() time.Time {
+		calls++
+		if calls > 1 {
+			return time.Now().Add(20 * time.Minute)
+		}
+		return time.Now()
+	}
+	_, stderr, code = runCLI(t, "Track\n", "policy", "exception", "apply", late.ID, "--project", "datatug-demo")
+	assert.Equal(t, exitCodeUsage, code)
+	assert.Contains(t, stderr, "the time shown on the screen passed")
+}
+
+// M2: an applied field list without the key column withholds the key.
+func TestProjectReadWithholdsAnUnapprovedKey(t *testing.T) {
+	demoForTest(t)
+	asPerson(t)
+	view := propose(t, "--source", "chinook", "--role", "agent", "--table", "Employee", "--fields", "FirstName,LastName,Title")
+	_, stderr, code := runCLI(t, "Employee\n", "policy", "exception", "apply", view.ID, "--project", "datatug-demo")
+	require.Equal(t, 0, code, stderr)
+	rows, stderr, code := readAs(t, "", "--source", "chinook", "--from", "Employee")
+	require.Equal(t, 0, code, stderr)
+	require.NotEmpty(t, rows)
+	for _, row := range rows {
+		assert.Equal(t, meaninglabels.MaskedValue, row["$key"])
+		assert.NotContains(t, row, "EmployeeId")
+	}
+	customers, _, code := readAs(t, "", "--source", "chinook", "--from", "Customer", "--limit", "1")
+	require.Equal(t, 0, code)
+	assert.Equal(t, "3", customers[0]["$key"], "an allowed key column keeps its key")
+}
+
+// M3: the project is the same whether it is named by its ID or its folder.
+func TestExceptionAppliesByProjectFolder(t *testing.T) {
+	dir := demoForTest(t)
+	asPerson(t)
+	t.Chdir(filepath.Dir(dir))
+	stdout, stderr, code := runCLI(t, "", "policy", "exception", "propose", "--project", "./datatug-demo", "--source", "chinook", "--role", "agent",
+		"--table", "Employee", "--fields", "EmployeeId,Title", "--reason", "why", "--format", "json")
+	require.Equal(t, 0, code, stderr)
+	var view exceptionView
+	require.NoError(t, json.Unmarshal([]byte(stdout), &view))
+	assert.Equal(t, "datatug-demo", view.ProjectID)
+	_, stderr, code = runCLI(t, "Employee\n", "policy", "exception", "apply", view.ID, "--project", "datatug-demo")
+	require.Equal(t, 0, code, stderr)
+	for _, project := range []string{"datatug-demo", "./datatug-demo", dir} {
+		_, stderr, code = runCLI(t, "", "query", "run", "--project", project, "--source", "chinook", "--from", "Employee", "--as", "agent", "--role", "agent", "--format", "json")
+		assert.Equal(t, 0, code, project+": "+stderr)
+	}
+	restoreVar(t, &absolutePath)
+	absolutePath = func(string) (string, error) { return "", errors.New("no cwd") }
+	_, _, code = runCLI(t, "", "policy", "exception", "list", "--project", "./datatug-demo")
+	assert.Equal(t, exitCodeUsage, code)
+}
+
+func TestProjectSummaryID(t *testing.T) {
+	dir := t.TempDir()
+	assert.Equal(t, "fallback", projectSummaryID(dir, "fallback"))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "datatug-project.json"), []byte(`{"id":"shop"}`), 0o644))
+	assert.Equal(t, "shop", projectSummaryID(dir, "fallback"))
+}
+
+// M4: a demo install that failed after its marker can be run again.
+func TestDemoInstallRecoversAfterAFailure(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := filepath.Join(t.TempDir(), "demo")
+	restoreVar(t, &initStat)
+	initStat = func(string) (os.FileInfo, error) { return nil, errors.New("stat failed") }
+	_, _, code := runCLI(t, "", "demo", "install", "--dir", dir)
+	require.Equal(t, 1, code)
+	initStat = os.Stat
+	stdout, stderr, code := runCLI(t, "", "demo", "install", "--dir", dir, "--format", "json")
+	require.Equal(t, 0, code, stderr)
+	assert.Contains(t, stdout, `"status":"installed"`)
+}
+
+func TestDemoInstallMarkerWriteFailures(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	restoreVar(t, &demoInstallWriteFile)
+	demoInstallWriteFile = func(string, []byte, os.FileMode) error { return errors.New("disk full") }
+	_, stderr, code := runCLI(t, "", "demo", "install", "--dir", filepath.Join(t.TempDir(), "d"))
+	assert.Equal(t, 1, code)
+	assert.Contains(t, stderr, demoInstallMarker)
+}
+
+// L1: an empty --fields does not mean every proposed field.
+func TestApplyRefusesAnEmptyFieldList(t *testing.T) {
+	demoForTest(t)
+	asPerson(t)
+	view := propose(t, "--source", "chinook", "--role", "agent", "--table", "Employee", "--fields", "Title")
+	_, stderr, code := runCLI(t, "Employee\n", "policy", "exception", "apply", view.ID, "--project", "datatug-demo", "--fields", "")
+	assert.Equal(t, exitCodeUsage, code)
+	assert.Contains(t, stderr, "--fields is empty")
+}
+
+func TestDemoInstallRepairWriteFailures(t *testing.T) {
+	dir := demoForTest(t)
+	notice := filepath.Join(dir, filepath.FromSlash(demofixtures.NoticePath))
+	require.NoError(t, os.Remove(notice))
+	restoreVar(t, &demoInstallMkdirAll)
+	demoInstallMkdirAll = func(string, os.FileMode) error { return errors.New("read-only") }
+	_, stderr, code := runCLI(t, "", "demo", "install")
+	assert.Equal(t, 1, code)
+	assert.Contains(t, stderr, "read-only")
+	demoInstallMkdirAll = os.MkdirAll
+	restoreVar(t, &demoInstallWriteFile)
+	demoInstallWriteFile = func(string, []byte, os.FileMode) error { return errors.New("disk full") }
+	_, stderr, code = runCLI(t, "", "demo", "install")
+	assert.Equal(t, 1, code)
+	assert.Contains(t, stderr, "disk full")
 }

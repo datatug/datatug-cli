@@ -2,10 +2,12 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -20,6 +22,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/querybody"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -203,7 +206,11 @@ func resolveQueryProject(project string) (projectDir string, projStore datatug.P
 func resolveQueryProjectRef(project string) (projectDir, projectID string, projStore datatug.ProjectStore, err error) {
 	var v projectBaseCommand
 	if info, statErr := os.Stat(project); statErr == nil && info.IsDir() {
-		v.ProjectDir = project
+		// A folder is used by its absolute path, so a relative --project names
+		// the same project wherever the command runs from.
+		if v.ProjectDir, err = absolutePath(project); err != nil {
+			return "", "", nil, fmt.Errorf("--project %q: %w", project, err)
+		}
 	} else {
 		v.ProjectName = project
 	}
@@ -221,7 +228,21 @@ func resolveQueryProjectRef(project string) (projectDir, projectID string, projS
 	if _, declared, err := secureread.LoadBoundSession(context.Background(), v.ProjectDir, secureread.BoundSessionOptions{}); declared || err != nil {
 		return "", "", nil, secureread.ErrSourceBinding
 	}
-	return v.ProjectDir, v.projectID, v.store.GetProjectStore(v.projectID), nil
+	return v.ProjectDir, projectSummaryID(v.ProjectDir, v.projectID), v.store.GetProjectStore(v.projectID), nil
+}
+
+// projectSummaryID is the ID a project records in its own summary file, so
+// the project is the same one whether it is named by its registered ID or
+// by its folder; fallback when the file names none.
+func projectSummaryID(projectDir, fallback string) string {
+	var summary struct {
+		ID string `json:"id"`
+	}
+	data, err := os.ReadFile(filepath.Join(projectDir, storage.ProjectSummaryFileName))
+	if err == nil && json.Unmarshal(data, &summary) == nil && summary.ID != "" {
+		return summary.ID
+	}
+	return fallback
 }
 
 // resolveQueryEnvironment picks the environment a saved SQL/TugQL query runs

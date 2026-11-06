@@ -15,6 +15,7 @@ import (
 	"github.com/dal-go/dalgo/access"
 	"github.com/dal-go/dalgo/condeval"
 	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/dalgo/dbschema"
 	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
@@ -39,6 +40,8 @@ type projectRead struct {
 	projectDir string
 	projectID  string
 	source     string
+	env        string
+	sourceURL  string
 	backend    dbcopy.BackendRef
 	exceptions policyexceptions.Store
 	// applied maps the rule id of each exception overlaid on the loaded
@@ -48,6 +51,12 @@ type projectRead struct {
 	labels  meaninglabels.Document
 	table   string
 	masked  map[string]meaninglabels.ColumnLabel
+	// view is whether the table is a view or an object of unknown kind: one
+	// no owner reviewed is masked entirely, as the server masks it.
+	view bool
+	// key is the single primary-key column whose value is the record key, or
+	// "" when the key is not a column of the table.
+	key string
 }
 
 // resolveProjectRead resolves --project, --env and --source to the source the
@@ -69,7 +78,7 @@ func resolveProjectRead(ctx context.Context, o queryOptions) (*projectRead, erro
 	if err != nil {
 		return nil, Exit(err.Error(), exitCodeUsage)
 	}
-	return &projectRead{projectDir: projectDir, projectID: projectID, source: o.source, backend: backend.WithFlag("--source"), exceptions: policyexceptions.Store{ProjectDir: projectDir}}, nil
+	return &projectRead{projectDir: projectDir, projectID: projectID, source: o.source, env: env, sourceURL: source.URL, backend: backend.WithFlag("--source"), exceptions: policyexceptions.Store{ProjectDir: projectDir}}, nil
 }
 
 // errNoProjectPolicies is the refusal of a project read in a project that has
@@ -90,18 +99,13 @@ func (r *projectRead) loadPolicies(stderr io.Writer) ([]accesspolicies.Loaded, e
 	} else {
 		r.exceptions.RecordExpiries(all, r.now)
 	}
-	var mine []policyexceptions.Exception
-	for _, e := range all {
-		if e.Source == r.source {
-			mine = append(mine, e)
-		}
-	}
 	r.applied = map[string]policyexceptions.Exception{}
 	overlay := func(path string, data []byte, codec access.Codec) ([]byte, error) {
 		rel, _ := filepath.Rel(r.projectDir, path) // both are paths of the project folder
-		out, ids, err := policyexceptions.Overlay(data, codec, r.projectID, filepath.ToSlash(rel), mine, r.now)
+		binding := policyexceptions.Binding{ProjectID: r.projectID, Env: r.env, Source: r.source, SourceIdentity: policyexceptions.SourceFingerprint(r.sourceURL), PolicyPath: filepath.ToSlash(rel)}
+		out, ids, err := policyexceptions.Overlay(data, codec, binding, all, r.now)
 		for _, id := range ids {
-			for _, e := range mine {
+			for _, e := range all {
 				if e.ID == id {
 					r.applied[e.RuleID()] = e
 				}
@@ -152,7 +156,7 @@ func (e *errFieldProtected) Error() string { return e.message }
 // never speaks for a table the policy denies: one table, no subquery, and no filter, sort, grouping, alias or
 // expression on a protected column. A label document that cannot be read
 // refuses the read.
-func (r *projectRead) prepareMasking(ctx context.Context, query dal.Query) *errFieldProtected {
+func (r *projectRead) prepareMasking(ctx context.Context, db dal.DB, query dal.Query) *errFieldProtected {
 	doc, err := loadLabels(ctx, r.projectDir)
 	if err != nil {
 		return &errFieldProtected{"the project's sensitivity labels (datatug-labels.json) cannot be read, so the read is refused"}
@@ -167,16 +171,59 @@ func (r *projectRead) prepareMasking(ctx context.Context, query dal.Query) *errF
 		return &errFieldProtected{"a project read takes one table without joins or subqueries, so its labelled columns can be masked"}
 	}
 	r.table = base.Name()
+	r.describe(ctx, db)
 	referenced, err := accesspolicies.NonProjectionFields(structured)
 	if err != nil {
 		return &errFieldProtected{"the query uses an expression the masking check cannot inspect"}
 	}
-	plan := meaninglabels.NewPlan(meaninglabels.Effective(doc, r.source, r.table, labelColumnsOf(referenced)), nil)
+	plan := meaninglabels.NewPlan(meaninglabels.EffectiveObject(doc, r.source, r.table, r.view, labelColumnsOf(referenced)), nil)
 	if err := plan.CheckReferenced(r.table, referenced); err != nil {
 		return &errFieldProtected{strings.TrimPrefix(err.Error(), meaninglabels.CodeFieldProtected+": ")}
 	}
 	r.masked = map[string]meaninglabels.ColumnLabel{}
 	return nil
+}
+
+// listSourceViews lists the views of a source that can say; a seam for tests.
+var listSourceViews = func(ctx context.Context, db dal.DB) ([]dbschema.SourceViewDef, error) {
+	reader, ok := dal.As[dbschema.SourceViewReader](db)
+	if !ok {
+		return nil, nil
+	}
+	return reader.ListSourceViews(ctx)
+}
+
+// describe finds what kind of object the table is and which column holds
+// its record key. Like the server, only a table of a SQL source that the
+// source lists, and does not list as a view, is a table; every other object,
+// and any failure to tell, is treated as a view.
+func (r *projectRead) describe(ctx context.Context, db dal.DB) {
+	r.view, r.key = true, ""
+	if r.backend.Scheme != "sqlite" && !dbcopy.IsServerScheme(r.backend.Scheme) {
+		return
+	}
+	collections, err := listCollections(ctx, db, nil)
+	if err != nil {
+		return
+	}
+	listed := false
+	for _, ref := range collections {
+		listed = listed || ref.Name() == r.table
+	}
+	views, err := listSourceViews(ctx, db)
+	if !listed || err != nil {
+		return
+	}
+	for _, v := range views {
+		if v.Name == r.table {
+			return
+		}
+	}
+	r.view = false
+	ref := dal.NewRootCollectionRef(r.table, "")
+	if def, err := describeCollection(ctx, db, &ref); err == nil && len(def.PrimaryKey) == 1 {
+		r.key = string(def.PrimaryKey[0])
+	}
 }
 
 func baseCollectionRef(query dal.StructuredQuery) (dal.CollectionRef, bool) {
@@ -216,7 +263,7 @@ func (m *maskingReader) label(column string) meaninglabels.ColumnLabel {
 	if l, ok := m.labels[column]; ok {
 		return l
 	}
-	l := meaninglabels.Effective(m.read.labels, m.read.source, m.read.table, []meaninglabels.Column{{Name: column}})[0]
+	l := meaninglabels.EffectiveObject(m.read.labels, m.read.source, m.read.table, m.read.view, []meaninglabels.Column{{Name: column}})[0]
 	m.labels[column] = l
 	return l
 }
@@ -239,10 +286,19 @@ func (m *maskingReader) Next() (record.Record, error) {
 		}
 		masked[column] = value
 	}
-	if rec.Key() == nil {
-		return record.NewRecordWithoutKey(masked), nil
+	return record.NewRecordWithData(m.key(rec.Key(), masked), masked), nil
+}
+
+// key is the record key to show: the source's own key only when it is the
+// value of the table's single key column, that column is in the row (the
+// policy allows it) and it is not masked; otherwise a withheld key, so a key
+// never carries a value the read may not see.
+func (m *maskingReader) key(key *record.Key, row map[string]any) *record.Key {
+	column := m.read.key
+	if value, present := row[column]; key != nil && column != "" && present && value != meaninglabels.MaskedValue && fmt.Sprint(value) == fmt.Sprint(key.ID) {
+		return key
 	}
-	return record.NewRecordWithData(rec.Key(), masked), nil
+	return record.NewKeyWithID(m.read.table, meaninglabels.MaskedValue)
 }
 
 // maskedNote is the stderr line naming the columns a read masked.

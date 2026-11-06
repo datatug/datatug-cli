@@ -488,7 +488,7 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	// A masking refusal of a project read is decided after the policy, so in
 	// JSON the policy lines wait for it: a refusal is the only stderr line.
 	if project != nil && err == nil && !jsonDenial {
-		if maskErr := project.prepareMasking(ctx, result.Query); maskErr != nil {
+		if maskErr := project.prepareMasking(ctx, db, result.Query); maskErr != nil {
 			closeReader(result.Reader)
 			return fieldProtectedFailure(stderr, o, maskErr)
 		}

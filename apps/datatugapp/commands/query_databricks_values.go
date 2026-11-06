@@ -22,9 +22,9 @@ type databricksWireColumn struct {
 }
 
 type databricksWireDocument struct {
-	ID      string                  `json:"id"`
-	Data    map[string]any          `json:"data"`
-	Columns []databricksWireColumn  `json:"columns"`
+	ID      string                 `json:"id"`
+	Data    map[string]any         `json:"data"`
+	Columns []databricksWireColumn `json:"columns"`
 }
 
 type databricksWireBudget struct {

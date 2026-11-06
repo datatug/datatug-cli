@@ -288,7 +288,7 @@ curl -fsSL https://datatug.app/run-cli | sh -s -- ui --deep-link <address>
 brew install --cask datatug/tap/datatug
 ```
 
-Homebrew gets a release only when the maintainers promote it, so it can be behind the direct installers (curl and PowerShell, which always take the latest release). `brew list --cask --versions datatug` shows the version installed.
+Every release updates the Homebrew cask a few minutes after it is published, so Homebrew carries the same version as the direct installers (curl and PowerShell). `brew list --cask --versions datatug` shows the version installed.
 
 The direct installers and Homebrew package do not require Go. See the full
 [installation guide](https://datatug.io/install/) or the official

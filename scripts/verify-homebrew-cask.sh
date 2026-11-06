@@ -10,14 +10,11 @@
 # final message says whether the tap could not be read or was read and is not
 # the release's: those need different fixes.
 #
-# Publishing to the tap is manual ("Publish latest packages"), so the tap is
-# behind the release unless someone has started that workflow since:
-#   - in the release run (--warn-only) the answer is only a ::warning:: line and
-#     the exit code is always 0: a stale tap or a check that cannot run never
-#     fails or delays a release;
-#   - at the end of "Publish latest packages" (no flag) every result except
-#     "current" is an ::error:: line and a non-zero exit, so a manual publish
-#     that did not reach the tap is a failed run.
+# "Publish latest packages" (called by release.yml after every release, or
+# started by hand) runs it with no flag at the end: every result except
+# "current" is an ::error:: line and a non-zero exit, so a publish that did
+# not reach the tap is a failed run. --warn-only turns every outcome into a
+# ::warning:: line and exit 0, for callers that must never fail.
 #
 # Environment: RELEASE_REPO (optional public asset repository), GITHUB_REPOSITORY
 # (fallback asset repository and publisher workflow location), GH_TOKEN (for gh),

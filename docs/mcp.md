@@ -34,7 +34,6 @@ An MCP client's stdio configuration can launch the installed executable:
 
 Use the absolute path of the executable that supports `datatug mcp --help`.
 Installation and upgrade options are in the [CLI installation guide](../README.md#installation).
-Homebrew promotion can lag the directly downloadable release.
 
 | Tool | Arguments | Result |
 |---|---|---|

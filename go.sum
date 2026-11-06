@@ -134,8 +134,8 @@ github.com/crediterra/money v0.4.2 h1:jywtH44L+BwPV3Yy+VxAmvk18eayaUXfVxvz1dnk5w
 github.com/crediterra/money v0.4.2/go.mod h1:v1LjiUrGIVmK0L070iz4ghVDhqVGiyd9vNX0XJOLGak=
 github.com/cyphar/filepath-securejoin v0.7.0 h1:s0Y3ITPy6sQn5xt54DuYvTF8hu134ooYLUb58DX/HjE=
 github.com/cyphar/filepath-securejoin v0.7.0/go.mod h1:ymLGms/u3BYaviIiuKFnUx8EkQEZeK6cInNoAPJA3o4=
-github.com/dal-go/dalgo v0.99.0 h1:k7hBWRlNsiieOulquGuYAVrcQUn4lT2OPYih4JtYbCA=
-github.com/dal-go/dalgo v0.99.0/go.mod h1:UCGV7G50rWbXamWXbmbBGmHiACWtNYUFNIL+qM5AAs8=
+github.com/dal-go/dalgo v0.101.4 h1:ivdMAwxoMSROWAGATylTJvCEdBQpgRgUfio44la+Ffs=
+github.com/dal-go/dalgo v0.101.4/go.mod h1:UCGV7G50rWbXamWXbmbBGmHiACWtNYUFNIL+qM5AAs8=
 github.com/dal-go/dalgo2bigquery v0.3.2 h1:1csPB0KBMZVCuK7jYTo0RT9GDvGnAn/26tDEIEs4RFY=
 github.com/dal-go/dalgo2bigquery v0.3.2/go.mod h1:HSFmmveLpuU56sYBmnubGMReGqyWBzU883ckm1l4MyI=
 github.com/dal-go/dalgo2clickhouse v0.0.0-20261030135300-99a44064132e h1:koN3TRsNRluxQ9QR7exDNQMOGVo4saWIS5hckBkaDJg=
@@ -148,6 +148,8 @@ github.com/dal-go/dalgo2cosmosdb v0.0.0-20261102042954-234d09879876 h1:2YstDUW/V
 github.com/dal-go/dalgo2cosmosdb v0.0.0-20261102042954-234d09879876/go.mod h1:wfhH4GpPUazUl6vtE/Afbm45Kq0sT7sKB8jQkrcY1ng=
 github.com/dal-go/dalgo2couchdb v0.0.0-20261027215721-2c03679be8a7 h1:DyUA4dylwRHYiDiFOFsb5YrAlcAS2NkS+PUdKNL3eEE=
 github.com/dal-go/dalgo2couchdb v0.0.0-20261027215721-2c03679be8a7/go.mod h1:f1uJAiDIsJvypCGZ+Uwpc2HLgEt1VLNeh6FX8zLs4CE=
+github.com/dal-go/dalgo2databricks v0.0.0-20261106082405-de696d8c2a1b h1:KfGAmtJ/DTo1SlLiSsgqszaQMoxHZ8UEwFWr8aiIpUY=
+github.com/dal-go/dalgo2databricks v0.0.0-20261106082405-de696d8c2a1b/go.mod h1:LuJv9zaPqL6RlcpyRwTfsIeLjs+/50BAe+xNLUBU5/I=
 github.com/dal-go/dalgo2duckdb v0.1.0 h1:6+eWkleiYHxJODSHulqRfr+td0avT0+n0x+xCbkFjXI=
 github.com/dal-go/dalgo2duckdb v0.1.0/go.mod h1:gXsm9ABNg/HkwihkfVuCoojqMzzFSZzYb/qAzzwE5RQ=
 github.com/dal-go/dalgo2dynamodb v0.0.0-20261101230446-46c9938f48ef h1:DCVuqacafBQlsaf8IvVQAOC9M5T4gOEyoVq7JRtjgXQ=

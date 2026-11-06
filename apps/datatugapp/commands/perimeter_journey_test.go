@@ -157,6 +157,7 @@ func TestPerimeterDemoJourney(t *testing.T) {
 	assert.Equal(t, "agent", denial.Error.Policy)
 	assert.Equal(t, "/Employee", denial.Error.Resource)
 	assert.Equal(t, "query", denial.Error.Operation)
+	assert.Contains(t, strings.ToLower(denial.Error.Message), "access denied", "the text refusal stays in the JSON for consumers that match on it")
 	assert.Contains(t, denial.Error.Request.Command, "datatug policy exception propose --project datatug-demo --source chinook --role agent --table Employee --fields <field,...>")
 
 	view := propose(t, "--source", "chinook", "--role", "agent", "--table", "employee", "--fields", "employeeid,FirstName,LastName,Title,Email")

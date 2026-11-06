@@ -50,10 +50,10 @@ func TestPrepareMaskingRefusesShapesItCannotMask(t *testing.T) {
 
 func TestBaseCollectionRef(t *testing.T) {
 	ref := dal.NewRootCollectionRef("Customer", "")
-	got, ok := baseCollectionRef(dal.NewQueryBuilder(dal.From(&ref)).SelectColumns().(dal.StructuredQuery))
+	got, ok := baseCollectionRef(dal.NewQueryBuilder(dal.From(&ref)).SelectColumns())
 	assert.True(t, ok)
 	assert.Equal(t, "Customer", got.Name())
-	_, ok = baseCollectionRef(dal.NewQueryBuilder(dal.From(dal.NewCollectionGroupRef("notes", ""))).SelectColumns().(dal.StructuredQuery))
+	_, ok = baseCollectionRef(dal.NewQueryBuilder(dal.From(dal.NewCollectionGroupRef("notes", ""))).SelectColumns())
 	assert.False(t, ok)
 }
 

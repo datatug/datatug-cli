@@ -63,14 +63,14 @@ func TestStoreJourney(t *testing.T) {
 
 	require.NoError(t, s.Record(NewEvent("used", got, got.Fields, t0)))
 	all, _, _ := s.List()
-	s.RecordExpiries(all, t0.Add(time.Hour))
-	s.RecordExpiries(all, t0.Add(time.Hour)) // a stale list: Get still works, nothing new is recorded twice
+	assert.NoError(t, s.RecordExpiries(all, t0.Add(time.Hour)))
+	assert.NoError(t, s.RecordExpiries(all, t0.Add(time.Hour))) // a stale list: Get still works, nothing new is recorded twice
 	after, _, _ := s.List()
 	for _, e := range after {
 		assert.True(t, e.ExpiryRecorded, e.ID)
 	}
-	s.RecordExpiries(after, t0.Add(time.Hour))
-	s.RecordExpiries([]Exception{pending("00000000000000ff")}, t0.Add(time.Hour))
+	assert.NoError(t, s.RecordExpiries(after, t0.Add(time.Hour)))
+	_ = s.RecordExpiries([]Exception{pending("00000000000000ff")}, t0.Add(time.Hour))
 	events, err = s.Audit()
 	require.NoError(t, err)
 	var kinds []string
@@ -239,7 +239,7 @@ func TestAuditReadEdges(t *testing.T) {
 func TestRecordExpiriesSkipsUnreadable(t *testing.T) {
 	s := Store{ProjectDir: t.TempDir()}
 	gone := pending("0000000000000009")
-	s.RecordExpiries([]Exception{gone}, t0.Add(time.Hour))
+	_ = s.RecordExpiries([]Exception{gone}, t0.Add(time.Hour))
 	events, err := s.Audit()
 	require.NoError(t, err)
 	assert.Empty(t, events)
@@ -250,7 +250,7 @@ func TestRecordExpiriesLockFailure(t *testing.T) {
 	require.NoError(t, s.Propose(pending("0000000000000001")))
 	restore(t, &tryLock)
 	tryLock = func(context.Context, *flock.Flock) (bool, error) { return false, nil }
-	s.RecordExpiries([]Exception{pending("0000000000000001")}, t0.Add(time.Hour))
+	_ = s.RecordExpiries([]Exception{pending("0000000000000001")}, t0.Add(time.Hour))
 	got, _, err := s.Get("0000000000000001")
 	require.NoError(t, err)
 	assert.False(t, got.ExpiryRecorded)

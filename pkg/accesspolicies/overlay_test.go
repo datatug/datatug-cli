@@ -56,10 +56,10 @@ func TestNonProjectionFields(t *testing.T) {
 		WhereField("Country", dal.Equal, "Canada").
 		OrderBy(dal.AscendingField("City")).
 		SelectColumns(dal.Column{Expression: dal.Field("FirstName")}, dal.Column{Expression: dal.Field("Email"), Alias: "Email"}, dal.Column{Expression: dal.Field("Phone"), Alias: "contact"})
-	fields, err := NonProjectionFields(query.(dal.StructuredQuery))
+	fields, err := NonProjectionFields(query)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"City", "Country", "Phone"}, fields)
-	all, err := ReferencedFields(query.(dal.StructuredQuery))
+	all, err := ReferencedFields(query)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"City", "Country", "Email", "FirstName", "Phone"}, all)
 }

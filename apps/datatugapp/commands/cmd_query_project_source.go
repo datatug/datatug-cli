@@ -327,12 +327,15 @@ type denialJSON struct {
 }
 
 type denialBody struct {
-	Code      string         `json:"code"`
-	Policy    string         `json:"policy,omitempty"`
-	Resource  string         `json:"resource,omitempty"`
-	Operation string         `json:"operation"`
-	Reason    string         `json:"reason"`
-	Request   *denialRequest `json:"request,omitempty"`
+	Code      string `json:"code"`
+	Policy    string `json:"policy,omitempty"`
+	Resource  string `json:"resource,omitempty"`
+	Operation string `json:"operation"`
+	Reason    string `json:"reason"`
+	// Message is the refusal as the text format prints it ("dalgo access
+	// denied: …"), kept so consumers that match on that text keep working.
+	Message string         `json:"message,omitempty"`
+	Request *denialRequest `json:"request,omitempty"`
 }
 
 type denialRequest struct {
@@ -351,7 +354,7 @@ func reportedJSONDenial(stderr io.Writer, body denialBody, code int) error {
 
 // accessDenialBody describes a policy refusal of a query run.
 func accessDenialBody(lines []accesspolicies.Line, err error, o queryOptions, query dal.Query) denialBody {
-	body := denialBody{Code: "ACCESS_DENIED", Operation: "query", Reason: err.Error(), Resource: accesspolicies.BaseResource(query).String()}
+	body := denialBody{Code: "ACCESS_DENIED", Operation: "query", Reason: err.Error(), Message: err.Error(), Resource: accesspolicies.BaseResource(query).String()}
 	for _, line := range lines {
 		if !line.Allowed {
 			body.Policy, body.Resource, body.Reason = line.Policy, line.Resource, line.Explanation
@@ -384,7 +387,7 @@ func accessDenialBody(lines []accesspolicies.Line, err error, o queryOptions, qu
 func shellWord(s string) string {
 	plain := s != ""
 	for _, c := range s {
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("-_./:,", c)) {
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && !strings.ContainsRune("-_./:,", c) {
 			plain = false
 		}
 	}

@@ -193,7 +193,7 @@ func TestDatabricksPublicSDKFactoryUsesClosedSQLAndOperationENV(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	doc, err := client.Get(context.Background(), "users", "a")
 	if err != nil {
@@ -273,7 +273,7 @@ func TestDatabricksConcurrencySafety(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {

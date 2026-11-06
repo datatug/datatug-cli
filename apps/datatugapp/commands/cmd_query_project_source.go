@@ -17,6 +17,7 @@ import (
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/meaninglabelsfile"
 	"github.com/datatug/datatug-cli/pkg/policyexceptions"
 	"github.com/datatug/datatug-core/pkg/meaninglabels"
@@ -38,7 +39,7 @@ type projectRead struct {
 	projectDir string
 	projectID  string
 	source     string
-	url        string
+	backend    dbcopy.BackendRef
 	exceptions policyexceptions.Store
 	// applied maps the rule id of each exception overlaid on the loaded
 	// policies to that exception.
@@ -61,10 +62,14 @@ func resolveProjectRead(ctx context.Context, o queryOptions) (*projectRead, erro
 		return nil, Exit(err.Error(), exitCodeUsage)
 	}
 	source, err := resolveQuerySource(ctx, store, projectDir, env, o.source)
+	var backend dbcopy.BackendRef
+	if err == nil {
+		backend, err = dbcopy.Parse(source.URL)
+	}
 	if err != nil {
 		return nil, Exit(err.Error(), exitCodeUsage)
 	}
-	return &projectRead{projectDir: projectDir, projectID: projectID, source: o.source, url: source.URL, exceptions: policyexceptions.Store{ProjectDir: projectDir}}, nil
+	return &projectRead{projectDir: projectDir, projectID: projectID, source: o.source, backend: backend.WithFlag("--source"), exceptions: policyexceptions.Store{ProjectDir: projectDir}}, nil
 }
 
 // errNoProjectPolicies is the refusal of a project read in a project that has
@@ -93,10 +98,7 @@ func (r *projectRead) loadPolicies(stderr io.Writer) ([]accesspolicies.Loaded, e
 	}
 	r.applied = map[string]policyexceptions.Exception{}
 	overlay := func(path string, data []byte, codec access.Codec) ([]byte, error) {
-		rel, relErr := filepath.Rel(r.projectDir, path)
-		if relErr != nil {
-			return data, nil
-		}
+		rel, _ := filepath.Rel(r.projectDir, path) // both are paths of the project folder
 		out, ids, err := policyexceptions.Overlay(data, codec, r.projectID, filepath.ToSlash(rel), mine, r.now)
 		for _, id := range ids {
 			for _, e := range mine {
@@ -150,7 +152,7 @@ func (e *errFieldProtected) Error() string { return e.message }
 // never speaks for a table the policy denies: one table, no subquery, and no filter, sort, grouping, alias or
 // expression on a protected column. A label document that cannot be read
 // refuses the read.
-func (r *projectRead) prepareMasking(ctx context.Context, query dal.Query) error {
+func (r *projectRead) prepareMasking(ctx context.Context, query dal.Query) *errFieldProtected {
 	doc, err := loadLabels(ctx, r.projectDir)
 	if err != nil {
 		return &errFieldProtected{"the project's sensitivity labels (datatug-labels.json) cannot be read, so the read is refused"}

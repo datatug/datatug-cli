@@ -366,10 +366,7 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		if project, err = resolveProjectRead(cmd.Context(), o); err != nil {
 			return err
 		}
-		if backend, err = dbcopy.Parse(project.url); err != nil {
-			return Exit(err.Error(), exitCodeUsage)
-		}
-		backend = backend.WithFlag("--source")
+		backend = project.backend
 		if loaded, err = project.loadPolicies(cmd.ErrOrStderr()); err != nil {
 			return err
 		}
@@ -559,11 +556,7 @@ func closeReader(reader dal.RecordsReader) {
 
 // fieldProtectedFailure is a masking refusal of a project read: exit 5, as
 // one JSON object on stderr with --format json.
-func fieldProtectedFailure(stderr io.Writer, o queryOptions, err error) error {
-	var protected *errFieldProtected
-	if !errors.As(err, &protected) {
-		return err
-	}
+func fieldProtectedFailure(stderr io.Writer, o queryOptions, protected *errFieldProtected) error {
 	if o.format == "json" {
 		return reportedJSONDenial(stderr, denialBody{Code: meaninglabels.CodeFieldProtected, Operation: "query", Reason: protected.message}, exitCodeAccessDenied)
 	}

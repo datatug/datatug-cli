@@ -34,6 +34,8 @@ var (
 	exceptionNow             = time.Now
 	exceptionSleep           = time.Sleep
 	newExceptionID           = policyexceptions.NewID
+	listCollections          = dbschema.ListCollections
+	describeCollection       = dbschema.DescribeCollection
 )
 
 // maxStatusWait bounds status --wait.
@@ -121,6 +123,12 @@ func writeExceptionView(w io.Writer, format string, view exceptionView) error {
 	if format == "json" {
 		return writeJSONLine(w, view)
 	}
+	_, err := io.WriteString(w, exceptionText(view))
+	return err
+}
+
+// exceptionText is the text form of one exception.
+func exceptionText(view exceptionView) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s %s: role %s on %s.%s (all rows), fields %s\n", view.ID, view.State, view.Role, view.Source, view.Table, strings.Join(view.Fields, ", "))
 	if len(view.AppliedFields) > 0 {
@@ -140,8 +148,7 @@ func writeExceptionView(w io.Writer, format string, view exceptionView) error {
 		fmt.Fprintf(&b, "  %s: %s\n", verb, view.Next[verb])
 	}
 	b.WriteString(view.Note + "\n")
-	_, err := io.WriteString(w, b.String())
-	return err
+	return b.String()
 }
 
 // writeJSONLine writes v as one line of JSON, without HTML escaping.
@@ -153,9 +160,10 @@ func writeJSONLine(w io.Writer, v any) error {
 
 // projectPolicy is one policy document of a project.
 type projectPolicy struct {
-	name, rel, path string
-	data            []byte
-	codec           access.Codec
+	name, rel string
+	data      []byte
+	codec     access.Codec
+	loaded    accesspolicies.Loaded
 }
 
 // findProjectPolicy picks the policy document an exception binds to: the one
@@ -174,19 +182,19 @@ func findProjectPolicy(projectDir, want string) (projectPolicy, error) {
 			continue
 		}
 		path := filepath.Join(dir, entry.Name())
-		item, err := accesspolicies.LoadFile(path)
+		data, err := os.ReadFile(path)
 		if err != nil {
-			return projectPolicy{}, Exit(err.Error(), exitCodeUsage)
+			return projectPolicy{}, Exit(fmt.Sprintf("policy %s cannot be read", entry.Name()), exitCodeUsage)
+		}
+		item, err := accesspolicies.DecodeLoaded(data, codec, path)
+		if err != nil {
+			return projectPolicy{}, Exit(fmt.Sprintf("policy %s: %v", entry.Name(), err), exitCodeUsage)
 		}
 		base := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
 		if want != "" && want != item.Policy.Name() && want != base {
 			continue
 		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return projectPolicy{}, err
-		}
-		found = append(found, projectPolicy{name: item.Policy.Name(), rel: projectPoliciesDir + "/" + entry.Name(), path: path, data: data, codec: codec})
+		found = append(found, projectPolicy{name: item.Policy.Name(), rel: projectPoliciesDir + "/" + entry.Name(), data: data, codec: codec, loaded: item})
 	}
 	switch {
 	case len(found) == 1:
@@ -204,13 +212,9 @@ func checkRoleHasNoRule(ctx context.Context, policy projectPolicy, role, table s
 	if err := policyexceptions.Applicable(policy.data, policy.codec); err != nil {
 		return Exit(err.Error(), exitCodeUsage)
 	}
-	item, err := accesspolicies.DecodeLoaded(policy.data, policy.codec, policy.path)
-	if err != nil {
-		return Exit(err.Error(), exitCodeUsage)
-	}
 	ctx = access.WithPrincipal(ctx, access.Principal{Roles: []string{role}})
 	query := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef(table, ""))).SelectColumns()
-	for _, line := range accesspolicies.Explain(ctx, []accesspolicies.Loaded{item}, query, nil) {
+	for _, line := range accesspolicies.Explain(ctx, []accesspolicies.Loaded{policy.loaded}, query, nil) {
 		if line.Allowed || line.Rule != "" {
 			return Exit(fmt.Sprintf("role %s already has a rule on %s in policy %s: an exception only opens a table the role cannot read at all; change the policy itself instead", role, table, policy.name), exitCodeUsage)
 		}
@@ -230,7 +234,7 @@ func sourceColumns(ctx context.Context, sourceURL, table string) (string, []stri
 		return "", nil, Exit(backend.OpenFailure(err).Error(), exitCodeDatabase)
 	}
 	defer dbcopy.CloseSource(db)
-	collections, err := dbschema.ListCollections(ctx, db, nil)
+	collections, err := listCollections(ctx, db, nil)
 	if err != nil {
 		return "", nil, Exit("the tables of the source cannot be listed", exitCodeDatabase)
 	}
@@ -247,7 +251,7 @@ func sourceColumns(ctx context.Context, sourceURL, table string) (string, []stri
 		return "", nil, Exit(fmt.Sprintf("the source has no table %q", table), exitCodeUsage)
 	}
 	ref := dal.NewRootCollectionRef(canonical, "")
-	def, err := dbschema.DescribeCollection(ctx, db, &ref)
+	def, err := describeCollection(ctx, db, &ref)
 	if err != nil || len(def.Fields) == 0 {
 		return "", nil, Exit(fmt.Sprintf("the columns of %s cannot be read", canonical), exitCodeDatabase)
 	}
@@ -460,12 +464,12 @@ func exceptionListCommand() *cobra.Command {
 			if format == "json" {
 				return writeJSONLine(cmd.OutOrStdout(), map[string]any{"kind": policyexceptions.Kind, "exceptions": views})
 			}
+			var b strings.Builder
 			for _, view := range views {
-				if err = writeExceptionView(cmd.OutOrStdout(), format, view); err != nil {
-					return err
-				}
+				b.WriteString(exceptionText(view))
 			}
-			return nil
+			_, err = io.WriteString(cmd.OutOrStdout(), b.String())
+			return err
 		},
 	}
 	addExceptionCommonFlags(cmd)
@@ -586,9 +590,8 @@ func exceptionApplyCommand() *cobra.Command {
 			if err != nil || policy.rel != e.Policy.Path || policyexceptions.Fingerprint(policy.data) != e.Policy.SHA256 {
 				return Exit("the policy changed since the exception was proposed, so it cannot be applied; ask for a new proposal", exitCodeUsage)
 			}
-			if err = checkRoleHasNoRule(cmd.Context(), policy, e.Role, e.Table); err != nil {
-				return err
-			}
+			// The policy is byte for byte the one the proposal was checked against
+			// (no rule of the role on the table), so that check still holds.
 			scope := policyexceptions.Scope(e, fields, now)
 			out := cmd.OutOrStdout()
 			_, _ = fmt.Fprint(out, scope)

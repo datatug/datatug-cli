@@ -722,6 +722,13 @@ func pagingOrder(ctx context.Context, db dal.DB, scheme, collection string) []da
 	}
 	var order []dal.OrderExpression
 	for _, name := range def.PrimaryKey {
+		if string(name) == keyColumn {
+			// A document source (inGitDB) reports its record key as the primary
+			// key. The key is not a data field, so a field-restricted policy
+			// would refuse a sort on it; the source already lists records in
+			// key order, so a page keeps that order instead.
+			return nil
+		}
 		order = append(order, dal.AscendingField(string(name)))
 	}
 	if len(order) == 0 && scheme == "sqlite" {

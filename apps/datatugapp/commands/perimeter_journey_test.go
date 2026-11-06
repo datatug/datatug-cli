@@ -135,6 +135,15 @@ func TestPerimeterDemoJourney(t *testing.T) {
 	require.Equal(t, 0, code, stderr)
 	require.Len(t, notes, 1)
 
+	// A paged read (--limit, as the onboarding skill runs it) keeps the inGitDB
+	// key order instead of sorting on $key, which the field allow-list hides.
+	paged, stderr, code := readAs(t, "", "--source", "support", "--from", "support-notes", "--limit", "3")
+	require.Equal(t, 0, code, stderr)
+	assert.LessOrEqual(t, len(paged), 3)
+	for _, row := range paged {
+		assert.Equal(t, "Canada", row["Country"])
+	}
+
 	_, stderr, code = readAs(t, "", "--source", "chinook", "--from", "Employee")
 	require.Equal(t, exitCodeAccessDenied, code)
 	assert.Equal(t, 1, strings.Count(stderr, "\n"), "one JSON object on stderr: %s", stderr)

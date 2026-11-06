@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -399,17 +400,16 @@ func TestPerimeterMaskingRefusals(t *testing.T) {
 func TestPerimeterProjectReadFlags(t *testing.T) {
 	dir := demoForTest(t)
 	cases := map[string][]string{
-		"no project":   {"--source", "chinook", "--from", "Customer"},
-		"with db":      {"--project", "datatug-demo", "--source", "chinook", "--db", "sqlite:///x.db", "--from", "Customer"},
-		"with policy":  {"--project", "datatug-demo", "--source", "chinook", "--no-policies", "--from", "Customer"},
-		"with sql":     {"--project", "datatug-demo", "--source", "chinook", "--sql", "select 1"},
-		"no input":     {"--project", "datatug-demo", "--source", "chinook"},
-		"two inputs":   {"--project", "datatug-demo", "--source", "chinook", "--from", "Customer", "-f", "q.yaml"},
-		"bad project":  {"--project", "nope", "--source", "chinook", "--from", "Customer"},
-		"bad env":      {"--project", "datatug-demo", "--env", "prod", "--source", "chinook", "--from", "Customer"},
-		"bad source":   {"--project", "datatug-demo", "--source", "nope", "--from", "Customer"},
-		"with query":   {"--project", "datatug-demo", "--source", "chinook", "--query", "x"},
-		"result files": {"--project", "datatug-demo", "--source", "chinook", "--from", "Customer", "--result-id", "r1"},
+		"no project":  {"--source", "chinook", "--from", "Customer"},
+		"with db":     {"--project", "datatug-demo", "--source", "chinook", "--db", "sqlite:///x.db", "--from", "Customer"},
+		"with policy": {"--project", "datatug-demo", "--source", "chinook", "--no-policies", "--from", "Customer"},
+		"with sql":    {"--project", "datatug-demo", "--source", "chinook", "--sql", "select 1"},
+		"no input":    {"--project", "datatug-demo", "--source", "chinook"},
+		"two inputs":  {"--project", "datatug-demo", "--source", "chinook", "--from", "Customer", "-f", "q.yaml"},
+		"bad project": {"--project", "nope", "--source", "chinook", "--from", "Customer"},
+		"bad env":     {"--project", "datatug-demo", "--env", "prod", "--source", "chinook", "--from", "Customer"},
+		"bad source":  {"--project", "datatug-demo", "--source", "nope", "--from", "Customer"},
+		"with query":  {"--project", "datatug-demo", "--source", "chinook", "--query", "x"},
 	}
 	for name, args := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -425,4 +425,27 @@ func TestPerimeterProjectReadFlags(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "policies", "bad.yaml"), []byte("kind: nope\n"), 0o644))
 	_, _, code = readAs(t, "", "--source", "chinook", "--from", "Customer")
 	assert.Equal(t, exitCodeUsage, code)
+}
+
+// TestPerimeterProjectReadKeepsAResultCardMasked covers the Claude Code
+// plugin's result card: it adds --result-id to every read, so a project read
+// must accept it, and the stored rows are the masked ones.
+func TestPerimeterProjectReadKeepsAResultCardMasked(t *testing.T) {
+	home := filepath.Dir(filepath.Dir(demoForTest(t)))
+	stdout, stderr, code := runCLI(t, "", "query", "run", "--project", "datatug-demo", "--source", "chinook", "--from", "Customer",
+		"--as", "agent", "--role", "agent", "--limit", "3", "--format", "json", "--result-id", "onboarding-card")
+	require.Equal(t, 0, code, stderr)
+	assert.Contains(t, stdout, `"resultFiles"`)
+	stored := ""
+	require.NoError(t, filepath.WalkDir(home, func(path string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.Contains(path, "onboarding-card") {
+			data, readErr := os.ReadFile(path)
+			require.NoError(t, readErr)
+			stored += string(data)
+		}
+		return nil
+	}))
+	require.NotEmpty(t, stored, "the result card's files are written")
+	assert.Contains(t, stored, "••••")
+	assert.NotContains(t, stored, "@", "no email address reaches the stored result")
 }

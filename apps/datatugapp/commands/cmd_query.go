@@ -248,8 +248,8 @@ func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
 		return o, Exit("--project/--source reads one table of a project source: --query and --db do not go with it", exitCodeUsage)
 	case projectSourceMode && (len(o.policies) > 0 || o.policiesDir != "" || o.noPolicies):
 		return o, Exit("--policy/--policies-dir/--no-policies are not supported with --project/--source; policies come from the project's own policies/ directory", exitCodeUsage)
-	case projectSourceMode && (o.sql != "" || o.resultID != ""):
-		return o, Exit("--sql and --result-id are not supported with --project/--source; use --from or -f", exitCodeUsage)
+	case projectSourceMode && o.sql != "":
+		return o, Exit("--sql is not supported with --project/--source; use --from or -f", exitCodeUsage)
 	case projectSourceMode && queryInputs == 0:
 		return o, Exit("one of -f/--file or --from is required with --project/--source", exitCodeUsage)
 	case projectSourceMode && queryInputs > 1:

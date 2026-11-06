@@ -46,9 +46,11 @@ scopes:
         operations: [query]
 `
 
+var demoBinding = Binding{ProjectID: "demo", Env: "local", Source: "chinook", SourceIdentity: SourceFingerprint("sqlite:///chinook.sqlite"), PolicyPath: "policies/agent.yaml"}
+
 func applied(id string, expires time.Time) Exception {
 	return Exception{
-		ID: id, Kind: Kind, ProjectID: "demo", Source: "chinook", Role: "agent", Table: "Employee",
+		ID: id, Kind: Kind, ProjectID: "demo", Env: "local", Source: "chinook", SourceIdentity: SourceFingerprint("sqlite:///chinook.sqlite"), Role: "agent", Table: "Employee",
 		Policy: PolicyRef{Name: "agent", Path: "policies/agent.yaml", SHA256: Fingerprint([]byte(principalPolicy))},
 		Fields: []string{"EmployeeId", "Title"}, AppliedFields: []string{"EmployeeId"}, DurationSeconds: 900,
 		State: StateApplied, ProposedAt: t0, PendingExpiresAt: t0.Add(PendingTTL), ExpiresAt: &expires,
@@ -102,12 +104,10 @@ func TestCheckDurationAndSubset(t *testing.T) {
 func TestScope(t *testing.T) {
 	e := applied("0123456789abcdef", t0)
 	e.Reason = "escalations"
-	scope := Scope(e, []string{"EmployeeId", "Title"}, t0)
-	for _, want := range []string{"0123456789abcdef", "all rows of Employee", "EmployeeId, Title", "until 2026-11-06T12:15:00Z", "escalations", HonestLimit, e.Policy.SHA256} {
+	scope := Scope(e, []string{"EmployeeId", "Title"}, t0.Add(15*time.Minute))
+	for _, want := range []string{"0123456789abcdef", "all rows of Employee", "EmployeeId, Title", "until 2026-11-06T12:15:00Z", "escalations", HonestLimit, e.Policy.SHA256, "Env:      local", e.SourceIdentity} {
 		assert.Contains(t, scope, want)
 	}
-	assert.Len(t, ScopeHash(scope), 64)
-	assert.NotEqual(t, ScopeHash(scope), ScopeHash(Scope(e, []string{"EmployeeId"}, t0)))
 }
 
 func TestApplicable(t *testing.T) {
@@ -126,7 +126,7 @@ func decodePolicy(t *testing.T, data []byte) access.Policy {
 func TestOverlayAddsOneRule(t *testing.T) {
 	data := []byte(principalPolicy)
 	e := applied("0123456789abcdef", t0.Add(time.Hour))
-	out, ids, err := Overlay(data, access.YAMLCodec{}, "demo", "policies/agent.yaml", []Exception{e}, t0)
+	out, ids, err := Overlay(data, access.YAMLCodec{}, demoBinding, []Exception{e}, t0)
 	require.NoError(t, err)
 	assert.Equal(t, []string{e.ID}, ids)
 	var document access.Document
@@ -148,6 +148,9 @@ func TestOverlayContributesNothing(t *testing.T) {
 		"expired":       func(e *Exception) { e.ExpiresAt = &t0 },
 		"pending":       func(e *Exception) { e.State = StatePending },
 		"other project": func(e *Exception) { e.ProjectID = "other" },
+		"other env":     func(e *Exception) { e.Env = "prod" },
+		"other source":  func(e *Exception) { e.Source = "support" },
+		"other db":      func(e *Exception) { e.SourceIdentity = SourceFingerprint("sqlite:///elsewhere.sqlite") },
 		"other path":    func(e *Exception) { e.Policy.Path = "policies/other.yaml" },
 		"policy edited": func(e *Exception) { e.Policy.SHA256 = Fingerprint([]byte("old")) },
 		"no fields":     func(e *Exception) { e.AppliedFields = nil },
@@ -156,7 +159,7 @@ func TestOverlayContributesNothing(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			e := live
 			change(&e)
-			out, ids, err := Overlay(data, access.YAMLCodec{}, "demo", "policies/agent.yaml", []Exception{e}, t0)
+			out, ids, err := Overlay(data, access.YAMLCodec{}, demoBinding, []Exception{e}, t0)
 			require.NoError(t, err)
 			assert.Empty(t, ids)
 			assert.Equal(t, data, out)
@@ -169,7 +172,7 @@ func TestOverlayEdges(t *testing.T) {
 		data := []byte(scopesPolicy)
 		e := applied("0123456789abcdef", t0.Add(time.Hour))
 		e.Policy.SHA256 = Fingerprint(data)
-		out, ids, err := Overlay(data, access.YAMLCodec{}, "demo", "policies/agent.yaml", []Exception{e}, t0)
+		out, ids, err := Overlay(data, access.YAMLCodec{}, demoBinding, []Exception{e}, t0)
 		require.NoError(t, err)
 		assert.Empty(t, ids)
 		assert.Equal(t, data, out)
@@ -178,7 +181,7 @@ func TestOverlayEdges(t *testing.T) {
 		data := []byte("{")
 		e := applied("0123456789abcdef", t0.Add(time.Hour))
 		e.Policy.SHA256 = Fingerprint(data)
-		_, _, err := Overlay(data, access.YAMLCodec{}, "demo", "policies/agent.yaml", []Exception{e}, t0)
+		_, _, err := Overlay(data, access.YAMLCodec{}, demoBinding, []Exception{e}, t0)
 		assert.Error(t, err)
 	})
 	t.Run("groups only and a taken rule set", func(t *testing.T) {
@@ -189,7 +192,7 @@ func TestOverlayEdges(t *testing.T) {
 		taken.Policy.SHA256 = e.Policy.SHA256
 		data = []byte(strings.Replace(string(data), "ruleSets:\n", "ruleSets:\n  exception-fedcba9876543210:\n    - path: /Track\n      rules:\n        - {id: t, effect: allow, operations: [query]}\n", 1))
 		e.Policy.SHA256, taken.Policy.SHA256 = Fingerprint(data), Fingerprint(data)
-		out, ids, err := Overlay(data, access.YAMLCodec{}, "demo", "policies/agent.yaml", []Exception{e, taken}, t0)
+		out, ids, err := Overlay(data, access.YAMLCodec{}, demoBinding, []Exception{e, taken}, t0)
 		require.NoError(t, err)
 		assert.Equal(t, []string{e.ID}, ids)
 		assert.Contains(t, string(out), "exception-0123456789abcdef")
@@ -197,7 +200,7 @@ func TestOverlayEdges(t *testing.T) {
 	t.Run("encode failure", func(t *testing.T) {
 		data := []byte(principalPolicy)
 		e := applied("0123456789abcdef", t0.Add(time.Hour))
-		_, _, err := Overlay(data, failingEncodeCodec{}, "demo", "policies/agent.yaml", []Exception{e}, t0)
+		_, _, err := Overlay(data, failingEncodeCodec{}, demoBinding, []Exception{e}, t0)
 		assert.ErrorContains(t, err, "cannot encode")
 	})
 }

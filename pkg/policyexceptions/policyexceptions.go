@@ -68,10 +68,15 @@ type PolicyRef struct {
 
 // Exception is one stored local policy exception.
 type Exception struct {
-	ID               string     `json:"id"`
-	Kind             string     `json:"kind"`
-	ProjectID        string     `json:"projectId"`
-	Source           string     `json:"source"`
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`
+	ProjectID string `json:"projectId"`
+	Env       string `json:"env"`
+	Source    string `json:"source"`
+	// SourceIdentity is SourceFingerprint of the source the exception was
+	// proposed for, as the project resolved it: the same source id pointed at
+	// another database is another source.
+	SourceIdentity   string     `json:"sourceIdentity"`
 	Policy           PolicyRef  `json:"policy"`
 	Role             string     `json:"role"`
 	Table            string     `json:"table"`
@@ -85,7 +90,6 @@ type Exception struct {
 	DecidedAt        *time.Time `json:"decidedAt,omitempty"`
 	ExpiresAt        *time.Time `json:"expiresAt,omitempty"`
 	DecisionReason   string     `json:"decisionReason,omitempty"`
-	ScopeHash        string     `json:"scopeHash,omitempty"`
 	ExpiryRecorded   bool       `json:"expiryRecorded,omitempty"`
 }
 
@@ -161,25 +165,29 @@ func Fingerprint(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// SourceFingerprint is the identity of a resolved source: the hex sha256 of
+// the source reference the project resolves its id to (a SQLite or inGitDB
+// path, or the environment variable of a server source).
+func SourceFingerprint(sourceURL string) string { return Fingerprint([]byte(sourceURL)) }
+
 // Scope renders the exact scope screen apply shows before the person
-// confirms; ScopeHash is the hash of that text, recorded with the decision.
-func Scope(e Exception, fields []string, now time.Time) string {
+// confirms. expires is the expiry the decision records, fixed before the
+// screen is shown.
+func Scope(e Exception, fields []string, expires time.Time) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Local policy exception %s (%s)\n", e.ID, Kind)
 	fmt.Fprintf(&b, "  Project:  %s\n", e.ProjectID)
-	fmt.Fprintf(&b, "  Source:   %s\n", e.Source)
+	fmt.Fprintf(&b, "  Env:      %s\n", e.Env)
+	fmt.Fprintf(&b, "  Source:   %s (identity sha256 %s)\n", e.Source, e.SourceIdentity)
 	fmt.Fprintf(&b, "  Policy:   %s (%s, sha256 %s)\n", e.Policy.Name, e.Policy.Path, e.Policy.SHA256)
 	fmt.Fprintf(&b, "  Role:     %s\n", e.Role)
 	fmt.Fprintf(&b, "  Table:    %s (all rows of %s)\n", e.Table, e.Table)
 	fmt.Fprintf(&b, "  Fields:   %s\n", strings.Join(fields, ", "))
-	fmt.Fprintf(&b, "  Duration: %s, until %s\n", e.Duration(), now.Add(e.Duration()).UTC().Format(time.RFC3339))
+	fmt.Fprintf(&b, "  Duration: %s, until %s\n", e.Duration(), expires.UTC().Format(time.RFC3339))
 	fmt.Fprintf(&b, "  Reason:   %s\n", e.Reason)
 	b.WriteString(HonestLimit + "\n")
 	return b.String()
 }
-
-// ScopeHash is the hex sha256 of a scope screen.
-func ScopeHash(scope string) string { return Fingerprint([]byte(scope)) }
 
 // ErrNotApplicable marks a policy document an exception cannot be added to:
 // it binds no roles to rule sets.
@@ -198,18 +206,29 @@ func Applicable(data []byte, codec access.Codec) error {
 	return nil
 }
 
-// Overlay adds to the policy document data (read from the project-relative
-// path policyPath) one allow rule for each exception that is active at now,
-// names projectID and policyPath, and was bound to exactly these bytes. Each
+// Binding is what a read must match for an exception to apply: the project,
+// its environment, the source id and identity, and the project-relative path
+// of the policy document being loaded.
+type Binding struct {
+	ProjectID, Env, Source, SourceIdentity, PolicyPath string
+}
+
+func (b Binding) matches(e Exception) bool {
+	return e.ProjectID == b.ProjectID && e.Env == b.Env && e.Source == b.Source && e.SourceIdentity == b.SourceIdentity && e.Policy.Path == b.PolicyPath
+}
+
+// Overlay adds to the policy document data one allow rule for each exception
+// that is active at now, matches binding in full, and was bound to exactly
+// these bytes. Each
 // rule is its own rule set, named like the rule, bound to the exception's
 // role: operations [query], path /<table>, fields as applied, and nothing
 // else. It returns data itself and no ids when nothing applies, else the
 // re-encoded document and the ids of the exceptions it added.
-func Overlay(data []byte, codec access.Codec, projectID, policyPath string, exceptions []Exception, now time.Time) ([]byte, []string, error) {
+func Overlay(data []byte, codec access.Codec, binding Binding, exceptions []Exception, now time.Time) ([]byte, []string, error) {
 	fingerprint := Fingerprint(data)
 	var matching []Exception
 	for _, e := range exceptions {
-		if e.Active(now) && e.ProjectID == projectID && e.Policy.Path == policyPath && e.Policy.SHA256 == fingerprint && len(e.AppliedFields) > 0 {
+		if e.Active(now) && binding.matches(e) && e.Policy.SHA256 == fingerprint && len(e.AppliedFields) > 0 {
 			matching = append(matching, e)
 		}
 	}

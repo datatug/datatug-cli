@@ -37,19 +37,19 @@ type Event struct {
 	Event     string     `json:"event"` // proposed, applied, narrowed, rejected, revoked, expired, used
 	ID        string     `json:"id"`
 	ProjectID string     `json:"projectId"`
+	Env       string     `json:"env"`
 	Source    string     `json:"source"`
 	Policy    string     `json:"policy"`
 	Role      string     `json:"role"`
 	Table     string     `json:"table"`
 	Fields    []string   `json:"fields,omitempty"`
 	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
-	ScopeHash string     `json:"scopeHash,omitempty"`
 	Reason    string     `json:"reason,omitempty"`
 }
 
 // NewEvent is an event about e at at.
 func NewEvent(kind string, e Exception, fields []string, at time.Time) Event {
-	return Event{At: at.UTC(), Kind: Kind, Event: kind, ID: e.ID, ProjectID: e.ProjectID, Source: e.Source, Policy: e.Policy.Path, Role: e.Role, Table: e.Table, Fields: fields, ExpiresAt: e.ExpiresAt}
+	return Event{At: at.UTC(), Kind: Kind, Event: kind, ID: e.ID, ProjectID: e.ProjectID, Env: e.Env, Source: e.Source, Policy: e.Policy.Path, Role: e.Role, Table: e.Table, Fields: fields, ExpiresAt: e.ExpiresAt}
 }
 
 // Seams over the file system, for failure tests.
@@ -185,15 +185,20 @@ func (s Store) List() ([]Exception, error) {
 }
 
 // Commit changes one exception under the store's lock, only if its file still
-// holds exactly expected, and records the event change returns. change may
-// refuse the commit by returning an error, and nothing is written then. When the event cannot be
-// recorded the old file is put back and the commit fails.
+// holds exactly expected. change may refuse by returning an error. The event
+// change returns is appended to the audit log first and the new state is
+// written only after it: a decision that cannot be audited is never recorded,
+// and a write that fails after the event leaves the old state in force.
 func (s Store) Commit(id string, expected []byte, change func(*Exception) (Event, error)) error {
 	unlock, err := s.lock()
 	if err != nil {
 		return err
 	}
 	defer unlock()
+	return s.commitLocked(id, expected, change)
+}
+
+func (s Store) commitLocked(id string, expected []byte, change func(*Exception) (Event, error)) error {
 	current, raw, err := s.Get(id)
 	if err != nil {
 		return err
@@ -205,16 +210,10 @@ func (s Store) Commit(id string, expected []byte, change func(*Exception) (Event
 	if err != nil {
 		return err
 	}
-	if err := s.write(current); err != nil {
-		return err
-	}
 	if err := s.appendAudit(event); err != nil {
-		if restoreErr := writeFile(s.file(id), raw, 0o600); restoreErr != nil {
-			return errors.Join(err, restoreErr)
-		}
 		return err
 	}
-	return nil
+	return s.write(current)
 }
 
 // Record appends one event to the audit log under the store's lock.
@@ -267,21 +266,33 @@ func (s Store) Audit() ([]Event, error) {
 }
 
 // RecordExpiries marks every exception that expired at now and was not yet
-// recorded, writing one expired event each. It is best effort: a failure
-// leaves the exception to be recorded next time and never changes what is
-// applied, because expiry is evaluated against the clock on every load.
+// recorded, writing one expired event each, in one pass under the store's
+// lock. It is best effort: a failure leaves the exception to be recorded next
+// time and never changes what is applied, because expiry is evaluated
+// against the clock on every load.
 func (s Store) RecordExpiries(exceptions []Exception, now time.Time) {
+	var due []string
 	for _, e := range exceptions {
-		if e.ExpiryRecorded || e.Status(now) != StateExpired {
-			continue
+		if !e.ExpiryRecorded && e.Status(now) == StateExpired {
+			due = append(due, e.ID)
 		}
-		current, raw, err := s.Get(e.ID)
+	}
+	if len(due) == 0 {
+		return
+	}
+	unlock, err := s.lock()
+	if err != nil {
+		return
+	}
+	defer unlock()
+	for _, id := range due {
+		current, raw, err := s.Get(id)
 		if err != nil || current.ExpiryRecorded {
 			continue
 		}
-		_ = s.Commit(e.ID, raw, func(current *Exception) (Event, error) {
-			current.ExpiryRecorded = true
-			return NewEvent("expired", *current, nil, now), nil
+		_ = s.commitLocked(id, raw, func(e *Exception) (Event, error) {
+			e.ExpiryRecorded = true
+			return NewEvent("expired", *e, nil, now), nil
 		})
 	}
 }

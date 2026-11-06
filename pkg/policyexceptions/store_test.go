@@ -197,30 +197,19 @@ func TestStoreCommitFailures(t *testing.T) {
 		writeFile = func(string, []byte, os.FileMode) error { return errors.New("full") }
 		assert.ErrorContains(t, s.Commit("0000000000000001", raw, change), "full")
 	})
-	t.Run("audit restores the decision", func(t *testing.T) {
+	t.Run("an event that cannot be audited records nothing", func(t *testing.T) {
 		s, raw := setup(t)
 		restore(t, &openFile)
 		openFile = func(string, int, os.FileMode) (*os.File, error) { return nil, errors.New("no audit") }
 		assert.ErrorContains(t, s.Commit("0000000000000001", raw, change), "no audit")
 		assert.Equal(t, raw, mustRaw(t, s, "0000000000000001"))
 	})
-	t.Run("audit and restore both fail", func(t *testing.T) {
+	t.Run("a write after the event keeps the old state", func(t *testing.T) {
 		s, raw := setup(t)
-		restore(t, &openFile)
-		restore(t, &writeFile)
-		openFile = func(string, int, os.FileMode) (*os.File, error) { return nil, errors.New("no audit") }
-		calls := 0
-		real := writeFile
-		writeFile = func(name string, data []byte, mode os.FileMode) error {
-			calls++
-			if calls > 1 {
-				return errors.New("no restore")
-			}
-			return real(name, data, mode)
-		}
-		err := s.Commit("0000000000000001", raw, change)
-		assert.ErrorContains(t, err, "no audit")
-		assert.ErrorContains(t, err, "no restore")
+		restore(t, &rename)
+		rename = func(string, string) error { return errors.New("cross-device") }
+		assert.ErrorContains(t, s.Commit("0000000000000001", raw, change), "cross-device")
+		assert.Equal(t, raw, mustRaw(t, s, "0000000000000001"))
 	})
 }
 
@@ -246,4 +235,15 @@ func TestRecordExpiriesSkipsUnreadable(t *testing.T) {
 	events, err := s.Audit()
 	require.NoError(t, err)
 	assert.Empty(t, events)
+}
+
+func TestRecordExpiriesLockFailure(t *testing.T) {
+	s := Store{ProjectDir: t.TempDir()}
+	require.NoError(t, s.Propose(pending("0000000000000001")))
+	restore(t, &tryLock)
+	tryLock = func(context.Context, *flock.Flock) (bool, error) { return false, nil }
+	s.RecordExpiries([]Exception{pending("0000000000000001")}, t0.Add(time.Hour))
+	got, _, err := s.Get("0000000000000001")
+	require.NoError(t, err)
+	assert.False(t, got.ExpiryRecorded)
 }

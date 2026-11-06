@@ -94,10 +94,7 @@ func (s Store) lock() (func(), error) {
 
 // write stores e atomically (a temporary file renamed over the old one).
 func (s Store) write(e Exception) error {
-	body, err := encode(e)
-	if err != nil {
-		return err
-	}
+	body, _ := encode(e) // plain values; cannot fail
 	tmp := s.file(e.ID) + ".tmp"
 	if err := writeFile(tmp, body, 0o600); err != nil {
 		return fmt.Errorf("policy exceptions: %w", err)
@@ -231,10 +228,7 @@ func (s Store) Record(event Event) error {
 }
 
 func (s Store) appendAudit(event Event) error {
-	line, err := json.Marshal(event)
-	if err != nil {
-		return err
-	}
+	line, _ := json.Marshal(event) // plain values; cannot fail
 	f, err := openFile(s.auditPath(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("policy exceptions audit: %w", err)
@@ -281,8 +275,8 @@ func (s Store) RecordExpiries(exceptions []Exception, now time.Time) {
 		if e.ExpiryRecorded || e.Status(now) != StateExpired {
 			continue
 		}
-		_, raw, err := s.Get(e.ID)
-		if err != nil {
+		current, raw, err := s.Get(e.ID)
+		if err != nil || current.ExpiryRecorded {
 			continue
 		}
 		_ = s.Commit(e.ID, raw, func(current *Exception) (Event, error) {

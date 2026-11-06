@@ -1,0 +1,26 @@
+record_file:
+    name: '{key}.yaml'
+    format: yaml
+    type: map[string]any
+columns:
+    CustomerId:
+        type: int
+        required: true
+    Country:
+        type: string
+        required: true
+    Author:
+        type: string
+        required: true
+    CreatedAt:
+        type: string
+        required: true
+    Note:
+        type: string
+        required: true
+columns_order:
+    - CustomerId
+    - Country
+    - Author
+    - CreatedAt
+    - Note

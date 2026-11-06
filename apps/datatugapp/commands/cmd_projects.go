@@ -1,7 +1,9 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 
 	"github.com/datatug/cliformat"
@@ -21,6 +23,11 @@ type projectEntry struct {
 func projectsCommandAction(cmd *cobra.Command, _ []string) error {
 	format, _ := cmd.Flags().GetString("format")
 	settings, err := dtconfig.GetSettings()
+	if errors.Is(err, fs.ErrNotExist) {
+		// A fresh machine has no ~/.datatug.yaml yet: no project is
+		// registered, which is an empty list, not a failure.
+		settings, err = dtconfig.Settings{}, nil
+	}
 	if err != nil {
 		return fmt.Errorf("failed to get settings: %w", err)
 	}

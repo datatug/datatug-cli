@@ -40,6 +40,9 @@ type ProjectSourceRequest struct {
 	ID          string // the id of the source (the catalog id), a plain name
 	SQLitePath  string
 	DSNEnv      string
+	// IngitDBPath is the root folder of a local inGitDB database (the folder
+	// that holds .ingitdb/); it is recorded like a SQLite path.
+	IngitDBPath string
 	// Driver optionally distinguishes an env-only ClickHouse source. Empty
 	// retains the existing PostgreSQL descriptor registration behavior.
 	Driver string
@@ -82,6 +85,12 @@ func catalogIdentity(projectDir string, catalog *datatug.DbCatalog) (sourceIdent
 			return sourceIdentity{}, false
 		}
 		return sourceIdentity{dbconnection.DriverSQLite3, canonicalFile(path)}, true
+	case catalog.Driver == DriverIngitDB:
+		path, err := ResolveCatalogPath(projectDir, catalog.Path)
+		if err != nil {
+			return sourceIdentity{}, false
+		}
+		return sourceIdentity{DriverIngitDB, canonicalFile(path)}, true
 	case IsServerDriver(catalog.Driver) || catalog.Driver == DriverClickHouse:
 		file, err := ResolveDescriptorPath(projectDir, catalog.Path)
 		if err != nil {
@@ -110,6 +119,9 @@ func catalogIdentity(projectDir string, catalog *datatug.DbCatalog) (sourceIdent
 // of that id. A write that fails takes back what this call wrote before it.
 func AddProjectSource(ctx context.Context, store datatug.ProjectStore, projectDir string, req ProjectSourceRequest) (AddedSource, error) {
 	driver, want := dbconnection.DriverSQLite3, sourceIdentity{dbconnection.DriverSQLite3, canonicalFile(req.SQLitePath)}
+	if req.IngitDBPath != "" {
+		driver, want = DriverIngitDB, sourceIdentity{DriverIngitDB, canonicalFile(req.IngitDBPath)}
+	}
 	if req.DSNEnv != "" {
 		driver, want = DriverPostgres, sourceIdentity{DriverPostgres, req.DSNEnv}
 		if req.Driver != "" {
@@ -166,6 +178,10 @@ func AddProjectSource(ctx context.Context, store datatug.ProjectStore, projectDi
 		catalog.Path = PostgresDescriptorPath(req.Environment, req.ID)
 		if undo, err = WritePostgresDescriptor(projectDir, req.Environment, req.ID, req.DSNEnv); err != nil {
 			return AddedSource{}, err
+		}
+	} else if req.IngitDBPath != "" {
+		if catalog.Path, err = sqliteCatalogPath(projectDir, req.IngitDBPath); err != nil {
+			return AddedSource{}, fmt.Errorf("failed to record the path of the inGitDB database %q in the project: %w", req.ID, err)
 		}
 	} else if catalog.Path, err = sqliteCatalogPath(projectDir, req.SQLitePath); err != nil {
 		return AddedSource{}, fmt.Errorf("failed to record the path of the SQLite database %q in the project: %w", req.ID, err)

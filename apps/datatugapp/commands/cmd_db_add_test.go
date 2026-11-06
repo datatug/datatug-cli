@@ -250,9 +250,12 @@ func TestDbAddRefusesCredentialedURLsWithoutEchoingThem(t *testing.T) {
 	}
 	assert.Len(t, projectFilesOf(t, dir), 1, "nothing is written")
 
-	_, _, err := runDbAdd(t, "--project", "shop", "--db", "ingitdb://./x", "--name", "x", "--env", "prod")
+	_, _, err := runDbAdd(t, "--project", "shop", "--db", "openvaultdb://./x", "--name", "x", "--env", "prod")
 	assert.Equal(t, 2, exitCodeOf(t, err))
-	assert.ErrorContains(t, err, "a ingitdb source cannot be registered")
+	assert.ErrorContains(t, err, "a openvaultdb source cannot be registered")
+	_, _, err = runDbAdd(t, "--project", "shop", "--db", "ingitdb://./x", "--name", "x", "--env", "prod")
+	assert.Equal(t, 2, exitCodeOf(t, err))
+	assert.ErrorContains(t, err, "is not an inGitDB database")
 	_, _, err = runDbAdd(t, "--project", "shop", "--db", "nonsense:thing", "--name", "x", "--env", "prod")
 	assert.Equal(t, 2, exitCodeOf(t, err))
 }
@@ -430,4 +433,20 @@ func TestDbAddIsAListedSubcommandWithHelp(t *testing.T) {
 	for _, want := range []string{"--project", "--db", "--env", "--name", "--format", "env:NAME", "never"} {
 		assert.Contains(t, out.String(), want)
 	}
+}
+
+func TestDbAddIngitDB(t *testing.T) {
+	dir := addProject(t)
+	folder := filepath.Join(t.TempDir(), "support")
+	require.NoError(t, os.MkdirAll(filepath.Join(folder, ".ingitdb"), 0o755))
+	stdout, stderr, err := runDbAdd(t, "--project", "shop", "--db", "ingitdb://"+folder, "--env", "local")
+	require.NoError(t, err, stderr)
+	assert.Equal(t, `{"added":true,"id":"support","env":"local","driver":"ingitdb","dbRef":"datatug://shop/support?env=local"}`+"\n", stdout)
+	assert.Contains(t, projectFilesOf(t, dir)["environments/local/catalogs/support/support.db.json"], `"driver": "ingitdb"`)
+
+	previous := absolutePath
+	absolutePath = func(string) (string, error) { return "", errors.New("no working directory") }
+	t.Cleanup(func() { absolutePath = previous })
+	_, _, err = runDbAdd(t, "--project", "shop", "--db", "ingitdb://"+folder, "--env", "local")
+	assert.ErrorContains(t, err, "cannot resolve the --db path")
 }

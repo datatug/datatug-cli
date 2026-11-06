@@ -29,7 +29,7 @@ jobs:
       - name: Find published release
         id: release
         env:
-          GH_TOKEN: ${{ secrets.DATATUG_RELEASE_TOKEN || secrets.HOMEBREW_TAP_GITHUB_TOKEN || github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           tag="${{ inputs.tag }}"
           if [[ -z "$tag" ]]; then
@@ -41,17 +41,32 @@ jobs:
           test -n "$tag"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
+      # datatug-cli is public, so the private-repository-only DATATUG_RELEASE_TOKEN
+      # never reaches this job, and HOMEBREW_TAP_GITHUB_TOKEN may write only to
+      # the tap (it got HTTP 403 on datatug/datatug release assets on
+      # 2026-11-06). Mint the same narrowly scoped, short-lived App token the
+      # publish-datatug-release job in release.yml uses.
+      - name: Mint exact public release token
+        id: public-release-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: Iv23li26w131Kv6u3IdM
+          private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
+          owner: datatug
+          repositories: datatug
+          permission-contents: write
+
       - name: Ensure release is published to datatug/datatug
         env:
           GH_SOURCE_TOKEN: ${{ github.token }}
-          GH_TARGET_TOKEN: ${{ secrets.DATATUG_RELEASE_TOKEN || secrets.HOMEBREW_TAP_GITHUB_TOKEN || secrets.GORELEASER_GITHUB_TOKEN }}
+          GH_TARGET_TOKEN: ${{ steps.public-release-token.outputs.token }}
           TAG: ${{ steps.release.outputs.tag }}
         run: |
           bash scripts/publish-datatug-release.sh "$TAG" "$GITHUB_REPOSITORY" "datatug/datatug"
 
       - name: Download and verify release artifacts
         env:
-          GH_TOKEN: ${{ secrets.DATATUG_RELEASE_TOKEN || secrets.HOMEBREW_TAP_GITHUB_TOKEN || github.token }}
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.release.outputs.tag }}
         run: |
           mkdir release
@@ -89,7 +104,7 @@ jobs:
       # A failure here stops nothing else: nothing depends on this workflow.
       - name: Verify the tap serves the release
         env:
-          GH_TOKEN: ${{ secrets.DATATUG_RELEASE_TOKEN || secrets.HOMEBREW_TAP_GITHUB_TOKEN || github.token }}
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.release.outputs.tag }}
           RELEASE_REPO: datatug/datatug
         run: bash scripts/verify-homebrew-cask.sh "$TAG"

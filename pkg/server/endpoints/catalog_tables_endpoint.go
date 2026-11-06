@@ -43,6 +43,11 @@ func getCatalogTablesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
+	boundProject, _, _, bound, bindingErr := api.BoundReadScope(r.Context())
+	if bound && (bindingErr != nil || paramAlias(q, "project", "proj") != boundProject) {
+		writeContractError(w, r, contractErrAccessDenied("configured source read is unavailable"))
+		return
+	}
 	ref, err := newProjectRef(q)
 	if err != nil {
 		handleError(err, w, r)
@@ -54,7 +59,7 @@ func getCatalogTablesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	projectDir, ok := catalogProjectDir(ref.ProjectID)
 	if !ok {
-		handleError(fmt.Errorf("%w: unknown project %q", api.ErrCatalogNotFound, dbcopy.SourceIDDisplay(ref.ProjectID)), w, r)
+		handleError(&catalogNotFoundError{err: fmt.Errorf("%w: unknown project %q", api.ErrCatalogNotFound, dbcopy.SourceIDDisplay(ref.ProjectID)), field: "project"}, w, r)
 		return
 	}
 	environmentID := paramAlias(q, "environment", "env")
@@ -66,6 +71,7 @@ func getCatalogTablesHandler(w http.ResponseWriter, r *http.Request) {
 		handleError(err, w, r)
 		return
 	}
+	generation := api.SecurityContextID()
 	executor, configured := secureExecutorHook()
 	if !configured {
 		writeContractError(w, r, newContractError(apicontract.ErrCodeAccessDenied, "access denied", ""))
@@ -76,6 +82,9 @@ func getCatalogTablesHandler(w http.ResponseWriter, r *http.Request) {
 		var loadErr error
 		tables, loadErr = getCatalogTablesFunc(projectDir, environmentID, catalogID)
 		if loadErr != nil {
+			if errors.Is(loadErr, api.ErrCatalogNotFound) {
+				loadErr = &catalogNotFoundError{err: loadErr, field: "source"}
+			}
 			returnJSON(w, r, http.StatusOK, loadErr, nil)
 			return false
 		}
@@ -85,11 +94,16 @@ func getCatalogTablesHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		return true
 	}
-	bound := api.SourceBoundProfile()
 	// Legacy metadata preserves its stored catalog lookup/404 behavior. Bound
 	// metadata must first verify the exact source, before reading its catalog.
-	if !bound && !loadTables() {
-		return
+	if !bound {
+		if _, err := api.GetProjectSummary(r.Context(), ref); err != nil {
+			handleError(err, w, r)
+			return
+		}
+		if !loadTables() {
+			return
+		}
 	}
 	store, err := relatedProjectStoreFor(ref.ProjectID)
 	if err != nil {
@@ -168,7 +182,12 @@ func getCatalogTablesHandler(w http.ResponseWriter, r *http.Request) {
 		writeContractError(w, r, newContractError(codeInternal, "catalog permissions could not be verified", ""))
 		return
 	}
-	returnJSON(w, r, http.StatusOK, nil, &api.CatalogTables{Tables: allowedTables, Views: allowedViews})
+	hosted, err := api.HostedTableRead(r.Context(), ref.ProjectID, environmentID, catalogID)
+	if err != nil || !api.ValidateSecurityContext(generation) || r.Context().Err() != nil {
+		writeContractError(w, r, newContractError(apicontract.ErrCodeAccessDenied, "access denied", ""))
+		return
+	}
+	returnJSON(w, r, http.StatusOK, nil, &api.CatalogTables{Tables: allowedTables, Views: allowedViews, HostedTableRead: hosted})
 }
 
 // A policy evaluation failure is not evidence that one relation is invisible.

@@ -19,6 +19,10 @@ type Options struct {
 	// Initial, when not nil, is a page pushed on top of the start module, for
 	// example the database opened with `datatug ui -f file.db`.
 	Initial *nav.Page
+	// Then, when not nil, runs once the start module (and Initial) are shown,
+	// for work that decides its page only when it runs, for example the
+	// project a `datatug ui --deep-link <address>` names.
+	Then tea.Cmd
 }
 
 // startMsg opens the start module once the program runs.
@@ -108,11 +112,15 @@ func (a App) forward(msg tea.Msg) (App, tea.Cmd) {
 // start opens the start module and then the initial page.
 func (a App) start() (App, tea.Cmd) {
 	a, cmd := a.open(OpenModuleMsg{ID: a.opts.Start, Focus: nav.FocusToMenu})
-	if a.opts.Initial == nil {
-		return a, cmd
+	if a.opts.Initial != nil {
+		var push tea.Cmd
+		a, push = a.forward(nav.PushMsg{Page: *a.opts.Initial})
+		cmd = tea.Batch(cmd, push)
 	}
-	a, push := a.forward(nav.PushMsg{Page: *a.opts.Initial})
-	return a, tea.Batch(cmd, push)
+	if a.opts.Then != nil {
+		cmd = tea.Batch(cmd, a.opts.Then)
+	}
+	return a, cmd
 }
 
 // open shows a module: the stack goes back to the root page, the module's page

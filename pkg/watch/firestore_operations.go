@@ -187,7 +187,7 @@ func (s *Store) GetClaim(ctx context.Context, id RunnerIdentity, runID string, f
 			return err
 		}
 		d.SourceFingerprint = obs.SourceFingerprint
-		result = Claim{ClaimID: r.ID, RunID: r.ID, Fence: r.Fence, LeaseUntil: r.LeaseUntil, Definition: d}
+		result = Claim{ClaimID: r.ID, RunID: r.ID, Fence: r.Fence, LeaseUntil: r.LeaseUntil, Deadline: r.Deadline, Definition: d}
 		return nil
 	})
 	if err != nil {

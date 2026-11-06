@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
+	"github.com/datatug/datatug-cli/pkg/cloudproject"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/strongo/cli-helpers/fsutil"
@@ -21,6 +22,13 @@ type projectData struct {
 	envsErr      error
 	databases    datatug.ProjDbDrivers
 	dbsErr       error
+	// hasQueries is set when queries were loaded: a cloud project lists them,
+	// a project on disk keeps the placeholder screen.
+	hasQueries bool
+	queries    []cloudproject.Item
+	queriesErr error
+	// readOnly marks a DataTug Cloud project: it is edited on datatug.app.
+	readOnly bool
 }
 
 // title is the project's own title, or the one of its reference.
@@ -48,7 +56,11 @@ func loadProjectData(ctx context.Context, ref dtconfig.ProjectRef, store datatug
 // openProject returns the command that loads the project of ref from its files
 // and opens its page under the current one. A project whose files are missing is
 // an alert; any other failure is shown in the content panel.
-func openProject(ref dtconfig.ProjectRef) tea.Cmd {
+func openProject(ref dtconfig.ProjectRef) tea.Cmd { return openProjectAt(ref, sectionProject, false) }
+
+// openProjectAt is openProject showing section s. With register, a project that
+// loads is added to the settings first, so it is listed with the others.
+func openProjectAt(ref dtconfig.ProjectRef, s section, register bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		store := newProjectStore(ref.ID, fsutil.ExpandHome(ref.Path))
@@ -59,8 +71,13 @@ func openProject(ref dtconfig.ProjectRef) tea.Cmd {
 		if err != nil {
 			return datatugui.ReportError("open project "+projectTitle(&ref), err)()
 		}
+		if register {
+			if err = addProjectToSettings(ref); err != nil {
+				return datatugui.ReportError("add project "+projectTitle(&ref)+" to settings", err)()
+			}
+		}
 		bumpRecentProject(ref.ID)
-		return nav.PushMsg{Page: projectPage(data)}
+		return nav.PushMsg{Page: projectPageAt(data, s)}
 	}
 }
 

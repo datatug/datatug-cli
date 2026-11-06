@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -93,5 +94,60 @@ func TestUICommandPassesTheFileFlag(t *testing.T) {
 	}
 	if opts.Start != "" {
 		t.Errorf("the UI must not start when the file is rejected: %+v", *opts)
+	}
+}
+
+// runUICommand runs `ui` with args and returns its error.
+func runUIDeepLinkCommand(args ...string) error {
+	cmd := uiCommandArgs()
+	cmd.SilenceErrors, cmd.SilenceUsage = true, true
+	cmd.SetArgs(args)
+	return cmd.Execute()
+}
+
+// usageError fails the test unless err is an exit error of exitCodeUsage.
+func usageError(t *testing.T, err error) string {
+	t.Helper()
+	var exit *exitError
+	if !errors.As(err, &exit) || exit.ExitCode() != exitCodeUsage {
+		t.Fatalf("err = %v, want a usage error", err)
+	}
+	return exit.Error()
+}
+
+func TestUICommandDeepLinkOpensTheProjectOverTheProjectsScreen(t *testing.T) {
+	_, opts := stubUI(t, &dtstate.DatatugState{CurrentScreenPath: "settings"}, nil)
+	if err := runUIDeepLinkCommand("--deep-link", "https://datatug.app/store/local/project/p1"); err != nil {
+		t.Fatal(err)
+	}
+	if opts.Start != datatugui.ScreenProjects || opts.Then == nil || opts.Initial != nil {
+		t.Errorf("options = %+v", *opts)
+	}
+}
+
+func TestUICommandDeepLinkToAPageThatIsNoProjectStartsAsUsual(t *testing.T) {
+	_, opts := stubUI(t, &dtstate.DatatugState{CurrentScreenPath: "settings"}, nil)
+	if err := runUIDeepLinkCommand("--deep-link", "https://datatug.app/home"); err != nil {
+		t.Fatal(err)
+	}
+	if opts.Start != datatugui.ScreenSettings || opts.Then != nil {
+		t.Errorf("options = %+v", *opts)
+	}
+}
+
+func TestUICommandDeepLinkUsageErrors(t *testing.T) {
+	_, opts := stubUI(t, &dtstate.DatatugState{}, nil)
+	msg := usageError(t, runUIDeepLinkCommand("--deep-link", "https://user:secret@example.com/x?token=abc"))
+	if !strings.Contains(msg, "https://datatug.app/project/github.com/") || strings.Contains(msg, "secret") || strings.Contains(msg, "abc") {
+		t.Errorf("message = %q", msg)
+	}
+	usageError(t, runUIDeepLinkCommand("--deep-link", "https://datatug.app/home", "--file", "x.db"))
+	usageError(t, runUIDeepLinkCommand("--deep-link", "https://datatug.app/home", "--result", "r1"))
+	msg = usageError(t, runUIDeepLinkCommand("https://datatug.app/project/github.com/a/b"))
+	if !strings.Contains(msg, "--deep-link") {
+		t.Errorf("message = %q", msg)
+	}
+	if opts.Start != "" {
+		t.Errorf("the UI must not start: %+v", *opts)
 	}
 }

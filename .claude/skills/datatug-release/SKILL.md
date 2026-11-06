@@ -63,14 +63,15 @@ change repository configuration merely to trigger another release.
    limits. Only then print `RELEASE_OK <tag>`. Stop at the first missing/failed
    condition and print `RELEASE_FAILED <specific reason>` instead.
 
-## Package distribution is separate
+## Package distribution
 
-Automatic release skips Homebrew and Winget publication. The separate manual
-`publish-packages.yml` downloads the public release, verifies checksums, publishes
-its Homebrew cask and reads back the public tap. Its source contract and the
-release's cask-install artifact smoke test do not prove the tap was updated for
-that release. Claim manual distribution or local Homebrew installation only
-with its own execution receipt. Do not dispatch that workflow implicitly.
+GoReleaser skips Homebrew and Winget. After the release is public, release.yml's
+`publish-homebrew-cask` job calls `publish-packages.yml`, which downloads the
+public release, verifies checksums, publishes its Homebrew cask and reads back
+the public tap; that job's success is the receipt that the tap carries the
+release. Winget is not published. Start `publish-packages.yml` by hand only to
+republish a tag after that job failed. Claim local Homebrew installation only
+with its own execution receipt.
 
 ## Executed reference
 

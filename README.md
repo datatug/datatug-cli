@@ -23,13 +23,13 @@
 <table>
   <tr>
     <td valign="top">
-      <a href="https://youtu.be/tjOzdzB_PGA"><img src="https://datatug.app/static/illustrations/intro-video-poster-1280.webp" alt="DataTug in one minute — watch the intro (1:01)" width="420"></a><br>
-      ▶ <b><a href="https://youtu.be/tjOzdzB_PGA">Watch the DataTug intro (1:01)</a></b><br>
-      The DataTug intro.
+      <a href="https://youtu.be/P8c-uw29XyE"><img src="https://datatug.app/static/illustrations/datatug-in-30-poster-1280.webp" alt="DataTug in 30 seconds: every database, one workspace (0:30)" width="420"></a><br>
+      ▶ <b><a href="https://youtu.be/P8c-uw29XyE">Watch DataTug in 30 seconds (0:30)</a></b><br>
+      Sources, browsing, column meanings, the suggested join, cards and Perimeter. Longer: the <a href="https://youtu.be/8-KHMVIe1S0">intro (1:01)</a>.
     </td>
     <td valign="top">
-      <a href="https://youtu.be/_mla67RoPWY"><img src="https://datatug.app/static/illustrations/explainer-sales-per-capita-poster-1280.webp" alt="Where are we underselling? Sales per capita across three sources (1:30)" width="420"></a><br>
-      ▶ <b><a href="https://youtu.be/_mla67RoPWY">Where are we underselling? (1:30)</a></b><br>
+      <a href="https://youtu.be/ENjhplq2SQ0"><img src="https://datatug.app/static/illustrations/explainer-sales-per-capita-poster-1280.webp" alt="Where are we underselling? Sales per capita across three sources (1:30)" width="420"></a><br>
+      ▶ <b><a href="https://youtu.be/ENjhplq2SQ0">Where are we underselling? (1:30)</a></b><br>
       The sales-per-capita query in this explainer runs with the DataTug CLI.
     </td>
   </tr>
@@ -135,6 +135,16 @@ Launch the interactive terminal UI to explore schemas, tables, and run queries w
 datatug tui
 ```
 For details on widget layouts and keybindings, see [TUI Screens](docs/tui-screens.md).
+
+#### Open a page of the web app in the terminal
+
+The web app at [datatug.app](https://datatug.app) shows a command for the page you are on. Pass its address to `--deep-link` and the terminal UI opens on the matching project and screen:
+
+```bash
+datatug ui --deep-link https://datatug.app/project/github.com/acme/repo/some/dir/-/queries
+```
+
+A GitHub project is cloned to `~/datatug/github.com/<owner>/<repo>` the first time and added to your projects; a project of the local `datatug serve` agent opens by its id in your settings. Queries, boards, databases and environments pages open their section of the project; other pages open the project itself. DataTug Cloud projects and projects stored in the browser can't be opened in the terminal yet: the Projects screen says so. See [spec/features/cli/ui](spec/features/cli/ui/README.md#req-deep-link-flag).
 
 ### Local Server (`datatug serve`)
 Run the local DataTug HTTP agent daemon to serve the Web UI, REST endpoints, and IDE integrations:
@@ -245,7 +255,7 @@ Help wanted to [get test coverage to 100%](https://github.com/datatug/datatug-cl
 ### macOS / Linux — curl
 
 ```bash
-(p=$(mktemp) && trap 'rm -f "$p"' EXIT && curl -fsSL https://datatug.app/install/get-cli -o "$p" && sh "$p")
+(p=$(mktemp) && trap 'rm -f "$p"' EXIT && curl -fsSL https://datatug.app/get-cli -o "$p" && sh "$p")
 ```
 
 Environment overrides: `DATATUG_VERSION` (default: latest release), `DATATUG_INSTALL_DIR` (default: `~/.local/bin`).
@@ -255,10 +265,22 @@ When the install directory is not on `PATH`, the installer appends one line that
 ### Windows — PowerShell
 
 ```powershell
-$p=Join-Path $env:TEMP ("datatug-"+[guid]::NewGuid()+".ps1"); try { irm https://datatug.app/install/get-cli.ps1 -OutFile $p -EA Stop; & $p } finally { Remove-Item $p -EA SilentlyContinue }
+$p=Join-Path $env:TEMP ("datatug-"+[guid]::NewGuid()+".ps1"); try { irm https://datatug.app/get-cli.ps1 -OutFile $p -EA Stop; & $p } finally { Remove-Item $p -EA SilentlyContinue }
 ```
 
 Environment overrides: `DATATUG_VERSION`, `DATATUG_INSTALL_DIR` (default: `%LOCALAPPDATA%\DataTug\bin`). Current Windows releases support amd64.
+
+### Run without installing
+
+`https://datatug.app/run-cli` runs the CLI with the arguments you give it, so the command the web app shows works on a machine without DataTug:
+
+```bash
+curl -fsSL https://datatug.app/run-cli | sh -s -- ui --deep-link <address>
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://datatug.app/run-cli.ps1))) ui --deep-link '<address>'
+```
 
 ### macOS / Linux — Homebrew ([tap](https://github.com/datatug/homebrew-tap))
 
@@ -266,7 +288,7 @@ Environment overrides: `DATATUG_VERSION`, `DATATUG_INSTALL_DIR` (default: `%LOCA
 brew install --cask datatug/tap/datatug
 ```
 
-Homebrew gets a release only when the maintainers promote it, so it can be behind the direct installers (curl and PowerShell, which always take the latest release). `brew list --cask --versions datatug` shows the version installed.
+Every release updates the Homebrew cask a few minutes after it is published, so Homebrew carries the same version as the direct installers (curl and PowerShell). `brew list --cask --versions datatug` shows the version installed.
 
 The direct installers and Homebrew package do not require Go. See the full
 [installation guide](https://datatug.io/install/) or the official

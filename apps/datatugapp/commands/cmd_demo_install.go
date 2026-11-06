@@ -160,12 +160,20 @@ func installDemo(cmd *cobra.Command, dir, projectID string) (demoInstallResult, 
 	status := "unchanged"
 	if projectErr != nil {
 		status = "installed"
+		// The marker goes first: a run that fails after it can be repeated,
+		// and the next run recognises the folder as its own.
+		markerPath := filepath.Join(dir, filepath.FromSlash(demoInstallMarker))
+		if err := demoInstallMkdirAll(filepath.Dir(markerPath), 0o755); err != nil {
+			return demoInstallResult{}, fmt.Errorf("failed to write %s: %w", demoInstallMarker, err)
+		}
+		if err := demoInstallWriteFile(markerPath, marker, 0o644); err != nil {
+			return demoInstallResult{}, fmt.Errorf("failed to write %s: %w", demoInstallMarker, err)
+		}
 		initCmd := initCommand()
 		initCmd.SetContext(cmd.Context())
 		if err := initCommandAction(initCmd, []string{projectID, dir}); err != nil {
 			return demoInstallResult{}, fmt.Errorf("failed to create the demo project: %w", err)
 		}
-		missing = append(missing, demofixtures.File{Path: demoInstallMarker, Content: marker})
 	}
 	for _, f := range missing {
 		target := filepath.Join(dir, filepath.FromSlash(f.Path))

@@ -79,6 +79,9 @@ var labelChanges = []meaninglabels.Change{
 	{Action: meaninglabels.ActionSet, Target: meaninglabels.Target{Source: ChinookSource, Table: "Employee", Column: "Address"}, Class: meaninglabels.ClassPII, Kind: "postal-address", Reason: "employee home address"},
 	{Action: meaninglabels.ActionSet, Target: meaninglabels.Target{Source: ChinookSource, Table: "Employee", Column: "FirstName"}, Class: meaninglabels.ClassNone, Reason: "reviewed: staff directory name"},
 	{Action: meaninglabels.ActionSet, Target: meaninglabels.Target{Source: ChinookSource, Table: "Employee", Column: "LastName"}, Class: meaninglabels.ClassNone, Reason: "reviewed: staff directory name"},
+	// An inGitDB collection is a document object, masked entirely until an
+	// owner reviews it; the synthetic support notes hold nothing sensitive.
+	{Action: meaninglabels.ActionSet, Target: meaninglabels.Target{Source: SupportSource, Table: "support-notes"}, Class: meaninglabels.ClassNone, Reason: "reviewed: synthetic support notes"},
 }
 
 // applyLabel is meaninglabels.Apply; a seam for tests.

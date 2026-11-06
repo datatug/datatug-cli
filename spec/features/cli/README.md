@@ -32,6 +32,7 @@ Pinning the contract surface lets the implementation evolve without breaking use
 | Directory | Description |
 |---|---|
 | [ui/](ui/README.md) | TUI — terminal UI over a DataTug project (default command) |
+| [cloud-projects/](cloud-projects/README.md) | Open DataTug Cloud (Firestore, Space-owned) projects in the TUI from a datatug.app address, signed in through `auth login` and read only through backend endpoints |
 | [init/](init/README.md) | Scaffold a new DataTug project on disk |
 | [config/](config/README.md) | Print user-level CLI configuration |
 | [projects/](projects/README.md) | List & manage user-level project registry (with [`add`](projects/add/README.md)) |

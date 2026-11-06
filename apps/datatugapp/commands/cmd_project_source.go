@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtproject"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
@@ -67,10 +68,16 @@ func projectNameOf(name string) (project, dir string, err error) {
 		return "", ".", nil
 	}
 	config, err := dtconfig.GetSettings()
-	if err != nil || len(config.Projects) != 1 {
+	var local []*dtconfig.ProjectRef
+	for _, p := range config.Projects {
+		if !dtproject.IsCloudRef(*p) {
+			local = append(local, p)
+		}
+	}
+	if err != nil || len(local) != 1 {
 		return "", "", Exit("the reference names no project (datatug:///<db>): run in a project folder, or have exactly one registered project, or write datatug://<project>/<db>", exitCodeUsage)
 	}
-	return config.Projects[0].ID, "", nil
+	return local[0].ID, "", nil
 }
 
 // datatugRefSource resolves reference to a source (see parseSourceArg).

@@ -2,10 +2,12 @@ package endpoints
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/localprojects"
+	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/sneat-co/sneat-go-core/apicore"
 )
 
@@ -48,6 +50,11 @@ func (ProjectAgentEndpoints) deleteProject(w http.ResponseWriter, _ *http.Reques
 // (project.service.ts's getProjectSummaryRequest) sends the project id as
 // `?id=`, not `?project=` — see projectRefByID.
 func getProjectSummary(w http.ResponseWriter, r *http.Request) {
+	boundProject, _, _, bound, bindingErr := api.BoundReadScope(r.Context())
+	if bound && (bindingErr != nil || r.URL.Query().Get(urlParamID) != boundProject) {
+		writeContractError(w, r, contractErrAccessDenied("configured source read is unavailable"))
+		return
+	}
 	if r.URL.Query().Has("branch") {
 		if err := api.RequireLocalReadPrincipal(); err != nil {
 			writeProjectMutationError(w, r, err)
@@ -71,8 +78,41 @@ func getProjectSummary(w http.ResponseWriter, r *http.Request) {
 		handleError(err, w, r)
 		return
 	}
+	answer := &projectSummaryAbsenceResponse{ResponseWriter: w, request: r}
 	worker := func(ctx context.Context) (response apicore.ResponseDTO, err error) {
-		return api.GetProjectSummary(ctx, ref)
+		response, err = api.GetProjectSummary(ctx, ref)
+		if errors.Is(err, datatug.ErrProjectDoesNotExist) {
+			answer.missing = err
+		}
+		return
 	}
-	handle(w, r, &ref, VerifyRequest{AuthRequired: true}, http.StatusOK, getContextFromRequest, worker)
+	handle(answer, r, &ref, VerifyRequest{AuthRequired: true}, http.StatusOK, getContextFromRequest, worker)
+}
+
+// The shared authenticated handler cannot classify a missing project. Translate
+// only absence observed by its worker, after verification/authentication.
+// Pre-worker refusals, success and unrelated errors keep their original path.
+type projectSummaryAbsenceResponse struct {
+	http.ResponseWriter
+	request  *http.Request
+	missing  error
+	answered bool
+}
+
+func (w *projectSummaryAbsenceResponse) WriteHeader(status int) {
+	if w.missing == nil {
+		w.ResponseWriter.WriteHeader(status)
+		return
+	}
+	if !w.answered {
+		w.answered = true
+		handleError(w.missing, w.ResponseWriter, w.request)
+	}
+}
+func (w *projectSummaryAbsenceResponse) Write(body []byte) (int, error) {
+	if w.missing != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return len(body), nil
+	}
+	return w.ResponseWriter.Write(body)
 }

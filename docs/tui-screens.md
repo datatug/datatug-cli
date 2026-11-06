@@ -79,7 +79,7 @@ The lead wires them in `apps/datatugapp/commands/cmd_ui.go`; these names are fix
 
 | Package | Exports |
 |---|---|
-| `dtproject` | `Module() datatugui.Module` (ID `projects`, "Projects", `p`) |
+| `dtproject` | `Module() datatugui.Module` (ID `projects`, "Projects", `p`); `OpenDeepLink(link deeplink.Link) tea.Cmd` (used by `datatug ui --deep-link <address>` as `datatugui.Options.Then`) |
 | `dtviewers` | `Module(viewers ...Viewer) datatugui.Module` (ID `viewers`, "Viewers", `v`); `type Viewer struct{ ID ViewerID; Name, Description string; Shortcut rune; Root func() nav.Page }`; `GetSQLiteDbContext(path string) *SqlDBContext` stays |
 | `dbviewer` | `Viewer() dtviewers.Viewer` (DB viewer, `1`); `DbHomePage(dbContext dtviewers.DbContext) nav.Page` (used by `datatug ui -f file.db` for SQLite) |
 | `gcloudui`, `awsui`, `azureui` | `Viewer() dtviewers.Viewer` each |

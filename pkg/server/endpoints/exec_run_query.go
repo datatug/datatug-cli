@@ -49,7 +49,7 @@ func runQueryHandler(w http.ResponseWriter, r *http.Request) {
 		writeContractError(w, r, newInvalidRequest("", err.Error()))
 		return
 	}
-	result, err := computeRunQuery(r.Context(), req)
+	result, err := computeRunQuery(withAgentContext(r.Context(), isAgentRequest(r)), req)
 	writeContractResponse(w, r, err, result)
 }
 
@@ -181,6 +181,17 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 		}
 	}
 
+	// The configured SQLite profile admits only structured reads. Route-level
+	// admission alone cannot qualify saved HTTP, raw SQL or artifact execution.
+	if api.SourceBoundProfile() {
+		if api.CheckSourceBinding(ctx) != nil {
+			return apicontract.Result{}, contractErrAccessDenied("configured source read is unavailable")
+		}
+		if req.Mode == apicontract.ProvenanceModeSnapshot || req.Record || queryDef != nil && queryDef.Type != datatug.QueryTypeTugQL {
+			return apicontract.Result{}, newUnsupportedProtectedExecution("configured source supports structured TugQL reads only")
+		}
+	}
+
 	// A context variable is bound only by the DataTug web app for a signed-in
 	// user: a saved or ad-hoc query using one is refused before its source is
 	// resolved or opened (backstage spec/features/my-data-project).
@@ -239,13 +250,24 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 	var profile string
 	var collection string
 
+	agent := agentFromContext(ctx)
 	switch {
 	case req.TugQL != "":
 		profile = apicontract.ExecutionProfileProtected
+		if agent {
+			if err := agentTugQLGuard(ctx, req.Project, req.Environment, resolved.ID, []byte(req.TugQL)); err != nil {
+				return apicontract.Result{}, err
+			}
+		}
 		result, err = runTugQLHook(executor, runCtx, resolved.URL, []byte(req.TugQL), variables)
 	case queryDef.Type == datatug.QueryTypeTugQL:
 		var doc string
 		doc, err = executionQueryDocument(req.Project, req.QueryID, queryDef, queryRevision)
+		if err == nil && agent {
+			if err := agentTugQLGuard(ctx, req.Project, req.Environment, resolved.ID, []byte(doc)); err != nil {
+				return apicontract.Result{}, err
+			}
+		}
 		if err == nil {
 			profile = apicontract.ExecutionProfileProtected
 			result, err = runTugQLHook(executor, runCtx, resolved.URL, []byte(doc), variables)
@@ -261,6 +283,11 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 		// UNSUPPORTED_PROTECTED_EXECUTION.
 		var text string
 		text, err = executionQueryDocumentHook(req.Project, req.QueryID, queryDef, queryRevision)
+		if err == nil && agent {
+			if err := agentSavedSQLRefusal(ctx, req.Project, req.Environment, resolved.ID, text); err != nil {
+				return apicontract.Result{}, err
+			}
+		}
 		if err == nil {
 			profile = apicontract.ExecutionProfileOpaquePrivileged
 			result, err = runNativeSQLHook(executor, runCtx, resolved.URL, text, sqlQueryArgs(queryDef, variables)...)

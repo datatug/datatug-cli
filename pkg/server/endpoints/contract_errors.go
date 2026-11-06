@@ -3,6 +3,7 @@ package endpoints
 import (
 	"encoding/json"
 	"errors"
+	"github.com/datatug/datatug-cli/pkg/api"
 	"log"
 	"net/http"
 	"strings"
@@ -44,6 +45,9 @@ func writeCORSOrigin(w http.ResponseWriter, r *http.Request) {
 // writeSemanticJSON (both of which predate the appendix's
 // {error:{code,message,field,requestId,targets?}} shape).
 func writeContractResponse(w http.ResponseWriter, r *http.Request, err error, content any) {
+	if err == nil && api.SourceBoundProfile() && api.CheckSourceBinding(r.Context()) != nil {
+		err = contractErrAccessDenied("configured source read is unavailable")
+	}
 	writeCORSOrigin(w, r)
 	if err != nil {
 		writeContractError(w, r, err)
@@ -99,6 +103,12 @@ func writeContractError(w http.ResponseWriter, r *http.Request, err error) {
 	default:
 		ce = &contractError{Code: codeInternal, Message: unclassifiedErrorMessage, RequestID: newRequestID()}
 		log.Printf("%s: request %s: answered 500 INTERNAL: %v", r.URL.Path, ce.RequestID, dbcopy.RedactError(err))
+	}
+	if api.SourceBoundProfile() {
+		// The fixed profile never returns policy source paths or parser/driver text.
+		safe := *ce
+		safe.Message = "configured source request was refused"
+		ce = &safe
 	}
 	status := httpStatusFor(ce.Code)
 	if ce.Code == codeInternal {

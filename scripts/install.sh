@@ -2,7 +2,7 @@
 
 # Install an official DataTug CLI release without a language toolchain.
 #
-#   curl -fsSL https://datatug.app/install/get-cli | sh
+#   curl -fsSL https://datatug.app/get-cli | sh
 #
 # DATATUG_INSTALL_DIR may override the default per-user destination (an absolute path).
 # DATATUG_VERSION may pin a release tag such as v0.32.0.
@@ -68,7 +68,7 @@ add_to_path() {
     printf '%s already has this line, so it was not changed:\n  %s\nOpen a new terminal, or run the line in this one.\n' "$rc" "$line"
     return 0
   fi
-  if mkdir -p "${rc%/*}" 2>/dev/null && printf '\n# Added by the DataTug CLI installer (https://datatug.app/install/get-cli)\n%s\n' "$line" >>"$rc" 2>/dev/null; then
+  if mkdir -p "${rc%/*}" 2>/dev/null && printf '\n# Added by the DataTug CLI installer (https://datatug.app/get-cli)\n%s\n' "$line" >>"$rc" 2>/dev/null; then
     printf 'Added %s to PATH: appended line %s to %s:\n  %s\nOpen a new terminal, or run that line in this one. DATATUG_MODIFY_PATH=0 skips this edit.\n' "$dir" "$(wc -l <"$rc" | tr -d ' ')" "$rc" "$line"
   else
     printf '%s is not on PATH, and %s could not be written. Add this line to it yourself:\n  %s\n' "$dir" "$rc" "$line"

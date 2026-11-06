@@ -12,6 +12,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/querywrite"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/meaninglabels"
 )
 
 type noInput struct{}
@@ -20,7 +21,7 @@ type projectInput struct {
 }
 type queryInput struct {
 	Project string `json:"project" jsonschema:"Discovered project ID"`
-	QueryID string `json:"queryId" jsonschema:"Saved SQL query ID returned by datatug_list_queries, including its folder"`
+	QueryID string `json:"queryId" jsonschema:"Saved SQL or TugQL query ID returned by datatug_list_queries, including its folder"`
 }
 type sourceInput struct {
 	Project     string `json:"project" jsonschema:"Discovered project ID"`
@@ -38,7 +39,7 @@ type runInput struct {
 	Project     string            `json:"project" jsonschema:"Discovered project ID"`
 	Environment string            `json:"environment" jsonschema:"Discovered environment ID"`
 	Source      string            `json:"source" jsonschema:"Discovered source ID"`
-	QueryID     string            `json:"queryId" jsonschema:"Saved SQL query ID from datatug_list_queries"`
+	QueryID     string            `json:"queryId" jsonschema:"Saved SQL or TugQL query ID from datatug_list_queries"`
 	Parameters  map[string]string `json:"parameters" jsonschema:"Declared parameter IDs mapped to text values. Integer and decimal values use exact decimal text; boolean values use true or false. Strings are bound literally, never interpolated into SQL."`
 	Limit       int               `json:"limit,omitempty" jsonschema:"Returned row limit from 1 to 500; default 100. Does not bound database work."`
 }
@@ -200,8 +201,8 @@ func (c *Client) describeProject(ctx context.Context, input projectInput) (any, 
 }
 
 func publicQuery(q *datatug.QueryDef, id string, withText bool) (query, error) {
-	if q == nil || q.Type != datatug.QueryTypeSQL {
-		return query{}, errors.New("UNSUPPORTED_QUERY: this MCP release runs saved SQL queries only")
+	if q == nil || (q.Type != datatug.QueryTypeSQL && q.Type != datatug.QueryTypeTugQL) {
+		return query{}, errors.New("UNSUPPORTED_QUERY: saved SQL and TugQL queries are supported")
 	}
 	if !queryIdentifier(id) {
 		return query{}, errors.New("INVALID_REQUEST: saved query has an invalid ID")
@@ -209,7 +210,7 @@ func publicQuery(q *datatug.QueryDef, id string, withText bool) (query, error) {
 	if _, _, found := querywrite.QueryCredentialReason(q); found {
 		return query{}, errors.New("UNSAFE_METADATA: saved query contains embedded connection credentials")
 	}
-	out := query{ID: id, Title: safeText(q.Title), Type: "SQL", Parameters: []parameter{}}
+	out := query{ID: id, Title: safeText(q.Title), Type: string(q.Type), Parameters: []parameter{}}
 	if withText {
 		out.Text = q.Text
 	}
@@ -237,7 +238,7 @@ func (c *Client) listQueries(ctx context.Context, input projectInput) (any, erro
 			return errors.New("query folder tree is too deep")
 		}
 		for _, q := range folder.Items {
-			if q == nil || q.Type != datatug.QueryTypeSQL {
+			if q == nil || (q.Type != datatug.QueryTypeSQL && q.Type != datatug.QueryTypeTugQL) {
 				continue
 			}
 			item, err := publicQuery(q, prefix+q.ID, false)
@@ -319,8 +320,10 @@ type schemaResponse struct {
 	Schema  string `json:"schema"`
 	Table   string `json:"table"`
 	Columns []struct {
-		Name string `json:"name"`
-		Type string `json:"type"`
+		Name       string                    `json:"name"`
+		Type       string                    `json:"type"`
+		Label      *EffectiveLabel           `json:"label,omitempty"`
+		Protection *meaninglabels.Protection `json:"protection,omitempty"`
 	} `json:"columns"`
 	PrimaryKey   []string `json:"primaryKey"`
 	ReferencedBy []string `json:"referencedBy"`
@@ -354,6 +357,11 @@ func (c *Client) describeTable(ctx context.Context, input tableInput) (any, erro
 	for i := range out.Columns {
 		out.Columns[i].Name = safeText(out.Columns[i].Name)
 		out.Columns[i].Type = safeText(out.Columns[i].Type)
+		out.Columns[i].Label = safeLabel(out.Columns[i].Label)
+		if p := out.Columns[i].Protection; p != nil {
+			safe := safeProtection(*p)
+			out.Columns[i].Protection = &safe
+		}
 	}
 	out.PrimaryKey = safeTexts(out.PrimaryKey)
 	out.ReferencedBy = safeTexts(out.ReferencedBy)
@@ -403,7 +411,7 @@ func bindParameters(def datatug.Parameters, supplied map[string]string) (map[str
 			}
 			v = apicontract.NewNumberValue(number)
 		default:
-			return nil, nil, errors.New("TYPE_MISMATCH: unsupported SQL parameter type")
+			return nil, nil, errors.New("TYPE_MISMATCH: unsupported query parameter type")
 		}
 		if v.Validate() != nil {
 			return nil, nil, errors.New("TYPE_MISMATCH: invalid parameter value")
@@ -449,6 +457,13 @@ func (c *Client) runQuery(ctx context.Context, input runInput) (any, error) {
 // executeQuery uses the exact definition and authority prepared by the caller;
 // private sessions bind their capability to those same unredacted inputs.
 func (c *Client) executeQuery(ctx context.Context, input runInput, q *datatug.QueryDefWithFolderPath, info apicontract.AgentInfo) (any, error) {
+	if q == nil || (q.Type != datatug.QueryTypeSQL && q.Type != datatug.QueryTypeTugQL) {
+		return nil, errors.New("UNSUPPORTED_QUERY: saved SQL and TugQL queries are supported")
+	}
+	expectedProfile := apicontract.ExecutionProfileOpaquePrivileged
+	if q.Type == datatug.QueryTypeTugQL {
+		expectedProfile = apicontract.ExecutionProfileProtected
+	}
 	parameters, origins, err := bindParameters(q.Parameters, input.Parameters)
 	if err != nil {
 		return nil, err
@@ -463,7 +478,7 @@ func (c *Client) executeQuery(ctx context.Context, input runInput, q *datatug.Qu
 	if err := c.request(ctx, "exec/run_query", nil, req, &result); err != nil {
 		return nil, err
 	}
-	if result.Validate() != nil || len(result.Recordset.Rows) > limit || result.Provenance.ExecutionProfile != apicontract.ExecutionProfileOpaquePrivileged {
+	if result.Validate() != nil || len(result.Recordset.Rows) > limit || result.Provenance.ExecutionProfile != expectedProfile {
 		return nil, errors.New("local agent returned an invalid query result")
 	}
 	// Forward only the shared read contract. Execution/row-evidence extensions

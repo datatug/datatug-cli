@@ -74,6 +74,10 @@ func executeSelectHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	storeID := query.Get(urlParamStoreID)
 	response, err := executeSelectFunc(ctx, storeID, request)
+	if api.SourceBoundProfile() {
+		writeContractResponse(w, r, err, response)
+		return
+	}
 	returnJSON(w, r, http.StatusOK, err, response)
 }
 

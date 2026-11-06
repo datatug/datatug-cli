@@ -1,11 +1,13 @@
 name: Release artifacts
 
-# Each merge to main still computes a version and publishes the GitHub release
-# artifacts. Package-manager distribution is a separate manual workflow
-# ("Publish latest packages", publish-packages.yml): by the owner's decision of
-# 2026-09-23 a merge never updates the Homebrew tap. The tap is therefore behind
-# until someone starts that workflow; the warn-homebrew-cask-behind job below
-# says so after every release. It only warns and can never fail or delay one.
+# Each merge to main computes a version, publishes the GitHub release artifacts
+# and then, once the release is public, updates the Homebrew tap by calling
+# publish-packages.yml (job publish-homebrew-cask below). The owner reversed the
+# manual-only decision of 2026-09-23 on 2026-11-06 ("Yes, automate it"): the
+# tap had sat at v0.103.2 for 39 releases. GoReleaser itself still skips its
+# homebrew publisher, so publish-packages.yml stays the one path that writes
+# the tap, for automatic and manual (re)publishing alike. It runs after
+# publication, so a tap failure turns the run red but never holds a release.
 #
 # datatug-cli is pre-1.0: allow_major_version_bump stays false, so a stray
 # `feat!:` is capped to a minor bump instead of jumping to v1.0.0.
@@ -28,21 +30,43 @@ permissions:
   contents: write
 
 jobs:
+  dependency-release:
+    name: Classify dependency release
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    outputs:
+      bump: ${{ steps.classify.outputs.bump }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Classify the pushed commit title
+        id: classify
+        run: |
+          bump="$(python3 scripts/release-dependency-bump.py < "$GITHUB_EVENT_PATH")"
+          printf 'bump=%s\n' "$bump" >> "$GITHUB_OUTPUT"
+
   release:
+    needs: dependency-release
     # Pin the released private-dependency and macOS signing contract.
-    uses: strongo/cicd/.github/workflows/release.yml@e9d8156d4d20c4faef7b7b5f01ba3c3c10ba5abc # verified native-build contract
+    uses: strongo/cicd/.github/workflows/release.yml@751025d2bac74e10f666325a39e76d849adcfa0c # exact-tag native retry and publication gates
     permissions:
       contents: write
       # Read exact-head CI results and dispatch the exact-tag native build.
       # A reusable workflow cannot grant more permission than its caller.
       actions: write
     with:
+      # Only dependency-titled pushes supply a patch fallback. The shared
+      # workflow still chooses larger conventional bumps and enforces all gates.
+      default_bump: ${{ needs.dependency-release.outputs.bump }}
       GOPRIVATE: github.com/datatug/datatug-core
       goprivate_github_app_client_id: Iv23li26w131Kv6u3IdM
       goprivate_github_app_owner: datatug
       goprivate_github_app_repositories: datatug-core
-      # Keep GitHub release artifacts automatic, but never update downstream
-      # package managers as a side effect of merging code.
+      # GoReleaser never writes the tap or Winget; publish-homebrew-cask below
+      # updates the tap through publish-packages.yml after publication.
       goreleaser_extra_args: '--skip=homebrew,winget'
       # Refuse to tag or publish when Go CI did not pass for this exact
       # commit. Before this input a red suite could not stop a release —
@@ -56,15 +80,15 @@ jobs:
         Go CI
         Native release builds
       native_build_workflow: native-release.yml
-      # Must be >= go.mod's `go` directive, whose current value is `go 1.27.1`
+      # Must be >= go.mod's `go` directive, whose current value is `go 1.27.3`
       # (it was 1.27.0 when adopting github.com/strongo/buildinfo raised it;
       # the directive has moved on since). The shared release job runs its
       # `go mod tidy` before-hook under this setup-go version with
       # GOTOOLCHAIN=local, so leaving it unset (default '1.27.0') fails with
-      # "go.mod requires go >= 1.27.1" before the build starts. This input is
+      # "go.mod requires go >= 1.27.3" before the build starts. This input is
       # also kept equal to golangci.yml's strongo_workflow go_version, so CI
       # proves the same toolchain the release builds under.
-      go_version: '1.27.1'
+      go_version: '1.27.3'
       # Pre-1.0: cap an accidental major (feat!:) to a minor bump.
       allow_major_version_bump: false
       # Block publication unless the macOS build is genuinely signed, notarized,
@@ -76,7 +100,7 @@ jobs:
       GOPRIVATE_GITHUB_APP_PRIVATE_KEY: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
       # The verified release uses only its repository token. The public hub
       # mirror below mints its own narrowly scoped, short-lived App token.
-      # Only the manually triggered package workflow updates the Homebrew tap.
+      # Only publish-packages.yml (called below) holds the Homebrew tap token.
       # macOS signing + notarization. These activate the `notarize:` block in
       # .goreleaser.yaml, which is gated on MACOS_SIGN_P12 being set. See
       # ingitdb/ingitdb-cli's release.yml, the reference implementation this
@@ -127,37 +151,20 @@ jobs:
           fi
           bash scripts/publish-datatug-release.sh "$TAG" "datatug/datatug-cli" "datatug/datatug"
 
-  # Says, as one ::warning:: annotation, when the Homebrew tap is behind the
-  # release that was just published, and names the workflow that fixes it. It
-  # never fails the run: the script exits 0 for every outcome (--warn-only), a
-  # job that dies for another reason is made green by continue-on-error, and it
-  # runs after the release, so it cannot hold a release back. `tag` is empty
-  # when no release went public (a docs or chore merge cut no tag) and there is
-  # nothing to compare then. It reads the public tap with the workflow's own
-  # token and needs no secret. Two attempts, five seconds apart: the tap does
-  # not move during a release, so a second read only covers a failed call.
-  warn-homebrew-cask-behind:
-    name: Warn when the Homebrew cask is behind
+  # Updates the Homebrew tap to the release just published, through the same
+  # workflow a person can start by hand. `tag` is empty when no release went
+  # public (a docs or chore merge cut no tag). The release is already public
+  # in datatug/datatug here, so the called workflow skips re-publishing it
+  # (publish_hub_release: false). Its last step reads the tap back and fails
+  # this job unless the cask carries the release's version and checksums.
+  publish-homebrew-cask:
+    name: Publish Homebrew cask
     needs: [release, publish-datatug-release]
-    # !cancelled() keeps the job running when a smoke test after publication
-    # failed: the release is public then and the tap question is still open.
-    if: ${{ !cancelled() && needs.release.outputs.tag != '' }}
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    # The job sits inside the workflow-level `release` concurrency group and gh
-    # has no request timeout: without a limit a stalled call would hold every
-    # later release. The script's worst case is well under a minute.
-    timeout-minutes: 3
+    if: ${{ !cancelled() && needs.release.outputs.tag != '' && needs.publish-datatug-release.result == 'success' }}
+    uses: ./.github/workflows/publish-packages.yml
     permissions:
       contents: read
-    steps:
-      - name: Check out the checker
-        uses: actions/checkout@v7
-
-      - name: Compare the tap's cask with the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.release.outputs.tag }}
-          ATTEMPTS: '2'
-          INTERVAL: '5'
-        run: bash scripts/verify-homebrew-cask.sh --warn-only "$TAG"
+    with:
+      tag: ${{ needs.release.outputs.tag }}
+      publish_hub_release: false
+    secrets: inherit

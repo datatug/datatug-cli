@@ -28,7 +28,7 @@ func registerRoutesOn(path string, router router, wrapper wrapper, writeOnly boo
 	if caps.Access != nil {
 		route(router, wrapper, http.MethodPost, path+"/session/exchange", exchangeHandler(caps.Access))
 	}
-	route(router, wrapper, http.MethodPost, path+"/chat/interpret", chatInterpretHandler)
+	route(router, wrapper, http.MethodPost, path+"/chat/interpret", refuseAgentRows(chatInterpretHandler))
 	projectsRoutes(path, router, wrapper, writeOnly, caps)
 	foldersRoutes(path, router, wrapper, caps)
 	queriesRoutes(path, router, wrapper, writeOnly, caps)
@@ -80,7 +80,7 @@ func executionRoutes(path string, router router, wrap wrapper, writeOnly bool) {
 	}
 	route(router, wrap, http.MethodGet, path+"/executions", executionsListHandler)
 	route(router, wrap, http.MethodGet, path+"/executions/:id", executionShowHandler)
-	route(router, wrap, http.MethodGet, path+"/executions/:id/snapshot", executionSnapshotHandler)
+	route(router, wrap, http.MethodGet, path+"/executions/:id/snapshot", refuseAgentRows(executionSnapshotHandler))
 	route(router, wrap, http.MethodPost, path+"/executions/series", executionSeriesHandler)
 }
 
@@ -98,13 +98,20 @@ func semanticRoutes(path string, router router, wrap wrapper, writeOnly bool) {
 	}
 	route(router, wrap, http.MethodGet, path+"/semantic/columns", semanticColumnsHandler)
 	route(router, wrap, http.MethodPost, path+"/semantic/related", semanticRelatedHandler)
-	route(router, wrap, http.MethodPost, path+"/semantic/related/rows", semanticRelatedRowsHandler)
+	route(router, wrap, http.MethodPost, path+"/semantic/related/rows", refuseAgentRows(semanticRelatedRowsHandler))
 	route(router, wrap, http.MethodPost, path+"/queries/applicable", semanticApplicableHandler)
 	// records/lookup: one record by the typed values of its declared primary key (POST, so a
 	// key is never copied into a URL or an access log), read through the same policy path.
-	route(router, wrap, http.MethodPost, path+"/records/lookup", recordsLookupHandler)
+	route(router, wrap, http.MethodPost, path+"/records/lookup", refuseAgentRows(recordsLookupHandler))
 	// records/schema: the live schema of one table of a registered, not scanned source.
 	route(router, wrap, http.MethodPost, path+"/records/schema", recordsSchemaHandler)
+	// Meaning Graph sensitivity (backstage spec features/meaning-sensitivity): describe, find,
+	// a masked table read, and the label document's list and change routes.
+	route(router, wrap, http.MethodPost, path+"/meanings/describe", meaningsDescribeHandler)
+	route(router, wrap, http.MethodPost, path+"/meanings/find", meaningsFindHandler)
+	route(router, wrap, http.MethodPost, path+"/records/read", recordsReadHandler)
+	route(router, wrap, http.MethodPost, path+"/meanings/labels", meaningsLabelsHandler)
+	route(router, wrap, http.MethodPost, path+"/meanings/labels/change", meaningsLabelsChangeHandler)
 }
 
 // foldersRoutes: both routes mutate the project's query-folder tree and are
@@ -121,10 +128,10 @@ func queriesRoutes(path string, router router, wrap wrapper, writeOnly bool, cap
 		route(router, wrap, http.MethodGet, path+"/queries/get_query", getQueryHandler)
 		route(router, wrap, http.MethodGet, path+"/queries/query_revision", getProjectQueryRevisionHandler)
 	}
-	route(router, wrap, http.MethodPost, path+"/queries/save_query", requireWriteCapability(caps, saveProjectQueryHandler))
-	route(router, wrap, http.MethodPost, path+"/queries/create_query", requireWriteCapability(caps, createQuery))
-	route(router, wrap, http.MethodPut, path+"/queries/update_query", requireWriteCapability(caps, updateQuery))
-	route(router, wrap, http.MethodDelete, path+"/queries/delete_query", requireWriteCapability(caps, rejectUnreviewedProjectLifecycle))
+	route(router, wrap, http.MethodPost, path+"/queries/save_query", refuseAgentQueryWrites(requireWriteCapability(caps, saveProjectQueryHandler)))
+	route(router, wrap, http.MethodPost, path+"/queries/create_query", refuseAgentQueryWrites(requireWriteCapability(caps, createQuery)))
+	route(router, wrap, http.MethodPut, path+"/queries/update_query", refuseAgentQueryWrites(requireWriteCapability(caps, updateQuery)))
+	route(router, wrap, http.MethodDelete, path+"/queries/delete_query", refuseAgentQueryWrites(requireWriteCapability(caps, rejectUnreviewedProjectLifecycle)))
 	// queries/capture: "Save as project query" (Phase 2 task 2). Behind the
 	// process write capability here, then authorized for the serving
 	// principal inside the handler (api.AuthorizeProjectQueryWrite).
@@ -211,7 +218,7 @@ func recordsetsRoutes(path string, router router, wrap wrapper, writeOnly bool, 
 	if !writeOnly {
 		route(router, wrap, http.MethodGet, path+"/recordsets/recordsets_summary", getRecordsetsSummary)
 		route(router, wrap, http.MethodGet, path+"/recordsets/recordset_definition", getRecordsetDefinition)
-		route(router, wrap, http.MethodGet, path+"/recordsets/recordset_data", getRecordsetData)
+		route(router, wrap, http.MethodGet, path+"/recordsets/recordset_data", refuseAgentRows(getRecordsetData))
 	}
 	route(router, wrap, http.MethodPost, path+"/recordsets/recordset_add_rows", requireWriteCapability(caps, addRowsToRecordset))
 	route(router, wrap, http.MethodPut, path+"/recordsets/recordset_update_rows", requireWriteCapability(caps, updateRowsInRecordset))
@@ -243,10 +250,10 @@ func recordsetsRoutes(path string, router router, wrap wrapper, writeOnly bool, 
 // schema is never stripped and keeps its own distinct policy identity.
 func executeRoutes(path string, router router, wrap wrapper, writeOnly bool, caps Capabilities) {
 	if !writeOnly {
-		route(router, wrap, http.MethodPost, path+"/exec/execute_commands", executeCommandsHandler)
-		route(router, wrap, http.MethodGet, path+"/exec/select", executeSelectHandler)
+		route(router, wrap, http.MethodPost, path+"/exec/execute_commands", refuseAgentRows(executeCommandsHandler))
+		route(router, wrap, http.MethodGet, path+"/exec/select", refuseAgentRows(executeSelectHandler))
 		route(router, wrap, http.MethodPost, path+"/exec/run_query", runQueryHandler)
 		route(router, wrap, http.MethodPost, path+"/compare", compareHandler(caps))
-		route(router, wrap, http.MethodGet, path+"/compare/rows", compareRowsHandler)
+		route(router, wrap, http.MethodGet, path+"/compare/rows", refuseAgentRows(compareRowsHandler))
 	}
 }

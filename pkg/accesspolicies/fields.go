@@ -199,3 +199,10 @@ func dedupe(sorted []string) []string {
 	}
 	return out
 }
+
+// ReferencedFields lists the fields a structured query names in any clause,
+// sorted; a construct the walker cannot inspect is an error. The Meaning Graph
+// masking gate uses it to refuse any expression on a masked column.
+func ReferencedFields(query dal.StructuredQuery) ([]string, error) {
+	return referencedFields(query)
+}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/datatug/datatug-core/pkg/meaninglabels"
 	"io"
 	"log"
 	"net/http"
@@ -452,6 +453,10 @@ func exactInteger(s string) (int64, bool) {
 type recordsSchemaColumn struct {
 	Name string `json:"name"`
 	Type string `json:"type"`
+	// Label is the column's effective Meaning Graph sensitivity label, and
+	// Protection says it is masked for reads (spec meaning-sensitivity).
+	Label      *labelView                `json:"label,omitempty"`
+	Protection *meaninglabels.Protection `json:"protection,omitempty"`
 }
 
 // recordsSchemaResponse is the answer of POST /datatug/records/schema: what the lookup validates a
@@ -497,7 +502,7 @@ func recordsSchemaHandler(w http.ResponseWriter, r *http.Request) {
 		writeContractError(w, r, err)
 		return
 	}
-	resolved, _, executor, err := resolveRecordsTable(r.Context(), req)
+	resolved, collection, executor, err := resolveRecordsTable(r.Context(), req)
 	if err != nil {
 		writeContractError(w, r, err)
 		return
@@ -508,8 +513,14 @@ func recordsSchemaHandler(w http.ResponseWriter, r *http.Request) {
 		Columns: []recordsSchemaColumn{}, PrimaryKey: []string{}, ReferencedBy: []string{},
 		ForeignKeys: []recordsForeignKey{},
 	}
-	for _, c := range resolved.Columns {
-		resp.Columns = append(resp.Columns, recordsSchemaColumn{Name: c.Name, Type: c.Type})
+	labels, err := schemaColumnLabels(r.Context(), req, collection, resolved.Columns)
+	if err != nil {
+		writeContractError(w, r, err)
+		return
+	}
+	plan := meaninglabels.NewPlan(labels, nil)
+	for i, c := range resolved.Columns {
+		resp.Columns = append(resp.Columns, recordsSchemaColumn{Name: c.Name, Type: c.Type, Label: toLabelView(labels[i]), Protection: plan.Protection(c.Name)})
 	}
 	if pk := resolved.Schema.PrimaryKey; pk != nil {
 		resp.PrimaryKey = append(resp.PrimaryKey, pk.Columns...)

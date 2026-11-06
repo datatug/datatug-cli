@@ -44,6 +44,11 @@ import (
 func writeChatRunProjectFixture(t *testing.T) (dir string) {
 	t.Helper()
 	dir = t.TempDir()
+	canonicalRoot, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir = canonicalRoot
 	write := func(path, content string) {
 		t.Helper()
 		full := filepath.Join(dir, path)

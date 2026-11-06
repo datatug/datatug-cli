@@ -79,6 +79,7 @@ func TestNativeOpenerInventory(t *testing.T) {
 
 func nativeProvider(path string) bool {
 	return path == "database/sql" || strings.HasPrefix(path, "github.com/dal-go/dalgo2") ||
+		path == "github.com/aws/aws-sdk-go-v2/service/dynamodb" ||
 		strings.HasPrefix(path, "github.com/jackc/pgx") || strings.HasPrefix(path, "go.mongodb.org/") ||
 		strings.HasPrefix(path, "github.com/redis/")
 }
@@ -150,4 +151,17 @@ func third() { pgx.Connect(nil, "owned") }
 		"first:database/sql.Open": 1, "second:*.Open": 1,
 		"import:github.com/jackc/pgx/v5": 1, "third:github.com/jackc/pgx/v5.Connect": 1,
 	}, openerReferences(file))
+}
+
+func TestOpenerRatchetTracksOfficialDynamoSDKClient(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "dynamodb.go", `package probe
+import sdk "github.com/aws/aws-sdk-go-v2/service/dynamodb"
+func explicitNative() { sdk.NewFromConfig(config) }
+`, 0)
+	require.NoError(t, err)
+	require.Equal(t, map[string]int{
+		"import:github.com/aws/aws-sdk-go-v2/service/dynamodb":                       1,
+		"explicitNative:github.com/aws/aws-sdk-go-v2/service/dynamodb.NewFromConfig": 1,
+	}, openerReferences(file))
+	require.False(t, nativeProvider("github.com/aws/unrelated/client"))
 }

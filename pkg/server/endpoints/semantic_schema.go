@@ -26,6 +26,10 @@ var dbcopyParse = dbcopy.Parse
 // closeSchemaDB releases a source opened to read a schema (a no-op for a backend with no Close).
 var closeSchemaDB = dbcopy.CloseSource
 
+// Same pinned native constructor; tests can interrupt the following freshness
+// check after a real open without substituting a schema or permission decision.
+var openBoundSchemaDB = func(ctx context.Context, ref dbcopy.BackendRef) (dal.DB, error) { return ref.OpenProtected(ctx) }
+
 // recordsetDefinitionPath is the project's declared shape for a
 // non-SQL (inGitDB-backed) collection: recordsets/<source>.recordset.json,
 // per recordsets/README.md's own documented convention in
@@ -130,7 +134,35 @@ func resolveSQLSourceURL(ctx context.Context, sourceID, sourceURL, collection st
 	// shown is the source in a form safe for an error text: a password inside
 	// a source URL must never reach an error, a log or a client.
 	shown := ref.String()
-	db, err := ref.Open(ctx)
+	boundRef, bound, bindingErr := api.BoundSourceBackend(ctx, sourceURL)
+	if bindingErr != nil {
+		return resolvedSource{}, bindingErr
+	}
+	if bound {
+		ref = boundRef
+		// Metadata uses the same fixed session and mandatory policies as data.
+		// Refuse before native schema discovery; the source URL was already
+		// matched to this session by BoundSourceBackend above.
+		executor, configured := secureExecutorHook()
+		if !configured {
+			return resolvedSource{}, newContractError(codeInternal, "server has no policy-enforced session configured", "")
+		}
+		if err := executor.Authorize(ctx, authorizeQuery(collection), nil); err != nil {
+			return resolvedSource{}, err
+		}
+	}
+	var db dal.DB
+	if bound {
+		db, err = openBoundSchemaDB(ctx, ref)
+	} else {
+		db, err = ref.Open(ctx)
+	}
+	if bound && err == nil {
+		if bindingErr := api.CheckSourceBinding(ctx); bindingErr != nil {
+			closeSchemaDB(db)
+			return resolvedSource{}, bindingErr
+		}
+	}
 	if err == nil {
 		// The handle is only used to describe the collection: it is closed with the request.
 		defer closeSchemaDB(db)

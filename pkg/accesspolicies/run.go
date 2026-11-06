@@ -55,11 +55,7 @@ func Run(ctx context.Context, session dal.ReadSession, query dal.Query, o Option
 		return result, err
 	}
 	query = result.Query
-	if len(o.Policies) == 0 {
-		result.Reader, err = session.ExecuteQueryToRecordsReader(ctx, query)
-		return result, err
-	}
-	secured := access.SecureReadSession(session, Policies(o.Policies)...)
+	secured := secureReadSession(session, o)
 	result.Reader, err = secured.ExecuteQueryToRecordsReader(ctx, query)
 	return result, err
 }
@@ -168,10 +164,20 @@ func prepareReadWithVariables(ctx context.Context, query dal.Query, o Options, n
 	if len(o.Policies) == 0 && !o.Unrestricted {
 		return ctx, Result{}, ErrNoPolicies
 	}
+	if query == nil {
+		return ctx, Result{}, fmt.Errorf("%w: query is required", ErrInvalidQuery)
+	}
 	var err error
 	o.Variables, err = normalize(o.Variables)
 	if err != nil {
 		return ctx, Result{}, err
+	}
+	// Query parameters are caller input, not authority to redefine the fixed
+	// principal or structural path bindings in the policy context.
+	for name := range o.Variables {
+		if reservedVariableName(name) {
+			return ctx, Result{}, fmt.Errorf("%w: security-reserved query parameter", ErrInvalidQuery)
+		}
 	}
 	bindings := map[string]any{}
 	for name, value := range o.Variables {

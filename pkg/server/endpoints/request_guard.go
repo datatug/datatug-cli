@@ -78,6 +78,9 @@ func (g RequestGuard) Wrap(next http.HandlerFunc) http.HandlerFunc {
 			refuseRequest(w, r, http.StatusUnauthorized, tokenRequiredMessage, "no valid session token")
 			return
 		}
+		if !configuredSourceRequest(w, r) {
+			return
+		}
 		next(w, r)
 	}
 }

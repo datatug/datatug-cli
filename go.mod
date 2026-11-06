@@ -34,6 +34,7 @@ require (
 	github.com/dal-go/dalgo2convex v0.0.0-20261102043632-9c8a437f4c85
 	github.com/dal-go/dalgo2cosmosdb v0.0.0-20261102042954-234d09879876
 	github.com/dal-go/dalgo2couchdb v0.0.0-20261027215721-2c03679be8a7
+	github.com/dal-go/dalgo2databricks v0.0.0-20261106082405-de696d8c2a1b
 	github.com/dal-go/dalgo2duckdb v0.1.0
 	github.com/dal-go/dalgo2dynamodb v0.0.0-20261101230446-46c9938f48ef
 	github.com/dal-go/dalgo2firestore v0.10.45
@@ -142,7 +143,6 @@ require (
 	github.com/cloudflare/circl v1.6.4 // indirect
 	github.com/crediterra/money v0.4.2 // indirect
 	github.com/cyphar/filepath-securejoin v0.7.0 // indirect
-	github.com/dal-go/dalgo2databricks v0.0.0-20261106082405-de696d8c2a1b // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/dlclark/regexp2/v2 v2.6.0 // indirect

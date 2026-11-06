@@ -3,9 +3,11 @@ package policyexceptions
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -311,12 +313,107 @@ func TestEndSession(t *testing.T) {
 	_, err = s.EndSession(bound, t0)
 	assert.ErrorContains(t, err, "cross-device")
 	rename = os.Rename
-	restore(t, &tryLock)
-	tryLock = func(context.Context, *flock.Flock) (bool, error) { return false, nil }
-	_, err = s.EndSession(bound, t0)
-	assert.ErrorContains(t, err, "locked")
 	restore(t, &readDir)
 	readDir = func(string) ([]os.DirEntry, error) { return nil, errors.New("denied") }
 	_, err = s.EndSession(bound, t0)
 	assert.ErrorContains(t, err, "denied")
+	readDir = os.ReadDir
+	restore(t, &tryLock)
+	tryLock = func(context.Context, *flock.Flock) (bool, error) { return false, nil }
+	_, err = s.EndSession(bound, t0)
+	assert.ErrorContains(t, err, "locked")
+}
+
+func TestUnknownLifetimeIsUnreadable(t *testing.T) {
+	s := Store{ProjectDir: t.TempDir()}
+	e := pending("0000000000000001")
+	e.Lifetime = "forever"
+	require.NoError(t, s.Propose(e))
+	_, _, err := s.Get(e.ID)
+	assert.ErrorContains(t, err, "unreadable")
+	listed, unreadable, err := s.List()
+	require.NoError(t, err)
+	assert.Empty(t, listed)
+	assert.Equal(t, []string{"0000000000000001.json"}, unreadable)
+}
+
+func TestEndSessionSkipsWhatIsNoLongerLive(t *testing.T) {
+	s := Store{ProjectDir: t.TempDir()}
+	bound := SessionBinding{Harness: "claude-code", Session: "s-1"}
+	e := pending("0000000000000001")
+	e.Lifetime, e.BoundSession = LifetimeSession, &bound
+	require.NoError(t, s.Propose(e))
+	ended, err := s.EndSession(bound, t0.Add(time.Hour)) // past the pending wait
+	require.NoError(t, err)
+	assert.Empty(t, ended)
+	got, _, _ := s.Get(e.ID)
+	assert.Equal(t, StatePending, got.State, "an expired proposal keeps its state")
+}
+
+// EndSession holds the lock for its whole pass: every proposal of the
+// session is either ended, or was stored after the pass.
+func TestEndSessionRacingProposals(t *testing.T) {
+	s := Store{ProjectDir: t.TempDir()}
+	bound := SessionBinding{Harness: "claude-code", Session: "s-1"}
+	seed := pending("00000000000000ff")
+	seed.Lifetime, seed.BoundSession = LifetimeSession, &bound
+	require.NoError(t, s.Propose(seed))
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			e := pending(fmt.Sprintf("%016x", i+1))
+			e.Lifetime, e.BoundSession = LifetimeSession, &bound
+			assert.NoError(t, s.Propose(e))
+		}(i)
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_, err := s.EndSession(bound, t0)
+		assert.NoError(t, err)
+	}()
+	wg.Wait()
+	events, err := s.Audit()
+	require.NoError(t, err)
+	lastEnded := -1
+	proposedAt := map[string]int{}
+	for i, e := range events {
+		switch e.Event {
+		case "ended":
+			lastEnded = i
+		case "proposed":
+			proposedAt[e.ID] = i
+		}
+	}
+	require.GreaterOrEqual(t, lastEnded, 0, "the seeded exception was ended")
+	all, _, err := s.List()
+	require.NoError(t, err)
+	for _, e := range all {
+		if e.State != StateEnded {
+			assert.Greater(t, proposedAt[e.ID], lastEnded, "%s was stored before the pass and not ended", e.ID)
+		}
+	}
+}
+
+func TestRecordExpiriesReportsOnceAndDoesNotRetry(t *testing.T) {
+	s := Store{ProjectDir: t.TempDir()}
+	e := pending("00000000000000a1")
+	require.NoError(t, s.Propose(e))
+	restore(t, &rename)
+	rename = func(string, string) error { return errors.New("cross-device") }
+	err := s.RecordExpiries([]Exception{e}, t0.Add(time.Hour))
+	assert.ErrorContains(t, err, "could not be recorded")
+	assert.NoError(t, s.RecordExpiries([]Exception{e}, t0.Add(time.Hour)), "not tried again by this process")
+	events, _ := s.Audit()
+	kinds := []string{}
+	for _, ev := range events {
+		kinds = append(kinds, ev.Event)
+	}
+	assert.Equal(t, []string{"proposed", "expired", "expired-failed"}, kinds)
+	restore(t, &tryLock)
+	tryLock = func(context.Context, *flock.Flock) (bool, error) { return false, nil }
+	other := pending("00000000000000a2")
+	assert.Error(t, Store{ProjectDir: t.TempDir()}.RecordExpiries([]Exception{other}, t0.Add(time.Hour)))
 }

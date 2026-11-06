@@ -99,7 +99,9 @@ func (r *projectRead) loadPolicies(stderr io.Writer) ([]accesspolicies.Loaded, e
 	for _, name := range unreadable {
 		_, _ = fmt.Fprintf(stderr, "warning: local policy exception %s is unreadable and is not applied\n", name)
 	}
-	r.exceptions.RecordExpiries(all, r.now)
+	if err := r.exceptions.RecordExpiries(all, r.now); err != nil {
+		_, _ = fmt.Fprintf(stderr, "warning: %v\n", err)
+	}
 	var reader policyexceptions.SessionBinding
 	if caller := r.exceptions.Caller; caller != nil {
 		reader = policyexceptions.SessionBinding{Harness: caller.Harness, Session: caller.Session}

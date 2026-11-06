@@ -260,3 +260,29 @@ func TestLifetimeLine(t *testing.T) {
 	assert.Equal(t, "codex session short", SessionBinding{Harness: "codex", Session: "short"}.Short())
 	assert.Contains(t, Scope(e, e.Fields, until), "Lifetime: this session only")
 }
+
+func TestSessionMatchingFailsClosed(t *testing.T) {
+	data := []byte(principalPolicy)
+	reader := SessionBinding{Harness: "claude-code", Session: "s-1"}
+	cases := map[string]func(*Exception, *Binding){
+		"unknown lifetime":      func(e *Exception, _ *Binding) { e.Lifetime = "forever" },
+		"bound without harness": func(e *Exception, b *Binding) { e.BoundSession.Harness = ""; b.Reader.Harness = "" },
+		"reader without harness": func(e *Exception, b *Binding) {
+			e.BoundSession.Harness = ""
+			b.Reader.Harness = ""
+		},
+	}
+	for name, change := range cases {
+		t.Run(name, func(t *testing.T) {
+			e := applied("0123456789abcdef", t0.Add(time.Hour))
+			e.Lifetime = LifetimeSession
+			e.BoundSession = &SessionBinding{Harness: "claude-code", Session: "s-1"}
+			binding := demoBinding
+			binding.Reader = reader
+			change(&e, &binding)
+			_, ids, err := Overlay(data, access.YAMLCodec{}, binding, []Exception{e}, t0)
+			require.NoError(t, err)
+			assert.Empty(t, ids)
+		})
+	}
+}

@@ -878,3 +878,37 @@ func TestProjectReadResultCardMetadata(t *testing.T) {
 	assert.Contains(t, meta, `"project":"datatug-demo"`)
 	assert.Contains(t, meta, `"source":"chinook"`)
 }
+
+func TestAuditSessionFilterAndExpiryWarning(t *testing.T) {
+	dir := demoForTest(t)
+	asPerson(t)
+	inSession(t, testSession)
+	view := propose(t, "--source", "chinook", "--role", "agent", "--table", "Employee", "--fields", "EmployeeId,Title")
+	withCaller(t, map[string]string{"DATATUG_CALLER_HARNESS": "codex", "DATATUG_CALLER_SESSION": testSession})
+	propose(t, "--source", "chinook", "--role", "agent", "--table", "Track", "--fields", "TrackId")
+	withCaller(t, nil)
+	count := func(args ...string) int {
+		stdout, _, code := runCLI(t, "", append([]string{"policy", "exception", "audit", "--project", "datatug-demo", "--format", "json", "--session", testSession}, args...)...)
+		require.Equal(t, 0, code)
+		var audit struct {
+			Events []policyexceptions.Event `json:"events"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(stdout), &audit))
+		return len(audit.Events)
+	}
+	assert.Equal(t, 2, count(), "the session id alone matches both harnesses")
+	assert.Equal(t, 1, count("--harness", "claude-code"))
+	assert.Equal(t, 1, count("--harness", "codex"))
+	stdout, _, _ := runCLI(t, "", "policy", "exception", "audit", "--project", "datatug-demo")
+	assert.Contains(t, stdout, "; for claude-code session 0f88afc6…; by claude-code 2.1.317 · session 0f88afc6… (self-reported)")
+
+	_, stderr, code := runCLI(t, "Employee\n", "policy", "exception", "apply", view.ID, "--project", "datatug-demo")
+	require.Equal(t, 0, code, stderr)
+	restoreVar(t, &projectReadNow)
+	projectReadNow = func() time.Time { return time.Now().Add(time.Hour) }
+	audit := filepath.Join(dir, ".datatug", "policy-exceptions", policyexceptions.AuditFile)
+	require.NoError(t, os.Chmod(audit, 0o400))
+	t.Cleanup(func() { _ = os.Chmod(audit, 0o600) })
+	_, stderr, _ = readAs(t, "", "--source", "chinook", "--from", "Customer")
+	assert.Contains(t, stderr, "could not be recorded")
+}

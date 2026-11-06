@@ -545,7 +545,8 @@ func exceptionAuditCommand() *cobra.Command {
 				return err
 			}
 			if session, _ := cmd.Flags().GetString("session"); session != "" {
-				events = eventsOfSession(events, session)
+				harness, _ := cmd.Flags().GetString("harness")
+				events = eventsOfSession(events, harness, session)
 			}
 			if format == "json" {
 				return writeJSONLine(cmd.OutOrStdout(), map[string]any{"kind": policyexceptions.Kind, "events": events})
@@ -556,6 +557,12 @@ func exceptionAuditCommand() *cobra.Command {
 				if len(event.Fields) > 0 {
 					fmt.Fprintf(&b, " fields %s", strings.Join(event.Fields, ", "))
 				}
+				if event.BoundSession != nil {
+					fmt.Fprintf(&b, "; for %s", event.BoundSession.Short())
+				}
+				if event.Caller != nil {
+					fmt.Fprintf(&b, "; by %s", event.Caller.Line())
+				}
 				b.WriteString("\n")
 			}
 			_, err = io.WriteString(cmd.OutOrStdout(), b.String())
@@ -563,6 +570,7 @@ func exceptionAuditCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().String("session", "", "Only events of this harness session: the session an exception was given to, or the session that used it")
+	cmd.Flags().String("harness", "", "With --session: only that harness's session (default: any harness with that session id)")
 	addExceptionCommonFlags(cmd)
 	return cmd
 }
@@ -741,10 +749,12 @@ func exceptionRevokeCommand() *cobra.Command {
 
 // eventsOfSession keeps the events about one harness session: the session an
 // exception was bound to, or the session of the process that wrote it.
-func eventsOfSession(events []policyexceptions.Event, session string) []policyexceptions.Event {
+// With harness set, both must match; without it, the session id alone.
+func eventsOfSession(events []policyexceptions.Event, harness, session string) []policyexceptions.Event {
+	is := func(h, s string) bool { return s == session && (harness == "" || h == harness) }
 	kept := []policyexceptions.Event{}
 	for _, e := range events {
-		if (e.BoundSession != nil && e.BoundSession.Session == session) || (e.Caller != nil && e.Caller.Session == session) {
+		if (e.BoundSession != nil && is(e.BoundSession.Harness, e.BoundSession.Session)) || (e.Caller != nil && is(e.Caller.Harness, e.Caller.Session)) {
 			kept = append(kept, e)
 		}
 	}

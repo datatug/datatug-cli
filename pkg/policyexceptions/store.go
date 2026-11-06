@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/datatug/datatug-cli/pkg/callercontext"
@@ -166,6 +167,9 @@ func decode(raw []byte) (Exception, error) {
 	if e.Kind != Kind || !ValidID(e.ID) {
 		return Exception{}, errors.New("not a local policy exception")
 	}
+	if e.Lifetime != "" && e.Lifetime != LifetimeSession && e.Lifetime != LifetimeDeadline {
+		return Exception{}, errors.New("unknown lifetime")
+	}
 	return e, nil
 }
 
@@ -239,27 +243,36 @@ func (s Store) commitLocked(id string, expected []byte, change func(*Exception) 
 // exactly this harness session as ended, with one ended event each, under
 // the store's lock, and returns their ids. It only ever narrows access.
 func (s Store) EndSession(binding SessionBinding, now time.Time) ([]string, error) {
-	all, _, err := s.List()
-	if err != nil {
-		return nil, err
-	}
+	// The lock is taken before the store is listed, so a proposal either
+	// lands before (and is ended) or after this whole pass.
 	unlock, err := s.lock()
 	if err != nil {
 		return nil, err
 	}
 	defer unlock()
+	all, _, err := s.List()
+	if err != nil {
+		return nil, err
+	}
 	ended := []string{}
 	for _, e := range all {
-		state := e.Status(now)
-		if !e.IsSession() || e.BoundSession == nil || *e.BoundSession != binding || (state != StatePending && state != StateApplied) {
+		if !e.IsSession() || e.BoundSession == nil || *e.BoundSession != binding {
 			continue
 		}
 		_, raw, err := s.Get(e.ID)
 		if err == nil {
 			err = s.commitLocked(e.ID, raw, func(current *Exception) (Event, error) {
+				// Only a live exception is ended; a decided or expired one keeps
+				// its state and decision.
+				if state := current.Status(now); state != StatePending && state != StateApplied {
+					return Event{}, errNotLive
+				}
 				current.State = StateEnded
 				return NewEvent("ended", *current, nil, now), nil
 			})
+		}
+		if errors.Is(err, errNotLive) {
+			continue
 		}
 		if err != nil {
 			return ended, err
@@ -268,6 +281,9 @@ func (s Store) EndSession(binding SessionBinding, now time.Time) ([]string, erro
 	}
 	return ended, nil
 }
+
+// errNotLive skips an exception that is no longer pending or applied.
+var errNotLive = errors.New("not pending or applied")
 
 // Record appends one event to the audit log under the store's lock.
 func (s Store) Record(event Event) error {
@@ -323,32 +339,46 @@ func (s Store) Audit() ([]Event, error) {
 
 // RecordExpiries marks every exception that expired at now and was not yet
 // recorded, writing one expired event each, in one pass under the store's
-// lock. It is best effort: a failure leaves the exception to be recorded next
-// time and never changes what is applied, because expiry is evaluated
-// against the clock on every load.
-func (s Store) RecordExpiries(exceptions []Exception, now time.Time) {
+// lock, and returns the first failure. It is best effort: it never changes
+// what is applied, because expiry is evaluated against the clock on every
+// load.
+func (s Store) RecordExpiries(exceptions []Exception, now time.Time) error {
 	var due []string
 	for _, e := range exceptions {
-		if !e.ExpiryRecorded && e.Status(now) == StateExpired {
+		if _, failed := expiryFailed.Load(e.ID); !failed && !e.ExpiryRecorded && e.Status(now) == StateExpired {
 			due = append(due, e.ID)
 		}
 	}
 	if len(due) == 0 {
-		return
+		return nil
 	}
 	unlock, err := s.lock()
 	if err != nil {
-		return
+		return err
 	}
 	defer unlock()
+	var first error
 	for _, id := range due {
 		current, raw, err := s.Get(id)
 		if err != nil || current.ExpiryRecorded {
 			continue
 		}
-		_ = s.commitLocked(id, raw, func(e *Exception) (Event, error) {
+		err = s.commitLocked(id, raw, func(e *Exception) (Event, error) {
 			e.ExpiryRecorded = true
 			return NewEvent("expired", *e, nil, now), nil
 		})
+		if err != nil {
+			// Not retried by this process: one failure, one warning.
+			expiryFailed.Store(id, true)
+			if first == nil {
+				first = fmt.Errorf("the expiry of policy exception %s could not be recorded: %w", id, err)
+			}
+		}
 	}
+	return first
 }
+
+// expiryFailed holds the exceptions whose expiry could not be recorded in
+// this process; they are not tried again, so a failing store does not fill
+// the audit log with repeated events.
+var expiryFailed sync.Map

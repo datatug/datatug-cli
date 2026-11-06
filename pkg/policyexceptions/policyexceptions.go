@@ -288,8 +288,13 @@ type Binding struct {
 }
 
 func (b Binding) matches(e Exception) bool {
-	if e.IsSession() && (e.BoundSession == nil || e.BoundSession.Session == "" || *e.BoundSession != b.Reader) {
-		return false
+	// Any lifetime other than deadline (or none, from before lifetimes) needs
+	// the exact harness session; an unknown one matches no reader.
+	if e.Lifetime != "" && e.Lifetime != LifetimeDeadline {
+		bound := e.BoundSession
+		if !e.IsSession() || bound == nil || bound.Harness == "" || bound.Session == "" || b.Reader.Harness == "" || *bound != b.Reader {
+			return false
+		}
 	}
 	return e.ProjectID == b.ProjectID && e.Env == b.Env && e.Source == b.Source && e.SourceIdentity == b.SourceIdentity && e.Policy.Path == b.PolicyPath
 }

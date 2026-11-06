@@ -1,22 +1,34 @@
-# DataTug Commercial Engine
+# DataTug commercial components
 
-This directory contains commercial extensions and enterprise entitlement mechanisms for DataTug.
+DataTug ships one CLI for free and paid use. This directory contains proprietary
+licence-verification components included in the default composite executable;
+it does not define a separate enterprise CLI.
 
-## Governance & Boundary
+The owner-approved product boundary follows [pricing](https://datatug.app/en/pricing/):
+unlimited owner-only private projects and shared public projects are Free;
+shared private projects require Pro, Business or an agreed Enterprise plan.
+Pro's project/access limits and Business's monthly active-user rules are
+explained in [LICENSING.md](../LICENSING.md). Serving multiple public-project
+users, running CI or connecting to a remote database is not inherently paid.
 
-The code in this directory (`commercial/`) is proprietary and governed by the **DataTug Commercial Terms** (see [`LICENSES/COMMERCIAL-TERMS.md`](../LICENSES/COMMERCIAL-TERMS.md)).
+## Status of this implementation
 
-Unlike the permissive open-source Community components (`apps/`, `pkg/`, `internal/`, root CLI `main.go`) licensed under Apache License 2.0, the commercial engine provides centralized coordination, multi-user sharing, enterprise audit logging, and team runners for organizational self-hosted environments.
+`licensing.CoordinatorEntitlementChecker` is a legacy coordinator startup check.
+It verifies a supplied key's signature, validity and coordinator feature. The
+absence of a key emits guidance; it is not a trusted project-plan decision.
+The checker has no project visibility, membership, subscription or activity data.
+Do not present feature constants, capacity helpers or this startup check as
+complete Pro/Business enforcement. Reuse the existing hosted services described
+in the [implementation contract](../docs/licensing-pricing.md).
 
-## Features Gated by Commercial Licensing
+Signature verification itself runs locally. That does not imply all plan or
+activity decisions work offline. The legacy verifier's grace calculation does
+not guarantee continuous checking during long-running server operation.
 
-- `central_watch_coordinator`: Shared centralized watch coordinator scheduling jobs across organizational runners.
-- `shared_execution_store`: Centralized multi-user execution store and historical query persistence.
-- `team_audit_trail`: Immutable organizational activity logging and compliance auditing.
-- `sms_notifications`: Cellular SMS alerting via cloud telephony providers (e.g., Twilio).
+## Rights and release gates
 
-## Architectural Principles
-
-1. **Air-Gapped & Offline**: License verification performs local cryptographic verification of Ed25519 digital signatures. No network phone-home, external validation APIs, or cloud beacons are required.
-2. **Operational Grace Period**: A 14-day grace period ensures that accidental expiration of a license does not instantly disrupt active workflows. Operators receive actionable warnings on `stderr`.
-3. **Fails-Open for Developers**: Single-user local CLI, TUI, and local `datatug serve` on localhost remain part of the Community edition and never require a commercial license.
+The [commercial terms](../LICENSES/COMMERCIAL-TERMS.md) remain a draft requiring
+qualified review of component scope, free-use and redistribution grants, and
+paid operation. Product approval does not finalize that legal text. Existing
+Apache source scopes and third-party licences remain unchanged; Commons Clause
+and aggregate-binary distribution issues remain separate publication gates.

@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/dal-go/dalgo/access"
+	"github.com/datatug/datatug-cli/pkg/callercontext"
 )
 
 // Kind is the kind every exception and audit event carries.
@@ -91,6 +92,18 @@ type Exception struct {
 	ExpiresAt        *time.Time `json:"expiresAt,omitempty"`
 	DecisionReason   string     `json:"decisionReason,omitempty"`
 	ExpiryRecorded   bool       `json:"expiryRecorded,omitempty"`
+	// Caller is the self-reported harness the proposal came from:
+	// attribution only, never authority.
+	Caller *callercontext.Caller `json:"caller,omitempty"`
+}
+
+// ProposedBy is the one line the apply and reject screens show about who
+// proposed the exception.
+func (e Exception) ProposedBy() string {
+	if e.Caller == nil {
+		return "Proposed by: not reported"
+	}
+	return "Proposed by: " + e.Caller.Line()
 }
 
 // Duration is the time an applied exception lasts.
@@ -185,6 +198,7 @@ func Scope(e Exception, fields []string, expires time.Time) string {
 	fmt.Fprintf(&b, "  Fields:   %s\n", strings.Join(fields, ", "))
 	fmt.Fprintf(&b, "  Duration: %s, until %s\n", e.Duration(), expires.UTC().Format(time.RFC3339))
 	fmt.Fprintf(&b, "  Reason:   %s\n", e.Reason)
+	fmt.Fprintf(&b, "  %s\n", e.ProposedBy())
 	b.WriteString(HonestLimit + "\n")
 	return b.String()
 }

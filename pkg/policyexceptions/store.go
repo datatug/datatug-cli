@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/datatug/datatug-cli/pkg/callercontext"
 	"github.com/gofrs/flock"
 )
 
@@ -45,6 +46,9 @@ type Event struct {
 	Fields    []string   `json:"fields,omitempty"`
 	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
 	Reason    string     `json:"reason,omitempty"`
+	// Caller is the self-reported harness of the process that wrote the
+	// event (Store.Caller): attribution only.
+	Caller *callercontext.Caller `json:"caller,omitempty"`
 }
 
 // NewEvent is an event about e at at.
@@ -69,6 +73,8 @@ var (
 // Store is the exception store of one project directory.
 type Store struct {
 	ProjectDir string
+	// Caller is stamped on every event this store writes that names none.
+	Caller *callercontext.Caller
 }
 
 func (s Store) dir() string              { return filepath.Join(s.ProjectDir, DirName) }
@@ -227,6 +233,9 @@ func (s Store) Record(event Event) error {
 }
 
 func (s Store) appendAudit(event Event) error {
+	if event.Caller == nil {
+		event.Caller = s.Caller
+	}
 	line, _ := json.Marshal(event) // plain values; cannot fail
 	f, err := openFile(s.auditPath(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {

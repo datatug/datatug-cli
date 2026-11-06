@@ -14,8 +14,10 @@ import (
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
 	"github.com/dal-go/record"
+	"github.com/datatug/datatug-cli/pkg/callercontext"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/demofixtures"
+	"github.com/datatug/datatug-cli/pkg/policyexceptions"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/datatug/datatug-core/pkg/meaninglabels"
 	"github.com/stretchr/testify/assert"
@@ -677,4 +679,67 @@ func TestDemoInstallRepairWriteFailures(t *testing.T) {
 	_, stderr, code = runCLI(t, "", "demo", "install")
 	assert.Equal(t, 1, code)
 	assert.Contains(t, stderr, "disk full")
+}
+
+func withCaller(t *testing.T, values map[string]string) {
+	t.Helper()
+	restoreVar(t, &callerLookup)
+	callerLookup = func(name string) (string, bool) { v, ok := values[name]; return v, ok }
+}
+
+// Proposals and audit events name the harness they came from, and the apply
+// and reject screens show it as self-reported.
+func TestPerimeterCallerAttribution(t *testing.T) {
+	demoForTest(t)
+	asPerson(t)
+	withCaller(t, map[string]string{"CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "0f88afc6-1234-4abc-9def-0123456789ab", "AI_AGENT": "claude-code_2-1-317_agent"})
+	view := propose(t, "--source", "chinook", "--role", "agent", "--table", "Employee", "--fields", "EmployeeId,Title")
+	require.NotNil(t, view.Caller)
+	assert.Equal(t, callercontext.Caller{Harness: "claude-code", HarnessVersion: "2.1.317", Session: "0f88afc6-1234-4abc-9def-0123456789ab", Source: callercontext.SourceHarnessEnv}, *view.Caller)
+	for _, verb := range []string{"status", "list"} {
+		args := []string{"policy", "exception", verb, "--project", "datatug-demo", "--format", "json"}
+		if verb == "status" {
+			args = append(args, view.ID)
+		}
+		stdout, _, code := runCLI(t, "", args...)
+		require.Equal(t, 0, code)
+		assert.Contains(t, stdout, `"caller":{"harness":"claude-code","harnessVersion":"2.1.317"`, verb)
+	}
+	withCaller(t, nil) // the person's own terminal reports no harness
+	stdout, stderr, code := runCLI(t, "Employee\n", "policy", "exception", "apply", view.ID, "--project", "datatug-demo")
+	require.Equal(t, 0, code, stderr)
+	assert.Contains(t, stdout, "Proposed by: claude-code 2.1.317 · session 0f88afc6… (self-reported)")
+	withCaller(t, map[string]string{"CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "0f88afc6-1234-4abc-9def-0123456789ab"})
+	_, _, code = readAs(t, "", "--source", "chinook", "--from", "Employee")
+	require.Equal(t, 0, code)
+
+	withCaller(t, map[string]string{"CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "bad session;", "AI_AGENT": "claude-code_x;_agent"})
+	rejected := propose(t, "--source", "chinook", "--role", "agent", "--table", "Track", "--fields", "Name")
+	assert.Equal(t, &callercontext.Caller{Harness: "claude-code", Source: callercontext.SourceHarnessEnv}, rejected.Caller, "invalid values are dropped")
+	withCaller(t, nil)
+	stdout, _, code = runCLI(t, "", "policy", "exception", "reject", rejected.ID, "--project", "datatug-demo")
+	require.Equal(t, 0, code)
+	assert.Contains(t, stdout, "Proposed by: claude-code (self-reported)")
+	unknown := propose(t, "--source", "chinook", "--role", "agent", "--table", "Genre", "--fields", "GenreId")
+	assert.Nil(t, unknown.Caller)
+	stdout, _, _ = runCLI(t, "", "policy", "exception", "reject", unknown.ID, "--project", "datatug-demo")
+	assert.Contains(t, stdout, "Proposed by: not reported")
+
+	auditOut, _, code := runCLI(t, "", "policy", "exception", "audit", "--project", "datatug-demo", "--format", "json")
+	require.Equal(t, 0, code)
+	var audit struct {
+		Events []policyexceptions.Event `json:"events"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(auditOut), &audit))
+	byEvent := map[string]*callercontext.Caller{}
+	for _, e := range audit.Events {
+		if e.ID == view.ID {
+			byEvent[e.Event] = e.Caller
+		}
+	}
+	require.NotNil(t, byEvent["proposed"])
+	assert.Equal(t, "2.1.317", byEvent["proposed"].HarnessVersion)
+	assert.Nil(t, byEvent["applied"], "the person's terminal reported no harness")
+	require.NotNil(t, byEvent["used"], "the agent's read is attributed")
+	assert.Equal(t, "claude-code", byEvent["used"].Harness)
 }

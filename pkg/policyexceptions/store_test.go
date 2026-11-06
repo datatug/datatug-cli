@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/datatug/datatug-cli/pkg/callercontext"
 	"github.com/gofrs/flock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -246,4 +247,22 @@ func TestRecordExpiriesLockFailure(t *testing.T) {
 	got, _, err := s.Get("0000000000000001")
 	require.NoError(t, err)
 	assert.False(t, got.ExpiryRecorded)
+}
+
+func TestStoreStampsTheCaller(t *testing.T) {
+	caller := &callercontext.Caller{Harness: "claude-code"}
+	s := Store{ProjectDir: t.TempDir(), Caller: caller}
+	e := pending("0000000000000001")
+	e.Caller = caller
+	require.NoError(t, s.Propose(e))
+	other := &callercontext.Caller{Harness: "other"}
+	event := NewEvent("used", e, nil, t0)
+	event.Caller = other
+	require.NoError(t, s.Record(event))
+	events, err := s.Audit()
+	require.NoError(t, err)
+	assert.Equal(t, caller, events[0].Caller)
+	assert.Equal(t, other, events[1].Caller)
+	assert.Contains(t, e.ProposedBy(), "claude-code")
+	assert.Equal(t, "Proposed by: not reported", pending("0000000000000002").ProposedBy())
 }

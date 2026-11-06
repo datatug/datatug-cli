@@ -17,6 +17,7 @@ import (
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
+	"github.com/datatug/datatug-cli/pkg/callercontext"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/policyexceptions"
 	"github.com/datatug/datatug-core/pkg/datatug"
@@ -34,8 +35,10 @@ var (
 	exceptionNow             = time.Now
 	exceptionSleep           = time.Sleep
 	newExceptionID           = policyexceptions.NewID
-	listCollections          = dbschema.ListCollections
-	describeCollection       = dbschema.DescribeCollection
+	// callerLookup is the environment the caller is detected from.
+	callerLookup       = os.LookupEnv
+	listCollections    = dbschema.ListCollections
+	describeCollection = dbschema.DescribeCollection
 )
 
 // maxStatusWait bounds status --wait.
@@ -56,6 +59,17 @@ func policyCommand() *cobra.Command {
 	exception.AddCommand(exceptionProposeCommand(), exceptionStatusCommand(), exceptionListCommand(), exceptionApplyCommand(), exceptionRejectCommand(), exceptionRevokeCommand(), exceptionAuditCommand())
 	cmd.AddCommand(exception)
 	return cmd
+}
+
+// detectCaller is the self-reported harness this process runs under, or nil:
+// attribution on proposals and audit events only, never authority, never
+// telemetry.
+func detectCaller() *callercontext.Caller {
+	c := callercontext.Detect(callerLookup)
+	if c.Empty() {
+		return nil
+	}
+	return &c
 }
 
 // exceptionProject is the project an exception command works on.
@@ -83,7 +97,7 @@ func readExceptionCommon(cmd *cobra.Command) (exceptionProject, string, error) {
 	if err != nil {
 		return exceptionProject{}, format, Exit(err.Error(), exitCodeUsage)
 	}
-	return exceptionProject{dir: dir, id: id, arg: project, store: policyexceptions.Store{ProjectDir: dir}, projStore: projStore}, format, nil
+	return exceptionProject{dir: dir, id: id, arg: project, store: policyexceptions.Store{ProjectDir: dir, Caller: detectCaller()}, projStore: projStore}, format, nil
 }
 
 func (p exceptionProject) command(verb, id string) string {
@@ -99,6 +113,7 @@ type exceptionView struct {
 	Env              string                     `json:"env"`
 	Source           string                     `json:"source"`
 	SourceIdentity   string                     `json:"sourceIdentity"`
+	Caller           *callercontext.Caller      `json:"caller,omitempty"`
 	Policy           policyexceptions.PolicyRef `json:"policy"`
 	Role             string                     `json:"role"`
 	Table            string                     `json:"table"`
@@ -116,7 +131,7 @@ type exceptionView struct {
 }
 
 func viewOf(e policyexceptions.Exception, now time.Time) exceptionView {
-	return exceptionView{ID: e.ID, Kind: e.Kind, State: e.Status(now), ProjectID: e.ProjectID, Env: e.Env, Source: e.Source, SourceIdentity: e.SourceIdentity, Policy: e.Policy, Role: e.Role, Table: e.Table,
+	return exceptionView{ID: e.ID, Kind: e.Kind, State: e.Status(now), ProjectID: e.ProjectID, Env: e.Env, Source: e.Source, SourceIdentity: e.SourceIdentity, Caller: e.Caller, Policy: e.Policy, Role: e.Role, Table: e.Table,
 		Rows: "all rows of " + e.Table, Fields: e.Fields, AppliedFields: e.AppliedFields, Reason: e.Reason, DurationSeconds: e.DurationSeconds,
 		ProposedAt: e.ProposedAt, PendingExpiresAt: e.PendingExpiresAt, DecidedAt: e.DecidedAt, ExpiresAt: e.ExpiresAt, Note: policyexceptions.HonestLimit}
 }
@@ -385,6 +400,7 @@ func exceptionProposeAction(cmd *cobra.Command, _ []string) error {
 		Policy: policyexceptions.PolicyRef{Name: policy.name, Path: policy.rel, SHA256: policyexceptions.Fingerprint(policy.data)},
 		Role:   role, Table: canonical, Fields: fields, Reason: reason, DurationSeconds: int64(duration / time.Second),
 		State: policyexceptions.StatePending, ProposedAt: now, PendingExpiresAt: now.Add(policyexceptions.PendingTTL),
+		Caller: project.store.Caller,
 	}
 	if err = project.store.Propose(e); err != nil {
 		return err
@@ -649,6 +665,7 @@ func exceptionRejectCommand() *cobra.Command {
 					return err
 				}
 			}
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Rejecting exception %s: role %s on %s.%s, fields %s\n  %s\n", e.ID, e.Role, e.Source, e.Table, strings.Join(e.Fields, ", "), e.ProposedBy())
 			err := project.store.Commit(e.ID, raw, func(current *policyexceptions.Exception) (policyexceptions.Event, error) {
 				at := exceptionNow().UTC()
 				current.State, current.DecidedAt, current.DecisionReason = policyexceptions.StateRejected, &at, reason

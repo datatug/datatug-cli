@@ -93,7 +93,9 @@ func Overlay(base reconcile.Rules, override *reconcile.Rules) reconcile.Rules {
 			out.Fields[k] = v
 		}
 	}
-	if override.Disclosure != "" {
+	// A request may tighten disclosure, never loosen it: a groups-only rule
+	// stays groups-only.
+	if override.Disclosure != "" && base.Disclosure != reconcile.DiscloseGroupsOnly {
 		out.Disclosure = override.Disclosure
 	}
 	if override.Limit != 0 {

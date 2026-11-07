@@ -92,6 +92,10 @@ func TestComputeReconcileRefusals(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, reconcile.ProfilesFolder, "broken.json"), []byte("{"), 0o644))
 		_, err := computeReconcile(ctx, reconcileapi.Request{SecurityContextID: sc, Project: projectID, ProfileID: "broken"})
 		require.Equal(t, apicontract.ErrCodeInvalidRequest, reconcileCode(t, err))
+		require.Contains(t, err.Error(), `reconcile profile "broken" cannot be read`)
+		_, err = computeReconcile(ctx, reconcileapi.Request{SecurityContextID: sc, Project: projectID, ProfileID: "evil\x1b[31m\nid"})
+		require.Equal(t, apicontract.ErrCodeNotFound, reconcileCode(t, err))
+		require.NotContains(t, err.Error(), "\x1b", "a raw profile id is never echoed")
 	})
 	t.Run("store unavailable", func(t *testing.T) {
 		previous := execRunProjectStoreFor
@@ -280,7 +284,7 @@ func TestOrderReconcileRows(t *testing.T) {
 	_, problem = orderReconcileRows(apicontract.Recordset{Columns: columns, Rows: [][]apicontract.TypedValue{row(apicontract.NewNullValue())}}, []string{"code"})
 	require.Contains(t, problem, "null")
 	_, problem = orderReconcileRows(apicontract.Recordset{Columns: columns, Rows: [][]apicontract.TypedValue{row(apicontract.NewStringValue("A")), row(apicontract.NewStringValue("A"))}}, []string{"code"})
-	require.Contains(t, problem, "not unique")
+	require.Empty(t, problem, "a duplicate key is left for the engine's merge to reject")
 	rows, problem = orderReconcileRows(apicontract.Recordset{Columns: columns, Rows: [][]apicontract.TypedValue{row(apicontract.NewStringValue("B")), row(apicontract.NewStringValue("A"))}}, []string{"code"})
 	require.Empty(t, problem)
 	var keys []string
@@ -313,6 +317,47 @@ func TestRunReconciliationHidesEngineFailures(t *testing.T) {
 	_, err := runReconciliation(context.Background(), reconcileRun{selected: []reconcile.Candidate{{Environment: "a"}, {Environment: "b"}}, rules: reconcile.Rules{Key: []string{"code"}}})
 	require.Equal(t, codeInternal, reconcileCode(t, err))
 	require.Equal(t, "the instances could not be reconciled", err.(*contractError).Message)
+}
+
+func TestRunReconciliationRefusesADuplicateKeyWithoutEchoingIt(t *testing.T) {
+	previous := reconcileExecuteInstanceHook
+	t.Cleanup(func() { reconcileExecuteInstanceHook = previous })
+	reconcileExecuteInstanceHook = func(context.Context, liveInstanceRequest, map[string]apicontract.TypedValueOrSet, []apicontract.BindingOriginEntry) (compareSideData, error) {
+		secret := apicontract.NewStringValue("secret-key-value")
+		return compareSideData{recordset: apicontract.Recordset{Columns: []apicontract.Column{{Name: "code", Type: "string"}}, Rows: [][]apicontract.TypedValue{{secret}, {secret}}}}, nil
+	}
+	_, err := runReconciliation(context.Background(), reconcileRun{selected: []reconcile.Candidate{{Environment: "a"}, {Environment: "b"}}, rules: reconcile.Rules{Key: []string{"code"}}})
+	require.Equal(t, apicontract.ErrCodeInvalidRequest, reconcileCode(t, err))
+	require.Contains(t, err.Error(), "not unique")
+	require.NotContains(t, err.Error(), "secret-key-value")
+}
+
+// An agent request (X-DataTug-Agent) runs under the agent context, so the
+// agent guards apply, and is always answered groups-only.
+func TestReconcileHandlerAgentRequestsAreGroupsOnly(t *testing.T) {
+	projectID, _ := serveFactoriesProject(t)
+	var agent bool
+	previous := reconcileExecuteInstanceHook
+	t.Cleanup(func() { reconcileExecuteInstanceHook = previous })
+	reconcileExecuteInstanceHook = func(ctx context.Context, request liveInstanceRequest, parameters map[string]apicontract.TypedValueOrSet, origins []apicontract.BindingOriginEntry) (compareSideData, error) {
+		agent = agentFromContext(ctx)
+		return previous(ctx, request, parameters, origins)
+	}
+	body, _ := json.Marshal(reconcileapi.Request{SecurityContextID: api.SecurityContextID(), Project: projectID, ProfileID: factories.ProfileCountries,
+		Rules: &reconcile.Rules{Disclosure: reconcile.DiscloseValues}})
+	request := httptest.NewRequest(http.MethodPost, "/datatug/reconcile", strings.NewReader(string(body)))
+	request.Header.Set(agentHeader, "claude")
+	w := httptest.NewRecorder()
+	reconcileHandler(w, request)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.True(t, agent, "instances are read under the agent context")
+	var response reconcileapi.Response
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.Equal(t, reconcile.DiscloseGroupsOnly, response.Result.Disclosure)
+	require.NotContains(t, w.Body.String(), "Eire")
+	require.NotContains(t, w.Body.String(), `"IE"`)
+	require.Nil(t, response.Result.Unexpected[0].Key)
+	require.Positive(t, response.Result.Unexpected[0].Ordinal)
 }
 
 func TestRunReconciliationRejectsInvalidRules(t *testing.T) {

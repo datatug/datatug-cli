@@ -113,3 +113,19 @@ func TestCloudBundleHTTPUsesOnlyClaimAndAuthenticatedEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCloudBundleRefusesReconcileSteps(t *testing.T) {
+	b, _ := cloudTestBundle(t)
+	b.Catalog.Checks["check"] = detective.Check{ID: "check", Title: "Check", Version: 1, Steps: []detective.Step{
+		{ID: "read", Kind: "query", QueryID: "query"},
+		{ID: "agree", Kind: "reconcile", Profile: "reference-countries"},
+	}}
+	claim := sealCloudTestBundle(t, &b)
+	_, err := b.VerifiedCatalog(context.Background(), claim)
+	if !errors.Is(err, ErrHostedReconcileStep) || !errors.Is(err, watch.ErrForbidden) {
+		t.Fatalf("a hosted bundle with a reconcile step must be refused, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "local agent") {
+		t.Fatalf("the refusal says where reconciliation runs: %v", err)
+	}
+}

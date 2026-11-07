@@ -78,13 +78,13 @@ func TestReconcileCommandPrintsEveryKindOfFinding(t *testing.T) {
 	result := reconcile.Result{
 		Mode: reconcile.ModeBaseline, Baseline: "a", Key: []string{"code"}, Presence: reconcile.PresenceSubset, Status: reconcile.StatusPartial,
 		Instances: []reconcile.InstanceResult{
-			{Instance: reconcile.Instance{ID: "a"}, Status: reconcile.StatusConsistent, Authoritative: true},
+			{Instance: reconcile.Instance{ID: "a"}, Status: reconcile.StatusPartial, Authoritative: true, DriftColumns: []string{"amount", "secret"}},
 			{Instance: reconcile.Instance{ID: "b"}, Status: reconcile.StatusInconclusive, Unavailable: &reconcile.Unavailable{Reason: reconcile.UnavailablePermissionDenied, Message: "refused"}},
 		},
 		Columns: []reconcile.ColumnStatus{{Column: "secret", HiddenIn: []string{"c"}, Compared: true}, {Column: "amount", Types: map[string]string{"a": "number", "c": "string"}}},
 		Unexpected: []reconcile.RecordDiscrepancy{{Key: []apicontract.TypedValue{value}, Extra: []string{"c"},
 			Fields: []reconcile.FieldDifference{{Column: "name", Policy: reconcile.FieldIdentical, NoConsensus: true, Groups: []reconcile.ValueGroup{{Value: &value, Instances: []string{"a"}, Authoritative: true}, {Instances: []string{"c"}}}}}}},
-		Inconclusive: []reconcile.RecordDiscrepancy{{Key: []apicontract.TypedValue{value}, Inconclusive: []string{"c"}}},
+		Inconclusive: []reconcile.RecordDiscrepancy{{Key: []apicontract.TypedValue{value}, Inconclusive: []string{"c"}}, {Ordinal: 3, Missing: []string{"a"}, Extra: []string{"c"}, PresenceNoConsensus: true}},
 		Expected:     []reconcile.RecordDiscrepancy{{Key: []apicontract.TypedValue{value}, Extra: []string{"d"}, ExtraExpected: true}},
 		Truncated:    true,
 	}
@@ -101,6 +101,8 @@ func TestReconcileCommandPrintsEveryKindOfFinding(t *testing.T) {
 		"secret: hidden in c",
 		"amount: conflicting types, not compared",
 		"detail lists are truncated",
+		"drift: amount, secret",
+		"  #3\n    presence: no consensus\n    missing in a\n    extra in c\n",
 	} {
 		require.Contains(t, output, want)
 	}

@@ -56,3 +56,11 @@ func TestOverlaySelector(t *testing.T) {
 	require.Equal(t, reconcile.InstanceSelector{Family: "g", Kind: "test", Tenants: []string{"t"}, Environments: []string{"e1", "e2"}},
 		OverlaySelector(base, &reconcile.InstanceSelector{Family: "g", Kind: "test", Tenants: []string{"t"}, Environments: []string{"e1", "e2"}}))
 }
+
+func TestOverlayNeverLoosensDisclosure(t *testing.T) {
+	groupsOnly := reconcile.Rules{Key: []string{"code"}, Disclosure: reconcile.DiscloseGroupsOnly}
+	require.Equal(t, reconcile.DiscloseGroupsOnly, Overlay(groupsOnly, &reconcile.Rules{Disclosure: reconcile.DiscloseValues}).Disclosure)
+	values := reconcile.Rules{Key: []string{"code"}, Disclosure: reconcile.DiscloseValues}
+	require.Equal(t, reconcile.DiscloseGroupsOnly, Overlay(values, &reconcile.Rules{Disclosure: reconcile.DiscloseGroupsOnly}).Disclosure)
+	require.Equal(t, reconcile.DiscloseValues, Overlay(reconcile.Rules{Key: []string{"code"}}, &reconcile.Rules{Disclosure: reconcile.DiscloseValues}).Disclosure)
+}

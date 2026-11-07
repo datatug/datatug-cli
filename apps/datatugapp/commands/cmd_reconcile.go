@@ -239,6 +239,9 @@ func writeReconcileResult(w io.Writer, label string, result reconcile.Result) {
 		if instance.Authoritative {
 			_, _ = fmt.Fprint(w, "  (baseline)")
 		}
+		if len(instance.DriftColumns) > 0 {
+			_, _ = fmt.Fprintf(w, "  drift: %s", strings.Join(instance.DriftColumns, ", "))
+		}
 		_, _ = fmt.Fprintln(w)
 	}
 	s := result.Summary
@@ -279,7 +282,14 @@ func writeReconcileRecords(w io.Writer, label string, key []string, records []re
 	}
 	_, _ = fmt.Fprintf(w, "%s (%d):\n", label, total)
 	for _, record := range records {
-		_, _ = fmt.Fprintf(w, "  [%s]\n", formatCompareKey(key, record.Key))
+		if record.Key == nil {
+			_, _ = fmt.Fprintf(w, "  #%d\n", record.Ordinal)
+		} else {
+			_, _ = fmt.Fprintf(w, "  [%s]\n", formatCompareKey(key, record.Key))
+		}
+		if record.PresenceNoConsensus {
+			_, _ = fmt.Fprintln(w, "    presence: no consensus")
+		}
 		if len(record.Missing) > 0 {
 			_, _ = fmt.Fprintf(w, "    missing in %s%s\n", strings.Join(record.Missing, ", "), expectedSuffix(record.MissingExpected))
 		}

@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/dal-go/dalgo/recordops"
 	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/datarolesfile"
@@ -48,7 +49,7 @@ func reconcileHandler(w http.ResponseWriter, r *http.Request) {
 		writeContractResponse(w, r, newInvalidRequest("", err.Error()), nil)
 		return
 	}
-	response, err := computeReconcile(r.Context(), req)
+	response, err := computeReconcile(withAgentContext(r.Context(), isAgentRequest(r)), req)
 	writeContractResponse(w, r, err, response)
 }
 
@@ -79,7 +80,7 @@ func computeReconcile(ctx context.Context, req reconcileapi.Request) (reconcilea
 			return reconcileapi.Response{}, newNotFound(fmt.Sprintf("reconcile profile %q not found", dbcopy.SourceIDDisplay(req.ProfileID)))
 		}
 		if err != nil {
-			return reconcileapi.Response{}, newInvalidRequest("profileId", fmt.Sprintf("reconcile profile %q cannot be read", req.ProfileID))
+			return reconcileapi.Response{}, newInvalidRequest("profileId", fmt.Sprintf("reconcile profile %q cannot be read", dbcopy.SourceIDDisplay(req.ProfileID)))
 		}
 		if queryID == "" {
 			queryID = profile.QueryID
@@ -105,6 +106,10 @@ func computeReconcile(ctx context.Context, req reconcileapi.Request) (reconcilea
 		}
 	}
 	rules := reconcileapi.Overlay(base, req.Rules)
+	if agentFromContext(ctx) {
+		// An AI agent sees which instances agree, never the values.
+		rules.Disclosure = reconcile.DiscloseGroupsOnly
+	}
 	if len(rules.Key) == 0 {
 		return reconcileapi.Response{}, newInvalidRequest("rules.key", "no key: pass the semantic key columns, or confirm a data-role classification with a consistency rule for the query's collection (datatug db roles confirm)")
 	}
@@ -235,6 +240,10 @@ func runReconciliation(ctx context.Context, run reconcileRun) (reconcileapi.Resp
 		if errors.Is(err, reconcile.ErrInvalidRules) {
 			return reconcileapi.Response{}, newInvalidRequest("rules", err.Error())
 		}
+		if errors.Is(err, recordops.ErrDuplicateID) {
+			// The engine's text can hold the duplicated key value: never echo it.
+			return reconcileapi.Response{}, newInvalidRequest("rules.key", "the key is not unique in at least one instance: choose columns that identify one record")
+		}
 		log.Printf("reconcile: %v", dbcopy.RedactError(err))
 		return reconcileapi.Response{}, newContractError(codeInternal, "the instances could not be reconciled", "")
 	}
@@ -292,15 +301,15 @@ func reconcileUnavailable(err error) *reconcile.Unavailable {
 
 // orderReconcileRows orders the recordset by key. A key column the instance
 // does not return yields an empty stream, so the engine reports the instance
-// not examined with its column drift; a null or duplicate key is reported
-// here, so one bad instance never aborts the whole run.
+// not examined with its column drift; a null key is reported here. A
+// duplicate key is left for the engine's merge to reject.
 func orderReconcileRows(recordset apicontract.Recordset, key []string) (recordsetcompare.OrderedRows, string) {
-	indexes := make(map[string]int, len(recordset.Columns))
-	for i, column := range recordset.Columns {
-		indexes[column.Name] = i
+	present := make(map[string]bool, len(recordset.Columns))
+	for _, column := range recordset.Columns {
+		present[column.Name] = true
 	}
 	for _, name := range key {
-		if _, ok := indexes[name]; !ok {
+		if !present[name] {
 			return func(func([]apicontract.TypedValue, error) bool) {}, ""
 		}
 	}
@@ -308,27 +317,7 @@ func orderReconcileRows(recordset apicontract.Recordset, key []string) (recordse
 	if err != nil {
 		return nil, "the rows cannot be aligned by the key: a key value is null or invalid"
 	}
-	rows := make([][]apicontract.TypedValue, 0, len(recordset.Rows))
-	previous := ""
-	for row := range ordered {
-		values := make([]apicontract.TypedValue, len(key))
-		for i, name := range key {
-			values[i] = row[indexes[name]]
-		}
-		sortKey, _ := apicontract.TypedKeySortKey(values)
-		if len(rows) > 0 && sortKey == previous {
-			return nil, "the key is not unique in this instance"
-		}
-		previous = sortKey
-		rows = append(rows, row)
-	}
-	return func(yield func([]apicontract.TypedValue, error) bool) {
-		for _, row := range rows {
-			if !yield(row, nil) {
-				return
-			}
-		}
-	}, ""
+	return ordered, ""
 }
 
 // detectiveReconciler runs a Check's reconcile step through the same path as

@@ -123,6 +123,8 @@ func TestReconcileCommandFactoriesDemo(t *testing.T) {
 		output, err = runReconcileTestCommand(t, reconcileCommand(), reconcileArgs("--profile", factories.ProfileProducts, "--groups-only")...)
 		require.Equal(t, reconcileExitDiscrepancies, reconcileExitCodeOf(err), output)
 		require.Contains(t, output, "<group> {factory-a-prod, factory-b-prod, factory-d-prod, factory-e-prod} | <group> {factory-c-prod}; deviating: factory-c-prod")
+		require.Contains(t, output, "unexpected (1):\n  #1\n", "groups-only records are named by ordinal, never by key")
+		require.NotContains(t, output, factories.DescribedSKU)
 		require.Contains(t, output, "columns:\n  local_notes: missing in factory-a-prod, factory-b-prod, factory-c-prod, factory-d-prod")
 
 		output, err = runReconcileTestCommand(t, reconcileCommand(), reconcileArgs("--profile", factories.ProfileCurrencies, "--env", "factory-a-prod,factory-b-prod", "--limit", "5")...)

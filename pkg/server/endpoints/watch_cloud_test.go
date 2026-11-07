@@ -144,3 +144,32 @@ func TestCloudArtifactRejectsMalformedDatabaseBeforeEvaluation(t *testing.T) {
 		t.Fatal("cancellation lost")
 	}
 }
+
+// A hosted bundle never runs a reconcile step: it could name any local
+// profile and read every selected local environment outside the operator's
+// bindings. The bundle is refused before anything is evaluated or read.
+func TestCloudWatchCheckRefusesReconcileSteps(t *testing.T) {
+	ctx := context.Background()
+	dir, project := writeRunQueryTestProject(t)
+	previous := storage.NewDatatugStore
+	defer func() { storage.NewDatatugStore = previous }()
+	configureSemanticSession(t, dir, project, "alice", []string{"admin"})
+	api.ConfigureSecureSession(secureread.Session{Unrestricted: true, AllowOpaqueSQL: true}, map[string]string{project: dir}, api.Capabilities{AllowWrites: true, EvidencePrivateDir: t.TempDir()})
+	defer api.ConfigureSecureSession(secureread.Session{}, nil, api.Capabilities{})
+	configureExecutionEvidence(t, project, dir)
+	previousExecute := reconcileExecuteInstanceHook
+	defer func() { reconcileExecuteInstanceHook = previousExecute }()
+	reconcileExecuteInstanceHook = func(context.Context, liveInstanceRequest, map[string]apicontract.TypedValueOrSet, []apicontract.BindingOriginEntry) (compareSideData, error) {
+		t.Fatal("a hosted bundle read a local instance")
+		return compareSideData{}, nil
+	}
+	bundle, _ := endpointCloudBundle(t)
+	check := bundle.Catalog.Checks[bundle.CheckID]
+	check.Steps = append(check.Steps, core.Step{ID: "agree", Kind: "reconcile", Profile: "reference-countries"})
+	bundle.Catalog.Checks[bundle.CheckID] = check
+	claim := sealEndpointCloudBundle(t, &bundle)
+	run, _, err := ExecuteCloudWatchCheck(ctx, project, "cloud-reconcile", claim, bundle, map[string]string{"source-grant": "chinook-local"})
+	if !errors.Is(err, watchdaemon.ErrHostedReconcileStep) || len(run.Steps) != 0 {
+		t.Fatalf("hosted reconcile step was not refused: %+v %v", run, err)
+	}
+}

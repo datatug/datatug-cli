@@ -22,6 +22,7 @@ type serveRuntimeSettings struct {
 		EnvironmentMetadataPolicies map[string]api.EnvironmentMetadataPolicy `yaml:"environmentMetadataPolicies"`
 		EnvironmentPrivateDir       string                                   `yaml:"environmentPrivateDir"`
 		EnvironmentAuthorityID      string                                   `yaml:"environmentAuthorityId"`
+		UIHost                      string                                   `yaml:"uiHost"`
 	} `yaml:"server"`
 }
 

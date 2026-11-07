@@ -274,6 +274,11 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 
 	agent := agentFromContext(ctx)
 	executor = labelledRunQueryExecutor(ctx, executor, projStore, projDir, req.Environment, resolved)
+	if len(bindings) == 0 {
+		// A federated read spans several instances, so it keeps the policies
+		// that deny what a rule selector would decide.
+		executor = instanceExecutor(ctx, executor, projStore, req.Environment, resolved.Catalog)
+	}
 	switch {
 	case req.TugQL != "":
 		profile = apicontract.ExecutionProfileProtected

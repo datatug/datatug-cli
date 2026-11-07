@@ -22,6 +22,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/meaninglabelsfile"
 	"github.com/datatug/datatug-cli/pkg/policyexceptions"
 	"github.com/datatug/datatug-core/pkg/meaninglabels"
+	"github.com/datatug/datatug-core/pkg/policyscope"
 )
 
 // A project read is `query run --project <p> --source <db> --from <table>`
@@ -42,6 +43,8 @@ type projectRead struct {
 	source     string
 	env        string
 	sourceURL  string
+	// target is the instance the read opens, which rule selectors match.
+	target     policyscope.Target
 	backend    dbcopy.BackendRef
 	exceptions policyexceptions.Store
 	// applied maps the rule id of each exception overlaid on the loaded
@@ -78,7 +81,7 @@ func resolveProjectRead(ctx context.Context, o queryOptions) (*projectRead, erro
 	if err != nil {
 		return nil, Exit(err.Error(), exitCodeUsage)
 	}
-	return &projectRead{projectDir: projectDir, projectID: projectID, source: o.source, env: env, sourceURL: source.URL, backend: backend.WithFlag("--source"), exceptions: policyexceptions.Store{ProjectDir: projectDir, Caller: detectCaller()}}, nil
+	return &projectRead{projectDir: projectDir, projectID: projectID, source: o.source, env: env, sourceURL: source.URL, target: source.Target, backend: backend.WithFlag("--source"), exceptions: policyexceptions.Store{ProjectDir: projectDir, Caller: detectCaller()}}, nil
 }
 
 // errNoProjectPolicies is the refusal of a project read in a project that has
@@ -87,8 +90,10 @@ func errNoProjectPolicies() error {
 	return Exit("access denied: the project has no policy in its policies/ folder, and a project read is denied by default", exitCodeAccessDenied)
 }
 
-// loadPolicies loads <project>/policies/ with the applied, unexpired local
-// policy exceptions of this source overlaid. An exception store that cannot
+// loadPolicies loads <project>/policies/ as it stands for this source's
+// instance (rule selectors, policyscope) with the applied, unexpired local
+// policy exceptions of this source overlaid. A document that denies every
+// read of the instance is loaded as such, with no exception. An exception store that cannot
 // be read contributes nothing (with a warning), so it never widens a read.
 func (r *projectRead) loadPolicies(stderr io.Writer) ([]accesspolicies.Loaded, error) {
 	r.now = projectReadNow()
@@ -109,8 +114,15 @@ func (r *projectRead) loadPolicies(stderr io.Writer) ([]accesspolicies.Loaded, e
 	r.applied = map[string]policyexceptions.Exception{}
 	overlay := func(path string, data []byte, codec access.Codec) ([]byte, error) {
 		rel, _ := filepath.Rel(r.projectDir, path) // both are paths of the project folder
+		projected, err := policyscope.Project(data, codec, r.target)
+		if policyscope.Denies(err) {
+			return data, nil // loads as a policy that denies every read
+		}
+		if err != nil {
+			return nil, err
+		}
 		binding := policyexceptions.Binding{ProjectID: r.projectID, Env: r.env, Source: r.source, SourceIdentity: policyexceptions.SourceFingerprint(r.sourceURL), PolicyPath: filepath.ToSlash(rel), Reader: reader}
-		out, ids, err := policyexceptions.Overlay(data, codec, binding, all, r.now)
+		out, ids, err := policyexceptions.OverlayProjected(data, projected, codec, binding, all, r.now)
 		for _, id := range ids {
 			for _, e := range all {
 				if e.ID == id {

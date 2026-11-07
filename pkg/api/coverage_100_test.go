@@ -933,6 +933,7 @@ func TestSecureSession(t *testing.T) {
 	assert.Empty(t, g)
 	assert.Empty(t, SecureConfiguredProjectIDs())
 	assert.False(t, SecureSessionUnrestricted())
+	assert.False(t, SecurePolicyFreeReads())
 
 	// Configure
 	session, err := secureread.NewSession(secureread.SessionOptions{
@@ -964,6 +965,7 @@ func TestSecureSession(t *testing.T) {
 	assert.Equal(t, []string{"devs"}, g)
 	assert.Equal(t, []string{"p1"}, SecureConfiguredProjectIDs())
 	assert.True(t, SecureSessionUnrestricted())
+	assert.True(t, SecurePolicyFreeReads())
 	assert.Equal(t, caps, GetCapabilities())
 
 	// SecurePrincipalID with non-string ID

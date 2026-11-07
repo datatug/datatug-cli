@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strings"
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/dbcopy/filter"
+	"github.com/datatug/datatug-cli/pkg/labelguard"
 	"github.com/datatug/datatug-core/pkg/meaninglabels"
 	"github.com/spf13/cobra"
 )
@@ -51,7 +51,7 @@ func copyLabelRefusal(cmd *cobra.Command, src dbcopy.BackendRef, project *projec
 	if err != nil {
 		return errLabelsUnreadable.Message
 	}
-	labelled := sourceHasProtectedLabel(doc, project.catalog)
+	labelled := labelguard.SourceHasProtectedLabel(doc, project.catalog)
 	strict := callerIsAgent()
 	db, err := openCopySource(ctx, src, schema)
 	if err != nil {
@@ -83,8 +83,7 @@ func copyLabelRefusal(cmd *cobra.Command, src dbcopy.BackendRef, project *projec
 		suggested = append(suggested, names...)
 	}
 	sort.Strings(suggested)
-	warner := &suggestionWarner{out: cmd.ErrOrStderr(), warned: map[string]bool{}}
-	warner.warn("this copy", project.catalog, suggested)
+	labelguard.NewWarner(cmd.ErrOrStderr()).Warn("this copy", project.catalog, suggested)
 	return ""
 }
 
@@ -92,10 +91,8 @@ func copyLabelRefusal(cmd *cobra.Command, src dbcopy.BackendRef, project *projec
 // copy is refused, or the table.column names that only a read-time suggestion
 // protects.
 func copyTableRefusal(ctx context.Context, db dal.DB, doc meaninglabels.Document, src dbcopy.BackendRef, catalog, table string, labelled, strict bool) (string, []string) {
-	for _, l := range doc.Labels {
-		if l.Class.Protected() && strings.EqualFold(l.Target.Source, catalog) && meaninglabels.TableMatches(l.Target.Table, table) {
-			return copyProtected(catalog, table, meaninglabels.ColumnLabel{Column: l.Target.Column, Class: l.Class}), nil
-		}
+	if l, ok := labelguard.StoredTableLabel(doc, catalog, table); ok {
+		return copyProtected(catalog, table, l), nil
 	}
 	columns, ok := collectionColumns(ctx, db, table)
 	if !ok && labelled {

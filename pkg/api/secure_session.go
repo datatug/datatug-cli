@@ -293,6 +293,15 @@ func SecureSessionUnrestricted() bool {
 	return secureSession.DatabaseProfile.PolicyFreeReads()
 }
 
+// SecurePolicyFreeReads reports whether this process's session runs with the
+// policy-free database-read profile of a local project owner. A read-time
+// sensitivity suggestion refuses a read of any other session.
+func SecurePolicyFreeReads() bool {
+	secureMu.RLock()
+	defer secureMu.RUnlock()
+	return secureSession.DatabaseProfile.PolicyFreeReads()
+}
+
 // projectDir returns the filesystem directory serve resolved for projectID,
 // as configured via ConfigureSecureSession's pathsByID.
 func projectDir(projectID string) (string, bool) {

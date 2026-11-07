@@ -20,6 +20,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/mcpserver"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
+	"github.com/datatug/datatug-core/pkg/meaninglabels"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -93,7 +94,7 @@ func TestMCPRealSavedSQLChildProcess(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = cs.Close() })
 	listed, err := cs.ListTools(ctx, nil)
-	if err != nil || len(listed.Tools) != 8 {
+	if err != nil || len(listed.Tools) != 12 {
 		t.Fatalf("tools/list: %+v %v", listed, err)
 	}
 	call := func(name string, args map[string]any) json.RawMessage {
@@ -129,6 +130,15 @@ func TestMCPRealSavedSQLChildProcess(t *testing.T) {
 		t.Fatalf("saved SQL not discoverable: %s", queries)
 	}
 	call("datatug_get_query", map[string]any{"project": demoProjectID, "queryId": "customers/customer-purchases-by-genre"})
+	// An MCP caller is an agent: saved SQL, which cannot be masked, is refused
+	// on a source whose columns read-time suggestions mark sensitive. Once the
+	// owner has reviewed every suggested column, it runs.
+	suggested, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "datatug_run_query", Arguments: map[string]any{"project": demoProjectID, "environment": demoProjectEnv, "source": demoProjectSource, "queryId": "customers/customer-purchases-by-genre", "parameters": map[string]string{"CustomerId": "1"}}})
+	suggestedBody, _ := json.Marshal(suggested)
+	if err != nil || !suggested.IsError || !bytes.Contains(suggestedBody, []byte(meaninglabels.CodeRawRefused)) || !bytes.Contains(suggestedBody, []byte("Customer.Email")) {
+		t.Fatalf("saved SQL on a suggested source: %s %v", suggestedBody, err)
+	}
+	reviewSuggestedSQLiteColumns(t, projectDir, demoProjectSource, filepath.Join(projectDir, "fixtures", "chinook-local.sqlite"))
 	counts := []string{}
 	for _, id := range []string{"1", "2"} {
 		body := call("datatug_run_query", map[string]any{"project": demoProjectID, "environment": demoProjectEnv, "source": demoProjectSource, "queryId": "customers/customer-purchases-by-genre", "parameters": map[string]string{"CustomerId": id}, "limit": 100})

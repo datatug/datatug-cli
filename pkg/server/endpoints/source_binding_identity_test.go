@@ -69,6 +69,7 @@ func TestBoundSourceNativeCaseCannotEscapeMandatoryDeny(t *testing.T) {
 				mandatory += opaque
 			}
 			mustWriteFile(t, filepath.Join(root, "policies", "mandatory.yaml"), mandatory)
+			reviewSuggestedColumns(t, root, "chinook-local", filepath.Join(root, "chinook.sqlite"))
 			configureSemanticSessionWithCapabilities(t, root, project, "bob", nil, api.Capabilities{})
 			config, _ := json.Marshal(map[string]any{"profile": secureread.ExactTableReadProfile, "project": project, "environment": "local", "catalog": "chinook-local", "sqliteFile": filepath.Join(root, "chinook.sqlite"), "requiredPolicies": []string{"policies/test.yaml", "policies/mandatory.yaml"}, "principal": map[string]any{"id": "bob"}})
 			mustMkdirAll(t, filepath.Join(root, ".datatug"))

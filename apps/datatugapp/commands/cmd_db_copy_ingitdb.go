@@ -128,6 +128,19 @@ func inGitDBEndpoints(src, tgt dbcopy.BackendRef) func() (faithful.EndpointInfo,
 	}
 }
 
+// copyEndpoints names both ends of a `db copy` that fails before its engine
+// runs, for the --json report, as that engine names them: a new inGitDB
+// project, or the SQL engines of a SQLite <-> PostgreSQL copy.
+func copyEndpoints(src, tgt dbcopy.BackendRef, newInGitDB bool) func() (faithful.EndpointInfo, faithful.EndpointInfo) {
+	if newInGitDB {
+		return inGitDBEndpoints(src, tgt)
+	}
+	return func() (faithful.EndpointInfo, faithful.EndpointInfo) {
+		return faithful.EndpointInfo{Engine: faithful.Engine(src.SQLEngine()), Display: src.Display()},
+			faithful.EndpointInfo{Engine: faithful.Engine(tgt.SQLEngine()), Display: tgt.Display()}
+	}
+}
+
 // runNativeInGitDB copies the source into a new native inGitDB project at req.tgt and reports it.
 func runNativeInGitDB(cmd *cobra.Command, req nativeInGitDBRequest) error {
 	// SIGINT and SIGTERM stop the export through its own return path, which removes the staging folder (a dry run's too).
@@ -231,14 +244,11 @@ func writeNativeText(cmd *cobra.Command, req nativeInGitDBRequest, rep *faithful
 }
 
 // dbCopyToNewInGitDB runs `db copy --to ingitdb://<folder that does not exist>`.
-func dbCopyToNewInGitDB(cmd *cobra.Command, fromURL string, srcRef, tgtRef dbcopy.BackendRef, fromSchema, recordsFormat string) error {
+// directives are the table filter dbCopyAction has already parsed.
+func dbCopyToNewInGitDB(cmd *cobra.Command, fromURL string, srcRef, tgtRef dbcopy.BackendRef, fromSchema, recordsFormat string, directives *filter.Directives) error {
 	fail := nativeFailer(cmd, "db copy", inGitDBEndpoints(srcRef, tgtRef))
 	if err := refuseNativeInGitDBFlags(cmd, fail); err != nil {
 		return err
-	}
-	directives, err := buildDirectivesFromFlags(cmd)
-	if err != nil {
-		return fail(2, "%v", err)
 	}
 	return runNativeInGitDB(cmd, nativeInGitDBRequest{command: "db copy", fromRaw: fromURL, src: srcRef, tgt: tgtRef, fromSchema: fromSchema,
 		recordsFormat: recordsFormat, directives: directives, quietWhenEmpty: true, fail: fail})

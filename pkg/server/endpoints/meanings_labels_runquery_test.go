@@ -93,9 +93,16 @@ func TestRunQueryAgentGuards(t *testing.T) {
 	if _, err = computeRunQuery(agentCtx, agentRunRequest(project, "agent-missing", "")); err == nil {
 		t.Fatal("missing query")
 	}
-	// a person is not guarded
+	// a person in a policy-governed session is refused a column only a
+	// suggestion protects (Cards.card_number); the policy-free owner reads it
+	if _, err = computeRunQuery(context.Background(), agentRunRequest(project, "agent-wild", "")); errCode(err) != meaninglabels.CodeFieldProtected {
+		t.Fatalf("policy-governed person wildcard: %v", err)
+	}
+	prevPolicyFree := policyFreeReads
+	t.Cleanup(func() { policyFreeReads = prevPolicyFree })
+	policyFreeReads = func() bool { return true }
 	if _, err = computeRunQuery(context.Background(), agentRunRequest(project, "agent-wild", "")); err != nil {
-		t.Fatalf("person wildcard: %v", err)
+		t.Fatalf("owner wildcard: %v", err)
 	}
 
 	// through the handler the header marks the agent

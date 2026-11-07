@@ -1,14 +1,12 @@
 package endpoints
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -212,14 +210,6 @@ func recordRoutes(guarded bool, caps Capabilities) []recordedRoute {
 	return all
 }
 
-// quietLog silences the "Registering ..." lines of the registration for the length of the test.
-func quietLog(t *testing.T) {
-	t.Helper()
-	saved := log.Writer()
-	log.SetOutput(&bytes.Buffer{})
-	t.Cleanup(func() { log.SetOutput(saved) })
-}
-
 // stubHandle makes the routes that answer through apicore answer through a fixed handler.
 func stubHandle(t *testing.T) {
 	t.Helper()
@@ -242,7 +232,6 @@ func refusedRequests(method, path string) map[string]*http.Request {
 }
 
 func TestRoutes_EveryRouteRefusesARequestThatIsNotItsOwn(t *testing.T) {
-	quietLog(t)
 	stubHandle(t)
 	routes := recordRoutes(true, Capabilities{ServedPort: 8989})
 	require.Greater(t, len(routes), 60, "the whole route table is recorded")
@@ -261,7 +250,6 @@ func TestRoutes_EveryRouteRefusesARequestThatIsNotItsOwn(t *testing.T) {
 // The same request from an allowed origin is served exactly as it is by the route with no guard:
 // the guard adds nothing to an answer and takes nothing from it.
 func TestRoutes_EveryRouteServesARequestThatIsItsOwnAsBefore(t *testing.T) {
-	quietLog(t)
 	stubHandle(t)
 	caps := Capabilities{ServedPort: 8989}
 	guarded, reference := recordRoutes(true, caps), recordRoutes(false, caps)

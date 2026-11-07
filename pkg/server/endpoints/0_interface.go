@@ -2,7 +2,6 @@ package endpoints
 
 import (
 	"context"
-	"log"
 	"net/http"
 
 	"github.com/sneat-co/sneat-go-core/apicore"
@@ -71,7 +70,6 @@ var handle Handler = func(
 }
 
 func route(r router, wrap wrapper, method, path string, handler http.HandlerFunc) {
-	log.Printf("Registering %v %v", method, path)
 	if wrap != nil {
 		handler = wrap(handler)
 	}

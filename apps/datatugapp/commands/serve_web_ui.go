@@ -122,15 +122,3 @@ func (w *servedWebUI) links(port int) (primary, fallback string) {
 	}
 	return link(w.host), link("127.0.0.1")
 }
-
-func (w *servedWebUI) banner() string {
-	b := fmt.Sprintf("Serving web UI %s from %s (local mode: no telemetry; the page can reach only this agent", w.entry.Version, w.entry.Dir)
-	if len(w.connect) > 0 {
-		b += " and " + strings.Join(w.connect, ", ")
-	}
-	b += ")"
-	if w.handler.InlineHandlers > 0 {
-		b += fmt.Sprintf("\nwarning: the web UI has %d inline event handler(s) that its Content-Security-Policy blocks", w.handler.InlineHandlers)
-	}
-	return b
-}

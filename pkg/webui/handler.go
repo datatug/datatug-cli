@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html"
+	"html/template"
 	"io"
 	"io/fs"
 	"net/http"
@@ -201,10 +201,15 @@ func checkConnectOrigin(origin string) error {
 	return nil
 }
 
+// runtimeMeta is the runtime config tag; html/template does the attribute escaping.
+var runtimeMeta = template.Must(template.New("datatug-runtime").Parse(`<meta name="datatug-runtime" content="{{.}}">`))
+
 // injectRuntime puts the runtime config as the first element of <head>.
 func injectRuntime(index []byte, rc RuntimeConfig) ([]byte, error) {
 	data, _ := json.Marshal(rc) // a RuntimeConfig of strings and a bool always marshals
-	meta := []byte(`<meta name="datatug-runtime" content="` + html.EscapeString(string(data)) + `">`)
+	// html/template escapes the JSON for an attribute value (quotes, ampersands, angle brackets...).
+	var meta bytes.Buffer
+	_ = runtimeMeta.Execute(&meta, string(data)) // writing a string into a bytes.Buffer cannot fail
 	// The <head> start tag as the HTML tokenizer reads it: never <header>, a comment or script text.
 	z := nethtml.NewTokenizer(bytes.NewReader(index))
 	cut := -1
@@ -218,9 +223,9 @@ func injectRuntime(index []byte, rc RuntimeConfig) ([]byte, error) {
 			cut = offset
 		}
 	}
-	out := make([]byte, 0, len(index)+len(meta))
+	out := make([]byte, 0, len(index)+meta.Len())
 	out = append(out, index[:cut]...)
-	out = append(out, meta...)
+	out = append(out, meta.Bytes()...)
 	return append(out, index[cut:]...), nil
 }
 

@@ -8,7 +8,9 @@ import (
 	"sort"
 
 	"github.com/dal-go/dalgo/dal"
+	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/datatug/datatug-core/pkg/policyscope"
 )
 
 // FederatedLeaf is one collection a federated read touches, with every column
@@ -82,6 +84,17 @@ func (e *Executor) WithCatalog(sourceURL, catalog string) *Executor {
 func (e *Executor) WithLabels(columns FederatedColumnGuard, native NativeSQLGuard, catalogs map[string][]string) *Executor {
 	session := e.session
 	session.FederatedColumns, session.NativeSQL, session.SourceCatalogs = columns, native, catalogs
+	return &Executor{session: session}
+}
+
+// ForTarget returns the executor with its policies as they stand for a read
+// of t (accesspolicies.ForTarget): rules that select another environment or
+// instance are left out. Use it only for an executor that reads t and
+// nothing else; every other executor keeps denying the reads that documents
+// with selectors would decide.
+func (e *Executor) ForTarget(t policyscope.Target) *Executor {
+	session := e.session
+	session.Policies = accesspolicies.ForTarget(session.Policies, t)
 	return &Executor{session: session}
 }
 

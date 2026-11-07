@@ -21,6 +21,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/policyexceptions"
 	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/policyscope"
 	"github.com/spf13/cobra"
 )
 
@@ -235,9 +236,19 @@ func findProjectPolicy(projectDir, want string) (projectPolicy, error) {
 
 // checkRoleHasNoRule refuses an exception on a table the role already has a
 // rule for: an exception only opens a table the role cannot read at all, so
-// it never widens a row condition or a field list.
-func checkRoleHasNoRule(ctx context.Context, policy projectPolicy, role, table string) error {
-	if err := policyexceptions.Applicable(policy.data, policy.codec); err != nil {
+// it never widens a row condition or a field list. A policy whose rules
+// select environments or instances is checked as it stands for target.
+func checkRoleHasNoRule(ctx context.Context, policy projectPolicy, target policyscope.Target, role, table string) error {
+	if policy.loaded.Scoped() {
+		loaded := accesspolicies.ForTarget([]accesspolicies.Loaded{policy.loaded}, target)
+		if loaded[0].Scoped() {
+			return Exit(fmt.Sprintf("policy %s denies every read of %s %s (its rules select environments or instances and none applies, or the environment has no kind), so an exception cannot be added to it here", policy.name, dbcopy.SourceIDDisplay(target.Environment), dbcopy.SourceIDDisplay(target.Catalog)), exitCodeUsage)
+		}
+		if _, ok := loaded[0].Policy.(*access.PrincipalPolicySet); !ok {
+			return Exit(policyexceptions.ErrNotApplicable.Error(), exitCodeUsage)
+		}
+		policy.loaded = loaded[0]
+	} else if err := policyexceptions.Applicable(policy.data, policy.codec); err != nil {
 		return Exit(err.Error(), exitCodeUsage)
 	}
 	ctx = access.WithPrincipal(ctx, access.Principal{Roles: []string{role}})
@@ -418,7 +429,7 @@ func exceptionProposeAction(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	if err = checkRoleHasNoRule(ctx, policy, role, canonical); err != nil {
+	if err = checkRoleHasNoRule(ctx, policy, resolved.target(), role, canonical); err != nil {
 		return err
 	}
 	id, err := newExceptionID()

@@ -286,3 +286,18 @@ func TestSessionMatchingFailsClosed(t *testing.T) {
 		})
 	}
 }
+
+func TestOverlayProjectedBindsToTheBytesOnDisk(t *testing.T) {
+	original := []byte(principalPolicy + "# selectors removed by the projection\n")
+	projected := []byte(principalPolicy)
+	e := applied("0123456789abcdef", t0.Add(time.Hour))
+	e.Policy.SHA256 = Fingerprint(original)
+	out, ids, err := OverlayProjected(original, projected, access.YAMLCodec{}, demoBinding, []Exception{e}, t0)
+	require.NoError(t, err)
+	assert.Equal(t, []string{e.ID}, ids, "the exception bound to the file on disk applies to its projection")
+	decodePolicy(t, out)
+	out, ids, err = Overlay(projected, access.YAMLCodec{}, demoBinding, []Exception{e}, t0)
+	require.NoError(t, err)
+	assert.Empty(t, ids, "it never applies to other bytes")
+	assert.Equal(t, projected, out)
+}

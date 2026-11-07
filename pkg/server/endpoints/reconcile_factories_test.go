@@ -26,11 +26,20 @@ var factoriesProjectRuns atomic.Int64
 // and configures this process as an unrestricted agent serving it.
 func serveFactoriesProject(t *testing.T) (projectID, dir string) {
 	t.Helper()
+	return serveFactoriesProjectAs(t, func(string) secureread.SessionOptions {
+		return secureread.SessionOptions{As: "alice", NoPolicies: true}
+	})
+}
+
+// serveFactoriesProjectAs is serveFactoriesProject with the session options
+// options returns for the generated project folder.
+func serveFactoriesProjectAs(t *testing.T, options func(dir string) secureread.SessionOptions) (projectID, dir string) {
+	t.Helper()
 	projectID = fmt.Sprintf("factories-%d", factoriesProjectRuns.Add(1))
 	dir = t.TempDir()
 	filestore.SetProjectPath(projectID, dir)
 	require.NoError(t, factories.Generate(context.Background(), dir, filestore.NewProjectStore(projectID, dir)))
-	session, err := secureread.NewSession(secureread.SessionOptions{As: "alice", NoPolicies: true})
+	session, err := secureread.NewSession(options(dir))
 	require.NoError(t, err)
 	api.ConfigureSecureSession(session, map[string]string{projectID: dir}, api.Capabilities{EvidencePrivateDir: t.TempDir(), SnapshotPolicies: map[string]api.SnapshotProjectPolicy{
 		projectID: {Sources: map[string]api.SnapshotSourcePolicy{factories.Catalog: {Allow: true}}},

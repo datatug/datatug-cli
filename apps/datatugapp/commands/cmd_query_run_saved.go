@@ -22,6 +22,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-cli/pkg/tugqlbind"
 	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/policyscope"
 	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/spf13/cobra"
 )
@@ -352,6 +353,14 @@ type resolvedQuerySource struct {
 	Driver      string
 	Environment string
 	Catalog     string
+	// Kind is the environment's kind, which `environment` rule selectors
+	// match (policyscope); empty when the environment names none.
+	Kind datatug.EnvironmentKind
+}
+
+// target is the instance this source is, for rule selectors.
+func (s resolvedQuerySource) target() policyscope.Target {
+	return policyscope.Target{Environment: s.Environment, Catalog: s.Catalog, Kind: s.Kind}
 }
 
 func resolveQuerySource(ctx context.Context, projStore datatug.ProjectStore, projectDir, envID, database string) (resolvedQuerySource, error) {
@@ -373,7 +382,7 @@ func resolveQuerySource(ctx context.Context, projStore datatug.ProjectStore, pro
 		if err != nil {
 			return resolvedQuerySource{}, err
 		}
-		return resolvedQuerySource{URL: source, Driver: catalog.Driver, Environment: envID, Catalog: database}, nil
+		return resolvedQuerySource{URL: source, Driver: catalog.Driver, Environment: envID, Catalog: database, Kind: env.Kind}, nil
 	}
 	// database and envID are what the command was given, and a source string can
 	// be typed where an ID belongs: see api.LookupError.

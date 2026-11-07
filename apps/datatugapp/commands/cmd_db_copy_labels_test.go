@@ -63,6 +63,22 @@ func TestDBCopyAndExportRefuseALabelledProjectSource(t *testing.T) {
 	assert.Equal(t, "failed", report.Status)
 	assert.Contains(t, report.Error, meaninglabels.CodeFieldProtected)
 
+	// db copy --json reports the refusal too, and the current-project form is checked.
+	stdout, _, code = runCLI(t, "", "db", "copy", "--from", ref, "--to", "sqlite://"+sqliteFile, "--json")
+	require.Equal(t, exitCodeAccessDenied, code)
+	require.NoError(t, json.Unmarshal([]byte(stdout), &report), stdout)
+	assert.Equal(t, "failed", report.Status)
+	assert.Contains(t, report.Error, meaninglabels.CodeFieldProtected)
+	expectRefused("current project", sqliteFile, "db", "copy", "--from", "datatug:///chinook", "--to", "sqlite://"+sqliteFile)
+	filterConfig := filepath.Join(dir, "filter.yaml")
+	require.NoError(t, os.WriteFile(filterConfig, []byte("include: [Customer]\n"), 0o644))
+	expectRefused("filter config", sqliteFile, "db", "copy", "--from", ref, "--to", "sqlite://"+sqliteFile, "--filter-config", filterConfig)
+
+	// A usage error is reported before the labels are checked.
+	_, stderr, code := runCLI(t, "", "db", "copy", "--from", ref, "--to", "ingitdb://"+dir+"?records-format=json")
+	assert.Equal(t, exitCodeUsage, code, stderr)
+	assert.NotContains(t, stderr, meaninglabels.CodeFieldProtected)
+
 	// Copy has no principal and no policies to switch off: --no-policies and
 	// --role are not flags of it, so they cannot widen what it copies.
 	for _, flag := range []string{"--no-policies", "--role=owner"} {
@@ -77,7 +93,7 @@ func TestDBCopyAndExportRefuseALabelledProjectSource(t *testing.T) {
 	assert.True(t, os.IsNotExist(err))
 
 	// Unlabelled tables of the same source copy as before.
-	stdout, stderr, code := runCLI(t, "", "db", "copy", "--from", ref, "--to", "sqlite://"+sqliteFile, "--include", "Genre,MediaType")
+	stdout, stderr, code = runCLI(t, "", "db", "copy", "--from", ref, "--to", "sqlite://"+sqliteFile, "--include", "Genre,MediaType")
 	require.Equal(t, 0, code, stdout+stderr)
 	db, err := sql.Open("sqlite", sqliteFile)
 	require.NoError(t, err)
@@ -101,16 +117,16 @@ func copyLabelCommand(t *testing.T, args ...string) *cobra.Command {
 
 func TestCopyLabelRefusal(t *testing.T) {
 	restoreVar(t, &loadLabels)
-	restoreVar(t, &openBackend)
+	restoreVar(t, &openCopySource)
 	restoreVar(t, &listCollections)
 	restoreVar(t, &describeCollection)
 	restoreVar(t, &listSourceViews)
 	project := &projectSource{dir: "/p", catalog: "crm"}
 	src := dbcopy.BackendRef{Scheme: "sqlite", Path: "/x.sqlite"}
 	cmd := copyLabelCommand(t)
-	check := func() string { return copyLabelRefusal(cmd, src, project) }
+	check := func() string { return copyLabelRefusal(cmd, src, project, "sales") }
 
-	assert.Empty(t, copyLabelRefusal(cmd, src, nil), "a source that is not a project source has no labels")
+	assert.Empty(t, copyLabelRefusal(cmd, src, nil, ""), "a source that is not a project source has no labels")
 
 	loadLabels = func(context.Context, string) (meaninglabels.Document, error) {
 		return meaninglabels.Document{}, errors.New("broken")
@@ -119,10 +135,14 @@ func TestCopyLabelRefusal(t *testing.T) {
 
 	doc := meaninglabels.NewDocument()
 	loadLabels = func(context.Context, string) (meaninglabels.Document, error) { return doc, nil }
-	openBackend = func(context.Context, dbcopy.BackendRef) (dal.DB, error) { return nil, errors.New("no source") }
+	openCopySource = func(context.Context, dbcopy.BackendRef, string) (dal.DB, error) { return nil, errors.New("no source") }
 	assert.Contains(t, check(), "source crm cannot be opened")
 
-	openBackend = func(context.Context, dbcopy.BackendRef) (dal.DB, error) { return nil, nil }
+	var openedSchema string
+	openCopySource = func(_ context.Context, _ dbcopy.BackendRef, schema string) (dal.DB, error) {
+		openedSchema = schema
+		return nil, nil
+	}
 	tables := []string{"Account", "Region"}
 	listCollections = func(context.Context, dal.DB, *record.Key) ([]dal.CollectionRef, error) {
 		refs := make([]dal.CollectionRef, len(tables))
@@ -140,24 +160,24 @@ func TestCopyLabelRefusal(t *testing.T) {
 	}
 	listSourceViews = func(context.Context, dal.DB) ([]dbschema.SourceViewDef, error) { return nil, nil }
 	assert.Empty(t, check(), "an unlabelled source with no suggestion copies")
+	assert.Equal(t, "sales", openedSchema, "the check reads the schema the copy reads")
 
 	fields["Account"] = append(fields["Account"], dbschema.FieldDef{Name: "email"})
 	assert.Contains(t, check(), "crm.Account.email is protected (pii)", "a read-time suggestion counts")
-	assert.Empty(t, copyLabelRefusal(copyLabelCommand(t, "--include", "Region"), src, project), "only the selected tables count")
-	assert.Empty(t, copyLabelRefusal(copyLabelCommand(t, "--exclude", "Account"), src, project))
-	assert.NotEmpty(t, copyLabelRefusal(copyLabelCommand(t, "--include", "Region,Missing"), src, project), "a filter the copy refuses checks every table")
-	assert.NotEmpty(t, copyLabelRefusal(copyLabelCommand(t, "--include", "Region", "--exclude", "Account"), src, project), "directives the copy refuses check every table")
+	assert.Empty(t, copyLabelRefusal(copyLabelCommand(t, "--include", "Region"), src, project, ""), "only the selected tables count")
+	assert.Empty(t, copyLabelRefusal(copyLabelCommand(t, "--exclude", "Account"), src, project, ""))
+	assert.NotEmpty(t, copyLabelRefusal(copyLabelCommand(t, "--include", "Region,Missing"), src, project, ""), "a filter the copy refuses checks every table")
+	assert.NotEmpty(t, copyLabelRefusal(copyLabelCommand(t, "--include", "Region", "--exclude", "Account"), src, project, ""), "directives the copy refuses check every table")
 	fields["Account"] = fields["Account"][:2]
 
 	listCollections = func(context.Context, dal.DB, *record.Key) ([]dal.CollectionRef, error) {
 		return nil, errors.New("no list")
 	}
-	assert.Empty(t, check(), "an unlabelled source whose tables cannot be listed: the copy reports it")
+	assert.Contains(t, check(), "the tables of crm cannot be listed", "a copy writes every table: a source whose tables cannot be listed refuses")
 
 	// A protected label stored for the source checks it fully.
 	doc, _, err := meaninglabels.Apply(doc, meaninglabels.Change{Action: meaninglabels.ActionSet, Target: meaninglabels.Target{Source: "crm", Table: "Account", Column: "Hidden"}, Class: meaninglabels.ClassFinancial, Reason: "test"}, meaninglabels.Actor{ID: "owner"}, projectReadNow())
 	require.NoError(t, err)
-	assert.Contains(t, check(), "the tables of crm cannot be listed")
 	listCollections = func(context.Context, dal.DB, *record.Key) ([]dal.CollectionRef, error) {
 		return []dal.CollectionRef{dal.NewRootCollectionRef("Account", ""), dal.NewRootCollectionRef("Region", ""), dal.NewRootCollectionRef("Gone", "")}, nil
 	}

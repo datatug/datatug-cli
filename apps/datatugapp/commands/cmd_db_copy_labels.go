@@ -28,8 +28,17 @@ import (
 // that cannot be opened, refuses; a source with a protected label stored for
 // it is checked fully (an object that cannot be shown to be a reviewed table
 // is masked whole, and a table whose columns cannot be listed refuses); a
-// source with none is checked by read-time suggestions only.
-func copyLabelRefusal(cmd *cobra.Command, src dbcopy.BackendRef, project *projectSource) string {
+// source with none is checked by read-time suggestions only. A source whose
+// tables cannot be listed refuses whether or not a label is stored for it: a
+// copy writes every table, so a check that cannot see them cannot pass it.
+//
+// The source is opened as the copy opens it (openCopySource), with the copy's
+// PostgreSQL schema, so the check sees the same tables the copy writes.
+//
+// Labels are looked up under the catalog id the reference names, as a
+// single-source `query run --db datatug://...` does; another catalog id of the
+// project that resolves to the same database is not consulted.
+func copyLabelRefusal(cmd *cobra.Command, src dbcopy.BackendRef, project *projectSource, schema string) string {
 	if project == nil {
 		return ""
 	}
@@ -38,7 +47,7 @@ func copyLabelRefusal(cmd *cobra.Command, src dbcopy.BackendRef, project *projec
 	if err != nil {
 		return errLabelsUnreadable.Message
 	}
-	db, err := openBackend(ctx, src)
+	db, err := openCopySource(ctx, src, schema)
 	if err != nil {
 		return fmt.Sprintf("source %s cannot be opened to check its sensitivity labels, so the copy is refused", project.catalog)
 	}
@@ -46,10 +55,7 @@ func copyLabelRefusal(cmd *cobra.Command, src dbcopy.BackendRef, project *projec
 	labelled := sourceHasProtectedLabel(doc, project.catalog)
 	refs, err := listCollections(ctx, db, nil)
 	if err != nil {
-		if labelled {
-			return fmt.Sprintf("the tables of %s cannot be listed to check their sensitivity labels, so the copy is refused", project.catalog)
-		}
-		return ""
+		return fmt.Sprintf("the tables of %s cannot be listed to check their sensitivity labels, so the copy is refused", project.catalog)
 	}
 	// A filter the copy itself refuses checks every table: never fewer than it copies.
 	if directives, err := buildDirectivesFromFlags(cmd); err == nil {

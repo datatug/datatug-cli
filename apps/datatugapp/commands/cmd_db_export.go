@@ -93,7 +93,7 @@ func dbExportAction(cmd *cobra.Command, _ []string) error {
 		return fail(2, "%v", err)
 	}
 	// A project source keeps its sensitivity labels: checked once every argument is valid, before anything is written.
-	if reason := copyLabelRefusal(cmd, srcRef, srcProject); reason != "" {
+	if reason := copyLabelRefusal(cmd, srcRef, srcProject, fromSchema); reason != "" {
 		return fail(copyRefusedCode, copyRefusedFormat, reason)
 	}
 	return runNativeInGitDB(cmd, nativeInGitDBRequest{command: "db export", fromRaw: from, src: srcRef, tgt: tgtRef, fromSchema: fromSchema,

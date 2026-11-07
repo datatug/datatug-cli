@@ -596,6 +596,10 @@ datatug query run --db env:DATATUG_SHOP_MY_URL -f top-customers.tugql
 datatug query run --db env:DATATUG_SHOP_MY_URL --sql 'SELECT id, name FROM customer ORDER BY id'
 ```
 
+One TugQL text query can also join tables of several databases: it declares them in a `databases (` block and binds
+each alias to a project source (`datatug://<project>/<db>`) or with `--db <alias>=<url>`. Each source is a separate
+secured read. See [cross-database queries](docs/query/cross-database.md).
+
 Every scan, of these servers, PostgreSQL and SQLite alike, saves the foreign keys of the database's tables in
 `dbmodels/<db>/<db>.refs.json` and their indexes in `dbmodels/<db>/<db>.indexes.json` (an index on an expression is
 left out), beside the columns files of the tables.

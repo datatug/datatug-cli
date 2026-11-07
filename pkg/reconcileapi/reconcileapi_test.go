@@ -17,6 +17,8 @@ func TestRequestValidate(t *testing.T) {
 		{Request{SecurityContextID: "s", ProfileID: "x"}, "project"},
 		{Request{SecurityContextID: "s", Project: "p"}, "queryId or profileId"},
 		{Request{SecurityContextID: "s", Project: "p", QueryID: "q"}, "instances"},
+		{Request{SecurityContextID: "s", Project: "p", QueryID: "../etc/passwd", Instances: selector}, "project query reference"},
+		{Request{SecurityContextID: "s", Project: "p", QueryID: "a//b", Instances: selector}, "project query reference"},
 	} {
 		require.ErrorContains(t, c.req.Validate(), c.want)
 	}

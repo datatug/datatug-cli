@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/datatug/datatug-core/pkg/apicontract"
+	"github.com/datatug/datatug-core/pkg/detective"
 	"github.com/datatug/datatug-core/pkg/reconcile"
 )
 
@@ -36,6 +37,9 @@ func (r Request) Validate() error {
 	}
 	if r.ProfileID == "" && r.QueryID == "" {
 		return errors.New("queryId or profileId is required")
+	}
+	if r.QueryID != "" && !detective.ValidQueryRef(r.QueryID) {
+		return errors.New("queryId must be a project query reference (folder/id segments, no '..')")
 	}
 	if r.ProfileID == "" && r.Instances == nil {
 		return errors.New("instances are required without a profile")

@@ -35,6 +35,7 @@ func dbCommand() *cobra.Command {
 	cmd.AddCommand(dbSchemaCommand())
 	cmd.AddCommand(dbTableCommand())
 	cmd.AddCommand(dbColumnCommand())
+	cmd.AddCommand(dbRolesCommand())
 	return cmd
 }
 

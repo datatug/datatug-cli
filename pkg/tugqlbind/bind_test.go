@@ -26,11 +26,15 @@ func resolver(projectID string) Resolver {
 		ProjectID:   projectID,
 		ProjectDir:  "/p",
 		Environment: func(context.Context) (string, error) { return "local", nil },
-		Local: func(_ context.Context, env, catalog string) (string, error) {
-			if catalog == "missing" {
-				return "", errors.New("no source missing")
+		Local: func(_ context.Context, env, name string) (string, string, error) {
+			if name == "missing" {
+				return "", "", errors.New("no source missing")
 			}
-			return "sqlite:///" + env + "/" + catalog, nil
+			catalog := name
+			if name == "chinook-local" {
+				catalog = "chinook" // another name of the same source
+			}
+			return "sqlite:///" + env + "/" + catalog, catalog, nil
 		},
 	}
 }
@@ -52,6 +56,12 @@ func TestSavedBindsEveryDatabaseOnce(t *testing.T) {
 	assert.Equal(t, "chinook", root.Catalog)
 	_, ok = Root(parsed, nil)
 	assert.False(t, ok)
+
+	// A binding carries the catalog id the resolver names, not the name the query wrote.
+	_, bindings, err = Saved(ctx, text("databases (\n  crm = 'datatug:///chinook-local'\n)\nfrom crm::Customer as c\nselect c.Email\n"), resolver("shop"))
+	require.NoError(t, err)
+	assert.Equal(t, "chinook", bindings["crm"].Catalog)
+	assert.Equal(t, "chinook", bindings["crm"].Ref.DB)
 
 	// An unregistered project has no reference; the project's own id is not foreign.
 	_, bindings, err = Saved(ctx, text(twoDatabases), resolver(""))

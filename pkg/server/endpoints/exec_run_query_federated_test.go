@@ -6,10 +6,14 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/dal-go/dalgo/tugql"
+	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-cli/pkg/tugqlbind"
+	"github.com/datatug/datatug-cli/pkg/watch"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/meaninglabels"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 )
 
@@ -48,6 +52,8 @@ func writeFederatedRunQueryProject(t *testing.T) (projectDir, projectID string) 
 	}
 	writeText("support-reps", supportReps)
 	writeText("other-project", "databases (\n  geo = 'datatug://elsewhere/geo'\n)\nfrom geo::Employee as e\nselect e.LastName\n")
+	writeText("by-catalog-id", "databases (\n  crm = 'datatug:///chinook-local'\n  geo\n)\nfrom crm::Customer as c\njoin geo::Employee as e\n  on c.SupportRepId = e.EmployeeId\nwhere c.CustomerId <= 3\nselect c.CustomerId, e.LastName\n")
+	writeText("other-env", "databases (\n  geo = 'datatug:///geo?env=prod'\n)\nfrom geo::Employee as e\nselect e.LastName\n")
 	writeText("missing-source", "databases (\n  nowhere\n)\nfrom nowhere::Employee as e\nselect e.LastName\n")
 	return projectDir, projectID
 }
@@ -100,8 +106,74 @@ func TestExecRunQueryRunsASavedQueryAcrossTwoDatabases(t *testing.T) {
 func TestExecRunQueryFederatedReadWithoutALabelGuardIsRefused(t *testing.T) {
 	restoreFederatedLabelGuard(t)
 	federatedLabelGuardFor = nil
-	if _, err := computeRunQuery(context.Background(), federatedRunRequest(t, "support-reps")); err == nil {
-		t.Fatal("a policy-governed federated read ran with no label guard")
+	var ce *contractError
+	if _, err := computeRunQuery(context.Background(), federatedRunRequest(t, "support-reps")); !errors.As(err, &ce) || ce.Code != meaninglabels.CodeFieldProtected {
+		t.Fatalf("a policy-governed federated read with no label guard: %v", err)
+	}
+}
+
+// A leaf is checked by its catalog's label id, whichever of its names the
+// query wrote; a label refusal answers FIELD_PROTECTED.
+func TestExecRunQueryFederatedLabelsUseTheCatalogID(t *testing.T) {
+	restoreFederatedLabelGuard(t)
+	SetFederatedLabelGuard(func(string) secureread.FederatedColumnGuard {
+		return func(_ context.Context, leaf secureread.FederatedLeaf) error {
+			if leaf.Database == "chinook" && leaf.Collection == "Customer" {
+				return &secureread.FieldProtectedError{Message: "chinook.Customer.Email is protected"}
+			}
+			return nil
+		}
+	})
+	var ce *contractError
+	_, err := computeRunQuery(context.Background(), federatedRunRequest(t, "by-catalog-id"))
+	if !errors.As(err, &ce) || ce.Code != meaninglabels.CodeFieldProtected || ce.Message != "chinook.Customer.Email is protected" {
+		t.Fatalf("crm = chinook-local: %v", err)
+	}
+}
+
+func TestExecRunQueryFederatedRefusesASourceOrAnOverride(t *testing.T) {
+	var ce *contractError
+	req := federatedRunRequest(t, "support-reps")
+	req.Source = "chinook"
+	if _, err := computeRunQuery(context.Background(), req); !errors.As(err, &ce) || ce.Code != apicontract.ErrCodeInvalidRequest || ce.Field != "source" {
+		t.Fatalf("with a source: %v", err)
+	}
+	req.Source = ""
+	ctx := context.WithValue(context.Background(), watchCloudSourcesKey{}, map[string]watchCloudSource{req.QueryID: {}})
+	if _, err := computeRunQuery(ctx, req); !errors.Is(err, watch.ErrForbidden) {
+		t.Fatalf("with a cloud-watch override: %v", err)
+	}
+}
+
+func TestServedCatalog(t *testing.T) {
+	ctx := context.Background()
+	if _, _, err := servedCatalog(ctx, nil, "", "local", "prod", "geo"); !tugqlbind.IsError(err) {
+		t.Fatalf("another environment: %v", err)
+	}
+	oldResolve, oldEligible := resolveSourceHook, eligibleTargetsHook
+	t.Cleanup(func() { resolveSourceHook, eligibleTargetsHook = oldResolve, oldEligible })
+	resolveSourceHook = func(context.Context, datatug.ProjectStore, string, string, string) (api.ResolvedSource, error) {
+		return api.ResolvedSource{ID: "notes", Kind: api.SourceKindHTTP, URL: "project://x"}, nil
+	}
+	if _, _, err := servedCatalog(ctx, nil, "", "local", "local", "notes"); !tugqlbind.IsError(err) {
+		t.Fatalf("an HTTP source: %v", err)
+	}
+	resolveSourceHook = func(context.Context, datatug.ProjectStore, string, string, string) (api.ResolvedSource, error) {
+		return api.ResolvedSource{ID: "chinook-local", Kind: api.SourceKindSQL, URL: "sqlite:///c.db"}, nil
+	}
+	boom := errors.New("boom")
+	eligibleTargetsHook = func(context.Context, datatug.ProjectStore, string, string, *datatug.QueryDef) ([]api.ResolvedSource, error) {
+		return nil, boom
+	}
+	var unavailable bindingSourceError
+	if _, _, err := servedCatalog(ctx, nil, "", "local", "local", "chinook-local"); !errors.As(err, &unavailable) || !errors.Is(unavailable.err, boom) {
+		t.Fatalf("targets that cannot be listed: %v", err)
+	}
+	eligibleTargetsHook = func(context.Context, datatug.ProjectStore, string, string, *datatug.QueryDef) ([]api.ResolvedSource, error) {
+		return nil, nil
+	}
+	if url, catalog, err := servedCatalog(ctx, nil, "", "local", "local", "chinook-local"); err != nil || url != "sqlite:///c.db" || catalog != "chinook-local" {
+		t.Fatalf("no listed target: %q %q %v", url, catalog, err)
 	}
 }
 
@@ -111,6 +183,11 @@ func TestExecRunQueryFederatedBindingFailures(t *testing.T) {
 	_, err := computeRunQuery(context.Background(), req)
 	if !errors.As(err, &ce) || ce.Code != apicontract.ErrCodeInvalidRequest {
 		t.Fatalf("another project: %v", err)
+	}
+	req.QueryID = "other-env"
+	_, err = computeRunQuery(context.Background(), req)
+	if !errors.As(err, &ce) || ce.Code != apicontract.ErrCodeInvalidRequest {
+		t.Fatalf("another environment: %v", err)
 	}
 	req.QueryID = "missing-source"
 	_, err = computeRunQuery(context.Background(), req)
@@ -140,8 +217,27 @@ func TestExecRunQueryAgentFederatedReadIsGuardedPerSource(t *testing.T) {
 	if len(judged) != 1 || judged[0] != "local/geo" {
 		t.Fatalf("judged %v, want geo first in alias order (geo, sales), where the refusal stops it", judged)
 	}
-	if err := agentFederatedGuard(ctx, req.Project, map[string]tugqlbind.Binding{"sales": {Catalog: "chinook", Env: "local"}}); err != nil {
+	query, err := tugql.Deserialize([]byte("from: {database: sales, name: Customer}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := agentFederatedGuard(ctx, req.Project, query, map[string]tugqlbind.Binding{"sales": {Catalog: "chinook", Env: "local"}}); err != nil {
 		t.Fatalf("a source the hook admits: %v", err)
+	}
+}
+
+// A query the policy denies gets the policy's answer before any label one.
+func TestExecRunQueryAgentFederatedReadDeniedByPolicy(t *testing.T) {
+	projectDir, projectID := writeFederatedRunQueryProject(t)
+	scope := configureSemanticSession(t, projectDir, projectID, "bob", []string{"support"})
+	req := apicontract.ExecutionRequest{Project: scope.Project, Environment: scope.Environment, SecurityContextID: scope.SecurityContextID, QueryID: "support-reps", Mode: apicontract.ProvenanceModeLive}
+	old := agentRawRefusalHook
+	t.Cleanup(func() { agentRawRefusalHook = old })
+	agentRawRefusalHook = func(context.Context, string, string, string) error { return errors.New("label answer") }
+	var ce *contractError
+	_, err := computeRunQuery(context.WithValue(context.Background(), agentContextKey{}, true), req)
+	if !errors.As(err, &ce) || ce.Code != apicontract.ErrCodeAccessDenied {
+		t.Fatalf("support reads no Employee: %v", err)
 	}
 }
 

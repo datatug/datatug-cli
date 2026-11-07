@@ -23,6 +23,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/tugqlbind"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/meaninglabels"
 )
 
 // runQueryHandler is POST exec/run_query, rewritten (Task 12 / S64 item 3)
@@ -203,13 +204,18 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 	// source of the project (exec_run_query_federated.go); its root's source is
 	// the one the result reports.
 	var bindings map[string]tugqlbind.Binding
+	var federated dal.StructuredQuery
 	var resolved api.ResolvedSource
 	if req.TugQL == "" && queryDef.Type == datatug.QueryTypeTugQL {
-		var parsed dal.StructuredQuery
-		if parsed, bindings, err = bindSavedTugQL(ctx, projStore, projDir, req, queryDef); err != nil {
+		if federated, bindings, err = bindSavedTugQL(ctx, projStore, projDir, req, queryDef); err != nil {
 			return apicontract.Result{}, err
 		}
-		root, _ := tugqlbind.Root(parsed, bindings)
+		if len(bindings) > 0 {
+			if refusal := federatedRunRefusal(ctx, req); refusal != nil {
+				return apicontract.Result{}, refusal
+			}
+		}
+		root, _ := tugqlbind.Root(federated, bindings)
 		resolved = api.ResolvedSource{ID: root.Catalog, URL: root.URL}
 	}
 	if len(bindings) == 0 {
@@ -282,7 +288,7 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 		if err == nil && agent {
 			var guardErr error
 			if len(bindings) > 0 {
-				guardErr = agentFederatedGuard(ctx, req.Project, bindings)
+				guardErr = agentFederatedGuard(ctx, req.Project, federated, bindings)
 			} else {
 				guardErr = agentTugQLGuard(ctx, req.Project, req.Environment, resolved.ID, []byte(doc))
 			}
@@ -423,6 +429,11 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 		// own answer, which names only the query and carries the snapshots recorded for it.
 		if unavailable := api.SourceUnavailable(resolved.ID, err); unavailable != nil {
 			return apicontract.Result{}, newSourceUnavailable(unavailable.Error())
+		}
+		// A sensitivity-label refusal (a federated read checks every leaf).
+		var protected *secureread.FieldProtectedError
+		if errors.As(err, &protected) {
+			return apicontract.Result{}, newContractError(meaninglabels.CodeFieldProtected, protected.Message, "")
 		}
 		return apicontract.Result{}, newInvalidRequest("", err.Error())
 	}

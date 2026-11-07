@@ -94,6 +94,9 @@ func TestSourcesWalksHandBuiltNodes(t *testing.T) {
 	}
 	assert.Equal(t, []string{"Inner"}, visit(func(v func(dal.CollectionRef)) { walkExpression(&binary, v, 0) }))
 	assert.Equal(t, []string{"Inner"}, visit(func(v func(dal.CollectionRef)) { walkExpression(&expression, v, 0) }))
+	// An aggregate's own ORDER BY may hold a subquery, as DALgo walks it too.
+	ordered := dal.NewOrderedAggregate("string_agg", []dal.OrderExpression{nil, dal.Ascending(expression)}, dal.Field("a"))
+	assert.Equal(t, []string{"Inner"}, visit(func(v func(dal.CollectionRef)) { walkExpression(ordered, v, 0) }))
 	var nilBinary *dal.BinaryExpression
 	var nilExpression *dal.QueryExpression
 	assert.Empty(t, visit(func(v func(dal.CollectionRef)) { walkExpression(nilBinary, v, 0) }))

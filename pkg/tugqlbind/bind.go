@@ -61,8 +61,10 @@ type Resolver struct {
 	// Environment is the run's environment. It is called only when the query
 	// binds a database.
 	Environment func(ctx context.Context) (string, error)
-	// Local resolves a catalog of the query's own project in env to its source.
-	Local func(ctx context.Context, env, catalog string) (string, error)
+	// Local resolves a name of a source of the query's own project in env to
+	// the source's URL and its catalog id: the one name its sensitivity labels
+	// use, whichever of the source's names the query wrote.
+	Local func(ctx context.Context, env, name string) (url, catalog string, err error)
 	// Foreign binds a datatug:// target that names another project. Nil
 	// refuses one.
 	Foreign func(ctx context.Context, target string) (Binding, error)
@@ -137,7 +139,7 @@ func (r Resolver) bind(ctx context.Context, env, queryID, name, target string) (
 			env = reference.Env
 		}
 	}
-	url, err := r.Local(ctx, env, catalog)
+	url, catalog, err := r.Local(ctx, env, catalog)
 	if err != nil {
 		return Binding{}, err
 	}

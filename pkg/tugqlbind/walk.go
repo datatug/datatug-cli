@@ -143,5 +143,12 @@ func walkExpression(expression dal.Expression, visit func(dal.CollectionRef), de
 		for _, arg := range value.FuncArgs() {
 			walkExpression(arg, visit, depth)
 		}
+		if ordered, ok := value.(dal.OrderedAggregateFunc); ok {
+			for _, order := range ordered.AggregateOrder() {
+				if order != nil {
+					walkExpression(order.Expression(), visit, depth)
+				}
+			}
+		}
 	}
 }

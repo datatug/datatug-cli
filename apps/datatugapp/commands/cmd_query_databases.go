@@ -155,8 +155,10 @@ func savedBindingResolver(store datatug.ProjectStore, projectDir, envFlag string
 		Environment: func(ctx context.Context) (string, error) {
 			return resolveQueryEnvironment(ctx, store, envFlag)
 		},
-		Local: func(ctx context.Context, env, catalog string) (string, error) {
-			return resolveQuerySourceURL(ctx, store, projectDir, env, catalog)
+		// The CLI names a source by its catalog id only, so the name is the catalog.
+		Local: func(ctx context.Context, env, catalog string) (string, string, error) {
+			url, err := resolveQuerySourceURL(ctx, store, projectDir, env, catalog)
+			return url, catalog, err
 		},
 		Foreign: projectDatabaseBinding,
 	}

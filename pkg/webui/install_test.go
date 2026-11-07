@@ -245,7 +245,7 @@ func TestInstallArchive_RenameFailures(t *testing.T) {
 	tamper(t, filepath.Join(in.Dir, IndexFile), "x")
 	rename = func(string, string) error { return errors.New("busy") }
 	_, err := s.InstallArchive(archive, InstallOptions{})
-	assert.ErrorContains(t, err, "replace damaged 1.0.0")
+	assert.ErrorContains(t, err, "replace existing 1.0.0")
 
 	// a publish that fails with nothing valid in place
 	s = newStore(t)

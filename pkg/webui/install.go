@@ -153,7 +153,7 @@ func (s Store) InstallArchive(archivePath string, opts InstallOptions) (Installe
 		// publish the one just verified.
 		trash := filepath.Join(versions, ".trash-"+randomSuffix())
 		if err := rename(target, trash); err != nil {
-			return out, fmt.Errorf("replace damaged %s: %w", m.Version, err)
+			return out, fmt.Errorf("replace existing %s: %w", m.Version, err)
 		}
 		defer func() { _ = os.RemoveAll(trash) }()
 	}

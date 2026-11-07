@@ -486,6 +486,9 @@ func federatedTugQLBindings(ctx context.Context, projStore datatug.ProjectStore,
 	}
 	databases := map[string]bool{}
 	collectFederatedDatabases(parsed.From(), databases)
+	if name := unqualifiedSource(parsed.From()); name != "" && len(databases) > 0 {
+		return nil, nil, databaseBindingError(fmt.Sprintf("saved query %q: %s", queryDef.ID, unqualifiedSourceMessage(name)))
+	}
 	bindings, err := savedDatabaseBindings(ctx, projStore, projectDir, envFlag, queryDef, databases)
 	if err != nil {
 		return nil, nil, err

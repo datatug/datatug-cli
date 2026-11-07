@@ -17,7 +17,7 @@ import (
 )
 
 // invoiceCountries joins Chinook invoices to a countries table of another
-// database: the example of docs/query-run.md.
+// database: the example of docs/query/cross-database.md.
 const invoiceCountries = `databases (
   sales = 'datatug://datatug-demo/chinook'
   geo
@@ -96,7 +96,8 @@ func TestQueryRunCrossDatabaseUsageErrors(t *testing.T) {
 	}{
 		{"unbound alias", []string{"-f", file, "--no-policies"}, "database geo is declared but not bound: pass --db geo="},
 		{"undeclared alias", []string{"-f", file, "--db", geo, "--db", "other=sqlite:///x.db", "--no-policies"}, "--db other=...: the query declares no database other"},
-		{"bare db with databases", []string{"-f", file, "--db", geo, "--db", "sqlite:///x.db", "--no-policies"}, "the query declares databases (sales, geo): a --db without an alias"},
+		{"bare db with databases", []string{"-f", file, "--db", geo, "--db", "sqlite:///x.db", "--no-policies"}, "the query declares databases (sales, geo) and reads every source through one of them"},
+		{"unqualified source", []string{"-f", writeTemp(t, "mixed.tugql", "databases (\n  geo\n)\nfrom Invoice as i\njoin geo::countries as c\n  on i.BillingCountry = c.name\nselect i.InvoiceId\n"), "--db", geo, "--no-policies"}, "source Invoice names no database: a query with a databases block reads every source as <alias>::Invoice"},
 		{"alias without databases block", []string{"-f", plain, "--db", geo, "--no-policies"}, "the query declares none"},
 		{"no db for plain text", []string{"-f", plain, "--no-policies"}, "one of --project+--query or --db is required"},
 		{"alias without -f", []string{"--db", geo, "--from", "Invoice"}, "pass -f too"},
@@ -118,7 +119,7 @@ func TestQueryRunCrossDatabaseUsageErrors(t *testing.T) {
 	// An unknown project in a target keeps its not-found exit code.
 	missing := writeTemp(t, "missing.tugql", strings.Replace(invoiceCountries, "datatug-demo", "no-such-project", 1))
 	_, _, code := runCLI(t, "", "query", "run", "-f", missing, "--db", geo, "--no-policies")
-	assert.NotEqual(t, 0, code)
+	assert.Equal(t, exitCodeNotFound, code)
 	// A source that fails to read is a database failure.
 	broken := "geo=" + api.LocalSQLiteSourceURL(filepath.Join(t.TempDir(), "empty.sqlite"))
 	_, stderr, code := runCLI(t, "", "query", "run", "-f", file, "--db", broken, "--no-policies")
@@ -206,6 +207,15 @@ func TestSavedTextQueryRefusesAConnectionStringTarget(t *testing.T) {
 	assert.Equal(t, exitCodeUsage, code, stderr)
 	assert.Contains(t, stderr, `saved query "raw-target": database geo is bound to a connection string`)
 	assert.NotContains(t, stderr, "/tmp/geo.sqlite", "the target is not repeated")
+}
+
+func TestSavedTextQueryRefusesAnUnqualifiedSource(t *testing.T) {
+	dir := demoForTest(t)
+	addGeoSource(t, dir)
+	writeTextQuery(t, dir, "mixed", "databases (\n  geo\n)\nfrom Invoice as i\njoin geo::countries as c\n  on i.BillingCountry = c.name\nselect i.InvoiceId\n")
+	_, stderr, code := runCLI(t, "", "query", "run", "--project", "datatug-demo", "--query", "mixed", "--as", "agent", "--role", "agent")
+	assert.Equal(t, exitCodeUsage, code, stderr)
+	assert.Contains(t, stderr, `saved query "mixed": source Invoice names no database`)
 }
 
 func TestSavedTextQueryLabelsFollowTheAlias(t *testing.T) {

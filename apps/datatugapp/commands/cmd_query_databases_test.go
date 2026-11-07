@@ -168,3 +168,16 @@ func TestTugQLFileHoldingYAMLStaysYAML(t *testing.T) {
 	assert.Empty(t, document.databases)
 	assert.True(t, strings.Contains(document.text, "Invoice"))
 }
+
+func TestUnqualifiedSourceWalksJoins(t *testing.T) {
+	invoice := dal.NewDatabaseCollectionRef("sales", "", "Invoice", "i")
+	countries := dal.NewCollectionRef("countries", "c", nil)
+	// A join with no nested from: its recordset is the joined source.
+	joined := dal.From(&invoice).Join(dal.NewJoinedSource(&countries, dal.JoinInner))
+	assert.Equal(t, "countries", unqualifiedSource(joined))
+	assert.Empty(t, unqualifiedSource(dal.From(&invoice)))
+	assert.Equal(t, "countries", unqualifiedSource(dal.From(&countries)), "a pointer base")
+	document, err := loadAdHocQuery(queryOptions{file: writeTemp(t, "j.tugql", "databases (\n  sales\n)\nfrom sales::Invoice as i\njoin countries as c\n  on i.BillingCountry = c.name\nselect i.InvoiceId\n")}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "countries", unqualifiedSource(document.query.(dal.StructuredQuery).From()))
+}

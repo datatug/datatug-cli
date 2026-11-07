@@ -49,8 +49,9 @@ datatug query run -f invoice-countries.tugql --db geo=sqlite:///data/geo.sqlite 
 | Saved (`--project --query`) | that project source; `datatug:///<db>` is the query's own project | the project source of the same name | refused (exit 2) |
 
 - `--db` is repeatable. `--db <alias>=...` binds an alias, and replaces the alias's declared target. A `--db` without an
-  alias is the default database of a query that declares no databases. It has nothing to read next to a `databases`
-  block, so DataTug refuses that combination.
+  alias is the default database of a query that declares no databases. A query with a `databases` block reads every
+  source through an alias (`from Invoice` next to `geo::countries` is refused), so DataTug refuses a `--db` without an
+  alias there too.
 - A declared alias that nothing binds is a usage error (exit 2) that names the alias. So is a `--db <alias>=` that the
   query does not declare.
 - A target never carries a password: DALgo refuses one. Put credentials in an `env:NAME` source or in the project's
@@ -82,6 +83,8 @@ Each source is a separate secured read. The policies of the run apply to every o
 `--no-policies` with `--as`/`--role`/`--group` for an ad-hoc run, and the project's own `policies/` for a saved query.
 In the saved example, the demo's agent policy lets the agent read only Canadian invoices, so only those rows come back.
 
+A saved query reads a source that a target takes from another registered project under its own project's policies.
+
 A source that is a project source is also checked against that project's sensitivity labels, by its catalog id,
 whatever the alias is called. A federated read cannot mask yet, so a read of a labelled column is refused (exit 5). A
 connection-string source belongs to no project, so no label applies to it, as for `--db <url>`.
@@ -89,5 +92,5 @@ connection-string source belongs to no project, so no label applies to it, as fo
 ## Result files
 
 With `--result-id`, `meta.json` records the root source as `db`. Each participant's `db` is the full
-`datatug://<project>/<db>?env=<env>` reference of its source, or `null` for a connection-string source. It never holds
-a connection string, a path or a credential.
+`datatug://<project>/<db>?env=<env>` reference of its source. A connection-string source's participant has no `db`.
+`meta.json` never holds a connection string, a path or a credential.

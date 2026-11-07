@@ -228,6 +228,37 @@ func savedDatabaseBinding(ctx context.Context, store datatug.ProjectStore, proje
 	return binding, nil
 }
 
+// unqualifiedSource is the first source of from that names no database, or "".
+// DALgo's federated execution needs every source qualified: a query with a
+// databases block cannot also read the default database.
+func unqualifiedSource(from dal.FromSource) string {
+	switch ref := from.Base().(type) {
+	case dal.CollectionRef:
+		if ref.Database() == "" {
+			return ref.Name()
+		}
+	case *dal.CollectionRef:
+		if ref.Database() == "" {
+			return ref.Name()
+		}
+	}
+	for _, joined := range from.Joins() {
+		child := joined.From()
+		if child == nil {
+			child = dal.From(joined.RecordsetSource)
+		}
+		if name := unqualifiedSource(child); name != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+// unqualifiedSourceMessage refuses a source with no alias next to a databases block.
+func unqualifiedSourceMessage(name string) string {
+	return fmt.Sprintf("source %s names no database: a query with a databases block reads every source as <alias>::%s", name, name)
+}
+
 // bindingURLs is the source URL of each alias, nil when there is none.
 func bindingURLs(bindings map[string]databaseBinding) map[string]string {
 	if len(bindings) == 0 {
@@ -338,7 +369,10 @@ func runFederatedAdHocQuery(cmd *cobra.Command, o queryOptions, document adHocQu
 	case o.source != "":
 		return Exit("a query with a databases block reads the sources it binds: --project/--source does not go with it", exitCodeUsage)
 	case strings.TrimSpace(o.db) != "":
-		return Exit(fmt.Sprintf("the query declares databases (%s): a --db without an alias has nothing to read; bind each as --db <alias>=<url|datatug://...>", strings.Join(names, ", ")), exitCodeUsage)
+		return Exit(fmt.Sprintf("the query declares databases (%s) and reads every source through one of them, so a --db without an alias has no source to bind; bind each as --db <alias>=<url|datatug://...>", strings.Join(names, ", ")), exitCodeUsage)
+	}
+	if name := unqualifiedSource(document.query.(dal.StructuredQuery).From()); name != "" {
+		return Exit(unqualifiedSourceMessage(name), exitCodeUsage)
 	}
 	// queryRunCommandAction always installs the read's cancellable context.
 	ctx := cmd.Context()

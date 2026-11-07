@@ -67,6 +67,15 @@ The reusable core lives in `pkg/accesspolicies` (discovery, decoding, variable p
 
 `pkg/joinmeta` (relation instances, and the foreign-key snapshot read through `dbschema` for every engine, shared with the chat, whose SQLite-only gate is gone), and the `meta.json` builder for ad-hoc, saved TugQL, federated, native SQL and HTTP results.
 
+### Task 6: Cross-database sources
+
+**Id:** task-6
+**Verifies:** cli/query#ac:cross-database-ad-hoc, cli/query#ac:cross-database-unbound-alias, cli/query#ac:cross-database-saved
+**Depends-On:** 5
+**Status:** complete
+
+DALgo v0.102.0's `databases (` block and `alias::path` sources: `pkg/querybody.ParseText` keeps the declared aliases; `cmd_query_databases.go` parses the repeatable `--db <alias>=<url|datatug://...>`, binds each alias (ad-hoc and saved rules), installs the per-alias label guard, runs ad-hoc documents through `RunFederatedTugQL`, and describes participants by `datatug://` reference. `cmd_query_databases_journey_test.go` joins Chinook invoices to a countries table of another database.
+
 ## Open Questions
 
 None at this time.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/httpsource"
+	"github.com/datatug/datatug-cli/pkg/querybody"
 	"github.com/datatug/datatug-cli/pkg/queryresults"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/meaninglabels"
@@ -120,6 +122,15 @@ in memory while fact rows and HTTP lookups stream in bounded batches.
 CSV additionally requires explicit result columns. Other federated query
 shapes can use json, yaml or grid, which collect the result before output.
 
+A TugQL text query (a .tugql file) can read several databases: its
+databases ( block declares each alias, and a source alias::table reads
+that database. An alias's target datatug://<project>/<db>[?env=] is that
+project source; bind an alias with no target with --db <alias>=<url|datatug://...>
+(which also replaces a target). Each source is a separate secured read
+through the policies of the run; a saved query binds an alias with no
+target to the project source of that name and refuses connection-string
+targets.
+
 Examples:
   datatug query run --db ingitdb://./crm --from customers --as alice
   datatug query run --db sqlite:///tmp/crm.db -f report.tugql.yaml --as alice --role support --format csv
@@ -129,6 +140,7 @@ Examples:
   datatug query run --db env:DATATUG_LIBSQL_DB --from items --limit 10 --no-policies   # a libSQL table; the token stays in DATATUG_LIBSQL_BEARER
   datatug query run --db env:DATATUG_TYPESENSE_BOOKS --from books --limit 10 --no-policies   # a Typesense collection; the scoped key stays in DATATUG_TYPESENSE_API_KEY
   datatug query run --db datatug://shop/crm --from customers --no-policies   # crm is a source of the registered project shop
+  datatug query run -f invoice-countries.tugql --db geo=sqlite:///data/geo.sqlite --no-policies   # declares sales = 'datatug://datatug-demo/chinook' and geo: joins invoices to countries
   datatug query run --project ./demo-project-1 --query customers/customer-invoices --as alice --var CustomerId=5
   datatug query run --project demo-project-1 --query reference/country-facts --env local --var name=Brazil
   datatug query run --project datatug-demo --source chinook --from Customer --as agent --role agent --limit 3
@@ -145,8 +157,8 @@ permissions or DataTug Cloud approvals.`,
 		RunE:         queryRunCommandAction,
 	}
 	flags := cmd.Flags()
-	flags.String(queryDBFlag, "", "Database URL ("+dbSchemesHelp()+"), or datatug://<project>/<db>[?env=<ENV>] for a database that is a source of a registered project (datatug:///<db> for the current project)")
-	flags.StringP(queryFileFlag, "f", "", "TugQL query document (YAML or JSON); '-' reads stdin")
+	flags.StringArray(queryDBFlag, nil, "Database URL ("+dbSchemesHelp()+"), or datatug://<project>/<db>[?env=<ENV>] for a database that is a source of a registered project (datatug:///<db> for the current project); repeat as --db <alias>=<url|datatug://...> to bind each database a -f query's databases block declares")
+	flags.StringP(queryFileFlag, "f", "", "TugQL query document: TugQL text (a .tugql file), or YAML or JSON; '-' reads stdin")
 	flags.String(queryFromFlag, "", "Select every row and field of this root collection (alternative to -f)")
 	flags.String(querySQLFlag, "", "SQL query to run against --db (alternative to -f): on PostgreSQL, MySQL, Oracle and SQL Server one SELECT or WITH query, read-only; '-' reads stdin")
 	flags.String(queryProjectFlag, "", "Project directory or registered project ID (alternative to --db; runs a saved --query by ID)")
@@ -171,12 +183,15 @@ permissions or DataTug Cloud approvals.`,
 }
 
 type queryOptions struct {
-	db     string
-	file   string
-	from   string
-	sql    string
-	limit  int
-	offset int
+	db string
+	// dbAliases are the --db <alias>=<url|datatug://...> bindings of the
+	// databases a -f query declares, by alias as typed.
+	dbAliases map[string]string
+	file      string
+	from      string
+	sql       string
+	limit     int
+	offset    int
 	// limitSet is whether --limit was typed, so a CouchDB --from read can tell
 	// "no bound given" (use the visible exploration default) from an explicit
 	// --limit 0 (pass it through; the adapter then refuses it).
@@ -205,7 +220,11 @@ type queryOptions struct {
 func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
 	flags := cmd.Flags()
 	var o queryOptions
-	o.db, _ = flags.GetString(queryDBFlag)
+	dbValues, _ := flags.GetStringArray(queryDBFlag)
+	var err error
+	if o.db, o.dbAliases, err = parseDBFlags(dbValues); err != nil {
+		return o, err
+	}
 	o.file, _ = flags.GetString(queryFileFlag)
 	o.from, _ = flags.GetString(queryFromFlag)
 	o.sql, _ = flags.GetString(querySQLFlag)
@@ -234,7 +253,7 @@ func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
 
 	projectSourceMode := o.source != ""
 	savedQueryMode := !projectSourceMode && (o.project != "" || o.query != "")
-	adHocMode := o.db != "" || o.file != "" || o.from != "" || o.sql != ""
+	adHocMode := o.db != "" || len(o.dbAliases) > 0 || o.file != "" || o.from != "" || o.sql != ""
 	queryInputs := 0
 	for _, given := range []bool{o.file != "", o.from != "", o.sql != ""} {
 		if given {
@@ -244,7 +263,7 @@ func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
 	switch {
 	case projectSourceMode && o.project == "":
 		return o, Exit("--source names a source of a project: pass --project too", exitCodeUsage)
-	case projectSourceMode && (o.query != "" || o.db != ""):
+	case projectSourceMode && (o.query != "" || o.db != "" || len(o.dbAliases) > 0):
 		return o, Exit("--project/--source reads one table of a project source: --query and --db do not go with it", exitCodeUsage)
 	case projectSourceMode && (len(o.policies) > 0 || o.policiesDir != "" || o.noPolicies):
 		return o, Exit("--policy/--policies-dir/--no-policies are not supported with --project/--source; policies come from the project's own policies/ directory", exitCodeUsage)
@@ -261,8 +280,10 @@ func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
 		return o, Exit("--project and --query must be given together", exitCodeUsage)
 	case savedQueryMode && (len(o.policies) > 0 || o.policiesDir != "" || o.noPolicies):
 		return o, Exit("--policy/--policies-dir/--no-policies are not supported with --project/--query; policies come from the project's own policies/ directory, exactly like `serve`", exitCodeUsage)
-	case !savedQueryMode && strings.TrimSpace(o.db) == "":
-		return o, Exit("one of --project+--query or --db is required", exitCodeUsage)
+	case !savedQueryMode && strings.TrimSpace(o.db) == "" && len(o.dbAliases) == 0 && o.file == "":
+		return o, errDBRequired()
+	case len(o.dbAliases) > 0 && o.file == "":
+		return o, Exit("--db <alias>=<url> binds a database that a -f query's databases block declares: pass -f too", exitCodeUsage)
 	case !savedQueryMode && queryInputs == 0:
 		return o, Exit("one of -f/--file, --from or --sql is required", exitCodeUsage)
 	case !savedQueryMode && queryInputs > 1:
@@ -353,10 +374,20 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	if o.sql != "" {
 		return runSQLQueryCommand(cmd, o)
 	}
-	query, queryText, err := buildQuery(o, cmd.InOrStdin())
+	document, err := loadAdHocQuery(o, cmd.InOrStdin())
 	if err != nil {
 		return err
 	}
+	if len(document.databases) > 0 {
+		return runFederatedAdHocQuery(cmd, o, document)
+	}
+	switch {
+	case len(o.dbAliases) > 0:
+		return Exit("--db <alias>=<url> binds a database of a databases block, and the query declares none", exitCodeUsage)
+	case o.source == "" && strings.TrimSpace(o.db) == "":
+		return errDBRequired()
+	}
+	query, queryText := document.query, document.text
 	var (
 		backend dbcopy.BackendRef
 		loaded  []accesspolicies.Loaded
@@ -654,16 +685,37 @@ func queryFailure(err error) error {
 	}
 }
 
+// errDBRequired is the usage error of an ad-hoc run that names no database.
+func errDBRequired() error {
+	return Exit("one of --project+--query or --db is required", exitCodeUsage)
+}
+
+// adHocQuery is an ad-hoc query document: the query, its structured TugQL
+// text, and the databases a text document declares.
+type adHocQuery struct {
+	query     dal.Query
+	text      string
+	databases []tugql.TugQLDatabase
+}
+
 // buildQuery is the query to run and its TugQL text: the document as given,
 // or for --from the equivalent one-collection document.
 func buildQuery(o queryOptions, stdin io.Reader) (dal.Query, string, error) {
+	document, err := loadAdHocQuery(o, stdin)
+	return document.query, document.text, err
+}
+
+// loadAdHocQuery reads -f (or builds the --from document). A .tugql file is
+// TugQL text, as is stdin that is not a YAML or JSON document; text is lowered
+// to the structured document, keeping its declared databases.
+func loadAdHocQuery(o queryOptions, stdin io.Reader) (adHocQuery, error) {
 	if o.from != "" {
 		query := fromQuery(o, nil)
 		text, _ := tugql.Serialize(query.(dal.StructuredQuery))
 		if err := refuseAdHocContextVariables(string(text)); err != nil {
-			return nil, "", err
+			return adHocQuery{}, err
 		}
-		return query, string(text), nil
+		return adHocQuery{query: query, text: string(text)}, nil
 	}
 	var (
 		content []byte
@@ -675,19 +727,41 @@ func buildQuery(o queryOptions, stdin io.Reader) (dal.Query, string, error) {
 		content, err = os.ReadFile(o.file)
 	}
 	if err != nil {
-		return nil, "", Exit(fmt.Sprintf("read query %s: %v", o.file, err), exitCodeUsage)
+		return adHocQuery{}, Exit(fmt.Sprintf("read query %s: %v", o.file, err), exitCodeUsage)
 	}
 	if strings.TrimSpace(string(content)) == "" {
-		return nil, "", Exit(fmt.Sprintf("query %s is empty", o.file), exitCodeUsage)
+		return adHocQuery{}, Exit(fmt.Sprintf("query %s is empty", o.file), exitCodeUsage)
 	}
-	query, err := tugql.Deserialize(content)
-	if err != nil {
-		return nil, "", Exit(fmt.Sprintf("query %s: %v", o.file, err), exitCodeUsage)
+	document := adHocQuery{text: string(content)}
+	if isTugQLText(o.file, content) {
+		if document.text, document.databases, err = querybody.ParseText(string(content)); err != nil {
+			return adHocQuery{}, Exit(fmt.Sprintf("query %s: %v", o.file, err), exitCodeUsage)
+		}
 	}
-	if err = refuseAdHocContextVariables(string(content)); err != nil {
-		return nil, "", err
+	if document.query, err = tugql.Deserialize([]byte(document.text)); err != nil {
+		return adHocQuery{}, Exit(fmt.Sprintf("query %s: %v", o.file, err), exitCodeUsage)
 	}
-	return query, string(content), nil
+	if err = refuseAdHocContextVariables(document.text); err != nil {
+		return adHocQuery{}, err
+	}
+	return document, nil
+}
+
+// isTugQLText reports whether a -f document is TugQL text: a .tugql file, or
+// stdin, that is no YAML or JSON document. A .tugql file that is one keeps
+// being read as one; stdin is text only when it parses as text.
+func isTugQLText(file string, content []byte) bool {
+	if file != "-" && !strings.EqualFold(filepath.Ext(file), ".tugql") {
+		return false
+	}
+	if _, err := tugql.Deserialize(content); err == nil {
+		return false
+	}
+	if file != "-" {
+		return true
+	}
+	_, diagnostics := tugql.ParseTugQL(string(content))
+	return len(diagnostics) == 0
 }
 
 // refuseAdHocContextVariables refuses an ad-hoc structured TugQL document

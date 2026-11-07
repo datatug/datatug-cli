@@ -265,7 +265,7 @@ func TestSavedTugQLSources(t *testing.T) {
 	chatParseSource = origParse
 	_, _, _, err = sources.open(context.Background(), "nope")
 	assert.Error(t, err, "a database the environment does not list")
-	assert.Nil(t, sources.ref("main"), "an unregistered project has no reference")
+	assert.Nil(t, sources.ref, "one database: participants carry no reference")
 	// a source that cannot be opened
 	orig := openBackend
 	t.Cleanup(func() { openBackend = orig })

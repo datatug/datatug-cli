@@ -2,6 +2,7 @@ package webui
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"crypto/rand"
 	"crypto/sha256"
@@ -144,11 +145,12 @@ func (s Store) InstallArchive(archivePath string, opts InstallOptions) (Installe
 	target := filepath.Join(versions, m.Version)
 	out.Dir = target
 	if _, err := os.Stat(target); err == nil {
-		if _, verr := VerifyDir(target); verr == nil {
+		if sameInstalled(target, staging) {
 			out.Reused = true
 			return out, nil
 		}
-		// A damaged copy of the same version: move it aside, then publish the good one.
+		// A damaged or different copy of the same version (for example one installed unsigned): move it aside, then
+		// publish the one just verified.
 		trash := filepath.Join(versions, ".trash-"+randomSuffix())
 		if err := rename(target, trash); err != nil {
 			return out, fmt.Errorf("replace damaged %s: %w", m.Version, err)
@@ -156,8 +158,8 @@ func (s Store) InstallArchive(archivePath string, opts InstallOptions) (Installe
 		defer func() { _ = os.RemoveAll(trash) }()
 	}
 	if err := rename(staging, target); err != nil {
-		// Another process published the same version first: accept it if it verifies.
-		if _, verr := VerifyDir(target); verr == nil {
+		// Another process published the same version first: accept it if it is exactly what was just verified.
+		if sameInstalled(target, staging) {
 			out.Reused = true
 			return out, nil
 		}
@@ -165,6 +167,24 @@ func (s Store) InstallArchive(archivePath string, opts InstallOptions) (Installe
 	}
 	keep = true
 	return out, nil
+}
+
+// sameInstalled reports whether the installed dir verifies and holds the same manifest.json and manifest.json.sig as
+// staging, the archive just verified. Only then may the install keep dir: a copy that verifies against its own,
+// different manifest (installed with --allow-unsigned, or by a CLI that did not check signatures) is not the archive
+// whose signature was checked.
+func sameInstalled(dir, staging string) bool {
+	if _, err := VerifyDir(dir); err != nil {
+		return false
+	}
+	for _, name := range []string{ManifestFile, SignatureFile} {
+		have, haveErr := os.ReadFile(filepath.Join(dir, name))
+		want, wantErr := os.ReadFile(filepath.Join(staging, name))
+		if (haveErr == nil) != (wantErr == nil) || !bytes.Equal(have, want) {
+			return false
+		}
+	}
+	return true
 }
 
 // extracted is what extract wrote: each content file's size and digest.

@@ -266,6 +266,22 @@ func TestInstallArchive_RenameFailures(t *testing.T) {
 	got, err := s.InstallArchive(archive, InstallOptions{})
 	require.NoError(t, err)
 	assert.True(t, got.Reused)
+
+	// ... and loses to a different build of the same version: not accepted as this archive
+	s = newStore(t)
+	files := appFiles()
+	files[IndexFile] = testIndex + "<!-- other build -->"
+	different := writeFile(t, t.TempDir(), "d.tar.gz", tarGz(t, archiveEntries(t, "1.0.0", ">=1", files)...))
+	rename = orig
+	other = install(t, Store{Dir: filepath.Join(t.TempDir(), "other2")}, "1.0.0", ">=1")
+	rename = func(from, to string) error {
+		if err := orig(other.Dir, to); err != nil {
+			return err
+		}
+		return errors.New("exists")
+	}
+	_, err = s.InstallArchive(different, InstallOptions{})
+	assert.ErrorContains(t, err, "publish 1.0.0")
 }
 
 func TestInstallArchive_Concurrent(t *testing.T) {

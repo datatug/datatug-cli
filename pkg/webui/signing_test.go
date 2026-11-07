@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -135,4 +137,44 @@ func TestInstallArchive_SignatureRequired(t *testing.T) {
 	_, err = s.InstallArchive(writeFile(t, t.TempDir(), "b.tar.gz", tarGz(t, tampered...)), InstallOptions{AllowUnsigned: true})
 	require.ErrorContains(t, err, "changed after signing")
 	assert.Equal(t, []string{"1.0.0"}, versionDirs(t, s))
+}
+
+// A copy of the same version installed unsigned (or by a CLI that did not check signatures) verifies against its own
+// manifest; installing the signed release must replace it, not report it as the signed one.
+func TestInstallArchive_SignedReplacesUnsignedCopy(t *testing.T) {
+	key := testKey(t)
+	useKeys(t, key)
+	s := newStore(t)
+
+	files := appFiles()
+	files[IndexFile] = testIndex + "<script>evil()</script>"
+	evil := writeFile(t, t.TempDir(), "evil.tar.gz", tarGz(t, archiveEntries(t, "1.0.0", ">=1", files)...))
+	_, err := s.InstallArchive(evil, InstallOptions{AllowUnsigned: true})
+	require.NoError(t, err)
+
+	content := archiveEntries(t, "1.0.0", ">=1", appFiles())
+	signed := writeFile(t, t.TempDir(), "signed.tar.gz",
+		tarGz(t, append([]tarEntry{file(SignatureFile, signLine(key, content[0].body))}, content...)...))
+	in, err := s.InstallArchive(signed, InstallOptions{})
+	require.NoError(t, err)
+	assert.False(t, in.Reused)
+	assert.Equal(t, KeyID(key.Public().(ed25519.PublicKey)), in.Signature.KeyID)
+	index, err := os.ReadFile(filepath.Join(in.Dir, IndexFile))
+	require.NoError(t, err)
+	assert.Equal(t, testIndex, string(index))
+
+	// The same signed archive again is reused.
+	again, err := s.InstallArchive(signed, InstallOptions{})
+	require.NoError(t, err)
+	assert.True(t, again.Reused)
+}
+
+// A signature made by tools/package-web-ui/package-web-ui.mjs (Node crypto.sign) for a fixed key and manifest: catches
+// drift between the JS signer and this verifier in go test, not first in the release workflow.
+func TestVerifySignature_NodeVector(t *testing.T) {
+	keys, err := parseReleaseKeys([]string{nodeVectorPublicKey})
+	require.NoError(t, err)
+	got, err := verifySignature([]byte(nodeVectorManifest), []byte(nodeVectorSig), true, false, keys)
+	require.NoError(t, err)
+	assert.Equal(t, keys[0].id, got.KeyID)
 }

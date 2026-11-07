@@ -36,7 +36,7 @@ datatug serve --web-ui[=<version>] [--ui-host <name>] [--ui-connect-src <https-o
 
 #### REQ: release-signature
 
-An archive MUST carry `manifest.json.sig` (`datatug-web-ui-signature/1 ed25519 <key id> <base64>`): an Ed25519 signature over the exact bytes of `manifest.json` by a key compiled into this CLI (`pkg/webui/signing.go`; key id = first 16 hex characters of the SHA-256 of the raw public key). A signature that does not verify is always refused. A missing signature, or one from a key this CLI does not know, is refused unless `--allow-unsigned` (a local or test build); the output then says the archive is NOT signed by a DataTug release key. `install --latest` / `update` never allow unsigned archives.
+An archive MUST carry `manifest.json.sig` (`datatug-web-ui-signature/1 ed25519 <key id> <base64>`): an Ed25519 signature over the exact bytes of `manifest.json` by a key compiled into this CLI (`pkg/webui/signing.go`; key id = first 16 hex characters of the SHA-256 of the raw public key). A signature that does not verify is always refused. A missing signature, or one from a key this CLI does not know, is refused unless `--allow-unsigned` (a local or test build); the output then says the archive is NOT signed by a DataTug release key. `install --latest` / `update` never allow unsigned archives. An already installed copy of the same version is kept only when its `manifest.json` and `manifest.json.sig` are byte-identical to the verified archive's; otherwise it is replaced.
 
 #### REQ: explicit-download
 

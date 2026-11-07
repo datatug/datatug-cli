@@ -54,8 +54,8 @@ func TestNewHandler_Errors(t *testing.T) {
 	assert.Error(t, err, "no index.html")
 
 	for body, want := range map[string]string{
-		"<html><body></body></html>": "has no <head>",
-		"<html><HEAD":                "unterminated <head>",
+		"<html><body></body></html>":     "has no <head>",
+		"<html><header>no head</header>": "has no <head>",
 	} {
 		writeFile(t, filepath.Join(dir, BrowserDir), "index.html", []byte(body))
 		_, err = NewHandler(HandlerOptions{Dir: dir})

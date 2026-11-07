@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -169,4 +170,29 @@ func versionDirs(t *testing.T, s Store) []string {
 		names = append(names, e.Name())
 	}
 	return names
+}
+
+// tamper rewrites an installed file the way another process on the machine could: installed files
+// are read-only (0400), so it makes the file writable first.
+func tamper(t *testing.T, path, content string) {
+	t.Helper()
+	require.NoError(t, os.Chmod(path, 0o600))
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+}
+
+// sizedDirArchive is a gzip tar whose only entry is a directory header claiming a size, followed by
+// that many bytes: archive/tar's writer refuses to produce one, so a regular-file header is patched.
+func sizedDirArchive(t *testing.T) []byte {
+	t.Helper()
+	raw := tarBytes(t, file("browser/d", "xxxx"))
+	raw[156] = tar.TypeDir
+	for i := 148; i < 156; i++ {
+		raw[i] = ' '
+	}
+	sum := 0
+	for _, b := range raw[:512] {
+		sum += int(b)
+	}
+	copy(raw[148:156], fmt.Sprintf("%06o\x00 ", sum))
+	return gz(t, raw)
 }

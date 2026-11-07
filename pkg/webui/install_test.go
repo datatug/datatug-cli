@@ -110,6 +110,7 @@ func TestInstallArchive_Refused(t *testing.T) {
 	}{
 		"dot-dot traversal":   {data: withEntries(file("browser/../../evil.js", "x")), want: ". or .."},
 		"dot-dot directory":   {data: withEntries(tarEntry{name: "../evil/", typ: tar.TypeDir}), want: ". or .."},
+		"sized directory":     {data: sizedDirArchive(t), want: "a directory with a size"},
 		"absolute path":       {data: withEntries(file("/tmp/evil.js", "x")), want: "absolute"},
 		"backslash":           {data: withEntries(file(`browser\..\evil.js`, "x")), want: "backslash"},
 		"symlink":             {data: withEntries(tarEntry{name: "browser/link", typ: tar.TypeSymlink, link: "/etc/passwd"}), want: "not a regular file"},
@@ -212,7 +213,7 @@ func TestInstallArchive_ReplacesDamagedVersion(t *testing.T) {
 	s := newStore(t)
 	in := install(t, s, "1.0.0", ">=1")
 	tampered := filepath.Join(in.Dir, BrowserDir, "main-ABCD1234.js")
-	require.NoError(t, os.WriteFile(tampered, []byte("evil"), 0o600))
+	tamper(t, tampered, "evil")
 	_, err := VerifyDir(in.Dir)
 	require.ErrorContains(t, err, "changed after install")
 
@@ -232,7 +233,7 @@ func TestInstallArchive_RenameFailures(t *testing.T) {
 	// a damaged copy that cannot be moved aside
 	s := newStore(t)
 	in := install(t, s, "1.0.0", ">=1")
-	require.NoError(t, os.WriteFile(filepath.Join(in.Dir, IndexFile), []byte("x"), 0o600))
+	tamper(t, filepath.Join(in.Dir, IndexFile), "x")
 	rename = func(string, string) error { return errors.New("busy") }
 	_, err := s.InstallArchive(archive, InstallOptions{})
 	assert.ErrorContains(t, err, "replace damaged 1.0.0")

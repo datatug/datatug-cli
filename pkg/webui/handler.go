@@ -205,16 +205,19 @@ func checkConnectOrigin(origin string) error {
 func injectRuntime(index []byte, rc RuntimeConfig) ([]byte, error) {
 	data, _ := json.Marshal(rc) // a RuntimeConfig of strings and a bool always marshals
 	meta := []byte(`<meta name="datatug-runtime" content="` + html.EscapeString(string(data)) + `">`)
-	lower := bytes.ToLower(index)
-	at := bytes.Index(lower, []byte("<head"))
-	if at < 0 {
-		return nil, errors.New("index.html has no <head>")
+	// The <head> start tag as the HTML tokenizer reads it: never <header>, a comment or script text.
+	z := nethtml.NewTokenizer(bytes.NewReader(index))
+	cut := -1
+	for offset := 0; cut < 0; {
+		tt := z.Next()
+		if tt == nethtml.ErrorToken {
+			return nil, errors.New("index.html has no <head>")
+		}
+		offset += len(z.Raw())
+		if name, _ := z.TagName(); tt == nethtml.StartTagToken && string(name) == "head" {
+			cut = offset
+		}
 	}
-	end := bytes.IndexByte(index[at:], '>')
-	if end < 0 {
-		return nil, errors.New("index.html has an unterminated <head>")
-	}
-	cut := at + end + 1
 	out := make([]byte, 0, len(index)+len(meta))
 	out = append(out, index[:cut]...)
 	out = append(out, meta...)

@@ -253,9 +253,20 @@ func (s Store) Remove(version string) error {
 	if st.Pinned == version {
 		return fmt.Errorf("web UI %s is pinned; `datatug web-ui use` another version or `datatug web-ui unpin` first", version)
 	}
+	// The last served version may be in use by a running `serve --web-ui`: removing its files under it
+	// would break that page. Serve another version first.
+	if st.Active == version {
+		return fmt.Errorf("web UI %s is the one `serve --web-ui` served last (it may still be running); serve another version first", version)
+	}
 	trash := filepath.Join(s.versionsDir(), ".trash-"+randomSuffix())
 	if err := rename(e.Dir, trash); err != nil {
 		return err
+	}
+	if st.Previous == version {
+		st.Previous = ""
+		if err := s.saveState(st); err != nil {
+			return err
+		}
 	}
 	return os.RemoveAll(trash)
 }

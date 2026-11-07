@@ -191,6 +191,11 @@ func extract(r io.Reader, dir string) (extracted, error) {
 		}
 		name := strings.TrimPrefix(h.Name, "./")
 		if h.Typeflag == tar.TypeDir {
+			// A directory carries no data. One that claims a size would make the reader inflate (and
+			// skip) that many bytes, uncounted by the limits below: refused.
+			if h.Size != 0 {
+				return nil, fmt.Errorf("archive entry %q is a directory with a size", h.Name)
+			}
 			name = strings.TrimSuffix(name, "/")
 			if name == "." || name == "" {
 				continue
@@ -236,7 +241,8 @@ func extract(r io.Reader, dir string) (extracted, error) {
 }
 
 func writeEntry(root *os.Root, name string, r io.Reader, size int64) (ManifestFileEntry, error) {
-	out, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	// Read-only once written: an installed version is never edited in place (the open handle can still write it).
+	out, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o400)
 	if err != nil {
 		return ManifestFileEntry{}, err
 	}

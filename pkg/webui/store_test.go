@@ -134,7 +134,7 @@ func TestStoreSelect(t *testing.T) {
 	assert.Equal(t, "1.0.0", e.Version)
 
 	require.NoError(t, s.saveState(State{}))
-	require.NoError(t, os.WriteFile(filepath.Join(s.versionsDir(), "1.0.0", IndexFile), []byte("evil"), 0o600))
+	tamper(t, filepath.Join(s.versionsDir(), "1.0.0", IndexFile), "evil")
 	_, err = s.Select("")
 	assert.ErrorContains(t, err, "web UI 1.0.0 failed verification")
 
@@ -213,9 +213,28 @@ func TestStoreRemove(t *testing.T) {
 	assert.ErrorContains(t, s.Remove("1.1.0"), "busy")
 	rename = orig
 
+	// The version `serve --web-ui` served last may still be in use.
+	require.NoError(t, s.saveState(State{Pinned: "1.0.0", Active: "1.1.0"}))
+	assert.ErrorContains(t, s.Remove("1.1.0"), "served last")
+	// Removing the rollback target forgets it.
+	require.NoError(t, s.saveState(State{Pinned: "1.0.0", Active: "1.0.0", Previous: "1.1.0"}))
 	require.NoError(t, s.Remove("1.1.0"))
 	assert.Equal(t, []string{"1.0.0"}, versionDirs(t, s))
+	st, err := s.LoadState()
+	require.NoError(t, err)
+	assert.Equal(t, State{Pinned: "1.0.0", Active: "1.0.0"}, st)
 
 	damageState(t, s)
 	assert.Error(t, s.Remove("1.0.0"))
+}
+
+func TestStoreRemove_ForgetsPreviousOrFails(t *testing.T) {
+	s := newStore(t)
+	install(t, s, "1.0.0", ">=1")
+	install(t, s, "1.1.0", ">=1")
+	require.NoError(t, s.saveState(State{Active: "1.0.0", Previous: "1.1.0"}))
+	// state.json cannot be rewritten (its directory is read-only); versions/ still can.
+	require.NoError(t, os.Chmod(s.Dir, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(s.Dir, 0o700) })
+	assert.Error(t, s.Remove("1.1.0"))
 }

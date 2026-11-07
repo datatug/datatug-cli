@@ -361,6 +361,10 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		backend dbcopy.BackendRef
 		loaded  []accesspolicies.Loaded
 		project *projectRead
+		// masker masks by the project's labels: the project read, or a
+		// datatug:// read of a project source, with or without policies.
+		masker *projectRead
+		source *projectSource
 	)
 	if o.source != "" {
 		if project, err = resolveProjectRead(cmd.Context(), o); err != nil {
@@ -371,9 +375,12 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 			return err
 		}
 	} else {
-		backend, _, err = parseSourceArg(cmd.Context(), o.db)
+		backend, source, err = parseProjectSourceArg(cmd.Context(), o.db)
 		if err != nil {
 			return keepExit(err, func(err error) error { return Exit(err.Error(), exitCodeUsage) })
+		}
+		if source != nil {
+			masker = &projectRead{projectDir: source.dir, source: source.catalog, backend: backend}
 		}
 		// The flag the source was typed on is what a failure of a PostgreSQL source says its connection string is read
 		// from (an env:NAME source says the variable).
@@ -382,6 +389,9 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		if err != nil {
 			return Exit(err.Error(), exitCodeUsage)
 		}
+	}
+	if project != nil {
+		masker = project
 	}
 	variables, err := accesspolicies.ParseVariables(o.vars)
 	if dbcopy.IsClickHouseScheme(backend.Scheme) {
@@ -405,7 +415,7 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		return Exit("a ClickHouse source is not supported with --project/--source yet", exitCodeUsage)
 	}
 	if dbcopy.IsClickHouseScheme(backend.Scheme) {
-		return runClickHouseQuery(cmd, o, backend, query, queryText, variables, loaded, principal)
+		return runClickHouseQuery(cmd, o, backend, query, queryText, variables, loaded, principal, source)
 	}
 	// An exploratory `--from` read of a CouchDB or PostgREST source needs an
 	// explicit bound because the adapter refuses an unbounded read instead of
@@ -487,8 +497,8 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	jsonDenial := o.format == "json" && errors.Is(err, access.ErrAccessDenied)
 	// A masking refusal of a project read is decided after the policy, so in
 	// JSON the policy lines wait for it: a refusal is the only stderr line.
-	if project != nil && err == nil && !jsonDenial {
-		if maskErr := project.prepareMasking(ctx, db, result.Query); maskErr != nil {
+	if masker != nil && err == nil && !jsonDenial {
+		if maskErr := masker.prepareMasking(ctx, db, result.Query); maskErr != nil {
 			closeReader(result.Reader)
 			return fieldProtectedFailure(stderr, o, maskErr)
 		}
@@ -513,7 +523,9 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 			closeReader(result.Reader)
 			return err
 		}
-		result.Reader = project.mask(result.Reader)
+	}
+	if masker != nil {
+		result.Reader = masker.mask(result.Reader)
 	}
 	if o.sink != nil {
 		if provOK {
@@ -522,7 +534,7 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		if err = o.sink.collectAndWrite(cmd.OutOrStdout(), result.Reader, result.Query); err != nil {
 			return queryFailureFor(backend, err)
 		}
-		writeMaskedNote(stderr, o, project)
+		writeMaskedNote(stderr, o, masker)
 		return nil
 	}
 	rows, err := collectRows(result.Reader)
@@ -540,7 +552,7 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	if err := writeQueryRows(cmd.OutOrStdout(), o.format, columns, rows, provenance); err != nil {
 		return Exit(err.Error(), 1)
 	}
-	writeMaskedNote(stderr, o, project)
+	writeMaskedNote(stderr, o, masker)
 	return nil
 }
 

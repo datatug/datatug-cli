@@ -107,9 +107,9 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	// Neither TugQL nor native SQL reads can mask, so every one of them is
 	// checked against the project's sensitivity labels before any row is
 	// read, for every principal.
-	catalogs := map[string]string{}
+	catalogs := map[string][]string{}
 	if source.URL != "" {
-		catalogs[source.URL] = source.Catalog
+		catalogs[source.URL] = []string{source.Catalog}
 	}
 	installProjectLabels(&session, projectDir, catalogs)
 	executor := secureread.NewExecutor(session)

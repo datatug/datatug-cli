@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -45,7 +46,7 @@ var runClickHouseStructured = func(ctx context.Context, session secureread.Sessi
 var runNativeSQLCLI = (*secureread.Executor).RunNativeSQL
 var runSavedTugQLCLI = (*secureread.Executor).RunTugQL
 
-func runClickHouseQuery(cmd *cobra.Command, o queryOptions, backend dbcopy.BackendRef, query dal.Query, text string, variables map[string]any, policies []accesspolicies.Loaded, principal *access.Principal) error {
+func runClickHouseQuery(cmd *cobra.Command, o queryOptions, backend dbcopy.BackendRef, query dal.Query, text string, variables map[string]any, policies []accesspolicies.Loaded, principal *access.Principal, project *projectSource) error {
 	ctx := cmd.Context()
 	if ctx == nil {
 		ctx = context.Background()
@@ -59,7 +60,16 @@ func runClickHouseQuery(cmd *cobra.Command, o queryOptions, backend dbcopy.Backe
 		query = fromQuery(o, nil)
 	}
 	session := secureread.Session{Policies: policies, Principal: principal, Unrestricted: o.noPolicies}
+	// A ClickHouse read cannot be masked in place: a project source's
+	// labelled columns refuse it, with or without policies.
+	if project != nil {
+		installProjectLabels(&session, project.dir, map[string][]string{backend.Raw: {project.catalog}})
+	}
 	result, err := runClickHouseStructured(ctx, session, backend.Raw, query, variables)
+	var protected *secureread.FieldProtectedError
+	if errors.As(err, &protected) {
+		return fieldProtectedFailure(cmd.ErrOrStderr(), o, &errFieldProtected{protected.Message})
+	}
 	if err != nil {
 		return queryFailureFor(backend, err)
 	}

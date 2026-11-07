@@ -16,6 +16,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/meaninglabelsfile"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/meaninglabels"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -273,7 +274,9 @@ func TestFederatedLabelGuardOpensOnlyWhatItNeeds(t *testing.T) {
 }
 
 func TestChatSourceCatalogs(t *testing.T) {
-	assert.Equal(t, map[string]string{"sqlite:///a": "a", "unavailable://b": "b"}, chatSourceCatalogs(map[string]string{"a": "sqlite:///a"}, "unavailable://b", "b"))
+	assert.Equal(t, map[string][]string{"sqlite:///a": {"a"}, "unavailable://b": {"b"}}, chatSourceCatalogs(map[string]string{"a": "sqlite:///a"}, "unavailable://b", "b"))
+	// Two catalogs on one URL keep both ids; the chat's own database is not repeated.
+	assert.Equal(t, map[string][]string{"sqlite:///s": {"a", "b"}}, chatSourceCatalogs(map[string]string{"b": "sqlite:///s", "a": "sqlite:///s"}, "sqlite:///s", "a"))
 }
 
 // Without policies, a saved query still never prints a labelled column.
@@ -331,4 +334,59 @@ func TestChatChecksTheProjectLabels(t *testing.T) {
 	_, err = executor.RunTugQL(ctx, sourceURLs["chinook"], []byte("from: {name: Customer}\ncolumns: [{field: Email}]\n"), nil)
 	require.ErrorAs(t, err, &protected)
 	assert.Contains(t, protected.Message, "chinook.Customer.Email is protected (pii)")
+}
+
+// A datatug:// read of a project source applies that project's labels even
+// with --no-policies: a table read masks, a filter on a labelled column and
+// native SQL refuse.
+func TestDatatugRefReadAppliesProjectLabels(t *testing.T) {
+	demoForTest(t)
+	ref := "datatug://datatug-demo/chinook"
+	stdout, stderr, code := runCLI(t, "", "query", "run", "--db", ref, "--from", "Customer", "--limit", "5", "--no-policies", "--format", "json")
+	require.Equal(t, 0, code, stderr)
+	var rows []map[string]any
+	require.NoError(t, json.Unmarshal([]byte(stdout), &rows), stdout)
+	require.Len(t, rows, 5)
+	for _, row := range rows {
+		assert.Equal(t, meaninglabels.MaskedValue, row["Email"])
+		assert.Equal(t, meaninglabels.MaskedValue, row["Phone"])
+		assert.NotEqual(t, meaninglabels.MaskedValue, row["FirstName"])
+	}
+	assert.NotContains(t, stdout, "@")
+	assert.Contains(t, stderr, "Customer.Email (pii)")
+
+	file := filepath.Join(t.TempDir(), "by-email.tugql.yaml")
+	require.NoError(t, os.WriteFile(file, []byte("from: {name: Customer}\ncolumns: [{field: FirstName}]\nwhere: {op: '==', left: {field: Email}, right: {value: someone@example.com}}\n"), 0o644))
+	_, stderr, code = runCLI(t, "", "query", "run", "--db", ref, "-f", file, "--no-policies")
+	assert.Equal(t, exitCodeAccessDenied, code, stderr)
+	assert.Contains(t, stderr, "Customer.Email is protected (pii)")
+
+	stdout, stderr, code = runCLI(t, "", "query", "run", "--db", ref, "--sql", "SELECT Email FROM Customer", "--no-policies", "--format", "json")
+	require.Equal(t, exitCodeAccessDenied, code, stdout+stderr)
+	assert.NotContains(t, stdout+stderr, "@")
+	lines := strings.Split(strings.TrimSpace(stderr), "\n")
+	var denial denialJSON
+	require.NoError(t, json.Unmarshal([]byte(lines[len(lines)-1]), &denial), stderr)
+	assert.Equal(t, meaninglabels.CodeFieldProtected, denial.Error.Code)
+	assert.Contains(t, denial.Error.Reason, "native SQL cannot be masked")
+}
+
+func TestClickHouseProjectSourceReadIsGuarded(t *testing.T) {
+	t.Setenv("DATATUG_CH_COMMAND_BOUNDARY", "clickhouse+http://127.0.0.1:18123/explore")
+	t.Setenv(dbcopy.DescriptorEnvAllowList, "")
+	restoreVar(t, &runClickHouseStructured)
+	var installed bool
+	runClickHouseStructured = func(_ context.Context, session secureread.Session, source string, _ dal.Query, _ map[string]any) (secureread.Result, error) {
+		installed = session.FederatedColumns != nil && session.NativeSQL != nil && session.SourceCatalogs[source][0] == "warehouse"
+		return secureread.Result{}, &secureread.FieldProtectedError{Message: "warehouse.events.email is protected (pii)"}
+	}
+	ref, err := dbcopy.Parse(clickHouseDispatchSource)
+	require.NoError(t, err)
+	var stderr strings.Builder
+	cmd := &cobra.Command{}
+	cmd.SetErr(&stderr)
+	err = runClickHouseQuery(cmd, queryOptions{from: "events", limit: 2, limitSet: true, noPolicies: true, format: "json", quiet: true}, ref, nil, "", nil, nil, nil, &projectSource{dir: t.TempDir(), catalog: "warehouse"})
+	assert.True(t, installed)
+	assert.Equal(t, exitCodeAccessDenied, exitCodeOf(t, err))
+	assert.Contains(t, stderr.String(), meaninglabels.CodeFieldProtected)
 }

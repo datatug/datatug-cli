@@ -3,13 +3,16 @@ package secureread
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/tugql"
+	"github.com/datatug/datatug-cli/pkg/queryops"
 )
 
 // federatedGuardFixture is two SQLite databases a federated query joins.
@@ -212,7 +215,7 @@ func TestFederatedReadWithoutAGuard(t *testing.T) {
 	}
 }
 
-func TestFederatedGuardRefusesWhatItCannotInspect(t *testing.T) {
+func TestFederatedGuardChecksNestedQueries(t *testing.T) {
 	urls := federatedGuardFixture(t)
 	subquery := `from:
   database: orders
@@ -223,10 +226,11 @@ where: {exists: {query: {from: {database: countries, name: Country, alias: c}}}}
 	if _, err := tugql.Deserialize([]byte(subquery)); err != nil {
 		t.Fatal(err)
 	}
-	_, err := guardedExecutor(func(context.Context, FederatedLeaf) error { return nil }).
-		StreamFederatedTugQL(context.Background(), []byte(subquery), urls, nil)
+	// The nested query's leaf is checked: EXISTS reads every column of it.
+	guard := &labelGuard{labelled: map[string]bool{"countries.Country.population": true}}
+	_, err := guardedExecutor(guard.check).StreamFederatedTugQL(context.Background(), []byte(subquery), urls, nil)
 	var protected *FieldProtectedError
-	if !errors.As(err, &protected) || !strings.Contains(protected.Message, "cannot inspect") {
+	if !errors.As(err, &protected) || protected.Message != "wildcard over countries.Country.population" {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -320,7 +324,11 @@ func TestFederatedLeavesRefusesWhatItCannotInspect(t *testing.T) {
 		"comparison":      dal.NewQueryBuilder(dal.From(ref)).Where(dal.NewComparison(opaqueFederatedExpression{}, dal.Equal, dal.NewConstant(1))).SelectColumns(),
 		"group member":    dal.NewQueryBuilder(dal.From(ref)).Where(dal.NewGroupCondition(dal.And, opaqueFederatedCondition{})).SelectColumns(),
 		"is null":         dal.NewQueryBuilder(dal.From(ref)).Where(dal.NewIsNullCondition(opaqueFederatedExpression{})).SelectColumns(),
-		"subquery":        dal.NewQueryBuilder(dal.From(ref)).Where(dal.NewExistsCondition(dal.NewQueryBuilder(dal.From(ref)).SelectColumns())).SelectColumns(),
+		"nil derived":     dal.NewQueryBuilder(dal.From(dal.NewQuerySource(nil, "d"))).SelectColumns(),
+		"exists inner":    dal.NewQueryBuilder(dal.From(ref)).Where(dal.NewExistsCondition(dal.NewQueryBuilder(dal.From(ref)).Where(opaqueFederatedCondition{}).SelectColumns())).SelectColumns(),
+		"derived joins":   dal.NewQueryBuilder(dal.From(dal.NewQuerySource(dal.NewQueryBuilder(dal.From(ref)).SelectColumns(), "d")).Join(dal.NewJoinedSource(dal.NewCollectionGroupRef("C", "c"), dal.JoinInner))).SelectColumns(),
+		"derived inner":   dal.NewQueryBuilder(dal.From(dal.NewQuerySource(dal.NewQueryBuilder(dal.From(ref)).Where(opaqueFederatedCondition{}).SelectColumns(), "d"))).SelectColumns(),
+		"too deep":        deepQuery(ref, maxQueryDepth+1),
 	} {
 		if _, err := federatedLeaves(query); err == nil {
 			t.Errorf("%s: an uninspectable query was accepted", name)
@@ -377,7 +385,7 @@ func TestRunTugQLAndNativeSQLUseTheSessionGuards(t *testing.T) {
 	ctx := context.Background()
 	doc := []byte("from: {name: Country}\ncolumns: [{field: population}]\n")
 	guard := &labelGuard{labelled: map[string]bool{"countries.Country.population": true}}
-	session := Session{Unrestricted: true, FederatedColumns: guard.check, SourceCatalogs: map[string]string{urls["countries"]: "countries"}}
+	session := Session{Unrestricted: true, FederatedColumns: guard.check, SourceCatalogs: map[string][]string{urls["countries"]: {"countries"}}}
 	var protected *FieldProtectedError
 	if _, err := NewExecutor(session).RunTugQL(ctx, urls["countries"], doc, nil); !errors.As(err, &protected) || protected.Message != "protected countries.Country.population" {
 		t.Fatalf("err = %v", err)
@@ -404,5 +412,142 @@ func TestRunTugQLAndNativeSQLUseTheSessionGuards(t *testing.T) {
 	session.NativeSQL = func(context.Context, string, string) error { return nil }
 	if result, err = NewExecutor(session).RunNativeSQL(ctx, urls["countries"], "SELECT name FROM Country"); err != nil || len(result.Rows) != 2 {
 		t.Fatalf("rows=%+v err=%v", result.Rows, err)
+	}
+}
+
+// deepQuery nests depth scalar subqueries.
+func deepQuery(ref dal.CollectionRef, depth int) dal.StructuredQuery {
+	query := dal.NewQueryBuilder(dal.From(ref)).SelectColumns()
+	for i := 0; i < depth; i++ {
+		query = dal.NewQueryBuilder(dal.From(ref)).SelectColumns(dal.Column{Expression: dal.NewQueryExpression(query, "x")})
+	}
+	return query
+}
+
+func TestFederatedLeavesWalksNestedQueries(t *testing.T) {
+	orders := dal.NewDatabaseCollectionRef("orders", "", "Invoice", "o")
+	countries := dal.NewDatabaseCollectionRef("countries", "", "Country", "c")
+	inner := dal.NewQueryBuilder(dal.From(countries)).SelectColumns(dal.Column{Expression: dal.NewFieldRef("c", "name")})
+	exists := dal.NewExistsCondition(dal.NewQueryBuilder(dal.From(countries)).Where(dal.NewComparison(dal.NewFieldRef("c", "id"), dal.Equal, dal.NewFieldRef("o", "country_id"))).SelectColumns(dal.Column{Expression: dal.NewFieldRef("c", "id")}))
+	scalar := dal.NewQueryExpression(inner, "n")
+	derived := dal.NewQuerySource(dal.NewQueryBuilder(dal.From(orders)).SelectColumns(dal.Column{Expression: dal.NewFieldRef("o", "amount")}), "d")
+	query := dal.NewQueryBuilder(dal.From(&derived).Join(dal.NewJoinedSource(countries, dal.JoinInner))).
+		Where(dal.NewGroupCondition(dal.And, exists, &exists)).
+		SelectColumns(dal.Column{Expression: scalar}, dal.Column{Expression: &scalar}, dal.Column{Expression: dal.NewFieldRef("d", "amount")})
+	leaves, err := federatedLeaves(query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := []string{}
+	for _, leaf := range leaves {
+		got = append(got, leaf.Database+"."+leaf.Collection+":"+strings.Join(leaf.Columns, ","))
+	}
+	// d.amount names the derived source, no leaf: it counts against every leaf.
+	want := "orders.Invoice:amount,country_id|countries.Country:amount,id,name|countries.Country:amount,id,name|countries.Country:amount,id,name|countries.Country:amount,id|countries.Country:amount,id"
+	if strings.Join(got, "|") != want {
+		t.Fatalf("leaves:\n%s\nwant\n%s", strings.Join(got, "|"), want)
+	}
+	// A nested query without columns reads every column of its own leaves only.
+	leaves, err = federatedLeaves(dal.NewQueryBuilder(dal.From(orders)).Where(dal.NewExistsCondition(dal.NewQueryBuilder(dal.From(countries)).SelectColumns())).SelectColumns(dal.Column{Expression: dal.NewFieldRef("o", "id")}))
+	if err != nil || leaves[0].AllColumns || !leaves[1].AllColumns {
+		t.Fatalf("leaves=%+v err=%v", leaves, err)
+	}
+}
+
+// Every Executor entry point that reads a source refuses a labelled column
+// when the session carries a guard. A new entry point fails this test until
+// it is listed here or exempted with a reason.
+func TestEveryReadEntryPointChecksLabels(t *testing.T) {
+	source := exactSQLite(t)
+	ctx := context.Background()
+	guard := &labelGuard{labelled: map[string]bool{"items.Item.Category": true}}
+	protectedSQL := &FieldProtectedError{Message: "labelled source"}
+	session := Session{Unrestricted: true, FederatedColumns: guard.check, SourceCatalogs: map[string][]string{source: {"items"}},
+		NativeSQL: func(context.Context, string, string) error { return protectedSQL }}
+	e := NewExecutor(session)
+	doc := "from: {name: Item}\ncolumns: [{field: Category}]\n"
+	parsed, err := tugql.Deserialize([]byte(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	federated := "from: {database: items, name: Item}\ncolumns: [{field: Category}]\n"
+	preview := exactPreview(t, exactOriginal, queryops.MatchingSource, []queryops.AggregateTerm{{Column: "Value", Function: "SUM", Alias: "total"}})
+	reads := map[string]func() error{
+		"RunStructured":                func() error { _, err := e.RunStructured(ctx, source, parsed, nil); return err },
+		"RunStructuredInsecureForTest": func() error { _, err := e.RunStructuredInsecureForTest(ctx, source, parsed, nil); return err },
+		"RunTugQL":                     func() error { _, err := e.RunTugQL(ctx, source, []byte(doc), nil); return err },
+		"RunRecursiveTugQL":            func() error { _, err := e.RunRecursiveTugQL(ctx, source, []byte(doc), nil); return err },
+		"RunExactAggregateTugQL": func() error {
+			_, err := e.RunExactAggregateTugQL(ctx, source, []byte(exactOriginal), []byte(preview.TugQL), map[string]any{"minimum": json.Number("0")}, exactColumns)
+			return err
+		},
+		"RunFederatedTugQL": func() error {
+			_, err := e.RunFederatedTugQL(ctx, []byte(federated), map[string]string{"items": source}, nil)
+			return err
+		},
+		"StreamFederatedTugQL": func() error {
+			_, err := e.StreamFederatedTugQL(ctx, []byte(federated), map[string]string{"items": source}, nil)
+			return err
+		},
+		"RunNativeSQL":      func() error { _, err := e.RunNativeSQL(ctx, source, "SELECT Category FROM Item"); return err },
+		"GuardTugQLColumns": func() error { return e.GuardTugQLColumns(ctx, []byte(doc), "items", source) },
+	}
+	exempt := map[string]string{
+		"Authorize":              "decides a policy question and reads no row",
+		"CanReadWholeCollection": "decides a policy question and reads no row",
+		"RunSnapshot":            "reads a recordset an earlier, guarded read returned; it names no source",
+	}
+	methods := reflect.TypeOf(e)
+	for i := 0; i < methods.NumMethod(); i++ {
+		name := methods.Method(i).Name
+		if _, ok := exempt[name]; ok {
+			continue
+		}
+		read, ok := reads[name]
+		if !ok {
+			t.Errorf("Executor.%s is neither checked here nor exempted", name)
+			continue
+		}
+		var protected *FieldProtectedError
+		if err := read(); !errors.As(err, &protected) {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+	var protected *FieldProtectedError
+	// An unstructured query cannot be inspected, and a document that does not
+	// parse is refused before any read.
+	if _, err := e.RunStructured(ctx, source, dal.NewTextQuery("SELECT 1", nil), nil); !errors.Is(err, errUninspectable) {
+		t.Fatalf("err = %v", err)
+	}
+	if err := e.guardDocuments(ctx, source, []byte("not: [tugql")); err == nil || !strings.Contains(err.Error(), "secureread: parse TugQL") {
+		t.Fatalf("err = %v", err)
+	}
+	// A query the walker cannot follow is refused.
+	if err := e.guardSource(ctx, source, deepQuery(dal.NewRootCollectionRef("Item", ""), maxQueryDepth+1)); !errors.As(err, &protected) || !strings.Contains(protected.Message, "cannot inspect") {
+		t.Fatalf("err = %v", err)
+	}
+	// Unlabelled columns pass every check.
+	clean := NewExecutor(Session{Unrestricted: true, FederatedColumns: (&labelGuard{}).check, SourceCatalogs: map[string][]string{source: {"items"}}})
+	if _, err := clean.RunExactAggregateTugQL(ctx, source, []byte(exactOriginal), []byte(preview.TugQL), map[string]any{"minimum": json.Number("0")}, exactColumns); err != nil {
+		t.Fatal(err)
+	}
+	// An HTTP(S) source is no catalog: there is nothing to check.
+	if err := e.guardSource(ctx, "https://example.com/api", parsed); err != nil {
+		t.Fatal(err)
+	}
+	// Two catalogs on one URL: the labels of each apply.
+	guard = &labelGuard{labelled: map[string]bool{"other.Item.Category": true}}
+	shared := NewExecutor(Session{Unrestricted: true, FederatedColumns: guard.check, SourceCatalogs: map[string][]string{source: {"items", "other"}},
+		NativeSQL: func(_ context.Context, catalog, _ string) error {
+			if catalog == "other" {
+				return protectedSQL
+			}
+			return nil
+		}})
+	if _, err := shared.RunTugQL(ctx, source, []byte(doc), nil); !errors.As(err, &protected) {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := shared.RunNativeSQL(ctx, source, "SELECT 1"); !errors.Is(err, protectedSQL) {
+		t.Fatalf("err = %v", err)
 	}
 }

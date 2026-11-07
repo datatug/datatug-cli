@@ -47,13 +47,86 @@ type NativeSQLGuard func(ctx context.Context, catalog, sourceURL string) error
 // session cannot name: its labels cannot be found, so nothing is checked.
 var errUnknownCatalog = &FieldProtectedError{Message: "the source is not one of the project's catalogs, so its sensitivity labels cannot be checked and the read is refused"}
 
-// sourceCatalog names a guarded read's source by its project catalog id.
-func (e *Executor) sourceCatalog(sourceURL string) (string, error) {
-	catalog, ok := e.session.SourceCatalogs[sourceURL]
-	if !ok {
-		return "", errUnknownCatalog
+// errUninspectable refuses a guarded read of a query that is not structured.
+var errUninspectable = &FieldProtectedError{Message: "the query is not structured, so the sensitivity-label check cannot inspect it and the read is refused"}
+
+// sourceCatalogs names a guarded read's source by every project catalog id
+// that resolves to it; each one's labels apply (a shared URL fails closed).
+// An HTTP(S) source is the project's own HTTP endpoints, which are no catalog,
+// so no label can target it and it has nothing to check.
+func (e *Executor) sourceCatalogs(sourceURL string) ([]string, error) {
+	if catalogs := e.session.SourceCatalogs[sourceURL]; len(catalogs) > 0 {
+		return catalogs, nil
 	}
-	return catalog, nil
+	if ref, err := dbcopy.Parse(sourceURL); err == nil && (ref.Scheme == "http" || ref.Scheme == "https") {
+		return nil, nil
+	}
+	return nil, errUnknownCatalog
+}
+
+// guardSource checks a single-source read against the session's column guard
+// before the source is read. It is the first step of every Executor entry
+// point that reads a source (runStructured, RunExactAggregateTugQL,
+// RunRecursiveTugQL); TestEveryReadEntryPointChecksLabels keeps it so.
+func (e *Executor) guardSource(ctx context.Context, sourceURL string, query dal.Query) error {
+	if e.session.FederatedColumns == nil {
+		return nil
+	}
+	structured, ok := query.(dal.StructuredQuery)
+	if !ok {
+		return errUninspectable
+	}
+	catalogs, err := e.sourceCatalogs(sourceURL)
+	if err != nil {
+		return err
+	}
+	return e.checkSource(ctx, structured, catalogs, sourceURL)
+}
+
+// guardDocuments is guardSource for TugQL documents.
+func (e *Executor) guardDocuments(ctx context.Context, sourceURL string, documents ...[]byte) error {
+	if e.session.FederatedColumns == nil {
+		return nil
+	}
+	for _, document := range documents {
+		query, err := tugqlDeserialize(document)
+		if err != nil {
+			return fmt.Errorf("secureread: parse TugQL: %w", err)
+		}
+		if err := e.guardSource(ctx, sourceURL, query); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkSource runs the column guard over query as leaves of each catalog at
+// sourceURL, opening the source at most once.
+func (e *Executor) checkSource(ctx context.Context, query dal.StructuredQuery, catalogs []string, sourceURL string) error {
+	var opened dal.DB
+	closeSource := func() {}
+	defer func() { closeSource() }()
+	open := func(ctx context.Context, catalog string) (dal.DB, error) {
+		if opened != nil {
+			return opened, nil
+		}
+		db, closeDB, err := openSourceFn(ctx, sourceURL, false, len(e.session.Policies))
+		if err != nil {
+			return nil, fmt.Errorf("open database %q: %w", catalog, err)
+		}
+		opened, closeSource = db, closeDB
+		return db, nil
+	}
+	urls := map[string]string{}
+	for _, catalog := range catalogs {
+		urls[catalog] = sourceURL
+	}
+	for _, catalog := range catalogs {
+		if err := e.guardFederatedColumns(ctx, query, urls, open, catalog); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // FieldProtectedError is a FIELD_PROTECTED refusal: the read would touch a
@@ -115,23 +188,60 @@ type leafScope struct {
 	leaves  []*FederatedLeaf
 	columns []map[string]bool
 	byName  map[string][]int
+	depth   int
+	// everywhere and allEverywhere are what counts against every leaf.
+	everywhere    map[string]bool
+	allEverywhere bool
 }
 
-// federatedLeaves lists the leaves of a federated query, in FROM order, with
-// the columns the query names on each. A construct it cannot attribute (a
-// subquery, a non-collection source, an unknown expression or condition) is
-// an error, so nothing can reach a leaf unseen.
+// maxQueryDepth bounds how deep federatedLeaves follows nested queries.
+const maxQueryDepth = 64
+
+// federatedLeaves lists the leaves of a query, nested queries included, in
+// FROM order, with the columns the query names on each. A construct it cannot
+// attribute (a non-collection source, an unknown expression or condition, a
+// query nested too deep) is an error, so nothing can reach a leaf unseen.
 func federatedLeaves(query dal.StructuredQuery) ([]FederatedLeaf, error) {
-	if dal.HasSubquery(query) {
-		return nil, errors.New("a subquery")
-	}
-	s := &leafScope{byName: map[string][]int{}}
-	if err := s.from(query.From()); err != nil {
+	s := &leafScope{byName: map[string][]int{}, everywhere: map[string]bool{}}
+	if err := s.query(query); err != nil {
 		return nil, err
+	}
+	out := make([]FederatedLeaf, len(s.leaves))
+	for i, leaf := range s.leaves {
+		out[i] = *leaf
+		out[i].AllColumns = leaf.AllColumns || s.allEverywhere
+		for name := range s.everywhere {
+			s.columns[i][name] = true
+		}
+		for name := range s.columns[i] {
+			out[i].Columns = append(out[i].Columns, name)
+		}
+		sort.Strings(out[i].Columns)
+	}
+	return out, nil
+}
+
+// query walks one query into the scope. A nested query's leaves join the one
+// scope: a reference to a derived source's alias names no leaf, so it counts
+// against every leaf, and a reused alias counts against each leaf it names.
+func (s *leafScope) query(query dal.StructuredQuery) error {
+	s.depth++
+	defer func() { s.depth-- }()
+	if s.depth > maxQueryDepth {
+		return errors.New("a query nested too deep")
+	}
+	if query == nil || query.From() == nil {
+		return errors.New("a query without a source")
+	}
+	start := len(s.leaves)
+	if err := s.from(query.From()); err != nil {
+		return err
 	}
 	columns := query.Columns()
 	if len(columns) == 0 {
-		s.all("")
+		for i := start; i < len(s.leaves); i++ {
+			s.leaves[i].AllColumns = true
+		}
 	}
 	for _, column := range columns {
 		if column.Wildcard != nil {
@@ -139,33 +249,25 @@ func federatedLeaves(query dal.StructuredQuery) ([]FederatedLeaf, error) {
 			continue
 		}
 		if err := s.expression(column.Expression, -1); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	for _, condition := range []dal.Condition{query.Where(), query.Having()} {
 		if err := s.condition(condition); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	for _, order := range query.OrderBy() {
 		if err := s.expression(order.Expression(), -1); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	for _, expression := range query.GroupBy() {
 		if err := s.expression(expression, -1); err != nil {
-			return nil, err
+			return err
 		}
 	}
-	out := make([]FederatedLeaf, len(s.leaves))
-	for i, leaf := range s.leaves {
-		out[i] = *leaf
-		for name := range s.columns[i] {
-			out[i].Columns = append(out[i].Columns, name)
-		}
-		sort.Strings(out[i].Columns)
-	}
-	return out, nil
+	return nil
 }
 
 func (s *leafScope) from(from dal.FromSource) error {
@@ -175,6 +277,10 @@ func (s *leafScope) from(from dal.FromSource) error {
 		ref = base
 	case *dal.CollectionRef:
 		ref = *base
+	case dal.QuerySource:
+		return s.derived(base, from)
+	case *dal.QuerySource:
+		return s.derived(*base, from)
 	default:
 		return fmt.Errorf("a %T source", base)
 	}
@@ -189,6 +295,18 @@ func (s *leafScope) from(from dal.FromSource) error {
 			return err
 		}
 	}
+	return s.joins(from)
+}
+
+// derived walks a derived source's query, then the joins of its FROM.
+func (s *leafScope) derived(source dal.QuerySource, from dal.FromSource) error {
+	if err := s.query(source.Query()); err != nil {
+		return err
+	}
+	return s.joins(from)
+}
+
+func (s *leafScope) joins(from dal.FromSource) error {
 	for _, join := range from.Joins() {
 		child := join.From()
 		if child == nil {
@@ -209,32 +327,35 @@ func (s *leafScope) from(from dal.FromSource) error {
 // all marks every column of the leaves source names (every leaf when source
 // is empty or names no leaf) as projected.
 func (s *leafScope) all(source string) {
-	for _, i := range s.targets(source, -1) {
+	indices, every := s.targets(source, -1)
+	s.allEverywhere = s.allEverywhere || every
+	for _, i := range indices {
 		s.leaves[i].AllColumns = true
 	}
 }
 
 // targets are the leaves a reference qualified by source can stand for: the
-// named leaves, else home (a scan order's own leaf), else every leaf.
-func (s *leafScope) targets(source string, home int) []int {
+// named leaves, else home (a scan order's own leaf), else every leaf of the
+// whole query (every is set), applied once the walk has found them all.
+func (s *leafScope) targets(source string, home int) (indices []int, every bool) {
 	if named, ok := s.byName[source]; ok && source != "" {
-		return named
+		return named, false
 	}
 	if home >= 0 && source == "" {
-		return []int{home}
+		return []int{home}, false
 	}
-	every := make([]int, len(s.leaves))
-	for i := range every {
-		every[i] = i
-	}
-	return every
+	return nil, true
 }
 
 func (s *leafScope) field(field dal.FieldRef, home int) {
 	if field.IsID() {
 		return
 	}
-	for _, i := range s.targets(field.Source(), home) {
+	indices, every := s.targets(field.Source(), home)
+	if every {
+		s.everywhere[field.Name()] = true
+	}
+	for _, i := range indices {
 		s.columns[i][field.Name()] = true
 	}
 }
@@ -253,6 +374,10 @@ func (s *leafScope) expression(expression dal.Expression, home int) error {
 		return s.binary(e, home)
 	case *dal.BinaryExpression:
 		return s.binary(*e, home)
+	case dal.QueryExpression:
+		return s.query(e.Query())
+	case *dal.QueryExpression:
+		return s.query(e.Query())
 	case dal.AggregateFunc:
 		for _, arg := range e.FuncArgs() {
 			if err := s.expression(arg, home); err != nil {
@@ -293,6 +418,10 @@ func (s *leafScope) condition(condition dal.Condition) error {
 		return s.group(*c)
 	case dal.IsNullCondition:
 		return s.expression(c.Operand(), -1)
+	case dal.ExistsCondition:
+		return s.query(c.Query())
+	case *dal.ExistsCondition:
+		return s.query(c.Query())
 	default:
 		return fmt.Errorf("a condition of type %T", condition)
 	}
@@ -317,8 +446,7 @@ func (s *leafScope) group(g dal.GroupCondition) error {
 // GuardTugQLColumns runs the session's column guard over a single-source TugQL
 // read before it runs: every collection of the query is a leaf of database
 // (the source's project catalog id) at sourceURL, checked exactly as a leaf of
-// a federated read is, and with the same rule for a missing guard. RunTugQL
-// calls it whenever the session carries a column guard.
+// a federated read is, and with the same rule for a missing guard.
 func (e *Executor) GuardTugQLColumns(ctx context.Context, document []byte, database, sourceURL string) error {
 	if e.session.FederatedColumns == nil && e.session.DatabaseProfile.PolicyFreeReads() {
 		return nil
@@ -327,19 +455,5 @@ func (e *Executor) GuardTugQLColumns(ctx context.Context, document []byte, datab
 	if err != nil {
 		return fmt.Errorf("secureread: parse TugQL: %w", err)
 	}
-	var opened dal.DB
-	closeSource := func() {}
-	defer func() { closeSource() }()
-	open := func(ctx context.Context, _ string) (dal.DB, error) {
-		if opened != nil {
-			return opened, nil
-		}
-		db, closeDB, err := openSourceFn(ctx, sourceURL, false, len(e.session.Policies))
-		if err != nil {
-			return nil, fmt.Errorf("open database %q: %w", database, err)
-		}
-		opened, closeSource = db, closeDB
-		return db, nil
-	}
-	return e.guardFederatedColumns(ctx, query, map[string]string{database: sourceURL}, open, database)
+	return e.checkSource(ctx, query, []string{database}, sourceURL)
 }

@@ -15,9 +15,10 @@ import (
 // installProjectLabels makes every TugQL and native SQL read of session check
 // the project's Meaning Graph sensitivity labels first, for every principal
 // whatever its profile (ai-onboarding: labelled columns are masked for every
-// principal). catalogs maps each project source URL to its catalog id, the
-// Source of a label target. Used by `query run --project --query` and `chat`.
-func installProjectLabels(session *secureread.Session, projectDir string, catalogs map[string]string) {
+// principal). catalogs maps each project source URL to the catalog ids that
+// resolve to it, the Source of a label target. Used by `query run --project
+// --query`, `query run --db datatug://...` and `chat`.
+func installProjectLabels(session *secureread.Session, projectDir string, catalogs map[string][]string) {
 	session.FederatedColumns = federatedLabelGuard(projectDir)
 	session.NativeSQL = nativeSQLLabelGuard(projectDir)
 	session.SourceCatalogs = catalogs

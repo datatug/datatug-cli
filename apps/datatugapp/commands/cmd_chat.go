@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 
@@ -722,13 +723,21 @@ func (providerUnavailableConversation) AskWithContext(context.Context, string, s
 	return chat.Turn{Text: "Configure an AI provider under Settings → AI for chat. Use Explorer Open data or New query to work with your project locally. No query was executed."}, nil
 }
 
-// chatSourceCatalogs names every project source URL of a chat by its catalog
-// id: the explorer's sources and the chat's own database.
-func chatSourceCatalogs(sourceURLs map[string]string, sourceURL, database string) map[string]string {
-	catalogs := map[string]string{}
-	for id, url := range sourceURLs {
-		catalogs[url] = id
+// chatSourceCatalogs names every project source URL of a chat by the catalog
+// ids that resolve to it: the explorer's sources and the chat's own database.
+// Labels are keyed by catalog id, so a URL two catalogs share keeps both, and
+// the labels of each apply.
+func chatSourceCatalogs(sourceURLs map[string]string, sourceURL, database string) map[string][]string {
+	catalogs := map[string][]string{}
+	add := func(url, id string) {
+		if !slices.Contains(catalogs[url], id) {
+			catalogs[url] = append(catalogs[url], id)
+			slices.Sort(catalogs[url])
+		}
 	}
-	catalogs[sourceURL] = database
+	for id, url := range sourceURLs {
+		add(url, id)
+	}
+	add(sourceURL, database)
 	return catalogs
 }

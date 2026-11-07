@@ -27,25 +27,39 @@ import (
 // message names their ids) or a source that cannot be opened; 3 for a project, a database or an
 // environment that is not there. Any other value fails as dbcopy.Parse fails.
 func parseSourceArg(ctx context.Context, arg string) (ref dbcopy.BackendRef, fromProject bool, err error) {
+	ref, _, err = parseProjectSourceArg(ctx, arg)
+	return ref, dbcopy.IsDatatugRef(arg), err
+}
+
+// projectSource is the project and catalog id a datatug:// reference names:
+// where its Meaning Graph sensitivity labels are kept and what they call it.
+type projectSource struct {
+	dir     string
+	catalog string
+}
+
+// parseProjectSourceArg is parseSourceArg that also names, for a datatug://
+// reference, the project source it resolves to (nil for any other value).
+func parseProjectSourceArg(ctx context.Context, arg string) (ref dbcopy.BackendRef, project *projectSource, err error) {
 	if !dbcopy.IsDatatugRef(arg) {
 		ref, err = dbcopy.Parse(arg)
-		return ref, false, err
+		return ref, nil, err
 	}
 	reference, err := dbcopy.ParseDatatugRef(arg)
 	if err != nil {
-		return ref, true, Exit(err.Error(), exitCodeUsage)
+		return ref, nil, Exit(err.Error(), exitCodeUsage)
 	}
-	source, err := datatugRefSource(ctx, reference)
+	source, dir, err := datatugRefSource(ctx, reference)
 	if err != nil {
-		return ref, true, err
+		return ref, nil, err
 	}
 	if ref, err = dbcopy.Parse(source); err != nil {
-		return ref, true, Exit(err.Error(), exitCodeUsage)
+		return ref, nil, Exit(err.Error(), exitCodeUsage)
 	}
 	if ref.Scheme == "sqlite" {
 		ref.Raw = reference.String()
 	}
-	return ref, true, nil
+	return ref, &projectSource{dir: dir, catalog: reference.DB}, nil
 }
 
 // keepExit is err when it already carries an exit code (a datatug:// reference that did not
@@ -80,15 +94,16 @@ func projectNameOf(name string) (project, dir string, err error) {
 	return local[0].ID, "", nil
 }
 
-// datatugRefSource resolves reference to a source (see parseSourceArg).
-func datatugRefSource(ctx context.Context, reference dbcopy.DatatugRef) (string, error) {
+// datatugRefSource resolves reference to a source (see parseSourceArg) and
+// the folder of its project.
+func datatugRefSource(ctx context.Context, reference dbcopy.DatatugRef) (string, string, error) {
 	project, dir, err := projectNameOf(reference.Project)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	base, err := openProjectForRead(project, dir)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	source, err := api.ResolveProjectSourceURL(ctx, base.store.GetProjectStore(base.projectID), base.ProjectDir, reference.Env, reference.DB)
 	var notFound *api.ProjectSourceNotFoundError
@@ -96,11 +111,11 @@ func datatugRefSource(ctx context.Context, reference dbcopy.DatatugRef) (string,
 	var unresolved *api.SourceUnresolvedError
 	switch {
 	case errors.As(err, &notFound):
-		return "", Exit(err.Error(), exitCodeNotFound)
+		return "", "", Exit(err.Error(), exitCodeNotFound)
 	case errors.As(err, &ambiguous):
-		return "", Exit(fmt.Sprintf("database %q: %s", dbcopy.SourceIDDisplay(reference.DB), err.Error()), exitCodeUsage)
+		return "", "", Exit(fmt.Sprintf("database %q: %s", dbcopy.SourceIDDisplay(reference.DB), err.Error()), exitCodeUsage)
 	case errors.As(err, &unresolved):
-		return "", Exit(fmt.Sprintf("database %q cannot be opened: %s", dbcopy.SourceIDDisplay(reference.DB), err.Error()), exitCodeUsage)
+		return "", "", Exit(fmt.Sprintf("database %q cannot be opened: %s", dbcopy.SourceIDDisplay(reference.DB), err.Error()), exitCodeUsage)
 	}
-	return source, err
+	return source, base.ProjectDir, err
 }

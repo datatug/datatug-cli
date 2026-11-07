@@ -337,14 +337,15 @@ var registrationMethods = map[string]bool{
 	"GET": true, "POST": true, "PUT": true, "DELETE": true, "PATCH": true, "HEAD": true, "OPTIONS": true,
 }
 
-// isGuardWrap reports whether expr is a call of a Wrap method: guard.Wrap(handler).
+// isGuardWrap reports whether expr is a call of a Wrap method: guard.Wrap(handler), or
+// guard.WrapStatic(handler) for the web UI's static files (Host check only, by design).
 func isGuardWrap(expr ast.Expr) bool {
 	call, ok := expr.(*ast.CallExpr)
 	if !ok {
 		return false
 	}
 	selector, ok := call.Fun.(*ast.SelectorExpr)
-	return ok && selector.Sel.Name == "Wrap"
+	return ok && (selector.Sel.Name == "Wrap" || selector.Sel.Name == "WrapStatic")
 }
 
 // Every route is registered through the guard. A route registered any other way is not in the
@@ -396,5 +397,5 @@ func TestRoutes_NoRouteIsRegisteredOutsideTheGuard(t *testing.T) {
 		}
 	}
 	assert.NotZero(t, registered["0_interface.go"], "the route table is registered in 0_interface.go")
-	assert.Equal(t, 2, registered["../http_server.go"], "the server registers its pages and its OPTIONS handler in http_server.go")
+	assert.Equal(t, 4, registered["../http_server.go"], "the server registers its pages (the agent's own, or the web UI's for GET and HEAD) and its OPTIONS handler in http_server.go")
 }

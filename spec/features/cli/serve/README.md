@@ -71,9 +71,9 @@ The agent constructs a URL pointing at the Web UI and opens it in the user's def
 
 Without `--local`, the default client URL MUST be `https://datatug.app/pwa/repo/<host>:<port>`. The browser MUST be opened to that URL with the agent's host:port appended as `/agent/<host>:<port>`.
 
-#### REQ: local-flag
+#### REQ: web-ui-flag
 
-`--local` MUST switch the default client URL to `http://<host>:<port>` (the agent serves both the API and a bundled local UI when this flag is set). This supports air-gapped use.
+`--web-ui[=<version>]` MUST make the server also serve an installed DataTug web UI from its own origin (static files behind the Host check only; the API keeps the session token) and print `http://<ui-host>:<port>/store/http-<ui-host>:<port>#code=…` plus a `127.0.0.1` fallback link with its own one-time code. It replaces the former `--local` idea of a bundled UI. Contract: [web-ui](../web-ui/README.md).
 
 #### REQ: client-url-override
 
@@ -99,7 +99,7 @@ On signal receipt, the HTTP server MUST perform a graceful shutdown: stop accept
 
 #### REQ: origins-and-token
 
-The server admits exactly two browser origins: `https://datatug.app` and the host `datatug.localhost` (`http` or `https`, no port or a numeric one); `localhost:*`, `127.0.0.1:*`, `*.datatug.app` and `app.incidentius.com` are refused, and no flag or variable adds one. Every route but a CORS preflight (answered by origin only, with `Access-Control-Allow-Private-Network: true` when the preflight asks and the origin is listed) and `POST /datatug/session/exchange` requires the session token, `Authorization: Bearer <token>`. At start the server creates a random secret and keeps it in `~/datatug/daemon/access-<port>.key` (`$DATATUG_DAEMON_DIR`, mode `0600`), removed when it exits; the CLI's own clients (`incident`, `execution`, `compare`, `query` lookups) and `datatug daemon url` read it from there. A one-time code, `v1.<expiry>.<nonce>.<signature>`, valid 10 minutes and accepted once, is minted from the secret locally; the web UI reads it from the link's URL fragment, posts `{"code": ...}` to the exchange route and receives `{"token": ...}`, then sends the token on every request. A hand-started `datatug serve` prints its web UI link with `#code=<code>`; a server started with `--idle-timeout` (the daemon) prints none into its log. **Consequences:** local web UI development runs at `http://datatug.localhost:<port>` (no longer `localhost:4200`), a page of another product's UI loses access, and a client of the agent that is not one of the CLI's own (curl, a script) must send the token from the key file.
+The server admits exactly two browser origins: `https://datatug.app` and the host `datatug.localhost` (`http` or `https`, no port or a numeric one); `localhost:*`, `127.0.0.1:*`, `*.datatug.app` and `app.incidentius.com` are refused, and no flag or variable adds one. Every route but a CORS preflight (answered by origin only, with `Access-Control-Allow-Private-Network: true` when the preflight asks and the origin is listed) and `POST /datatug/session/exchange` requires the session token, `Authorization: Bearer <token>`. At start the server creates a random secret and keeps it in `~/datatug/daemon/access-<port>.key` (`$DATATUG_DAEMON_DIR`, mode `0600`), removed when it exits; the CLI's own clients (`incident`, `execution`, `compare`, `query` lookups) and `datatug daemon url` read it from there. A one-time code, `v1.<expiry>.<nonce>.<signature>`, valid 10 minutes and accepted once, is minted from the secret locally; the web UI reads it from the link's URL fragment, posts `{"code": ...}` to the exchange route and receives `{"token": ...}`, then sends the token on every request. A hand-started `datatug serve` prints its web UI link with `#code=<code>`; a server started with `--idle-timeout` (the daemon) prints none into its log. **Amended 2026-11-07 (founder direction, Feature [web-ui](../web-ui/README.md)):** only while this server itself serves the web UI (`--web-ui`), the exact origins `http://<ui-host>:<port>`, `http://localhost:<port>`, `http://127.0.0.1:<port>` and `http://[::1]:<port>` of its own port are also admitted, and `<ui-host>` (a `*.localhost` name) is accepted as Host. **Consequences:** local web UI development runs at `http://datatug.localhost:<port>` (no longer `localhost:4200`), a page of another product's UI loses access, and a client of the agent that is not one of the CLI's own (curl, a script) must send the token from the key file.
 
 #### REQ: result-route
 
@@ -147,7 +147,9 @@ The URL the agent navigates the browser to MUST embed the agent's listening addr
 |---|---|---|---|---|
 | `--host` | `-h` | string | `localhost` | Bind address. |
 | `--port` | `-o` | int | `8989` | Bind port. |
-| `--local` |  | bool | `false` | Use `http://<host>:<port>` as the client URL instead of the remote PWA. |
+| `--web-ui` |  | string | `""` (`auto` when given bare) | Also serve the installed web UI; `=<version>` picks one. |
+| `--ui-host` |  | string | `datatug-app.localhost` | Host name of the served web UI (`localhost`, `127.0.0.1` or `*.localhost`). |
+| `--ui-connect-src` |  | string array | — | Exact https origin the served page may also reach (CSP `connect-src`). |
 | `--client-url` |  | string | `""` | Override the Web UI URL the browser opens. |
 | `--project` | `-p` | string | `""` | Serve only the project with this registry ID. |
 | `--dir` | `-d` | string | `""` | Serve only the project rooted at this path. |
@@ -196,11 +198,11 @@ A recorded project execution writes its immutable receipt below the routed repos
 
 `datatug serve` with no flags and no server config binds to `localhost:8989` and opens the default browser to `https://datatug.app/pwa/repo/localhost:8989/agent/localhost:8989`.
 
-### AC: local-flag-uses-loopback-client
+### AC: web-ui-served-same-origin
 
-**Requirements:** serve#req:local-flag
+**Requirements:** serve#req:web-ui-flag, serve#req:origins-and-token
 
-`datatug serve --local` opens the default browser to `http://localhost:8989/agent/localhost:8989`.
+`datatug serve --web-ui` with an installed web UI answers `GET /` with the app's `index.html` (runtime meta and CSP set) without a token, answers API routes only with the session token, refuses a foreign Host, and prints the `datatug-app.localhost` and `127.0.0.1` links, each with its own code.
 
 ### AC: ctrl-c-stops-cleanly
 

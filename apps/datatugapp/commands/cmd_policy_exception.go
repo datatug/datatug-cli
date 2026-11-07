@@ -62,8 +62,8 @@ func policyCommand() *cobra.Command {
 }
 
 // detectCaller is the self-reported harness this process runs under, or nil:
-// attribution on proposals and audit events only, never authority, never
-// telemetry.
+// attribution on proposals and audit events, and a signal that may only make
+// a read stricter (labelStrictness); never authority, never telemetry.
 func detectCaller() *callercontext.Caller {
 	c := callercontext.Detect(callerLookup)
 	if c.Empty() {

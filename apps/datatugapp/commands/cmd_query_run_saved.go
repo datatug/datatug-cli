@@ -111,7 +111,7 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	if source.URL != "" {
 		catalogs[source.URL] = []string{source.Catalog}
 	}
-	installProjectLabels(&session, projectDir, catalogs)
+	installProjectLabels(&session, projectDir, catalogs, stderr, false)
 	executor := secureread.NewExecutor(session)
 	// Lookup enrichment consumes keyed map rows. Refuse before the first leaf
 	// query rather than manufacturing keys for anonymous ClickHouse results.

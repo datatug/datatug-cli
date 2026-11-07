@@ -37,6 +37,7 @@ Pinning the contract surface lets the implementation evolve without breaking use
 | [config/](config/README.md) | Print user-level CLI configuration |
 | [projects/](projects/README.md) | List & manage user-level project registry (with [`add`](projects/add/README.md)) |
 | [serve/](serve/README.md) | Run HTTP server providing the DataTug Web UI's API |
+| [web-ui/](web-ui/README.md) | Install, pin and roll back local copies of the compiled web UI that `serve --web-ui` serves offline |
 | [scan/](scan/README.md) | Scan a database and update project metadata |
 | [show/](show/README.md) | List what a scan wrote into a project: environments, sources, schemas, tables, columns |
 | [validate/](validate/README.md) | Validate a DataTug project on disk |

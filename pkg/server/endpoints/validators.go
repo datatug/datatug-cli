@@ -3,6 +3,7 @@ package endpoints
 import (
 	"net/url"
 	"strconv"
+	"sync"
 )
 
 // DevUIHost is the one host, besides https://datatug.app, whose pages may call the agent: the
@@ -20,11 +21,17 @@ const DevUIHost = "datatug.localhost"
 // and the answers' Access-Control-Allow-Origin all use it. An origin is a scheme, a host and
 // maybe a port, and nothing else (the Origin of a browser never has a path, a query, a fragment
 // or a user), so a text that has more is not on the list whatever it starts or ends with.
+//
+// One exception, by founder direction of 2026-11-07 (spec: datatug/backstage
+// local-frontend-distribution REQ:ui-host): when this server itself serves the web UI
+// (`datatug serve --web-ui`), the exact origins of its own pages are listed too —
+// http://<ui-host>:<port>, http://localhost:<port>, http://127.0.0.1:<port> and
+// http://[::1]:<port> for its own port only (ConfigureServedUIOrigins).
 func IsSupportedOrigin(origin string) bool {
 	if !isOriginShaped(origin) {
 		return false
 	}
-	if origin == "https://datatug.app" {
+	if origin == "https://datatug.app" || isServedUIOrigin(origin) {
 		return true
 	}
 	u, _ := url.Parse(origin) // isOriginShaped parsed it
@@ -45,4 +52,38 @@ func isOriginShaped(origin string) bool {
 	u, err := url.Parse(origin)
 	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" && u.User == nil &&
 		u.Path == "" && u.RawQuery == "" && u.Fragment == "" && !u.ForceQuery && u.String() == origin
+}
+
+var (
+	servedUIMu      sync.RWMutex
+	servedUIOrigins map[string]bool
+)
+
+// ConfigureServedUIOrigins lists the exact origins of the web UI pages this process serves
+// itself; nil clears the list. Each is http://<host>:<port> for uiHost and the loopback names.
+func ConfigureServedUIOrigins(uiHost string, port int) {
+	servedUIMu.Lock()
+	defer servedUIMu.Unlock()
+	if port == 0 {
+		servedUIOrigins = nil
+		return
+	}
+	p := strconv.Itoa(port)
+	servedUIOrigins = map[string]bool{}
+	for _, h := range []string{uiHost, "localhost", "127.0.0.1", "[::1]"} {
+		if h != "" {
+			servedUIOrigins["http://"+h+":"+p] = true
+		}
+	}
+}
+
+func isServedUIOrigin(origin string) bool {
+	servedUIMu.RLock()
+	defer servedUIMu.RUnlock()
+	return servedUIOrigins[origin]
+}
+
+// servedUIHostAllowed reports whether host:port is the origin of a web UI page this process serves.
+func servedUIHostAllowed(host string, port int) bool {
+	return isServedUIOrigin("http://" + host + ":" + strconv.Itoa(port))
 }

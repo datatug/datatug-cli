@@ -63,7 +63,7 @@ func runClickHouseQuery(cmd *cobra.Command, o queryOptions, backend dbcopy.Backe
 	// A ClickHouse read cannot be masked in place: a project source's
 	// labelled columns refuse it, with or without policies.
 	if project != nil {
-		installProjectLabels(&session, project.dir, map[string][]string{backend.Raw: {project.catalog}})
+		installProjectLabels(&session, project.dir, map[string][]string{backend.Raw: {project.catalog}}, cmd.ErrOrStderr(), false)
 	}
 	result, err := runClickHouseStructured(ctx, session, backend.Raw, query, variables)
 	var protected *secureread.FieldProtectedError

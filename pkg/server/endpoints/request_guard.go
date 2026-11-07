@@ -141,7 +141,7 @@ func (g RequestGuard) hostAllowed(value string) bool {
 	if !ok || (g.port != 0 && port != g.port) {
 		return false
 	}
-	if name == "localhost" || (g.host != "" && name == g.host) {
+	if name == "localhost" || (g.host != "" && name == g.host) || servedUIHostAllowed(name, port) {
 		return true
 	}
 	address, err := netip.ParseAddr(name)
@@ -202,4 +202,18 @@ func quotedForLog(value string) string {
 		value = value[:maxLoggedRequestValue] + "..."
 	}
 	return strconv.Quote(value)
+}
+
+// WrapStatic is the guard of the web UI's own static files (`serve --web-ui`): only the Host
+// check. The files are the public archive, so they need no token (the page loads before it has
+// one) and no Origin or Fetch-Metadata check (a link from another site must open the app); the
+// Host check is what stops a DNS-rebinding page from reading them through a name of its own.
+func (g RequestGuard) WrapStatic(next http.Handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !g.hostAllowed(r.Host) {
+			refuseRequest(w, r, http.StatusForbidden, requestRefusedMessage, "the Host is not one that this server was started for")
+			return
+		}
+		next.ServeHTTP(w, r)
+	}
 }

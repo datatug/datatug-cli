@@ -105,7 +105,7 @@ func TestFederatedLabelGuardWildcards(t *testing.T) {
 	describeCollection = func(context.Context, dal.DB, *dal.CollectionRef) (*dbschema.CollectionDef, error) {
 		return &dbschema.CollectionDef{Fields: fields}, nil
 	}
-	guard := federatedLabelGuard("/project")
+	guard := federatedLabelGuard("/project", true, io.Discard)
 	ctx := context.Background()
 	leaf := func(table string, all bool, columns ...string) error {
 		return guard(ctx, secureread.FederatedLeaf{Database: "crm", Collection: table, Scheme: "sqlite", AllColumns: all, Columns: columns, Open: openNothing})
@@ -290,7 +290,7 @@ func TestFederatedLabelGuardOpensOnlyWhatItNeeds(t *testing.T) {
 	ctx := context.Background()
 	doc := meaninglabels.NewDocument()
 	loadLabels = func(context.Context, string) (meaninglabels.Document, error) { return doc, nil }
-	guard := federatedLabelGuard("/p")
+	guard := federatedLabelGuard("/p", true, io.Discard)
 	opens := 0
 	failing := func(context.Context) (dal.DB, error) { opens++; return nil, errors.New("down") }
 	// An unlabelled source: named columns open nothing; a wildcard whose
@@ -424,4 +424,66 @@ func TestClickHouseProjectSourceReadIsGuarded(t *testing.T) {
 	assert.True(t, installed)
 	assert.Equal(t, exitCodeAccessDenied, exitCodeOf(t, err))
 	assert.Contains(t, stderr.String(), meaninglabels.CodeFieldProtected)
+}
+
+// With no stored labels, read-time suggestions refuse an agent's TugQL read
+// but let a policy-free owner read on, warned once.
+func TestSavedTugQLSuggestionsWarnTheOwnerAndRefuseAnAgent(t *testing.T) {
+	dir := demoForTest(t)
+	require.NoError(t, os.RemoveAll(filepath.Join(dir, "policies")))
+	require.NoError(t, os.Remove(filepath.Join(dir, meaninglabelsfile.FileName)))
+	queries := filepath.Join(dir, "queries")
+	require.NoError(t, os.MkdirAll(queries, 0o755))
+	writeTargetedQuery(t, queries, "customers", "TugQL", "chinook", "from: {name: Customer}\nlimit: 2\n")
+	stdout, stderr, code := runCLI(t, "", "query", "run", "--project", "datatug-demo", "--format", "json", "--query", "customers")
+	require.Equal(t, 0, code, stderr)
+	assert.Contains(t, stdout, "@", "the owner reads the suggested columns")
+	assert.Equal(t, 1, strings.Count(stderr, "warning: this TugQL read is not masked; read-time suggestions mark "), stderr)
+	assert.Contains(t, stderr, "Customer.Email")
+
+	restoreVar(t, &callerLookup)
+	callerLookup = func(name string) (string, bool) {
+		if name == callercontext.HarnessEnv {
+			return "claude-code", true
+		}
+		return "", false
+	}
+	stdout, stderr, code = runCLI(t, "", "query", "run", "--project", "datatug-demo", "--format", "json", "--query", "customers")
+	assert.Equal(t, exitCodeAccessDenied, code, stdout+stderr)
+	assert.NotContains(t, stdout+stderr, "@")
+}
+
+func TestFederatedLabelGuardForAnOwner(t *testing.T) {
+	restoreVar(t, &loadLabels)
+	ctx := context.Background()
+	doc := meaninglabels.NewDocument()
+	loadLabels = func(context.Context, string) (meaninglabels.Document, error) { return doc, nil }
+	var warning strings.Builder
+	guard := federatedLabelGuard("/p", false, &warning)
+	leaf := secureread.FederatedLeaf{Database: "crm", Collection: "Account", Columns: []string{"email", "Id"}, Open: openNothing}
+	require.NoError(t, guard(ctx, leaf))
+	require.NoError(t, guard(ctx, leaf), "a second read")
+	assert.Equal(t, "warning: this TugQL read is not masked; read-time suggestions mark Account.email of source crm sensitive: label them to protect them from agents\n", warning.String(), "warned once")
+	// A stored label refuses an owner too.
+	doc, _, err := meaninglabels.Apply(doc, meaninglabels.Change{Action: meaninglabels.ActionSet, Target: meaninglabels.Target{Source: "crm", Table: "Account", Column: "email"}, Class: meaninglabels.ClassPII, Reason: "test"}, meaninglabels.Actor{ID: "owner"}, projectReadNow())
+	require.NoError(t, err)
+	var protected *secureread.FieldProtectedError
+	require.ErrorAs(t, guard(ctx, leaf), &protected)
+	assert.Contains(t, protected.Message, "crm.Account.email is protected (pii)")
+}
+
+func TestLabelStrictness(t *testing.T) {
+	restoreVar(t, &callerLookup)
+	callerLookup = func(string) (string, bool) { return "", false }
+	assert.False(t, labelStrictness(secureread.Session{DatabaseProfile: secureread.DatabasePolicyFreeReads}))
+	assert.False(t, labelStrictness(secureread.Session{Unrestricted: true}), "a ClickHouse --no-policies session")
+	assert.True(t, labelStrictness(secureread.Session{DatabaseProfile: secureread.DatabasePolicyGoverned}))
+	assert.True(t, labelStrictness(secureread.Session{}), "an unspecified profile settles as policy-governed")
+	callerLookup = func(name string) (string, bool) {
+		if name == callercontext.HarnessEnv {
+			return "codex", true
+		}
+		return "", false
+	}
+	assert.True(t, labelStrictness(secureread.Session{DatabaseProfile: secureread.DatabasePolicyFreeReads}), "an agent")
 }

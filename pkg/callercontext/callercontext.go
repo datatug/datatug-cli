@@ -3,9 +3,11 @@
 // such as policy exception proposals and their audit events can say who
 // proposed or used what.
 //
-// It is attribution only and self-reported: any process can set these
-// variables. It is never used to authorize anything and never sent to
-// telemetry.
+// It is self-reported: any process can set these variables. It never grants
+// authority and is never sent to telemetry. Besides attribution it may only
+// make a read stricter: a detected agent is refused, rather than warned
+// about, columns that read-time suggestions mark sensitive. Hiding the
+// harness drops a caller to the owner's baseline, never above it.
 package callercontext
 
 import (

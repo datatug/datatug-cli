@@ -38,6 +38,10 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	lastChatOptionsPath = func() (string, error) { return filepath.Join(dir, "chat-last.json"), nil }
+	// No test inherits the harness this suite happens to run under: a
+	// detected agent makes label checks stricter, so an agent shell and CI
+	// would disagree. A test that needs a caller stubs callerLookup itself.
+	callerLookup = func(string) (string, bool) { return "", false }
 	code := m.Run()
 	_ = os.RemoveAll(dir)
 	// os.Exit below runs no deferred calls, so both cleanups happen here,

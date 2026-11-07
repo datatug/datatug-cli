@@ -101,10 +101,14 @@ func (e *Executor) StreamFederatedTugQL(ctx context.Context, document []byte, so
 	opened := map[string]dal.DB{}
 	var limitations []Limitation
 	var closes []func()
-	observer, _ := ctx.Value(federatedProgressKey{}).(func(dal.FederatedProgress))
-	reader, err := dal.ExecuteFederatedQueryWithOptions(ctx, query, func(ctx context.Context, database string) (dal.QueryExecutor, error) {
+	closeAll := func() {
+		for i := len(closes) - 1; i >= 0; i-- {
+			closes[i]()
+		}
+	}
+	open := func(ctx context.Context, database string) (dal.DB, error) {
 		if db, ok := opened[database]; ok {
-			return securedLeaf{db: db, session: e.session, variables: variables, limitations: &limitations}, nil
+			return db, nil
 		}
 		url := sourceURLs[database]
 		if url == "" {
@@ -116,12 +120,23 @@ func (e *Executor) StreamFederatedTugQL(ctx context.Context, document []byte, so
 		}
 		opened[database] = db
 		closes = append(closes, closeSource)
+		return db, nil
+	}
+	// Every leaf passes the sensitivity-label guard before any leaf is read.
+	if err := e.guardFederatedColumns(ctx, query, sourceURLs, open, ""); err != nil {
+		closeAll()
+		return nil, err
+	}
+	observer, _ := ctx.Value(federatedProgressKey{}).(func(dal.FederatedProgress))
+	reader, err := dal.ExecuteFederatedQueryWithOptions(ctx, query, func(ctx context.Context, database string) (dal.QueryExecutor, error) {
+		db, err := open(ctx, database)
+		if err != nil {
+			return nil, err
+		}
 		return securedLeaf{db: db, session: e.session, variables: variables, limitations: &limitations}, nil
 	}, dal.FederatedQueryOptions{OnProgress: observer})
 	if err != nil {
-		for i := len(closes) - 1; i >= 0; i-- {
-			closes[i]()
-		}
+		closeAll()
 		return nil, err
 	}
 	return &FederatedStream{Reader: &onceClosingReader{RecordsReader: reader}, Query: query, limitations: &limitations, closes: closes}, nil

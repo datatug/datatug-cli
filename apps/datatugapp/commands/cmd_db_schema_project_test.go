@@ -77,7 +77,11 @@ func TestQueryRunAndCopyOpenADatabaseOfAProjectByReference(t *testing.T) {
 	root.SilenceUsage, root.SilenceErrors = true, true
 	root.SetArgs([]string{"query", "run", "--db", "datatug://shop/shop", "--from", "Customer", "--no-policies", "--format", "json"})
 	require.NoError(t, root.Execute())
-	assert.Contains(t, out.String(), "Ada")
+	// A source of a project is read under its labels: a name is personal data
+	// by read-time suggestion until an owner labels it otherwise.
+	assert.Contains(t, out.String(), `"CustomerId":1`)
+	assert.NotContains(t, out.String(), "Ada")
+	assert.Contains(t, errOut.String(), "masked: Customer.FirstName (pii)")
 	assert.NotContains(t, out.String()+errOut.String(), dbPath)
 
 	root = DatatugCommand()

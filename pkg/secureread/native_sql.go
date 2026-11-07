@@ -117,6 +117,17 @@ func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, 
 	if !e.session.DatabaseProfile.PolicyFreeReads() && !e.session.AllowOpaqueSQL {
 		return Result{}, ErrOpaqueSQLNotGranted
 	}
+	if guard := e.session.NativeSQL; guard != nil {
+		catalogs, err := e.sourceCatalogs(sourceURL)
+		if err != nil {
+			return Result{}, err
+		}
+		for _, catalog := range catalogs {
+			if err := guard(ctx, catalog, sourceURL); err != nil {
+				return Result{}, err
+			}
+		}
+	}
 	ref, err := dbcopy.Parse(sourceURL)
 	if err != nil {
 		return Result{}, err

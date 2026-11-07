@@ -35,7 +35,7 @@ func runSQLQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	if err != nil {
 		return err
 	}
-	sourceURL, err := sqlSourceURL(ctx, o.db)
+	sourceURL, project, err := sqlSourceURL(ctx, o.db)
 	if err != nil {
 		return err
 	}
@@ -50,6 +50,12 @@ func runSQLQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	session := secureread.Session{Policies: loaded, DatabaseProfile: profile, AllowOpaqueSQL: o.allowOpaqueSQL}
 	if o.as != "" || len(o.roles) > 0 || len(o.groups) > 0 {
 		session.Principal = &access.Principal{ID: o.as, Roles: o.roles, Groups: o.groups}
+	}
+	// A source of a project is read under that project's sensitivity labels,
+	// with or without policies: SQL text cannot be masked, so a source with a
+	// protected column refuses it.
+	if project != nil {
+		installProjectLabels(&session, project.dir, map[string][]string{sourceURL: {project.catalog}}, cmd.ErrOrStderr(), false)
 	}
 	stderr := cmd.ErrOrStderr()
 	if session.DatabaseProfile.PolicyFreeReads() && len(session.Policies) == 0 {
@@ -75,7 +81,7 @@ func runSQLQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		return Exit(err.Error()+": SQL text is not read through the row and column rules of access policies; use --allow-opaque-sql with an opaque-query policy grant, or run it with --no-policies", exitCodeUsage)
 	}
 	if err != nil {
-		return savedQueryFailure(err)
+		return savedReadFailure(stderr, o, err)
 	}
 	if !o.quiet {
 		writeSavedQueryLimitations(stderr, result.Limitations)
@@ -106,17 +112,21 @@ func readSQLText(value string, stdin io.Reader) (string, error) {
 }
 
 // sqlSourceURL is the source --db names, as RunNativeSQL takes it: the value as it is, or for a
-// datatug:// reference the source of the project it names.
-func sqlSourceURL(ctx context.Context, db string) (string, error) {
+// datatug:// reference the source of the project it names, and that project source.
+func sqlSourceURL(ctx context.Context, db string) (string, *projectSource, error) {
 	if !dbcopy.IsDatatugRef(db) {
 		if _, err := dbcopy.Parse(db); err != nil {
-			return "", Exit(err.Error(), exitCodeUsage)
+			return "", nil, Exit(err.Error(), exitCodeUsage)
 		}
-		return db, nil
+		return db, nil, nil
 	}
 	reference, err := dbcopy.ParseDatatugRef(db)
 	if err != nil {
-		return "", Exit(err.Error(), exitCodeUsage)
+		return "", nil, Exit(err.Error(), exitCodeUsage)
 	}
-	return datatugRefSource(ctx, reference)
+	source, dir, err := datatugRefSource(ctx, reference)
+	if err != nil {
+		return "", nil, err
+	}
+	return source, &projectSource{dir: dir, catalog: reference.DB}, nil
 }

@@ -75,7 +75,6 @@ func TestOrdinaryDiscoveryHTTPStrictSelectedScopeAndProjection(t *testing.T) {
 }
 
 func TestOrdinaryDiscoveryRoutesKeepTheRequestGuard(t *testing.T) {
-	quietLog(t)
 	found := map[string]bool{}
 	for _, route := range recordRoutes(true, Capabilities{}) {
 		if route.path != "/datatug/meanings/discovery" && route.path != "/datatug/dbservers/discovery" {

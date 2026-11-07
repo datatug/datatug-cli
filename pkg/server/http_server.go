@@ -259,8 +259,6 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 			return context.Background()
 		},
 	}
-	log.Printf("Serving on: http://%v:%v", agentHost, agentPort)
-
 	if idle != nil {
 		done := make(chan struct{})
 		defer close(done)

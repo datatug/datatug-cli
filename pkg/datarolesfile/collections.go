@@ -18,7 +18,7 @@ func Collections(schema *api.CatalogSchema, foreignKeys []datatug.TableForeignKe
 	unique := map[string]map[string]bool{}
 	for _, table := range indexes {
 		for _, index := range table.Indexes {
-			if index == nil || !(index.IsUnique || index.IsUniqueConstraint || index.IsPrimaryKey) || len(index.Columns) != 1 {
+			if index == nil || !index.IsUnique && !index.IsUniqueConstraint && !index.IsPrimaryKey || len(index.Columns) != 1 {
 				continue
 			}
 			if unique[table.Table.Name()] == nil {

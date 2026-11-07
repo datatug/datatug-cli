@@ -278,7 +278,8 @@ func TestOrderReconcileRows(t *testing.T) {
 	}
 	rows, problem := orderReconcileRows(apicontract.Recordset{Columns: columns}, []string{"missing"})
 	require.Empty(t, problem)
-	for range rows {
+	for _, err := range rows {
+		require.NoError(t, err)
 		t.Fatal("a missing key column yields no rows")
 	}
 	_, problem = orderReconcileRows(apicontract.Recordset{Columns: columns, Rows: [][]apicontract.TypedValue{row(apicontract.NewNullValue())}}, []string{"code"})
@@ -288,7 +289,8 @@ func TestOrderReconcileRows(t *testing.T) {
 	rows, problem = orderReconcileRows(apicontract.Recordset{Columns: columns, Rows: [][]apicontract.TypedValue{row(apicontract.NewStringValue("B")), row(apicontract.NewStringValue("A"))}}, []string{"code"})
 	require.Empty(t, problem)
 	var keys []string
-	for r := range rows {
+	for r, err := range rows {
+		require.NoError(t, err)
 		keys = append(keys, r[0].Str)
 		break
 	}

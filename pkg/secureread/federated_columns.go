@@ -20,9 +20,9 @@ type FederatedLeaf struct {
 	Collection string
 	// Scheme is the dbcopy scheme of the database's source.
 	Scheme string
-	// DB is the opened source, for describing the collection. No row has
-	// been read from it yet.
-	DB dal.DB
+	// Open opens the leaf's source (once per read), for a guard that must
+	// describe the collection. A guard that needs no schema never opens it.
+	Open func(context.Context) (dal.DB, error)
 	// Columns lists, sorted, every column of this leaf the query projects or
 	// names in WHERE, ON, ORDER BY, GROUP BY, HAVING, an aggregate or a scan
 	// order. A reference whose source cannot be told is listed on every leaf.
@@ -37,6 +37,24 @@ type FederatedLeaf struct {
 // columns. StreamFederatedTugQL calls it once per leaf, after opening the
 // leaf's source and before any leaf is read; an error refuses the read.
 type FederatedColumnGuard func(ctx context.Context, leaf FederatedLeaf) error
+
+// NativeSQLGuard decides whether native SQL text may run against a source,
+// named by its project catalog id. SQL text cannot be inspected, so a guard
+// can only judge the source as a whole.
+type NativeSQLGuard func(ctx context.Context, catalog, sourceURL string) error
+
+// errUnknownCatalog refuses a guarded single-source read of a source the
+// session cannot name: its labels cannot be found, so nothing is checked.
+var errUnknownCatalog = &FieldProtectedError{Message: "the source is not one of the project's catalogs, so its sensitivity labels cannot be checked and the read is refused"}
+
+// sourceCatalog names a guarded read's source by its project catalog id.
+func (e *Executor) sourceCatalog(sourceURL string) (string, error) {
+	catalog, ok := e.session.SourceCatalogs[sourceURL]
+	if !ok {
+		return "", errUnknownCatalog
+	}
+	return catalog, nil
+}
 
 // FieldProtectedError is a FIELD_PROTECTED refusal: the read would touch a
 // column a sensitivity label protects, or one the check cannot inspect.
@@ -54,11 +72,10 @@ var errNoFederatedGuard = &FieldProtectedError{Message: "a policy-governed feder
 //
 // A session without a guard is refused when it is policy-governed: such a
 // session reads on behalf of a principal that labels exist to restrict, and
-// "no guard" must never mean "unguarded". A policy-free session (no policies,
-// the local owner, tests) has nothing restricting it and no project labels to
-// apply, so it keeps reading unchecked. Every project-scoped caller (`query run
-// --project --query`) installs a guard built from the project's labels whatever
-// its profile.
+// "no guard" must never mean "unguarded". A policy-free session with no guard
+// (tests, tools with no project) keeps reading unchecked. Every project-scoped
+// caller (`query run --project --query`, `chat`) installs a guard built from
+// the project's labels for every principal, whatever its profile.
 //
 // database, when set, names every leaf's database: a single-source read's
 // collections carry no database name of their own.
@@ -75,17 +92,17 @@ func (e *Executor) guardFederatedColumns(ctx context.Context, query dal.Structur
 		if database != "" {
 			leaf.Database = database
 		}
-		db, err := open(ctx, leaf.Database)
-		if err != nil {
-			return err
-		}
+		name := leaf.Database
 		// A source that refuses to open says so before the label refusal.
 		if guard == nil {
+			if _, err := open(ctx, name); err != nil {
+				return err
+			}
 			return errNoFederatedGuard
 		}
-		// The source parsed when the read began; open found it configured.
-		ref, _ := dbcopy.Parse(sourceURLs[leaf.Database])
-		leaf.DB, leaf.Scheme = db, ref.Scheme
+		ref, _ := dbcopy.Parse(sourceURLs[name]) // a missing source has no scheme
+		leaf.Scheme = ref.Scheme
+		leaf.Open = func(ctx context.Context) (dal.DB, error) { return open(ctx, name) }
 		if err := guard(ctx, leaf); err != nil {
 			return err
 		}
@@ -301,7 +318,7 @@ func (s *leafScope) group(g dal.GroupCondition) error {
 // read before it runs: every collection of the query is a leaf of database
 // (the source's project catalog id) at sourceURL, checked exactly as a leaf of
 // a federated read is, and with the same rule for a missing guard. RunTugQL
-// itself knows no catalog id, so a project-scoped caller calls this first.
+// calls it whenever the session carries a column guard.
 func (e *Executor) GuardTugQLColumns(ctx context.Context, document []byte, database, sourceURL string) error {
 	if e.session.FederatedColumns == nil && e.session.DatabaseProfile.PolicyFreeReads() {
 		return nil

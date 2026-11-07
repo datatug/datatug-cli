@@ -43,13 +43,19 @@ func federatedGuardFixture(t *testing.T) map[string]string {
 type labelGuard struct {
 	labelled map[string]bool
 	seen     []FederatedLeaf
+	dbs      []dal.DB
 }
 
-func (g *labelGuard) check(_ context.Context, leaf FederatedLeaf) error {
-	if leaf.DB == nil || leaf.Scheme != "sqlite" {
-		return errors.New("the guard was not given the opened source")
+func (g *labelGuard) check(ctx context.Context, leaf FederatedLeaf) error {
+	db, err := leaf.Open(ctx)
+	if err != nil {
+		return err
+	}
+	if leaf.Scheme != "sqlite" {
+		return errors.New("the guard was not given the source's scheme")
 	}
 	g.seen = append(g.seen, leaf)
+	g.dbs = append(g.dbs, db)
 	for key := range g.labelled {
 		prefix := leaf.Database + "." + leaf.Collection + "."
 		if !strings.HasPrefix(key, prefix) {
@@ -175,13 +181,18 @@ func TestFederatedGuardErrorPropagatesBeforeAnyLeafRead(t *testing.T) {
 	if !errors.Is(err, sentinel) || calls != 1 || *events != 0 {
 		t.Fatalf("err=%v calls=%d events=%d", err, calls, *events)
 	}
-	// A leaf whose source cannot be opened refuses before the guard sees it.
+	// A leaf whose source cannot be opened fails the guard that opens it.
 	delete(urls, "countries")
-	calls = 0
-	_, err = guardedExecutor(func(context.Context, FederatedLeaf) error { calls++; return nil }).
+	guard := &labelGuard{}
+	_, err = guardedExecutor(guard.check).StreamFederatedTugQL(context.Background(), []byte(guardJoinTugQL), urls, nil)
+	if err == nil || !strings.Contains(err.Error(), `database "countries" is not configured`) || len(guard.seen) != 1 {
+		t.Fatalf("err=%v seen=%d", err, len(guard.seen))
+	}
+	// A guard that opens nothing leaves the missing source to the read.
+	_, err = guardedExecutor(func(context.Context, FederatedLeaf) error { return nil }).
 		StreamFederatedTugQL(context.Background(), []byte(guardJoinTugQL), urls, nil)
-	if err == nil || !strings.Contains(err.Error(), `database "countries" is not configured`) || calls != 1 {
-		t.Fatalf("err=%v calls=%d", err, calls)
+	if err == nil || !strings.Contains(err.Error(), `database "countries" is not configured`) {
+		t.Fatalf("err=%v", err)
 	}
 }
 
@@ -339,7 +350,7 @@ columns: [{field: amount, source: b}]
 	if err = guardedExecutor(guard.check).GuardTugQLColumns(ctx, []byte(selfJoin), "orders", urls["orders"]); err != nil {
 		t.Fatal(err)
 	}
-	if len(guard.seen) != 2 || guard.seen[0].Database != "orders" || guard.seen[0].DB != guard.seen[1].DB {
+	if len(guard.seen) != 2 || guard.seen[0].Database != "orders" || g0(guard) != g1(guard) {
 		t.Fatalf("leaves: %+v", guard.seen)
 	}
 	// A policy-free session without a guard is unchecked, a governed one refused.
@@ -355,5 +366,43 @@ columns: [{field: amount, source: b}]
 	}
 	if err = governed.GuardTugQLColumns(ctx, []byte(selfJoin), "orders", "sqlite://"+filepath.Join(t.TempDir(), "missing.sqlite")); err == nil || !strings.Contains(err.Error(), `open database "orders"`) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func g0(g *labelGuard) dal.DB { return g.dbs[0] }
+func g1(g *labelGuard) dal.DB { return g.dbs[1] }
+
+func TestRunTugQLAndNativeSQLUseTheSessionGuards(t *testing.T) {
+	urls := federatedGuardFixture(t)
+	ctx := context.Background()
+	doc := []byte("from: {name: Country}\ncolumns: [{field: population}]\n")
+	guard := &labelGuard{labelled: map[string]bool{"countries.Country.population": true}}
+	session := Session{Unrestricted: true, FederatedColumns: guard.check, SourceCatalogs: map[string]string{urls["countries"]: "countries"}}
+	var protected *FieldProtectedError
+	if _, err := NewExecutor(session).RunTugQL(ctx, urls["countries"], doc, nil); !errors.As(err, &protected) || protected.Message != "protected countries.Country.population" {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := NewExecutor(session).RunTugQL(ctx, urls["orders"], doc, nil); !errors.Is(err, errUnknownCatalog) {
+		t.Fatalf("err = %v", err)
+	}
+	result, err := NewExecutor(session).RunTugQL(ctx, urls["countries"], []byte("from: {name: Country}\ncolumns: [{field: name}]\n"), nil)
+	if err != nil || len(result.Rows) != 2 {
+		t.Fatalf("rows=%+v err=%v", result.Rows, err)
+	}
+	sentinel := errors.New("labelled source")
+	var checked string
+	session.NativeSQL = func(_ context.Context, catalog, sourceURL string) error {
+		checked = catalog + " " + sourceURL
+		return sentinel
+	}
+	if _, err := NewExecutor(session).RunNativeSQL(ctx, urls["countries"], "SELECT name FROM Country"); !errors.Is(err, sentinel) || checked != "countries "+urls["countries"] {
+		t.Fatalf("err=%v checked=%q", err, checked)
+	}
+	if _, err := NewExecutor(session).RunNativeSQL(ctx, urls["orders"], "SELECT id FROM Invoice"); !errors.Is(err, errUnknownCatalog) {
+		t.Fatalf("err = %v", err)
+	}
+	session.NativeSQL = func(context.Context, string, string) error { return nil }
+	if result, err = NewExecutor(session).RunNativeSQL(ctx, urls["countries"], "SELECT name FROM Country"); err != nil || len(result.Rows) != 2 {
+		t.Fatalf("rows=%+v err=%v", result.Rows, err)
 	}
 }

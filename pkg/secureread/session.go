@@ -47,7 +47,14 @@ type Session struct {
 	// FederatedColumns checks every leaf of a federated TugQL read against the
 	// project's sensitivity labels before any row is read; see
 	// guardFederatedColumns for what a nil guard means.
+	// A non-nil guard also checks every single-source RunTugQL read.
 	FederatedColumns FederatedColumnGuard
+	// NativeSQL, when set, checks the source of every RunNativeSQL read.
+	NativeSQL NativeSQLGuard
+	// SourceCatalogs names each project source URL by its catalog id, the
+	// Source of a label target. A guarded single-source read of a source not
+	// listed here is refused.
+	SourceCatalogs   map[string]string
 	configurationErr error
 }
 

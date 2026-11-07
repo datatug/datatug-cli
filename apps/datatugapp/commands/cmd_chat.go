@@ -254,6 +254,9 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	if err != nil {
 		return "", Exit("chat: "+strings.TrimPrefix(err.Error(), "serve: "), exitCodeUsage)
 	}
+	// Saved queries and the model's own TugQL read through this session, so
+	// it checks the project's sensitivity labels, for every principal.
+	installProjectLabels(&session, projectDir, chatSourceCatalogs(sourceURLs, sourceURL, database))
 	executor := secureread.NewExecutor(session)
 	var conversation chat.ContextualConversation
 	var foreignKeys []narrowing.Link // set once the source's foreign keys are read
@@ -717,4 +720,15 @@ type providerUnavailableConversation struct{}
 
 func (providerUnavailableConversation) AskWithContext(context.Context, string, string) (chat.Turn, error) {
 	return chat.Turn{Text: "Configure an AI provider under Settings → AI for chat. Use Explorer Open data or New query to work with your project locally. No query was executed."}, nil
+}
+
+// chatSourceCatalogs names every project source URL of a chat by its catalog
+// id: the explorer's sources and the chat's own database.
+func chatSourceCatalogs(sourceURLs map[string]string, sourceURL, database string) map[string]string {
+	catalogs := map[string]string{}
+	for id, url := range sourceURLs {
+		catalogs[url] = id
+	}
+	catalogs[sourceURL] = database
+	return catalogs
 }

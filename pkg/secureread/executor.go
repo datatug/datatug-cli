@@ -111,6 +111,15 @@ func (e *Executor) RunTugQL(ctx context.Context, sourceURL string, tugqlDoc []by
 	if err != nil {
 		return Result{}, fmt.Errorf("secureread: parse TugQL: %w", err)
 	}
+	if e.session.FederatedColumns != nil {
+		catalog, err := e.sourceCatalog(sourceURL)
+		if err != nil {
+			return Result{}, err
+		}
+		if err := e.GuardTugQLColumns(ctx, tugqlDoc, catalog, sourceURL); err != nil {
+			return Result{}, err
+		}
+	}
 	return e.RunStructured(ctx, sourceURL, query, variables)
 }
 

@@ -104,14 +104,14 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		_, _ = fmt.Fprintln(stderr, "access: running without access policies")
 	}
 	session.AllowOpaqueSQL = o.allowOpaqueSQL
-	// TugQL reads cannot mask, so for a policy-governed principal every leaf
-	// of a federated or single-source one is checked against the project's
-	// sensitivity labels before any row is read. A policy-free session (a
-	// project with no policies) restricts nothing, ad hoc raw reads included,
-	// so it is not checked; secureread refuses a governed read with no guard.
-	if !session.DatabaseProfile.PolicyFreeReads() {
-		session.FederatedColumns = federatedLabelGuard(projectDir)
+	// Neither TugQL nor native SQL reads can mask, so every one of them is
+	// checked against the project's sensitivity labels before any row is
+	// read, for every principal.
+	catalogs := map[string]string{}
+	if source.URL != "" {
+		catalogs[source.URL] = source.Catalog
 	}
+	installProjectLabels(&session, projectDir, catalogs)
 	executor := secureread.NewExecutor(session)
 	// Lookup enrichment consumes keyed map rows. Refuse before the first leaf
 	// query rather than manufacturing keys for anonymous ClickHouse results.
@@ -136,21 +136,16 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	var result secureread.Result
 	switch queryDef.Type {
 	case datatug.QueryTypeHTTP:
+		// No label check: a label targets a catalog of the environment
+		// (Target.Source is a catalog id), and an HTTP query reads the
+		// project's own HTTP endpoints, which are no catalog, so no label can
+		// name what it returns.
 		result, err = runHTTPSavedQuery(ctx, executor, projectDir, queryDef, variables)
 	case datatug.QueryTypeSQL:
-		// Native SQL cannot be inspected, so it cannot be masked: a principal
-		// granted opaque SQL is refused it on a source with protected columns.
-		if session.AllowOpaqueSQL && !session.DatabaseProfile.PolicyFreeReads() {
-			err = refuseLabelledNativeSQL(ctx, projectDir, source)
-		}
-		if err == nil {
-			result, err = runSQLSavedQueryAtSource(ctx, executor, source.URL, queryDef, variables)
-		}
+		result, err = runSQLSavedQueryAtSource(ctx, executor, source.URL, queryDef, variables)
 	case datatug.QueryTypeTugQL:
 		if source.URL != "" {
-			if err = guardSavedTugQL(ctx, executor, source, queryDef); err == nil {
-				result, err = runTugQLSavedQueryAtSource(ctx, executor, source.URL, queryDef, variables)
-			}
+			result, err = runTugQLSavedQueryAtSource(ctx, executor, source.URL, queryDef, variables)
 		} else {
 			result, err = runTugQLSavedQuery(ctx, executor, projStore, projectDir, o.env, queryDef, variables)
 		}

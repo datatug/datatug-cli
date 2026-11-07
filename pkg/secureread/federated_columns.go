@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 
 	"github.com/dal-go/dalgo/dal"
@@ -52,16 +53,36 @@ var errUninspectable = &FieldProtectedError{Message: "the query is not structure
 
 // sourceCatalogs names a guarded read's source by every project catalog id
 // that resolves to it; each one's labels apply (a shared URL fails closed).
-// An HTTP(S) source is the project's own HTTP endpoints, which are no catalog,
-// so no label can target it and it has nothing to check.
+// An HTTP source is named by its source id (its saved HTTP query's id), as a
+// label targets it; one the session cannot name is refused like any other.
 func (e *Executor) sourceCatalogs(sourceURL string) ([]string, error) {
 	if catalogs := e.session.SourceCatalogs[sourceURL]; len(catalogs) > 0 {
 		return catalogs, nil
 	}
-	if ref, err := dbcopy.Parse(sourceURL); err == nil && (ref.Scheme == "http" || ref.Scheme == "https") {
-		return nil, nil
-	}
 	return nil, errUnknownCatalog
+}
+
+// WithCatalog returns an Executor of the same session that also names
+// sourceURL by catalog: an HTTP saved query reads the project's HTTP endpoints
+// at one URL, and is named by its own id, which its labels target.
+func (e *Executor) WithCatalog(sourceURL, catalog string) *Executor {
+	session := e.session
+	session.SourceCatalogs = make(map[string][]string, len(e.session.SourceCatalogs)+1)
+	for url, catalogs := range e.session.SourceCatalogs {
+		session.SourceCatalogs[url] = catalogs
+	}
+	session.SourceCatalogs[sourceURL] = append(slices.Clone(e.session.SourceCatalogs[sourceURL]), catalog)
+	return &Executor{session: session}
+}
+
+// WithLabels returns an Executor of the same session whose every read checks
+// the given sensitivity-label guards first (see Session.FederatedColumns,
+// Session.NativeSQL and Session.SourceCatalogs). A server builds one per
+// request, for the one project and principal the request reads as.
+func (e *Executor) WithLabels(columns FederatedColumnGuard, native NativeSQLGuard, catalogs map[string][]string) *Executor {
+	session := e.session
+	session.FederatedColumns, session.NativeSQL, session.SourceCatalogs = columns, native, catalogs
+	return &Executor{session: session}
 }
 
 // guardSource checks a single-source read against the session's column guard

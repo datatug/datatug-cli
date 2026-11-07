@@ -226,3 +226,53 @@ func TestCopyRefusedFormat(t *testing.T) {
 	assert.True(t, strings.HasPrefix(copyRefusedFormat, "access denied: FIELD_PROTECTED: "))
 	assert.Equal(t, exitCodeAccessDenied, copyRefusedCode)
 }
+
+// The demo's chinook source stores labels on Customer and Employee only. A
+// person may copy a table that read-time suggestions alone protect (Invoice:
+// its billing address), with a warning; an agent may not. A refused --json
+// copy names the SQLite engine of each end, and a table filter that is a
+// usage error exits 2, not 5, even on a labelled source.
+func TestDBCopyLabelledSourceFollowUps(t *testing.T) {
+	demoForTest(t)
+	const ref = "datatug://datatug-demo/chinook"
+	dir := t.TempDir()
+	prev := callerLookup
+	t.Cleanup(func() { callerLookup = prev })
+	callerLookup = func(string) (string, bool) { return "", false }
+
+	sqliteFile := filepath.Join(dir, "copy.sqlite")
+	stdout, _, code := runCLI(t, "", "db", "copy", "--from", ref, "--to", "sqlite://"+sqliteFile, "--json")
+	require.Equal(t, exitCodeAccessDenied, code)
+	var report struct {
+		From struct {
+			Engine string `json:"engine"`
+		} `json:"from"`
+		To struct {
+			Engine string `json:"engine"`
+		} `json:"to"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &report), stdout)
+	assert.Equal(t, "sqlite", report.From.Engine)
+	assert.Equal(t, "sqlite", report.To.Engine, "the target's own engine, not ingitdb")
+
+	_, stderr, code := runCLI(t, "", "db", "copy", "--from", ref, "--to", "sqlite://"+sqliteFile, "--include", "Genre", "--exclude", "Customer")
+	assert.Equal(t, exitCodeUsage, code, stderr)
+	assert.NotContains(t, stderr, meaninglabels.CodeFieldProtected)
+	stdout, _, code = runCLI(t, "", "db", "copy", "--from", ref, "--to", "sqlite://"+sqliteFile, "--include", "Genre", "--exclude", "Customer", "--json")
+	assert.Equal(t, exitCodeUsage, code)
+	require.NoError(t, json.Unmarshal([]byte(stdout), &report), stdout)
+	assert.Equal(t, "sqlite", report.To.Engine)
+
+	stdout, stderr, code = runCLI(t, "", "db", "copy", "--from", ref, "--to", "sqlite://"+sqliteFile, "--include", "Invoice")
+	require.Equal(t, 0, code, stdout+stderr)
+	assert.Contains(t, stderr, "warning: this copy is not masked")
+	assert.Contains(t, stderr, "Invoice.BillingAddress")
+
+	callerLookup = func(name string) (string, bool) { return "claude-code", name == callercontext.HarnessEnv }
+	agentFile := filepath.Join(dir, "agent.sqlite")
+	_, stderr, code = runCLI(t, "", "db", "copy", "--from", ref, "--to", "sqlite://"+agentFile, "--include", "Invoice")
+	assert.Equal(t, exitCodeAccessDenied, code, stderr)
+	assert.Contains(t, stderr, meaninglabels.CodeFieldProtected)
+	_, err := os.Stat(agentFile)
+	assert.True(t, os.IsNotExist(err))
+}

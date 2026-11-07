@@ -22,6 +22,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/meaninglabels"
 )
 
 // runQueryHandler is POST exec/run_query, rewritten (Task 12 / S64 item 3)
@@ -251,6 +252,7 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 	var collection string
 
 	agent := agentFromContext(ctx)
+	executor = labelledRunQueryExecutor(ctx, executor, projStore, projDir, req.Environment, resolved)
 	switch {
 	case req.TugQL != "":
 		profile = apicontract.ExecutionProfileProtected
@@ -306,6 +308,17 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 		}
 		if errors.Is(err, secureread.ErrOpaqueSQLNotGranted) {
 			return apicontract.Result{}, newUnsupportedProtectedExecution(err.Error())
+		}
+		// A sensitivity-label refusal (labelledRunQueryExecutor): native SQL,
+		// which cannot be inspected, answers as raw SQL does on a labelled
+		// source (agentSavedSQLRefusal).
+		var protected *secureread.FieldProtectedError
+		if errors.As(err, &protected) {
+			code := meaninglabels.CodeFieldProtected
+			if profile == apicontract.ExecutionProfileOpaquePrivileged {
+				code = meaninglabels.CodeRawRefused
+			}
+			return apicontract.Result{}, newContractError(apicontract.ErrorCode(code), protected.Message, "")
 		}
 		if errors.Is(err, secureread.ErrAccessDenied) {
 			ce := contractErrAccessDenied(err.Error())

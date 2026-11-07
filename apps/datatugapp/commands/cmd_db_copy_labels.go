@@ -9,6 +9,7 @@ import (
 	"github.com/dal-go/dalgo/dal"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/dbcopy/filter"
+	"github.com/datatug/datatug-cli/pkg/labelguard"
 	"github.com/datatug/datatug-core/pkg/meaninglabels"
 	"github.com/spf13/cobra"
 )
@@ -51,7 +52,7 @@ func copyLabelRefusal(cmd *cobra.Command, src dbcopy.BackendRef, project *projec
 	if err != nil {
 		return errLabelsUnreadable.Message
 	}
-	labelled := sourceHasProtectedLabel(doc, project.catalog)
+	labelled := labelguard.SourceHasProtectedLabel(doc, project.catalog)
 	strict := callerIsAgent()
 	db, err := openCopySource(ctx, src, schema)
 	if err != nil {
@@ -83,8 +84,7 @@ func copyLabelRefusal(cmd *cobra.Command, src dbcopy.BackendRef, project *projec
 		suggested = append(suggested, names...)
 	}
 	sort.Strings(suggested)
-	warner := &suggestionWarner{out: cmd.ErrOrStderr(), warned: map[string]bool{}}
-	warner.warn("this copy", project.catalog, suggested)
+	labelguard.NewWarner(cmd.ErrOrStderr()).Warn("this copy", project.catalog, suggested)
 	return ""
 }
 

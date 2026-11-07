@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dal-go/dalgo/tugql"
@@ -102,13 +103,14 @@ func TestExecRunQueryRunsASavedQueryAcrossTwoDatabases(t *testing.T) {
 	}
 }
 
-// Without a label guard, a policy-governed federated read is refused.
+// Without a label guard, a federated read is refused whoever reads: its
+// leaves' labels cannot be checked.
 func TestExecRunQueryFederatedReadWithoutALabelGuardIsRefused(t *testing.T) {
 	restoreFederatedLabelGuard(t)
 	federatedLabelGuardFor = nil
 	var ce *contractError
-	if _, err := computeRunQuery(context.Background(), federatedRunRequest(t, "support-reps")); !errors.As(err, &ce) || ce.Code != meaninglabels.CodeFieldProtected {
-		t.Fatalf("a policy-governed federated read with no label guard: %v", err)
+	if _, err := computeRunQuery(context.Background(), federatedRunRequest(t, "support-reps")); !errors.As(err, &ce) || ce.Code != meaninglabels.CodeFieldProtected || !strings.Contains(ce.Message, "no sensitivity-label guard") {
+		t.Fatalf("a federated read with no label guard: %v", err)
 	}
 }
 
@@ -241,11 +243,17 @@ func TestExecRunQueryAgentFederatedReadDeniedByPolicy(t *testing.T) {
 	}
 }
 
-func TestFederatedExecutorKeepsTheSessionWithoutAGuard(t *testing.T) {
+// A process that installed no label guard refuses every leaf of a federated
+// read, even for a policy-free session.
+func TestFederatedExecutorRefusesEveryLeafWithoutAGuard(t *testing.T) {
 	restoreFederatedLabelGuard(t)
 	federatedLabelGuardFor = nil
 	executor := secureread.NewExecutor(secureread.Session{Unrestricted: true})
-	if federatedExecutor(executor, nil) != executor {
-		t.Fatal("no guard to install, yet the executor was replaced")
+	if federatedExecutor(executor, nil) == executor {
+		t.Fatal("the executor kept no guard")
+	}
+	var protected *secureread.FieldProtectedError
+	if err := refuseUnguardedLeaf(context.Background(), secureread.FederatedLeaf{}); !errors.As(err, &protected) {
+		t.Fatalf("err = %v", err)
 	}
 }

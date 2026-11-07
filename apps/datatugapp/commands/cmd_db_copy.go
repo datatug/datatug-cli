@@ -147,20 +147,26 @@ func dbCopyAction(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	// A project source keeps its sensitivity labels: checked after the arguments, before anything is opened for writing.
+	// A project source keeps its sensitivity labels: checked after the arguments (the table
+	// filter too, a usage error), before anything is opened for writing.
+	fail := nativeFailer(cmd, "db copy", copyEndpoints(srcRef, tgtRef, newInGitDB))
+	directives, err := buildDirectivesFromFlags(cmd)
+	if err != nil {
+		return fail(2, "%v", err)
+	}
 	if reason := copyLabelRefusal(cmd, srcRef, srcProject, fromSchema); reason != "" {
-		return nativeFailer(cmd, "db copy", inGitDBEndpoints(srcRef, tgtRef))(copyRefusedCode, copyRefusedFormat, reason)
+		return fail(copyRefusedCode, copyRefusedFormat, reason)
 	}
 
 	// An ingitdb:// destination that does not exist yet is a new native inGitDB project: the engine of
 	// `datatug db export` (staged, then published whole). One that exists is copied into below.
 	if newInGitDB {
-		return dbCopyToNewInGitDB(cmd, fromURL, srcRef, tgtRef, fromSchema, recordsFormat)
+		return dbCopyToNewInGitDB(cmd, fromURL, srcRef, tgtRef, fromSchema, recordsFormat, directives)
 	}
 
 	// SQLite <-> PostgreSQL keeps keys, indexes, constraints and exact values: its own engine.
 	if faithfulPair {
-		return dbCopyFaithful(cmd, srcRef, tgtRef, fromSchema, overwrite)
+		return dbCopyFaithful(cmd, srcRef, tgtRef, fromSchema, overwrite, directives)
 	}
 
 	// Open both backends (REQ:exit-codes — 4 for connection failures). The source is opened as a
@@ -174,11 +180,6 @@ func dbCopyAction(cmd *cobra.Command, _ []string) error {
 	// release the source on every path from here, including the BigQuery
 	// destination, which opens no target.
 	defer dbcopy.SourceCloser(src)()
-
-	directives, err := buildDirectivesFromFlags(cmd)
-	if err != nil {
-		return Exit(err.Error(), 2)
-	}
 
 	// Run the copy.
 	parallelStreams, _ := cmd.Flags().GetInt("parallel-streams")

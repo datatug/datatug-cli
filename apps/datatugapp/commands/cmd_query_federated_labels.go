@@ -5,12 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sort"
 	"strings"
-	"sync"
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/datatug/datatug-cli/pkg/labelguard"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/meaninglabels"
 )
@@ -35,20 +34,6 @@ func installProjectLabels(session *secureread.Session, projectDir string, catalo
 	session.SourceCatalogs = catalogs
 }
 
-// storedLabelCovers reports whether a stored protected label (owner or
-// proposed, on the column or its whole table) covers column. A column's
-// effective origin can read "suggested" when a tied suggestion replaced such a
-// label, so whether a label is stored is decided here, from the document.
-func storedLabelCovers(doc meaninglabels.Document, source, table, column string) bool {
-	for _, l := range doc.Labels {
-		if l.Class.Protected() && strings.EqualFold(l.Target.Source, source) && meaninglabels.TableMatches(l.Target.Table, table) &&
-			(l.Target.Column == "" || strings.EqualFold(l.Target.Column, column)) {
-			return true
-		}
-	}
-	return false
-}
-
 // labelStrictness reports whether read-time suggestions alone refuse a read:
 // for an agent (a detected AI harness) or a policy-governed session. The
 // harness signal is self-reported, so it only ever makes a read stricter.
@@ -59,42 +44,8 @@ func labelStrictness(session secureread.Session) bool {
 	return callerIsAgent() || !normalized.DatabaseProfile.PolicyFreeReads()
 }
 
-// suggestionWarner writes one warning per suggested column, however many
-// reads (chat) or leaves name it.
-type suggestionWarner struct {
-	mu     sync.Mutex
-	out    io.Writer
-	warned map[string]bool
-}
-
-func (w *suggestionWarner) warn(what, source string, columns []string) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	var fresh []string
-	for _, column := range columns {
-		if !w.warned[source+"."+column] {
-			w.warned[source+"."+column] = true
-			fresh = append(fresh, column)
-		}
-	}
-	if len(fresh) > 0 {
-		_, _ = fmt.Fprintf(w.out, "warning: %s is not masked; read-time suggestions mark %s of source %s sensitive: label them to protect them from agents\n", what, strings.Join(fresh, ", "), source)
-	}
-}
-
 // errLabelsUnreadable refuses a read whose project labels cannot be read.
 var errLabelsUnreadable = &secureread.FieldProtectedError{Message: "the project's sensitivity labels (datatug-labels.json) cannot be read, so the read is refused"}
-
-// sourceHasProtectedLabel reports whether any protected label (owner or
-// proposed) is stored for source.
-func sourceHasProtectedLabel(doc meaninglabels.Document, source string) bool {
-	for _, l := range doc.Labels {
-		if l.Class.Protected() && strings.EqualFold(l.Target.Source, source) {
-			return true
-		}
-	}
-	return false
-}
 
 // federatedLabelGuard is the sensitivity-label check of every TugQL read of a
 // project, federated or single-source. A TugQL read cannot mask yet, so a leaf
@@ -113,13 +64,13 @@ func sourceHasProtectedLabel(doc meaninglabels.Document, source string) bool {
 // A column protected only by a read-time suggestion refuses a strict
 // principal; anyone else reads it, and warn names it once.
 func federatedLabelGuard(projectDir string, strict bool, warn io.Writer) secureread.FederatedColumnGuard {
-	warner := &suggestionWarner{out: warn, warned: map[string]bool{}}
+	warner := labelguard.NewWarner(warn)
 	return func(ctx context.Context, leaf secureread.FederatedLeaf) error {
 		doc, err := loadLabels(ctx, projectDir)
 		if err != nil {
 			return errLabelsUnreadable
 		}
-		labelled := sourceHasProtectedLabel(doc, leaf.Database)
+		labelled := labelguard.SourceHasProtectedLabel(doc, leaf.Database)
 		object := &projectRead{table: leaf.Collection, backend: dbcopy.BackendRef{Scheme: leaf.Scheme}}
 		var db dal.DB
 		openErr := errNotOpened
@@ -133,10 +84,8 @@ func federatedLabelGuard(projectDir string, strict bool, warn io.Writer) securer
 		}
 		names := leaf.Columns
 		if leaf.AllColumns {
-			for _, l := range doc.Labels {
-				if l.Class.Protected() && strings.EqualFold(l.Target.Source, leaf.Database) && meaninglabels.TableMatches(l.Target.Table, leaf.Collection) {
-					return federatedProtected(leaf, meaninglabels.ColumnLabel{Column: l.Target.Column, Class: l.Class})
-				}
+			if l, ok := labelguard.StoredTableLabel(doc, leaf.Database, leaf.Collection); ok {
+				return federatedProtected(leaf, l)
 			}
 			var columns []string
 			ok := false
@@ -148,18 +97,11 @@ func federatedLabelGuard(projectDir string, strict bool, warn io.Writer) securer
 			}
 			names = append(names, columns...)
 		}
-		var suggested []string
-		for _, l := range meaninglabels.EffectiveObject(doc, leaf.Database, leaf.Collection, object.view, labelColumnsOf(names)) {
-			switch {
-			case !l.Protected():
-			case strict || l.Origin != meaninglabels.FromSuggested || storedLabelCovers(doc, leaf.Database, leaf.Collection, l.Column):
-				return federatedProtected(leaf, l)
-			default:
-				suggested = append(suggested, leaf.Collection+"."+l.Column)
-			}
+		refused, suggested := labelguard.CheckColumns(doc, leaf.Database, leaf.Collection, object.view, names, strict)
+		if refused != nil {
+			return federatedProtected(leaf, *refused)
 		}
-		sort.Strings(suggested)
-		warner.warn("this TugQL read", leaf.Database, suggested)
+		warner.Warn("this TugQL read", leaf.Database, suggested)
 		return nil
 	}
 }
@@ -201,13 +143,13 @@ func federatedProtected(leaf secureread.FederatedLeaf, l meaninglabels.ColumnLab
 // source cannot be opened to check it, or its columns cannot be listed only
 // when a label is stored (already refused).
 func nativeSQLLabelGuard(projectDir string, strict bool, warn io.Writer) secureread.NativeSQLGuard {
-	warner := &suggestionWarner{out: warn, warned: map[string]bool{}}
+	warner := labelguard.NewWarner(warn)
 	return func(ctx context.Context, catalog, sourceURL string) error {
 		doc, err := loadLabels(ctx, projectDir)
 		if err != nil {
 			return errLabelsUnreadable
 		}
-		if sourceHasProtectedLabel(doc, catalog) {
+		if labelguard.SourceHasProtectedLabel(doc, catalog) {
 			return &secureread.FieldProtectedError{Message: fmt.Sprintf("source %s has columns protected by sensitivity labels, and native SQL cannot be masked, so the read is refused; use a TugQL query, which is checked column by column", catalog)}
 		}
 		backend, _ := dbcopy.Parse(sourceURL) // an unparsable URL fails to open below
@@ -219,32 +161,17 @@ func nativeSQLLabelGuard(projectDir string, strict bool, warn io.Writer) securer
 			return nil
 		}
 		defer dbcopy.CloseSource(db)
-		suggested := suggestedColumns(doc, catalog, sourceLabelColumns(ctx, db))
+		suggested := labelguard.SuggestedColumns(doc, catalog, sourceLabelColumns(ctx, db))
 		switch {
 		case len(suggested) == 0:
 			return nil
 		case strict:
 			return &secureread.FieldProtectedError{Message: fmt.Sprintf("source %s has columns that read-time suggestions mark sensitive (%s), and native SQL cannot be masked, so the read is refused; use a TugQL query, which is checked column by column", catalog, strings.Join(suggested, ", "))}
 		default:
-			warner.warn("native SQL", catalog, suggested)
+			warner.Warn("native SQL", catalog, suggested)
 			return nil
 		}
 	}
-}
-
-// suggestedColumns lists, sorted, the table.column names whose effective
-// label is protected.
-func suggestedColumns(doc meaninglabels.Document, source string, tables map[string][]meaninglabels.Column) []string {
-	var names []string
-	for table, columns := range tables {
-		for _, l := range meaninglabels.Effective(doc, source, table, columns) {
-			if l.Protected() {
-				names = append(names, table+"."+l.Column)
-			}
-		}
-	}
-	sort.Strings(names)
-	return names
 }
 
 // callerIsAgent reports whether this process runs under an AI agent harness.

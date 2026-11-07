@@ -496,6 +496,8 @@ func TestEveryReadEntryPointChecksLabels(t *testing.T) {
 		"Authorize":              "decides a policy question and reads no row",
 		"CanReadWholeCollection": "decides a policy question and reads no row",
 		"RunSnapshot":            "reads a recordset an earlier, guarded read returned; it names no source",
+		"WithLabels":             "returns an executor with label guards and reads no row",
+		"WithCatalog":            "returns an executor that names one more source and reads no row",
 		"WithFederatedColumns":   "reads no row: it returns an executor whose reads are checked here like any other",
 	}
 	methods := reflect.TypeOf(e)
@@ -532,9 +534,28 @@ func TestEveryReadEntryPointChecksLabels(t *testing.T) {
 	if _, err := clean.RunExactAggregateTugQL(ctx, source, []byte(exactOriginal), []byte(preview.TugQL), map[string]any{"minimum": json.Number("0")}, exactColumns); err != nil {
 		t.Fatal(err)
 	}
-	// An HTTP(S) source is no catalog: there is nothing to check.
-	if err := e.guardSource(ctx, "https://example.com/api", parsed); err != nil {
-		t.Fatal(err)
+	// An HTTP source is checked like any other: one the session cannot name
+	// is refused, and a named one is checked against its labels.
+	if err := e.guardSource(ctx, "https://example.com/api", parsed); !errors.Is(err, errUnknownCatalog) {
+		t.Fatalf("err = %v", err)
+	}
+	httpSource := "http://" + t.TempDir()
+	var seen FederatedLeaf
+	named := e.WithLabels(func(_ context.Context, leaf FederatedLeaf) error { seen = leaf; return protectedSQL }, nil, map[string][]string{httpSource: {"items"}})
+	if err := named.guardSource(ctx, httpSource, parsed); !errors.Is(err, protectedSQL) || seen.Database != "items" || seen.Scheme != "http" || seen.Collection != "Item" {
+		t.Fatalf("err = %v, leaf = %+v", err, seen)
+	}
+	// WithCatalog names one more URL and leaves the session it copies alone.
+	other := "https://example.com/api"
+	if err := named.WithCatalog(other, "items").guardSource(ctx, other, parsed); !errors.Is(err, protectedSQL) {
+		t.Fatalf("err = %v", err)
+	}
+	if _, ok := named.session.SourceCatalogs[other]; ok {
+		t.Fatal("WithCatalog changed the session it copies")
+	}
+	// WithLabels keeps the policy session and replaces only the guards.
+	if bare := e.WithLabels(nil, nil, nil); bare.session.FederatedColumns != nil || !bare.session.Unrestricted {
+		t.Fatalf("session = %+v", bare.session)
 	}
 	// Two catalogs on one URL: the labels of each apply.
 	guard = &labelGuard{labelled: map[string]bool{"other.Item.Category": true}}

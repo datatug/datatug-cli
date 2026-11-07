@@ -3,6 +3,7 @@ package endpoints
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/meaninglabels"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 )
 
@@ -88,7 +90,55 @@ func writeRunQueryTestProject(t *testing.T) (projectDir, projectID string) {
 	}`)
 	mustWriteFile(t, filepath.Join(queriesDir, "customer-invoices.query.tugql.yaml"), runQueryTestCustomerByIDTugQL)
 
+	reviewSuggestedColumns(t, dir, semanticTestSource, dbPath)
 	return dir, projectID
+}
+
+// reviewSuggestedColumns records the owner's "none" decision for every column
+// of source (the database at dbPath) that a read-time suggestion marks sensitive, so a
+// test that is not about sensitivity labels reads them as any reviewed column
+// (exec/run_query refuses a policy-governed read of a suggested column).
+func reviewSuggestedColumns(t *testing.T, dir, source, dbPath string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	tables, err := db.Query(`SELECT name FROM sqlite_master WHERE type = 'table'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for tables.Next() {
+		var name string
+		if err := tables.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		names = append(names, name)
+	}
+	_ = tables.Close()
+	for _, table := range names {
+		rows, err := db.Query(`SELECT name FROM pragma_table_info(?)`, table)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var columns []meaninglabels.Column
+		for rows.Next() {
+			var column string
+			if err := rows.Scan(&column); err != nil {
+				t.Fatal(err)
+			}
+			columns = append(columns, meaninglabels.Column{Name: column})
+		}
+		_ = rows.Close()
+		for _, l := range meaninglabels.Effective(meaninglabels.Document{}, source, table, columns) {
+			if l.Protected() {
+				setLabel(t, dir, meaninglabels.Change{Action: meaninglabels.ActionSet, Target: meaninglabels.Target{Source: source, Table: table, Column: l.Column},
+					Class: meaninglabels.ClassNone, Reason: "test fixture: reviewed"})
+			}
+		}
+	}
 }
 
 // --- valid shapes: core's own golden fixtures, through the real path ---

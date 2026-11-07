@@ -692,7 +692,8 @@ func runHTTPSavedQuery(ctx context.Context, executor *secureread.Executor, proje
 	// bound by that appendix's mode:live|snapshot semantics). See Open's own
 	// doc comment.
 	ctx = httpsource.ContextWithDispatch(ctx, dalgo2http.ModeLiveThenSnapshot, false, 0)
-	return runStructuredHTTPQuery(ctx, executor, sourceURL, builder.SelectColumns(), nil)
+	// The HTTP source is named by its query's id, which its labels target.
+	return runStructuredHTTPQuery(ctx, executor.WithCatalog(sourceURL, queryDef.ID), sourceURL, builder.SelectColumns(), nil)
 }
 
 // sqlQueryArgs builds one dal.QueryArg{Name: p.ID, Value: variables[p.ID]}

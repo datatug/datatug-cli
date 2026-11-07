@@ -239,6 +239,9 @@ func newSecurityMatrixProject(t *testing.T) (map[string]string, string) {
 	saveQuery("customers-sql", "Customers (SQL)", datatug.QueryTypeSQL,
 		"select CustomerId, FirstName, Country from Customer order by CustomerId", nil)
 
+	// Sensitivity labels are not what this matrix tests: the owner has
+	// reviewed every suggested column, so the policies alone decide.
+	reviewSuggestedSQLiteColumns(t, dir, securityMatrixSource, dbPath)
 	return map[string]string{projectID: dir}, projectID
 }
 

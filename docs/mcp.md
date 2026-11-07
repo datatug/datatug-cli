@@ -127,6 +127,16 @@ through `datatug_run_query` is refused with `FIELD_PROTECTION_RAW_REFUSED`,
 because DataTug cannot mask inside raw SQL. Use `datatug_read_table` or a saved
 TugQL query instead.
 
+`datatug_run_query` cannot mask either, so the agent checks every run against
+the project's labels before it reads, for every caller of `exec/run_query`, with
+or without the agent header. A stored label (an owner label or a pending
+proposal) refuses saved SQL on its source, and TugQL or a saved HTTP query that
+names the labelled field or reads every field of its table, whoever asks. A
+field that only a read-time suggestion marks sensitive refuses an agent (every
+MCP call is one) and a policy-governed session; the owner of a project without
+policies reads it, and the agent's stderr names it once. An HTTP source is
+labelled under its query id, as source and table.
+
 `datatug_propose_label` records a pending proposal, which masks the field at
 once. Only the project owner can confirm or dismiss it, with
 `datatug meaning label confirm` or `dismiss`. Agents cannot set, confirm,

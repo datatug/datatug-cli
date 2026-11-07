@@ -273,6 +273,7 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 	var collection string
 
 	agent := agentFromContext(ctx)
+	executor = labelledRunQueryExecutor(ctx, executor, projStore, projDir, req.Environment, resolved)
 	switch {
 	case req.TugQL != "":
 		profile = apicontract.ExecutionProfileProtected
@@ -338,6 +339,18 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 		}
 		if errors.Is(err, secureread.ErrOpaqueSQLNotGranted) {
 			return apicontract.Result{}, newUnsupportedProtectedExecution(err.Error())
+		}
+		// A sensitivity-label refusal (labelledRunQueryExecutor, or a federated
+		// read's guard, which checks every leaf): native SQL,
+		// which cannot be inspected, answers as raw SQL does on a labelled
+		// source (agentSavedSQLRefusal).
+		var protected *secureread.FieldProtectedError
+		if errors.As(err, &protected) {
+			code := meaninglabels.CodeFieldProtected
+			if profile == apicontract.ExecutionProfileOpaquePrivileged {
+				code = meaninglabels.CodeRawRefused
+			}
+			return apicontract.Result{}, newContractError(apicontract.ErrorCode(code), protected.Message, "")
 		}
 		if errors.Is(err, secureread.ErrAccessDenied) {
 			ce := contractErrAccessDenied(err.Error())
@@ -429,11 +442,6 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 		// own answer, which names only the query and carries the snapshots recorded for it.
 		if unavailable := api.SourceUnavailable(resolved.ID, err); unavailable != nil {
 			return apicontract.Result{}, newSourceUnavailable(unavailable.Error())
-		}
-		// A sensitivity-label refusal (a federated read checks every leaf).
-		var protected *secureread.FieldProtectedError
-		if errors.As(err, &protected) {
-			return apicontract.Result{}, newContractError(meaninglabels.CodeFieldProtected, protected.Message, "")
 		}
 		return apicontract.Result{}, newInvalidRequest("", err.Error())
 	}

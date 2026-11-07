@@ -451,7 +451,22 @@ reconcile under Perimeter.
 
 Reconcile is read-only: it never writes to a factory database.
 
-Perimeter note: local access policies select collections, not environments, so "this agent may not
-read factory-d-prod" cannot be expressed as a local policy without weakening enforcement. The
-refused-instance behaviour (permission_denied, inconclusive) is covered by tests instead.
+## Refusing one factory
+
+A local policy rule may name an ` + "`instance`" + ` (` + "`<environment>/<catalog>`" + `) or an ` + "`environment`" + `
+kind. Put this in ` + "`policies/factories.yaml`" + ` and serve with ` + "`--as analyst`" + `:
+
+    apiVersion: dalgo.io/access/v1
+    kind: AccessPolicy
+    metadata: {name: factories}
+    default: deny
+    scopes:
+      - path: /countries
+        rules:
+          - {id: never-factory-e, effect: deny, operations: [query], instance: factory-e-prod/factory}
+          - {id: read-countries, effect: allow, operations: [query]}
+
+` + "`datatug reconcile --profile reference-countries`" + ` then reports factory-e-prod as permission_denied and
+the result as inconclusive, never consistent. The deny sits at the same scope as the allow so it wins;
+a rule for another instance is left out of a read as if it were not there.
 `

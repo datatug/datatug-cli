@@ -20,6 +20,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/policyexceptions"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/datatug/datatug-core/pkg/meaninglabels"
+	"github.com/datatug/datatug-core/pkg/policyscope"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -289,7 +290,7 @@ func TestFindProjectPolicy(t *testing.T) {
 	assert.ErrorContains(t, err, "several policies")
 	global, err := findProjectPolicy(dir, "global")
 	require.NoError(t, err)
-	assert.ErrorContains(t, checkRoleHasNoRule(context.Background(), global, "agent", "Employee"), "binds no roles")
+	assert.ErrorContains(t, checkRoleHasNoRule(context.Background(), global, policyscope.Target{}, "agent", "Employee"), "binds no roles")
 
 	require.NoError(t, os.WriteFile(filepath.Join(policies, "bad.yaml"), []byte("kind: nope\n"), 0o644))
 	_, err = findProjectPolicy(dir, "")

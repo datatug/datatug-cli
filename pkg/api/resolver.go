@@ -58,10 +58,15 @@ const (
 // datatug-core's QueryDef.Validate enforces this — so it is not tied to any
 // environment/catalog record at all).
 type ResolvedSource struct {
-	ID    string
-	Label string
-	Kind  SourceKind
-	URL   string
+	ID string
+	// Catalog is the id of the environment catalog the source is, whichever
+	// alias (DbModel or catalog ID) resolved it; empty for a source that is
+	// no environment catalog. It is what an instance rule selector matches
+	// (policyscope), so an alias can never step around one.
+	Catalog string
+	Label   string
+	Kind    SourceKind
+	URL     string
 	// Collection is the fixed collection name a caller must query this
 	// source through: for SQL/inGitDB-via-catalog it is whatever the caller
 	// asks for (any table/collection in that database); for an HTTP source
@@ -200,7 +205,7 @@ func catalogSources(ctx context.Context, projStore datatug.ProjectStore, project
 				continue
 			}
 			seen[sourceKey(kind, id)] = true
-			out = append(out, ResolvedSource{ID: id, Label: label, Kind: kind, URL: url})
+			out = append(out, ResolvedSource{ID: id, Catalog: catalog.ID, Label: label, Kind: kind, URL: url})
 		}
 	}
 	return out, nil

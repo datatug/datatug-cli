@@ -17,6 +17,8 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/access"
+	"github.com/datatug/datatug-core/pkg/policyscope"
+	"gopkg.in/yaml.v3"
 )
 
 // DirEnv names the environment variable that overrides the default policies
@@ -62,6 +64,17 @@ type Loaded struct {
 	// DecodeLoaded, and AuthorizeWrite refuses every project write under
 	// such a policy.
 	writes *projectWrites
+
+	// scoped is set for a document whose rules select an environment or an
+	// instance (policyscope). Policy then denies every read; ForTarget
+	// replaces it with the document as it stands for one instance.
+	scoped *scopedDocument
+}
+
+// scopedDocument is a policy document with rule selectors, as on disk.
+type scopedDocument struct {
+	data  []byte
+	codec access.Codec
 }
 
 // LoadOptions says where policies come from.
@@ -173,7 +186,32 @@ func loadFileWith(path string, overlay Overlay) (Loaded, error) {
 // Besides the policy every read runs through, it prepares the document's
 // project-write view (prepareProjectWrites): a document that cannot be
 // prepared still loads, and AuthorizeWrite refuses project writes under it.
+//
+// A document whose rules select an environment or an instance
+// (policyscope) loads as a policy that denies every read, because the
+// instance a read opens is not known here; ForTarget gives the document as
+// it stands for one instance. A selector that cannot be applied refuses the
+// document.
 func DecodeLoaded(data []byte, codec access.Codec, source string) (Loaded, error) {
+	scoped, err := policyscope.Scoped(data, codec)
+	if errors.Is(err, policyscope.ErrInvalidSelector) || errors.Is(err, policyscope.ErrUnsupportedCodec) {
+		return Loaded{}, err
+	}
+	// Any other error is a document DALgo refuses below with its own message.
+	if scoped {
+		// DALgo checks every rule now, so a broken rule is refused at load
+		// rather than when an instance first selects it.
+		all, err := policyscope.Unscoped(data, codec)
+		if err == nil {
+			_, err = access.DecodePolicy(bytes.NewReader(all), codec, access.WithSource(source))
+		}
+		if err != nil {
+			return Loaded{}, err
+		}
+		return Loaded{Policy: denyEveryRead(data), Source: source, digest: sha256.Sum256(data),
+			writes: &projectWrites{refusal: "the policy selects environments or instances, which a project write does not open"},
+			scoped: &scopedDocument{data: data, codec: codec}}, nil
+	}
 	policy, err := access.DecodePolicy(bytes.NewReader(data), codec, access.WithSource(source))
 	if err != nil {
 		return Loaded{}, err
@@ -236,3 +274,49 @@ func codecFor(name string) access.Codec {
 // CodecFor is the policy codec a file name's extension selects, or nil when
 // the extension is not a policy document's.
 func CodecFor(name string) access.Codec { return codecFor(name) }
+
+// ForTarget returns loaded as it stands for a read of t: every document whose
+// rules select an environment or an instance is replaced by its projection
+// for t (policyscope.Project), and every other document is kept as it is.
+// A document that denies every read of t (an unknown instance or kind, or no
+// rule left for it), or whose projection cannot be decoded, keeps denying
+// every read.
+func ForTarget(loaded []Loaded, t policyscope.Target) []Loaded {
+	out := make([]Loaded, len(loaded))
+	for i, item := range loaded {
+		out[i] = item
+		if item.scoped == nil {
+			continue
+		}
+		projected, err := policyscope.Project(item.scoped.data, item.scoped.codec, t)
+		if err != nil {
+			continue
+		}
+		if decoded, err := DecodeLoaded(projected, item.scoped.codec, item.Source); err == nil {
+			// A projection decides reads only: project writes stay refused.
+			decoded.writes = item.writes
+			out[i] = decoded
+		}
+	}
+	return out
+}
+
+// Scoped reports whether item's rules select an environment or an instance.
+func (item Loaded) Scoped() bool { return item.scoped != nil }
+
+// denyEveryRead is the policy a selector document stands for when the
+// instance a read opens is not known: a default-deny policy with no rule,
+// named as the document is.
+func denyEveryRead(data []byte) access.Policy {
+	var document struct {
+		Metadata struct {
+			Name string `yaml:"name"`
+		} `yaml:"metadata"`
+	}
+	_ = yaml.Unmarshal(data, &document) // JSON is YAML; a broken name falls back below
+	name := document.Metadata.Name
+	if name == "" {
+		name = "policy"
+	}
+	return access.MustPolicy(name)
+}

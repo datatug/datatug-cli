@@ -497,6 +497,7 @@ func TestEveryReadEntryPointChecksLabels(t *testing.T) {
 		"CanReadWholeCollection": "decides a policy question and reads no row",
 		"RunSnapshot":            "reads a recordset an earlier, guarded read returned; it names no source",
 		"WithLabels":             "returns an executor with label guards and reads no row",
+		"ForTarget":              "returns an executor with its policies projected for one instance and reads no row",
 		"WithCatalog":            "returns an executor that names one more source and reads no row",
 		"WithFederatedColumns":   "reads no row: it returns an executor whose reads are checked here like any other",
 	}

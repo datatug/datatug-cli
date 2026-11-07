@@ -54,7 +54,7 @@ func boundResolvedSource(ctx context.Context, store datatug.ProjectStore, root, 
 		return ResolvedSource{}, true, err
 	}
 	_, _, catalog, _ := session.BoundScope()
-	return ResolvedSource{ID: catalog, Label: catalog, Kind: SourceKindSQL, URL: url}, true, nil
+	return ResolvedSource{ID: catalog, Catalog: catalog, Label: catalog, Kind: SourceKindSQL, URL: url}, true, nil
 }
 
 // HostedTableRead binds routing metadata to the current fixed local selection.

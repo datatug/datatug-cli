@@ -58,7 +58,7 @@ func dbExportAction(cmd *cobra.Command, _ []string) error {
 	recordsFormat, _ := cmd.Flags().GetString("records-format")
 	var srcRef, tgtRef dbcopy.BackendRef
 	fail := nativeFailer(cmd, "db export", func() (faithful.EndpointInfo, faithful.EndpointInfo) { return inGitDBEndpoints(srcRef, tgtRef)() })
-	srcRef, _, err := parseSourceArg(cmd.Context(), from)
+	srcRef, srcProject, err := parseProjectSourceArg(cmd.Context(), from)
 	if err != nil {
 		return keepExit(err, func(err error) error {
 			return fail(2, "--from: %v", dbcopy.RedactErrorWithSecrets(err, from))
@@ -91,6 +91,10 @@ func dbExportAction(cmd *cobra.Command, _ []string) error {
 	directives, err := buildDirectivesFromFlags(cmd)
 	if err != nil {
 		return fail(2, "%v", err)
+	}
+	// A project source keeps its sensitivity labels: checked once every argument is valid, before anything is written.
+	if reason := copyLabelRefusal(cmd, srcRef, srcProject, fromSchema); reason != "" {
+		return fail(copyRefusedCode, copyRefusedFormat, reason)
 	}
 	return runNativeInGitDB(cmd, nativeInGitDBRequest{command: "db export", fromRaw: from, src: srcRef, tgt: tgtRef, fromSchema: fromSchema,
 		recordsFormat: recordsFormat, directives: directives, fail: fail})

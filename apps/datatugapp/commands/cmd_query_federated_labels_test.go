@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
 	"github.com/dal-go/record"
+	"github.com/datatug/datatug-cli/pkg/callercontext"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/meaninglabelsfile"
 	"github.com/datatug/datatug-cli/pkg/secureread"
@@ -213,20 +215,24 @@ func TestNativeSQLLabelGuard(t *testing.T) {
 	restoreVar(t, &listCollections)
 	restoreVar(t, &describeCollection)
 	ctx := context.Background()
-	guard := nativeSQLLabelGuard("/p")
-	check := func() error { return guard(ctx, "crm", "sqlite:///x.sqlite") }
+	var warning strings.Builder
+	check := func(strict bool) error {
+		warning.Reset()
+		return nativeSQLLabelGuard("/p", strict, &warning)(ctx, "crm", "sqlite:///x.sqlite")
+	}
 	var protected *secureread.FieldProtectedError
 	loadLabels = func(context.Context, string) (meaninglabels.Document, error) {
 		return meaninglabels.Document{}, errors.New("broken")
 	}
-	require.ErrorAs(t, check(), &protected)
+	require.ErrorAs(t, check(false), &protected)
 	assert.Contains(t, protected.Message, "datatug-labels.json")
 
 	doc := meaninglabels.NewDocument()
 	loadLabels = func(context.Context, string) (meaninglabels.Document, error) { return doc, nil }
 	openBackend = func(context.Context, dbcopy.BackendRef) (dal.DB, error) { return nil, errors.New("no source") }
-	require.ErrorAs(t, check(), &protected, "a source that cannot be opened to check refuses")
+	require.ErrorAs(t, check(true), &protected, "a strict principal is refused a source it cannot check")
 	assert.Contains(t, protected.Message, "source crm cannot be opened")
+	assert.NoError(t, check(false), "an owner's read only could have warned")
 
 	openBackend = func(context.Context, dbcopy.BackendRef) (dal.DB, error) { return nil, nil }
 	listCollections = func(context.Context, dal.DB, *record.Key) ([]dal.CollectionRef, error) {
@@ -236,18 +242,47 @@ func TestNativeSQLLabelGuard(t *testing.T) {
 	describeCollection = func(context.Context, dal.DB, *dal.CollectionRef) (*dbschema.CollectionDef, error) {
 		return &dbschema.CollectionDef{Fields: fields}, nil
 	}
-	assert.NoError(t, check(), "a source with no protected column")
+	assert.NoError(t, check(true), "no protected column")
+	assert.Empty(t, warning.String())
+	// (b) Read-time suggestions alone: a strict principal is refused, an owner warned.
 	fields = append(fields, dbschema.FieldDef{Name: "email"})
-	require.ErrorAs(t, check(), &protected, "a read-time suggestion")
-	assert.Contains(t, protected.Message, "source crm has columns protected")
-
+	require.ErrorAs(t, check(true), &protected)
+	assert.Contains(t, protected.Message, "read-time suggestions mark sensitive (Account.email)")
+	assert.NoError(t, check(false))
+	assert.Contains(t, warning.String(), "warning: native SQL is not masked; read-time suggestions mark Account.email of source crm sensitive")
+	// (a) A stored label refuses every principal, before the source is opened.
 	listCollections = func(context.Context, dal.DB, *record.Key) ([]dal.CollectionRef, error) {
 		return nil, errors.New("no list")
 	}
-	assert.NoError(t, check(), "an unlabelled source whose tables cannot be listed")
+	assert.NoError(t, check(true), "an unlabelled source whose tables cannot be listed")
 	doc, _, err := meaninglabels.Apply(doc, meaninglabels.Change{Action: meaninglabels.ActionSet, Target: meaninglabels.Target{Source: "crm", Table: "Account", Column: "Hidden"}, Class: meaninglabels.ClassPII, Reason: "test"}, meaninglabels.Actor{ID: "owner"}, projectReadNow())
 	require.NoError(t, err)
-	require.ErrorAs(t, check(), &protected, "a labelled source")
+	openBackend = func(context.Context, dbcopy.BackendRef) (dal.DB, error) { return nil, errors.New("not opened") }
+	require.ErrorAs(t, check(false), &protected, "an owner too")
+	assert.Contains(t, protected.Message, "source crm has columns protected")
+}
+
+// Native SQL on a source with only read-time suggestions (no stored label):
+// the owner runs it with a warning; an agent is refused.
+func TestNativeSQLSuggestionsWarnTheOwnerAndRefuseAnAgent(t *testing.T) {
+	registeredSQLiteSource(t)
+	restoreVar(t, &callerLookup)
+	callerLookup = func(string) (string, bool) { return "", false }
+	stdout, stderr, code := runCLI(t, "", "query", "run", "--db", "datatug://shop/shop", "--sql", "SELECT FirstName FROM Customer", "--no-policies", "--format", "json")
+	require.Equal(t, 0, code, stderr)
+	assert.Contains(t, stdout, "Ada")
+	assert.Contains(t, stderr, "warning: native SQL is not masked; read-time suggestions mark Customer.FirstName")
+
+	callerLookup = func(name string) (string, bool) {
+		if name == callercontext.HarnessEnv {
+			return "claude-code", true
+		}
+		return "", false
+	}
+	stdout, stderr, code = runCLI(t, "", "query", "run", "--db", "datatug://shop/shop", "--sql", "SELECT FirstName FROM Customer", "--no-policies")
+	assert.Equal(t, exitCodeAccessDenied, code, stdout+stderr)
+	assert.NotContains(t, stdout, "Ada")
+	assert.Contains(t, stderr, "read-time suggestions mark sensitive (Customer.FirstName")
 }
 
 func TestFederatedLabelGuardOpensOnlyWhatItNeeds(t *testing.T) {
@@ -318,7 +353,7 @@ func TestChatChecksTheProjectLabels(t *testing.T) {
 	session, err := resolveServeSession(projectDir, serveFlags{projectDir: projectDir, as: "agent", roles: []string{"agent"}})
 	require.NoError(t, err)
 	session.AllowOpaqueSQL = true
-	installProjectLabels(&session, projectDir, chatSourceCatalogs(sourceURLs, sourceURLs["chinook"], "chinook"))
+	installProjectLabels(&session, projectDir, chatSourceCatalogs(sourceURLs, sourceURLs["chinook"], "chinook"), io.Discard)
 	executor := secureread.NewExecutor(session)
 	service := chatSavedQueries{projectDir: projectDir, store: store, executor: executor, env: env, session: session}
 	var protected *secureread.FieldProtectedError

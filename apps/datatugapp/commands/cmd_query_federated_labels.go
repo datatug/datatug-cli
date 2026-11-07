@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"sort"
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
@@ -18,9 +20,13 @@ import (
 // principal). catalogs maps each project source URL to the catalog ids that
 // resolve to it, the Source of a label target. Used by `query run --project
 // --query`, `query run --db datatug://...` and `chat`.
-func installProjectLabels(session *secureread.Session, projectDir string, catalogs map[string][]string) {
+//
+// Native SQL is judged strictly for an agent or a policy-governed session;
+// warn receives the owner's warning about suggested columns.
+func installProjectLabels(session *secureread.Session, projectDir string, catalogs map[string][]string, warn io.Writer) {
 	session.FederatedColumns = federatedLabelGuard(projectDir)
-	session.NativeSQL = nativeSQLLabelGuard(projectDir)
+	strict := callerIsAgent() || !session.DatabaseProfile.PolicyFreeReads()
+	session.NativeSQL = nativeSQLLabelGuard(projectDir, strict, warn)
 	session.SourceCatalogs = catalogs
 }
 
@@ -122,29 +128,65 @@ func federatedProtected(leaf secureread.FederatedLeaf, l meaninglabels.ColumnLab
 	return &secureread.FieldProtectedError{Message: fmt.Sprintf("%s is protected (%s), and federated reads cannot mask labelled columns yet, so the read is refused; name only unlabelled columns, or read the table alone with --source to get it masked", target, l.Class)}
 }
 
-// nativeSQLLabelGuard refuses native SQL against a source that has a
-// protected column (an owner label, a proposal or a read-time suggestion):
-// SQL text cannot be inspected, so its result cannot be masked. Decision 0003
-// makes a raw query database-wide, so the whole source is checked. A source
-// that cannot be opened to check refuses; a source whose tables or columns
-// cannot all be listed refuses only when a protected label is stored for it.
-func nativeSQLLabelGuard(projectDir string) secureread.NativeSQLGuard {
+// nativeSQLLabelGuard decides native SQL against a source: SQL text cannot be
+// inspected, so its result cannot be masked, and Decision 0003 makes a raw
+// query database-wide, so the whole source is judged. A protected label stored
+// for the source (an owner label or a proposal) refuses it for every
+// principal. Read-time suggestions alone refuse it for a strict principal (an
+// agent, or a policy-governed session); for anyone else the SQL runs and warn
+// names the suggested columns once. A strict principal is refused when the
+// source cannot be opened to check it, or its columns cannot be listed only
+// when a label is stored (already refused).
+func nativeSQLLabelGuard(projectDir string, strict bool, warn io.Writer) secureread.NativeSQLGuard {
 	return func(ctx context.Context, catalog, sourceURL string) error {
 		doc, err := loadLabels(ctx, projectDir)
 		if err != nil {
 			return errLabelsUnreadable
 		}
+		if sourceHasProtectedLabel(doc, catalog) {
+			return &secureread.FieldProtectedError{Message: fmt.Sprintf("source %s has columns protected by sensitivity labels, and native SQL cannot be masked, so the read is refused; use a TugQL query, which is checked column by column", catalog)}
+		}
 		backend, _ := dbcopy.Parse(sourceURL) // an unparsable URL fails to open below
 		db, err := openBackend(ctx, backend)
 		if err != nil {
-			return &secureread.FieldProtectedError{Message: fmt.Sprintf("source %s cannot be opened to check its sensitivity labels, so the read is refused", catalog)}
+			if strict {
+				return &secureread.FieldProtectedError{Message: fmt.Sprintf("source %s cannot be opened to check its sensitivity labels, so the read is refused", catalog)}
+			}
+			return nil
 		}
 		defer dbcopy.CloseSource(db)
-		if meaninglabels.AnyProtected(doc, catalog, sourceLabelColumns(ctx, db)) {
-			return &secureread.FieldProtectedError{Message: fmt.Sprintf("source %s has columns protected by sensitivity labels, and native SQL cannot be masked, so the read is refused; use a TugQL query, which is checked column by column", catalog)}
+		suggested := suggestedColumns(doc, catalog, sourceLabelColumns(ctx, db))
+		switch {
+		case len(suggested) == 0:
+			return nil
+		case strict:
+			return &secureread.FieldProtectedError{Message: fmt.Sprintf("source %s has columns that read-time suggestions mark sensitive (%s), and native SQL cannot be masked, so the read is refused; use a TugQL query, which is checked column by column", catalog, strings.Join(suggested, ", "))}
+		default:
+			_, _ = fmt.Fprintf(warn, "warning: native SQL is not masked; read-time suggestions mark %s of source %s sensitive: label them to protect them from agents\n", strings.Join(suggested, ", "), catalog)
+			return nil
 		}
-		return nil
 	}
+}
+
+// suggestedColumns lists, sorted, the table.column names whose effective
+// label is protected.
+func suggestedColumns(doc meaninglabels.Document, source string, tables map[string][]meaninglabels.Column) []string {
+	var names []string
+	for table, columns := range tables {
+		for _, l := range meaninglabels.Effective(doc, source, table, columns) {
+			if l.Protected() {
+				names = append(names, table+"."+l.Column)
+			}
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// callerIsAgent reports whether this process runs under an AI agent harness.
+func callerIsAgent() bool {
+	caller := detectCaller()
+	return caller != nil && caller.Harness != ""
 }
 
 // sourceLabelColumns lists every table of a source with its columns; a table

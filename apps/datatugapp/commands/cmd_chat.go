@@ -257,7 +257,7 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	}
 	// Saved queries and the model's own TugQL read through this session, so
 	// it checks the project's sensitivity labels, for every principal.
-	installProjectLabels(&session, projectDir, chatSourceCatalogs(sourceURLs, sourceURL, database))
+	installProjectLabels(&session, projectDir, chatSourceCatalogs(sourceURLs, sourceURL, database), cmd.ErrOrStderr())
 	executor := secureread.NewExecutor(session)
 	var conversation chat.ContextualConversation
 	var foreignKeys []narrowing.Link // set once the source's foreign keys are read

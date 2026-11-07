@@ -17,7 +17,7 @@ status: Implementing
 ## Synopsis
 
 ```
-datatug web-ui install <datatug-web-ui-<version>.tar.gz> [--sha256 <digest>]   # offline
+datatug web-ui install <datatug-web-ui-<version>.tar.gz> [--sha256 <digest>] [--allow-unsigned]   # offline
 datatug web-ui install --latest                                               # downloads (internet)
 datatug web-ui update                                                         # same as install --latest
 datatug web-ui list
@@ -32,7 +32,11 @@ datatug serve --web-ui[=<version>] [--ui-host <name>] [--ui-connect-src <https-o
 
 #### REQ: offline-install
 
-`install <archive>` MUST NOT touch the network. It verifies the archive's SHA-256 against `--sha256`, else an adjacent `<archive>.sha256`, else none (and says so), then every file against `manifest.json`, then publishes `~/datatug/web-ui/versions/<version>/` atomically. Output names where the expected digest came from.
+`install <archive>` MUST NOT touch the network. It verifies the archive's SHA-256 against `--sha256`, else an adjacent `<archive>.sha256`, else none (and says so), then every file against `manifest.json`, then the release signature (REQ: release-signature), then publishes `~/datatug/web-ui/versions/<version>/` atomically. Output names where the expected digest came from and who signed the archive.
+
+#### REQ: release-signature
+
+An archive MUST carry `manifest.json.sig` (`datatug-web-ui-signature/1 ed25519 <key id> <base64>`): an Ed25519 signature over the exact bytes of `manifest.json` by a key compiled into this CLI (`pkg/webui/signing.go`; key id = first 16 hex characters of the SHA-256 of the raw public key). A signature that does not verify is always refused. A missing signature, or one from a key this CLI does not know, is refused unless `--allow-unsigned` (a local or test build); the output then says the archive is NOT signed by a DataTug release key. `install --latest` / `update` never allow unsigned archives.
 
 #### REQ: explicit-download
 

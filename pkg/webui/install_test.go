@@ -2,6 +2,7 @@ package webui
 
 import (
 	"archive/tar"
+	"crypto/ed25519"
 	"errors"
 	"io"
 	"os"
@@ -74,16 +75,21 @@ func TestInstallArchive_Good(t *testing.T) {
 
 func TestInstallArchive_DirEntriesAndSignature(t *testing.T) {
 	s := newStore(t)
-	files := appFiles()
+	key := testKey(t)
+	useKeys(t, key)
+	content := archiveEntries(t, "1.0.0", ">=1", appFiles())
 	entries := append([]tarEntry{
 		{name: "./", typ: tar.TypeDir},
 		{name: "browser/", typ: tar.TypeDir},
 		{name: "./browser/assets/", typ: tar.TypeDir},
-		file(SignatureFile, "sig"),
-	}, archiveEntries(t, "1.0.0", ">=1", files)...)
+		file(SignatureFile, signLine(key, content[0].body)),
+	}, content...)
 	archive := writeFile(t, t.TempDir(), "a.tar.gz", tarGz(t, entries...))
-	_, err := s.InstallArchive(archive, InstallOptions{})
+	in, err := s.InstallArchive(archive, InstallOptions{})
 	require.NoError(t, err)
+	assert.Equal(t, KeyID(key.Public().(ed25519.PublicKey)), in.Signature.KeyID)
+	_, err = VerifyDir(in.Dir)
+	require.NoError(t, err, "the signature file is part of an installed version")
 }
 
 // Every malicious or broken archive is refused and leaves nothing under versions/.
@@ -205,7 +211,10 @@ func TestExtract_DirectCases(t *testing.T) {
 	_, err = writeEntry(root, "short", strings.NewReader("ab"), 5)
 	assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
 
-	_, err = verifyExtracted(t.TempDir(), extracted{ManifestFile: {}})
+	_, _, err = verifyExtracted(t.TempDir(), extracted{ManifestFile: {}})
+	assert.Error(t, err)
+
+	_, err = checkSignature(t.TempDir(), extracted{SignatureFile: {}}, nil, true)
 	assert.Error(t, err)
 }
 

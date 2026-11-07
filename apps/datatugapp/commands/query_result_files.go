@@ -173,11 +173,14 @@ func (s *resultSink) describeAnonymousSaved(projectDir, queryID string, queryDef
 	s.meta.SetEditor(queryDef.Text, strings.ToLower(string(queryDef.Type)))
 }
 
-// savedTugQLSources opens the databases of a saved TugQL query: each named
+// savedTugQLSources opens the databases of a saved TugQL query: each bound
 // database of a federated query, else the one it runs on.
 func savedTugQLSources(ctx context.Context, store datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef) tugqlSources {
+	if _, bindings, err := federatedTugQLBindings(ctx, store, projectDir, envFlag, queryDef); err == nil && len(bindings) > 0 {
+		return bindingSources(bindings)
+	}
+	// One database: its participants carry no reference of their own.
 	envID, _ := resolveQueryEnvironment(ctx, store, envFlag)
-	projectID := registeredProjectID(projectDir)
 	return tugqlSources{
 		scanned: func(database, schema, relation string) ([]string, bool) {
 			if database == "" {
@@ -208,13 +211,6 @@ func savedTugQLSources(ctx context.Context, store datatug.ProjectStore, projectD
 				return nil, backend.Scheme, nil, err
 			}
 			return db, backend.Scheme, dbcopy.SourceCloser(db), nil
-		},
-		ref: func(database string) *string {
-			if projectID == "" || envID == "" {
-				return nil
-			}
-			text := dbcopy.DatatugRef{Project: projectID, DB: database, Env: envID}.String()
-			return &text
 		},
 	}
 }
@@ -490,6 +486,12 @@ func registeredProjectID(dir string) string {
 func savedQueryDB(ctx context.Context, store datatug.ProjectStore, projectDir, projectArg, envFlag string, queryDef *datatug.QueryDef) queryresults.DB {
 	if queryDef.Type == datatug.QueryTypeHTTP {
 		return queryresults.DB{Driver: "http"}
+	}
+	if queryDef.Type == datatug.QueryTypeTugQL {
+		if _, bindings, err := federatedTugQLBindings(ctx, store, projectDir, envFlag, queryDef); err == nil && len(bindings) > 0 {
+			document, _ := querybody.Structured(queryDef) // the bindings parsed it
+			return rootBindingDB(document, bindings)
+		}
 	}
 	envID, err := resolveQueryEnvironment(ctx, store, envFlag)
 	if err != nil {

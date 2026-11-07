@@ -51,6 +51,7 @@ func webUIInstallCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			latest, _ := cmd.Flags().GetBool("latest")
 			digest, _ := cmd.Flags().GetString("sha256")
+			allowUnsigned, _ := cmd.Flags().GetBool("allow-unsigned")
 			out := cmd.OutOrStdout()
 			switch {
 			case latest && len(args) > 0:
@@ -60,11 +61,12 @@ func webUIInstallCommand() *cobra.Command {
 			case len(args) == 0:
 				return Exit("name an archive to install, or pass --latest to download one\n"+webUIOfflineHelp, exitCodeUsage)
 			}
-			return webUIInstallFile(out, args[0], digest)
+			return webUIInstallFile(out, args[0], digest, allowUnsigned)
 		},
 	}
 	cmd.Flags().Bool("latest", false, "Download and install the newest release this CLI can serve (needs internet)")
 	cmd.Flags().String("sha256", "", "Expected SHA-256 of the archive (defaults to <archive>.sha256 when present)")
+	cmd.Flags().Bool("allow-unsigned", false, "Install an archive that is not signed by a DataTug release key (a local or test build); a signature that does not verify is refused regardless")
 	return cmd
 }
 
@@ -79,7 +81,7 @@ func webUIUpdateCommand() *cobra.Command {
 	}
 }
 
-func webUIInstallFile(out io.Writer, archive, digestFlag string) error {
+func webUIInstallFile(out io.Writer, archive, digestFlag string, allowUnsigned bool) error {
 	opts := webui.InstallOptions{}
 	if digestFlag != "" {
 		d, err := webui.ParseDigest(digestFlag)
@@ -96,6 +98,7 @@ func webUIInstallFile(out io.Writer, archive, digestFlag string) error {
 			opts = webui.InstallOptions{ExpectedSHA256: d, Source: webui.DigestFromSidecar}
 		}
 	}
+	opts.AllowUnsigned = allowUnsigned
 	installed, err := webUIStore().InstallArchive(archive, opts)
 	if err != nil {
 		return Exit("web UI not installed: "+err.Error(), exitCodeUsage)
@@ -138,8 +141,12 @@ func printInstalled(out io.Writer, in webui.Installed) {
 	if err := webui.Compatible(in.Manifest); err != nil {
 		compat = "NOT servable by this CLI: " + err.Error()
 	}
-	_, _ = fmt.Fprintf(out, "web UI %s %s (%s)\n  archive sha256: %s\n  digest checked against: %s\n  files verified: %d\n  location: %s\n",
-		in.Manifest.Version, verb, compat, in.ArchiveSHA256, in.Source, len(in.Manifest.Files), in.Dir)
+	signedBy := "NOT signed by a DataTug release key (installed with --allow-unsigned)"
+	if in.Signature.KeyID != "" {
+		signedBy = "DataTug release key " + in.Signature.KeyID
+	}
+	_, _ = fmt.Fprintf(out, "web UI %s %s (%s)\n  signed by: %s\n  archive sha256: %s\n  digest checked against: %s\n  files verified: %d\n  location: %s\n",
+		in.Manifest.Version, verb, compat, signedBy, in.ArchiveSHA256, in.Source, len(in.Manifest.Files), in.Dir)
 	if in.Source == webui.DigestNone {
 		_, _ = fmt.Fprintln(out, "  note: no expected digest was given; pass --sha256 <digest from a trusted channel> to check the archive itself")
 	}

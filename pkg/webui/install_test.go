@@ -2,6 +2,7 @@ package webui
 
 import (
 	"archive/tar"
+	"crypto/ed25519"
 	"errors"
 	"io"
 	"os"
@@ -74,16 +75,21 @@ func TestInstallArchive_Good(t *testing.T) {
 
 func TestInstallArchive_DirEntriesAndSignature(t *testing.T) {
 	s := newStore(t)
-	files := appFiles()
+	key := testKey(t)
+	useKeys(t, key)
+	content := archiveEntries(t, "1.0.0", ">=1", appFiles())
 	entries := append([]tarEntry{
 		{name: "./", typ: tar.TypeDir},
 		{name: "browser/", typ: tar.TypeDir},
 		{name: "./browser/assets/", typ: tar.TypeDir},
-		file(SignatureFile, "sig"),
-	}, archiveEntries(t, "1.0.0", ">=1", files)...)
+		file(SignatureFile, signLine(key, content[0].body)),
+	}, content...)
 	archive := writeFile(t, t.TempDir(), "a.tar.gz", tarGz(t, entries...))
-	_, err := s.InstallArchive(archive, InstallOptions{})
+	in, err := s.InstallArchive(archive, InstallOptions{})
 	require.NoError(t, err)
+	assert.Equal(t, KeyID(key.Public().(ed25519.PublicKey)), in.Signature.KeyID)
+	_, err = VerifyDir(in.Dir)
+	require.NoError(t, err, "the signature file is part of an installed version")
 }
 
 // Every malicious or broken archive is refused and leaves nothing under versions/.
@@ -205,7 +211,10 @@ func TestExtract_DirectCases(t *testing.T) {
 	_, err = writeEntry(root, "short", strings.NewReader("ab"), 5)
 	assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
 
-	_, err = verifyExtracted(t.TempDir(), extracted{ManifestFile: {}})
+	_, _, err = verifyExtracted(t.TempDir(), extracted{ManifestFile: {}})
+	assert.Error(t, err)
+
+	_, err = checkSignature(t.TempDir(), extracted{SignatureFile: {}}, nil, true)
 	assert.Error(t, err)
 }
 
@@ -236,7 +245,7 @@ func TestInstallArchive_RenameFailures(t *testing.T) {
 	tamper(t, filepath.Join(in.Dir, IndexFile), "x")
 	rename = func(string, string) error { return errors.New("busy") }
 	_, err := s.InstallArchive(archive, InstallOptions{})
-	assert.ErrorContains(t, err, "replace damaged 1.0.0")
+	assert.ErrorContains(t, err, "replace existing 1.0.0")
 
 	// a publish that fails with nothing valid in place
 	s = newStore(t)
@@ -257,6 +266,22 @@ func TestInstallArchive_RenameFailures(t *testing.T) {
 	got, err := s.InstallArchive(archive, InstallOptions{})
 	require.NoError(t, err)
 	assert.True(t, got.Reused)
+
+	// ... and loses to a different build of the same version: not accepted as this archive
+	s = newStore(t)
+	files := appFiles()
+	files[IndexFile] = testIndex + "<!-- other build -->"
+	different := writeFile(t, t.TempDir(), "d.tar.gz", tarGz(t, archiveEntries(t, "1.0.0", ">=1", files)...))
+	rename = orig
+	other = install(t, Store{Dir: filepath.Join(t.TempDir(), "other2")}, "1.0.0", ">=1")
+	rename = func(from, to string) error {
+		if err := orig(other.Dir, to); err != nil {
+			return err
+		}
+		return errors.New("exists")
+	}
+	_, err = s.InstallArchive(different, InstallOptions{})
+	assert.ErrorContains(t, err, "publish 1.0.0")
 }
 
 func TestInstallArchive_Concurrent(t *testing.T) {

@@ -172,8 +172,8 @@ func TestServedCatalog(t *testing.T) {
 	eligibleTargetsHook = func(context.Context, datatug.ProjectStore, string, string, *datatug.QueryDef) ([]api.ResolvedSource, error) {
 		return nil, nil
 	}
-	if url, catalog, err := servedCatalog(ctx, nil, "", "local", "local", "chinook-local"); err != nil || url != "sqlite:///c.db" || catalog != "chinook-local" {
-		t.Fatalf("no listed target: %q %q %v", url, catalog, err)
+	if _, _, err := servedCatalog(ctx, nil, "", "local", "local", "chinook-local"); !errors.As(err, &unavailable) {
+		t.Fatalf("a catalog that is no listed target is not read: %v", err)
 	}
 }
 

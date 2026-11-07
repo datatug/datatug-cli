@@ -100,7 +100,9 @@ func servedCatalog(ctx context.Context, projStore datatug.ProjectStore, projDir,
 			return source.URL, candidate.ID, nil
 		}
 	}
-	return source.URL, source.ID, nil
+	// Every catalog is a listed target. One that is not has no id its labels
+	// are known to use, so it is not read (fail closed).
+	return "", "", bindingSourceError{fmt.Errorf("database %s has no catalog id its labels use", dbcopy.SourceIDDisplay(name))}
 }
 
 // federatedRunRefusal refuses what a federated saved query does not take: a

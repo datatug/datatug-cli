@@ -112,6 +112,14 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		catalogs[source.URL] = []string{source.Catalog}
 	}
 	installProjectLabels(&session, projectDir, catalogs, stderr, false)
+	// A federated query's leaves are checked against the labels of the project
+	// source each database is bound to. A binding that fails is reported by the
+	// read itself, below.
+	if queryDef.Type == datatug.QueryTypeTugQL && source.URL == "" {
+		if _, bindings, bindErr := federatedTugQLBindings(ctx, projStore, projectDir, o.env, queryDef); bindErr == nil && len(bindings) > 0 {
+			installBindingLabels(&session, bindings, stderr)
+		}
+	}
 	executor := secureread.NewExecutor(session)
 	// Lookup enrichment consumes keyed map rows. Refuse before the first leaf
 	// query rather than manufacturing keys for anonymous ClickHouse results.
@@ -458,6 +466,16 @@ func federatedTugQLURLs(ctx context.Context, projStore datatug.ProjectStore, pro
 // parseFederatedTugQL parses the query once and resolves the source URL of each
 // named database it references, returning both so callers need not re-parse.
 func parseFederatedTugQL(ctx context.Context, projStore datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef) (dal.StructuredQuery, map[string]string, error) {
+	parsed, bindings, err := federatedTugQLBindings(ctx, projStore, projectDir, envFlag, queryDef)
+	if err != nil {
+		return nil, nil, err
+	}
+	return parsed, bindingURLs(bindings), nil
+}
+
+// federatedTugQLBindings parses the query and binds each database it reads:
+// the aliases a text body declares and the names its sources carry.
+func federatedTugQLBindings(ctx context.Context, projStore datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef) (dal.StructuredQuery, map[string]databaseBinding, error) {
 	document, err := querybody.Structured(queryDef)
 	if err != nil {
 		return nil, nil, err
@@ -468,22 +486,11 @@ func parseFederatedTugQL(ctx context.Context, projStore datatug.ProjectStore, pr
 	}
 	databases := map[string]bool{}
 	collectFederatedDatabases(parsed.From(), databases)
-	if len(databases) > 0 {
-		envID, err := resolveQueryEnvironment(ctx, projStore, envFlag)
-		if err != nil {
-			return nil, nil, err
-		}
-		urls := make(map[string]string, len(databases))
-		for database := range databases {
-			url, err := resolveQuerySourceURL(ctx, projStore, projectDir, envID, database)
-			if err != nil {
-				return nil, nil, err
-			}
-			urls[database] = url
-		}
-		return parsed, urls, nil
+	bindings, err := savedDatabaseBindings(ctx, projStore, projectDir, envFlag, queryDef, databases)
+	if err != nil {
+		return nil, nil, err
 	}
-	return parsed, nil, nil
+	return parsed, bindings, nil
 }
 
 func collectFederatedDatabases(from dal.FromSource, databases map[string]bool) {
@@ -795,10 +802,15 @@ func savedReadFailure(stderr io.Writer, o queryOptions, err error) error {
 }
 
 func savedQueryFailure(err error) error {
+	// A datatug:// database target that did not resolve already carries its
+	// exit code (not found, or a usage error).
+	var coder ExitCoder
 	switch {
+	case errors.As(err, &coder):
+		return err
 	case errors.Is(err, secureread.ErrAccessDenied):
 		return Exit(err.Error(), exitCodeAccessDenied)
-	case errors.Is(err, secureread.ErrNoPrincipal), errors.Is(err, accesspolicies.ErrNoPolicies), errors.Is(err, accesspolicies.ErrInvalidQuery), errors.Is(err, secureread.ErrNativeSQLUnsupported):
+	case errors.Is(err, secureread.ErrNoPrincipal), errors.Is(err, accesspolicies.ErrNoPolicies), errors.Is(err, accesspolicies.ErrInvalidQuery), errors.Is(err, secureread.ErrNativeSQLUnsupported), isDatabaseBindingError(err):
 		return Exit(err.Error(), exitCodeUsage)
 	default:
 		return Exit(err.Error(), exitCodeDatabase)

@@ -27,6 +27,7 @@ Policy authors have no way to see what a DALgo access policy will do to a real q
 
 ```
 datatug query run --db <url|datatug://<project>/<db>[?env=<ENV>]> (-f <tugql-file>|--from <collection> [--limit <n>] [--offset <n>]) \
+  [--db <alias>=<url|datatug://<project>/<db>[?env=<ENV>]>]... \
   [--format grid|json|jsonl|yaml|csv] \
   [--as <user-id>] [--role <role>]... [--group <group>]... [--var <name>=<value>]... \
   [--policy <file>]... [--policies-dir <dir>] [--no-policies] [-q|--quiet] \
@@ -47,7 +48,7 @@ datatug query results annotate --id <id> --prompt-stdin
 
 #### REQ: query-input
 
-`query run` MUST accept the query either as a TugQL document (`-f <path>`, YAML or JSON; `-f -` reads stdin) or as `--from <collection>`, which selects every row and every field of one root collection. Exactly one of the two MUST be given; otherwise the command MUST exit 2 with a usage error. Parameters in the query document (`param:` nodes on the right-hand side of a `where` comparison) MUST be substituted from `--var` before execution; an unresolved query parameter MUST exit 2 naming `$name`. A parameter anywhere else (columns, the left-hand side, `orderBy`, `groupBy`, `having`) is not supported and MUST exit 2 naming it.
+`query run` MUST accept the query either as a TugQL document (`-f <path>`: YAML or JSON, or TugQL text when the file name ends in `.tugql` and it is no YAML or JSON document; `-f -` reads stdin, which is text when it is no YAML or JSON document but parses as text) or as `--from <collection>`, which selects every row and every field of one root collection. Exactly one of the two MUST be given; otherwise the command MUST exit 2 with a usage error. Parameters in the query document (`param:` nodes on the right-hand side of a `where` comparison) MUST be substituted from `--var` before execution; an unresolved query parameter MUST exit 2 naming `$name`. A parameter anywhere else (columns, the left-hand side, `orderBy`, `groupBy`, `having`) is not supported and MUST exit 2 naming it.
 
 #### REQ: limit-flag
 
@@ -59,11 +60,24 @@ datatug query results annotate --id <id> --prompt-stdin
 
 #### REQ: db-url
 
-`--db <url>` MUST be required and MUST accept the same URL schemes as `db copy` (`sqlite://`, `ingitdb://`, `postgres://`). A missing or unparsable URL MUST exit 2. A database that cannot be opened MUST exit 4. A PostgreSQL source that cannot be reached, whether at the open or in the middle of the read, MUST exit 4 with one line on stderr: the sentence the adapter chose for the failure, then where the connection string is read from, by the name of the variable (`the PostgreSQL connection string is read from the environment variable NAME` for an `env:NAME` source) or of the flag (`from the --db flag` for a URL), and nothing of the connection: no host, port, database, user, password, text of a driver or path of the machine. (`TestQuery_APostgresSourceIsOpenedReadOnlyAndItsFailuresAreClassified`, `TestQuery_AReadThatLosesItsConnectionShowsOneFixedSentence`.) A query on a PostgreSQL source orders NULLs first when ascending and last when descending, as every other source does, including over a column whose not-null constraint is not validated (PostgreSQL 18), where an `orderBy` with a `limit` returns the same rows as on a column with no such constraint; the job `Journey (PostgreSQL <major>)` runs it against a real server of each major version, 17 and 18. (`TestPostgresQueryJourneyOrdersNullsByDALgosRule`.)
+`--db <url>` MUST be required (except by a `-f` query that declares databases, see [REQ: cross-database-sources](#req-cross-database-sources)) and MUST accept the same URL schemes as `db copy` (`sqlite://`, `ingitdb://`, `postgres://`). A missing or unparsable URL MUST exit 2. A database that cannot be opened MUST exit 4. A PostgreSQL source that cannot be reached, whether at the open or in the middle of the read, MUST exit 4 with one line on stderr: the sentence the adapter chose for the failure, then where the connection string is read from, by the name of the variable (`the PostgreSQL connection string is read from the environment variable NAME` for an `env:NAME` source) or of the flag (`from the --db flag` for a URL), and nothing of the connection: no host, port, database, user, password, text of a driver or path of the machine. (`TestQuery_APostgresSourceIsOpenedReadOnlyAndItsFailuresAreClassified`, `TestQuery_AReadThatLosesItsConnectionShowsOneFixedSentence`.) A query on a PostgreSQL source orders NULLs first when ascending and last when descending, as every other source does, including over a column whose not-null constraint is not validated (PostgreSQL 18), where an `orderBy` with a `limit` returns the same rows as on a column with no such constraint; the job `Journey (PostgreSQL <major>)` runs it against a real server of each major version, 17 and 18. (`TestPostgresQueryJourneyOrdersNullsByDALgosRule`.)
 
 #### REQ: db-project-reference
 
 `--db` MUST also accept `datatug://<project>/<db>[?env=<ENV>]` (or `datatug:///<db>` for the current project), a reference to a database that is a source of a registered project: the grammar, the resolution (one function shared with `db schema`, `db table`, `db column`, `db copy` and `db export`), the exit codes (`3` for a project, environment or database that is not there; `2` for a malformed reference, a database several environments list, or a source that cannot be opened) and the rule that no path, URL or variable value is shown are those of [`db schema` REQ: project-reference](../db/schema/README.md#req-project-reference). The query is otherwise an ad-hoc one: `-f` or `--from`, policies and `--no-policies` apply as for any `--db`; the saved-query form (`--project` with `--query`) is unchanged and is mutually exclusive with `--db`. A PostgreSQL source resolved this way keeps the PostgreSQL rules of [REQ: db-url](#req-db-url).
+
+#### REQ: cross-database-sources
+
+A TugQL text document (`-f <file>.tugql`, `-f -`, or a saved `<id>.query.tugql`) MAY declare database aliases in its root `databases (` block, one per line, `alias` or `alias = '<target>'`, and read a source of one as `alias::path` ([DALgo REQ:tugql-cross-database](https://github.com/dal-go/dalgo/blob/main/spec/features/tugql/README.md); a target never carries a password, which DALgo refuses). Each alias MUST be bound to one source:
+
+- a `datatug://<project>/<db>[?env=<ENV>]` target is that source of the registered project, resolved as [REQ: db-project-reference](#req-db-project-reference) resolves `--db`; in a saved query `datatug:///<db>`, or the query's own project id, is the query's own project, in `--env` (or its only environment) unless the target names one;
+- an ad-hoc run MUST bind an alias with `--db <alias>=<url|datatug://...>` (repeatable; aliases compare case-insensitively), which also replaces a declared target; a `--db` value is an alias binding only when the text before its first `=` is a TugQL word, so a source URL with `=` in its query stays the default database;
+- a saved query binds an alias without a target to the project source of the same name, in `--env` (or the project's only environment), as a structured federated document binds each `database` it names;
+- a connection-string target (any target that is not `datatug://`) MUST be accepted in an ad-hoc run only; a saved query that declares one MUST exit 2 with `saved query "<id>": database <alias> is bound to a connection string; …`, without repeating the target.
+
+An alias declared but not bound MUST exit 2 with `database <alias> is declared but not bound: pass --db <alias>=<url|datatug://<project>/<db>>`. Each of these MUST also exit 2: a `--db <alias>=` binding the query does not declare, an empty binding, an alias bound twice, two `--db` values without an alias, a `--db` without an alias next to a databases block (it would have nothing to read), a `--db <alias>=` without `-f` or with a query that declares no databases block, and `--project/--source` with a databases block. A target that names an unknown project, environment or database keeps the exit code of [REQ: db-project-reference](#req-db-project-reference).
+
+The query MUST run through the secured federated path of saved federated TugQL (`secureread.Executor.RunFederatedTugQL`): every source is opened and read as its own leaf, through the policies of the run (`--policy`/`--policies-dir`/`--no-policies` and `--as`/`--role`/`--group` for an ad-hoc run, the project's `policies/` for a saved query) and the sensitivity-label check of the project source its alias is bound to, by that source's catalog id (whatever the alias is called). A connection-string source belongs to no project, so no label names it, as for a `--db` read of one. No joined query is sent to any database. With `--result-id`, `meta.json`'s `db` is the root source, and each participant's `db` is the full `datatug://<project>/<db>?env=<env>` reference of its source, or `null` for a connection-string source, never the connection string or a credential.
 
 ### Policies
 
@@ -380,6 +394,37 @@ A result lives 7 days. Every `--result-id` write MUST prune expired results, res
 **Given** results that are fresh, expired, incomplete for over an hour, incomplete for a minute, more than 200, a link and a directory named outside the grammar
 **When** `query results prune`, `prune --all` and `rm --id` run
 **Then** expired and stale incomplete results and the oldest past the bounds are removed, the recent incomplete one, the link (and what it points to) and the other directory stay, and `rm` removes only the result named.
+
+### AC: cross-database-ad-hoc (verifies REQ:cross-database-sources, REQ:query-input)
+
+**Given** the demo project `datatug-demo` (source `chinook`) and a SQLite file `geo.sqlite` holding a `countries` table (`name`, `code`), and `invoice-countries.tugql`:
+
+```
+databases (
+  sales = 'datatug://datatug-demo/chinook'
+  geo
+)
+from sales::Invoice as i
+join geo::countries as c
+  on i.BillingCountry = c.name
+where i.InvoiceId <= 9
+select i.InvoiceId, i.BillingCountry, c.code
+```
+
+**When** the user runs `datatug query run -f invoice-countries.tugql --db geo=sqlite:///<path>/geo.sqlite --no-policies --format json`
+**Then** each of the nine invoices is printed with its country's `code`; the same document on stdin with `--db sales=datatug://datatug-demo/chinook` gives the same rows. (`TestQueryRunJoinsTwoDatabasesAdHoc`.)
+
+### AC: cross-database-unbound-alias (verifies REQ:cross-database-sources)
+
+**Given** the same document
+**When** the user runs it without `--db geo=...`, or with `--db other=...`, or with a `--db` without an alias
+**Then** the command exits 2 naming `geo`, `other`, or the declared aliases. (`TestQueryRunCrossDatabaseUsageErrors`.)
+
+### AC: cross-database-saved (verifies REQ:cross-database-sources, REQ:result-sources)
+
+**Given** the demo project with a second source `geo` (the countries table) that the agent policy lets the agent read, and a saved `invoice-countries.query.tugql` declaring `sales = 'datatug:///chinook'` and `geo`
+**When** the user runs `datatug query run --project datatug-demo --query invoice-countries --as agent --role agent --format json`, then again with `--result-id`
+**Then** only Canadian invoices are printed, each with `CA` (the agent policy filters the `sales` leaf); `meta.json`'s participants are `datatug://datatug-demo/chinook?env=local` and `datatug://datatug-demo/geo?env=local`, and it holds no `sqlite://` URL or file path. A saved query binding an alias to a connection string exits 2 without repeating it, and an alias `crm = 'datatug:///chinook'` reading `Customer.Email` is refused by chinook's label (exit 5). (`TestSavedTextQueryJoinsTwoProjectSources`, `TestSavedTextQueryRefusesAConnectionStringTarget`, `TestSavedTextQueryLabelsFollowTheAlias`.)
 
 ## Architecture
 

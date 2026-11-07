@@ -150,7 +150,8 @@
     "pkg/watch/storage.go:NewSQLiteStore:github.com/dal-go/dalgo2sql.NewRecordset": 1,
     "pkg/watch/storage.go:NewSQLiteStore:github.com/dal-go/dalgo2sqlite.NewDatabaseWithOptions": 1,
     "pkg/watch/storage.go:import:github.com/dal-go/dalgo2sql": 1,
-    "pkg/watch/storage.go:import:github.com/dal-go/dalgo2sqlite": 1
+    "pkg/watch/storage.go:import:github.com/dal-go/dalgo2sqlite": 1,
+    "pkg/webui/install.go:VerifyDir:*.Open": 1
   },
   "files": {
     "apps/datatugapp/commands/cmd_compare_database.go": "Comparison source-read path; protected connection whole-source authority and per-object restrictions remain pending Core cutover.",
@@ -213,6 +214,7 @@
     "pkg/server/endpoints/watch_cloud.go": "DataTug-owned local result/session/artifact store or metadata helper. Local writes do not confer source-write authority; grant-bound retained-data cleanup is not certified by this inventory.",
     "pkg/sessionstore/store.go": "DataTug-owned local result/session/artifact store or metadata helper. Local writes do not confer source-write authority; grant-bound retained-data cleanup is not certified by this inventory.",
     "pkg/sqlexecute/executor.go": "Legacy SQL command executor; existing caller capability gates are not a unified grant/write-session proof. Pending boundary cutover.",
-    "pkg/watch/storage.go": "DataTug-owned local result/session/artifact store or metadata helper. Local writes do not confer source-write authority; grant-bound retained-data cleanup is not certified by this inventory."
+    "pkg/watch/storage.go": "DataTug-owned local result/session/artifact store or metadata helper. Local writes do not confer source-write authority; grant-bound retained-data cleanup is not certified by this inventory.",
+    "pkg/webui/install.go": "Not a data source: os.Root.Open re-reads an installed web UI file (static HTML/JS/CSS of a verified archive) to re-check its SHA-256 before `serve --web-ui` serves it. Confined to the version directory by os.Root; opens no database, connection or project source."
   }
 }

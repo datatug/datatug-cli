@@ -299,6 +299,15 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 	host, port := resolveServeAddr(flags.host, flags.port, config)
 
 	agentURL, url := serveAgentURLs(bannerAddr(host, flags.host), port)
+	webUI, err := prepareServeWebUI(cmd, host, runtimeSettings.Server.UIHost)
+	if err != nil {
+		return err
+	}
+	fallbackURL := ""
+	if webUI != nil {
+		defer func() { _ = webUI.handler.Close() }()
+		url, fallbackURL = webUI.links(port)
+	}
 
 	// Every route but a preflight and the exchange of a one-time code needs the session token.
 	// The secret lives in the state directory (mode 0600) for the CLI's own clients and for
@@ -316,11 +325,19 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 		// A hand-started server prints a link that opens. The daemon (--idle-timeout) writes its
 		// output to daemon.log, which never holds a code: `datatug daemon url` mints its links.
 		url += "#code=" + code
+		if fallbackURL != "" {
+			// A code is accepted once: the fallback link carries its own.
+			fallbackCode, _ := agentaccess.MintCode(secret, time.Now())
+			fallbackURL += "#code=" + fallbackCode
+		}
 	}
 
 	// Founder ruling 2026-09-09: serve never opens a browser by default; it
 	// prints the link and opens a browser only with --open-browser.
 	fmt.Printf("DataTug agent API: %s/datatug\nDataTug web UI for this agent: %s\n", agentURL, url)
+	if webUI != nil {
+		fmt.Printf("If that name does not open in your browser, use: %s\n%s\n", fallbackURL, webUI.banner())
+	}
 	if flags.openBrowser {
 		if err := serveOpenURL(url); err != nil {
 			_, _ = fmt.Printf("failed to open browser with URL=%v: %v\n", url, err)
@@ -328,6 +345,9 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 	}
 	httpServer := server.NewHttpServer()
 	httpServer.IdleTimeout = flags.idleTimeout
+	if webUI != nil {
+		httpServer.WebUI, httpServer.UIHost = webUI.handler, webUI.host
+	}
 	caps := api.Capabilities{
 		ProjectsRoot:                flags.projectsRoot,
 		NativeSessionDetective:      nativeContextFixtureEnabled,
@@ -453,5 +473,6 @@ func serveCommandArgs() *cobra.Command {
 	flags.Duration(serveSnapshotRetentionFlag, 0, "Execution snapshot retention before bytes are expired (default 30 days)")
 	flags.String(serveDetectiveAIProfileFlag, "", "Named AI profile for Detective proposals; credentials remain in its configured environment variable")
 	flags.Duration(serveIdleTimeoutFlag, 0, "Exit gracefully after this long with no HTTP request (0 serves until stopped); datatug daemon uses 2h")
+	addServeWebUIFlags(cmd)
 	return cmd
 }

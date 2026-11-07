@@ -50,6 +50,9 @@ func TestDecodeLoadedSelectorDocumentDeniesUntilProjected(t *testing.T) {
 	if !allowsCountries(t, forA[0]) || forA[0].Scoped() || forA[0].Source != "factories.yaml" {
 		t.Error("factory A reads countries")
 	}
+	if forA[0].writes != item.writes {
+		t.Error("a projection keeps refusing project writes")
+	}
 	if allowsCountries(t, forE[0]) || forE[0].Scoped() {
 		t.Error("factory E is denied by its rule")
 	}

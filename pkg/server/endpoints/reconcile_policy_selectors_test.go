@@ -113,3 +113,16 @@ func TestReconcileFactoriesEnvironmentRuleNeedsAKind(t *testing.T) {
 	require.Error(t, err, "an environment with no kind is denied by a policy that selects environments")
 	require.Equal(t, reconcile.UnavailablePermissionDenied, reconcileUnavailable(err).Reason)
 }
+
+// A case variant of an environment name opens the same files on a
+// case-insensitive disk (macOS); it must not step around an instance rule.
+func TestInstanceRuleHoldsForCaseVariants(t *testing.T) {
+	projectID, _ := serveFactoriesUnderPolicy(t, factoriesPolicy)
+	for _, environment := range []string{"Factory-E-Prod", "FACTORY-E-PROD"} {
+		data, err := executeLiveInstance(context.Background(), liveInstanceRequest{
+			SecurityContextID: api.SecurityContextID(), QueryID: "countries", Project: projectID,
+			Environment: environment, Source: factories.Catalog,
+		}, map[string]apicontract.TypedValueOrSet{}, []apicontract.BindingOriginEntry{})
+		require.Error(t, err, "%s read %d rows", environment, len(data.recordset.Rows))
+	}
+}

@@ -101,3 +101,19 @@ scopes:
 	assert.Equal(t, exitCodeUsage, code)
 	assert.Contains(t, stderr, "binds no roles to rule sets")
 }
+
+// Case variants of the environment or source name open the same database on
+// a case-insensitive disk; they must not step around an instance rule.
+func TestPerimeterProjectReadInstanceRuleHoldsForCaseVariants(t *testing.T) {
+	dir := demoForTest(t)
+	withRule(t, dir, "Customer", "{id: never-local-chinook, effect: deny, operations: [query], instance: local/chinook}")
+	for _, args := range [][]string{
+		{"--env", "LOCAL", "--source", "chinook", "--from", "Customer"},
+		{"--source", "CHINOOK", "--from", "Customer"},
+		{"--env", "Local", "--source", "Chinook", "--from", "Customer"},
+	} {
+		rows, stderr, code := readAs(t, "", args...)
+		assert.NotEqual(t, 0, code, "%v read %d rows: %s", args, len(rows), stderr)
+		assert.Empty(t, rows)
+	}
+}

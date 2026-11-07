@@ -192,10 +192,8 @@ github.com/danieljoos/wincred v1.2.3 h1:v7dZC2x32Ut3nEfRH+vhoZGvN72+dQ/snVXo/vMF
 github.com/danieljoos/wincred v1.2.3/go.mod h1:6qqX0WNrS4RzPZ1tnroDzq9kY3fu1KwE7MRLQK4X0bs=
 github.com/datatug/cliformat v0.0.8 h1:Wkn1KmO0oA0wOVQpIVdrvbQDUAT5rJwjNGTCbJ9ex8M=
 github.com/datatug/cliformat v0.0.8/go.mod h1:eY46M4p4h1LjVUb3jslLaWJStBm4lZMBlLYb+4eb8yo=
-github.com/datatug/datatug-core v0.142.0 h1:ckGB6DJHFLbfRrvqnun/Ss5torPIsnOyYtmVt2EpGXc=
-github.com/datatug/datatug-core v0.142.0/go.mod h1:TcloJ9Plm+Qsg9sUNl1UWNcaw6tkGGwG/jIQetf3wPI=
-github.com/datatug/datatug-core v0.142.1-0.20261107171248-a6f97b22d47d h1:a5U9M/HOs5cJu+xu/dM6QiClCf3uT9CwjPJAWJBwXAg=
-github.com/datatug/datatug-core v0.142.1-0.20261107171248-a6f97b22d47d/go.mod h1:TcloJ9Plm+Qsg9sUNl1UWNcaw6tkGGwG/jIQetf3wPI=
+github.com/datatug/datatug-core v0.142.1-0.20261107173720-8bd5cb64ca6f h1:gYS2F80q1/bgL/5o7VNelioOlBewfNEKaYHu8RYRB7E=
+github.com/datatug/datatug-core v0.142.1-0.20261107173720-8bd5cb64ca6f/go.mod h1:TcloJ9Plm+Qsg9sUNl1UWNcaw6tkGGwG/jIQetf3wPI=
 github.com/datatug/sql2csv v0.0.3 h1:jYZFrjcdIsqyUUb4e3qglYkLoRJxopfHtvpc1zEJJxc=
 github.com/datatug/sql2csv v0.0.3/go.mod h1:nZwHW70TWPF2PTXyCa4hysB+nVgY/AcF6m/KclO3fvs=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

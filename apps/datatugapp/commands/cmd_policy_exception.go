@@ -429,7 +429,7 @@ func exceptionProposeAction(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	if err = checkRoleHasNoRule(ctx, policy, resolved.target(), role, canonical); err != nil {
+	if err = checkRoleHasNoRule(ctx, policy, resolved.Target, role, canonical); err != nil {
 		return err
 	}
 	id, err := newExceptionID()

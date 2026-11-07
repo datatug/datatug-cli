@@ -353,14 +353,9 @@ type resolvedQuerySource struct {
 	Driver      string
 	Environment string
 	Catalog     string
-	// Kind is the environment's kind, which `environment` rule selectors
-	// match (policyscope); empty when the environment names none.
-	Kind datatug.EnvironmentKind
-}
-
-// target is the instance this source is, for rule selectors.
-func (s resolvedQuerySource) target() policyscope.Target {
-	return policyscope.Target{Environment: s.Environment, Catalog: s.Catalog, Kind: s.Kind}
+	// Target is the instance this source is, for rule selectors, named as
+	// the project stores it (api.InstanceTarget), never as it was typed.
+	Target policyscope.Target
 }
 
 func resolveQuerySource(ctx context.Context, projStore datatug.ProjectStore, projectDir, envID, database string) (resolvedQuerySource, error) {
@@ -382,7 +377,7 @@ func resolveQuerySource(ctx context.Context, projStore datatug.ProjectStore, pro
 		if err != nil {
 			return resolvedQuerySource{}, err
 		}
-		return resolvedQuerySource{URL: source, Driver: catalog.Driver, Environment: envID, Catalog: database, Kind: env.Kind}, nil
+		return resolvedQuerySource{URL: source, Driver: catalog.Driver, Environment: envID, Catalog: database, Target: api.InstanceTarget(ctx, projStore, envID, database)}, nil
 	}
 	// database and envID are what the command was given, and a source string can
 	// be typed where an ID belongs: see api.LookupError.

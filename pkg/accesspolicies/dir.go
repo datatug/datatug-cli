@@ -293,6 +293,8 @@ func ForTarget(loaded []Loaded, t policyscope.Target) []Loaded {
 			continue
 		}
 		if decoded, err := DecodeLoaded(projected, item.scoped.codec, item.Source); err == nil {
+			// A projection decides reads only: project writes stay refused.
+			decoded.writes = item.writes
 			out[i] = decoded
 		}
 	}

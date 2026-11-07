@@ -81,7 +81,7 @@ func resolveProjectRead(ctx context.Context, o queryOptions) (*projectRead, erro
 	if err != nil {
 		return nil, Exit(err.Error(), exitCodeUsage)
 	}
-	return &projectRead{projectDir: projectDir, projectID: projectID, source: o.source, env: env, sourceURL: source.URL, target: source.target(), backend: backend.WithFlag("--source"), exceptions: policyexceptions.Store{ProjectDir: projectDir, Caller: detectCaller()}}, nil
+	return &projectRead{projectDir: projectDir, projectID: projectID, source: o.source, env: env, sourceURL: source.URL, target: source.Target, backend: backend.WithFlag("--source"), exceptions: policyexceptions.Store{ProjectDir: projectDir, Caller: detectCaller()}}, nil
 }
 
 // errNoProjectPolicies is the refusal of a project read in a project that has

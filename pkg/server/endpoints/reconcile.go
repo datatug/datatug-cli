@@ -322,9 +322,15 @@ func orderReconcileRows(recordset apicontract.Recordset, key []string) (recordse
 
 // detectiveReconciler runs a Check's reconcile step through the same path as
 // POST /datatug/reconcile, under the session that runs the Check.
+//
+// A Check run is persisted, shown to AI-dispatched runs, scheduled by Watch
+// and returned to whoever triggered it, so its embedded result is always
+// groups-only: it says which instances disagree, never the values or keys.
+// People who need the values run `datatug reconcile --profile` directly.
 func detectiveReconciler(project, securityContextID string) core.Reconciler {
 	return func(ctx context.Context, profileID string) (reconcile.Result, error) {
-		response, err := computeReconcile(ctx, reconcileapi.Request{SecurityContextID: securityContextID, Project: project, ProfileID: profileID})
+		response, err := computeReconcile(ctx, reconcileapi.Request{SecurityContextID: securityContextID, Project: project, ProfileID: profileID,
+			Rules: &reconcile.Rules{Disclosure: reconcile.DiscloseGroupsOnly}})
 		if err != nil {
 			code := string(codeInternal)
 			var ce *contractError

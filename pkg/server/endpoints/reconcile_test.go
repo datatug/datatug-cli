@@ -378,6 +378,17 @@ func TestDetectiveReconcilerMapsErrors(t *testing.T) {
 	result, err := reconciler(context.Background(), factories.ProfileSettings)
 	require.NoError(t, err)
 	require.Equal(t, reconcile.StatusConsistent, result.Status)
+	require.Equal(t, reconcile.DiscloseGroupsOnly, result.Disclosure, "Check runs never embed values")
+
+	// A profile that discloses values is still reported groups-only in a Check.
+	result, err = reconciler(context.Background(), factories.ProfileCountries)
+	require.NoError(t, err)
+	require.Equal(t, reconcile.StatusDiscrepancies, result.Status)
+	require.Equal(t, reconcile.DiscloseGroupsOnly, result.Disclosure)
+	require.Nil(t, result.Unexpected[0].Key)
+	for _, group := range result.Unexpected[0].Fields[0].Groups {
+		require.Nil(t, group.Value)
+	}
 	_, err = reconciler(context.Background(), "nope")
 	var failure *core.QueryFailure
 	require.ErrorAs(t, err, &failure)

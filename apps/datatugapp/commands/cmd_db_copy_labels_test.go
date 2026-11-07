@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
 	"github.com/dal-go/record"
+	"github.com/datatug/datatug-cli/pkg/callercontext"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/meaninglabels"
 	"github.com/spf13/cobra"
@@ -121,9 +123,21 @@ func TestCopyLabelRefusal(t *testing.T) {
 	restoreVar(t, &listCollections)
 	restoreVar(t, &describeCollection)
 	restoreVar(t, &listSourceViews)
+	restoreVar(t, &callerLookup)
+	agent := func(on bool) {
+		callerLookup = func(name string) (string, bool) {
+			if on && name == callercontext.HarnessEnv {
+				return "claude-code", true
+			}
+			return "", false
+		}
+	}
+	agent(false)
 	project := &projectSource{dir: "/p", catalog: "crm"}
 	src := dbcopy.BackendRef{Scheme: "sqlite", Path: "/x.sqlite"}
+	var stderr bytes.Buffer
 	cmd := copyLabelCommand(t)
+	cmd.SetErr(&stderr)
 	check := func() string { return copyLabelRefusal(cmd, src, project, "sales") }
 
 	assert.Empty(t, copyLabelRefusal(cmd, src, nil, ""), "a source that is not a project source has no labels")
@@ -136,7 +150,10 @@ func TestCopyLabelRefusal(t *testing.T) {
 	doc := meaninglabels.NewDocument()
 	loadLabels = func(context.Context, string) (meaninglabels.Document, error) { return doc, nil }
 	openCopySource = func(context.Context, dbcopy.BackendRef, string) (dal.DB, error) { return nil, errors.New("no source") }
-	assert.Contains(t, check(), "source crm cannot be opened")
+	assert.Empty(t, check(), "with no stored label, a person's copy reports the source it cannot open itself")
+	agent(true)
+	assert.Contains(t, check(), "source crm cannot be opened", "an agent's copy that cannot be checked is refused")
+	agent(false)
 
 	var openedSchema string
 	openCopySource = func(_ context.Context, _ dbcopy.BackendRef, schema string) (dal.DB, error) {
@@ -161,23 +178,36 @@ func TestCopyLabelRefusal(t *testing.T) {
 	listSourceViews = func(context.Context, dal.DB) ([]dbschema.SourceViewDef, error) { return nil, nil }
 	assert.Empty(t, check(), "an unlabelled source with no suggestion copies")
 	assert.Equal(t, "sales", openedSchema, "the check reads the schema the copy reads")
+	assert.Empty(t, stderr.String())
 
+	// A read-time suggestion alone warns a person and refuses an agent.
 	fields["Account"] = append(fields["Account"], dbschema.FieldDef{Name: "email"})
-	assert.Contains(t, check(), "crm.Account.email is protected (pii)", "a read-time suggestion counts")
+	assert.Empty(t, check(), "a person copies a column only a suggestion protects")
+	assert.Contains(t, stderr.String(), "warning: this copy is not masked; read-time suggestions mark Account.email of source crm sensitive")
+	agent(true)
+	assert.Contains(t, check(), "crm.Account.email is protected (pii)", "a suggestion refuses an agent")
 	assert.Empty(t, copyLabelRefusal(copyLabelCommand(t, "--include", "Region"), src, project, ""), "only the selected tables count")
 	assert.Empty(t, copyLabelRefusal(copyLabelCommand(t, "--exclude", "Account"), src, project, ""))
 	assert.NotEmpty(t, copyLabelRefusal(copyLabelCommand(t, "--include", "Region,Missing"), src, project, ""), "a filter the copy refuses checks every table")
 	assert.NotEmpty(t, copyLabelRefusal(copyLabelCommand(t, "--include", "Region", "--exclude", "Account"), src, project, ""), "directives the copy refuses check every table")
+	agent(false)
 	fields["Account"] = fields["Account"][:2]
 
 	listCollections = func(context.Context, dal.DB, *record.Key) ([]dal.CollectionRef, error) {
 		return nil, errors.New("no list")
 	}
-	assert.Contains(t, check(), "the tables of crm cannot be listed", "a copy writes every table: a source whose tables cannot be listed refuses")
+	assert.Empty(t, check(), "with no stored label, a person's copy reports the tables it cannot list itself")
+	agent(true)
+	assert.Contains(t, check(), "the tables of crm cannot be listed", "an agent's copy that cannot see its tables is refused")
+	agent(false)
 
-	// A protected label stored for the source checks it fully.
+	// A protected label stored for the source checks it fully, for everyone.
 	doc, _, err := meaninglabels.Apply(doc, meaninglabels.Change{Action: meaninglabels.ActionSet, Target: meaninglabels.Target{Source: "crm", Table: "Account", Column: "Hidden"}, Class: meaninglabels.ClassFinancial, Reason: "test"}, meaninglabels.Actor{ID: "owner"}, projectReadNow())
 	require.NoError(t, err)
+	assert.Contains(t, check(), "the tables of crm cannot be listed", "a labelled source whose tables cannot be listed refuses a person")
+	openCopySource = func(context.Context, dbcopy.BackendRef, string) (dal.DB, error) { return nil, errors.New("no source") }
+	assert.Contains(t, check(), "source crm cannot be opened", "a labelled source that cannot be opened refuses a person")
+	openCopySource = func(context.Context, dbcopy.BackendRef, string) (dal.DB, error) { return nil, nil }
 	listCollections = func(context.Context, dal.DB, *record.Key) ([]dal.CollectionRef, error) {
 		return []dal.CollectionRef{dal.NewRootCollectionRef("Account", ""), dal.NewRootCollectionRef("Region", ""), dal.NewRootCollectionRef("Gone", "")}, nil
 	}
@@ -189,7 +219,7 @@ func TestCopyLabelRefusal(t *testing.T) {
 	listSourceViews = func(context.Context, dal.DB) ([]dbschema.SourceViewDef, error) {
 		return []dbschema.SourceViewDef{{Name: "Gone"}}, nil
 	}
-	assert.Contains(t, check(), "crm.Gone.Id is protected (pii)", "an unreviewed view is masked whole")
+	assert.Contains(t, check(), "crm.Gone.Id is protected (pii)", "an unreviewed view of a labelled source is masked whole, for a person too")
 }
 
 func TestCopyRefusedFormat(t *testing.T) {

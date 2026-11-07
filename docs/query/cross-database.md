@@ -77,6 +77,14 @@ select i.InvoiceId, i.BillingCountry, c.code
 datatug query run --project datatug-demo --query invoice-countries --as agent --role agent
 ```
 
+The same saved query runs from `datatug chat` and from `datatug serve` (the web UI's Run, `exec/run_query`), bound the
+same way. `serve` binds only sources of the query's own project, in the request's environment: a target naming
+another project is refused there.
+
+A query that names a database for one source must name one for every source, including the sources of its
+subqueries (a FROM subquery, `exists`, a subquery in a column or condition). In a structured YAML query, that is each
+source's `database` key.
+
 ## Policies and sensitivity labels
 
 Each source is a separate secured read. The policies of the run apply to every one: `--policy`, `--policies-dir` or
@@ -86,7 +94,9 @@ In the saved example, the demo's agent policy lets the agent read only Canadian 
 A saved query reads a source that a target takes from another registered project under its own project's policies.
 
 A source that is a project source is also checked against that project's sensitivity labels, by its catalog id,
-whatever the alias is called. A federated read cannot mask yet, so a read of a labelled column is refused (exit 5). A
+whatever the alias is called. A federated read cannot mask yet, so a read of a labelled column is refused (exit 5). Chat checks
+strictly: a column only a read-time suggestion marks sensitive is refused too, because what chat reads goes to an AI
+model. A
 connection-string source belongs to no project, so no label applies to it, as for `--db <url>`.
 
 ## Result files

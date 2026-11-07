@@ -136,9 +136,9 @@ func (s *resultSink) describeAdHoc(ctx context.Context, o queryOptions, backend 
 }
 
 // describeSaved records the database and the query of a saved-query run.
-func (s *resultSink) describeSaved(ctx context.Context, store datatug.ProjectStore, projectDir string, o queryOptions, queryID string, queryDef *datatug.QueryDef, variables map[string]any, result secureread.Result) {
+func (s *resultSink) describeSaved(ctx context.Context, store datatug.ProjectStore, projectDir string, o queryOptions, queryID string, queryDef *datatug.QueryDef, bindings map[string]databaseBinding, variables map[string]any, result secureread.Result) {
 	s.meta.Query = queryresults.Query{Kind: queryresults.QueryKindSaved, SavedQueryID: queryID, SavedQueryType: strings.ToLower(string(queryDef.Type)), Parameters: typedParameters(variables), Policy: queryresults.PolicyProject}
-	s.meta.DB = savedQueryDB(ctx, store, projectDir, o.project, o.env, queryDef)
+	s.meta.DB = savedQueryDB(ctx, store, projectDir, o.project, o.env, queryDef, bindings)
 	switch queryDef.Type {
 	case datatug.QueryTypeSQL:
 		s.meta.SetEditor(queryDef.Text, queryresults.LanguageSQL)
@@ -153,7 +153,7 @@ func (s *resultSink) describeSaved(ctx context.Context, store datatug.ProjectSto
 		s.describe = func([]string) resultDescription { return describeHTTP(result.Collection) }
 	default:
 		s.meta.SetEditor(queryDef.Text, queryresults.LanguageTugQL)
-		sources := savedTugQLSources(ctx, store, projectDir, o.env, queryDef)
+		sources := savedTugQLSources(ctx, store, projectDir, o.env, queryDef, bindings)
 		s.describe = func(columns []string) resultDescription {
 			document, _ := querybody.Structured(queryDef)
 			return describeTugQL(ctx, document, columns, sources)
@@ -175,8 +175,8 @@ func (s *resultSink) describeAnonymousSaved(projectDir, queryID string, queryDef
 
 // savedTugQLSources opens the databases of a saved TugQL query: each bound
 // database of a federated query, else the one it runs on.
-func savedTugQLSources(ctx context.Context, store datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef) tugqlSources {
-	if _, bindings, err := federatedTugQLBindings(ctx, store, projectDir, envFlag, queryDef); err == nil && len(bindings) > 0 {
+func savedTugQLSources(ctx context.Context, store datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef, bindings map[string]databaseBinding) tugqlSources {
+	if len(bindings) > 0 {
 		return bindingSources(bindings)
 	}
 	// One database: its participants carry no reference of their own.
@@ -483,15 +483,13 @@ func registeredProjectID(dir string) string {
 // registered id, the environment and the source the query ran on (for a
 // federated query, its root's database). An HTTP query, and a project that is
 // not registered, have no reference.
-func savedQueryDB(ctx context.Context, store datatug.ProjectStore, projectDir, projectArg, envFlag string, queryDef *datatug.QueryDef) queryresults.DB {
+func savedQueryDB(ctx context.Context, store datatug.ProjectStore, projectDir, projectArg, envFlag string, queryDef *datatug.QueryDef, bindings map[string]databaseBinding) queryresults.DB {
 	if queryDef.Type == datatug.QueryTypeHTTP {
 		return queryresults.DB{Driver: "http"}
 	}
-	if queryDef.Type == datatug.QueryTypeTugQL {
-		if _, bindings, err := federatedTugQLBindings(ctx, store, projectDir, envFlag, queryDef); err == nil && len(bindings) > 0 {
-			document, _ := querybody.Structured(queryDef) // the bindings parsed it
-			return rootBindingDB(document, bindings)
-		}
+	if len(bindings) > 0 {
+		document, _ := querybody.Structured(queryDef) // the bindings parsed it
+		return rootBindingDB(document, bindings)
 	}
 	envID, err := resolveQueryEnvironment(ctx, store, envFlag)
 	if err != nil {

@@ -105,6 +105,10 @@ The server admits exactly two browser origins: `https://datatug.app` and the hos
 
 The API MUST answer `GET /datatug/results/<id>` with `{"meta": <the members of meta.json>, "recordset": <data.json's recordset>, "query": <meta.query>, "prompt": <the prompt as plain text, present once `query results annotate` recorded one>}` (`meta.unavailable.editor: too-large` says `query.text`/`params` were dropped for size; `query` and `prompt` are additive; the contract version stays 1 and readers that predate them ignore them) of a result stored by `query run --result-id` (see [query](../query/README.md)), behind the request guard and the session token like every route, and MUST NOT open a database or run a query for it. A write-only server has no such route. Refusals carry a reason code and never the id or a path: an id outside the grammar is `400` (`bad-result-id`), a missing or expired result `404` (`result-not-found`), one whose files are not complete `404` (`result-incomplete`), an unknown format version `400` (`result-version-unsupported`), a result directory that is a link or not the user's `403` (`result-refused`, nothing is read through it), and a store that cannot be read `503` (`results-store-unavailable`). The request log writes the path with `:id` in place of the id.
 
+#### REQ: serve-cross-database-queries
+
+`exec/run_query` MUST run a saved TugQL query that reads named databases (a text body's `databases (` block with `alias::path` sources, or a structured body whose sources carry a `database`) the way `query run` does ([query REQ: cross-database-sources](../query/README.md#req-cross-database-sources)): each database is bound once, through `pkg/tugqlbind`, to a source of the served project in the request's `environment` (an alias without a target is the source of the same name; `datatug:///<db>[?env=]` or the project's own id names one of its sources), and the query is read through `secureread.Executor.RunFederatedTugQL`, every source its own leaf through the session's policies. Target resolution is skipped for such a query: its sources are its bindings, and `provenance.source` is the root's source. A target naming another project, a connection-string target and a source naming no database next to one that does answer `INVALID_REQUEST` (`queryId`); a bound name the project cannot resolve answers `SOURCE_UNAVAILABLE`; a document that does not parse binds nothing and is reported by the read, as before. Each leaf MUST be checked against the sensitivity labels of the project source its alias is bound to, by that source's catalog id, with the label guard `datatug serve` installs (`endpoints.SetFederatedLabelGuard`, strict as the served principal's reads are); without one, a policy-governed federated read is refused. An agent's federated read is judged like raw SQL on every bound source, in alias order: a source with protected columns, or one that cannot be described, refuses it.
+
 ### Execution evidence storage
 
 #### REQ: execution-receipts-follow-incident-routing
@@ -191,6 +195,12 @@ With a stored result, `GET /datatug/results/<id>` with the session token from a 
 **Requirements:** serve#req:execution-receipts-follow-incident-routing, serve#req:snapshot-bytes-are-private-sqlite-state
 
 A recorded project execution writes its immutable receipt below the routed repository's `executions/YYYY/MM/` tree while its snapshot bytes appear only in the configured private SQLite sidecar. Dedicated and application routes write the receipt to their configured repository. Expiring a snapshot removes its bytes without changing the receipt.
+
+### AC: saved-query-reads-two-databases
+
+**Requirements:** serve#req:serve-cross-database-queries
+
+A served project with sources `chinook` and `geo` and a saved `support-reps.query.tugql` declaring `sales = 'datatug:///chinook'` and `geo` answers `exec/run_query` for it with the joined rows, `provenance.source` `chinook`, and every leaf checked against the labels of `chinook` or `geo`; with no label guard installed a policy-governed run is refused; a target naming another project answers `INVALID_REQUEST`, an unknown source `SOURCE_UNAVAILABLE`; an agent's run stops at the first bound source raw-SQL judgement refuses. (`TestExecRunQueryRunsASavedQueryAcrossTwoDatabases`, `TestExecRunQueryFederatedReadWithoutALabelGuardIsRefused`, `TestExecRunQueryFederatedBindingFailures`, `TestExecRunQueryAgentFederatedReadIsGuardedPerSource`.)
 
 ### AC: defaults-bind-localhost-8989
 

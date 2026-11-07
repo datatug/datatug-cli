@@ -124,6 +124,21 @@ func getCatalogSchema(projectDir, environmentID, catalogID string, partial bool)
 	if err != nil {
 		return nil, err
 	}
+	schema, err := loadDbModelSchema(projectDir, dbModelID, partial)
+	if err != nil {
+		return nil, catalogReadFailed(catalogID, environmentID, err)
+	}
+	return schema, nil
+}
+
+// GetDbModelSchema loads the stored (scanned) tables and views of the DB model
+// dbModelID with their columns, in schema and name order. It reads the
+// project's files only, never a database.
+func GetDbModelSchema(projectDir, dbModelID string) (*CatalogSchema, error) {
+	return loadDbModelSchema(projectDir, dbModelID, false)
+}
+
+func loadDbModelSchema(projectDir, dbModelID string, partial bool) (*CatalogSchema, error) {
 	dbModelDir := filepath.Join(projectDir, storage.DbModelsFolder, dbModelID)
 	var relations []CatalogRelation
 	for _, kind := range []struct {
@@ -132,7 +147,7 @@ func getCatalogSchema(projectDir, environmentID, catalogID string, partial bool)
 	}{{"tables", "BASE TABLE"}, {"views", "VIEW"}} {
 		items, err := loadCatalogRelationsWithMode(dbModelDir, kind.dir, kind.dbType, partial)
 		if err != nil {
-			return nil, catalogReadFailed(catalogID, environmentID, err)
+			return nil, err
 		}
 		relations = append(relations, items...)
 	}

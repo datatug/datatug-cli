@@ -32,7 +32,7 @@ type aiRunOperation struct {
 var (
 	confirmRunInterlock func()
 	loadCatalog         = core.LoadCatalog
-	evaluateCheck       = core.EvaluateCheck
+	evaluateCheck       = evaluateCheckWithContextOptions
 )
 
 // ConfirmRun accepts the confirmed intent before any query dispatch. An

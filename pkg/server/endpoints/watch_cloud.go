@@ -116,6 +116,10 @@ func executeCloudWatchCheck(ctx context.Context, localProject, operationID strin
 		return core.CheckRun{}, fingerprint, detective.ErrConflict
 	}
 	ctx = context.WithValue(detective.WithWatchAcceptedQueries(ctx, accepted), watchCloudSourcesKey{}, overrides)
+	// No Reconciler: a hosted bundle may read only the operator's bound
+	// sources through its pinned queries, never a local reconcile profile's
+	// environments. VerifiedCatalog refuses reconcile steps; were one to reach
+	// here it reports RECONCILE_UNAVAILABLE, never a pass.
 	run, err := core.EvaluateCheck(ctx, core.RunRequest{ID: operationID, CheckID: bundle.CheckID, Environment: claim.Definition.Environment, Actor: api.SecurePrincipalID(), Inputs: claim.Definition.Inputs}, catalog, detectiveQueryRunner(localProject, api.SecurityContextID()), detectiveExecutionMetadata(localProject))
 	return run, fingerprint, err
 }

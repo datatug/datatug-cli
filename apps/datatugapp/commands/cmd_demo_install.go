@@ -80,6 +80,7 @@ func demoInstallCommand() *cobra.Command {
 	cmd.Flags().String("dir", "", "Project folder (default: ~/datatug/datatug-demo)")
 	cmd.Flags().String("project-id", demoInstallProjectID, "Project ID to register")
 	cmd.Flags().String("format", "text", "Output format: text or json")
+	cmd.AddCommand(demoInstallFactoriesCommand())
 	return cmd
 }
 

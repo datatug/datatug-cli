@@ -89,6 +89,7 @@ func DatatugCommand() *cobra.Command {
 		entityCommand(),
 		executionCommand(),
 		compareCommand(),
+		reconcileCommand(),
 		incidentCommand(),
 		sessionCommand(),
 		chatCommand(),

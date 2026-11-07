@@ -1507,6 +1507,13 @@ func TestSourceResolverAPI(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "SELECT * FROM customers", doc)
 
+	// A query id must never read outside the project's queries folder.
+	outside := filepath.Join(tmpDir, "secret.query.sql")
+	require.NoError(t, os.WriteFile(outside, []byte("SECRET"), 0644))
+	_, err = LoadQueryDocument("p1", "../secret", datatug.QueryTypeSQL)
+	require.ErrorContains(t, err, "is not inside the project's")
+	assert.NotContains(t, err.Error(), "SECRET")
+
 	// 4. queryFolderAndID
 	f, id := queryFolderAndID("q1")
 	assert.Equal(t, "", f)

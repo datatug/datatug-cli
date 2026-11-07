@@ -213,7 +213,7 @@ func sessionContextDetectiveHandler(w http.ResponseWriter, r *http.Request) {
 		if claimErr == nil {
 			// Native journal itself checks exact identity, durable phase and current
 			// Case/fence under shared admission; false never creates an acceptance.
-			_, executeErr := store.ExecuteNativePin(r.Context(), token, pin, first, detectiveQueryRunner(scope.Project, api.SecurityContextID()), nil)
+			_, executeErr := store.ExecuteNativePin(withDetectiveReconciler(r.Context(), scope.Project, api.SecurityContextID()), token, pin, first, detectiveQueryRunner(scope.Project, api.SecurityContextID()), nil)
 			if executeErr != nil && !errors.Is(executeErr, detective.ErrOutcomeUncertain) && !errors.Is(executeErr, sessioncontext.ErrReadOnly) && !errors.Is(executeErr, sessioncontext.ErrForbidden) {
 				writeSessionDetectiveError(w, r, executeErr)
 				return

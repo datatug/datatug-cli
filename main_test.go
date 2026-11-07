@@ -184,7 +184,7 @@ func TestMainFunc(t *testing.T) {
 		for _, name := range []string{
 			"auth", "compare", "config", "console", "dataset", "dataset-data",
 			"datasets", "db", "demo", "entity", "execution", "gcloud", "init",
-			"install", "projects", "queries", "query", "render", "scan", "self-update",
+			"install", "projects", "queries", "query", "reconcile", "render", "scan", "self-update",
 			"serve", "show", "ui", "updateUrlConfig", "upgrade", "validate", "version",
 		} {
 			found, _, err := cmd.Find([]string{name})

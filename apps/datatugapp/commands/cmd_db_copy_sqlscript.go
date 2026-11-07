@@ -201,9 +201,12 @@ func dbCopySQLScript(cmd *cobra.Command, fromURL, toURL, overwrite string) error
 	if err != nil {
 		return fail(2, "%v", err)
 	}
-	srcRef, _, err := parseSourceArg(ctx, fromURL)
+	srcRef, srcProject, err := parseProjectSourceArg(ctx, fromURL)
 	if err != nil {
 		return keepExit(err, func(err error) error { return fail(2, "--from: %v", err) })
+	}
+	if reason := copyLabelRefusal(cmd, srcRef, srcProject); reason != "" {
+		return fail(copyRefusedCode, copyRefusedFormat, reason)
 	}
 	if srcRef.Scheme != "sqlite" {
 		return fail(2, "a sqlscript destination is written from a sqlite:// source, not %s://", srcRef.Scheme)

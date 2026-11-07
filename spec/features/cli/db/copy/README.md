@@ -223,6 +223,17 @@ If a copy fails midway (mid-stream insert error, target connection drop, source 
 | `2` | Invalid flags (missing required, unsupported `--overwrite` value, unknown scheme, remote `ingitdb://`) |
 | `3` | A SQLite or PostgreSQL copy finished but carried something inexactly, and `--fail-on-warning` was given (the copy is made; see REQ:faithful-reporting) |
 | `4` | Could not connect to source or target |
+| `5` | A project source (`datatug://`) has a column protected by a sensitivity label in a table the copy would write (see REQ:project-source-labels) |
+
+### Sensitivity labels of a project source
+
+Added 2026-11-07 (follow-up to the label guard of project reads: a copy of the demo's `chinook` wrote the real `Customer.Email` values, labelled `pii`, to a file anyone could query).
+
+#### REQ: project-source-labels
+
+When `--from` is a project source (`datatug://<project>/<db>` or `datatug:///<db>`), `db copy` (every destination, `sqlscript://` included) and `db export` MUST check the project's Meaning Graph sensitivity labels (`datatug-labels.json`) before anything is opened for writing. A copy writes every value of every column of the tables it selects, and no copy engine masks, so the command MUST refuse, with exit `5` and the code `FIELD_PROTECTED` (in the `--json` report too), when any table it selects (`--include`, `--exclude` or `--filter-config`; `--where` and `--limit` select rows, not columns) has a column whose effective label is protected: an owner label, a pending proposal, or a read-time suggestion no owner dismissed, as `query run` counts them. The refusal holds for every caller: the commands have no principal, and no `--no-policies` or `--role` flag. It MUST also refuse when the labels cannot be read or the source cannot be opened to check them, and, for a source with a protected label stored for it, when its tables or a selected table's columns cannot be listed, and treat an object that cannot be shown to be a table as an unreviewed view (every column masked). A filter the copy itself refuses MUST NOT narrow the check. (Column subsetting, the deferred part of [filtering](filtering/README.md), would let a copy leave a protected column out; until it ships every selected table is copied whole, and it MUST narrow this check exactly as it narrows the copy.) Tables with no protected column copy as before; a source that is not a project source has no labels and is not checked. Writing masked values instead was not chosen: no copy engine shares the masking reader of project reads, and a copy holding placeholder values would look like real data.
+
+A `sqlite://` URL that points at a project's database file is not a project source and is not checked: labels are an accident guard for an honest agent, not a boundary against a caller that reads the file itself.
 
 ### SQLite and PostgreSQL copies
 

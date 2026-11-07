@@ -212,6 +212,20 @@ not after it. A table that is filtered can leave a foreign key without its paren
 the key is created `NOT VALID`, on SQLite the orphans are counted, and the warning says the filter
 is the reason.
 
+## Sensitivity labels of a project source
+
+A `--from` that is a project source (`datatug://<project>/<db>`) keeps the project's sensitivity labels.
+A copy cannot mask, so `db copy` and `db export` refuse, with exit 5 and `FIELD_PROTECTED`, when a table
+they would write has a protected column (an owner label, a pending proposal, or a read-time suggestion such
+as an `Email` column), whoever runs them. Copy only the unlabelled tables with `--include` (or leave the
+labelled ones out with `--exclude`); `--where` and `--limit` choose rows and do not help:
+
+```sh
+datatug db copy --from datatug://datatug-demo/chinook --to sqlite://./chinook.sqlite
+# access denied: FIELD_PROTECTED: chinook.Customer.Email is protected (pii), and a copy cannot mask ...
+datatug db copy --from datatug://datatug-demo/chinook --to sqlite://./music.sqlite --include Genre,MediaType
+```
+
 ## `--json`
 
 ```json

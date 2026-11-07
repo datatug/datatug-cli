@@ -117,7 +117,7 @@ func dbCopyAction(cmd *cobra.Command, _ []string) error {
 
 	// Parse both URLs first (REQ:unknown-scheme-rejected, REQ:ingitdb-url-local-only,
 	// REQ:required-flags) — fail with exit 2 before any connection attempt.
-	srcRef, _, err := parseSourceArg(ctx, fromURL)
+	srcRef, srcProject, err := parseProjectSourceArg(ctx, fromURL)
 	if err != nil {
 		return keepExit(err, func(err error) error { return Exit(fmt.Sprintf("--from: %v", err), 2) })
 	}
@@ -133,6 +133,11 @@ func dbCopyAction(cmd *cobra.Command, _ []string) error {
 	}
 	if tgtRef.Scheme == "bigquery" && overwrite != "" {
 		return Exit("BigQuery destinations never replace existing tables; omit --overwrite and choose a new dataset or table names", 2)
+	}
+
+	// A project source keeps its sensitivity labels: checked before anything is opened for writing.
+	if reason := copyLabelRefusal(cmd, srcRef, srcProject); reason != "" {
+		return nativeFailer(cmd, "db copy", inGitDBEndpoints(srcRef, tgtRef))(copyRefusedCode, copyRefusedFormat, reason)
 	}
 
 	// An ingitdb:// destination that does not exist yet is a new native inGitDB project: the engine of

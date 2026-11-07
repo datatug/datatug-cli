@@ -99,9 +99,17 @@ func TestQueryRunAndCopyOpenADatabaseOfAProjectByReference(t *testing.T) {
 	root.SetOut(&out)
 	root.SetErr(&errOut)
 	root.SilenceUsage, root.SilenceErrors = true, true
+	// Customer's names are personal data by read-time suggestion: a copy cannot mask, so it is refused.
 	root.SetArgs([]string{"db", "copy", "--from", "datatug://shop/shop", "--to", "ingitdb://" + target})
+	assert.Equal(t, exitCodeAccessDenied, exitCodeOf(t, root.Execute()))
+	assert.Empty(t, projectFilesOf(t, target), "nothing was copied")
+	root = DatatugCommand()
+	root.SetOut(&out)
+	root.SetErr(&errOut)
+	root.SilenceUsage, root.SilenceErrors = true, true
+	root.SetArgs([]string{"db", "copy", "--from", "datatug://shop/shop", "--to", "ingitdb://" + target, "--include", "order_line"})
 	require.NoError(t, root.Execute())
-	assert.NotEmpty(t, projectFilesOf(t, target), "the tables were copied")
+	assert.NotEmpty(t, projectFilesOf(t, target), "the unlabelled table was copied")
 	root = DatatugCommand()
 	root.SetOut(&out)
 	root.SetErr(&errOut)

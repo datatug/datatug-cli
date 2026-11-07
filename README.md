@@ -153,6 +153,21 @@ datatug serve
 ```
 By default, `datatug serve` binds strictly to loopback (`127.0.0.1`) with origin protection. It is completely free and unrestricted under Apache License 2.0—no license key is ever required for individual local development.
 
+## Web UI on your own machine, offline
+
+The DataTug web UI can run entirely on your machine, served by the CLI, with no internet connection and no account.
+
+```bash
+datatug web-ui install ./datatug-web-ui-0.1.0.tar.gz   # from a release of github.com/datatug/web-ui; never touches the network
+datatug serve --web-ui                                 # prints http://datatug-app.localhost:8989/… and a 127.0.0.1 link
+```
+
+- Get the archive (and its `.sha256`) from [datatug/web-ui releases](https://github.com/datatug/web-ui/releases) on any connected machine and copy both across; `install` checks the digest and every file before anything is installed. With internet, `datatug web-ui install --latest` downloads the newest compatible release, and only then.
+- Installed versions live in `~/datatug/web-ui` (`$DATATUG_WEB_UI_DIR`). `datatug web-ui list | use <version> | rollback | remove <version>` manage them; a version this CLI cannot serve is listed with the reason and never served.
+- The page can reach only the local agent (Content-Security-Policy `connect-src 'self'`), runs no telemetry, and the agent still enforces your access policies on every request. Cloud features (sign-in, cloud projects, hosted AI) are unavailable there unless you allow an origin with `--ui-connect-src`.
+
+Details: [spec/features/cli/web-ui](spec/features/cli/web-ui/README.md).
+
 ## Architecture Overview
 
 DataTug provides a unified developer toolchain for multi-database exploration and automation:

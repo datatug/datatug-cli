@@ -32,7 +32,7 @@ func TestManifestValidate(t *testing.T) {
 		edit func(*Manifest)
 		want string
 	}{
-		"schema":         {func(m *Manifest) { m.Schema = "datatug-frontend/2" }, "schema"},
+		"schema":         {func(m *Manifest) { m.Schema = "datatug-web-ui/2" }, "schema"},
 		"name":           {func(m *Manifest) { m.Name = "evil" }, "name"},
 		"version":        {func(m *Manifest) { m.Version = "v1.0.0" }, "semantic version"},
 		"range":          {func(m *Manifest) { m.Requires.LocalAPI = "1.0" }, "requires.localApi"},

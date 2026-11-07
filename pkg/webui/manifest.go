@@ -1,5 +1,5 @@
 // Package webui installs, selects and serves the compiled DataTug web app (the
-// public archives of github.com/datatug/frontend) from the CLI's own HTTP server.
+// public archives of github.com/datatug/web-ui) from the CLI's own HTTP server.
 //
 // Spec: datatug/backstage spec/features/local-frontend-distribution (decision 0006).
 // An archive is a gzip tar of manifest.json plus the static app under browser/;
@@ -19,10 +19,10 @@ import (
 )
 
 // ManifestSchema is the only manifest schema this CLI reads.
-const ManifestSchema = "datatug-frontend/1"
+const ManifestSchema = "datatug-web-ui/1"
 
-// ManifestName is the name every DataTug frontend archive declares.
-const ManifestName = "datatug-frontend"
+// ManifestName is the name every DataTug web UI archive declares.
+const ManifestName = "datatug-web-ui"
 
 // ManifestFile and IndexFile are the two paths every archive must hold.
 const (
@@ -32,7 +32,7 @@ const (
 	IndexFile     = BrowserDir + "/index.html"
 )
 
-// Manifest is manifest.json of a frontend archive.
+// Manifest is manifest.json of a web UI archive.
 type Manifest struct {
 	Schema   string              `json:"schema"`
 	Name     string              `json:"name"`

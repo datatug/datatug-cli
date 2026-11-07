@@ -140,7 +140,7 @@ func goodArchive(t *testing.T, version, localAPI string) (string, string) {
 	t.Helper()
 	data := tarGz(t, archiveEntries(t, version, localAPI, appFiles())...)
 	h := sha256.Sum256(data)
-	return writeFile(t, t.TempDir(), "datatug-frontend-"+version+".tar.gz", data), hex.EncodeToString(h[:])
+	return writeFile(t, t.TempDir(), "datatug-web-ui-"+version+".tar.gz", data), hex.EncodeToString(h[:])
 }
 
 func newStore(t *testing.T) Store {

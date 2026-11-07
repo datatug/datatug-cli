@@ -24,7 +24,7 @@ var (
 )
 
 const webUIOfflineHelp = "Install it from a release archive (works offline):\n" +
-	"  datatug web-ui install ./datatug-frontend-<version>.tar.gz\n" +
+	"  datatug web-ui install ./datatug-web-ui-<version>.tar.gz\n" +
 	"or download the newest compatible release (needs internet):\n" +
 	"  datatug web-ui install --latest\n" +
 	"Releases: https://github.com/" + webui.DefaultReleaseRepo + "/releases"

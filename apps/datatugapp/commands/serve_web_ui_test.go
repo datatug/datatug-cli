@@ -51,7 +51,7 @@ func TestServeWebUI_NothingInstalled(t *testing.T) {
 	useWebUIStore(t) // fails the test on any network use
 	_, started, err := serveWebUIRun(t, map[string]string{serveWebUIFlag: webUIAuto})
 	requireExit(t, err, exitCodeUsage, "serve --web-ui: no DataTug web UI is installed",
-		"datatug web-ui install ./datatug-frontend-<version>.tar.gz", "datatug web-ui install --latest")
+		"datatug web-ui install ./datatug-web-ui-<version>.tar.gz", "datatug web-ui install --latest")
 	assert.Nil(t, started)
 }
 

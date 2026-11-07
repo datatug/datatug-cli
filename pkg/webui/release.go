@@ -14,7 +14,7 @@ import (
 )
 
 // DefaultReleaseRepo is the public repository of compiled frontend releases.
-const DefaultReleaseRepo = "datatug/frontend"
+const DefaultReleaseRepo = "datatug/web-ui"
 
 // ReleaseSource finds and downloads frontend releases on GitHub. It is used
 // only when the person asks for a download (`web-ui install --latest`,
@@ -123,7 +123,7 @@ func (rs ReleaseSource) latestDirect(ctx context.Context) (Candidate, error) {
 	if err := Compatible(m); err != nil {
 		return Candidate{}, err
 	}
-	archive := base + "datatug-frontend-" + m.Version + ".tar.gz"
+	archive := base + "datatug-web-ui-" + m.Version + ".tar.gz"
 	return Candidate{Manifest: m, ArchiveURL: archive, DigestURL: archive + ".sha256"}, nil
 }
 
@@ -169,7 +169,7 @@ func (rs ReleaseSource) latestListed(ctx context.Context) (Candidate, error) {
 }
 
 func (rs ReleaseSource) candidate(ctx context.Context, version string, r ghRelease) (Candidate, error) {
-	archive := "datatug-frontend-" + version + ".tar.gz"
+	archive := "datatug-web-ui-" + version + ".tar.gz"
 	var c Candidate
 	manifestURL := ""
 	for _, a := range r.Assets {
@@ -207,7 +207,7 @@ func (rs ReleaseSource) Download(ctx context.Context, c Candidate, dir string) (
 	if digest, err = ParseDigest(string(data)); err != nil {
 		return "", "", fmt.Errorf("release digest: %w", err)
 	}
-	f, err := os.CreateTemp(dir, "datatug-frontend-*.tar.gz")
+	f, err := os.CreateTemp(dir, "datatug-web-ui-*.tar.gz")
 	if err != nil {
 		return "", "", err
 	}

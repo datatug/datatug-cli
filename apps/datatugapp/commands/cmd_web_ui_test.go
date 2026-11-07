@@ -62,7 +62,7 @@ func webUIArchive(t *testing.T, version, localAPI string) []byte {
 
 func webUIArchiveFile(t *testing.T, version, localAPI string) string {
 	t.Helper()
-	p := filepath.Join(t.TempDir(), "datatug-frontend-"+version+".tar.gz")
+	p := filepath.Join(t.TempDir(), "datatug-web-ui-"+version+".tar.gz")
 	require.NoError(t, os.WriteFile(p, webUIArchive(t, version, localAPI), 0o600))
 	return p
 }
@@ -116,7 +116,7 @@ func TestWebUIInstall_File(t *testing.T) {
 	useWebUIStore(t)
 
 	_, err := runWebUI(t, "install")
-	requireExit(t, err, exitCodeUsage, "datatug web-ui install ./datatug-frontend-<version>.tar.gz", "datatug web-ui install --latest")
+	requireExit(t, err, exitCodeUsage, "datatug web-ui install ./datatug-web-ui-<version>.tar.gz", "datatug web-ui install --latest")
 	_, err = runWebUI(t, "install", "--latest", "a.tar.gz")
 	requireExit(t, err, exitCodeUsage, "not both")
 
@@ -165,8 +165,8 @@ func TestWebUIInstall_File(t *testing.T) {
 func fakeReleases(t *testing.T, version string) (*httptest.Server, map[string][]byte) {
 	t.Helper()
 	data := webUIArchive(t, version, ">=1")
-	base := "/datatug/frontend/releases/latest/download/"
-	archive := "datatug-frontend-" + version + ".tar.gz"
+	base := "/datatug/web-ui/releases/latest/download/"
+	archive := "datatug-web-ui-" + version + ".tar.gz"
 	var manifest []byte
 	gr, err := gzip.NewReader(bytes.NewReader(data))
 	require.NoError(t, err)
@@ -192,7 +192,7 @@ func fakeReleases(t *testing.T, version string) (*httptest.Server, map[string][]
 	}))
 	t.Cleanup(srv.Close)
 	webUIReleaseSource = func() webui.ReleaseSource {
-		return webui.ReleaseSource{Repo: "datatug/frontend", APIBase: srv.URL, DownloadBase: srv.URL, Client: srv.Client()}
+		return webui.ReleaseSource{Repo: "datatug/web-ui", APIBase: srv.URL, DownloadBase: srv.URL, Client: srv.Client()}
 	}
 	return srv, routes
 }
@@ -203,7 +203,7 @@ func TestWebUIInstall_Latest(t *testing.T) {
 
 	out, err := runWebUI(t, "install", "--latest")
 	require.NoError(t, err)
-	assert.Contains(t, out, "Looking for the newest compatible web UI in github.com/datatug/frontend")
+	assert.Contains(t, out, "Looking for the newest compatible web UI in github.com/datatug/web-ui")
 	assert.Contains(t, out, "Downloading web UI 1.3.0")
 	assert.Contains(t, out, "web UI 1.3.0 installed")
 	assert.Contains(t, out, "digest checked against: GitHub release over HTTPS")
@@ -212,7 +212,7 @@ func TestWebUIInstall_Latest(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, out, "already installed and verified")
 
-	digestPath := "/datatug/frontend/releases/latest/download/datatug-frontend-1.3.0.tar.gz.sha256"
+	digestPath := "/datatug/web-ui/releases/latest/download/datatug-web-ui-1.3.0.tar.gz.sha256"
 	routes[digestPath] = []byte(strings.Repeat("0", 64))
 	_, err = runWebUI(t, "update")
 	requireExit(t, err, exitCodeDatabase, "web UI not installed", "GitHub release over HTTPS")
@@ -233,7 +233,7 @@ func TestWebUIInstall_LatestUnavailable(t *testing.T) {
 		delete(routes, k)
 	}
 	_, err := runWebUI(t, "update")
-	requireExit(t, err, exitCodeDatabase, "list web UI releases", "datatug web-ui install ./datatug-frontend-<version>.tar.gz")
+	requireExit(t, err, exitCodeDatabase, "list web UI releases", "datatug web-ui install ./datatug-web-ui-<version>.tar.gz")
 }
 
 func TestWebUIList(t *testing.T) {

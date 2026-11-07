@@ -17,7 +17,7 @@ import (
 
 func TestParseDigest(t *testing.T) {
 	d := strings.Repeat("ab", 32)
-	for _, in := range []string{d, " " + d + "\n", "sha256:" + d, strings.ToUpper(d), d + "  datatug-frontend-1.0.0.tar.gz\n"} {
+	for _, in := range []string{d, " " + d + "\n", "sha256:" + d, strings.ToUpper(d), d + "  datatug-web-ui-1.0.0.tar.gz\n"} {
 		got, err := ParseDigest(in)
 		require.NoError(t, err, in)
 		assert.Equal(t, d, got)

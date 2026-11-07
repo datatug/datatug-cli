@@ -25,11 +25,28 @@ import (
 // A stored protected label refuses for every principal. Read-time suggestions
 // alone refuse a strict principal (see labelStrictness); anyone else reads
 // on, and warn receives one warning naming the suggested columns.
-func installProjectLabels(session *secureread.Session, projectDir string, catalogs map[string][]string, warn io.Writer) {
-	strict := labelStrictness(*session)
+//
+// alwaysStrict makes every suggestion refuse whoever the caller is: `chat`
+// hands what it reads to an AI model.
+func installProjectLabels(session *secureread.Session, projectDir string, catalogs map[string][]string, warn io.Writer, alwaysStrict bool) {
+	strict := alwaysStrict || labelStrictness(*session)
 	session.FederatedColumns = federatedLabelGuard(projectDir, strict, warn)
 	session.NativeSQL = nativeSQLLabelGuard(projectDir, strict, warn)
 	session.SourceCatalogs = catalogs
+}
+
+// storedLabelCovers reports whether a stored protected label (owner or
+// proposed, on the column or its whole table) covers column. A column's
+// effective origin can read "suggested" when a tied suggestion replaced such a
+// label, so whether a label is stored is decided here, from the document.
+func storedLabelCovers(doc meaninglabels.Document, source, table, column string) bool {
+	for _, l := range doc.Labels {
+		if l.Class.Protected() && strings.EqualFold(l.Target.Source, source) && meaninglabels.TableMatches(l.Target.Table, table) &&
+			(l.Target.Column == "" || strings.EqualFold(l.Target.Column, column)) {
+			return true
+		}
+	}
+	return false
 }
 
 // labelStrictness reports whether read-time suggestions alone refuse a read:
@@ -135,7 +152,7 @@ func federatedLabelGuard(projectDir string, strict bool, warn io.Writer) securer
 		for _, l := range meaninglabels.EffectiveObject(doc, leaf.Database, leaf.Collection, object.view, labelColumnsOf(names)) {
 			switch {
 			case !l.Protected():
-			case strict || l.Origin != meaninglabels.FromSuggested:
+			case strict || l.Origin != meaninglabels.FromSuggested || storedLabelCovers(doc, leaf.Database, leaf.Collection, l.Column):
 				return federatedProtected(leaf, l)
 			default:
 				suggested = append(suggested, leaf.Collection+"."+l.Column)

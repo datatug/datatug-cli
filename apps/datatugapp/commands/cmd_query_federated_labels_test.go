@@ -353,7 +353,7 @@ func TestChatChecksTheProjectLabels(t *testing.T) {
 	session, err := resolveServeSession(projectDir, serveFlags{projectDir: projectDir, as: "agent", roles: []string{"agent"}})
 	require.NoError(t, err)
 	session.AllowOpaqueSQL = true
-	installProjectLabels(&session, projectDir, chatSourceCatalogs(sourceURLs, sourceURLs["chinook"], "chinook"), io.Discard)
+	installProjectLabels(&session, projectDir, chatSourceCatalogs(sourceURLs, sourceURLs["chinook"], "chinook"), io.Discard, true)
 	executor := secureread.NewExecutor(session)
 	service := chatSavedQueries{projectDir: projectDir, store: store, executor: executor, env: env, session: session}
 	var protected *secureread.FieldProtectedError
@@ -486,4 +486,57 @@ func TestLabelStrictness(t *testing.T) {
 		return "", false
 	}
 	assert.True(t, labelStrictness(secureread.Session{DatabaseProfile: secureread.DatabasePolicyFreeReads}), "an agent")
+}
+
+// A stored table-level label decides, even where a tied suggestion with a
+// kind becomes the column's effective label: an owner is refused.
+func TestStoredTableLabelRefusesAnOwnerUnderASuggestion(t *testing.T) {
+	dir := demoForTest(t)
+	require.NoError(t, os.RemoveAll(filepath.Join(dir, "policies")))
+	doc, _, err := meaninglabels.Apply(meaninglabels.NewDocument(), meaninglabels.Change{Action: meaninglabels.ActionSet, Target: meaninglabels.Target{Source: "chinook", Table: "Customer"}, Class: meaninglabels.ClassPII, Reason: "customer table"}, meaninglabels.Actor{ID: "owner"}, projectReadNow())
+	require.NoError(t, err)
+	effective := meaninglabels.Effective(doc, "chinook", "Customer", []meaninglabels.Column{{Name: "Email"}})[0]
+	require.Equal(t, meaninglabels.FromSuggested, effective.Origin, "the repro: the suggestion is the effective label")
+	body, err := meaninglabels.Encode(doc)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, meaninglabelsfile.FileName), body, 0o644))
+	queries := filepath.Join(dir, "queries")
+	require.NoError(t, os.MkdirAll(queries, 0o755))
+	writeTargetedQuery(t, queries, "emails", "TugQL", "chinook", "from: {name: Customer}\ncolumns: [{field: Email}]\n")
+	stdout, stderr, code := runCLI(t, "", "query", "run", "--project", "datatug-demo", "--format", "json", "--query", "emails")
+	require.Equal(t, exitCodeAccessDenied, code, stdout+stderr)
+	assert.NotContains(t, stdout+stderr, "@")
+	assert.Contains(t, stderr, meaninglabels.CodeFieldProtected)
+	assert.Contains(t, stderr, "chinook.Customer.Email is protected (pii)")
+}
+
+// chat is strict whatever the profile: a policy-free project's chat is refused
+// a column only a suggestion protects, which a policy-free owner may read.
+func TestChatIsStrictOnAPolicyFreeProject(t *testing.T) {
+	dir := demoForTest(t)
+	require.NoError(t, os.RemoveAll(filepath.Join(dir, "policies")))
+	require.NoError(t, os.Remove(filepath.Join(dir, meaninglabelsfile.FileName)))
+	queries := filepath.Join(dir, "queries")
+	require.NoError(t, os.MkdirAll(queries, 0o755))
+	writeTargetedQuery(t, queries, "emails", "TugQL", "chinook", "from: {name: Customer}\ncolumns: [{field: Email}]\n")
+	ctx := context.Background()
+	projectDir, store, err := resolveQueryProject("datatug-demo")
+	require.NoError(t, err)
+	env, err := resolveQueryEnvironment(ctx, store, "")
+	require.NoError(t, err)
+	_, sourceURLs, err := buildChatProjectCatalog(ctx, projectDir, store, env)
+	require.NoError(t, err)
+	run := func(alwaysStrict bool) error {
+		session, err := resolveServeSession(projectDir, serveFlags{projectDir: projectDir})
+		require.NoError(t, err)
+		require.True(t, session.DatabaseProfile.PolicyFreeReads())
+		installProjectLabels(&session, projectDir, chatSourceCatalogs(sourceURLs, sourceURLs["chinook"], "chinook"), io.Discard, alwaysStrict)
+		service := chatSavedQueries{projectDir: projectDir, store: store, executor: secureread.NewExecutor(session), env: env, session: session}
+		_, err = service.Run(ctx, "emails")
+		return err
+	}
+	var protected *secureread.FieldProtectedError
+	require.ErrorAs(t, run(true), &protected, "chat")
+	assert.Contains(t, protected.Message, "chinook.Customer.Email is protected (pii)")
+	assert.NoError(t, run(false), "the same owner outside chat")
 }

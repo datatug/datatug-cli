@@ -55,7 +55,7 @@ func runSQLQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	// with or without policies: SQL text cannot be masked, so a source with a
 	// protected column refuses it.
 	if project != nil {
-		installProjectLabels(&session, project.dir, map[string][]string{sourceURL: {project.catalog}}, cmd.ErrOrStderr())
+		installProjectLabels(&session, project.dir, map[string][]string{sourceURL: {project.catalog}}, cmd.ErrOrStderr(), false)
 	}
 	stderr := cmd.ErrOrStderr()
 	if session.DatabaseProfile.PolicyFreeReads() && len(session.Policies) == 0 {

@@ -256,8 +256,9 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 		return "", Exit("chat: "+strings.TrimPrefix(err.Error(), "serve: "), exitCodeUsage)
 	}
 	// Saved queries and the model's own TugQL read through this session, so
-	// it checks the project's sensitivity labels, for every principal.
-	installProjectLabels(&session, projectDir, chatSourceCatalogs(sourceURLs, sourceURL, database), cmd.ErrOrStderr())
+	// it checks the project's sensitivity labels, for every principal, and
+	// strictly: what it reads goes to an AI model.
+	installProjectLabels(&session, projectDir, chatSourceCatalogs(sourceURLs, sourceURL, database), cmd.ErrOrStderr(), true)
 	executor := secureread.NewExecutor(session)
 	var conversation chat.ContextualConversation
 	var foreignKeys []narrowing.Link // set once the source's foreign keys are read

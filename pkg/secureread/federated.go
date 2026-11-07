@@ -172,3 +172,13 @@ func (s securedLeaf) ExecuteQueryToRecordsReader(ctx context.Context, query dal.
 func (s securedLeaf) ExecuteQueryToRecordsetReader(context.Context, dal.Query, ...recordset.Option) (dal.RecordsetReader, error) {
 	return nil, fmt.Errorf("federated recordset readers are not supported")
 }
+
+// WithFederatedColumns is e with its session's federated column guard
+// replaced by guard; e itself is unchanged. A federated saved query checks each
+// leaf against the labels of the project source its alias is bound to, which
+// only the binding knows.
+func (e *Executor) WithFederatedColumns(guard FederatedColumnGuard) *Executor {
+	session := e.session
+	session.FederatedColumns = guard
+	return &Executor{session: session}
+}

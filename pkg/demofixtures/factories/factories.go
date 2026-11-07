@@ -369,7 +369,7 @@ func Profiles() []reconcile.Profile {
 		{
 			ID: ProfileProducts, Title: "Product master data: shared descriptions, local prices and stock", QueryID: "products", Instances: production,
 			Rules: reconcile.Rules{Key: []string{"sku"}, Mode: reconcile.ModeConsensus, Presence: reconcile.PresenceAny, Fields: map[string]reconcile.FieldPolicy{
-				"id": reconcile.FieldIgnored, "price": reconcile.FieldInstanceSpecific, "stock": reconcile.FieldInstanceSpecific,
+				"id": reconcile.FieldIgnored, "price": reconcile.FieldInstanceSpecific, "stock": reconcile.FieldIgnored,
 			}},
 		},
 		{
@@ -414,7 +414,7 @@ rows align only by their semantic key.
 | factory-a-test | setting ` + "`smtp_host`" + ` is ` + "`smtp.test.factory-a.example`" + ` | environment-specific |
 | factory-e-prod | ` + "`products`" + ` has an extra column ` + "`local_notes`" + ` | schema drift |
 
-Stock levels differ in every factory; the products profile treats them as instance-specific.
+Stock levels differ in every factory; the products profile does not compare them (ignored), so the one permitted price difference stands out.
 
 ## Profiles and expected verdicts
 

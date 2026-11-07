@@ -12,6 +12,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/policyscope"
 	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/stretchr/testify/require"
 )
@@ -200,7 +201,8 @@ func TestClickHouseSavedSourceSnapshotComesFromValidatedCatalog(t *testing.T) {
 	require.NoError(t, err)
 	source, err := savedQuerySourceForClickHouse(context.Background(), store, dir, "local", query, nil)
 	require.NoError(t, err)
-	require.Equal(t, resolvedQuerySource{URL: clickHouseDispatchSource, Driver: api.DriverClickHouse, Environment: "local", Catalog: "warehouse"}, source)
+	require.Equal(t, resolvedQuerySource{URL: clickHouseDispatchSource, Driver: api.DriverClickHouse, Environment: "local", Catalog: "warehouse",
+		Target: policyscope.Target{Environment: "local", Catalog: "warehouse"}}, source)
 	require.Equal(t, 1, store.catalogReads, "one validated catalog snapshot suffices for classification")
 	// A ClickHouse label cannot classify a descriptor whose actual source is
 	// another engine. No partial URL/driver snapshot may escape on failure.

@@ -307,7 +307,15 @@ func (b Binding) matches(e Exception) bool {
 // else. It returns data itself and no ids when nothing applies, else the
 // re-encoded document and the ids of the exceptions it added.
 func Overlay(data []byte, codec access.Codec, binding Binding, exceptions []Exception, now time.Time) ([]byte, []string, error) {
-	fingerprint := Fingerprint(data)
+	return OverlayProjected(data, data, codec, binding, exceptions, now)
+}
+
+// OverlayProjected is Overlay for a document whose rules select environments
+// or instances: exceptions bind to original, the bytes on disk, and their
+// rules are added to data, original as it stands for the read
+// (policyscope.Project). When nothing applies it returns data itself.
+func OverlayProjected(original, data []byte, codec access.Codec, binding Binding, exceptions []Exception, now time.Time) ([]byte, []string, error) {
+	fingerprint := Fingerprint(original)
 	var matching []Exception
 	for _, e := range exceptions {
 		if e.Active(now) && binding.matches(e) && e.Policy.SHA256 == fingerprint && len(e.AppliedFields) > 0 {

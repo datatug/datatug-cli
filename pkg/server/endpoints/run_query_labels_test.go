@@ -76,13 +76,18 @@ func TestRunQueryLabelColumns(t *testing.T) {
 	if got := warnings.String(); strings.Count(got, "warning:") != 1 || !strings.Contains(got, "Customer.Email of source shop") {
 		t.Fatalf("warnings = %q", got)
 	}
-	// A wildcard whose columns cannot be described, or whose source cannot be
-	// opened, passes on a source with no stored label.
+	// On a source with no stored label, a wildcard whose columns cannot be
+	// described, or whose source cannot be opened, passes.
 	if err := strict.columns(ctx, runQueryLeaf("Unknown", true, nil)); err != nil {
 		t.Fatal(err)
 	}
 	if err := strict.columns(ctx, runQueryLeaf("Customer", true, errors.New("refused"))); err != nil {
 		t.Fatal(err)
+	}
+	// An HTTP source is described from its declaration, never opened here.
+	http := &runQueryLabels{projectDir: dir, source: api.ResolvedSource{ID: "shop", Kind: api.SourceKindHTTP}, strict: true}
+	if msg := protectedMessage(t, http.columns(ctx, runQueryLeaf("Customer", true, errors.New("never opened")))); !strings.Contains(msg, "Customer.Email") {
+		t.Fatal(msg)
 	}
 
 	// A stored protected label refuses the owner too.

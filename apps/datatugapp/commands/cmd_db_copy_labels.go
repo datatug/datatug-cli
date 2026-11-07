@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strings"
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
@@ -92,10 +91,8 @@ func copyLabelRefusal(cmd *cobra.Command, src dbcopy.BackendRef, project *projec
 // copy is refused, or the table.column names that only a read-time suggestion
 // protects.
 func copyTableRefusal(ctx context.Context, db dal.DB, doc meaninglabels.Document, src dbcopy.BackendRef, catalog, table string, labelled, strict bool) (string, []string) {
-	for _, l := range doc.Labels {
-		if l.Class.Protected() && strings.EqualFold(l.Target.Source, catalog) && meaninglabels.TableMatches(l.Target.Table, table) {
-			return copyProtected(catalog, table, meaninglabels.ColumnLabel{Column: l.Target.Column, Class: l.Class}), nil
-		}
+	if l, ok := labelguard.StoredTableLabel(doc, catalog, table); ok {
+		return copyProtected(catalog, table, l), nil
 	}
 	columns, ok := collectionColumns(ctx, db, table)
 	if !ok && labelled {

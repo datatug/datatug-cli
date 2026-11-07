@@ -25,9 +25,9 @@ import (
 // Executor.RunFederatedTugQL.
 
 // federatedLabelGuardFor builds the sensitivity-label guard of one project's
-// sources. `datatug serve` installs it (SetFederatedLabelGuard). Without one a
-// federated read has no guard: a policy-free session reads on, and a
-// policy-governed one is refused (secureread.Executor.RunFederatedTugQL).
+// sources. `datatug serve` and `datatug daemon watch` install it
+// (SetFederatedLabelGuard). Without one every federated read is refused: its
+// leaves' labels cannot be checked (fail closed).
 var federatedLabelGuardFor func(projectDir string) secureread.FederatedColumnGuard
 
 // SetFederatedLabelGuard installs the label guard every federated saved query
@@ -37,6 +37,13 @@ func SetFederatedLabelGuard(guardFor func(projectDir string) secureread.Federate
 }
 
 var runFederatedTugQLHook = (*secureread.Executor).RunFederatedTugQL
+
+// refuseUnguardedLeaf refuses every leaf of a federated read in a process that
+// installed no label guard.
+func refuseUnguardedLeaf(context.Context, secureread.FederatedLeaf) error {
+	return &secureread.FieldProtectedError{Message: "this process has no sensitivity-label guard for queries that read named databases, so the read is refused"}
+}
+
 var agentRawRefusalHook = agentRawRefusal
 
 // bindingSourceError is a bound name whose source the served project cannot
@@ -124,7 +131,7 @@ func federatedRunRefusal(ctx context.Context, req apicontract.ExecutionRequest) 
 // project source its alias is bound to.
 func federatedExecutor(executor *secureread.Executor, bindings map[string]tugqlbind.Binding) *secureread.Executor {
 	if federatedLabelGuardFor == nil {
-		return executor
+		return executor.WithFederatedColumns(refuseUnguardedLeaf)
 	}
 	return executor.WithFederatedColumns(tugqlbind.LabelGuard(bindings, federatedLabelGuardFor))
 }

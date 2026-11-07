@@ -107,11 +107,12 @@ func (g *runQueryLabels) isView(ctx context.Context, table string) bool {
 }
 
 // columns is the TugQL check of one read: the columns it names on its table,
-// or all of them for a wildcard (or no column list). The source is opened
-// through the session's own opener first, so a source the session refuses is
-// never described. A source with no stored protected label is judged by
+// or all of them for a wildcard (or no column list). A database source is
+// opened through the session's own opener first, so a source the session
+// refuses is never described. A source with no stored protected label is judged by
 // read-time suggestions only, and a wildcard whose columns cannot be listed
-// passes there; a source with one refuses what it cannot open or describe.
+// passes there (as in the CLI's guard): the read itself reports a source it
+// cannot open or a table the policy denies. A source with one refuses what it cannot open or describe.
 func (g *runQueryLabels) columns(ctx context.Context, leaf secureread.FederatedLeaf) error {
 	doc, err := g.load(ctx)
 	if err != nil {
@@ -123,8 +124,10 @@ func (g *runQueryLabels) columns(ctx context.Context, leaf secureread.FederatedL
 		}
 	}
 	labelled := labelguard.SourceHasProtectedLabel(doc, leaf.Database)
-	opened := false
-	if labelled || leaf.AllColumns {
+	// An HTTP source's fields are read from its saved query's declaration,
+	// which needs no connection; any other source is opened first.
+	opened := g.source.Kind == api.SourceKindHTTP
+	if !opened && (labelled || leaf.AllColumns) {
 		if _, err := leaf.Open(ctx); err == nil {
 			opened = true
 		} else if labelled {

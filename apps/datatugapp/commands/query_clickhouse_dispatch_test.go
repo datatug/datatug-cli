@@ -317,7 +317,7 @@ func TestClickHouseCommandDefaultExecutionRefusesMissingOperatorConfig(t *testin
 }
 
 func TestClickHouseSavedStreamingRejectsInvalidDocumentBeforeExecution(t *testing.T) {
-	streamed, err := runStreamedSavedTugQL(context.Background(), io.Discard, io.Discard, queryOptions{format: "csv"}, nil, &covCStore{}, "", &datatug.QueryDef{Type: datatug.QueryTypeTugQL, Text: "from: ["}, nil)
-	require.True(t, streamed)
+	// A saved run binds before streaming: a document that does not parse fails there.
+	_, _, err := federatedTugQLBindings(context.Background(), &covCStore{}, "", "", &datatug.QueryDef{Type: datatug.QueryTypeTugQL, Text: "from: ["})
 	require.Error(t, err)
 }

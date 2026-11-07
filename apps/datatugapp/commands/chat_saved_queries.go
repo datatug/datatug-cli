@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"sort"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/joinmeta"
 	"github.com/datatug/datatug-cli/pkg/querybody"
 	"github.com/datatug/datatug-cli/pkg/secureread"
+	"github.com/datatug/datatug-cli/pkg/tugqlbind"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
@@ -32,6 +34,8 @@ type chatSavedQueries struct {
 	env        string
 	projectID  string
 	session    secureread.Session
+	// warn receives the label warnings of a federated read.
+	warn io.Writer
 }
 
 func (s chatSavedQueries) Save(ctx context.Context, request chat.SavedQuerySaveRequest) (chat.SavedQuery, error) {
@@ -273,6 +277,20 @@ func (s chatSavedQueries) RunHTTPWithVariables(ctx context.Context, id string, r
 	return s.run(ctx, id, variables, datatug.QueryTypeHTTP)
 }
 
+// runFederated reads every bound source of a saved TugQL query as its own
+// secured leaf, each checked strictly against the labels of the project source
+// its alias is bound to: what chat reads goes to an AI model.
+func (s chatSavedQueries) runFederated(ctx context.Context, definition *datatug.QueryDef, bindings map[string]databaseBinding, variables map[string]any) (secureread.Result, error) {
+	session := s.session
+	warn := s.warn
+	if warn == nil {
+		warn = io.Discard
+	}
+	installBindingLabels(&session, bindings, warn, true)
+	document, _ := querybody.Structured(definition) // the bindings parsed it
+	return secureread.NewExecutor(session).RunFederatedTugQL(ctx, []byte(document), tugqlbind.URLs(bindings), variables)
+}
+
 func (s chatSavedQueries) run(ctx context.Context, id string, variables map[string]any, allowedType datatug.QueryType) (chat.QueryResult, error) {
 	canonical, err := api.ResolveQueryID(s.projectDir, id)
 	if err != nil {
@@ -293,6 +311,19 @@ func (s chatSavedQueries) run(ctx context.Context, id string, variables map[stri
 	database := ""
 	switch definition.Type {
 	case datatug.QueryTypeTugQL, datatug.QueryTypeSQL:
+		if definition.Type == datatug.QueryTypeTugQL {
+			// A query that reads named databases binds each one, as `query run` does.
+			parsed, bindings, bindErr := federatedTugQLBindings(ctx, s.store, s.projectDir, s.env, definition)
+			if bindErr != nil {
+				return chat.QueryResult{}, bindErr
+			}
+			if len(bindings) > 0 {
+				root, _ := tugqlbind.Root(parsed, bindings)
+				source, database = root.URL, root.Catalog
+				result, err = s.runFederated(ctx, definition, bindings, variables)
+				break
+			}
+		}
 		database, err = resolveQueryDatabase(ctx, s.store, s.env, definition)
 		if err != nil {
 			return chat.QueryResult{}, err

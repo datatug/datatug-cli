@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"regexp"
@@ -13,9 +12,9 @@ import (
 	"github.com/dal-go/dalgo/tugql"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
-	"github.com/datatug/datatug-cli/pkg/querybody"
 	"github.com/datatug/datatug-cli/pkg/queryresults"
 	"github.com/datatug/datatug-cli/pkg/secureread"
+	"github.com/datatug/datatug-cli/pkg/tugqlbind"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/spf13/cobra"
 )
@@ -23,7 +22,9 @@ import (
 // Cross-database TugQL (spec/features/cli/query, REQ:cross-database-sources).
 // A text document's root `databases (` block declares aliases, and a source
 // written `alias::path` reads the database bound to its alias. DALgo leaves
-// binding to the caller; this file is that caller for `query run`:
+// binding to the caller. A saved query is bound by pkg/tugqlbind, for `query
+// run`, `chat` and `serve` alike; this file binds an ad-hoc run and supplies
+// the CLI's resolver of a saved one (savedBindingResolver):
 //
 //   - a `datatug://<project>/<db>[?env=]` target is that project source;
 //   - an alias without a target is bound by --db <alias>=<url|datatug://...>
@@ -35,25 +36,8 @@ import (
 // Every bound source is read as its own secured leaf (RunFederatedTugQL), so
 // access policies and sensitivity labels apply per source.
 
-// databaseBinding is the source one database alias reads.
-type databaseBinding struct {
-	// url is the source opened; it never leaves the process.
-	url string
-	// ref is the datatug:// reference of a project source, written in full,
-	// or nil for a connection-string target. It is the only form of the
-	// source a result's meta.json records.
-	ref *dbcopy.DatatugRef
-	// projectDir, env and catalog name the project source whose labels apply;
-	// projectDir is "" for a connection-string target, which no label names.
-	projectDir string
-	env        string
-	catalog    string
-}
-
-// databaseBindingError is a database alias that cannot be bound: a usage error.
-type databaseBindingError string
-
-func (e databaseBindingError) Error() string { return string(e) }
+// databaseBinding is the source one database alias reads (pkg/tugqlbind).
+type databaseBinding = tugqlbind.Binding
 
 // dbAliasFlag matches a --db value that binds an alias: a TugQL word, then `=`.
 // A source URL never matches: its scheme is followed by `:`.
@@ -139,7 +123,7 @@ func adHocDatabaseBinding(ctx context.Context, alias, target string) (databaseBi
 	if _, err := dbcopy.Parse(target); err != nil {
 		return databaseBinding{}, Exit(fmt.Sprintf("database %s: %v", alias, err), exitCodeUsage)
 	}
-	return databaseBinding{url: target}, nil
+	return databaseBinding{URL: target}, nil
 }
 
 // projectDatabaseBinding resolves a datatug:// target through the project
@@ -153,147 +137,44 @@ func projectDatabaseBinding(ctx context.Context, target string) (databaseBinding
 	if err != nil {
 		return databaseBinding{}, err
 	}
-	binding := databaseBinding{url: url, projectDir: dir, env: reference.Env, catalog: reference.DB}
+	binding := databaseBinding{URL: url, ProjectDir: dir, Env: reference.Env, Catalog: reference.DB}
 	if full, ok := fullDatatugRef(ctx, target); ok {
-		binding.ref, binding.env = &full, full.Env
+		binding.Ref, binding.Env = &full, full.Env
 	}
 	return binding, nil
 }
 
-// savedDatabaseBindings binds every database a saved TugQL query reads: the
-// aliases its text declares, and the database names a structured document's
-// sources carry (referenced). A name without a target is the project source of
-// that name in the query's environment.
-func savedDatabaseBindings(ctx context.Context, store datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef, referenced map[string]bool) (map[string]databaseBinding, error) {
-	declared, err := querybody.Databases(queryDef)
-	if err != nil {
-		return nil, err
+// savedBindingResolver resolves a saved query's databases as `query run` and
+// `chat` do: a name is the project source of that name, in the query's
+// environment, and a datatug:// target in another project resolves through
+// the project registry, exactly as --db datatug://... does.
+func savedBindingResolver(store datatug.ProjectStore, projectDir, envFlag string) tugqlbind.Resolver {
+	return tugqlbind.Resolver{
+		ProjectID:  registeredProjectID(projectDir),
+		ProjectDir: projectDir,
+		Environment: func(ctx context.Context) (string, error) {
+			return resolveQueryEnvironment(ctx, store, envFlag)
+		},
+		// The CLI names a source by its catalog id only, so the name is the catalog.
+		Local: func(ctx context.Context, env, catalog string) (string, string, error) {
+			url, err := resolveQuerySourceURL(ctx, store, projectDir, env, catalog)
+			return url, catalog, err
+		},
+		Foreign: projectDatabaseBinding,
 	}
-	targets := map[string]string{}
-	for _, database := range declared {
-		targets[database.Name] = database.Target
-		referenced[database.Name] = true
-	}
-	if len(referenced) == 0 {
-		return nil, nil
-	}
-	envID, err := resolveQueryEnvironment(ctx, store, envFlag)
-	if err != nil {
-		return nil, err
-	}
-	projectID := registeredProjectID(projectDir)
-	names := make([]string, 0, len(referenced))
-	for name := range referenced {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	bindings := make(map[string]databaseBinding, len(names))
-	for _, name := range names {
-		binding, err := savedDatabaseBinding(ctx, store, projectDir, projectID, envID, queryDef.ID, name, targets[name])
-		if err != nil {
-			return nil, err
-		}
-		bindings[name] = binding
-	}
-	return bindings, nil
-}
-
-func savedDatabaseBinding(ctx context.Context, store datatug.ProjectStore, projectDir, projectID, envID, queryID, name, target string) (databaseBinding, error) {
-	catalog := name
-	if target != "" {
-		// The target itself is not repeated: it may name a host.
-		if !dbcopy.IsDatatugRef(target) {
-			return databaseBinding{}, databaseBindingError(fmt.Sprintf("saved query %q: database %s is bound to a connection string; a saved query binds a database to a project source, datatug://<project>/<db>[?env=<ENV>], or leaves the target empty for the project source of the same name", queryID, name))
-		}
-		reference, err := dbcopy.ParseDatatugRef(target)
-		if err != nil {
-			return databaseBinding{}, databaseBindingError(fmt.Sprintf("saved query %q: database %s: %v", queryID, name, err))
-		}
-		if reference.Project != "" && reference.Project != projectID {
-			return projectDatabaseBinding(ctx, target)
-		}
-		catalog = reference.DB
-		if reference.Env != "" {
-			envID = reference.Env
-		}
-	}
-	url, err := resolveQuerySourceURL(ctx, store, projectDir, envID, catalog)
-	if err != nil {
-		return databaseBinding{}, err
-	}
-	binding := databaseBinding{url: url, projectDir: projectDir, env: envID, catalog: catalog}
-	if projectID != "" {
-		binding.ref = &dbcopy.DatatugRef{Project: projectID, Env: envID, DB: catalog}
-	}
-	return binding, nil
-}
-
-// unqualifiedSource is the first source of from that names no database, or "".
-// DALgo's federated execution needs every source qualified: a query with a
-// databases block cannot also read the default database.
-func unqualifiedSource(from dal.FromSource) string {
-	switch ref := from.Base().(type) {
-	case dal.CollectionRef:
-		if ref.Database() == "" {
-			return ref.Name()
-		}
-	case *dal.CollectionRef:
-		if ref.Database() == "" {
-			return ref.Name()
-		}
-	}
-	for _, joined := range from.Joins() {
-		child := joined.From()
-		if child == nil {
-			child = dal.From(joined.RecordsetSource)
-		}
-		if name := unqualifiedSource(child); name != "" {
-			return name
-		}
-	}
-	return ""
-}
-
-// unqualifiedSourceMessage refuses a source with no alias next to a databases block.
-func unqualifiedSourceMessage(name string) string {
-	return fmt.Sprintf("source %s names no database: a query with a databases block reads every source as <alias>::%s", name, name)
-}
-
-// bindingURLs is the source URL of each alias, nil when there is none.
-func bindingURLs(bindings map[string]databaseBinding) map[string]string {
-	if len(bindings) == 0 {
-		return nil
-	}
-	urls := make(map[string]string, len(bindings))
-	for alias, binding := range bindings {
-		urls[alias] = binding.url
-	}
-	return urls
 }
 
 // installBindingLabels checks every federated leaf against the labels of the
 // project source its alias is bound to, named by that source's catalog id.
 // A connection-string source belongs to no project, so no label names it, as
 // for a --db read of one.
-func installBindingLabels(session *secureread.Session, bindings map[string]databaseBinding, warn io.Writer) {
-	strict := labelStrictness(*session)
-	guards := map[string]secureread.FederatedColumnGuard{}
-	session.FederatedColumns = func(ctx context.Context, leaf secureread.FederatedLeaf) error {
-		binding, ok := bindings[leaf.Database]
-		if !ok {
-			return fmt.Errorf("database %q is not configured", leaf.Database)
-		}
-		if binding.projectDir == "" {
-			return nil
-		}
-		guard := guards[binding.projectDir]
-		if guard == nil {
-			guard = federatedLabelGuard(binding.projectDir, strict, warn)
-			guards[binding.projectDir] = guard
-		}
-		leaf.Database = binding.catalog
-		return guard(ctx, leaf)
-	}
+//
+// alwaysStrict makes every read-time suggestion refuse, as for chat.
+func installBindingLabels(session *secureread.Session, bindings map[string]databaseBinding, warn io.Writer, alwaysStrict bool) {
+	strict := alwaysStrict || labelStrictness(*session)
+	session.FederatedColumns = tugqlbind.LabelGuard(bindings, func(projectDir string) secureread.FederatedColumnGuard {
+		return federatedLabelGuard(projectDir, strict, warn)
+	})
 }
 
 // bindingSources describes a federated result's participants by their aliases'
@@ -305,7 +186,7 @@ func bindingSources(bindings map[string]databaseBinding) tugqlSources {
 			if !ok {
 				return nil, "", nil, fmt.Errorf("database %q is not configured", database)
 			}
-			backend, err := chatParseSource(binding.url)
+			backend, err := chatParseSource(binding.URL)
 			if err != nil {
 				return nil, "", nil, err
 			}
@@ -317,15 +198,15 @@ func bindingSources(bindings map[string]databaseBinding) tugqlSources {
 		},
 		ref: func(database string) *string {
 			binding := bindings[database]
-			if binding.ref == nil {
+			if binding.Ref == nil {
 				return nil
 			}
-			text := binding.ref.String()
+			text := binding.Ref.String()
 			return &text
 		},
 		scanned: func(database, schema, relation string) ([]string, bool) {
 			binding := bindings[database]
-			return scannedColumns(binding.projectDir, binding.env, binding.catalog)(database, schema, relation)
+			return scannedColumns(binding.ProjectDir, binding.Env, binding.Catalog)(database, schema, relation)
 		},
 	}
 }
@@ -341,11 +222,11 @@ func rootBindingDB(text string, bindings map[string]databaseBinding) queryresult
 	if !ok {
 		return queryresults.DB{}
 	}
-	backend, _ := dbcopy.Parse(binding.url) // a bound URL was parsed when it was bound
-	if binding.ref == nil {
+	backend, _ := dbcopy.Parse(binding.URL) // a bound URL was parsed when it was bound
+	if binding.Ref == nil {
 		return queryresults.DB{Driver: backend.Scheme}
 	}
-	return projectDB(*binding.ref, backend.Scheme)
+	return projectDB(*binding.Ref, backend.Scheme)
 }
 
 // describeFederatedAdHoc records an ad-hoc cross-database run.
@@ -371,8 +252,8 @@ func runFederatedAdHocQuery(cmd *cobra.Command, o queryOptions, document adHocQu
 	case strings.TrimSpace(o.db) != "":
 		return Exit(fmt.Sprintf("the query declares databases (%s) and reads every source through one of them, so a --db without an alias has no source to bind; bind each as --db <alias>=<url|datatug://...>", strings.Join(names, ", ")), exitCodeUsage)
 	}
-	if name := unqualifiedSource(document.query.(dal.StructuredQuery).From()); name != "" {
-		return Exit(unqualifiedSourceMessage(name), exitCodeUsage)
+	if name := tugqlbind.Unqualified(document.query.(dal.StructuredQuery)); name != "" {
+		return Exit(tugqlbind.UnqualifiedMessage(name), exitCodeUsage)
 	}
 	// queryRunCommandAction always installs the read's cancellable context.
 	ctx := cmd.Context()
@@ -389,7 +270,7 @@ func runFederatedAdHocQuery(cmd *cobra.Command, o queryOptions, document adHocQu
 		return Exit(err.Error(), exitCodeUsage)
 	}
 	stderr := cmd.ErrOrStderr()
-	installBindingLabels(&session, bindings, stderr)
+	installBindingLabels(&session, bindings, stderr, false)
 	if len(session.Policies) == 0 {
 		_, _ = fmt.Fprintln(stderr, "access: running without access policies")
 	}
@@ -398,7 +279,7 @@ func runFederatedAdHocQuery(cmd *cobra.Command, o queryOptions, document adHocQu
 			_, _ = fmt.Fprintf(stderr, "query %s: %d rows %s\n", item.Phase, item.Rows, item.Database)
 		})
 	}
-	result, err := secureread.NewExecutor(session).RunFederatedTugQL(ctx, []byte(document.text), bindingURLs(bindings), variables)
+	result, err := secureread.NewExecutor(session).RunFederatedTugQL(ctx, []byte(document.text), tugqlbind.URLs(bindings), variables)
 	if err != nil {
 		return savedReadFailure(stderr, o, err)
 	}
@@ -413,10 +294,4 @@ func runFederatedAdHocQuery(cmd *cobra.Command, o queryOptions, document adHocQu
 		return Exit(err.Error(), 1)
 	}
 	return nil
-}
-
-// isDatabaseBindingError reports a saved query's unbindable database alias.
-func isDatabaseBindingError(err error) bool {
-	var binding databaseBindingError
-	return errors.As(err, &binding)
 }

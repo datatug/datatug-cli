@@ -498,6 +498,7 @@ func TestEveryReadEntryPointChecksLabels(t *testing.T) {
 		"RunSnapshot":            "reads a recordset an earlier, guarded read returned; it names no source",
 		"WithLabels":             "returns an executor with label guards and reads no row",
 		"WithCatalog":            "returns an executor that names one more source and reads no row",
+		"WithFederatedColumns":   "reads no row: it returns an executor whose reads are checked here like any other",
 	}
 	methods := reflect.TypeOf(e)
 	for i := 0; i < methods.NumMethod(); i++ {

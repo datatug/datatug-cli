@@ -2,6 +2,7 @@ package webui
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"crypto/rand"
 	"crypto/sha256"
@@ -47,6 +48,9 @@ type InstallOptions struct {
 	// ExpectedSHA256 is the archive's expected digest, lowercase hex. "" checks none.
 	ExpectedSHA256 string
 	Source         DigestSource
+	// AllowUnsigned installs an archive with no signature from a trusted release key (a local or test build). A
+	// signature that does not verify is refused regardless.
+	AllowUnsigned bool
 }
 
 // Installed is the outcome of an install.
@@ -57,6 +61,8 @@ type Installed struct {
 	Source        DigestSource
 	// Reused is true when the same version was already installed and verified.
 	Reused bool
+	// Signature says which trusted release key signed the archive.
+	Signature Signature
 }
 
 // ParseDigest reads a digest in any of the forms people paste: bare hex,
@@ -128,28 +134,32 @@ func (s Store) InstallArchive(archivePath string, opts InstallOptions) (Installe
 	if err != nil {
 		return out, err
 	}
-	m, err := verifyExtracted(staging, extracted)
+	m, manifestData, err := verifyExtracted(staging, extracted)
 	if err != nil {
+		return out, err
+	}
+	if out.Signature, err = checkSignature(staging, extracted, manifestData, opts.AllowUnsigned); err != nil {
 		return out, err
 	}
 	out.Manifest = m
 	target := filepath.Join(versions, m.Version)
 	out.Dir = target
 	if _, err := os.Stat(target); err == nil {
-		if _, verr := VerifyDir(target); verr == nil {
+		if sameInstalled(target, staging) {
 			out.Reused = true
 			return out, nil
 		}
-		// A damaged copy of the same version: move it aside, then publish the good one.
+		// A damaged or different copy of the same version (for example one installed unsigned): move it aside, then
+		// publish the one just verified.
 		trash := filepath.Join(versions, ".trash-"+randomSuffix())
 		if err := rename(target, trash); err != nil {
-			return out, fmt.Errorf("replace damaged %s: %w", m.Version, err)
+			return out, fmt.Errorf("replace existing %s: %w", m.Version, err)
 		}
 		defer func() { _ = os.RemoveAll(trash) }()
 	}
 	if err := rename(staging, target); err != nil {
-		// Another process published the same version first: accept it if it verifies.
-		if _, verr := VerifyDir(target); verr == nil {
+		// Another process published the same version first: accept it if it is exactly what was just verified.
+		if sameInstalled(target, staging) {
 			out.Reused = true
 			return out, nil
 		}
@@ -157,6 +167,24 @@ func (s Store) InstallArchive(archivePath string, opts InstallOptions) (Installe
 	}
 	keep = true
 	return out, nil
+}
+
+// sameInstalled reports whether the installed dir verifies and holds the same manifest.json and manifest.json.sig as
+// staging, the archive just verified. Only then may the install keep dir: a copy that verifies against its own,
+// different manifest (installed with --allow-unsigned, or by a CLI that did not check signatures) is not the archive
+// whose signature was checked.
+func sameInstalled(dir, staging string) bool {
+	if _, err := VerifyDir(dir); err != nil {
+		return false
+	}
+	for _, name := range []string{ManifestFile, SignatureFile} {
+		have, haveErr := os.ReadFile(filepath.Join(dir, name))
+		want, wantErr := os.ReadFile(filepath.Join(staging, name))
+		if (haveErr == nil) != (wantErr == nil) || !bytes.Equal(have, want) {
+			return false
+		}
+	}
+	return true
 }
 
 // extracted is what extract wrote: each content file's size and digest.
@@ -260,36 +288,49 @@ func writeEntry(root *os.Root, name string, r io.Reader, size int64) (ManifestFi
 	return ManifestFileEntry{Path: name, Size: n, SHA256: hex.EncodeToString(h.Sum(nil))}, nil
 }
 
+// checkSignature verifies the extracted manifest.json.sig, if the archive had one, against the trusted keys.
+func checkSignature(dir string, files extracted, manifest []byte, allowUnsigned bool) (Signature, error) {
+	var sig []byte
+	_, present := files[SignatureFile]
+	if present {
+		var err error
+		if sig, err = os.ReadFile(filepath.Join(dir, SignatureFile)); err != nil {
+			return Signature{}, err
+		}
+	}
+	return verifySignature(manifest, sig, present, allowUnsigned, trustedKeys)
+}
+
 // verifyExtracted compares what was extracted with manifest.json, exactly.
-func verifyExtracted(dir string, files extracted) (Manifest, error) {
+func verifyExtracted(dir string, files extracted) (Manifest, []byte, error) {
 	if _, ok := files[ManifestFile]; !ok {
-		return Manifest{}, errors.New("archive has no " + ManifestFile)
+		return Manifest{}, nil, errors.New("archive has no " + ManifestFile)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, ManifestFile))
 	if err != nil {
-		return Manifest{}, err
+		return Manifest{}, nil, err
 	}
 	m, err := ParseManifest(data)
 	if err != nil {
-		return m, err
+		return m, nil, err
 	}
 	listed := make(map[string]bool, len(m.Files))
 	for _, want := range m.Files {
 		listed[want.Path] = true
 		got, ok := files[want.Path]
 		if !ok {
-			return m, fmt.Errorf("archive lacks %q, which the manifest lists", want.Path)
+			return m, nil, fmt.Errorf("archive lacks %q, which the manifest lists", want.Path)
 		}
 		if got.Size != want.Size || got.SHA256 != want.SHA256 {
-			return m, fmt.Errorf("archive file %q does not match the manifest (size or SHA-256 differ)", want.Path)
+			return m, nil, fmt.Errorf("archive file %q does not match the manifest (size or SHA-256 differ)", want.Path)
 		}
 	}
 	for name := range files {
 		if name != ManifestFile && name != SignatureFile && !listed[name] {
-			return m, fmt.Errorf("archive holds %q, which the manifest does not list", name)
+			return m, nil, fmt.Errorf("archive holds %q, which the manifest does not list", name)
 		}
 	}
-	return m, nil
+	return m, data, nil
 }
 
 // VerifyDir re-checks an installed version against its manifest.

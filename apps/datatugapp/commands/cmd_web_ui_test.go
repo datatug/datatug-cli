@@ -4,7 +4,10 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -28,8 +31,8 @@ func hexSum(data []byte) string {
 	return hex.EncodeToString(h[:])
 }
 
-// webUIArchive builds a frontend archive of version that needs localAPI.
-func webUIArchive(t *testing.T, version, localAPI string) []byte {
+// webUIArchive builds a frontend archive of version that needs localAPI, signed by key when one is given.
+func webUIArchive(t *testing.T, version, localAPI string, key ...ed25519.PrivateKey) []byte {
 	t.Helper()
 	files := map[string]string{webui.IndexFile: webUITestIndex, webui.BrowserDir + "/main-ABCD1234.js": "main()"}
 	m := webui.Manifest{Schema: webui.ManifestSchema, Name: webui.ManifestName, Version: version, Requires: webui.Requirements{LocalAPI: localAPI}}
@@ -52,6 +55,10 @@ func webUIArchive(t *testing.T, version, localAPI string) []byte {
 		require.NoError(t, err)
 	}
 	write(webui.ManifestFile, manifest)
+	for _, k := range key {
+		sig := base64.StdEncoding.EncodeToString(ed25519.Sign(k, manifest))
+		write(webui.SignatureFile, []byte(webui.SignatureFormat+" ed25519 "+webui.KeyID(k.Public().(ed25519.PublicKey))+" "+sig+"\n"))
+	}
 	for _, name := range names {
 		write(name, []byte(files[name]))
 	}
@@ -70,6 +77,10 @@ func webUIArchiveFile(t *testing.T, version, localAPI string) string {
 // useWebUIStore points the commands at a fresh store and forbids the network.
 func useWebUIStore(t *testing.T) webui.Store {
 	t.Helper()
+	// Test archives are unsigned: trust no release key here (TestWebUIInstall_Signatures covers signing).
+	restore, err := webui.UseTrustedKeys()
+	require.NoError(t, err)
+	t.Cleanup(restore)
 	store := webui.Store{Dir: filepath.Join(t.TempDir(), "web-ui")}
 	origStore, origSource := webUIStore, webUIReleaseSource
 	t.Cleanup(func() { webUIStore, webUIReleaseSource = origStore, origSource })
@@ -79,6 +90,29 @@ func useWebUIStore(t *testing.T) webui.Store {
 		return webui.ReleaseSource{}
 	}
 	return store
+}
+
+func TestWebUIInstall_Signatures(t *testing.T) {
+	useWebUIStore(t)
+	pub, key, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	restore, err := webui.UseTrustedKeys(base64.StdEncoding.EncodeToString(pub))
+	require.NoError(t, err)
+	t.Cleanup(restore)
+
+	unsigned := webUIArchiveFile(t, "1.0.0", ">=1.0 <2")
+	_, err = runWebUI(t, "install", unsigned)
+	requireExit(t, err, exitCodeUsage, "not signed by a DataTug release key", "--allow-unsigned")
+
+	out, err := runWebUI(t, "install", "--allow-unsigned", unsigned)
+	require.NoError(t, err)
+	assert.Contains(t, out, "signed by: NOT signed by a DataTug release key (installed with --allow-unsigned)")
+
+	signed := filepath.Join(t.TempDir(), "datatug-web-ui-1.0.1.tar.gz")
+	require.NoError(t, os.WriteFile(signed, webUIArchive(t, "1.0.1", ">=1.0 <2", key), 0o600))
+	out, err = runWebUI(t, "install", signed)
+	require.NoError(t, err)
+	assert.Contains(t, out, "signed by: DataTug release key "+webui.KeyID(pub))
 }
 
 func runWebUI(t *testing.T, args ...string) (string, error) {

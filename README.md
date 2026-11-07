@@ -162,7 +162,7 @@ datatug web-ui install ./datatug-web-ui-0.1.0.tar.gz   # from a release of githu
 datatug serve --web-ui                                 # prints http://datatug-app.localhost:8989/… and a 127.0.0.1 link
 ```
 
-- Get the archive (and its `.sha256`) from [datatug/web-ui releases](https://github.com/datatug/web-ui/releases) on any connected machine and copy both across; `install` checks the digest and every file before anything is installed. With internet, `datatug web-ui install --latest` downloads the newest compatible release, and only then.
+- Get the archive (and its `.sha256`) from [datatug/web-ui releases](https://github.com/datatug/web-ui/releases) on any connected machine and copy both across; `install` checks the digest, every file and the DataTug release signature before anything is installed (a web UI you built yourself installs with `--allow-unsigned`). With internet, `datatug web-ui install --latest` downloads the newest compatible release, and only then.
 - Installed versions live in `~/datatug/web-ui` (`$DATATUG_WEB_UI_DIR`). `datatug web-ui list | use <version> | rollback | remove <version>` manage them; a version this CLI cannot serve is listed with the reason and never served.
 - The page can reach only the local agent (Content-Security-Policy `connect-src 'self'`), runs no telemetry, and the agent still enforces your access policies on every request. Cloud features (sign-in, cloud projects, hosted AI) are unavailable there unless you allow an origin with `--ui-connect-src`.
 

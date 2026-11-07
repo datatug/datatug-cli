@@ -13,6 +13,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
+	"github.com/datatug/datatug-cli/pkg/tugqlbind"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -30,31 +31,30 @@ func TestParseDBFlagsKeepsURLsWithEqualsAsTheDefault(t *testing.T) {
 	assert.Equal(t, exitCodeUsage, coder.ExitCode())
 }
 
-func TestSavedDatabaseBindingsFailures(t *testing.T) {
+func TestSavedBindingResolverFailures(t *testing.T) {
 	dir := covCWriteProject(t, covCEnvFiles(map[string]string{"main": "main.sqlite"}))
 	store := covCFileStore(dir)
 	ctx := context.Background()
 	text := func(body string) *datatug.QueryDef {
 		return &datatug.QueryDef{ID: "q", Type: datatug.QueryTypeTugQL, Text: body}
 	}
-	_, err := savedDatabaseBindings(ctx, store, dir, "local", text("not tugql"), map[string]bool{})
+	_, _, err := federatedTugQLBindings(ctx, store, dir, "local", text("not tugql"))
 	assert.ErrorContains(t, err, "invalid TugQL text")
-	_, err = savedDatabaseBindings(ctx, store, dir, "local", &datatug.QueryDef{}, map[string]bool{})
-	assert.NoError(t, err, "nothing to bind")
-	_, err = savedDatabaseBindings(ctx, &covCStore{envsErr: errors.New("boom")}, dir, "", &datatug.QueryDef{}, map[string]bool{"main": true})
+	_, _, err = federatedTugQLBindings(ctx, &covCStore{envsErr: errors.New("boom")}, dir, "", text("databases (\n  main\n)\nfrom main::Item as i\nselect i.id\n"))
 	assert.ErrorContains(t, err, "boom")
 
 	bind := func(target string) (databaseBinding, error) {
-		return savedDatabaseBinding(ctx, store, dir, "", "local", "q", "main", target)
+		_, bindings, err := federatedTugQLBindings(ctx, store, dir, "local", text("databases (\n  main = '"+target+"'\n)\nfrom main::Item as i\nselect i.id\n"))
+		return bindings["main"], err
 	}
 	_, err = bind("datatug://")
-	assert.True(t, isDatabaseBindingError(err), err)
+	assert.True(t, tugqlbind.IsError(err), err)
 	_, err = bind("datatug:///missing")
 	assert.ErrorContains(t, err, "missing")
 	binding, err := bind("datatug:///main?env=local")
 	require.NoError(t, err)
-	assert.Nil(t, binding.ref, "an unregistered project has no reference")
-	assert.Equal(t, "main", binding.catalog)
+	assert.Nil(t, binding.Ref, "an unregistered project has no reference")
+	assert.Equal(t, "main", binding.Catalog)
 	// A target in another project resolves through the registry.
 	_, err = bind("datatug://elsewhere/main")
 	assert.Error(t, err)
@@ -69,7 +69,7 @@ func TestSavedTextQueryNamingAnUnknownProject(t *testing.T) {
 
 func TestInstallBindingLabels(t *testing.T) {
 	session := secureread.Session{}
-	installBindingLabels(&session, map[string]databaseBinding{"raw": {url: "sqlite:///x.db"}}, io.Discard)
+	installBindingLabels(&session, map[string]databaseBinding{"raw": {URL: "sqlite:///x.db"}}, io.Discard, false)
 	ctx := context.Background()
 	assert.NoError(t, session.FederatedColumns(ctx, secureread.FederatedLeaf{Database: "raw"}))
 	assert.ErrorContains(t, session.FederatedColumns(ctx, secureread.FederatedLeaf{Database: "other"}), `database "other" is not configured`)
@@ -79,10 +79,10 @@ func TestBindingSources(t *testing.T) {
 	path := countriesDB(t)
 	ref := dbcopy.DatatugRef{Project: "p", Env: "local", DB: "geo"}
 	sources := bindingSources(map[string]databaseBinding{
-		"geo":    {url: api.LocalSQLiteSourceURL(path), ref: &ref},
-		"raw":    {url: api.LocalSQLiteSourceURL(path)},
-		"bad":    {url: "nope://x"},
-		"closed": {url: api.LocalSQLiteSourceURL(filepath.Join(t.TempDir(), "missing", "x.sqlite"))},
+		"geo":    {URL: api.LocalSQLiteSourceURL(path), Ref: &ref},
+		"raw":    {URL: api.LocalSQLiteSourceURL(path)},
+		"bad":    {URL: "nope://x"},
+		"closed": {URL: api.LocalSQLiteSourceURL(filepath.Join(t.TempDir(), "missing", "x.sqlite"))},
 	})
 	ctx := context.Background()
 	db, driver, release, err := sources.open(ctx, "geo")
@@ -108,11 +108,11 @@ func TestBindingSources(t *testing.T) {
 func TestRootBindingDB(t *testing.T) {
 	ref := dbcopy.DatatugRef{Project: "p", Env: "local", DB: "chinook"}
 	text := `{"from":{"database":"sales","name":"Invoice"}}`
-	db := rootBindingDB(text, map[string]databaseBinding{"sales": {url: "sqlite:///x.db", ref: &ref}})
+	db := rootBindingDB(text, map[string]databaseBinding{"sales": {URL: "sqlite:///x.db", Ref: &ref}})
 	require.NotNil(t, db.Ref)
 	assert.Equal(t, "datatug://p/chinook?env=local", *db.Ref)
 	assert.Equal(t, "sqlite", db.Driver)
-	db = rootBindingDB(text, map[string]databaseBinding{"sales": {url: "sqlite:///x.db"}})
+	db = rootBindingDB(text, map[string]databaseBinding{"sales": {URL: "sqlite:///x.db"}})
 	assert.Nil(t, db.Ref)
 	assert.Equal(t, "sqlite", db.Driver)
 	assert.Empty(t, rootBindingDB(text, nil).Driver)
@@ -169,15 +169,9 @@ func TestTugQLFileHoldingYAMLStaysYAML(t *testing.T) {
 	assert.True(t, strings.Contains(document.text, "Invoice"))
 }
 
-func TestUnqualifiedSourceWalksJoins(t *testing.T) {
-	invoice := dal.NewDatabaseCollectionRef("sales", "", "Invoice", "i")
-	countries := dal.NewCollectionRef("countries", "c", nil)
-	// A join with no nested from: its recordset is the joined source.
-	joined := dal.From(&invoice).Join(dal.NewJoinedSource(&countries, dal.JoinInner))
-	assert.Equal(t, "countries", unqualifiedSource(joined))
-	assert.Empty(t, unqualifiedSource(dal.From(&invoice)))
-	assert.Equal(t, "countries", unqualifiedSource(dal.From(&countries)), "a pointer base")
-	document, err := loadAdHocQuery(queryOptions{file: writeTemp(t, "j.tugql", "databases (\n  sales\n)\nfrom sales::Invoice as i\njoin countries as c\n  on i.BillingCountry = c.name\nselect i.InvoiceId\n")}, nil)
-	require.NoError(t, err)
-	assert.Equal(t, "countries", unqualifiedSource(document.query.(dal.StructuredQuery).From()))
+func TestAdHocUnqualifiedSourceInAJoin(t *testing.T) {
+	file := writeTemp(t, "j.tugql", "databases (\n  sales\n)\nfrom sales::Invoice as i\njoin countries as c\n  on i.BillingCountry = c.name\nselect i.InvoiceId\n")
+	_, stderr, code := runCLI(t, "", "query", "run", "-f", file, "--db", "sales=sqlite:///x.db", "--no-policies")
+	assert.Equal(t, exitCodeUsage, code, stderr)
+	assert.Contains(t, stderr, "source countries names no database")
 }

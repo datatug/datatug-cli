@@ -397,7 +397,7 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 		// above is not visible until the user quits, so show it in the chat too.
 		setSessionNotices(ui, sessionNotices)
 	}
-	if err := setSavedQueryService(ui, chatSavedQueries{projectDir: projectDir, store: projectStore, executor: executor, env: options.env, projectID: projectCatalog.ID, session: session}); err != nil {
+	if err := setSavedQueryService(ui, chatSavedQueries{projectDir: projectDir, store: projectStore, executor: executor, env: options.env, projectID: projectCatalog.ID, session: session, warn: cmd.ErrOrStderr()}); err != nil {
 		return "", Exit(fmt.Sprintf("list saved project queries: %v", err), exitCodeUsage)
 	}
 	bridge, err := startBrowserBridge(sessions)

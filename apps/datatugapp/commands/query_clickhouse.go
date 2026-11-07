@@ -25,15 +25,10 @@ import (
 
 // Resolve only the single-source path here. Federated queries retain their own
 // validation and ClickHouse refusal in secureread before any source is opened.
-func savedQuerySourceForClickHouse(ctx context.Context, store datatug.ProjectStore, dir, env string, q *datatug.QueryDef) (resolvedQuerySource, error) {
-	if q.Type == datatug.QueryTypeTugQL {
-		urls, err := federatedTugQLURLs(ctx, store, dir, env, q)
-		if err != nil {
-			return resolvedQuerySource{}, err
-		}
-		if len(urls) > 0 {
-			return resolvedQuerySource{}, nil
-		}
+// bindings are the run's federated bindings (federatedTugQLBindings).
+func savedQuerySourceForClickHouse(ctx context.Context, store datatug.ProjectStore, dir, env string, q *datatug.QueryDef, bindings map[string]databaseBinding) (resolvedQuerySource, error) {
+	if len(bindings) > 0 {
+		return resolvedQuerySource{}, nil
 	}
 	return resolveSQLOrTugQLSource(ctx, store, dir, env, q)
 }

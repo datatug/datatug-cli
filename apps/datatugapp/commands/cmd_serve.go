@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/datatug/datatug-cli/pkg/agentaccess"
+	"io"
 	"log"
 	"os"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/personalqueries"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-cli/pkg/server"
+	"github.com/datatug/datatug-cli/pkg/server/endpoints"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/pkg/browser"
@@ -261,6 +263,7 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return Exit(err.Error(), exitCodeUsage)
 	}
+	endpoints.SetFederatedLabelGuard(serveFederatedLabelGuard(session, log.Writer()))
 	if session.DatabaseProfile.PolicyFreeReads() && len(session.Policies) == 0 {
 		log.Print(unrestrictedServeLog(session))
 	} else {
@@ -475,4 +478,15 @@ func serveCommandArgs() *cobra.Command {
 	flags.Duration(serveIdleTimeoutFlag, 0, "Exit gracefully after this long with no HTTP request (0 serves until stopped); datatug daemon uses 2h")
 	addServeWebUIFlags(cmd)
 	return cmd
+}
+
+// serveFederatedLabelGuard is the label guard a federated saved query served
+// by `datatug serve` checks each leaf with: the labels of the project source
+// its alias is bound to (pkg/tugqlbind), strict as the served principal's reads
+// are, with suggestion warnings written to warn.
+func serveFederatedLabelGuard(session secureread.Session, warn io.Writer) func(projectDir string) secureread.FederatedColumnGuard {
+	strict := labelStrictness(session)
+	return func(projectDir string) secureread.FederatedColumnGuard {
+		return federatedLabelGuard(projectDir, strict, warn)
+	}
 }

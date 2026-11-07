@@ -496,6 +496,7 @@ func TestEveryReadEntryPointChecksLabels(t *testing.T) {
 		"Authorize":              "decides a policy question and reads no row",
 		"CanReadWholeCollection": "decides a policy question and reads no row",
 		"RunSnapshot":            "reads a recordset an earlier, guarded read returned; it names no source",
+		"WithFederatedColumns":   "reads no row: it returns an executor whose reads are checked here like any other",
 	}
 	methods := reflect.TypeOf(e)
 	for i := 0; i < methods.NumMethod(); i++ {

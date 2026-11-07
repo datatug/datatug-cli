@@ -3,6 +3,8 @@ package endpoints
 import (
 	"net/http"
 	"strings"
+
+	"github.com/datatug/datatug-cli/pkg/reconcileapi"
 )
 
 type router interface {
@@ -254,6 +256,7 @@ func executeRoutes(path string, router router, wrap wrapper, writeOnly bool, cap
 		route(router, wrap, http.MethodGet, path+"/exec/select", refuseAgentRows(executeSelectHandler))
 		route(router, wrap, http.MethodPost, path+"/exec/run_query", runQueryHandler)
 		route(router, wrap, http.MethodPost, path+"/compare", compareHandler(caps))
+		route(router, wrap, http.MethodPost, path+reconcileapi.Path, reconcileHandler)
 		route(router, wrap, http.MethodGet, path+"/compare/rows", refuseAgentRows(compareRowsHandler))
 	}
 }

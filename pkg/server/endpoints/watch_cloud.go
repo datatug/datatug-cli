@@ -116,7 +116,7 @@ func executeCloudWatchCheck(ctx context.Context, localProject, operationID strin
 		return core.CheckRun{}, fingerprint, detective.ErrConflict
 	}
 	ctx = context.WithValue(detective.WithWatchAcceptedQueries(ctx, accepted), watchCloudSourcesKey{}, overrides)
-	run, err := core.EvaluateCheck(ctx, core.RunRequest{ID: operationID, CheckID: bundle.CheckID, Environment: claim.Definition.Environment, Actor: api.SecurePrincipalID(), Inputs: claim.Definition.Inputs}, catalog, detectiveQueryRunner(localProject, api.SecurityContextID()), detectiveExecutionMetadata(localProject))
+	run, err := core.EvaluateCheck(ctx, core.RunRequest{ID: operationID, CheckID: bundle.CheckID, Environment: claim.Definition.Environment, Actor: api.SecurePrincipalID(), Inputs: claim.Definition.Inputs}, catalog, detectiveQueryRunner(localProject, api.SecurityContextID()), detectiveExecutionMetadata(localProject), core.WithReconciler(detectiveReconciler(localProject, api.SecurityContextID())))
 	return run, fingerprint, err
 }
 

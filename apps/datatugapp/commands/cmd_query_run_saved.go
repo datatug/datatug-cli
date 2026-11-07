@@ -104,9 +104,14 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		_, _ = fmt.Fprintln(stderr, "access: running without access policies")
 	}
 	session.AllowOpaqueSQL = o.allowOpaqueSQL
-	// A federated read cannot mask, so every leaf of one is checked against
-	// the project's sensitivity labels before any row is read.
-	session.FederatedColumns = federatedLabelGuard(projectDir)
+	// TugQL reads cannot mask, so for a policy-governed principal every leaf
+	// of a federated or single-source one is checked against the project's
+	// sensitivity labels before any row is read. A policy-free session (a
+	// project with no policies) restricts nothing, ad hoc raw reads included,
+	// so it is not checked; secureread refuses a governed read with no guard.
+	if !session.DatabaseProfile.PolicyFreeReads() {
+		session.FederatedColumns = federatedLabelGuard(projectDir)
+	}
 	executor := secureread.NewExecutor(session)
 	// Lookup enrichment consumes keyed map rows. Refuse before the first leaf
 	// query rather than manufacturing keys for anonymous ClickHouse results.
@@ -133,10 +138,19 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	case datatug.QueryTypeHTTP:
 		result, err = runHTTPSavedQuery(ctx, executor, projectDir, queryDef, variables)
 	case datatug.QueryTypeSQL:
-		result, err = runSQLSavedQueryAtSource(ctx, executor, source.URL, queryDef, variables)
+		// Native SQL cannot be inspected, so it cannot be masked: a principal
+		// granted opaque SQL is refused it on a source with protected columns.
+		if session.AllowOpaqueSQL && !session.DatabaseProfile.PolicyFreeReads() {
+			err = refuseLabelledNativeSQL(ctx, projectDir, source)
+		}
+		if err == nil {
+			result, err = runSQLSavedQueryAtSource(ctx, executor, source.URL, queryDef, variables)
+		}
 	case datatug.QueryTypeTugQL:
 		if source.URL != "" {
-			result, err = runTugQLSavedQueryAtSource(ctx, executor, source.URL, queryDef, variables)
+			if err = guardSavedTugQL(ctx, executor, source, queryDef); err == nil {
+				result, err = runTugQLSavedQueryAtSource(ctx, executor, source.URL, queryDef, variables)
+			}
 		} else {
 			result, err = runTugQLSavedQuery(ctx, executor, projStore, projectDir, o.env, queryDef, variables)
 		}

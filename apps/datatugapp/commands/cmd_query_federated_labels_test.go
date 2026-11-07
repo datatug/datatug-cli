@@ -12,8 +12,10 @@ import (
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
 	"github.com/dal-go/record"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/meaninglabelsfile"
 	"github.com/datatug/datatug-cli/pkg/secureread"
+	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/meaninglabels"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -123,4 +125,125 @@ func TestFederatedLabelGuardWildcards(t *testing.T) {
 	require.ErrorAs(t, leaf("Plain", true), &protected)
 	assert.Contains(t, protected.Message, "columns of crm.Plain cannot be listed")
 	assert.NoError(t, leaf("Plain", false, "Id"), "named columns need no description")
+}
+
+// writeTargetedQuery writes a saved query that names its catalog.
+func writeTargetedQuery(t *testing.T, queriesDir, id, queryType, catalog, text string) {
+	t.Helper()
+	writeSavedQuery(t, queriesDir, id, queryType, text)
+	meta := `{"createdAt":"2026-11-07T00:00:00Z","id":"` + id + `","type":"` + queryType + `","targets":[{"catalog":"` + catalog + `"}]}`
+	require.NoError(t, os.WriteFile(filepath.Join(queriesDir, id+".query.json"), []byte(meta), 0o644))
+}
+
+func agentSavedQuery(t *testing.T, id string, extra ...string) (stdout, stderr string, code int) {
+	t.Helper()
+	return runCLI(t, "", append([]string{"query", "run", "--project", "datatug-demo", "--as", "agent", "--role", "agent", "--format", "json", "--query", id}, extra...)...)
+}
+
+// A single-source saved TugQL query is checked as one leaf of its catalog.
+func TestSavedSingleSourceTugQLRefusesLabelledColumnsForAnAgent(t *testing.T) {
+	dir := demoForTest(t)
+	queries := filepath.Join(dir, "queries")
+	require.NoError(t, os.MkdirAll(queries, 0o755))
+	writeTargetedQuery(t, queries, "customer-emails", "TugQL", "chinook", "from: {name: Customer}\ncolumns: [{field: FirstName}, {field: Email}]\n")
+	writeTargetedQuery(t, queries, "customer-all", "TugQL", "chinook", "from: {name: Customer}\n")
+	writeTargetedQuery(t, queries, "customer-by-email", "TugQL", "chinook", "from: {name: Customer}\ncolumns: [{field: FirstName}]\nwhere: {op: '==', left: {field: Email}, right: {value: someone@example.com}}\n")
+	writeTargetedQuery(t, queries, "customer-names", "TugQL", "chinook", "from: {name: Customer}\ncolumns: [{field: CustomerId}, {field: FirstName}]\n")
+
+	for _, id := range []string{"customer-emails", "customer-all", "customer-by-email"} {
+		stdout, stderr, code := agentSavedQuery(t, id)
+		require.Equal(t, exitCodeAccessDenied, code, id+": "+stdout+stderr)
+		assert.NotContains(t, stdout+stderr, "@", id)
+		var denial denialJSON
+		require.NoError(t, json.Unmarshal([]byte(stderr), &denial), stderr)
+		assert.Equal(t, meaninglabels.CodeFieldProtected, denial.Error.Code, id)
+		assert.Contains(t, denial.Error.Reason, "chinook.Customer.Email is protected (pii)", id)
+	}
+	stdout, stderr, code := agentSavedQuery(t, "customer-names")
+	require.Equal(t, 0, code, stderr)
+	var rows []map[string]any
+	require.NoError(t, json.Unmarshal([]byte(stdout), &rows), stdout)
+	require.Len(t, rows, 8)
+	for _, row := range rows {
+		assert.NotContains(t, row, "Email")
+	}
+}
+
+// Saved native SQL is refused without an opaque-SQL grant, and with one it is
+// refused on a source with protected columns, even where a policy allows it.
+func TestSavedNativeSQLRefusesALabelledSourceForAnAgent(t *testing.T) {
+	dir := demoForTest(t)
+	queries := filepath.Join(dir, "queries")
+	require.NoError(t, os.MkdirAll(queries, 0o755))
+	writeTargetedQuery(t, queries, "customer-emails-sql", "SQL", "chinook", "SELECT FirstName, Email FROM Customer WHERE Country = 'Canada'")
+
+	stdout, stderr, code := agentSavedQuery(t, "customer-emails-sql")
+	assert.NotZero(t, code)
+	assert.NotContains(t, stdout+stderr, "@")
+	assert.Contains(t, stderr, "opaque-query grant")
+
+	expectProtected := func(name string) {
+		t.Helper()
+		stdout, stderr, code := agentSavedQuery(t, "customer-emails-sql", "--allow-opaque-sql")
+		require.Equal(t, exitCodeAccessDenied, code, name+": "+stdout+stderr)
+		assert.NotContains(t, stdout+stderr, "@", name)
+		var denial denialJSON
+		require.NoError(t, json.Unmarshal([]byte(stderr), &denial), stderr)
+		assert.Equal(t, meaninglabels.CodeFieldProtected, denial.Error.Code, name)
+		assert.Contains(t, denial.Error.Reason, "native SQL cannot be masked", name)
+		assert.Contains(t, denial.Error.Reason, "use a TugQL query", name)
+	}
+	expectProtected("the demo policy")
+	// A policy that grants the agent opaque SQL still cannot unmask Email.
+	policy := filepath.Join(dir, "policies", "agent.yaml")
+	data, err := os.ReadFile(policy)
+	require.NoError(t, err)
+	const grant = "ruleSets:\n  agent:\n    - opaqueQuery: true\n      rules:\n        - id: agent-opaque-sql\n          effect: allow\n          operations: [query]\n"
+	granted := strings.Replace(string(data), "ruleSets:\n  agent:\n", grant, 1)
+	require.NotEqual(t, string(data), granted)
+	require.NoError(t, os.WriteFile(policy, []byte(granted), 0o644))
+	expectProtected("an opaque-SQL grant")
+}
+
+func TestRefuseLabelledNativeSQL(t *testing.T) {
+	restoreVar(t, &loadLabels)
+	restoreVar(t, &openBackend)
+	restoreVar(t, &listCollections)
+	restoreVar(t, &describeCollection)
+	ctx := context.Background()
+	source := resolvedQuerySource{URL: "sqlite:///x.sqlite", Catalog: "crm"}
+	var protected *secureread.FieldProtectedError
+	loadLabels = func(context.Context, string) (meaninglabels.Document, error) {
+		return meaninglabels.Document{}, errors.New("broken")
+	}
+	require.ErrorAs(t, refuseLabelledNativeSQL(ctx, "/p", source), &protected)
+	assert.Contains(t, protected.Message, "datatug-labels.json")
+
+	loadLabels = func(context.Context, string) (meaninglabels.Document, error) { return meaninglabels.NewDocument(), nil }
+	openBackend = func(context.Context, dbcopy.BackendRef) (dal.DB, error) { return nil, errors.New("no source") }
+	assert.NoError(t, refuseLabelledNativeSQL(ctx, "/p", source), "the read itself reports the open failure")
+
+	openBackend = func(context.Context, dbcopy.BackendRef) (dal.DB, error) { return nil, nil }
+	listCollections = func(context.Context, dal.DB, *record.Key) ([]dal.CollectionRef, error) {
+		return []dal.CollectionRef{dal.NewRootCollectionRef("Account", "")}, nil
+	}
+	describeCollection = func(context.Context, dal.DB, *dal.CollectionRef) (*dbschema.CollectionDef, error) {
+		return &dbschema.CollectionDef{Fields: []dbschema.FieldDef{{Name: "Id"}, {Name: "Region"}}}, nil
+	}
+	assert.NoError(t, refuseLabelledNativeSQL(ctx, "/p", source), "a source with no protected column")
+
+	describeCollection = func(context.Context, dal.DB, *dal.CollectionRef) (*dbschema.CollectionDef, error) {
+		return nil, errors.New("no description")
+	}
+	require.ErrorAs(t, refuseLabelledNativeSQL(ctx, "/p", source), &protected, "columns that cannot be read")
+	listCollections = func(context.Context, dal.DB, *record.Key) ([]dal.CollectionRef, error) {
+		return nil, errors.New("no list")
+	}
+	require.ErrorAs(t, refuseLabelledNativeSQL(ctx, "/p", source), &protected, "tables that cannot be listed")
+	assert.Contains(t, protected.Message, "source crm has columns protected")
+}
+
+func TestGuardSavedTugQLBodyError(t *testing.T) {
+	err := guardSavedTugQL(context.Background(), secureread.NewExecutor(secureread.Session{}), resolvedQuerySource{}, &datatug.QueryDef{ID: "q", Type: datatug.QueryTypeTugQL})
+	assert.Error(t, err)
 }

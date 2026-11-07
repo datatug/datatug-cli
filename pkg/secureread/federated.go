@@ -123,7 +123,7 @@ func (e *Executor) StreamFederatedTugQL(ctx context.Context, document []byte, so
 		return db, nil
 	}
 	// Every leaf passes the sensitivity-label guard before any leaf is read.
-	if err := e.guardFederatedColumns(ctx, query, sourceURLs, open); err != nil {
+	if err := e.guardFederatedColumns(ctx, query, sourceURLs, open, ""); err != nil {
 		closeAll()
 		return nil, err
 	}

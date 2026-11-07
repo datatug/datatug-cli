@@ -59,7 +59,10 @@ var errNoFederatedGuard = &FieldProtectedError{Message: "a policy-governed feder
 // apply, so it keeps reading unchecked. Every project-scoped caller (`query run
 // --project --query`) installs a guard built from the project's labels whatever
 // its profile.
-func (e *Executor) guardFederatedColumns(ctx context.Context, query dal.StructuredQuery, sourceURLs map[string]string, open func(context.Context, string) (dal.DB, error)) error {
+//
+// database, when set, names every leaf's database: a single-source read's
+// collections carry no database name of their own.
+func (e *Executor) guardFederatedColumns(ctx context.Context, query dal.StructuredQuery, sourceURLs map[string]string, open func(context.Context, string) (dal.DB, error), database string) error {
 	guard := e.session.FederatedColumns
 	if guard == nil && e.session.DatabaseProfile.PolicyFreeReads() {
 		return nil
@@ -69,6 +72,9 @@ func (e *Executor) guardFederatedColumns(ctx context.Context, query dal.Structur
 		return &FieldProtectedError{Message: fmt.Sprintf("the federated query uses %v, which the sensitivity-label check cannot inspect, so the read is refused", err)}
 	}
 	for _, leaf := range leaves {
+		if database != "" {
+			leaf.Database = database
+		}
 		db, err := open(ctx, leaf.Database)
 		if err != nil {
 			return err
@@ -289,4 +295,34 @@ func (s *leafScope) group(g dal.GroupCondition) error {
 		}
 	}
 	return nil
+}
+
+// GuardTugQLColumns runs the session's column guard over a single-source TugQL
+// read before it runs: every collection of the query is a leaf of database
+// (the source's project catalog id) at sourceURL, checked exactly as a leaf of
+// a federated read is, and with the same rule for a missing guard. RunTugQL
+// itself knows no catalog id, so a project-scoped caller calls this first.
+func (e *Executor) GuardTugQLColumns(ctx context.Context, document []byte, database, sourceURL string) error {
+	if e.session.FederatedColumns == nil && e.session.DatabaseProfile.PolicyFreeReads() {
+		return nil
+	}
+	query, err := tugqlDeserialize(document)
+	if err != nil {
+		return fmt.Errorf("secureread: parse TugQL: %w", err)
+	}
+	var opened dal.DB
+	closeSource := func() {}
+	defer func() { closeSource() }()
+	open := func(ctx context.Context, _ string) (dal.DB, error) {
+		if opened != nil {
+			return opened, nil
+		}
+		db, closeDB, err := openSourceFn(ctx, sourceURL, false, len(e.session.Policies))
+		if err != nil {
+			return nil, fmt.Errorf("open database %q: %w", database, err)
+		}
+		opened, closeSource = db, closeDB
+		return db, nil
+	}
+	return e.guardFederatedColumns(ctx, query, map[string]string{database: sourceURL}, open, database)
 }

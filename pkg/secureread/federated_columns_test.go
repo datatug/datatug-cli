@@ -316,3 +316,44 @@ func TestFederatedLeavesRefusesWhatItCannotInspect(t *testing.T) {
 		}
 	}
 }
+
+func TestGuardTugQLColumnsChecksASingleSourceRead(t *testing.T) {
+	urls := federatedGuardFixture(t)
+	selfJoin := `from:
+  name: Invoice
+  alias: a
+  joins:
+    - from: {name: Invoice, alias: b}
+      on: [{left: {field: id, source: a}, op: '==', right: {field: id, source: b}}]
+columns: [{field: amount, source: b}]
+`
+	ctx := context.Background()
+	guard := &labelGuard{labelled: map[string]bool{"orders.Invoice.amount": true}}
+	err := guardedExecutor(guard.check).GuardTugQLColumns(ctx, []byte(selfJoin), "orders", urls["orders"])
+	var protected *FieldProtectedError
+	if !errors.As(err, &protected) || protected.Message != "protected orders.Invoice.amount" {
+		t.Fatalf("err = %v", err)
+	}
+	// Both leaves are of the one source, opened once, named by the catalog id.
+	guard = &labelGuard{labelled: map[string]bool{"orders.Invoice.secret": true}}
+	if err = guardedExecutor(guard.check).GuardTugQLColumns(ctx, []byte(selfJoin), "orders", urls["orders"]); err != nil {
+		t.Fatal(err)
+	}
+	if len(guard.seen) != 2 || guard.seen[0].Database != "orders" || guard.seen[0].DB != guard.seen[1].DB {
+		t.Fatalf("leaves: %+v", guard.seen)
+	}
+	// A policy-free session without a guard is unchecked, a governed one refused.
+	if err = NewExecutor(Session{Unrestricted: true}).GuardTugQLColumns(ctx, []byte("not: [tugql"), "orders", urls["orders"]); err != nil {
+		t.Fatal(err)
+	}
+	governed := NewExecutor(Session{DatabaseProfile: DatabasePolicyGoverned})
+	if err = governed.GuardTugQLColumns(ctx, []byte(selfJoin), "orders", urls["orders"]); !errors.As(err, &protected) {
+		t.Fatalf("err = %v", err)
+	}
+	if err = governed.GuardTugQLColumns(ctx, []byte("not: [tugql"), "orders", urls["orders"]); err == nil || !strings.Contains(err.Error(), "secureread: parse TugQL") {
+		t.Fatalf("err = %v", err)
+	}
+	if err = governed.GuardTugQLColumns(ctx, []byte(selfJoin), "orders", "sqlite://"+filepath.Join(t.TempDir(), "missing.sqlite")); err == nil || !strings.Contains(err.Error(), `open database "orders"`) {
+		t.Fatalf("err = %v", err)
+	}
+}

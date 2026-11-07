@@ -2,8 +2,10 @@ package endpoints
 
 import (
 	"context"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/api"
@@ -11,7 +13,6 @@ import (
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/reconcile"
-	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/stretchr/testify/require"
 )
 
@@ -100,18 +101,44 @@ func TestReconcileFactoriesEnvironmentRuleDeniesProduction(t *testing.T) {
 }
 
 func TestReconcileFactoriesEnvironmentRuleNeedsAKind(t *testing.T) {
-	projectID, dir := serveFactoriesUnderPolicy(t, factoriesPolicy)
-	store := filestore.NewProjectStore(projectID, dir)
-	env, err := store.LoadEnvironment(context.Background(), "factory-a-test")
-	require.NoError(t, err)
-	env.Kind = ""
-	require.NoError(t, store.SaveEnvironment(context.Background(), env))
-	_, err = executeLiveInstance(context.Background(), liveInstanceRequest{
-		SecurityContextID: api.SecurityContextID(), QueryID: "orders", Project: projectID,
-		Environment: "factory-a-test", Source: factories.Catalog,
-	}, map[string]apicontract.TypedValueOrSet{}, []apicontract.BindingOriginEntry{})
-	require.Error(t, err, "an environment with no kind is denied by a policy that selects environments")
-	require.Equal(t, reconcile.UnavailablePermissionDenied, reconcileUnavailable(err).Reason)
+	// "Production" is no kind of the closed set: an environment file is not
+	// checked when it is loaded, so it must not count as "not production".
+	for _, kind := range []string{"", "Production", "prod"} {
+		projectID, dir := serveFactoriesUnderPolicy(t, factoriesPolicy)
+		setKindOnDisk(t, filepath.Join(dir, "environments", "factory-a-prod"), kind)
+		_, err := executeLiveInstance(context.Background(), liveInstanceRequest{
+			SecurityContextID: api.SecurityContextID(), QueryID: "orders", Project: projectID,
+			Environment: "factory-a-prod", Source: factories.Catalog,
+		}, map[string]apicontract.TypedValueOrSet{}, []apicontract.BindingOriginEntry{})
+		require.Error(t, err, "kind %q: a policy that selects environments denies it", kind)
+		require.Equal(t, reconcile.UnavailablePermissionDenied, reconcileUnavailable(err).Reason, kind)
+	}
+}
+
+// setKindOnDisk rewrites the kind in an environment's files as a hand edit
+// would; saving through the store refuses a kind outside the closed set.
+func setKindOnDisk(t *testing.T, envDir, kind string) {
+	t.Helper()
+	pattern := regexp.MustCompile(`"kind":\s*"production"`)
+	replacement := ""
+	if kind != "" {
+		replacement = `"kind": "` + kind + `"`
+	} else {
+		replacement = `"kind": ""`
+	}
+	edited := 0
+	require.NoError(t, filepath.WalkDir(envDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || filepath.Ext(path) != ".json" {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err == nil && pattern.Match(data) {
+			edited++
+			err = os.WriteFile(path, pattern.ReplaceAll(data, []byte(replacement)), 0o600)
+		}
+		return err
+	}))
+	require.Positive(t, edited, "the environment stores its kind")
 }
 
 // A case variant of an environment name opens the same files on a

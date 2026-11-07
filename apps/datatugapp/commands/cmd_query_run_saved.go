@@ -104,6 +104,9 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		_, _ = fmt.Fprintln(stderr, "access: running without access policies")
 	}
 	session.AllowOpaqueSQL = o.allowOpaqueSQL
+	// A federated read cannot mask, so every leaf of one is checked against
+	// the project's sensitivity labels before any row is read.
+	session.FederatedColumns = federatedLabelGuard(projectDir)
 	executor := secureread.NewExecutor(session)
 	// Lookup enrichment consumes keyed map rows. Refuse before the first leaf
 	// query rather than manufacturing keys for anonymous ClickHouse results.
@@ -119,7 +122,7 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		streamed, streamErr := runStreamedSavedTugQL(ctx, cmd.OutOrStdout(), stderr, o, executor, projStore, projectDir, queryDef, variables)
 		if streamed {
 			if streamErr != nil {
-				return savedQueryFailure(streamErr)
+				return savedReadFailure(stderr, o, streamErr)
 			}
 			return nil
 		}
@@ -141,7 +144,7 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		err = fmt.Errorf("query %q has type %q, which is not yet runnable through the policy-enforced path", o.query, queryDef.Type)
 	}
 	if err != nil {
-		return savedQueryFailure(err)
+		return savedReadFailure(stderr, o, err)
 	}
 	if queryDef.Federation != nil && len(queryDef.Federation.Lookups) != 0 {
 		result, err = applySavedQueryLookups(ctx, result, queryDef.Federation, stderr, o.quiet)
@@ -772,6 +775,16 @@ func writeSavedQueryLimitations(w interface{ Write([]byte) (int, error) }, limit
 
 // savedQueryFailure maps a saved-query run error to the CLI's standard exit
 // codes (same convention queryFailure uses for the ad-hoc path).
+// savedReadFailure is savedQueryFailure that reports a sensitivity-label
+// refusal as the project read does: FIELD_PROTECTED, exit 5.
+func savedReadFailure(stderr io.Writer, o queryOptions, err error) error {
+	var protected *secureread.FieldProtectedError
+	if errors.As(err, &protected) {
+		return fieldProtectedFailure(stderr, o, &errFieldProtected{protected.Message})
+	}
+	return savedQueryFailure(err)
+}
+
 func savedQueryFailure(err error) error {
 	switch {
 	case errors.Is(err, secureread.ErrAccessDenied):

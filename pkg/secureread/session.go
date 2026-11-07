@@ -43,7 +43,11 @@ type Session struct {
 	// Deprecated: use the separate ownership, database and identity fields.
 	Unrestricted bool
 	// AllowOpaqueSQL is the existing native-query capability, never a data-write grant.
-	AllowOpaqueSQL   bool
+	AllowOpaqueSQL bool
+	// FederatedColumns checks every leaf of a federated TugQL read against the
+	// project's sensitivity labels before any row is read; see
+	// guardFederatedColumns for what a nil guard means.
+	FederatedColumns FederatedColumnGuard
 	configurationErr error
 }
 

@@ -300,6 +300,18 @@ func TestLocalMaintenanceDemoResetConflicts(t *testing.T) {
 		require.ErrorContains(t, err, scenario.errorText)
 		require.FileExists(t, filepath.Join(project, "unmanaged.txt"))
 	}
+	if runtime.GOOS != "windows" {
+		child := filepath.Join(project, "personal")
+		require.NoError(t, os.Mkdir(child, 0o700))
+		alias := filepath.Join(home, "linked-personal")
+		require.NoError(t, os.Symlink(child, alias))
+		maintenanceWrite(t, config, fmt.Appendf(nil, "projects:\n  - id: personal\n    path: %q\n", alias))
+		_, err := demoResetPlan(project, config)
+		require.ErrorContains(t, err, "another registered project")
+		info, err := os.Stat(alias)
+		require.NoError(t, err)
+		require.True(t, info.IsDir())
+	}
 }
 
 func TestLocalMaintenanceDelegatesOnlyToNamedPluginManager(t *testing.T) {

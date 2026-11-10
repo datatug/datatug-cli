@@ -297,7 +297,7 @@ datatug demo reset --dry-run
 
 Bare `uninstall` previews the CLI only. Use `--web-ui` for downloaded browser assets, `--skills codex` or `--skills claude` for one agent's user plugin, or `--full` for the CLI and web UI together. Add `--skills` explicitly to include a plugin in full removal. Stop a local server using the selected web UI files before removing them. After reviewing the plan, replace `--dry-run` with `--apply`. The standalone Unix executable can remove itself. Other installs report the owning package manager or require a manual step, including a running Windows executable. Projects, credentials, shell settings and marketplaces stay in place.
 
-The web UI preview lists every path in a verified signed release. Unsigned builds, modified files, and unrecognized paths are left in place. If deletion is interrupted after the store has been detached, DataTug reports the private directory containing its remaining files.
+The web UI preview lists every path in a verified signed release. Unsigned builds, modified files, and unrecognized paths are left in place. If deletion returns an error after the store has been detached, DataTug reports the private directory containing its remaining files.
 
 `demo reset` separately moves the default Perimeter demo into a numbered sibling backup and removes its matching registration. Run `datatug demo install` again to create a fresh copy. The backup keeps the demo audit and any edits, so it does not reclaim disk space.
 

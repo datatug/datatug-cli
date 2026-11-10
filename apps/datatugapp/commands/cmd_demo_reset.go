@@ -260,7 +260,8 @@ func removeDemoRegistration(doc *yaml.Node, dir string) (bool, error) {
 		}
 		atDemoPath := filepath.Clean(project.Path) == dir
 		if project.ID != demoInstallProjectID && !atDemoPath {
-			if relative, err := filepath.Rel(dir, project.Path); err == nil && filepath.IsLocal(relative) {
+			resolved, err := filepath.EvalSymlinks(project.Path)
+			if withinDemo(dir, project.Path) || err == nil && withinDemo(dir, resolved) {
 				return false, fmt.Errorf("another registered project is inside the demo folder; no files were moved")
 			}
 			continue
@@ -275,6 +276,11 @@ func removeDemoRegistration(doc *yaml.Node, dir string) (bool, error) {
 	}
 	projects.Content = append(projects.Content[:match], projects.Content[match+1:]...)
 	return true, nil
+}
+
+func withinDemo(dir, path string) bool {
+	relative, err := filepath.Rel(dir, path)
+	return err == nil && filepath.IsLocal(relative)
 }
 
 func replaceDemoSettings(path string, before, after []byte) error {

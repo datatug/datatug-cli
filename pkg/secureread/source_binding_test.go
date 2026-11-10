@@ -618,7 +618,11 @@ func TestBoundSourceOpenerFailureAndUnsupportedSnapshots(t *testing.T) {
 	if err := (&sourceBinding{root: f.root}).addPolicySet(filepath.Join(t.TempDir(), "absent"), true); err == nil {
 		t.Fatal("missing policy accepted")
 	}
-	external := filepath.Join(t.TempDir(), "external.yaml")
+	externalDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	external := filepath.Join(externalDir, "external.yaml")
 	writeBindingFile(t, external, []byte(phase1TablePolicy))
 	if err := (&sourceBinding{root: f.root}).addPolicySet(external, true); err == nil {
 		t.Fatal("outside required policy accepted")

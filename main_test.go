@@ -93,9 +93,9 @@ func TestLocalMaintenanceDoesNotStartTelemetry(t *testing.T) {
 		assert.True(t, isLocalMaintenanceInvocation(commands.DatatugCommand(), args), args)
 	}
 	assert.False(t, isLocalMaintenanceInvocation(commands.DatatugCommand(), []string{"demo", "install"}))
-	assert.False(t, isLocalMaintenanceInvocation(&cobra.Command{
-		Use: "datatug", Args: cobra.NoArgs,
-	}, []string{"invalid"}))
+	root := &cobra.Command{Use: "datatug"}
+	root.AddCommand(&cobra.Command{Use: "uninstall"})
+	assert.False(t, isLocalMaintenanceInvocation(root, []string{"invalid"}))
 }
 
 func TestMainFunc(t *testing.T) {

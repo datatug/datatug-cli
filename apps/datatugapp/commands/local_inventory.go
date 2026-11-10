@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -42,6 +43,11 @@ var (
 	localWalkDir    = filepath.WalkDir
 	localExecutable = os.Executable
 	localHomeDir    = os.UserHomeDir
+	localOpenChild  = (*os.Root).OpenRoot
+	localRootStat   = (*os.Root).Lstat
+	localRootMkdir  = (*os.Root).Mkdir
+	localRootRename = (*os.Root).Rename
+	localReadFile   = os.ReadFile
 )
 
 // inventoryTree never traverses symlinks. Removal callers pass a nil covered
@@ -67,11 +73,7 @@ func inventoryTree(path string, covered map[string]bool) (localTree, error) {
 			return err
 		}
 		if covered == nil {
-			rel, err := filepath.Rel(filepath.Dir(path), name)
-			if err != nil {
-				return err
-			}
-			tree.entries = append(tree.entries, localEntry{rel, info})
+			tree.entries = append(tree.entries, localEntry{name, info})
 		}
 		if info.IsDir() {
 			tree.usage.Directories++
@@ -101,20 +103,62 @@ func openLocalParent(path string) (*os.Root, error) {
 	return os.OpenRoot(parent)
 }
 
+func (t localTree) paths() []string {
+	paths := make([]string, 0, len(t.entries))
+	for _, entry := range t.entries {
+		paths = append(paths, entry.name)
+	}
+	return paths
+}
+
 func (t localTree) remove() error {
+	return t.removeAt(t.path)
+}
+
+// stageRemoval isolates the old store from subsequent installations. Only
+// planned entries are deleted. Anything left after a failure stays in the
+// private staging directory at the path reported to the person.
+func (t localTree) stageRemoval() error {
 	parent, err := openLocalParent(t.path)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = parent.Close() }()
+	name := filepath.Base(t.path)
+	if err := checkRemovalEntry(parent, t.entries[0], name); err != nil {
+		return err
+	}
+	stage := ".datatug-uninstall-" + rand.Text()
+	if err := localRootMkdir(parent, stage, 0o700); err != nil {
+		return err
+	}
+	dest := filepath.Join(stage, name)
+	if err := localRootRename(parent, name, dest); err != nil {
+		_ = parent.Remove(stage)
+		return err
+	}
+	recovery := filepath.Join(parent.Name(), dest)
+	if err := t.removeAt(recovery); err != nil {
+		return fmt.Errorf("web UI detached; remaining files are at %s: %w", recovery, err)
+	}
+	return parent.Remove(stage)
+}
+
+func (t localTree) removeAt(path string) error {
+	parent, err := openLocalParent(path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = parent.Close() }()
 	first := t.entries[0]
-	if err := checkRemovalEntry(parent, first, first.name); err != nil {
+	name := filepath.Base(path)
+	if err := checkRemovalEntry(parent, first, name); err != nil {
 		return err
 	}
 	if !first.info.IsDir() {
-		return parent.Remove(first.name)
+		return parent.Remove(name)
 	}
-	root, err := parent.OpenRoot(first.name)
+	root, err := localOpenChild(parent, name)
 	if err != nil {
 		return err
 	}
@@ -122,7 +166,7 @@ func (t localTree) remove() error {
 	if err := checkRemovalEntry(root, first, "."); err != nil {
 		return err
 	}
-	prefix := first.name + string(filepath.Separator)
+	prefix := t.path + string(filepath.Separator)
 	entries := t.entries[1:]
 	for _, entry := range entries {
 		if err := checkRemovalEntry(root, entry, strings.TrimPrefix(entry.name, prefix)); err != nil {
@@ -138,14 +182,14 @@ func (t localTree) remove() error {
 			return err
 		}
 	}
-	if err := checkRemovalEntry(parent, first, first.name); err != nil {
+	if err := checkRemovalEntry(parent, first, name); err != nil {
 		return err
 	}
-	return parent.Remove(first.name)
+	return parent.Remove(name)
 }
 
 func checkRemovalEntry(root *os.Root, entry localEntry, name string) error {
-	info, err := root.Lstat(name)
+	info, err := localRootStat(root, name)
 	if err != nil || info.Mode()&os.ModeSymlink != 0 || !os.SameFile(info, entry.info) ||
 		(!info.IsDir() && (info.Size() != entry.info.Size() || !info.ModTime().Equal(entry.info.ModTime()))) {
 		return fmt.Errorf("path changed during cleanup: %s", filepath.Join(root.Name(), name))
@@ -157,6 +201,7 @@ type localOperation struct {
 	Component string      `json:"component"`
 	Action    string      `json:"action"`
 	Path      string      `json:"path,omitempty"`
+	Paths     []string    `json:"paths,omitempty"`
 	Target    string      `json:"target,omitempty"`
 	Usage     *localUsage `json:"usage,omitempty"`
 	Command   []string    `json:"command,omitempty"`
@@ -201,6 +246,11 @@ func printLocalReport(w io.Writer, r localReport, format string) error {
 			_, _ = fmt.Fprintf(w, " — %s", op.Note)
 		}
 		_, _ = fmt.Fprintln(w)
+		for _, path := range op.Paths {
+			if path != op.Path {
+				_, _ = fmt.Fprintln(w, "  "+path)
+			}
+		}
 	}
 	for _, note := range r.Notes {
 		_, _ = fmt.Fprintln(w, note)

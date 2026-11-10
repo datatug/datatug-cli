@@ -18,6 +18,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+var (
+	demoReadRootFile = (*os.Root).ReadFile
+	demoOpenRootFile = (*os.Root).OpenFile
+	demoMarshalYAML  = yaml.Marshal
+)
+
 func demoResetCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "reset", Short: "Preview or archive the default local Perimeter demo",
@@ -90,7 +96,7 @@ func demoResetPlan(dir, settingsPath string) (localReport, error) {
 	if err != nil || !markerInfo.Mode().IsRegular() {
 		return report, fmt.Errorf("refusing to reset %s without a regular demo install marker", dir)
 	}
-	marker, err := root.ReadFile(markerPath)
+	marker, err := demoReadRootFile(root, markerPath)
 	if err != nil {
 		return report, fmt.Errorf("refusing to reset %s without its demo install marker: %w", dir, err)
 	}
@@ -136,7 +142,7 @@ func demoResetPlan(dir, settingsPath string) (localReport, error) {
 func nextDemoBackup(root *os.Root, project string) (string, error) {
 	for number := 1; ; number++ {
 		name := fmt.Sprintf("%s.reset-%d", project, number)
-		if _, err := root.Lstat(name); errors.Is(err, fs.ErrNotExist) {
+		if _, err := localRootStat(root, name); errors.Is(err, fs.ErrNotExist) {
 			return name, nil
 		} else if err != nil {
 			return "", err
@@ -197,7 +203,7 @@ func demoSettingsEdit(path, dir string) ([]byte, []byte, error) {
 	if !info.Mode().IsRegular() {
 		return nil, nil, fmt.Errorf("refusing to edit a non-regular settings file: %s", path)
 	}
-	before, err := os.ReadFile(path)
+	before, err := localReadFile(path)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -215,7 +221,7 @@ func demoSettingsEdit(path, dir string) ([]byte, []byte, error) {
 	if err != nil || !changed {
 		return nil, nil, err
 	}
-	after, err := yaml.Marshal(&doc)
+	after, err := demoMarshalYAML(&doc)
 	if err != nil {
 		return nil, nil, fmt.Errorf("cannot encode updated settings at %s", path)
 	}
@@ -254,6 +260,9 @@ func removeDemoRegistration(doc *yaml.Node, dir string) (bool, error) {
 		}
 		atDemoPath := filepath.Clean(project.Path) == dir
 		if project.ID != demoInstallProjectID && !atDemoPath {
+			if relative, err := filepath.Rel(dir, project.Path); err == nil && filepath.IsLocal(relative) {
+				return false, fmt.Errorf("another registered project is inside the demo folder; no files were moved")
+			}
 			continue
 		}
 		if project.ID != demoInstallProjectID || !atDemoPath || match >= 0 {
@@ -280,7 +289,7 @@ func replaceDemoSettings(path string, before, after []byte) error {
 		return fmt.Errorf("settings file changed: %s", path)
 	}
 	tmp := ".datatug-reset-" + rand.Text()
-	f, err := root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm())
+	f, err := demoOpenRootFile(root, tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm())
 	if err != nil {
 		return err
 	}

@@ -1,7 +1,9 @@
 package commands
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -48,7 +50,7 @@ func uninstallAction(cmd *cobra.Command, _ []string) error {
 	}
 	report := localReport{Mode: "preview", Operations: []localOperation{}, Notes: []string{
 		"Projects, credentials, shell settings and marketplaces are preserved. Demo reset is a separate command.",
-		"Byte totals are logical file sizes. Space reclaimed may differ. Stop any running DataTug servers before applying.",
+		"Byte totals are logical file sizes. Space reclaimed may differ.",
 	}}
 	if agent != "" {
 		op, err := skillRemoval(cmd.Context(), agent)
@@ -58,6 +60,7 @@ func uninstallAction(cmd *cobra.Command, _ []string) error {
 		report.add(op)
 	}
 	if ui || full {
+		report.Notes = append(report.Notes, "Stop the local server if it is using the selected web UI files before applying.")
 		op, err := planWebUIRemoval(webUIStore())
 		if err != nil {
 			return err
@@ -116,13 +119,17 @@ func planCLIRemoval() (localOperation, error) {
 func cliRemoval(exe, standalone, goos string) (localOperation, error) {
 	op := localOperation{Component: "cli", Action: "manual", Path: exe,
 		Note: "Use the installer or package manager that owns this executable."}
-	actual, err := filepath.EvalSymlinks(exe)
+	actual, err := localEvalSymlinks(exe)
 	if err != nil {
 		return op, err
 	}
-	if strings.Contains(filepath.ToSlash(actual), "/Caskroom/datatug/") {
-		op.Command = []string{"brew", "uninstall", "--cask", "datatug"}
-		return op, nil
+	if goos == "darwin" {
+		for _, prefix := range []string{"/opt/homebrew", "/usr/local"} {
+			if exe == prefix+"/bin/datatug" && strings.HasPrefix(actual, prefix+"/Caskroom/datatug/") {
+				op.Command = []string{prefix + "/bin/brew", "uninstall", "--cask", "datatug"}
+				return op, nil
+			}
+		}
 	}
 	if goos == "windows" {
 		if appData := os.Getenv("LOCALAPPDATA"); filepath.IsAbs(appData) &&
@@ -143,6 +150,7 @@ func cliRemoval(exe, standalone, goos string) (localOperation, error) {
 		return op, fmt.Errorf("running CLI is no longer a regular file at %s", exe)
 	}
 	op.Action, op.Usage, op.Note, op.run = "remove", &tree.usage, "", tree.remove
+	op.Paths = tree.paths()
 	return op, nil
 }
 
@@ -170,8 +178,13 @@ func skillRemoval(ctx context.Context, agent string) (localOperation, error) {
 	return op, nil
 }
 
+var (
+	localAbs          = filepath.Abs
+	localEvalSymlinks = filepath.EvalSymlinks
+)
+
 func planWebUIRemoval(store webui.Store) (*localOperation, error) {
-	dir, err := filepath.Abs(store.Dir)
+	dir, err := localAbs(store.Dir)
 	if err != nil {
 		return nil, err
 	}
@@ -182,17 +195,19 @@ func planWebUIRemoval(store webui.Store) (*localOperation, error) {
 	} else if resolved != dir {
 		return nil, fmt.Errorf("refusing to remove a symlinked web UI directory: %s", dir)
 	}
+	store.Dir = dir
 	tree, err := inventoryTree(dir, nil)
 	if err != nil {
 		return nil, err
 	}
 	for _, entry := range tree.entries {
-		if entry.info.Mode()&os.ModeSymlink != 0 {
-			return nil, fmt.Errorf("web UI directory contains a symlink: %s", filepath.Join(filepath.Dir(dir), entry.name))
+		if !entry.info.IsDir() && !entry.info.Mode().IsRegular() {
+			return nil, fmt.Errorf("web UI directory contains a symlink or special file: %s", entry.name)
 		}
 	}
-	allowed := map[string]bool{".": true, "versions": true, "state.json": false}
-	if _, err := store.LoadState(); err != nil {
+	statePath := filepath.Join(dir, "state.json")
+	allowed := map[string]bool{dir: true, filepath.Join(dir, "versions"): true, statePath: false}
+	if err := checkWebUIStateOwnership(statePath); err != nil {
 		return nil, err
 	}
 	versions, err := store.List()
@@ -200,44 +215,58 @@ func planWebUIRemoval(store webui.Store) (*localOperation, error) {
 		return nil, err
 	}
 	for _, entry := range versions {
-		if err := addWebUIPaths(allowed, entry); err != nil {
-			return nil, err
-		}
-	}
-	for _, entry := range tree.entries {
-		rel, err := filepath.Rel(dir, filepath.Join(filepath.Dir(dir), entry.name))
+		manifest, err := webui.VerifyRemovalDir(entry.Dir)
 		if err != nil {
 			return nil, err
 		}
-		isDir, ok := allowed[rel]
+		addWebUIPaths(allowed, entry.Dir, manifest)
+	}
+	for _, entry := range tree.entries {
+		isDir, ok := allowed[entry.name]
 		if !ok || (isDir && !entry.info.IsDir()) || (!isDir && !entry.info.Mode().IsRegular()) {
-			return nil, fmt.Errorf("web UI directory contains an unrecognized path: %s", filepath.Join(dir, rel))
+			return nil, fmt.Errorf("web UI directory contains an unrecognized path: %s", entry.name)
 		}
 	}
 	if len(versions) == 0 {
 		return nil, nil
 	}
-	for _, entry := range versions {
-		if _, err := webui.VerifyDir(entry.Dir); err != nil {
-			return nil, err
-		}
-	}
-	return &localOperation{Component: "web-ui", Action: "remove", Path: dir, Usage: &tree.usage, run: tree.remove}, nil
+	return &localOperation{Component: "web-ui", Action: "remove", Path: dir, Paths: tree.paths(), Usage: &tree.usage, run: tree.stageRemoval}, nil
 }
 
-func addWebUIPaths(allowed map[string]bool, entry webui.Entry) error {
-	version := filepath.Join("versions", entry.Version)
+// addWebUIPaths receives an entry already validated against the signed
+// manifest and the on-disk files by VerifyRemovalDir.
+func addWebUIPaths(allowed map[string]bool, version string, manifest webui.Manifest) {
 	allowed[version] = true
 	allowed[filepath.Join(version, webui.ManifestFile)] = false
 	allowed[filepath.Join(version, webui.SignatureFile)] = false
-	for _, file := range entry.Manifest.Files {
+	for _, file := range manifest.Files {
 		name := filepath.Join(version, filepath.FromSlash(file.Path))
-		if !filepath.IsLocal(filepath.FromSlash(file.Path)) {
-			return fmt.Errorf("invalid web UI manifest path %q", file.Path)
-		}
 		allowed[name] = false
 		for parent := filepath.Dir(name); parent != version; parent = filepath.Dir(parent) {
 			allowed[parent] = true
+		}
+	}
+}
+
+// A store selector can point at a custom directory. Keep arbitrary state
+// documents there even if their filename happens to be state.json.
+func checkWebUIStateOwnership(path string) error {
+	data, err := localReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var state *webui.State
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&state); err != nil || state == nil || !json.Valid(data) {
+		return fmt.Errorf("web UI state is damaged or has unrecognized fields: %s", path)
+	}
+	for _, version := range []string{state.Pinned, state.Active, state.Previous} {
+		if version != "" && !webui.ValidVersion(version) {
+			return fmt.Errorf("web UI state has an unrecognized version: %s", path)
 		}
 	}
 	return nil

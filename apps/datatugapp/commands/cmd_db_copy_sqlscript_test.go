@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
@@ -42,8 +43,11 @@ func TestSQLScriptWritesAScriptAndReports(t *testing.T) {
 		assert.Contains(t, script, want)
 	}
 	if info, err := os.Stat(out); assert.NoError(t, err) {
-		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm()&0o600)
-		assert.Zero(t, info.Mode().Perm()&0o133)
+		old := syscall.Umask(0)
+		want := os.FileMode(0o666 &^ old)
+		syscall.Umask(old)
+		assert.Equal(t, want, info.Mode().Perm())
+		assert.Zero(t, info.Mode().Perm()&0o111)
 	}
 	// No temporary file is left behind.
 	entries, _ := os.ReadDir(filepath.Dir(out))

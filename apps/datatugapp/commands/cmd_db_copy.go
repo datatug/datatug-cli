@@ -117,7 +117,7 @@ func dbCopyAction(cmd *cobra.Command, _ []string) error {
 
 	// Parse both URLs first (REQ:unknown-scheme-rejected, REQ:ingitdb-url-local-only,
 	// REQ:required-flags) — fail with exit 2 before any connection attempt.
-	srcRef, _, err := parseSourceArg(ctx, fromURL)
+	srcRef, srcProject, err := parseProjectSourceArg(ctx, fromURL)
 	if err != nil {
 		return keepExit(err, func(err error) error { return Exit(fmt.Sprintf("--from: %v", err), 2) })
 	}
@@ -135,23 +135,38 @@ func dbCopyAction(cmd *cobra.Command, _ []string) error {
 		return Exit("BigQuery destinations never replace existing tables; omit --overwrite and choose a new dataset or table names", 2)
 	}
 
+	newInGitDB, faithfulPair := isNewInGitDBTarget(tgtRef), faithfulEligible(srcRef, tgtRef)
+	if !newInGitDB && recordsFormat != "" {
+		return Exit("?records-format applies only to an ingitdb:// destination that does not exist yet: it makes a new native project", 2)
+	}
+	if !newInGitDB && !faithfulPair {
+		for _, name := range []string{"json", "dry-run", "fail-on-warning", "to-schema", "decimals"} {
+			if cmd.Flags().Changed(name) {
+				return Exit(fmt.Sprintf("--%s is supported only for SQLite <-> PostgreSQL copies", name), 2)
+			}
+		}
+	}
+
+	// A project source keeps its sensitivity labels: checked after the arguments (the table
+	// filter too, a usage error), before anything is opened for writing.
+	fail := nativeFailer(cmd, "db copy", copyEndpoints(srcRef, tgtRef, newInGitDB))
+	directives, err := buildDirectivesFromFlags(cmd)
+	if err != nil {
+		return fail(2, "%v", err)
+	}
+	if reason := copyLabelRefusal(cmd, srcRef, srcProject, fromSchema); reason != "" {
+		return fail(copyRefusedCode, copyRefusedFormat, reason)
+	}
+
 	// An ingitdb:// destination that does not exist yet is a new native inGitDB project: the engine of
 	// `datatug db export` (staged, then published whole). One that exists is copied into below.
-	if isNewInGitDBTarget(tgtRef) {
-		return dbCopyToNewInGitDB(cmd, fromURL, srcRef, tgtRef, fromSchema, recordsFormat)
-	}
-	if recordsFormat != "" {
-		return Exit("?records-format applies only to an ingitdb:// destination that does not exist yet: it makes a new native project", 2)
+	if newInGitDB {
+		return dbCopyToNewInGitDB(cmd, fromURL, srcRef, tgtRef, fromSchema, recordsFormat, directives)
 	}
 
 	// SQLite <-> PostgreSQL keeps keys, indexes, constraints and exact values: its own engine.
-	if faithfulEligible(srcRef, tgtRef) {
-		return dbCopyFaithful(cmd, srcRef, tgtRef, fromSchema, overwrite)
-	}
-	for _, name := range []string{"json", "dry-run", "fail-on-warning", "to-schema", "decimals"} {
-		if cmd.Flags().Changed(name) {
-			return Exit(fmt.Sprintf("--%s is supported only for SQLite <-> PostgreSQL copies", name), 2)
-		}
+	if faithfulPair {
+		return dbCopyFaithful(cmd, srcRef, tgtRef, fromSchema, overwrite, directives)
 	}
 
 	// Open both backends (REQ:exit-codes — 4 for connection failures). The source is opened as a
@@ -165,11 +180,6 @@ func dbCopyAction(cmd *cobra.Command, _ []string) error {
 	// release the source on every path from here, including the BigQuery
 	// destination, which opens no target.
 	defer dbcopy.SourceCloser(src)()
-
-	directives, err := buildDirectivesFromFlags(cmd)
-	if err != nil {
-		return Exit(err.Error(), 2)
-	}
 
 	// Run the copy.
 	parallelStreams, _ := cmd.Flags().GetInt("parallel-streams")

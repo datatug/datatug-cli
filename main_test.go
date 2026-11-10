@@ -32,6 +32,14 @@ func TestPreserveErrorTextCase(t *testing.T) {
 	assert.NotContains(t, output.String(), "Ai profile")
 }
 
+// A refusal the command already wrote to stderr as JSON is not printed again,
+// so stderr holds exactly that one document.
+func TestPreserveErrorTextCaseSkipsReportedErrors(t *testing.T) {
+	var output bytes.Buffer
+	preserveErrorTextCase(&output, fang.Styles{ErrorText: lipgloss.NewStyle()}, commands.Reported("access denied", 5))
+	assert.Empty(t, output.String())
+}
+
 func TestPreserveErrorTextCaseRedactsSourceURLs(t *testing.T) {
 	var output bytes.Buffer
 	preserveErrorTextCase(&output, fang.Styles{ErrorText: lipgloss.NewStyle()}, errors.New(`open "postgres://alice:s3cr3t-DT01@db.example.com/shop": refused; password=s3cr3t-DT01`))
@@ -176,7 +184,7 @@ func TestMainFunc(t *testing.T) {
 		for _, name := range []string{
 			"auth", "compare", "config", "console", "dataset", "dataset-data",
 			"datasets", "db", "demo", "entity", "execution", "gcloud", "init",
-			"install", "projects", "queries", "query", "render", "scan", "self-update",
+			"install", "projects", "queries", "query", "reconcile", "render", "scan", "self-update",
 			"serve", "show", "ui", "updateUrlConfig", "upgrade", "validate", "version",
 		} {
 			found, _, err := cmd.Find([]string{name})

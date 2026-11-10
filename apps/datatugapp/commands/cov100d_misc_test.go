@@ -194,6 +194,16 @@ func TestCovDProjectsCommandSettingsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to get settings")
 }
 
+func TestProjectsCommandOnAFreshMachineListsNothing(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cmd := projectsCommandArgs()
+	require.NoError(t, cmd.Flags().Set("format", "json"))
+	var err error
+	out := covDCaptureStdout(t, func() { err = projectsCommandAction(cmd, nil) })
+	require.NoError(t, err, "no ~/.datatug.yaml yet is an empty list")
+	assert.JSONEq(t, "[]", out)
+}
+
 func TestCovDDBCommandRejectsUnparseableURL(t *testing.T) {
 	cmd := dbCommand()
 	cmd.SetOut(&bytes.Buffer{})

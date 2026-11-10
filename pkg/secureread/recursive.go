@@ -39,6 +39,9 @@ func (e *Executor) RunRecursiveTugQL(ctx context.Context, sourceURL string, docu
 	if err != nil {
 		return Result{}, err
 	}
+	if err := e.guardSource(ctx, sourceURL, query); err != nil {
+		return Result{}, err
+	}
 	db, closeSource, err := openSourceFn(ctx, sourceURL, false, len(e.session.Policies))
 	if err != nil {
 		return Result{}, err

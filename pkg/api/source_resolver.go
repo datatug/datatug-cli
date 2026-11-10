@@ -432,7 +432,12 @@ func loadQueryDocument(projectID, queryID string, queryType datatug.QueryType) (
 	}
 	folder, id := queryFolderAndID(queryID)
 	fileName := fmt.Sprintf("%s.%s.%s", id, storage.QueryFileSuffix, strings.ToLower(string(queryType)))
-	filePath := filepath.Join(dir, storage.QueriesFolder, folder, fileName)
+	queriesRoot := filepath.Clean(filepath.Join(dir, storage.QueriesFolder))
+	filePath := filepath.Clean(filepath.Join(queriesRoot, folder, fileName))
+	if !strings.HasPrefix(filePath, queriesRoot+string(filepath.Separator)) {
+		// A query id from a request must never step outside the project's queries folder.
+		return "", fmt.Errorf("query %s is not inside the project's %s folder", dbcopy.SourceIDDisplay(queryID), storage.QueriesFolder)
+	}
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return "", fmt.Errorf("read query document %s: %w", filePath, err)

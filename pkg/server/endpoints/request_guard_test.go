@@ -1,14 +1,12 @@
 package endpoints
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -212,14 +210,6 @@ func recordRoutes(guarded bool, caps Capabilities) []recordedRoute {
 	return all
 }
 
-// quietLog silences the "Registering ..." lines of the registration for the length of the test.
-func quietLog(t *testing.T) {
-	t.Helper()
-	saved := log.Writer()
-	log.SetOutput(&bytes.Buffer{})
-	t.Cleanup(func() { log.SetOutput(saved) })
-}
-
 // stubHandle makes the routes that answer through apicore answer through a fixed handler.
 func stubHandle(t *testing.T) {
 	t.Helper()
@@ -242,7 +232,6 @@ func refusedRequests(method, path string) map[string]*http.Request {
 }
 
 func TestRoutes_EveryRouteRefusesARequestThatIsNotItsOwn(t *testing.T) {
-	quietLog(t)
 	stubHandle(t)
 	routes := recordRoutes(true, Capabilities{ServedPort: 8989})
 	require.Greater(t, len(routes), 60, "the whole route table is recorded")
@@ -261,7 +250,6 @@ func TestRoutes_EveryRouteRefusesARequestThatIsNotItsOwn(t *testing.T) {
 // The same request from an allowed origin is served exactly as it is by the route with no guard:
 // the guard adds nothing to an answer and takes nothing from it.
 func TestRoutes_EveryRouteServesARequestThatIsItsOwnAsBefore(t *testing.T) {
-	quietLog(t)
 	stubHandle(t)
 	caps := Capabilities{ServedPort: 8989}
 	guarded, reference := recordRoutes(true, caps), recordRoutes(false, caps)
@@ -337,14 +325,15 @@ var registrationMethods = map[string]bool{
 	"GET": true, "POST": true, "PUT": true, "DELETE": true, "PATCH": true, "HEAD": true, "OPTIONS": true,
 }
 
-// isGuardWrap reports whether expr is a call of a Wrap method: guard.Wrap(handler).
+// isGuardWrap reports whether expr is a call of a Wrap method: guard.Wrap(handler), or
+// guard.WrapStatic(handler) for the web UI's static files (Host check only, by design).
 func isGuardWrap(expr ast.Expr) bool {
 	call, ok := expr.(*ast.CallExpr)
 	if !ok {
 		return false
 	}
 	selector, ok := call.Fun.(*ast.SelectorExpr)
-	return ok && selector.Sel.Name == "Wrap"
+	return ok && (selector.Sel.Name == "Wrap" || selector.Sel.Name == "WrapStatic")
 }
 
 // Every route is registered through the guard. A route registered any other way is not in the
@@ -396,5 +385,5 @@ func TestRoutes_NoRouteIsRegisteredOutsideTheGuard(t *testing.T) {
 		}
 	}
 	assert.NotZero(t, registered["0_interface.go"], "the route table is registered in 0_interface.go")
-	assert.Equal(t, 2, registered["../http_server.go"], "the server registers its pages and its OPTIONS handler in http_server.go")
+	assert.Equal(t, 4, registered["../http_server.go"], "the server registers its pages (the agent's own, or the web UI's for GET and HEAD) and its OPTIONS handler in http_server.go")
 }

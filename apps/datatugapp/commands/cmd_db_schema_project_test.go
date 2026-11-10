@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/dal-go/dalgo/dal"
+	"github.com/datatug/datatug-cli/pkg/callercontext"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -77,7 +78,11 @@ func TestQueryRunAndCopyOpenADatabaseOfAProjectByReference(t *testing.T) {
 	root.SilenceUsage, root.SilenceErrors = true, true
 	root.SetArgs([]string{"query", "run", "--db", "datatug://shop/shop", "--from", "Customer", "--no-policies", "--format", "json"})
 	require.NoError(t, root.Execute())
-	assert.Contains(t, out.String(), "Ada")
+	// A source of a project is read under its labels: a name is personal data
+	// by read-time suggestion until an owner labels it otherwise.
+	assert.Contains(t, out.String(), `"CustomerId":1`)
+	assert.NotContains(t, out.String(), "Ada")
+	assert.Contains(t, errOut.String(), "masked: Customer.FirstName (pii)")
 	assert.NotContains(t, out.String()+errOut.String(), dbPath)
 
 	root = DatatugCommand()
@@ -95,9 +100,23 @@ func TestQueryRunAndCopyOpenADatabaseOfAProjectByReference(t *testing.T) {
 	root.SetOut(&out)
 	root.SetErr(&errOut)
 	root.SilenceUsage, root.SilenceErrors = true, true
+	// Customer's names are personal data by read-time suggestion only, and a copy cannot mask: an agent is refused.
+	restoreVar(t, &callerLookup)
+	callerLookup = func(name string) (string, bool) { return "claude-code", name == callercontext.HarnessEnv }
+	root.SetArgs([]string{"db", "copy", "--from", "datatug://shop/shop", "--to", "ingitdb://" + target})
+	assert.Equal(t, exitCodeAccessDenied, exitCodeOf(t, root.Execute()))
+	assert.Empty(t, projectFilesOf(t, target), "nothing was copied")
+	// A person copies, and is warned.
+	callerLookup = func(string) (string, bool) { return "", false }
+	errOut.Reset()
+	root = DatatugCommand()
+	root.SetOut(&out)
+	root.SetErr(&errOut)
+	root.SilenceUsage, root.SilenceErrors = true, true
 	root.SetArgs([]string{"db", "copy", "--from", "datatug://shop/shop", "--to", "ingitdb://" + target})
 	require.NoError(t, root.Execute())
 	assert.NotEmpty(t, projectFilesOf(t, target), "the tables were copied")
+	assert.Contains(t, errOut.String(), "warning: this copy is not masked; read-time suggestions mark Customer.FirstName")
 	root = DatatugCommand()
 	root.SetOut(&out)
 	root.SetErr(&errOut)

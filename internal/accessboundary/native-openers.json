@@ -27,10 +27,13 @@
     "apps/datatugapp/commands/cmd_query_convex.go:newConvexNativeClient:github.com/dal-go/dalgo2convex.New": 1,
     "apps/datatugapp/commands/cmd_query_cosmosdb.go:import:github.com/dal-go/dalgo2cosmosdb": 1,
     "apps/datatugapp/commands/cmd_query_cosmosdb.go:newCosmosNativeClient:github.com/dal-go/dalgo2cosmosdb.New": 1,
+    "apps/datatugapp/commands/cmd_query_databricks.go:import:github.com/dal-go/dalgo2databricks": 1,
+    "apps/datatugapp/commands/cmd_query_databricks.go:newDatabricksNativeClient:github.com/dal-go/dalgo2databricks.New": 1,
     "apps/datatugapp/commands/cmd_query_dynamodb.go:import:github.com/aws/aws-sdk-go-v2/service/dynamodb": 1,
     "apps/datatugapp/commands/cmd_query_dynamodb.go:import:github.com/dal-go/dalgo2dynamodb": 1,
     "apps/datatugapp/commands/cmd_query_dynamodb.go:newDynamoNativeClient:github.com/aws/aws-sdk-go-v2/service/dynamodb.NewFromConfig": 1,
     "apps/datatugapp/commands/cmd_query_dynamodb.go:newDynamoNativeClient:github.com/dal-go/dalgo2dynamodb.New": 1,
+    "apps/datatugapp/commands/cmd_query_federated_labels.go:federatedLabelGuard:*.Open": 1,
     "apps/datatugapp/commands/cmd_query_influxdb.go:import:github.com/dal-go/dalgo2influxdb": 1,
     "apps/datatugapp/commands/cmd_query_influxdb.go:newInfluxNativeClient:github.com/dal-go/dalgo2influxdb.New": 1,
     "apps/datatugapp/commands/cmd_query_redis.go:import:github.com/dal-go/dalgo2redis": 1,
@@ -116,11 +119,16 @@
     "pkg/dbcopy/typesense_source.go:package:github.com/dal-go/dalgo2typesense.NewDB": 1,
     "pkg/dbcopy/url.go:import:github.com/dal-go/dalgo2sqlite": 1,
     "pkg/dbcopy/url.go:package:github.com/dal-go/dalgo2sqlite.NewDatabaseWithOptions": 1,
+    "pkg/demofixtures/factories/factories.go:import:database/sql": 1,
+    "pkg/demofixtures/factories/factories.go:package:database/sql.Open": 1,
     "pkg/executionstore/store.go:import:database/sql": 1,
     "pkg/executionstore/store.go:package:database/sql.Open": 1,
     "pkg/httpsource/httpsource.go:ExecuteQuery:github.com/dal-go/dalgo2http.NewRecorder": 1,
     "pkg/httpsource/httpsource.go:Open:github.com/dal-go/dalgo2http.NewDB": 1,
     "pkg/httpsource/httpsource.go:import:github.com/dal-go/dalgo2http": 1,
+    "pkg/secureread/bound_sqlite_identity.go:import:github.com/dal-go/dalgo2sqlite": 1,
+    "pkg/secureread/bound_sqlite_identity.go:openBoundSQLiteIdentityDB:github.com/dal-go/dalgo2sqlite.NewLenientSchemaReader": 1,
+    "pkg/secureread/bound_sqlite_identity.go:openBoundSQLiteIdentityDB:github.com/dal-go/dalgo2sqlite.NewSchemaReader": 1,
     "pkg/secureread/exact_aggregate.go:RunExactAggregateTugQL:github.com/dal-go/dalgo2http.NewRecorder": 1,
     "pkg/secureread/exact_aggregate.go:import:github.com/dal-go/dalgo2http": 1,
     "pkg/secureread/bound_sqlite_identity.go:import:github.com/dal-go/dalgo2sqlite": 1,
@@ -130,10 +138,16 @@
     "pkg/secureread/executor.go:openSource:*.OpenProtected": 1,
     "pkg/secureread/executor.go:openSource:*.OpenProtectedForTest": 1,
     "pkg/secureread/executor.go:runStructured:github.com/dal-go/dalgo2http.NewRecorder": 1,
+    "pkg/secureread/federated_columns.go:guardFederatedColumns:*.Open": 1,
     "pkg/secureread/seams.go:import:database/sql": 1,
     "pkg/secureread/seams.go:import:github.com/dal-go/dalgo2sql": 1,
     "pkg/secureread/seams.go:package:database/sql.Open": 2,
     "pkg/secureread/seams.go:package:github.com/dal-go/dalgo2sql.NewDatabase": 1,
+<<<<<<< HEAD
+=======
+    "pkg/server/endpoints/meanings_labels.go:listSourceObjects:*.Open": 1,
+    "pkg/server/endpoints/run_query_labels.go:columns:*.Open": 1,
+>>>>>>> origin/main
     "pkg/server/endpoints/semantic_schema.go:package:*.OpenProtected": 1,
     "pkg/server/endpoints/semantic_schema.go:resolveSQLSourceURL:*.Open": 1,
     "pkg/server/endpoints/watch_cloud.go:import:database/sql": 1,
@@ -145,7 +159,8 @@
     "pkg/watch/storage.go:NewSQLiteStore:github.com/dal-go/dalgo2sql.NewRecordset": 1,
     "pkg/watch/storage.go:NewSQLiteStore:github.com/dal-go/dalgo2sqlite.NewDatabaseWithOptions": 1,
     "pkg/watch/storage.go:import:github.com/dal-go/dalgo2sql": 1,
-    "pkg/watch/storage.go:import:github.com/dal-go/dalgo2sqlite": 1
+    "pkg/watch/storage.go:import:github.com/dal-go/dalgo2sqlite": 1,
+    "pkg/webui/install.go:VerifyDir:*.Open": 1
   },
   "files": {
     "apps/datatugapp/commands/cmd_compare_database.go": "Comparison source-read path; protected connection whole-source authority and per-object restrictions remain pending Core cutover.",
@@ -159,7 +174,9 @@
     "apps/datatugapp/commands/cmd_query_cloudflare_kv.go": "Explicit native Cloudflare Workers KV existing-namespace read route; configured token/account/namespace/literal prefixes govern access, not DataTug application policies. Closed trusted mapping/read-only point/batch/list operations, no admin/discovery/write/SQL/portable-cursor fallback.",
     "apps/datatugapp/commands/cmd_query_convex.go": "Explicit configured Convex public query-function reads using trusted aliases, native encoded values and named user-token ENV or explicit anonymous scope; bounded input/output and context guards. No DataTug application policy, admin/mutation fallback, table discovery, writes or portable cursor claim.",
     "apps/datatugapp/commands/cmd_query_cosmosdb.go": "Explicit native Cosmos NoSQL reads of existing documents in supplied string partitions using typed resource/AAD environment authorization; bounded input/output and context guards. No DataTug application policy, master-key/admin fallback, cross-partition discovery, writes or portable server-cursor claim.",
+    "apps/datatugapp/commands/cmd_query_databricks.go": "Dedicated native Databricks SQL API read command; explicit trusted table mapping and read-token authority, bounded public Shutdown before stdout. DataTug application policies are not applied; no unified protected connection or hosted Databricks authorization/credit certification.",
     "apps/datatugapp/commands/cmd_query_dynamodb.go": "Explicit native GetItem/Query using trusted existing-table mappings and scoped environment IAM credentials; bounded input/output and context guards. No DataTug application policy, Scan/write fallback, account discovery or general protected-source claim.",
+    "apps/datatugapp/commands/cmd_query_federated_labels.go": "Label guard only: calls the leaf's lazy Open, which is the secureread Executor's own protected open path, to list a leaf's columns for a wildcard label check before any row is read. Opens no new native connection and reads no rows.",
     "apps/datatugapp/commands/cmd_query_influxdb.go": "Explicit native InfluxDB v3 mapped reads using a trusted HTTPS root, existing-table/column mapping and named environment read token; bounded input/output and context guards. No DataTug application policy, raw SQL, proxy/redirect, write fallback, schema or Cloud discovery claim.",
     "apps/datatugapp/commands/cmd_query_redis.go": "Explicit allow-listed raw compatibility on connections without a control plane (OQ-13); protected source disposition pending.",
     "apps/datatugapp/commands/cmd_query_snowflake.go": "Dedicated native Snowflake SQL API read command; explicit trusted table mapping and read-token authority, bounded public Shutdown before stdout. DataTug application policies are not applied; no unified protected connection or hosted Snowflake authorization/credit certification.",
@@ -194,16 +211,25 @@
     "pkg/dbcopy/server_source.go": "Shared native construction seam; read modes and explicit copy-target writer are separate. Generic Core authority cutover remains pending.",
     "pkg/dbcopy/typesense_source.go": "Shared native construction seam; read modes and explicit copy-target writer are separate. Generic Core authority cutover remains pending.",
     "pkg/dbcopy/url.go": "Shared native construction seam; read modes and explicit copy-target writer are separate. Generic Core authority cutover remains pending.",
+    "pkg/demofixtures/factories/factories.go": "Owned demo fixture construction: creates the seven five-factory demo SQLite files from scratch inside the demo project's own data folder; never opens an existing or protected production source. Reconcile reads them back only through the policy-enforced execution path.",
     "pkg/executionstore/store.go": "DataTug-owned local result/session/artifact store or metadata helper. Local writes do not confer source-write authority; grant-bound retained-data cleanup is not certified by this inventory.",
     "pkg/httpsource/httpsource.go": "DataTug-owned local result/session/artifact store or metadata helper. Local writes do not confer source-write authority; grant-bound retained-data cleanup is not certified by this inventory.",
+<<<<<<< HEAD
     "pkg/secureread/bound_sqlite_identity.go": "Existing SQLite source-identity guard; it opens a native SQLite schema reader on a dedicated read-only connection and is evaluated as a source-binding check, not a general protected connection grant.",
+=======
+    "pkg/secureread/bound_sqlite_identity.go": "Native SQLite schema-reader leaf for a bound source (#549): verifies source spelling/kind beneath the DALgo policy layers, which still execute and may narrow first. Not a permission check.",
+>>>>>>> origin/main
     "pkg/secureread/exact_aggregate.go": "Existing policy evaluator and native read-only safeguards; not yet the unified Core SubjectAgent/connection-authority path. Explicit no-control-plane raw compatibility remains OQ-13.",
     "pkg/secureread/executor.go": "Existing policy evaluator and native read-only safeguards; not yet the unified Core SubjectAgent/connection-authority path. Explicit no-control-plane raw compatibility remains OQ-13.",
+    "pkg/secureread/federated_columns.go": "Label guard only: each guarded leaf's lazy Open calls the Executor's own openSourceFn (openSource -> OpenProtected), and the read reuses that cached connection. No new native opener; no rows read by the guard.",
     "pkg/secureread/seams.go": "Existing policy evaluator and native read-only safeguards; not yet the unified Core SubjectAgent/connection-authority path. Explicit no-control-plane raw compatibility remains OQ-13.",
+    "pkg/server/endpoints/meanings_labels.go": "Meaning Graph object listing (tables/views) for describe and agent raw-SQL refusal: schema metadata only, no row reads. Mirrors semantic_schema.go: bound sources use OpenProtected, an unbound local URL uses Open. Core metadata cutover pending.",
+    "pkg/server/endpoints/run_query_labels.go": "exec/run_query label guard only: calls the leaf's lazy Open, the secureread Executor's own protected open path (openSource -> OpenProtected), so a source the session refuses is never described; the read reuses that connection. No new native opener; the guard reads no rows.",
     "pkg/server/endpoints/semantic_schema.go": "Schema/metadata source path; existing read opener is not proof of unified connection or exact-object authorization. Core metadata cutover pending.",
     "pkg/server/endpoints/watch_cloud.go": "DataTug-owned local result/session/artifact store or metadata helper. Local writes do not confer source-write authority; grant-bound retained-data cleanup is not certified by this inventory.",
     "pkg/sessionstore/store.go": "DataTug-owned local result/session/artifact store or metadata helper. Local writes do not confer source-write authority; grant-bound retained-data cleanup is not certified by this inventory.",
     "pkg/sqlexecute/executor.go": "Legacy SQL command executor; existing caller capability gates are not a unified grant/write-session proof. Pending boundary cutover.",
-    "pkg/watch/storage.go": "DataTug-owned local result/session/artifact store or metadata helper. Local writes do not confer source-write authority; grant-bound retained-data cleanup is not certified by this inventory."
+    "pkg/watch/storage.go": "DataTug-owned local result/session/artifact store or metadata helper. Local writes do not confer source-write authority; grant-bound retained-data cleanup is not certified by this inventory.",
+    "pkg/webui/install.go": "Not a data source: os.Root.Open re-reads an installed web UI file (static HTML/JS/CSS of a verified archive) to re-check its SHA-256 before `serve --web-ui` serves it. Confined to the version directory by os.Root; opens no database, connection or project source."
   }
 }

@@ -400,7 +400,7 @@ func (s *LocalStore) executeRunAction(ctx context.Context, id, actor string, req
 	}
 	var run CheckRun
 	if checkID != "" {
-		run, err = core.EvaluateCheck(ctx, coreReq, catalog, runner, metadata)
+		run, err = evaluateCheckWithContextOptions(ctx, coreReq, catalog, runner, metadata)
 	} else if result == nil {
 		run, err = core.EvaluateQueryValidators(ctx, coreReq, catalog, runner, metadata)
 	} else {

@@ -68,6 +68,9 @@ func (e *Executor) RunExactAggregateTugQL(ctx context.Context, sourceURL string,
 	if err != nil {
 		return ExactAggregateResult{}, err
 	}
+	if err := e.guardDocuments(ctx, sourceURL, originalDocument, document); err != nil {
+		return ExactAggregateResult{}, err
+	}
 	variables, err = accesspolicies.ExactVariables(variables)
 	if err != nil {
 		return ExactAggregateResult{}, err

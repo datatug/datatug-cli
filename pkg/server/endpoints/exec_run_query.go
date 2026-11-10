@@ -20,8 +20,10 @@ import (
 	"github.com/datatug/datatug-cli/pkg/querybody"
 	"github.com/datatug/datatug-cli/pkg/queryparams"
 	"github.com/datatug/datatug-cli/pkg/secureread"
+	"github.com/datatug/datatug-cli/pkg/tugqlbind"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/meaninglabels"
 )
 
 // runQueryHandler is POST exec/run_query, rewritten (Task 12 / S64 item 3)
@@ -49,7 +51,7 @@ func runQueryHandler(w http.ResponseWriter, r *http.Request) {
 		writeContractError(w, r, newInvalidRequest("", err.Error()))
 		return
 	}
-	result, err := computeRunQuery(r.Context(), req)
+	result, err := computeRunQuery(withAgentContext(r.Context(), isAgentRequest(r)), req)
 	writeContractResponse(w, r, err, result)
 }
 
@@ -198,9 +200,29 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 	if refuseErr := refuseExecutionContextVariables(req, queryDef); refuseErr != nil {
 		return apicontract.Result{}, refuseErr
 	}
-	resolved, targetErr := resolveWatchExecutionSource(ctx, projStore, projDir, req, queryDef, options.acceptedQuery != nil)
-	if targetErr != nil {
-		return apicontract.Result{}, targetErr
+	// A saved TugQL query that reads named databases binds each one to a
+	// source of the project (exec_run_query_federated.go); its root's source is
+	// the one the result reports.
+	var bindings map[string]tugqlbind.Binding
+	var federated dal.StructuredQuery
+	var resolved api.ResolvedSource
+	if req.TugQL == "" && queryDef.Type == datatug.QueryTypeTugQL {
+		if federated, bindings, err = bindSavedTugQL(ctx, projStore, projDir, req, queryDef); err != nil {
+			return apicontract.Result{}, err
+		}
+		if len(bindings) > 0 {
+			if refusal := federatedRunRefusal(ctx, req); refusal != nil {
+				return apicontract.Result{}, refusal
+			}
+		}
+		root, _ := tugqlbind.Root(federated, bindings)
+		resolved = api.ResolvedSource{ID: root.Catalog, URL: root.URL}
+	}
+	if len(bindings) == 0 {
+		var targetErr error
+		if resolved, targetErr = resolveWatchExecutionSource(ctx, projStore, projDir, req, queryDef, options.acceptedQuery != nil); targetErr != nil {
+			return apicontract.Result{}, targetErr
+		}
 	}
 
 	variables, missing, mismatched := typedParametersToVariables(req.Parameters, queryDef)
@@ -250,16 +272,43 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 	var profile string
 	var collection string
 
+	agent := agentFromContext(ctx)
+	executor = labelledRunQueryExecutor(ctx, executor, projStore, projDir, req.Environment, resolved)
+	if len(bindings) == 0 {
+		// A federated read spans several instances, so it keeps the policies
+		// that deny what a rule selector would decide.
+		executor = instanceExecutor(ctx, executor, projStore, req.Environment, resolved.Catalog)
+	}
 	switch {
 	case req.TugQL != "":
 		profile = apicontract.ExecutionProfileProtected
+		if agent {
+			if err := agentTugQLGuard(ctx, req.Project, req.Environment, resolved.ID, []byte(req.TugQL)); err != nil {
+				return apicontract.Result{}, err
+			}
+		}
 		result, err = runTugQLHook(executor, runCtx, resolved.URL, []byte(req.TugQL), variables)
 	case queryDef.Type == datatug.QueryTypeTugQL:
 		var doc string
 		doc, err = executionQueryDocument(req.Project, req.QueryID, queryDef, queryRevision)
+		if err == nil && agent {
+			var guardErr error
+			if len(bindings) > 0 {
+				guardErr = agentFederatedGuard(ctx, req.Project, federated, bindings)
+			} else {
+				guardErr = agentTugQLGuard(ctx, req.Project, req.Environment, resolved.ID, []byte(doc))
+			}
+			if guardErr != nil {
+				return apicontract.Result{}, guardErr
+			}
+		}
 		if err == nil {
 			profile = apicontract.ExecutionProfileProtected
-			result, err = runTugQLHook(executor, runCtx, resolved.URL, []byte(doc), variables)
+			if len(bindings) > 0 {
+				result, err = runFederatedTugQLHook(federatedExecutor(executor, bindings), runCtx, []byte(doc), tugqlbind.URLs(bindings), variables)
+			} else {
+				result, err = runTugQLHook(executor, runCtx, resolved.URL, []byte(doc), variables)
+			}
 		}
 	case queryDef.Type == datatug.QueryTypeSQL:
 		// The opaque-query-grant gate itself lives centrally in
@@ -272,6 +321,11 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 		// UNSUPPORTED_PROTECTED_EXECUTION.
 		var text string
 		text, err = executionQueryDocumentHook(req.Project, req.QueryID, queryDef, queryRevision)
+		if err == nil && agent {
+			if err := agentSavedSQLRefusal(ctx, req.Project, req.Environment, resolved.ID, text); err != nil {
+				return apicontract.Result{}, err
+			}
+		}
 		if err == nil {
 			profile = apicontract.ExecutionProfileOpaquePrivileged
 			result, err = runNativeSQLHook(executor, runCtx, resolved.URL, text, sqlQueryArgs(queryDef, variables)...)
@@ -290,6 +344,18 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 		}
 		if errors.Is(err, secureread.ErrOpaqueSQLNotGranted) {
 			return apicontract.Result{}, newUnsupportedProtectedExecution(err.Error())
+		}
+		// A sensitivity-label refusal (labelledRunQueryExecutor, or a federated
+		// read's guard, which checks every leaf): native SQL,
+		// which cannot be inspected, answers as raw SQL does on a labelled
+		// source (agentSavedSQLRefusal).
+		var protected *secureread.FieldProtectedError
+		if errors.As(err, &protected) {
+			code := meaninglabels.CodeFieldProtected
+			if profile == apicontract.ExecutionProfileOpaquePrivileged {
+				code = meaninglabels.CodeRawRefused
+			}
+			return apicontract.Result{}, newContractError(apicontract.ErrorCode(code), protected.Message, "")
 		}
 		if errors.Is(err, secureread.ErrAccessDenied) {
 			ce := contractErrAccessDenied(err.Error())

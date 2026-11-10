@@ -101,10 +101,14 @@ func (e *Executor) StreamFederatedTugQL(ctx context.Context, document []byte, so
 	opened := map[string]dal.DB{}
 	var limitations []Limitation
 	var closes []func()
-	observer, _ := ctx.Value(federatedProgressKey{}).(func(dal.FederatedProgress))
-	reader, err := dal.ExecuteFederatedQueryWithOptions(ctx, query, func(ctx context.Context, database string) (dal.QueryExecutor, error) {
+	closeAll := func() {
+		for i := len(closes) - 1; i >= 0; i-- {
+			closes[i]()
+		}
+	}
+	open := func(ctx context.Context, database string) (dal.DB, error) {
 		if db, ok := opened[database]; ok {
-			return securedLeaf{db: db, session: e.session, variables: variables, limitations: &limitations}, nil
+			return db, nil
 		}
 		url := sourceURLs[database]
 		if url == "" {
@@ -116,12 +120,23 @@ func (e *Executor) StreamFederatedTugQL(ctx context.Context, document []byte, so
 		}
 		opened[database] = db
 		closes = append(closes, closeSource)
+		return db, nil
+	}
+	// Every leaf passes the sensitivity-label guard before any leaf is read.
+	if err := e.guardFederatedColumns(ctx, query, sourceURLs, open, ""); err != nil {
+		closeAll()
+		return nil, err
+	}
+	observer, _ := ctx.Value(federatedProgressKey{}).(func(dal.FederatedProgress))
+	reader, err := dal.ExecuteFederatedQueryWithOptions(ctx, query, func(ctx context.Context, database string) (dal.QueryExecutor, error) {
+		db, err := open(ctx, database)
+		if err != nil {
+			return nil, err
+		}
 		return securedLeaf{db: db, session: e.session, variables: variables, limitations: &limitations}, nil
 	}, dal.FederatedQueryOptions{OnProgress: observer})
 	if err != nil {
-		for i := len(closes) - 1; i >= 0; i-- {
-			closes[i]()
-		}
+		closeAll()
 		return nil, err
 	}
 	return &FederatedStream{Reader: &onceClosingReader{RecordsReader: reader}, Query: query, limitations: &limitations, closes: closes}, nil
@@ -156,4 +171,14 @@ func (s securedLeaf) ExecuteQueryToRecordsReader(ctx context.Context, query dal.
 
 func (s securedLeaf) ExecuteQueryToRecordsetReader(context.Context, dal.Query, ...recordset.Option) (dal.RecordsetReader, error) {
 	return nil, fmt.Errorf("federated recordset readers are not supported")
+}
+
+// WithFederatedColumns is e with its session's federated column guard
+// replaced by guard; e itself is unchanged. A federated saved query checks each
+// leaf against the labels of the project source its alias is bound to, which
+// only the binding knows.
+func (e *Executor) WithFederatedColumns(guard FederatedColumnGuard) *Executor {
+	session := e.session
+	session.FederatedColumns = guard
+	return &Executor{session: session}
 }

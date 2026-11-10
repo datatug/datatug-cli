@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 
@@ -254,6 +255,10 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	if err != nil {
 		return "", Exit("chat: "+strings.TrimPrefix(err.Error(), "serve: "), exitCodeUsage)
 	}
+	// Saved queries and the model's own TugQL read through this session, so
+	// it checks the project's sensitivity labels, for every principal, and
+	// strictly: what it reads goes to an AI model.
+	installProjectLabels(&session, projectDir, chatSourceCatalogs(sourceURLs, sourceURL, database), cmd.ErrOrStderr(), true)
 	executor := secureread.NewExecutor(session)
 	var conversation chat.ContextualConversation
 	var foreignKeys []narrowing.Link // set once the source's foreign keys are read
@@ -392,7 +397,7 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 		// above is not visible until the user quits, so show it in the chat too.
 		setSessionNotices(ui, sessionNotices)
 	}
-	if err := setSavedQueryService(ui, chatSavedQueries{projectDir: projectDir, store: projectStore, executor: executor, env: options.env, projectID: projectCatalog.ID, session: session}); err != nil {
+	if err := setSavedQueryService(ui, chatSavedQueries{projectDir: projectDir, store: projectStore, executor: executor, env: options.env, projectID: projectCatalog.ID, session: session, warn: cmd.ErrOrStderr()}); err != nil {
 		return "", Exit(fmt.Sprintf("list saved project queries: %v", err), exitCodeUsage)
 	}
 	bridge, err := startBrowserBridge(sessions)
@@ -717,4 +722,23 @@ type providerUnavailableConversation struct{}
 
 func (providerUnavailableConversation) AskWithContext(context.Context, string, string) (chat.Turn, error) {
 	return chat.Turn{Text: "Configure an AI provider under Settings → AI for chat. Use Explorer Open data or New query to work with your project locally. No query was executed."}, nil
+}
+
+// chatSourceCatalogs names every project source URL of a chat by the catalog
+// ids that resolve to it: the explorer's sources and the chat's own database.
+// Labels are keyed by catalog id, so a URL two catalogs share keeps both, and
+// the labels of each apply.
+func chatSourceCatalogs(sourceURLs map[string]string, sourceURL, database string) map[string][]string {
+	catalogs := map[string][]string{}
+	add := func(url, id string) {
+		if !slices.Contains(catalogs[url], id) {
+			catalogs[url] = append(catalogs[url], id)
+			slices.Sort(catalogs[url])
+		}
+	}
+	for id, url := range sourceURLs {
+		add(url, id)
+	}
+	add(sourceURL, database)
+	return catalogs
 }

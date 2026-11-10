@@ -82,7 +82,7 @@ func TestSDKDiscoveryAndSafeReadTools(t *testing.T) {
 	}
 	defer func() { _ = cs.Close() }()
 	tools, err := cs.ListTools(ctx, nil)
-	if err != nil || len(tools.Tools) != 8 {
+	if err != nil || len(tools.Tools) != 12 {
 		t.Fatalf("tools %v: %v", tools, err)
 	}
 	calls := []struct {

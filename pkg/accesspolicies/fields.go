@@ -14,6 +14,13 @@ import (
 // kind the walker does not know is an error, so a construct that might wrap a
 // field can never slip past the hidden-field check.
 func referencedFields(query dal.StructuredQuery) ([]string, error) {
+	return referencedFieldsIn(query, false)
+}
+
+// referencedFieldsIn is referencedFields; with skipPlainColumns a column that
+// only selects a field under its own name is left out, so what remains is
+// every field the query filters, sorts, groups, renames or computes on.
+func referencedFieldsIn(query dal.StructuredQuery, skipPlainColumns bool) ([]string, error) {
 	seen := map[string]bool{}
 	walkExpression := func(expression dal.Expression) error {
 		switch e := expression.(type) {
@@ -51,6 +58,9 @@ func referencedFields(query dal.StructuredQuery) ([]string, error) {
 		}
 	}
 	for _, column := range query.Columns() {
+		if field, ok := column.Expression.(dal.FieldRef); ok && skipPlainColumns && (column.Alias == "" || column.Alias == field.Name()) {
+			continue
+		}
 		if err := walkExpression(column.Expression); err != nil {
 			return nil, err
 		}
@@ -198,4 +208,20 @@ func dedupe(sorted []string) []string {
 		}
 	}
 	return out
+}
+
+// ReferencedFields lists the fields a structured query names in any clause,
+// sorted; a construct the walker cannot inspect is an error. The Meaning Graph
+// masking gate uses it to refuse any expression on a masked column.
+func ReferencedFields(query dal.StructuredQuery) ([]string, error) {
+	return referencedFields(query)
+}
+
+// NonProjectionFields lists the fields a structured query filters, sorts,
+// groups, renames or computes on, sorted: every referenced field except a
+// column that only selects a field under its own name. A masking boundary
+// refuses a query that names a masked field here, because a predicate on a
+// masked value discloses it; a plain selection is masked in the output.
+func NonProjectionFields(query dal.StructuredQuery) ([]string, error) {
+	return referencedFieldsIn(query, true)
 }

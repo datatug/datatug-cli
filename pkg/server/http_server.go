@@ -56,6 +56,11 @@ type HttpServer struct {
 	// IdleTimeout, when positive, makes ServeHTTP return nil after that long
 	// without a request. Zero (the default) serves until stopped.
 	IdleTimeout time.Duration
+	// WebUI, when set, is the installed web UI (`serve --web-ui`): it answers GET and HEAD
+	// outside /datatug/ (the page at "/" included) behind the Host check only, and UIHost is
+	// admitted as Host and, with the loopback names on this port, as Origin.
+	WebUI  http.Handler
+	UIHost string
 }
 
 func NewHttpServer() HttpServer {
@@ -216,7 +221,23 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 	router.MethodNotAllowed = http.HandlerFunc(guard.Wrap(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 	}))
-	router.HandlerFunc(http.MethodGet, "/", guard.Wrap(root))
+	if s.WebUI != nil {
+		endpoints.ConfigureServedUIOrigins(s.UIHost, agentPort)
+		defer endpoints.ConfigureServedUIOrigins("", 0)
+		static := guard.WrapStatic(s.WebUI)
+		apiNotFound := router.NotFound
+		router.NotFound = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if (r.Method == http.MethodGet || r.Method == http.MethodHead) && !isAgentPath(r.URL.Path) {
+				static(w, r)
+				return
+			}
+			apiNotFound.ServeHTTP(w, r)
+		})
+		router.HandlerFunc(http.MethodGet, "/", guard.WrapStatic(s.WebUI))
+		router.HandlerFunc(http.MethodHead, "/", guard.WrapStatic(s.WebUI))
+	} else {
+		router.HandlerFunc(http.MethodGet, "/", guard.Wrap(root))
+	}
 	endpoints.RegisterDatatugHandlersWithCapabilities("", router, endpoints.RegisterAllHandlers, logRequests, func(r *http.Request) (context.Context, error) {
 		return r.Context(), nil
 	}, apicore.Execute, endpointCaps)
@@ -238,8 +259,6 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 			return context.Background()
 		},
 	}
-	log.Printf("Serving on: http://%v:%v", agentHost, agentPort)
-
 	if idle != nil {
 		done := make(chan struct{})
 		defer close(done)
@@ -265,6 +284,11 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 // GlobalOPTIONS only for a path some route serves, and a refused preflight makes the browser drop
 // the real request, so the page would see a network failure (status 0) instead of the 404 that
 // the real request gets.
+// isAgentPath reports whether a request path belongs to the agent API (/datatug and below).
+func isAgentPath(p string) bool {
+	return p == "/datatug" || strings.HasPrefix(p, "/datatug/")
+}
+
 func notFound(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
 		globalOptionsHandler(w, r)

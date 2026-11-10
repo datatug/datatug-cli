@@ -94,7 +94,7 @@ func TestClickHouseCommandKeepsExplicitLimitAndCancellation(t *testing.T) {
 	cmd.SetErr(io.Discard)
 	ref, err := dbcopy.Parse(clickHouseDispatchSource)
 	require.NoError(t, err)
-	require.NoError(t, runClickHouseQuery(cmd, queryOptions{from: "events", limit: 2, limitSet: true, noPolicies: true, format: "json", quiet: true}, ref, nil, "from: {name: events}", nil, nil, nil))
+	require.NoError(t, runClickHouseQuery(cmd, queryOptions{from: "events", limit: 2, limitSet: true, noPolicies: true, format: "json", quiet: true}, ref, nil, "from: {name: events}", nil, nil, nil, nil))
 }
 
 func TestClickHouseCommandSealsFailuresAndSavesTypedAdhocResults(t *testing.T) {
@@ -246,7 +246,7 @@ func TestClickHouseCommandOutputFailurePropagates(t *testing.T) {
 	cmd.SetErr(&bytes.Buffer{})
 	ref, err := dbcopy.Parse(clickHouseDispatchSource)
 	require.NoError(t, err)
-	err = runClickHouseQuery(cmd, queryOptions{format: "json", noPolicies: true}, ref, nil, "", nil, nil, nil)
+	err = runClickHouseQuery(cmd, queryOptions{format: "json", noPolicies: true}, ref, nil, "", nil, nil, nil, nil)
 	require.ErrorIs(t, err, broken)
 }
 
@@ -317,7 +317,7 @@ func TestClickHouseCommandDefaultExecutionRefusesMissingOperatorConfig(t *testin
 }
 
 func TestClickHouseSavedStreamingRejectsInvalidDocumentBeforeExecution(t *testing.T) {
-	streamed, err := runStreamedSavedTugQL(context.Background(), io.Discard, io.Discard, queryOptions{format: "csv"}, nil, &covCStore{}, "", &datatug.QueryDef{Type: datatug.QueryTypeTugQL, Text: "from: ["}, nil)
-	require.True(t, streamed)
+	// A saved run binds before streaming: a document that does not parse fails there.
+	_, _, err := federatedTugQLBindings(context.Background(), &covCStore{}, "", "", &datatug.QueryDef{Type: datatug.QueryTypeTugQL, Text: "from: ["})
 	require.Error(t, err)
 }

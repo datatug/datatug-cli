@@ -255,7 +255,7 @@ func TestQueryRunSavedResultMeta(t *testing.T) {
 func TestSavedTugQLSources(t *testing.T) {
 	dir := covCWriteProject(t, covCEnvFiles(map[string]string{"main": filepath.Join(t.TempDir(), "absent.sqlite")}))
 	tempDatatugHome(t)
-	sources := savedTugQLSources(context.Background(), covCFileStore(dir), dir, "local", &datatug.QueryDef{ID: "q", Targets: []datatug.QueryDefTarget{{Catalog: "nope"}}})
+	sources := savedTugQLSources(context.Background(), covCFileStore(dir), dir, "local", &datatug.QueryDef{ID: "q", Targets: []datatug.QueryDefTarget{{Catalog: "nope"}}}, nil)
 	_, _, _, err := sources.open(context.Background(), "")
 	assert.Error(t, err, "the query's own database cannot be resolved")
 	origParse := chatParseSource
@@ -265,7 +265,7 @@ func TestSavedTugQLSources(t *testing.T) {
 	chatParseSource = origParse
 	_, _, _, err = sources.open(context.Background(), "nope")
 	assert.Error(t, err, "a database the environment does not list")
-	assert.Nil(t, sources.ref("main"), "an unregistered project has no reference")
+	assert.Nil(t, sources.ref, "one database: participants carry no reference")
 	// a source that cannot be opened
 	orig := openBackend
 	t.Cleanup(func() { openBackend = orig })

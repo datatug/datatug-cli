@@ -335,6 +335,9 @@ func configureWatchExecution(cfg watchdaemon.Config, projectID string) (func(), 
 	if err = api.ConfigureSecureSessionChecked(session, paths, api.Capabilities{EvidencePrivateDir: evidence, AllowOpaqueSQL: cfg.Runner.AllowOpaqueSQL}); err != nil {
 		return nil, err
 	}
+	// A check that runs a federated saved query checks each leaf against the
+	// labels of the source its alias is bound to, as `datatug serve` does.
+	endpoints.SetFederatedLabelGuard(serveFederatedLabelGuard(session, os.Stderr))
 	if err = api.ConfigureExecutionEvidence(paths, nil, executionstore.Options{PrivateDir: evidence}); err != nil {
 		return nil, errors.New("watch execution evidence unavailable")
 	}

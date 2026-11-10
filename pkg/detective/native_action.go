@@ -18,7 +18,7 @@ import (
 
 var nativeLoadCatalog = core.LoadCatalog
 var nativeBindOperation = core.BindOperation
-var nativeEvaluateCheck = core.EvaluateCheck
+var nativeEvaluateCheck = evaluateCheckWithContextOptions
 var nativePlatformAdmission = nativeBridgePlatformAdmission
 
 type nativeSessionEvidenceReceipt struct {

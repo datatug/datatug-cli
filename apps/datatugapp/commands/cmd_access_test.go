@@ -163,7 +163,7 @@ func TestAccessCommandsRefuseBadInputAndReportDenials(t *testing.T) {
 	})}
 	_, err = runAccess(t, broken, "inbox", "--space", "s", "--project", "p", "--connection", "c", "--base-url", "http://127.0.0.1:1/v0/")
 	require.ErrorContains(t, err, "invalid access service response")
-	_, err = accessDo(nil, d, accessClientOptions{baseURL: "http://127.0.0.1:1/v0/"}, http.MethodGet, "x", nil, nil, "") //nolint:staticcheck // a nil context fails request building
+	_, err = accessDo(nil, d, accessClientOptions{baseURL: "http://127.0.0.1:1/v0/"}, http.MethodGet, "x", nil, nil, agentCaller{}) //nolint:staticcheck // a nil context fails request building
 	require.Error(t, err)
 	require.NotNil(t, accessCommand())
 }

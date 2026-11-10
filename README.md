@@ -23,13 +23,13 @@
 <table>
   <tr>
     <td valign="top">
-      <a href="https://youtu.be/tjOzdzB_PGA"><img src="https://datatug.app/static/illustrations/intro-video-poster-1280.webp" alt="DataTug in one minute — watch the intro (1:01)" width="420"></a><br>
-      ▶ <b><a href="https://youtu.be/tjOzdzB_PGA">Watch the DataTug intro (1:01)</a></b><br>
-      The DataTug intro.
+      <a href="https://youtu.be/P8c-uw29XyE"><img src="https://datatug.app/static/illustrations/datatug-in-30-poster-1280.webp" alt="DataTug in 30 seconds: every database, one workspace (0:30)" width="420"></a><br>
+      ▶ <b><a href="https://youtu.be/P8c-uw29XyE">Watch DataTug in 30 seconds (0:30)</a></b><br>
+      Sources, browsing, column meanings, the suggested join, cards and Perimeter. Longer: the <a href="https://youtu.be/8-KHMVIe1S0">intro (1:01)</a>.
     </td>
     <td valign="top">
-      <a href="https://youtu.be/_mla67RoPWY"><img src="https://datatug.app/static/illustrations/explainer-sales-per-capita-poster-1280.webp" alt="Where are we underselling? Sales per capita across three sources (1:30)" width="420"></a><br>
-      ▶ <b><a href="https://youtu.be/_mla67RoPWY">Where are we underselling? (1:30)</a></b><br>
+      <a href="https://youtu.be/ENjhplq2SQ0"><img src="https://datatug.app/static/illustrations/explainer-sales-per-capita-poster-1280.webp" alt="Where are we underselling? Sales per capita across three sources (1:30)" width="420"></a><br>
+      ▶ <b><a href="https://youtu.be/ENjhplq2SQ0">Where are we underselling? (1:30)</a></b><br>
       The sales-per-capita query in this explainer runs with the DataTug CLI.
     </td>
   </tr>
@@ -152,6 +152,21 @@ Run the local DataTug HTTP agent daemon to serve the Web UI, REST endpoints, and
 datatug serve
 ```
 By default, `datatug serve` binds strictly to loopback (`127.0.0.1`) with origin protection. It is completely free and unrestricted under Apache License 2.0—no license key is ever required for individual local development.
+
+## Web UI on your own machine, offline
+
+The DataTug web UI can run entirely on your machine, served by the CLI, with no internet connection and no account.
+
+```bash
+datatug web-ui install ./datatug-web-ui-0.1.0.tar.gz   # from a release of github.com/datatug/web-ui; never touches the network
+datatug serve --web-ui                                 # prints http://datatug-app.localhost:8989/… and a 127.0.0.1 link
+```
+
+- Get the archive (and its `.sha256`) from [datatug/web-ui releases](https://github.com/datatug/web-ui/releases) on any connected machine and copy both across; `install` checks the digest, every file and the DataTug release signature before anything is installed (a web UI you built yourself installs with `--allow-unsigned`). With internet, `datatug web-ui install --latest` downloads the newest compatible release, and only then.
+- Installed versions live in `~/datatug/web-ui` (`$DATATUG_WEB_UI_DIR`). `datatug web-ui list | use <version> | rollback | remove <version>` manage them; a version this CLI cannot serve is listed with the reason and never served.
+- The page can reach only the local agent (Content-Security-Policy `connect-src 'self'`), runs no telemetry, and the agent still enforces your access policies on every request. Cloud features (sign-in, cloud projects, hosted AI) are unavailable there unless you allow an origin with `--ui-connect-src`.
+
+Details: [spec/features/cli/web-ui](spec/features/cli/web-ui/README.md).
 
 ## Architecture Overview
 
@@ -288,7 +303,7 @@ curl -fsSL https://datatug.app/run-cli | sh -s -- ui --deep-link <address>
 brew install --cask datatug/tap/datatug
 ```
 
-Homebrew gets a release only when the maintainers promote it, so it can be behind the direct installers (curl and PowerShell, which always take the latest release). `brew list --cask --versions datatug` shows the version installed.
+Every release updates the Homebrew cask a few minutes after it is published, so Homebrew carries the same version as the direct installers (curl and PowerShell). `brew list --cask --versions datatug` shows the version installed.
 
 The direct installers and Homebrew package do not require Go. See the full
 [installation guide](https://datatug.io/install/) or the official
@@ -580,6 +595,10 @@ datatug scan -D sqlserver --dsn-env DATATUG_SALES_MS_URL --db sales --env local
 datatug query run --db env:DATATUG_SHOP_MY_URL -f top-customers.tugql
 datatug query run --db env:DATATUG_SHOP_MY_URL --sql 'SELECT id, name FROM customer ORDER BY id'
 ```
+
+One TugQL text query can also join tables of several databases: it declares them in a `databases (` block and binds
+each alias to a project source (`datatug://<project>/<db>`) or with `--db <alias>=<url>`. Each source is a separate
+secured read. See [cross-database queries](docs/query/cross-database.md).
 
 Every scan, of these servers, PostgreSQL and SQLite alike, saves the foreign keys of the database's tables in
 `dbmodels/<db>/<db>.refs.json` and their indexes in `dbmodels/<db>/<db>.indexes.json` (an index on an expression is

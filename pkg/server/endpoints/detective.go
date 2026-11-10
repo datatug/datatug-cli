@@ -207,7 +207,7 @@ func detectiveActionHandler(w http.ResponseWriter, r *http.Request) {
 		writeContractResponse(w, r, detectiveError(err), detective.ActionResponse{})
 		return
 	}
-	response, err := store.ExecuteAction(r.Context(), body.OperationID, actor, req, detectiveQueryRunner(req.Project, req.SecurityContextID), detectiveExecutionMetadata(req.Project), result, proof, detectiveQueryRevisionLookup(req.Project))
+	response, err := store.ExecuteAction(withDetectiveReconciler(r.Context(), req.Project, req.SecurityContextID), body.OperationID, actor, req, detectiveQueryRunner(req.Project, req.SecurityContextID), detectiveExecutionMetadata(req.Project), result, proof, detectiveQueryRevisionLookup(req.Project))
 	linkStatus := ""
 	if err == nil && (req.Type == "run-check" || req.Type == "run-query-validators") {
 		linkStatus, err = store.ActionLinkStatus(r.Context(), body.OperationID, actor, req)

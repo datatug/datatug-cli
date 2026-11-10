@@ -76,6 +76,9 @@ func (e *Executor) runStructured(ctx context.Context, sourceURL string, query da
 	if err := e.session.configurationErr; err != nil {
 		return Result{}, err
 	}
+	if err := e.guardSource(ctx, sourceURL, query); err != nil {
+		return Result{}, err
+	}
 	db, closeSource, err := e.openSource(ctx, sourceURL, insecureAllowLoopback)
 	if err != nil {
 		return Result{}, err

@@ -12,6 +12,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/policyscope"
 	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/stretchr/testify/require"
 )
@@ -164,7 +165,7 @@ func TestSavedTugQLResolvingWrapperPreservesLeafContract(t *testing.T) {
 				require.Equal(t, variables, gotVariables)
 				return want, tc.err
 			}
-			got, err := runTugQLSavedQuery(ctx, executor, store, dir, "local", query, variables)
+			got, err := runTugQLSavedQuery(ctx, executor, store, dir, "local", query, nil, variables)
 			if tc.err != nil {
 				require.ErrorIs(t, err, tc.err)
 			} else {
@@ -184,7 +185,7 @@ func TestSavedTugQLStreamingDefersSingleSourceWithoutIO(t *testing.T) {
 			query := &datatug.QueryDef{Type: datatug.QueryTypeTugQL, StructuredBody: true, Text: "from: {name: events}\nlimit: 2\n"}
 			// A single-source query belongs to ordinary execution. It needs no
 			// store or executor here, and must emit nothing before that fallback.
-			streamed, err := runStreamedSavedTugQL(context.Background(), &out, &progress, queryOptions{format: format}, nil, nil, "", query, nil)
+			streamed, err := runStreamedSavedTugQL(context.Background(), &out, &progress, queryOptions{format: format}, nil, query, nil, nil, nil)
 			require.NoError(t, err)
 			require.False(t, streamed)
 			require.Empty(t, out.String())
@@ -198,23 +199,24 @@ func TestClickHouseSavedSourceSnapshotComesFromValidatedCatalog(t *testing.T) {
 	store := &clickHouseSnapshotStore{ProjectStore: covCFileStore(dir)}
 	query, err := store.LoadQuery(context.Background(), "f/exact")
 	require.NoError(t, err)
-	source, err := savedQuerySourceForClickHouse(context.Background(), store, dir, "local", query)
+	source, err := savedQuerySourceForClickHouse(context.Background(), store, dir, "local", query, nil)
 	require.NoError(t, err)
-	require.Equal(t, resolvedQuerySource{URL: clickHouseDispatchSource, Driver: api.DriverClickHouse, Environment: "local", Catalog: "warehouse"}, source)
+	require.Equal(t, resolvedQuerySource{URL: clickHouseDispatchSource, Driver: api.DriverClickHouse, Environment: "local", Catalog: "warehouse",
+		Target: policyscope.Target{Environment: "local", Catalog: "warehouse"}}, source)
 	require.Equal(t, 1, store.catalogReads, "one validated catalog snapshot suffices for classification")
 	// A ClickHouse label cannot classify a descriptor whose actual source is
 	// another engine. No partial URL/driver snapshot may escape on failure.
 	t.Setenv("DATATUG_CH_COMMAND_BOUNDARY", "sqlite:///tmp/synthetic.sqlite")
-	source, err = savedQuerySourceForClickHouse(context.Background(), store, dir, "local", query)
+	source, err = savedQuerySourceForClickHouse(context.Background(), store, dir, "local", query, nil)
 	require.ErrorContains(t, err, "descriptor must name a ClickHouse source")
 	require.Empty(t, source)
 	t.Setenv("DATATUG_CH_COMMAND_BOUNDARY", "not-a-supported-source")
-	source, err = savedQuerySourceForClickHouse(context.Background(), store, dir, "local", query)
+	source, err = savedQuerySourceForClickHouse(context.Background(), store, dir, "local", query, nil)
 	require.Error(t, err)
 	require.Empty(t, source)
 	clickHouseDispatchEnv(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "connections/local/warehouse.json"), []byte(`{"dsnEnv":"DATATUG_CH_COMMAND_BOUNDARY","password":"private"}`), 0600))
-	source, err = savedQuerySourceForClickHouse(context.Background(), store, dir, "local", query)
+	source, err = savedQuerySourceForClickHouse(context.Background(), store, dir, "local", query, nil)
 	require.Error(t, err)
 	require.Empty(t, source)
 	require.NotContains(t, err.Error(), "private")
@@ -223,18 +225,20 @@ func TestClickHouseSavedSourceSnapshotComesFromValidatedCatalog(t *testing.T) {
 func TestClickHouseSavedSourceSnapshotPreservesAmbiguityAndFederationRefusal(t *testing.T) {
 	ctx := context.Background()
 	dir := covCWriteProject(t, covCEnvFiles(map[string]string{"one": "/tmp/one.sqlite", "two": "/tmp/two.sqlite"}))
-	source, err := savedQuerySourceForClickHouse(ctx, covCFileStore(dir), dir, "local", &datatug.QueryDef{Type: datatug.QueryTypeSQL})
+	source, err := savedQuerySourceForClickHouse(ctx, covCFileStore(dir), dir, "local", &datatug.QueryDef{Type: datatug.QueryTypeSQL}, nil)
 	require.ErrorContains(t, err, "does not declare which one")
 	require.Empty(t, source)
 	dir = clickHouseSavedProject(t, false)
 	store := covCFileStore(dir)
 	query := &datatug.QueryDef{Type: datatug.QueryTypeTugQL, StructuredBody: true, Text: "from: {database: warehouse, name: events}\nlimit: 2\n"}
-	source, err = savedQuerySourceForClickHouse(ctx, store, dir, "local", query)
+	_, bindings, err := federatedTugQLBindings(ctx, store, dir, "local", query)
+	require.NoError(t, err)
+	source, err = savedQuerySourceForClickHouse(ctx, store, dir, "local", query, bindings)
 	require.NoError(t, err)
 	require.Empty(t, source, "named-database federation must not be classified as a single-source query")
 	// The actual executor retains the independent refusal before opening any
 	// ClickHouse leaf; classification does not create a RecordsReader fallback.
-	_, err = runTugQLSavedQuery(ctx, secureread.NewExecutor(secureread.Session{Unrestricted: true}), store, dir, "local", query, nil)
+	_, err = runTugQLSavedQuery(ctx, secureread.NewExecutor(secureread.Session{Unrestricted: true}), store, dir, "local", query, bindings, nil)
 	require.ErrorIs(t, err, dal.ErrNotSupported)
 	require.ErrorContains(t, err, "ClickHouse")
 }

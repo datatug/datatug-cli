@@ -28,6 +28,10 @@ const (
 	// DriverClickHouse names the read-only anonymous-recordset adapter.
 	DriverClickHouse = "clickhouse"
 
+	// DriverIngitDB is the driver name a local inGitDB catalog carries: its path
+	// is the database's root folder (the one that holds .ingitdb/).
+	DriverIngitDB = "ingitdb"
+
 	// DriverTypesense is the driver name a Typesense catalog carries, and the
 	// --driver value `datatug scan` reads it with. One Typesense server exposes
 	// one configured collection of native documents; the scoped API key comes

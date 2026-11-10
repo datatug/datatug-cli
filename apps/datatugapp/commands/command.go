@@ -66,6 +66,8 @@ func DatatugCommand() *cobra.Command {
 		datasetDataCommandArgs(),
 		datasetsCommandArgs(),
 		demoCommandArgs(),
+		diskCommand(),
+		uninstallCommand(),
 		updateUrlConfigCommandArgs(),
 		projectsCommandArgs(),
 		dataModelsCommand(),

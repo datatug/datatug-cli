@@ -79,7 +79,9 @@ func main() {
 			logus.Errorf(ctx, "panic: %s", rText)
 			// The report carries the Go type of the panic value and the stack,
 			// never its text: rText stays on stderr and in the log.
-			dtlogEnqueue(dtlog.PanicEvent(r))
+			if !skipTelemetry {
+				dtlogEnqueue(dtlog.PanicEvent(r))
+			}
 			_, _ = fmt.Fprintln(os.Stderr, "panic:", rText)
 			debug.PrintStack()
 		}
@@ -112,7 +114,7 @@ func main() {
 	// resolution (root.Find + the matched command's own flag set) rather
 	// than hand-parsed argv matching, so this check can never disagree with
 	// what fang.Execute actually runs below.
-	skipTelemetry = isVersionJSONInvocation(root, args)
+	skipTelemetry = isLocalMaintenanceInvocation(root, args) || isVersionJSONInvocation(root, args)
 
 	if !skipTelemetry {
 		// The notice comes first: on the run that prints it nothing is sent.
@@ -197,4 +199,17 @@ func isVersionJSONInvocation(root *cobra.Command, args []string) bool {
 	}
 	asJSON, _ := cmd.Flags().GetBool("json")
 	return asJSON
+}
+
+func isLocalMaintenanceInvocation(root *cobra.Command, args []string) bool {
+	cmd, _, err := root.Find(args)
+	if err != nil || cmd == nil {
+		return false
+	}
+	switch cmd.CommandPath() {
+	case "datatug uninstall", "datatug disk", "datatug demo reset":
+		return true
+	default:
+		return false
+	}
 }

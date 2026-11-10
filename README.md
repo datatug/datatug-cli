@@ -285,6 +285,24 @@ $p=Join-Path $env:TEMP ("datatug-"+[guid]::NewGuid()+".ps1"); try { irm https://
 
 Environment overrides: `DATATUG_VERSION`, `DATATUG_INSTALL_DIR` (default: `%LOCALAPPDATA%\DataTug\bin`). Current Windows releases support amd64.
 
+### Preview removal and inspect disk usage
+
+```bash
+datatug disk
+datatug uninstall --dry-run
+datatug uninstall --web-ui --dry-run
+datatug uninstall --full --skills codex --dry-run
+datatug demo reset --dry-run
+```
+
+Bare `uninstall` previews the CLI only. Use `--web-ui` for downloaded browser assets, `--skills codex` or `--skills claude` for one agent's user plugin, or `--full` for the CLI and web UI together. Add `--skills` explicitly to include a plugin in full removal. Stop a local server using the selected web UI files before removing them. After reviewing the plan, replace `--dry-run` with `--apply`. The standalone Unix executable can remove itself. Other installs report the owning package manager or require a manual step, including a running Windows executable. Projects, credentials, shell settings and marketplaces stay in place.
+
+The web UI preview lists every path in a verified signed release. Unsigned builds, modified files, and unrecognized paths are left in place. If deletion returns an error after the store has been detached, DataTug reports the private directory containing its remaining files.
+
+`demo reset` separately moves the default Perimeter demo into a numbered sibling backup and removes its matching registration. Run `datatug demo install` again to create a fresh copy. The backup keeps the demo audit and any edits, so it does not reclaim disk space.
+
+Add `--format json` for machine-readable paths, file and directory counts, and logical bytes. Disk usage includes the running CLI, downloaded web UI, settings, local registered projects, and the rest of the DataTug data directory. Symlink targets inside a directory are excluded. Filesystem allocation and plugin-manager removals may differ from the measured total.
+
 ### Run without installing
 
 `https://datatug.app/run-cli` runs the CLI with the arguments you give it, so the command the web app shows works on a machine without DataTug:

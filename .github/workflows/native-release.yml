@@ -83,7 +83,7 @@ jobs:
       - name: Build native release binary
         uses: goreleaser/goreleaser-action@v7
         with:
-          version: v2.19.0
+          version: v2.20.0
           args: build --single-target --clean ${{ github.event_name != 'workflow_dispatch' && '--snapshot' || '' }}
         env:
           GORELEASER_CURRENT_TAG: ${{ github.event_name == 'workflow_dispatch' && github.ref_name || '' }}

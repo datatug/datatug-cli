@@ -97,6 +97,7 @@ type explorePane struct {
 	contentFocused bool
 	index          int
 	search         string
+	notice         string // the last alert of a page, shown until the next key
 }
 
 func mountExplore(ui *chat.ChatUI, start workspaceStart) {
@@ -142,7 +143,11 @@ func (p *explorePane) View(w, h int, focused bool) string {
 	if p.search != "" {
 		selected += " · Search: " + p.search
 	}
-	return ansi.Truncate(label, max(1, w), "…") + "\n" + ansi.Truncate(selected, max(1, w), "…") + "\n" + shell.Content().View()
+	head := ansi.Truncate(label, max(1, w), "…") + "\n" + ansi.Truncate(selected, max(1, w), "…") + "\n"
+	if p.notice != "" {
+		head += ansi.Wrap(p.notice, max(1, w), " ") + "\n\n"
+	}
+	return head + shell.Content().View()
 }
 
 func (p *explorePane) visibleModules() []int {
@@ -159,7 +164,14 @@ func (p *explorePane) CapturesEsc() bool { return p.search != "" }
 
 func (p *explorePane) Update(msg tea.Msg) (chatshell.SidePanel, tea.Cmd) {
 	state := p.workspace
+	if alert, ok := msg.(nav.AlertMsg); ok {
+		// The pane draws the page only, so a modal of the page would be an
+		// invisible dialog that swallows the next key. Say it in the pane.
+		p.notice = strings.TrimSuffix(alert.Title+": "+alert.Message, ": ")
+		return p, nil
+	}
 	if k, ok := msg.(tea.KeyPressMsg); ok {
+		p.notice = ""
 		if k.String() == "tab" || k.String() == "shift+tab" {
 			p.contentFocused = !p.contentFocused
 			return p, state.update(nav.SetFocusMsg{To: nav.FocusToContent})

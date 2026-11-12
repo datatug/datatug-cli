@@ -46,6 +46,12 @@ func (u *ChatUI) showExplore() tea.Cmd {
 	return nil
 }
 
+// nothingToInspect is the state of a workspace that has neither a project
+// catalog nor any result yet: a first run.
+func (u *ChatUI) nothingToInspect() bool {
+	return u.explorePanel != nil && !u.HasCatalogExplorer() && len(u.snapshot.RecordSets) == 0
+}
+
 // SetExplorer replaces the left explorer for a setup/navigation workspace.
 func (u *ChatUI) SetExplorer(p chatshell.SidePanel) { u.shell.SetLeftPanel(p) }
 

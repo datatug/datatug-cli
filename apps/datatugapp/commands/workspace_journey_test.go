@@ -114,3 +114,25 @@ func TestExplorePaneOpenProjectsWithoutProjectsModule(t *testing.T) {
 		t.Fatal("a pane without a Projects module must stay as it is")
 	}
 }
+
+// The pane draws only the page of the legacy shell, so an alert of that page
+// is said in the pane: a modal would be invisible and swallow the next key.
+func TestExplorePaneShowsPageAlertUntilNextKey(t *testing.T) {
+	modules := []datatugui.Module{{ID: "projects", Text: "Projects", Shortcut: 'p', Root: func() nav.Page { return nav.Page{Content: nav.Static("Projects", "Projects page content")} }}}
+	ui := chat.NewChatUI(context.Background(), setupConversation{}, "setup")
+	mountExplore(ui, workspaceStart{modules: modules, options: datatugui.Options{Start: "projects"}})
+	ui.Model().Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	pane := ui.Model().CenterPanel().(*explorePane)
+
+	pane.Update(nav.AlertMsg{Title: "Add existing project", Message: "not here yet"})
+	if pane.workspace.app.Shell().AlertOpen() {
+		t.Fatal("the alert opened an invisible modal in the embedded shell")
+	}
+	if view := ansi.Strip(ui.Model().View().Content); !strings.Contains(view, "Add existing project: not here yet") {
+		t.Fatalf("alert not shown in the pane: %s", view)
+	}
+	pane.Update(uitest.Key("down"))
+	if view := ansi.Strip(ui.Model().View().Content); strings.Contains(view, "Add existing project:") {
+		t.Fatalf("alert kept after the next key: %s", view)
+	}
+}

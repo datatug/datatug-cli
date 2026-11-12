@@ -518,7 +518,7 @@ func (p *workspacePanel) projectExplorer(width, height int) string {
 	}
 	if p == p.ui.explorer {
 		if len(p.ui.catalog.Objects) == 0 {
-			return ansi.Wrap("No project is open. "+theme.WorkspaceKeyHint("F3")+" opens Projects, where you create, add or choose one.", max(1, width), " ")
+			return ansi.Wrap("No project open\n\n"+theme.WorkspaceKeyHint("F3")+" Projects: create, add or choose one.\n\nSample data, offline:\ndatatug demo install", max(1, width), " ")
 		}
 		hintsHeight := 0
 		if p.focused {

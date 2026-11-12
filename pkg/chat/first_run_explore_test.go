@@ -1,9 +1,11 @@
 package chat
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/strongo/aichat/tui/chatshell"
 )
 
@@ -98,5 +100,26 @@ func TestSetupHintsNameTheWayToProjects(t *testing.T) {
 	u.shell.FocusLeftPanel()
 	if hints := u.workspaceHints(120); len(hints) == 0 || hints[0] != "F3 Projects and Settings" {
 		t.Fatalf("explorer hints without a project: %v", hints)
+	}
+}
+
+// A first run has no project and no result: the side panels say what to do
+// and what will appear, not result-grid vocabulary.
+func TestFirstRunSidePanelsExplainThemselves(t *testing.T) {
+	t.Parallel()
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.SetExplorePanel(u.explorer)
+	if !u.nothingToInspect() {
+		t.Fatal("a workspace without a catalog or a result has nothing to inspect")
+	}
+	inspect := ansi.Strip(u.workspace.inspectStackView(40, 12))
+	if !strings.Contains(inspect, "Nothing to inspect yet.") || strings.Contains(inspect, "durable selection") {
+		t.Fatalf("inspect empty state: %q", inspect)
+	}
+	explorer := ansi.Strip(u.explorer.projectExplorer(28, 12))
+	for _, want := range []string{"No project open", "F3 Projects", "datatug demo install"} {
+		if !strings.Contains(explorer, want) {
+			t.Fatalf("explorer empty state lacks %q: %q", want, explorer)
+		}
 	}
 }

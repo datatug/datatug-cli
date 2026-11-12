@@ -182,7 +182,7 @@ func selectProjectNode(node widgets.TreeNode) tea.Cmd {
 		case actionAddToGitHub:
 			return datatugui.Drill("Add to GitHub", newAddToGitHub())
 		default:
-			return nav.Alert("Add existing project", "quit and run datatug projects add -p <id> -d <folder>", 0, nav.FocusToContent)
+			return nav.Alert("Add existing project", "run datatug projects add -p <id> -d <folder> (not in this screen yet)", 0, nav.FocusToContent)
 		}
 	}
 	return nil

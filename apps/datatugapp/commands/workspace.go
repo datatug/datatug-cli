@@ -3,6 +3,7 @@ package commands
 import (
 	tea "charm.land/bubbletea/v2"
 	"context"
+	"fmt"
 	"strings"
 	"unicode/utf8"
 
@@ -48,6 +49,7 @@ func switchChatProject(options *chatOptions, project string) {
 
 func runWorkspaceLoop(cmd *cobra.Command, options chatOptions) error {
 	programOptions := options.workspace.programOptions
+	chosen := false // options.project was chosen by the person in this run
 	for {
 		if options.ai != "" {
 			if err := resolveChatAIProfile(&options, cmd); err != nil {
@@ -56,28 +58,59 @@ func runWorkspaceLoop(cmd *cobra.Command, options chatOptions) error {
 		}
 		next, err := runChatProjectFunc(cmd, options)
 		if err != nil {
-			ui := chat.NewChatUI(context.Background(), setupConversation{}, "setup")
-			ui.SetProjectChoicesLoader(registeredProjectChoices)
-			ui.SetSessionNotices([]string{setupNotice})
-			mountExplore(ui, *options.workspace)
-			if runErr := ui.Run(programOptions...); runErr != nil {
-				return runErr
+			// The project the person chose could not be opened for chat: say
+			// why on the setup screen. The project of the start (the current
+			// folder, or the last one used) simply is not there on a first run.
+			reason := ""
+			if chosen {
+				reason = fmt.Sprintf("Could not open project %q for chat: %s", options.project, strings.Join(strings.Fields(err.Error()), " "))
 			}
-			next = ui.SelectedProject()
+			next, err = runSetupWorkspaceFunc(*options.workspace, reason, programOptions)
+			if err != nil {
+				return err
+			}
+			if next == "" {
+				return nil
+			}
+			// Choosing the same project again is a retry, never a silent exit.
+			switchChatProject(&options, next)
+			chosen = true
+			continue
 		}
 		if next == "" || next == options.project {
 			return nil
 		}
 		switchChatProject(&options, next)
+		chosen = true
 	}
+}
+
+// runSetupWorkspaceFunc shows the workspace without a project and returns the
+// project chosen there with F3, or "" when the person quit.
+var runSetupWorkspaceFunc = runSetupWorkspace
+
+func runSetupWorkspace(start workspaceStart, reason string, programOptions []tea.ProgramOption) (string, error) {
+	ui := chat.NewChatUI(context.Background(), setupConversation{reason: reason}, "setup")
+	ui.SetProjectChoicesLoader(registeredProjectChoices)
+	notices := []string{setupNotice}
+	if reason != "" {
+		notices = []string{reason, setupNotice}
+	}
+	ui.SetSessionNotices(notices)
+	mountExplore(ui, start)
+	if err := ui.Run(programOptions...); err != nil {
+		return "", err
+	}
+	return ui.SelectedProject(), nil
 }
 
 // The setup texts name only what works in this state: F3 lists the registered
 // projects, and with none it opens Projects, where the first is created or
-// added. Chat itself starts when a project is chosen with F3.
+// added. A chosen project opens for chat when it has what chat needs; when it
+// does not, the reason is shown above these texts.
 const (
-	setupNotice = "No project is open. Press F3 to choose a project; with none yet it opens Projects, where you create or add your first. Then press F3 again to open it for chat. Chat also needs an AI profile, configured under Settings."
-	setupReply  = "Chat cannot answer yet: no project is open. Press F3 to choose a project; with none yet it opens Projects, where you create or add your first, then F3 again opens it for chat. For sample data that works offline, quit, run: datatug demo install, start datatug and press F3. Chat also needs an AI profile, configured under Settings. No query has been executed."
+	setupNotice = "No project is open. Press F3 to choose a project; with none yet it opens Projects, where you create or add your first. Chat needs a project with a database, and an AI profile, configured under Settings."
+	setupReply  = "Chat cannot answer yet: no project is open. Press F3 to choose a project; with none yet it opens Projects, where you create or add your first. Chat needs a project with a database, and an AI profile, configured under Settings. No query has been executed."
 )
 
 // registeredProjectChoices lists the projects of the settings file as they are
@@ -100,9 +133,14 @@ func registeredProjectChoices() []chat.ProjectChoice {
 	return choices
 }
 
-type setupConversation struct{}
+type setupConversation struct {
+	reason string // why the chosen project did not open for chat, if one was chosen
+}
 
-func (setupConversation) Ask(context.Context, string) (chat.Turn, error) {
+func (c setupConversation) Ask(context.Context, string) (chat.Turn, error) {
+	if c.reason != "" {
+		return chat.Turn{Text: c.reason + " " + setupReply}, nil
+	}
 	return chat.Turn{Text: setupReply}, nil
 }
 

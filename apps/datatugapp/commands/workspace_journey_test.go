@@ -7,6 +7,7 @@ import (
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
 	"github.com/datatug/datatug-cli/pkg/chat"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
+	"github.com/spf13/cobra"
 	"github.com/tuigoff/tuigoff/pkg/nav"
 	"github.com/tuigoff/tuigoff/pkg/uitest"
 	"os"
@@ -185,5 +186,36 @@ func TestRegisteredProjectChoices(t *testing.T) {
 	got := registeredProjectChoices()
 	if len(got) != 2 || got[0].Title != "shop" || got[1].Title != "CRM" {
 		t.Fatalf("choices = %+v", got)
+	}
+}
+
+// A project chosen with F3 that cannot open for chat must come back to the
+// setup screen with the reason, and choosing it again is a retry: the loop
+// used to drop the error and then exit silently on the second choice.
+func TestWorkspaceLoopSaysWhyAChosenProjectDidNotOpen(t *testing.T) {
+	oldRun, oldSetup := runChatProjectFunc, runSetupWorkspaceFunc
+	t.Cleanup(func() { runChatProjectFunc, runSetupWorkspaceFunc = oldRun, oldSetup })
+	var opened []string
+	runChatProjectFunc = func(_ *cobra.Command, options chatOptions) (string, error) {
+		opened = append(opened, options.project)
+		return "", Exit("environment \"local\" has 2 database catalogs\n(chinook, support)", exitCodeUsage)
+	}
+	choices := []string{"datatug-demo", "datatug-demo", ""}
+	var reasons []string
+	runSetupWorkspaceFunc = func(_ workspaceStart, reason string, _ []tea.ProgramOption) (string, error) {
+		reasons = append(reasons, reason)
+		next := choices[len(reasons)-1]
+		return next, nil
+	}
+	options := chatOptions{project: ".", workspace: &workspaceStart{}}
+	if err := runWorkspaceLoop(chatCommand(), options); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(opened, ",") != ".,datatug-demo,datatug-demo" {
+		t.Fatalf("projects tried = %v", opened)
+	}
+	want := `Could not open project "datatug-demo" for chat: environment "local" has 2 database catalogs (chinook, support)`
+	if len(reasons) != 3 || reasons[0] != "" || reasons[1] != want || reasons[2] != want {
+		t.Fatalf("reasons shown = %q", reasons)
 	}
 }

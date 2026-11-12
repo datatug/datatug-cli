@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -22,7 +23,9 @@ func TestSetupConversationAsk(t *testing.T) {
 	turn, err := conv.Ask(context.Background(), "prompt")
 	require.NoError(t, err)
 	require.Contains(t, turn.Text, "Press F3 to choose a project")
-	require.Contains(t, turn.Text, "datatug demo install")
+	why, err := setupConversation{reason: "Could not open project \"shop\" for chat: no database."}.Ask(context.Background(), "prompt")
+	require.NoError(t, err)
+	require.True(t, strings.HasPrefix(why.Text, "Could not open project \"shop\" for chat: no database. Chat cannot answer yet"))
 }
 
 func TestExplorePaneTitleAndEsc(t *testing.T) {

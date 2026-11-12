@@ -52,6 +52,10 @@ Opening a table from the Explorer never refuses because of sensitive columns alo
 
 Without an AI provider (none configured, or a hosted model with no API key) the workspace still opens tables and runs queries. A question in plain words gets one plain answer saying that AI is not set up and where to set it up; it never shows a provider's authentication error.
 
+On the sample project a first-time user gets an answer to a question in plain words before any AI is set up. With no AI, the sample opens with four numbered ready-made questions. Typing a number, or the question itself, runs a query written in advance through the chat's own policy-bound executor and shows its result; the answer says that no AI was used. Any other question gets the list again and the way to real AI. No model is asked and nothing leaves the machine.
+
+Hosted AI is only ever the person's explicit choice (`--model cloud` after `datatug auth login`). No project, the sample included, is switched to it automatically: a sign-in alone sends nothing to the cloud.
+
 ### Input, discovery and Explorer actions
 
 Global bindings and visible controls are:
@@ -193,6 +197,14 @@ Given a table with protected-label columns (stored or suggested), Explorer Open 
 ### AC: no-ai-plain-answer
 
 Given a hosted model with no API key and no explicit endpoint, the session notice and every chat reply say that AI is not set up and name the ways to add it that exist (hosted AI after `datatug auth login`, or a provider key), no request is sent to the provider, and Open data and New query work.
+
+### AC: sample-ready-made-questions
+
+Given the sample project, no AI key and no DataTug sign-in, the first notice lists four numbered questions; each number (or the question text, any case) returns between 1 and 10 rows through the chat executor with strict sensitivity labels and says no AI was used; any other message returns the list and the way to hosted AI and runs no query.
+
+### AC: hosted-ai-is-explicit
+
+Given a DataTug sign-in and no API key, AI profile or explicit model, opening any project, the sample included, makes no request for a sign-in or a plan and keeps the no-AI answer; hosted AI starts only with `--model cloud`.
 
 ### AC: visual-focus
 

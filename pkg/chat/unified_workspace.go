@@ -21,7 +21,7 @@ func (u *ChatUI) Init() tea.Cmd {
 	if p, ok := u.explorePanel.(interface{ Init() tea.Cmd }); ok {
 		cmd = p.Init()
 	}
-	return tea.Batch(apiTick(), cmd)
+	return tea.Batch(apiTick(), cmd, u.openStartTable())
 }
 
 // SetExplorePanel mounts existing project/setup navigation above the persistent

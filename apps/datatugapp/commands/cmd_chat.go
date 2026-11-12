@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"github.com/dal-go/dalgo/dal"
+	"github.com/datatug/datatug-cli/pkg/labelguard"
+	"github.com/datatug/datatug-core/pkg/meaninglabels"
 	"io"
 	"net/url"
 	"os"
@@ -29,6 +31,8 @@ const defaultChatModel = "gpt-5.6-luna"
 
 type chatOptions struct {
 	workspace       *workspaceStart
+	notice          string // a line the workspace shows first in the chat of this project
+	openAtStart     string // a table the workspace opens as it starts, by its title
 	project         string
 	env             string
 	database        string
@@ -303,9 +307,10 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 			if options.model != "none" {
 				provider, providerErr = chat.NewLLMProvider(options.model, options.baseURL, options.apiKey)
 			}
-			if providerErr != nil || options.model == "none" {
+			if providerErr != nil || options.model == "none" || chat.MissingAPIKey(options.model, options.baseURL, options.apiKey) {
+				provider = nil
 				conversation = providerUnavailableConversation{}
-				sessionNotices = append(sessionNotices, "AI provider is not configured. Explorer Open data and New query work locally; configure a provider under Settings → AI for chat.")
+				sessionNotices = append(sessionNotices, providerUnavailableNotice)
 			}
 		}
 		if provider != nil {
@@ -392,6 +397,9 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 			return output.String(), err
 		})
 	}
+	if options.notice != "" {
+		sessionNotices = append([]string{options.notice}, sessionNotices...)
+	}
 	if len(sessionNotices) > 0 {
 		// The terminal UI uses the alternate screen: what was printed to stderr
 		// above is not visible until the user quits, so show it in the chat too.
@@ -417,6 +425,7 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	if options.workspace != nil {
 		mountExplore(ui, *options.workspace)
 	}
+	ui.OpenTableAtStart(options.openAtStart)
 	var programOptions []tea.ProgramOption
 	if options.workspace != nil {
 		programOptions = options.workspace.programOptions
@@ -605,6 +614,7 @@ func buildChatProjectCatalog(ctx context.Context, projectDir string, projectStor
 		return catalog, nil, err
 	}
 	sort.Slice(dbs, func(i, j int) bool { return dbs[i].ID < dbs[j].ID })
+	labels, labelsErr := loadLabels(ctx, projectDir)
 	for _, database := range dbs {
 		if database == nil {
 			continue
@@ -660,7 +670,8 @@ func buildChatProjectCatalog(ctx context.Context, projectDir string, projectStor
 			sort.SliceStable(primaryKey, func(i, j int) bool { return keyPositions[primaryKey[i]] < keyPositions[primaryKey[j]] })
 			catalog.Objects = append(catalog.Objects, chat.ProjectObject{Reference: chat.ContextReference{
 				Kind: kind, ProjectID: project.ID, SourceID: id, ObjectID: name, Title: relation.Name,
-			}, Columns: columns, ColumnTypes: columnTypes, PrimaryKey: primaryKey, Issue: relation.Issue})
+			}, Columns: columns, ColumnTypes: columnTypes, PrimaryKey: primaryKey, Issue: relation.Issue,
+				ProtectedColumns: chatProtectedColumns(labels, labelsErr, id, relation.Name, kind, columns)})
 		}
 	}
 	queryIDs, err := queryIDIndexFunc(projectDir)
@@ -720,8 +731,15 @@ func projectCatalogHasSource(catalog chat.ProjectCatalog, id string) bool {
 // executor available while provider credentials are absent or offline is chosen.
 type providerUnavailableConversation struct{}
 
+// Without an AI provider the workspace still opens tables and runs queries;
+// only questions in plain words need one. Both texts say where to set it up.
+const (
+	providerUnavailableNotice = "No AI is set up yet, so questions in plain words cannot be answered. Opening tables in the Explorer and New query work without it. To add AI: Ctrl+P → Explore → Settings → AI."
+	providerUnavailableReply  = "I can't answer yet: no AI is set up. Add an AI profile under Ctrl+P → Explore → Settings → AI. Meanwhile, open any table from the Explorer (Shift+←, then Enter) or write a query with Ctrl+N. No query was executed."
+)
+
 func (providerUnavailableConversation) AskWithContext(context.Context, string, string) (chat.Turn, error) {
-	return chat.Turn{Text: "Configure an AI provider under Settings → AI for chat. Use Explorer Open data or New query to work with your project locally. No query was executed."}, nil
+	return chat.Turn{Text: providerUnavailableReply}, nil
 }
 
 // chatSourceCatalogs names every project source URL of a chat by the catalog
@@ -741,4 +759,30 @@ func chatSourceCatalogs(sourceURLs map[string]string, sourceURL, database string
 	}
 	add(sourceURL, database)
 	return catalogs
+}
+
+// chatProtectedColumns lists the columns of a table that a chat read may not
+// name: chat is always strict, so a protected label refuses whether it is
+// stored or a read-time suggestion (see installProjectLabels). The workspace
+// opens the table without them instead of refusing the whole table.
+//
+// It lists nothing when the labels cannot be read, for a view, or when the
+// table as a whole is protected: those reads keep refusing at the guard.
+func chatProtectedColumns(doc meaninglabels.Document, labelsErr error, source, table, kind string, columns []string) []string {
+	if labelsErr != nil || kind != "table" {
+		return nil
+	}
+	for _, l := range doc.Labels {
+		// A label on the table itself protects all of it: nothing to open.
+		if l.Target.Column == "" && l.Class.Protected() && strings.EqualFold(l.Target.Source, source) && meaninglabels.TableMatches(l.Target.Table, table) {
+			return nil
+		}
+	}
+	var protected []string
+	for _, column := range columns {
+		if refused, _ := labelguard.CheckColumns(doc, source, table, false, []string{column}, true); refused != nil {
+			protected = append(protected, column)
+		}
+	}
+	return protected
 }

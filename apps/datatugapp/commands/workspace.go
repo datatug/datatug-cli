@@ -45,6 +45,7 @@ func switchChatProject(options *chatOptions, project string) {
 	options.cloudDecision = ""
 	options.cloudModel = ""
 	options.cloudProject = ""
+	options.notice, options.openAtStart = "", ""
 }
 
 func runWorkspaceLoop(cmd *cobra.Command, options chatOptions) error {
@@ -74,6 +75,9 @@ func runWorkspaceLoop(cmd *cobra.Command, options chatOptions) error {
 			}
 			// Choosing the same project again is a retry, never a silent exit.
 			switchChatProject(&options, next)
+			if next == sampleProjectID {
+				options.notice, options.openAtStart = sampleNotice, sampleFirstTable
+			}
 			chosen = true
 			continue
 		}
@@ -97,7 +101,10 @@ func runSetupWorkspace(start workspaceStart, reason string, programOptions []tea
 		notices = []string{reason, setupNotice}
 	}
 	ui.SetSessionNotices(notices)
-	mountExplore(ui, start)
+	pane := mountExplore(ui, start)
+	if reason == "" && len(registeredProjectChoices()) == 0 {
+		pane.welcome = &welcome{choose: ui.ChooseProject}
+	}
 	if err := ui.Run(programOptions...); err != nil {
 		return "", err
 	}
@@ -155,11 +162,12 @@ type explorePane struct {
 	contentFocused bool
 	index          int
 	search         string
-	notice         string // the last alert of a page, shown until the next key
-	opened         int    // the module whose page is shown
+	notice         string   // the last alert of a page, shown until the next key
+	opened         int      // the module whose page is shown
+	welcome        *welcome // the first screen of a machine with no project, until it is left
 }
 
-func mountExplore(ui *chat.ChatUI, start workspaceStart) {
+func mountExplore(ui *chat.ChatUI, start workspaceStart) *explorePane {
 	state := &exploreWorkspace{app: datatugui.New(start.modules, start.options, nav.WithoutLogin()), modules: start.modules}
 	pane := &explorePane{workspace: state}
 	for i, module := range start.modules {
@@ -168,6 +176,7 @@ func mountExplore(ui *chat.ChatUI, start workspaceStart) {
 		}
 	}
 	ui.SetExplorePanel(pane)
+	return pane
 }
 func (p *explorePane) Title() string {
 	if p.menu {
@@ -177,6 +186,9 @@ func (p *explorePane) Title() string {
 }
 func (p *explorePane) View(w, h int, focused bool) string {
 	state := p.workspace
+	if p.welcome != nil {
+		return p.welcome.view(w, h)
+	}
 
 	// Keep the existing page stacks and editable forms, with a compact module
 	// selector in place of the legacy shortcut menu and its second blue focus.
@@ -219,10 +231,21 @@ func (p *explorePane) visibleModules() []int {
 	return visible
 }
 
-func (p *explorePane) CapturesEsc() bool { return p.search != "" }
+func (p *explorePane) CapturesEsc() bool { return p.search != "" || p.welcome != nil }
 
 func (p *explorePane) Update(msg tea.Msg) (chatshell.SidePanel, tea.Cmd) {
 	state := p.workspace
+	if p.welcome != nil {
+		_, key := msg.(tea.KeyPressMsg)
+		_, ready := msg.(sampleReadyMsg)
+		if key || ready {
+			cmd, done := p.welcome.update(msg)
+			if done {
+				return p, p.OpenProjects()
+			}
+			return p, cmd
+		}
+	}
 	if alert, ok := msg.(nav.AlertMsg); ok {
 		// The pane draws the page only, so a modal of the page would be an
 		// invisible dialog that swallows the next key. Say it in the pane.
@@ -276,6 +299,7 @@ func (s *exploreWorkspace) update(msg tea.Msg) tea.Cmd {
 // while no project is registered.
 func (p *explorePane) OpenProjects() tea.Cmd {
 	state := p.workspace
+	p.welcome = nil
 	for i, module := range state.modules {
 		if module.ID == datatugui.ScreenProjects {
 			wasOpen := p.opened == i

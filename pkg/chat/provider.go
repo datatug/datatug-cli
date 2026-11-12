@@ -221,6 +221,22 @@ func NewLLMProvider(modelName, baseURL, apiKey string) (ai.LLMProvider, error) {
 	}
 }
 
+// MissingAPIKey reports that modelName resolves to a provider's own hosted
+// endpoint with no API key from the profile or the environment: every request
+// would be refused there. A local Ollama daemon and an endpoint the caller
+// named or configured need no key and are never reported.
+func MissingAPIKey(modelName, baseURL, apiKey string) bool {
+	if strings.TrimSpace(baseURL) != "" {
+		return false
+	}
+	endpoint, err := resolveEndpoint(modelName, baseURL, apiKey)
+	if err != nil || endpoint.apiKey != "" {
+		return false
+	}
+	family, _, _ := resolveProviderFamily(strings.TrimSpace(modelName))
+	return family != "ollama" && endpoint.baseURL == familyDefaults[family].defaultBaseURL
+}
+
 // wireProtocol names the adapter package a resolved endpoint is built
 // through -- resolveEndpoint's whole job is choosing one of these plus the
 // base URL/model/key that adapter needs, entirely without constructing a

@@ -39,7 +39,11 @@ func (u *ChatUI) openWorkspaceQuery(object ProjectObject, run bool) tea.Cmd {
 		return nil
 	}
 	if run {
-		return u.runWorkspaceQuery(object.Reference, doc)
+		cmd := u.runWorkspaceQuery(object.Reference, doc)
+		if cmd != nil {
+			u.openDataNote = hiddenColumnsNote(object)
+		}
+		return cmd
 	}
 	if u.queryEditors == nil {
 		u.queryEditors = map[string]*workspaceQueryEditor{}

@@ -41,7 +41,7 @@ F9 and visible Expand enlarge the selected grid across the covered side panels u
 
 A machine with no settings file, or an empty one, has no projects: nothing there is an error. With no registered project the workspace opens on a welcome screen with two choices and nothing to learn first:
 
-- **Explore the sample music store** installs the sample project (`datatug-sample`: the bundled Chinook SQLite database alone, its schema scanned, no access policy), registers it and reopens the workspace on it with its `Invoice` table already open. It needs no network, no signup and no AI provider, and prints nothing to the terminal while the workspace is on screen. A sample that is already there is reused; a missing or damaged database, scan or folder is restored.
+- **Explore the sample music store** installs the sample project (`datatug-sample`: the bundled Chinook SQLite database alone, its schema scanned, no access policy), registers it and reopens the workspace on it with its `Invoice` table already open. It needs no network, no signup and no AI provider, and prints nothing to the terminal while the workspace is on screen. A sample that is already there is reused, and a missing database, an unfinished scan or a deleted folder is restored. Only a folder the install made (it carries a marker) or an empty one is written to: a project registered under the same ID elsewhere is used as it is, and an existing database file is never replaced.
 - **Use my own database** (and Esc) leaves the welcome screen for the Projects page.
 
 The sample project is not the Perimeter demo of `datatug demo install`: that project's policy admits an agent role to a few rows and is driven from an AI agent, not from this workspace.

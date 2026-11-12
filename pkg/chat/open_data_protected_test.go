@@ -73,6 +73,13 @@ func TestOpenDataShowsTheHiddenColumnsNoteWithItsResult(t *testing.T) {
 	if u.openWorkspaceQuery(customerObject(), false); u.workspaceFeedback != "2 sensitive columns hidden in Customer: Email, Phone" {
 		t.Fatalf("the query editor did not say what it leaves out: %q", u.workspaceFeedback)
 	}
+	// A table with nothing hidden leaves the message on screen alone.
+	plain := customerObject()
+	plain.ProtectedColumns = nil
+	u.workspaceFeedback = "the last refusal"
+	if u.openWorkspaceQuery(plain, false); u.workspaceFeedback != "the last refusal" {
+		t.Fatalf("opening an editor wiped the message on screen: %q", u.workspaceFeedback)
+	}
 	fresh, _ := newTestChatUI(t, nil, Turn{})
 	fresh.openDataNote = "stale"
 	if cmd := fresh.runWorkspaceQuery(customerObject().Reference, "{}"); cmd == nil || fresh.openDataNote != "" {

@@ -46,7 +46,9 @@ func (u *ChatUI) openWorkspaceQuery(object ProjectObject, run bool) tea.Cmd {
 		return cmd
 	}
 	// The editor starts from the same document: say what it leaves out.
-	u.workspaceFeedback = hiddenColumnsNote(object)
+	if note := hiddenColumnsNote(object); note != "" {
+		u.workspaceFeedback = note
+	}
 	if u.queryEditors == nil {
 		u.queryEditors = map[string]*workspaceQueryEditor{}
 	}

@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"log"
@@ -12,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/demofixtures"
 	"github.com/datatug/datatug-cli/pkg/dtroot"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
@@ -43,47 +43,56 @@ var (
 	sampleRename          = os.Rename
 )
 
-// installSample makes sure the sample project is there and returns its ID: it
-// writes the bundled database, scans it and registers the project. Each step
-// that is already done is kept, and one that was damaged is done again: a
-// database that is not the bundled one (a write that was cut short), a project
-// that was never scanned, a folder that was deleted while still registered. It
-// writes nothing to the terminal: it runs while the workspace is on screen.
+// sampleInstallMarker marks a folder as made by installSample: only such a
+// folder, or an empty one, is ever written to.
+const sampleInstallMarker = ".datatug/sample-install.json"
+
+// installSample makes sure the sample project is there and returns its ID. It
+// writes the bundled database, scans it and registers the project in
+// ~/datatug/datatug-sample, and does again whatever step is missing: a run
+// that was interrupted, a folder that was deleted while still registered.
+//
+// It never writes into a folder it did not make. A project registered under
+// the sample's ID somewhere else, or a registered folder without the marker,
+// is someone's own and is returned as it is; an unregistered folder with other
+// files in it is refused. A database file that exists is never replaced: it is
+// written beside its place and renamed, so a file that is there is whole, and
+// one that differs from the bundled one was changed on purpose.
+//
+// It writes nothing to the terminal: it may run while the workspace is on screen.
 func installSample() (string, error) {
 	registered, err := sampleRegistration(sampleProjectID)
 	if err != nil {
 		return "", err
 	}
-	dir := registered
-	if dir == "" {
-		dir = filepath.Join(sampleProjectsRootDir(), sampleProjectID)
+	dir := filepath.Join(sampleProjectsRootDir(), sampleProjectID)
+	if registered != "" && filepath.Clean(registered) != dir {
+		return sampleProjectID, nil
 	}
-	files, err := sampleFixtureFiles()
-	if err != nil {
-		return "", err
+	marker := filepath.Join(dir, filepath.FromSlash(sampleInstallMarker))
+	if entries, _ := os.ReadDir(dir); len(entries) > 0 {
+		if _, statErr := os.Stat(marker); statErr != nil {
+			if registered != "" {
+				return sampleProjectID, nil
+			}
+			return "", fmt.Errorf("%s holds files the sample did not make; move that folder away and try again", dbcopy.PathDisplay(dir))
+		}
+	}
+	// The marker goes first: a run that fails after it can be repeated, and
+	// the next run recognises the folder as its own.
+	if err := demoInstallMkdirAll(filepath.Dir(marker), 0o755); err != nil {
+		return "", fmt.Errorf("cannot make the sample folder: %w", err)
+	}
+	if err := demoInstallWriteFile(marker, []byte(`{"projectId":"`+sampleProjectID+`"}`+"\n"), 0o644); err != nil {
+		return "", fmt.Errorf("cannot make the sample folder: %w", err)
 	}
 	database := filepath.Join(dir, filepath.FromSlash(demofixtures.ChinookPath))
-	for _, f := range files {
-		if f.Path != demofixtures.ChinookPath {
-			continue
-		}
-		if current, readErr := os.ReadFile(database); readErr == nil && bytes.Equal(current, f.Content) {
-			break
-		}
-		if err := demoInstallMkdirAll(filepath.Dir(database), 0o755); err != nil {
-			return "", fmt.Errorf("cannot make the sample folder: %w", err)
-		}
-		// Written beside its place and renamed: a write that is cut short
-		// leaves no half database for the next run to trip on.
-		partial := database + ".partial"
-		if err := demoInstallWriteFile(partial, f.Content, 0o644); err != nil {
-			return "", fmt.Errorf("cannot write the sample database: %w", err)
-		}
-		if err := sampleRename(partial, database); err != nil {
-			return "", fmt.Errorf("cannot write the sample database: %w", err)
+	if _, statErr := os.Stat(database); statErr != nil {
+		if err := writeSampleDatabase(database); err != nil {
+			return "", err
 		}
 	}
-	if _, statErr := os.Stat(filepath.Join(dir, "dbmodels", demofixtures.ChinookSource)); statErr != nil {
+	if !sampleScanned(dir) {
 		if err := sampleScan(dir, database); err != nil {
 			return "", fmt.Errorf("cannot read the sample database: %w", err)
 		}
@@ -94,6 +103,45 @@ func installSample() (string, error) {
 		}
 	}
 	return sampleProjectID, nil
+}
+
+// writeSampleDatabase puts the bundled database at path: written beside its
+// place and renamed, so a write that is cut short leaves no half database.
+func writeSampleDatabase(path string) error {
+	files, err := sampleFixtureFiles()
+	if err != nil {
+		return err
+	}
+	for _, f := range files {
+		if f.Path != demofixtures.ChinookPath {
+			continue
+		}
+		if err := demoInstallMkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return fmt.Errorf("cannot make the sample folder: %w", err)
+		}
+		if err := demoInstallWriteFile(path+".partial", f.Content, 0o644); err != nil {
+			return fmt.Errorf("cannot write the sample database: %w", err)
+		}
+		if err := sampleRename(path+".partial", path); err != nil {
+			return fmt.Errorf("cannot write the sample database: %w", err)
+		}
+	}
+	return nil
+}
+
+// sampleScanned reports that a scan of the sample ran to its end: the catalog
+// of the database and the columns of its first table are the last files a scan
+// writes, so a scan that was interrupted is done again.
+func sampleScanned(dir string) bool {
+	for _, file := range []string{
+		filepath.Join("environments", sampleEnvironment, "catalogs", demofixtures.ChinookSource, demofixtures.ChinookSource+".db.json"),
+		filepath.Join("dbmodels", demofixtures.ChinookSource, "main", "tables", sampleFirstTable, "main."+sampleFirstTable+".columns.json"),
+	} {
+		if _, err := os.Stat(filepath.Join(dir, file)); err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // scanSample runs the scan of `datatug scan` on the sample database with its

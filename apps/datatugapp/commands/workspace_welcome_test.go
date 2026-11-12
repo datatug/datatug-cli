@@ -42,8 +42,16 @@ func stubSampleDoors(t *testing.T) *sampleDoors {
 	sampleAddToSettings = func(ref dtconfig.ProjectRef) error { d.added = append(d.added, ref); return nil }
 	sampleScan = func(dir, database string) error {
 		d.scanned = append(d.scanned, dir+"|"+database)
-		// What the real scan leaves, and what a later run looks for.
-		return os.MkdirAll(filepath.Join(dir, "dbmodels", demofixtures.ChinookSource), 0o755)
+		// The two files a real scan writes last, which a later run looks for.
+		for _, file := range d.scanFiles(dir) {
+			if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(file, []byte("{}"), 0o644); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	sampleFixtureFiles = func() ([]demofixtures.File, error) {
 		return []demofixtures.File{
@@ -55,71 +63,172 @@ func stubSampleDoors(t *testing.T) *sampleDoors {
 	return d
 }
 
-func TestInstallSampleWritesScansAndRegisters(t *testing.T) {
-	d := stubSampleDoors(t)
-	id, err := installSample()
-	if err != nil || id != sampleProjectID {
-		t.Fatalf("id=%q err=%v", id, err)
+func (d *sampleDoors) dir() string { return filepath.Join(d.root, sampleProjectID) }
+func (d *sampleDoors) database() string {
+	return filepath.Join(d.dir(), filepath.FromSlash(demofixtures.ChinookPath))
+}
+func (d *sampleDoors) scanFiles(dir string) []string {
+	return []string{
+		filepath.Join(dir, "environments", sampleEnvironment, "catalogs", demofixtures.ChinookSource, demofixtures.ChinookSource+".db.json"),
+		filepath.Join(dir, "dbmodels", demofixtures.ChinookSource, "main", "tables", sampleFirstTable, "main."+sampleFirstTable+".columns.json"),
 	}
-	dir := filepath.Join(d.root, sampleProjectID)
-	database := filepath.Join(dir, filepath.FromSlash(demofixtures.ChinookPath))
-	if content, readErr := os.ReadFile(database); readErr != nil || string(content) != "sqlite bytes" {
-		t.Fatalf("sample database: %q, %v", content, readErr)
+}
+
+// One test per state the sample can be found in.
+func TestInstallSampleStates(t *testing.T) {
+	read := func(t *testing.T, path string) string {
+		t.Helper()
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(content)
 	}
-	if _, statErr := os.Stat(filepath.Join(dir, filepath.FromSlash(demofixtures.NoticePath))); statErr == nil {
-		t.Fatal("the sample holds the database alone, not the rest of the Perimeter demo")
-	}
-	if len(d.scanned) != 1 || d.scanned[0] != dir+"|"+database {
-		t.Fatalf("scanned = %v", d.scanned)
-	}
-	if len(d.added) != 1 || d.added[0].ID != sampleProjectID || d.added[0].Path != dir || d.added[0].Title != sampleProjectTitle {
-		t.Fatalf("registered = %+v", d.added)
+	install := func(t *testing.T) {
+		t.Helper()
+		if id, err := installSample(); err != nil || id != sampleProjectID {
+			t.Fatalf("id=%q err=%v", id, err)
+		}
 	}
 
-	if _, statErr := os.Stat(database + ".partial"); statErr == nil {
-		t.Fatal("the partial file was left behind")
-	}
+	t.Run("missing: written, scanned and registered", func(t *testing.T) {
+		d := stubSampleDoors(t)
+		install(t)
+		if read(t, d.database()) != "sqlite bytes" {
+			t.Fatal("the bundled database was not written")
+		}
+		if _, err := os.Stat(d.database() + ".partial"); err == nil {
+			t.Fatal("the partial file was left behind")
+		}
+		if _, err := os.Stat(filepath.Join(d.dir(), filepath.FromSlash(demofixtures.NoticePath))); err == nil {
+			t.Fatal("the sample holds the database alone, not the rest of the Perimeter demo")
+		}
+		if _, err := os.Stat(filepath.Join(d.dir(), filepath.FromSlash(sampleInstallMarker))); err != nil {
+			t.Fatalf("the folder is not marked as the sample's: %v", err)
+		}
+		if len(d.scanned) != 1 || d.scanned[0] != d.dir()+"|"+d.database() {
+			t.Fatalf("scanned = %v", d.scanned)
+		}
+		if len(d.added) != 1 || d.added[0].ID != sampleProjectID || d.added[0].Path != d.dir() || d.added[0].Title != sampleProjectTitle {
+			t.Fatalf("registered = %+v", d.added)
+		}
+	})
 
-	// A second run finds everything in place: nothing is written, scanned or
-	// registered again.
-	d.registered = dir
-	if _, err := installSample(); err != nil {
-		t.Fatal(err)
-	}
-	if len(d.scanned) != 1 || len(d.added) != 1 {
-		t.Fatalf("a healthy sample was redone: scanned=%v added=%v", d.scanned, d.added)
-	}
+	t.Run("healthy: nothing is done again", func(t *testing.T) {
+		d := stubSampleDoors(t)
+		install(t)
+		d.registered = d.dir()
+		install(t)
+		if len(d.scanned) != 1 || len(d.added) != 1 {
+			t.Fatalf("a healthy sample was redone: scanned=%v added=%v", d.scanned, d.added)
+		}
+	})
 
-	// A database cut short by an interrupted write is replaced, and a sample
-	// whose folder was deleted while registered is put back where it was.
-	if err := os.WriteFile(database, []byte("sqli"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := installSample(); err != nil {
-		t.Fatal(err)
-	}
-	if content, _ := os.ReadFile(database); string(content) != "sqlite bytes" {
-		t.Fatalf("a damaged sample database was kept: %q", content)
-	}
-	if err := os.RemoveAll(dir); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := installSample(); err != nil {
-		t.Fatal(err)
-	}
-	if content, _ := os.ReadFile(database); string(content) != "sqlite bytes" || len(d.scanned) != 2 || len(d.added) != 1 {
-		t.Fatalf("a deleted sample was not restored in place: db=%q scanned=%v added=%v", content, d.scanned, d.added)
-	}
+	t.Run("a database changed on purpose is kept", func(t *testing.T) {
+		d := stubSampleDoors(t)
+		install(t)
+		d.registered = d.dir()
+		if err := os.WriteFile(d.database(), []byte("my own rows"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		install(t)
+		if read(t, d.database()) != "my own rows" {
+			t.Fatal("an existing sample database was replaced")
+		}
+	})
+
+	t.Run("an interrupted scan is done again", func(t *testing.T) {
+		d := stubSampleDoors(t)
+		install(t)
+		d.registered = d.dir()
+		// As a scan stopped half-way leaves it: the model folder, no columns.
+		if err := os.Remove(d.scanFiles(d.dir())[1]); err != nil {
+			t.Fatal(err)
+		}
+		install(t)
+		if len(d.scanned) != 2 {
+			t.Fatalf("a half-finished scan was taken for a finished one: scanned=%v", d.scanned)
+		}
+	})
+
+	t.Run("a deleted folder is put back where it was", func(t *testing.T) {
+		d := stubSampleDoors(t)
+		install(t)
+		d.registered = d.dir()
+		if err := os.RemoveAll(d.dir()); err != nil {
+			t.Fatal(err)
+		}
+		install(t)
+		if read(t, d.database()) != "sqlite bytes" || len(d.scanned) != 2 || len(d.added) != 1 {
+			t.Fatalf("not restored in place: scanned=%v added=%v", d.scanned, d.added)
+		}
+	})
+
+	t.Run("someone's own project under the same ID is never touched", func(t *testing.T) {
+		d := stubSampleDoors(t)
+		d.registered = filepath.Join(d.root, "my-own-project")
+		install(t)
+		if _, err := os.Stat(d.dir()); err == nil || len(d.scanned) != 0 || len(d.added) != 0 {
+			t.Fatalf("a project registered elsewhere was written to: scanned=%v added=%v", d.scanned, d.added)
+		}
+	})
+
+	t.Run("a registered folder the install did not make is used as it is", func(t *testing.T) {
+		d := stubSampleDoors(t)
+		d.registered = d.dir()
+		own := filepath.Join(d.dir(), "data", "chinook.sqlite")
+		if err := os.MkdirAll(filepath.Dir(own), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(own, []byte("theirs"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		install(t)
+		if read(t, own) != "theirs" || len(d.scanned) != 0 {
+			t.Fatalf("a folder without the marker was written to: scanned=%v", d.scanned)
+		}
+	})
+
+	t.Run("an unregistered folder with other files is refused", func(t *testing.T) {
+		d := stubSampleDoors(t)
+		if err := os.MkdirAll(d.dir(), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d.dir(), "notes.txt"), []byte("mine"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		id, err := installSample()
+		if err == nil || id != "" || !strings.Contains(err.Error(), "holds files the sample did not make") || len(d.scanned) != 0 {
+			t.Fatalf("id=%q err=%v scanned=%v", id, err, d.scanned)
+		}
+	})
 }
 
 func TestInstallSampleFailures(t *testing.T) {
 	boom := errors.New("boom")
+	failOn := func(suffix string) func(string, os.FileMode) error {
+		return func(path string, _ os.FileMode) error {
+			if strings.HasSuffix(filepath.ToSlash(path), suffix) {
+				return boom
+			}
+			return os.MkdirAll(path, 0o755)
+		}
+	}
 	for name, breakDoor := range map[string]func(){
-		"settings cannot be read":   func() { sampleRegistration = func(string) (string, error) { return "", boom } },
-		"fixtures cannot be listed": func() { sampleFixtureFiles = func() ([]demofixtures.File, error) { return nil, boom } },
-		"folder cannot be made":     func() { demoInstallMkdirAll = func(string, os.FileMode) error { return boom } },
+		"settings cannot be read":      func() { sampleRegistration = func(string) (string, error) { return "", boom } },
+		"marker folder cannot be made": func() { demoInstallMkdirAll = failOn("/.datatug") },
+		"marker cannot be written": func() {
+			demoInstallWriteFile = func(path string, _ []byte, _ os.FileMode) error { return boom }
+		},
+		"fixtures cannot be listed":  func() { sampleFixtureFiles = func() ([]demofixtures.File, error) { return nil, boom } },
+		"data folder cannot be made": func() { demoInstallMkdirAll = failOn("/data") },
 		"database cannot be written": func() {
-			demoInstallWriteFile = func(string, []byte, os.FileMode) error { return boom }
+			demoInstallWriteFile = func(path string, content []byte, mode os.FileMode) error {
+				if strings.HasSuffix(path, ".partial") {
+					return boom
+				}
+				return os.WriteFile(path, content, mode)
+			}
 		},
 		"database cannot be put in place": func() { sampleRename = func(string, string) error { return boom } },
 		"scan fails":                      func() { sampleScan = func(string, string) error { return boom } },
@@ -132,6 +241,26 @@ func TestInstallSampleFailures(t *testing.T) {
 				t.Fatalf("id=%q err=%v, want the failure", id, err)
 			}
 		})
+	}
+}
+
+// The real install, with only the folder and the settings file stood in for:
+// the marker does not get in the way of the scan, the scan writes the files
+// the completeness check looks for, and a second run does nothing.
+func TestInstallSampleWithTheRealScan(t *testing.T) {
+	d := stubSampleDoors(t)
+	sampleScan = scanSample
+	sampleFixtureFiles = func() ([]demofixtures.File, error) { return demoInstallFiles() }
+	if _, err := installSample(); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if !sampleScanned(d.dir()) {
+		t.Fatal("after a real scan the sample does not count as scanned")
+	}
+	d.registered = d.dir()
+	sampleScan = func(string, string) error { return errors.New("scanned twice") }
+	if _, err := installSample(); err != nil {
+		t.Fatalf("second run: %v", err)
 	}
 }
 
@@ -340,11 +469,33 @@ func TestWorkspaceLoopOpensTheSampleWithItsFirstTable(t *testing.T) {
 	if ensured != 1 {
 		t.Fatalf("the sample was checked %d time(s) before it was opened", ensured)
 	}
+
 	if len(seen) != 3 || seen[1].project != sampleProjectID || seen[1].notice != sampleNotice || seen[1].openAtStart != sampleFirstTable {
 		t.Fatalf("the sample was opened as %+v", seen)
 	}
 	if seen[2].project != "other" || seen[2].notice != "" || seen[2].openAtStart != "" {
 		t.Fatalf("another project kept the sample's start: %+v", seen[2])
+	}
+
+	// A sample that cannot be prepared says so on the setup screen instead of
+	// failing to open without its cause.
+	seen = nil
+	installSampleFunc = func() (string, error) { return "", errors.New("disk full") }
+	var reasons []string
+	choices := []string{sampleProjectID, ""}
+	runSetupWorkspaceFunc = func(_ workspaceStart, reason string, _ []tea.ProgramOption) (string, error) {
+		reasons = append(reasons, reason)
+		return choices[len(reasons)-1], nil
+	}
+	runChatProjectFunc = func(_ *cobra.Command, options chatOptions) (string, error) {
+		seen = append(seen, options)
+		return "", Exit("no project here", exitCodeUsage)
+	}
+	if err := runWorkspaceLoop(chatCommand(), chatOptions{project: ".", workspace: &workspaceStart{}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != 1 || len(reasons) != 2 || reasons[1] != `Could not open project "datatug-sample" for chat: disk full` {
+		t.Fatalf("opened=%d reasons=%q", len(seen), reasons)
 	}
 }
 

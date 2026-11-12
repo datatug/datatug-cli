@@ -57,7 +57,17 @@ func runWorkspaceLoop(cmd *cobra.Command, options chatOptions) error {
 				options.ai = ""
 			}
 		}
-		next, err := runChatProjectFunc(cmd, options)
+		var next string
+		var err error
+		if options.project == sampleProjectID {
+			// The sample is checked before it is opened, chosen now or
+			// remembered from the last run: a folder deleted since is put
+			// back, and a sample that cannot be prepared says so itself.
+			_, err = installSampleFunc()
+		}
+		if err == nil {
+			next, err = runChatProjectFunc(cmd, options)
+		}
 		if err != nil {
 			// The project the person chose could not be opened for chat: say
 			// why on the setup screen. The project of the start (the current
@@ -76,9 +86,6 @@ func runWorkspaceLoop(cmd *cobra.Command, options chatOptions) error {
 			// Choosing the same project again is a retry, never a silent exit.
 			switchChatProject(&options, next)
 			if next == sampleProjectID {
-				// A sample that was damaged since (its folder deleted, say) is
-				// put back; when that fails, opening it says why.
-				_, _ = installSampleFunc()
 				options.notice, options.openAtStart = sampleNotice, sampleFirstTable
 			}
 			chosen = true

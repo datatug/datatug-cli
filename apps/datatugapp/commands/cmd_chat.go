@@ -739,7 +739,7 @@ const (
 	// providerSetupAdvice names the two ways that exist today: DataTug's hosted
 	// AI after a sign-in, or a provider key in the environment. It names no key
 	// of the terminal: the browser shows the same text.
-	providerSetupAdvice = "To add AI, quit and either sign in for DataTug's hosted AI (datatug auth login, then datatug chat --model cloud) or set a provider key such as OPENAI_API_KEY and start datatug again."
+	providerSetupAdvice = "To add AI, quit and either sign in for DataTug's hosted AI (datatug auth login, then datatug chat --model cloud) or set OPENAI_API_KEY and start datatug again (for another provider, its key and datatug chat --model <its model>)."
 )
 
 func (providerUnavailableConversation) AskWithContext(context.Context, string, string) (chat.Turn, error) {

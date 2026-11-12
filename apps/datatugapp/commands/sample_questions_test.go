@@ -58,7 +58,7 @@ func TestSampleConversation(t *testing.T) {
 	if err != nil || len(turn.Queries) != 0 || len(ran) != 0 {
 		t.Fatalf("a question that is not ready-made ran a query: turn=%+v ran=%d err=%v", turn, len(ran), err)
 	}
-	for _, want := range []string{"no AI is set up", "1. Which countries bring in the most revenue?", "datatug auth login", "datatug chat --model cloud", "No query was executed."} {
+	for _, want := range []string{"no AI is set up", "1. Which countries bring in the most revenue?", "datatug auth login", "datatug chat --project datatug-sample --model cloud", "remembers that model", "datatug chat --model none goes back to local", "No query was executed."} {
 		if !strings.Contains(turn.Text, want) {
 			t.Fatalf("reply lacks %q: %s", want, turn.Text)
 		}
@@ -76,7 +76,7 @@ func TestSampleConversation(t *testing.T) {
 	}
 
 	c.run = func(context.Context, []byte) (secureread.Result, error) {
-		return secureread.Result{}, errors.New("read\nrefused")
+		return secureread.Result{}, errors.New("read\nrefused.")
 	}
 	turn, err = c.AskWithContext(context.Background(), "2", "")
 	if err != nil || len(turn.Queries) != 0 || !strings.Contains(turn.Text, "could not be read: read refused. These questions expect the sample database as it was installed.") {

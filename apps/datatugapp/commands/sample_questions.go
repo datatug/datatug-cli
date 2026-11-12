@@ -139,7 +139,11 @@ limit: 10
 
 // sampleSignInAdvice is how the sample gets real AI. Hosted AI is the person's
 // own choice, made by naming it: nothing switches a project to it by itself.
-const sampleSignInAdvice = "To ask your own questions with DataTug's hosted AI, quit and run: datatug auth login, then: datatug chat --model cloud. The Free plan includes a monthly allowance of questions."
+//
+// The command names the sample, and the text says that the choice is
+// remembered: --model is saved for the next chats, whatever project they open,
+// so a person must know how to go back before they open their own data.
+const sampleSignInAdvice = "To ask your own questions with DataTug's hosted AI, quit and run: datatug auth login, then: datatug chat --project " + sampleProjectID + " --model cloud. A personal Free plan includes a monthly allowance of questions. DataTug remembers that model for your next chats, on any project; datatug chat --model none goes back to local."
 
 // sampleQuestionsList is the numbered list of the ready-made questions.
 func sampleQuestionsList() string {
@@ -194,4 +198,6 @@ func (c sampleConversation) AskWithContext(ctx context.Context, message, _ strin
 }
 
 // publicSampleError is an error of a sample read on one line.
-func publicSampleError(err error) string { return strings.Join(strings.Fields(err.Error()), " ") }
+func publicSampleError(err error) string {
+	return strings.TrimRight(strings.Join(strings.Fields(err.Error()), " "), ".")
+}

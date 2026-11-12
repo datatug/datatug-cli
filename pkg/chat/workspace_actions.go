@@ -39,7 +39,7 @@ func (u *ChatUI) workspaceActions() []workspaceAction {
 	}
 	exploreReason := ""
 	if u.explorePanel == nil {
-		exploreReason = "Projects and Settings are not mounted in this chat"
+		exploreReason = "Explore is not mounted in this chat"
 	}
 	actions := []workspaceAction{
 		{"group", "Group loaded / review server", "Actions", resultReason},
@@ -55,7 +55,7 @@ func (u *ChatUI) workspaceActions() []workspaceAction {
 		{"trail", "Exploration trail", "Ctrl+T / /trail", ""},
 		{"back", "Trail back", "Alt+←", u.trailNavigationReason(-1)}, {"forward", "Trail forward", "Alt+→", u.trailNavigationReason(1)},
 		{"cancel", "Cancel running operation", "Ctrl+X", cancelReason},
-		{"explore", "Projects and Settings", "Actions", exploreReason},
+		{"explore", "Explore: Projects, Settings, Viewers", "Actions", exploreReason},
 		{"composer", "Focus composer", "F4", ""}, {"explorer", "Toggle Explorer", "F6", ""},
 		{"inspect", "Toggle Inspect", "F7", ""}, {"api", "API Monitor", "F8", ""},
 		{"keyboard", "Keyboard diagnostic", "/keys", ""}, {"help", "Hotkeys", "F1", ""},
@@ -123,7 +123,8 @@ func (u *ChatUI) dispatchWorkspaceAction(id string) tea.Cmd {
 	}
 	switch id {
 	case "explore":
-		return u.showExplore()
+		u.showExplore()
+		return nil
 	case "actions":
 		return u.openWorkspaceActions()
 	case "trail":

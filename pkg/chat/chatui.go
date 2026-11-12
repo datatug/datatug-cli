@@ -108,10 +108,12 @@ type ChatUI struct {
 	savedQueryService SavedQueryService
 	savedQueries      []SavedQuery
 
-	projectChoices  []ProjectChoice
-	selectedProject string
-	browserURL      string
-	webLinkVisible  bool
+	projectChoices []ProjectChoice
+	// projectChoicesLoader, when set, re-reads the choices each time F3 asks.
+	projectChoicesLoader func() []ProjectChoice
+	selectedProject      string
+	browserURL           string
+	webLinkVisible       bool
 	// openBrowser is ui.go's browser.OpenURL seam: F5 tries it first and
 	// only falls back to showing the hyperlink (webLinkVisible) when it
 	// fails -- e.g. no GUI browser available over SSH. Overridable in
@@ -296,6 +298,15 @@ func (u *ChatUI) SetHostedPlanLookup(lookup func(context.Context) (string, error
 // SetProjectChoices mirrors UI.SetProjectChoices.
 func (u *ChatUI) SetProjectChoices(choices []ProjectChoice) {
 	u.projectChoices = append([]ProjectChoice(nil), choices...)
+}
+
+// SetProjectChoicesLoader makes F3 list the projects registered at that
+// moment, so one created or added during the session needs no restart.
+func (u *ChatUI) SetProjectChoicesLoader(load func() []ProjectChoice) {
+	u.projectChoicesLoader = load
+	if load != nil {
+		u.projectChoices = load()
+	}
 }
 
 // SelectedProject mirrors UI.SelectedProject.

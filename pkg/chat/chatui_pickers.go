@@ -115,8 +115,12 @@ func (u *ChatUI) globalKeys(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		if u.sessionFence() {
 			return nil, true
 		}
+		if u.projectChoicesLoader != nil {
+			// A project created or added in Explore is offered at once.
+			u.projectChoices = u.projectChoicesLoader()
+		}
 		if len(u.projectChoices) == 0 {
-			return u.showExplore(), true
+			return u.showProjects(), true
 		}
 		return u.shell.PushOverlay(newProjectPickerOverlay(u, u.projectChoices)), true
 	case "f10":

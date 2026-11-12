@@ -31,25 +31,42 @@ func (u *ChatUI) SetExplorePanel(p chatshell.SidePanel) {
 	u.shell.SetCenterPanel(p, true)
 }
 
-// showExplore returns the center to Projects and Settings: the transcript
-// replaces that pane on the first message, and without a project it is the
-// only place where one can be created, added or chosen.
-func (u *ChatUI) showExplore() tea.Cmd {
+// showExplore returns the center to the Explore pane as it was left, with its
+// page and any half-filled form: the transcript replaces that pane on the
+// first message. It reports false when this chat has no such pane.
+func (u *ChatUI) showExplore() bool {
 	if u.explorePanel == nil {
+		return false
+	}
+	// The API monitor is a temporary center of its own: close it properly, or
+	// its hidden panels and its Esc would outlive it.
+	u.closeAPIOverview()
+	u.shell.SetCenterPanel(u.explorePanel, true)
+	return true
+}
+
+// showProjects is where F3 leads while no project is registered: the Projects
+// page, where one is created or added.
+func (u *ChatUI) showProjects() tea.Cmd {
+	if !u.showExplore() {
 		u.workspaceFeedback = "No projects yet. Run: datatug demo install"
 		return nil
 	}
-	u.shell.SetCenterPanel(u.explorePanel, true)
 	if p, ok := u.explorePanel.(interface{ OpenProjects() tea.Cmd }); ok {
 		return p.OpenProjects()
 	}
 	return nil
 }
 
-// nothingToInspect is the state of a workspace that has neither a project
-// catalog nor any result yet: a first run.
+// noProject is a workspace started without a project: the setup of a first run.
+func (u *ChatUI) noProject() bool {
+	return u.catalog.ID == "" && u.catalog.Title == "" && len(u.catalog.Objects) == 0
+}
+
+// nothingToInspect is the state of a workspace that has neither a project nor
+// any result yet: a first run.
 func (u *ChatUI) nothingToInspect() bool {
-	return u.explorePanel != nil && !u.HasCatalogExplorer() && len(u.snapshot.RecordSets) == 0
+	return u.explorePanel != nil && u.noProject() && len(u.snapshot.RecordSets) == 0
 }
 
 // SetExplorer replaces the left explorer for a setup/navigation workspace.
@@ -68,8 +85,11 @@ func (u *ChatUI) workspaceHints(width int) []string {
 	case "session-tabs":
 		return []string{"←/→ choose chat", "Enter activate", "Esc return", "Ctrl+Tab next chat", "Ctrl+Shift+Tab previous chat", "Ctrl+W close chat", "Ctrl+P Actions / New chat"}
 	case "explorer":
+		if u.noProject() {
+			return []string{"F3 projects", "Shift+→ center", "F4 composer"}
+		}
 		if !u.HasCatalogExplorer() {
-			return []string{"F3 Projects and Settings", "Shift+→ center", "F4 composer"}
+			return []string{"↑↓ navigate", "Enter open", "F3 projects", "Shift+→ center"}
 		}
 		return []string{"Ctrl+F filter objects", "type to search", "←→ tree", "Enter Open data", "Ctrl+P Actions", "Ctrl+N New query", "Ctrl+Shift+←/→ resize panel", "F7 Inspect", "Shift+→ center"}
 	case "center":
@@ -115,8 +135,8 @@ func (u *ChatUI) workspaceHints(width int) []string {
 		if len(u.shell.Chips()) > 0 {
 			tab = "Tab attachments / Select text"
 		}
-		if !u.HasCatalogExplorer() && u.explorePanel != nil {
-			return []string{"F3 Projects and Settings", mouse, "Enter send", "Shift+Enter newline", "Shift+↑ history", tab, "Esc previous control", "Ctrl+C quit"}
+		if u.noProject() && u.explorePanel != nil {
+			return []string{"F3 projects", mouse, "Enter send", "Shift+Enter newline", "Shift+↑ history", tab, "Esc previous control", "Ctrl+C quit"}
 		}
 		return append([]string{mouse}, []string{"Enter send", "Shift+Enter newline", "Shift+↑ history", tab, "Esc previous control", "Ctrl+Tab next chat", "Ctrl+C quit"}...)
 	default:

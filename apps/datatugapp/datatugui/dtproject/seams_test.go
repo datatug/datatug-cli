@@ -49,7 +49,7 @@ func TestProjectsFirstRunOffersCreateAndAdd(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			stub(t, &getSettings, func() (dtconfig.Settings, error) { return dtconfig.Settings{}, err })
-			stub(t, &readSettings, settingsOrNone)
+			// readSettings is not stubbed here: the production wiring is under test.
 			h := navtest.New(t, nav.Page{Title: "T", Content: newProjects()})
 			h.RequireContains("Create new local project").RequireContains("Add existing").RequireContains("Demo Project 1")
 			h.RequireNotContains("load projects")

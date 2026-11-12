@@ -57,16 +57,8 @@ func runWorkspaceLoop(cmd *cobra.Command, options chatOptions) error {
 		next, err := runChatProjectFunc(cmd, options)
 		if err != nil {
 			ui := chat.NewChatUI(context.Background(), setupConversation{}, "setup")
-			choices := []chat.ProjectChoice{}
-			if settings, loadErr := getChatSettings(); loadErr == nil {
-				for _, p := range settings.Projects {
-					if p != nil && p.Path != "" {
-						choices = append(choices, chat.ProjectChoice{Key: p.ID, Title: p.Title, Detail: p.Path})
-					}
-				}
-			}
-			ui.SetProjectChoices(choices)
-			ui.SetSessionNotices([]string{"No project is open. F3 opens Projects, where you create, add or choose one. Chat answers once a project is open and an AI profile is configured under Settings."})
+			ui.SetProjectChoicesLoader(registeredProjectChoices)
+			ui.SetSessionNotices([]string{setupNotice})
 			mountExplore(ui, *options.workspace)
 			if runErr := ui.Run(programOptions...); runErr != nil {
 				return runErr
@@ -80,10 +72,38 @@ func runWorkspaceLoop(cmd *cobra.Command, options chatOptions) error {
 	}
 }
 
+// The setup texts name only what works in this state: F3 lists the registered
+// projects, and with none it opens Projects, where the first is created or
+// added. Chat itself starts when a project is chosen with F3.
+const (
+	setupNotice = "No project is open. Press F3 to choose a project; with none yet it opens Projects, where you create or add your first. Then press F3 again to open it for chat. Chat also needs an AI profile, configured under Settings."
+	setupReply  = "Chat cannot answer yet: no project is open. Press F3 to choose a project; with none yet it opens Projects, where you create or add your first, then F3 again opens it for chat. For sample data that works offline, quit, run: datatug demo install, start datatug and press F3. Chat also needs an AI profile, configured under Settings. No query has been executed."
+)
+
+// registeredProjectChoices lists the projects of the settings file as they are
+// now; none when there is no settings file yet.
+func registeredProjectChoices() []chat.ProjectChoice {
+	choices := []chat.ProjectChoice{}
+	settings, err := getChatSettings()
+	if err != nil {
+		return choices
+	}
+	for _, p := range settings.Projects {
+		if p != nil && p.Path != "" {
+			title := p.Title
+			if title == "" {
+				title = p.ID
+			}
+			choices = append(choices, chat.ProjectChoice{Key: p.ID, Title: title, Detail: p.Path})
+		}
+	}
+	return choices
+}
+
 type setupConversation struct{}
 
 func (setupConversation) Ask(context.Context, string) (chat.Turn, error) {
-	return chat.Turn{Text: "Chat cannot answer yet: no project is open. Press F3 to open Projects, then create, add or choose one. To try DataTug on sample data, quit and run: datatug demo install. An AI provider is configured under Settings → AI. No query has been executed."}, nil
+	return chat.Turn{Text: setupReply}, nil
 }
 
 type exploreWorkspace struct {
@@ -98,6 +118,7 @@ type explorePane struct {
 	index          int
 	search         string
 	notice         string // the last alert of a page, shown until the next key
+	opened         int    // the module whose page is shown
 }
 
 func mountExplore(ui *chat.ChatUI, start workspaceStart) {
@@ -105,7 +126,7 @@ func mountExplore(ui *chat.ChatUI, start workspaceStart) {
 	pane := &explorePane{workspace: state}
 	for i, module := range start.modules {
 		if module.ID == start.options.Start {
-			pane.index = i
+			pane.index, pane.opened = i, i
 		}
 	}
 	ui.SetExplorePanel(pane)
@@ -143,11 +164,11 @@ func (p *explorePane) View(w, h int, focused bool) string {
 	if p.search != "" {
 		selected += " · Search: " + p.search
 	}
-	head := ansi.Truncate(label, max(1, w), "…") + "\n" + ansi.Truncate(selected, max(1, w), "…") + "\n"
 	if p.notice != "" {
-		head += ansi.Wrap(p.notice, max(1, w), " ") + "\n\n"
+		// In place of the key legend, so the page keeps its full height.
+		label = p.notice
 	}
-	return head + shell.Content().View()
+	return ansi.Truncate(label, max(1, w), "…") + "\n" + ansi.Truncate(selected, max(1, w), "…") + "\n" + shell.Content().View()
 }
 
 func (p *explorePane) visibleModules() []int {
@@ -186,6 +207,7 @@ func (p *explorePane) Update(msg tea.Msg) (chatshell.SidePanel, tea.Cmd) {
 			case "enter":
 				if len(visible) > 0 {
 					p.contentFocused = true
+					p.opened = visible[min(p.index, len(visible)-1)]
 					return p, state.update(datatugui.OpenModuleMsg{ID: state.modules[visible[min(p.index, len(visible)-1)]].ID, Focus: nav.FocusToContent})
 				}
 			case "esc":
@@ -218,7 +240,13 @@ func (p *explorePane) OpenProjects() tea.Cmd {
 	state := p.workspace
 	for i, module := range state.modules {
 		if module.ID == datatugui.ScreenProjects {
-			p.search, p.index, p.contentFocused = "", i, true
+			wasOpen := p.opened == i
+			p.search, p.index, p.opened, p.contentFocused = "", i, i, true
+			if wasOpen {
+				// Already on Projects, perhaps in a half-filled form: reopening
+				// the module would discard its pages.
+				return state.update(nav.SetFocusMsg{To: nav.FocusToContent})
+			}
 			return state.update(datatugui.OpenModuleMsg{ID: module.ID, Focus: nav.FocusToContent})
 		}
 	}

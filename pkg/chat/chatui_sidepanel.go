@@ -518,7 +518,10 @@ func (p *workspacePanel) projectExplorer(width, height int) string {
 	}
 	if p == p.ui.explorer {
 		if len(p.ui.catalog.Objects) == 0 {
-			return ansi.Wrap("No project open\n\n"+theme.WorkspaceKeyHint("F3")+" Projects: create, add or choose one.\n\nSample data, offline:\ndatatug demo install", max(1, width), " ")
+			if !p.ui.noProject() {
+				return ansi.Wrap("This project has no databases or queries yet.\n\nAdd a database:\ndatatug db add", max(1, width), " ")
+			}
+			return ansi.Wrap("No project open\n\n"+theme.WorkspaceKeyHint("F3")+" projects: choose one, or create or add your first.", max(1, width), " ")
 		}
 		hintsHeight := 0
 		if p.focused {

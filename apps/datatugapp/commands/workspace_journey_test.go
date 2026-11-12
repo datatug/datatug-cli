@@ -6,8 +6,10 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
 	"github.com/datatug/datatug-cli/pkg/chat"
+	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/tuigoff/tuigoff/pkg/nav"
 	"github.com/tuigoff/tuigoff/pkg/uitest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -134,5 +136,54 @@ func TestExplorePaneShowsPageAlertUntilNextKey(t *testing.T) {
 	pane.Update(uitest.Key("down"))
 	if view := ansi.Strip(ui.Model().View().Content); strings.Contains(view, "Add existing project:") {
 		t.Fatalf("alert kept after the next key: %s", view)
+	}
+}
+
+// F3 on the Projects module must keep the page that is open there, such as a
+// half-filled form: only another module is replaced by Projects.
+func TestExplorePaneOpenProjectsKeepsAnOpenProjectsPage(t *testing.T) {
+	opens := 0
+	modules := []datatugui.Module{
+		{ID: "projects", Text: "Projects", Shortcut: 'p', Root: func() nav.Page { opens++; return nav.Page{Content: nav.Static("Projects", "Projects page content")} }},
+		{ID: "settings", Text: "Settings", Shortcut: 's', Root: func() nav.Page { return nav.Page{Content: nav.Static("Settings", "Settings page content")} }},
+	}
+	ui := chat.NewChatUI(context.Background(), setupConversation{}, "setup")
+	mountExplore(ui, workspaceStart{modules: modules, options: datatugui.Options{Start: "projects"}})
+	ui.Model().Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	pane := ui.Model().CenterPanel().(*explorePane)
+	before := opens
+	run := func(cmd tea.Cmd) {
+		for cmd != nil {
+			msg := cmd()
+			if _, batch := msg.(tea.BatchMsg); batch || msg == nil {
+				return
+			}
+			_, cmd = pane.Update(msg)
+		}
+	}
+	run(pane.OpenProjects())
+	if opens != before || !pane.contentFocused {
+		t.Fatalf("F3 on the Projects module reopened its root %d time(s); focused=%v", opens-before, pane.contentFocused)
+	}
+	pane.opened = 1 // another module is shown
+	run(pane.OpenProjects())
+	if opens == before || pane.opened != 0 {
+		t.Fatalf("F3 from another module did not open Projects: opens=%d opened=%d", opens-before, pane.opened)
+	}
+}
+
+func TestRegisteredProjectChoices(t *testing.T) {
+	old := getChatSettings
+	t.Cleanup(func() { getChatSettings = old })
+	getChatSettings = func() (dtconfig.Settings, error) { return dtconfig.Settings{}, os.ErrNotExist }
+	if got := registeredProjectChoices(); len(got) != 0 {
+		t.Fatalf("no settings file: %v", got)
+	}
+	getChatSettings = func() (dtconfig.Settings, error) {
+		return dtconfig.Settings{Projects: []*dtconfig.ProjectRef{nil, {ID: "nopath"}, {ID: "shop", Path: "~/shop"}, {ID: "crm", Title: "CRM", Path: "~/crm"}}}, nil
+	}
+	got := registeredProjectChoices()
+	if len(got) != 2 || got[0].Title != "shop" || got[1].Title != "CRM" {
+		t.Fatalf("choices = %+v", got)
 	}
 }

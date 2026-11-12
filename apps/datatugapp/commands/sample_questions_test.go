@@ -3,8 +3,6 @@ package commands
 import (
 	"context"
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -60,7 +58,7 @@ func TestSampleConversation(t *testing.T) {
 	if err != nil || len(turn.Queries) != 0 || len(ran) != 0 {
 		t.Fatalf("a question that is not ready-made ran a query: turn=%+v ran=%d err=%v", turn, len(ran), err)
 	}
-	for _, want := range []string{"no AI is set up", "1. Which countries bring in the most revenue?", "datatug auth login", "No query was executed."} {
+	for _, want := range []string{"no AI is set up", "1. Which countries bring in the most revenue?", "datatug auth login", "datatug chat --model cloud", "No query was executed."} {
 		if !strings.Contains(turn.Text, want) {
 			t.Fatalf("reply lacks %q: %s", want, turn.Text)
 		}
@@ -81,7 +79,7 @@ func TestSampleConversation(t *testing.T) {
 		return secureread.Result{}, errors.New("read\nrefused")
 	}
 	turn, err = c.AskWithContext(context.Background(), "2", "")
-	if err != nil || len(turn.Queries) != 0 || !strings.Contains(turn.Text, "could not be read: read refused") {
+	if err != nil || len(turn.Queries) != 0 || !strings.Contains(turn.Text, "could not be read: read refused. These questions expect the sample database as it was installed.") {
 		t.Fatalf("a failed read: turn=%+v err=%v", turn, err)
 	}
 }
@@ -130,10 +128,13 @@ func TestSampleAnswersReadyMadeQuestionsWithoutAI(t *testing.T) {
 	for _, env := range []string{"OPENAI_API_KEY", "OPENAI_BASE_URL"} {
 		t.Setenv(env, "")
 	}
+	// Nothing may look for a DataTug sign-in: hosted AI is never chosen for
+	// the person, on the sample or anywhere else.
 	oldSession := loadCloudSession
 	t.Cleanup(func() { loadCloudSession = oldSession })
 	loadCloudSession = func(context.Context, chatOptions) (cloudSession, error) {
-		return cloudSession{}, errors.New("deviceauth: credential not found")
+		t.Error("the sample looked for a DataTug sign-in without being asked for hosted AI")
+		return cloudSession{}, errors.New("not asked for")
 	}
 	notices, conversation := openSampleChat(t, installedSample(t))
 	if !strings.Contains(strings.Join(notices, "\n"), sampleQuestionsNotice()) {
@@ -150,70 +151,5 @@ func TestSampleAnswersReadyMadeQuestionsWithoutAI(t *testing.T) {
 		if rows := len(turn.Queries[0].Result.Rows); rows == 0 || rows > 10 {
 			t.Fatalf("%s: %d rows", question.ask, rows)
 		}
-	}
-}
-
-// Signed in and with no other AI, the sample uses the hosted AI by itself and
-// says so; no other project does, and neither does an explicit choice.
-func TestSampleUsesHostedAIWhenSignedIn(t *testing.T) {
-	for _, env := range []string{"OPENAI_API_KEY", "OPENAI_BASE_URL"} {
-		t.Setenv(env, "")
-	}
-	planOK := true
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !planOK {
-			http.Error(w, "down", http.StatusInternalServerError)
-			return
-		}
-		_, _ = w.Write(contractFixture(t, "plan-response-several-accounts.json"))
-	}))
-	defer server.Close()
-	oldSession := loadCloudSession
-	t.Cleanup(func() { loadCloudSession = oldSession })
-	signedIn := true
-	loadCloudSession = func(context.Context, chatOptions) (cloudSession, error) {
-		if !signedIn {
-			return cloudSession{}, errors.New("deviceauth: credential not found")
-		}
-		return fakeCloudSession(server.URL + "/v0/"), nil
-	}
-	cmd := chatCommand()
-	fresh := func() chatOptions { return chatOptions{project: "/sample", model: defaultChatModel} }
-
-	options := fresh()
-	if !sampleHostedAI(context.Background(), cmd, &options) || options.model != "cloud" {
-		t.Fatalf("signed in without another AI: options=%+v", options)
-	}
-	for name, change := range map[string]func(*chatOptions){
-		"already hosted":       func(o *chatOptions) { o.model = "cloud" },
-		"local queries only":   func(o *chatOptions) { o.model = "none" },
-		"an AI profile chosen": func(o *chatOptions) { o.ai = "work" },
-		"a key is set":         func(o *chatOptions) { o.apiKey = "k" },
-	} {
-		options = fresh()
-		change(&options)
-		before := options
-		if sampleHostedAI(context.Background(), cmd, &options) || options.model != before.model {
-			t.Errorf("%s: the sample switched to hosted AI: %+v", name, options)
-		}
-	}
-	options, signedIn = fresh(), false
-	if sampleHostedAI(context.Background(), cmd, &options) || options.model != defaultChatModel {
-		t.Fatalf("not signed in: options=%+v", options)
-	}
-	options, signedIn, planOK = fresh(), true, false
-	if sampleHostedAI(context.Background(), cmd, &options) || options.model != defaultChatModel {
-		t.Fatalf("a plan that cannot be read: options=%+v", options)
-	}
-
-	// Through the chat itself: the notice is shown and a model conversation,
-	// not the ready-made one, is opened.
-	planOK = true
-	notices, conversation := openSampleChat(t, installedSample(t))
-	if !strings.Contains(strings.Join(notices, "\n"), sampleHostedNotice) {
-		t.Fatalf("the hosted AI was not announced: %q", notices)
-	}
-	if _, readyMade := conversation.(sampleConversation); readyMade {
-		t.Fatal("signed in, the sample still opened the ready-made conversation")
 	}
 }

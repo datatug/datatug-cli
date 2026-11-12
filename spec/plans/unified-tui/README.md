@@ -265,17 +265,17 @@ A machine with no project starts on a welcome screen; one key installs, scans an
 
 **Evidence:** datatug/datatug-cli#605 (dead-end fixes, released v0.153.2); unit and journey tests of the welcome screen, the sample install, protected columns and the no-AI answer; a first-run walk in a terminal with a cleared environment and an empty home directory. Not verified on Windows Terminal.
 
-### Task 18: Ready-made questions and hosted AI on the sample
+### Task 18: Ready-made questions on the sample
 
 **Id:** task-18
-**Verifies:** unified-tui#ac:sample-ready-made-questions, unified-tui#ac:sample-hosted-ai
+**Verifies:** unified-tui#ac:sample-ready-made-questions, unified-tui#ac:hosted-ai-is-explicit
 **Status:** complete
 **Owner:** CLI implementation owner
 **Depends on:** Task 17
 
-Without AI the sample answers four ready-made questions by running queries written in advance through the chat executor; signed in and with no other AI, the sample alone switches to DataTug's hosted AI and says what goes to the cloud.
+Without AI the sample answers four ready-made questions by running queries written in advance through the chat executor. Hosted AI stays an explicit choice: nothing looks for a sign-in unless `--model cloud` is given.
 
-**Evidence:** unit tests of matching, the scripted conversation and the switch; a test that installs the real sample, opens its chat and gets rows for each question under strict labels; a test of the signed-in path against a stand-in plan endpoint; a walk in a terminal with a cleared environment. The hosted path was not exercised against the real DataTug cloud.
+**Evidence:** unit tests of matching and the scripted conversation; a test that installs the real sample, opens its chat as the workspace does, fails if a sign-in is looked for, and gets rows for each question; a walk in a terminal with a cleared environment.
 
 ## Open Questions
 

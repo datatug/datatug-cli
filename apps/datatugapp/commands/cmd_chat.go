@@ -271,9 +271,6 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	var cloudContext ai.ClientContext
 	var hostedSession cloudSession
 	isSample := projectCatalog.ID == sampleProjectID
-	if isSample && sampleHostedAI(ctx, cmd, &options) {
-		sessionNotices = append(sessionNotices, sampleHostedNotice)
-	}
 	if options.model == "cloud" {
 		cloudSession, loadErr := loadCloudSession(ctx, options)
 		if loadErr != nil {

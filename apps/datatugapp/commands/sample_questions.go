@@ -7,7 +7,6 @@ import (
 
 	"github.com/datatug/datatug-cli/pkg/chat"
 	"github.com/datatug/datatug-cli/pkg/secureread"
-	"github.com/spf13/cobra"
 )
 
 // A first-time user of the sample project gets an answer to a question in
@@ -138,9 +137,9 @@ limit: 10
 	},
 }
 
-// sampleSignInAdvice is how the sample gets real AI: after a sign-in, chat on
-// the sample uses DataTug's hosted AI by itself (see sampleHostedAI).
-const sampleSignInAdvice = "To ask your own questions, quit, run datatug auth login, and start datatug again: on this sample DataTug's hosted AI then answers, within your plan's free allowance."
+// sampleSignInAdvice is how the sample gets real AI. Hosted AI is the person's
+// own choice, made by naming it: nothing switches a project to it by itself.
+const sampleSignInAdvice = "To ask your own questions with DataTug's hosted AI, quit and run: datatug auth login, then: datatug chat --model cloud. The Free plan includes a monthly allowance of questions."
 
 // sampleQuestionsList is the numbered list of the ready-made questions.
 func sampleQuestionsList() string {
@@ -186,7 +185,7 @@ func (c sampleConversation) AskWithContext(ctx context.Context, message, _ strin
 	}
 	result, err := c.run(ctx, []byte(question.tugql))
 	if err != nil {
-		return chat.Turn{Text: fmt.Sprintf("The ready-made answer to %q could not be read: %s", question.ask, publicSampleError(err))}, nil
+		return chat.Turn{Text: fmt.Sprintf("The ready-made answer to %q could not be read: %s. These questions expect the sample database as it was installed.", question.ask, publicSampleError(err))}, nil
 	}
 	return chat.Turn{
 		Text:    question.ask + "\nA ready-made answer: the query below was written in advance and no AI was used.",
@@ -196,28 +195,3 @@ func (c sampleConversation) AskWithContext(ctx context.Context, message, _ strin
 
 // publicSampleError is an error of a sample read on one line.
 func publicSampleError(err error) string { return strings.Join(strings.Fields(err.Error()), " ") }
-
-// sampleHostedAI switches a chat on the sample project to DataTug's hosted AI
-// when the person is signed in and no other AI is set up, and reports whether
-// it did. The sample is public data, so nothing private leaves the machine by
-// this choice; no other project is ever switched. Any doubt (no sign-in, no
-// network, a plan that does not allow it) leaves the options as they were.
-func sampleHostedAI(ctx context.Context, cmd *cobra.Command, options *chatOptions) bool {
-	if options.model == "cloud" || options.model == "none" || options.ai != "" || !chat.MissingAPIKey(options.model, options.baseURL, options.apiKey) {
-		return false
-	}
-	hosted := *options
-	hosted.model = "cloud"
-	session, err := loadCloudSession(ctx, hosted)
-	if err != nil {
-		return false
-	}
-	if _, err := resolveCloudSelection(ctx, cmd, &hosted, session); err != nil {
-		return false
-	}
-	*options = hosted
-	return true
-}
-
-// sampleHostedNotice says that the hosted AI was chosen for the person.
-const sampleHostedNotice = "You are signed in, so this sample uses DataTug's hosted AI: questions and the sample's table definitions go to the DataTug cloud. To keep everything local, start with --model none."

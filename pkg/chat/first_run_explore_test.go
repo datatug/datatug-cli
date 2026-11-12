@@ -185,3 +185,32 @@ func TestEmptyProjectIsNotAFirstRun(t *testing.T) {
 		t.Fatalf("explorer text for an empty project: %q", explorer)
 	}
 }
+
+// An Explore pane that cannot be asked for a page is still shown by F3.
+func TestF3WithoutProjectsShowsAPlainExplorePane(t *testing.T) {
+	t.Parallel()
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.SetExplorePanel(u.explorer)
+	u.shell.ShowTranscript()
+	cmd, handled := u.globalKeys(tea.KeyPressMsg{Code: tea.KeyF3})
+	if cmd != nil || !handled {
+		t.Fatalf("cmd=%v handled=%v, want nil/true", cmd, handled)
+	}
+	if u.shell.CenterPanel() == nil {
+		t.Fatal("F3 did not restore the Explore pane")
+	}
+}
+
+// An open project without objects keeps the explorer's navigation hints.
+func TestEmptyProjectExplorerHints(t *testing.T) {
+	t.Parallel()
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.SetExplorePanel(u.explorer)
+	u.catalog = ProjectCatalog{ID: "shop", Title: "Shop"}
+	u.shell.ShowTranscript()
+	u.shell.FocusLeftPanel()
+	hints := strings.Join(u.workspaceHints(120), " | ")
+	if !strings.Contains(hints, "Enter open") || !strings.Contains(hints, "F3 projects") {
+		t.Fatalf("explorer hints for an empty project: %s", hints)
+	}
+}

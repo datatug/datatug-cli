@@ -219,3 +219,19 @@ func TestWorkspaceLoopSaysWhyAChosenProjectDidNotOpen(t *testing.T) {
 		t.Fatalf("reasons shown = %q", reasons)
 	}
 }
+
+// The setup workspace runs with and without a reason and returns what was
+// chosen there: nothing, when the person quits.
+func TestRunSetupWorkspaceReturnsTheChoice(t *testing.T) {
+	old := getChatSettings
+	t.Cleanup(func() { getChatSettings = old })
+	getChatSettings = func() (dtconfig.Settings, error) { return dtconfig.Settings{}, os.ErrNotExist }
+	t.Cleanup(chat.SetRunTeaProgramForTest(func(*tea.Program) (tea.Model, error) { return nil, nil }))
+	start := workspaceStart{modules: []datatugui.Module{{ID: "projects", Text: "Projects", Root: func() nav.Page { return nav.Page{Content: nav.Static("Projects", "Projects page content")} }}}, options: datatugui.Options{Start: "projects"}}
+	for _, reason := range []string{"", `Could not open project "shop" for chat: no database`} {
+		next, err := runSetupWorkspace(start, reason, nil)
+		if err != nil || next != "" {
+			t.Fatalf("reason %q: next=%q err=%v", reason, next, err)
+		}
+	}
+}

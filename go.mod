@@ -91,7 +91,7 @@ require (
 	github.com/strongo/random v0.0.3
 	github.com/strongo/slice v0.3.14
 	github.com/strongo/validation v0.0.17
-	github.com/tuigoff/tuigoff v0.8.0
+	github.com/tuigoff/tuigoff v0.8.1
 	github.com/xo/dburl v0.24.2
 	github.com/xuri/excelize/v2 v2.11.0
 	github.com/zalando/go-keyring v0.2.8

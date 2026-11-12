@@ -109,6 +109,11 @@ type ChatUI struct {
 	savedQueries      []SavedQuery
 
 	projectChoices []ProjectChoice
+	// startTable is the title of a table opened when the program starts.
+	startTable string
+	// openDataNote names the sensitive columns the running Open data left out;
+	// it is shown once its result is on screen.
+	openDataNote string
 	// projectChoicesLoader, when set, re-reads the choices each time F3 asks.
 	projectChoicesLoader func() []ProjectChoice
 	selectedProject      string
@@ -307,6 +312,32 @@ func (u *ChatUI) SetProjectChoicesLoader(load func() []ProjectChoice) {
 	if load != nil {
 		u.projectChoices = load()
 	}
+}
+
+// OpenTableAtStart makes the workspace open the table with this title as it
+// starts, as Enter on it in the Explorer does. An unknown title opens nothing.
+func (u *ChatUI) OpenTableAtStart(title string) { u.startTable = title }
+
+// openStartTable is the command of OpenTableAtStart, run once from Init.
+func (u *ChatUI) openStartTable() tea.Cmd {
+	title := u.startTable
+	u.startTable = ""
+	if title == "" {
+		return nil
+	}
+	for _, object := range u.catalog.Objects {
+		if object.Reference.Kind == "table" && object.Reference.Title == title && object.Issue == "" {
+			return u.openWorkspaceQuery(object, true)
+		}
+	}
+	return nil
+}
+
+// ChooseProject closes this workspace so that its caller reopens it on
+// project, as choosing it with F3 does.
+func (u *ChatUI) ChooseProject(project string) tea.Cmd {
+	u.selectedProject = project
+	return tea.Quit
 }
 
 // SelectedProject mirrors UI.SelectedProject.
@@ -800,6 +831,8 @@ func (u *ChatUI) OnMsg(msg tea.Msg) tea.Cmd {
 			return nil
 		}
 		u.workspaceMutationPending = false
+		note := u.openDataNote
+		u.openDataNote = ""
 		if msg.err != nil {
 			u.workspaceFeedback = msg.err.Error()
 			return nil
@@ -812,6 +845,7 @@ func (u *ChatUI) OnMsg(msg tea.Msg) tea.Cmd {
 		u.loadSession(msg.snapshot)
 		u.shell.ShowTranscript()
 		u.shell.FocusEntry(u.lastGridEntryID)
+		u.workspaceFeedback = note
 		return nil
 	case hostedPlanMsg:
 		if msg.command != nil && u.sessions != nil {

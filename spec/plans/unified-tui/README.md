@@ -253,6 +253,18 @@ A context-aware searchable Actions registry dispatches existing paths, with Ctrl
 
 **Evidence:** full-shell searchable action/disabled reason/help/mouse routes, Ctrl+C/function-key diagnostic isolation, draft/caret return, compact layouts, parent actual key receipts and final independent review.
 
+### Task 17: First run: welcome, sample project and plain answers
+
+**Id:** task-17
+**Verifies:** unified-tui#ac:first-run-welcome, unified-tui#ac:first-run-no-dead-end, unified-tui#ac:sensitive-columns-open, unified-tui#ac:no-ai-plain-answer
+**Status:** complete
+**Owner:** CLI implementation owner
+**Depends on:** Tasks 1, 3
+
+A machine with no project starts on a welcome screen; one key installs, scans and registers the sample project in-process and reopens the workspace on it with a table open. F3 leads to Projects, lists projects as registered now, and a failed choice returns with its reason. Explorer Open data leaves protected-label columns out and names them. Without an AI key, chat answers plainly instead of relaying a provider error.
+
+**Evidence:** datatug/datatug-cli#605 (dead-end fixes, released v0.153.2); unit and journey tests of the welcome screen, the sample install, protected columns and the no-AI answer; a first-run walk in a terminal with a cleared environment and an empty home directory. Not verified on Windows Terminal.
+
 ## Open Questions
 
 Shortcut choices, server-scope defaults and supported/refused query shapes are resolved for the released baseline in the feature and inventory. Broader terminal/OS/modifier compatibility remains unproven beyond the recorded configurations; no automatic support claim is made. Grid-specific browser handoff and nested ancestor paths remain deferred to separate specifications. Incoming user corrections require their own source/evidence reconciliation rather than weakening existing acceptance criteria.

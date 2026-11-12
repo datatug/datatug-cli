@@ -1,0 +1,264 @@
+package commands
+
+import (
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"path/filepath"
+	"strings"
+
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/datatug/datatug-cli/pkg/demofixtures"
+	"github.com/datatug/datatug-cli/pkg/dtroot"
+	"github.com/datatug/datatug-core/pkg/dtconfig"
+	"github.com/tuigoff/tuigoff/pkg/theme"
+)
+
+// The sample project of the welcome screen: the bundled music-store database
+// alone, with its schema scanned and no access policy, so every table opens in
+// the workspace at once. It is not the Perimeter demo of `datatug demo
+// install`, whose policy admits an agent role to a few rows only.
+const (
+	sampleProjectID    = "datatug-sample"
+	sampleProjectTitle = "Sample music store"
+	sampleEnvironment  = "local"
+	// sampleFirstTable is opened as soon as the sample is: a first result
+	// without a key press. Its address columns show the sensitive-column rule.
+	sampleFirstTable = "Invoice"
+	sampleNotice     = "This is the sample music store, with its Invoice table open. Arrows move in the table; Shift+← goes to the Explorer, where Enter opens any other table; Ctrl+P lists everything you can do."
+)
+
+// Doors of the sample install, replaced in tests.
+var (
+	installSampleFunc     = installSample
+	sampleRegistration    = demoRegistration
+	sampleAddToSettings   = dtconfig.AddProjectToSettings
+	sampleScan            = scanSample
+	sampleFixtureFiles    = func() ([]demofixtures.File, error) { return demoInstallFiles() }
+	sampleProjectsRootDir = dtroot.Path
+	sampleRename          = os.Rename
+)
+
+// sampleInstallMarker marks a folder as made by installSample: only such a
+// folder, or an empty one, is ever written to.
+const sampleInstallMarker = ".datatug/sample-install.json"
+
+// installSample makes sure the sample project is there and returns its ID. It
+// writes the bundled database, scans it and registers the project in
+// ~/datatug/datatug-sample, and does again whatever step is missing: a run
+// that was interrupted, a folder that was deleted while still registered.
+//
+// It never writes into a folder it did not make. A project registered under
+// the sample's ID somewhere else, or a registered folder without the marker,
+// is someone's own and is returned as it is; an unregistered folder with other
+// files in it is refused. A database file that exists is never replaced: it is
+// written beside its place and renamed, so a file that is there is whole, and
+// one that differs from the bundled one was changed on purpose.
+//
+// It writes nothing to the terminal: it may run while the workspace is on screen.
+func installSample() (string, error) {
+	registered, err := sampleRegistration(sampleProjectID)
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(sampleProjectsRootDir(), sampleProjectID)
+	if registered != "" && filepath.Clean(registered) != dir {
+		return sampleProjectID, nil
+	}
+	marker := filepath.Join(dir, filepath.FromSlash(sampleInstallMarker))
+	if entries, _ := os.ReadDir(dir); len(entries) > 0 {
+		if _, statErr := os.Stat(marker); statErr != nil {
+			if registered != "" {
+				return sampleProjectID, nil
+			}
+			return "", fmt.Errorf("%s holds files the sample did not make; move that folder away and try again", dbcopy.PathDisplay(dir))
+		}
+	}
+	// The marker goes first: a run that fails after it can be repeated, and
+	// the next run recognises the folder as its own.
+	if err := demoInstallMkdirAll(filepath.Dir(marker), 0o755); err != nil {
+		return "", fmt.Errorf("cannot make the sample folder: %w", err)
+	}
+	if err := demoInstallWriteFile(marker, []byte(`{"projectId":"`+sampleProjectID+`"}`+"\n"), 0o644); err != nil {
+		return "", fmt.Errorf("cannot make the sample folder: %w", err)
+	}
+	database := filepath.Join(dir, filepath.FromSlash(demofixtures.ChinookPath))
+	if _, statErr := os.Stat(database); statErr != nil {
+		if err := writeSampleDatabase(database); err != nil {
+			return "", err
+		}
+	}
+	if !sampleScanned(dir) {
+		if err := sampleScan(dir, database); err != nil {
+			return "", fmt.Errorf("cannot read the sample database: %w", err)
+		}
+	}
+	if registered == "" {
+		if err := sampleAddToSettings(dtconfig.ProjectRef{ID: sampleProjectID, Path: dir, Title: sampleProjectTitle}); err != nil {
+			return "", fmt.Errorf("cannot register the sample project: %w", err)
+		}
+	}
+	return sampleProjectID, nil
+}
+
+// writeSampleDatabase puts the bundled database at path: written beside its
+// place and renamed, so a write that is cut short leaves no half database.
+func writeSampleDatabase(path string) error {
+	files, err := sampleFixtureFiles()
+	if err != nil {
+		return err
+	}
+	for _, f := range files {
+		if f.Path != demofixtures.ChinookPath {
+			continue
+		}
+		if err := demoInstallMkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return fmt.Errorf("cannot make the sample folder: %w", err)
+		}
+		if err := demoInstallWriteFile(path+".partial", f.Content, 0o644); err != nil {
+			return fmt.Errorf("cannot write the sample database: %w", err)
+		}
+		if err := sampleRename(path+".partial", path); err != nil {
+			return fmt.Errorf("cannot write the sample database: %w", err)
+		}
+	}
+	return nil
+}
+
+// sampleScanned reports that a scan of the sample ran to its end: the catalog
+// of the database and the columns of its first table are the last files a scan
+// writes, so a scan that was interrupted is done again.
+func sampleScanned(dir string) bool {
+	for _, file := range []string{
+		filepath.Join("environments", sampleEnvironment, "catalogs", demofixtures.ChinookSource, demofixtures.ChinookSource+".db.json"),
+		filepath.Join("dbmodels", demofixtures.ChinookSource, "main", "tables", sampleFirstTable, "main."+sampleFirstTable+".columns.json"),
+	} {
+		if _, err := os.Stat(filepath.Join(dir, file)); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// scanSample runs the scan of `datatug scan` on the sample database with its
+// progress lines discarded.
+func scanSample(dir, database string) error {
+	scan := scanCommandArgs()
+	scan.SetOut(io.Discard)
+	scan.SetErr(io.Discard)
+	for name, value := range map[string]string{
+		"directory": dir, "project": sampleProjectID, "driver": "sqlite3",
+		"db": demofixtures.ChinookSource, "env": sampleEnvironment, "path": database,
+	} {
+		_ = scan.Flags().Set(name, value) // the flags are the scan command's own
+	}
+	previous := log.Writer()
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(previous)
+	return scanCommandAction(scan, nil)
+}
+
+// sampleFailure says in one line why the sample is not there.
+func sampleFailure(err error) string {
+	return "The sample could not be prepared: " + strings.Join(strings.Fields(err.Error()), " ") + "."
+}
+
+// sampleReadyMsg ends an install started from the welcome screen.
+type sampleReadyMsg struct {
+	project string
+	err     error
+}
+
+// welcome is the first screen of a machine with no project: two choices and
+// nothing to learn first.
+type welcome struct {
+	index  int
+	busy   bool
+	failed string
+	// choose opens a project for chat: the workspace closes and reopens on it.
+	choose func(project string) tea.Cmd
+}
+
+var welcomeChoices = []struct{ title, detail string }{
+	{"Explore the sample music store", "A small sample database: customers, invoices, tracks. It stays on this machine: no signup, no network."},
+	{"Use my own database", "Create a project, or add one you already have."},
+}
+
+// update handles a message while the welcome screen is shown. done reports
+// that the person left it for the Projects page.
+func (w *welcome) update(msg tea.Msg) (cmd tea.Cmd, done bool) {
+	switch msg := msg.(type) {
+	case sampleReadyMsg:
+		w.busy = false
+		if msg.err != nil {
+			w.failed = sampleFailure(msg.err) + " Press Enter to try again, or Esc for your own projects."
+			return nil, false
+		}
+		return w.choose(msg.project), false
+	case tea.KeyPressMsg:
+		if w.busy {
+			return nil, false
+		}
+		switch msg.String() {
+		case "up", "k":
+			w.index = max(0, w.index-1)
+		case "down", "j", "tab":
+			w.index = min(len(welcomeChoices)-1, w.index+1)
+		case "esc":
+			return nil, true
+		case "enter":
+			if w.index == 1 {
+				return nil, true
+			}
+			w.busy, w.failed = true, ""
+			return func() tea.Msg {
+				project, err := installSampleFunc()
+				return sampleReadyMsg{project: project, err: err}
+			}, false
+		}
+	}
+	return nil, false
+}
+
+func (w *welcome) view(width, height int) string {
+	width = max(20, width)
+	inner := max(16, min(width-4, 76))
+	title := lipgloss.NewStyle().Bold(true).Foreground(theme.AccentColor())
+	muted := lipgloss.NewStyle().Foreground(theme.MutedColor())
+	chosen := lipgloss.NewStyle().Bold(true).Foreground(theme.FocusColor())
+	lines := []string{"", title.Render("Welcome to DataTug")}
+	for _, line := range strings.Split(ansi.Wrap("Browse your databases from the terminal: open tables, follow relationships, and ask questions in plain words once AI is set up.", inner, " "), "\n") {
+		lines = append(lines, muted.Render(line))
+	}
+	lines = append(lines, "")
+	for i, choice := range welcomeChoices {
+		marker, style := "  ", lipgloss.NewStyle().Bold(true)
+		if i == w.index {
+			marker, style = "▸ ", chosen
+		}
+		lines = append(lines, style.Render(marker+choice.title))
+		for _, detail := range strings.Split(ansi.Wrap(choice.detail, inner-4, " "), "\n") {
+			lines = append(lines, muted.Render("    "+detail))
+		}
+		lines = append(lines, "")
+	}
+	switch {
+	case w.busy:
+		lines = append(lines, chosen.Render("Preparing the sample…"))
+	case w.failed != "":
+		lines = append(lines, strings.Split(ansi.Wrap(w.failed, inner, " "), "\n")...)
+	default:
+		lines = append(lines, theme.WorkspaceKeyHint("↑↓")+" choose   "+theme.WorkspaceKeyHint("Enter")+" select   "+theme.WorkspaceKeyHint("Esc")+" all projects")
+	}
+	for i, line := range lines {
+		lines[i] = ansi.Truncate("  "+line, width, "…")
+	}
+	if len(lines) > height && height > 0 {
+		lines = lines[:height]
+	}
+	return strings.Join(lines, "\n")
+}

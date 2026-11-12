@@ -35,7 +35,7 @@ func TestProviderUnavailableConversationAskWithContext(t *testing.T) {
 	conv := providerUnavailableConversation{}
 	turn, err := conv.AskWithContext(context.Background(), "question", "context")
 	require.NoError(t, err)
-	require.Contains(t, turn.Text, "Configure an AI provider")
+	require.Equal(t, providerUnavailableReply, turn.Text)
 }
 
 // Not parallel: sets global RunTeaProgram seam in pkg/chat.

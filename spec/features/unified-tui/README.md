@@ -37,6 +37,21 @@ Outside a modal, Shift+Up/Down navigates chat history and Shift+Left/Right moves
 
 F9 and visible Expand enlarge the selected grid across the covered side panels using the SAME block/grid and RecordSet identity. Save panel layout, chat position, row identity, selected column, sort and scroll; do not clone or rerun. Esc restores them after any active search/editing layer has been dismissed, one layer per press as specified below. Shift+Left/Right from expansion first restores the saved layout, then reveals and focuses the requested side even if it was hidden before expansion. F4 transfers input to the composer without losing the result. Inspect retains an explicit selected-result/row target when focus leaves the grid or when an older result is selected; keyboard focus alone is not the inspection identity.
 
+### First run
+
+A machine with no settings file, or an empty one, has no projects: nothing there is an error. With no registered project the workspace opens on a welcome screen with two choices and nothing to learn first:
+
+- **Explore the sample music store** installs the sample project (`datatug-sample`: the bundled Chinook SQLite database alone, its schema scanned, no access policy), registers it and reopens the workspace on it with its `Invoice` table already open. It needs no network, no signup and no AI provider, and prints nothing to the terminal while the workspace is on screen. A sample that is already there is reused, and a missing database, an unfinished scan or a deleted folder is restored. Only a folder the install made (it carries a marker) or an empty one is written to: a project registered under the same ID elsewhere is used as it is, and an existing database file is never replaced.
+- **Use my own database** (and Esc) leaves the welcome screen for the Projects page.
+
+The sample project is not the Perimeter demo of `datatug demo install`: that project's policy admits an agent role to a few rows and is driven from an AI agent, not from this workspace.
+
+F3 lists the registered projects as they are at that moment; with none it opens the Projects page and keeps a page that is already open there. A project chosen with F3 that cannot open for chat returns to the setup screen with the reason, and choosing it again is a retry. The workspace never exits because of a choice.
+
+Opening a table from the Explorer never refuses because of sensitive columns alone. A chat read is strict and cannot mask, so a column whose sensitivity label is protected (stored, or suggested from its name) is left out of the read, and the workspace says how many columns were hidden and which. A table that is protected as a whole, a view, and a project whose labels cannot be read keep refusing. Queries a person or a model writes are judged by the label guard exactly as before.
+
+Without an AI provider (none configured, or a hosted model with no API key) the workspace still opens tables and runs queries. A question in plain words gets one plain answer saying that AI is not set up and where to set it up; it never shows a provider's authentication error.
+
 ### Input, discovery and Explorer actions
 
 Global bindings and visible controls are:
@@ -162,6 +177,22 @@ Ctrl+P and `/actions` open a searchable, context-aware action list; F1 exposes a
 ### AC: workspace-entry
 
 Default/ui and chat launches use one workspace/program; Explore retains Projects/Viewers/Settings and composer, chat focuses composer, and empty/provider-unconfigured starts remain useful without extra input.
+
+### AC: first-run-welcome
+
+Given no settings file (or an empty one), bare `datatug` shows the welcome screen; Enter on the sample installs, scans and registers `datatug-sample` without terminal output and reopens the workspace on it with `Invoice` rows on screen; "Use my own database" and Esc lead to the Projects page with its create/add actions; a failed install is said on the welcome screen and can be retried.
+
+### AC: first-run-no-dead-end
+
+With no project, F3 opens Projects and keeps a half-filled form; after a project is created or added, F3 lists it without a restart; a chosen project that cannot open returns to setup with the reason, and no choice exits the program.
+
+### AC: sensitive-columns-open
+
+Given a table with protected-label columns (stored or suggested), Explorer Open data returns the other columns and names the hidden ones; given a table protected as a whole, a view, or unreadable labels, the read refuses as before; typed and model-written queries are unchanged.
+
+### AC: no-ai-plain-answer
+
+Given a hosted model with no API key and no explicit endpoint, the session notice and every chat reply say that AI is not set up and name the ways to add it that exist (hosted AI after `datatug auth login`, or a provider key), no request is sent to the provider, and Open data and New query work.
 
 ### AC: visual-focus
 

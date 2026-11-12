@@ -45,6 +45,8 @@ func (u *ChatUI) openWorkspaceQuery(object ProjectObject, run bool) tea.Cmd {
 		}
 		return cmd
 	}
+	// The editor starts from the same document: say what it leaves out.
+	u.workspaceFeedback = hiddenColumnsNote(object)
 	if u.queryEditors == nil {
 		u.queryEditors = map[string]*workspaceQueryEditor{}
 	}
@@ -73,6 +75,9 @@ func (u *ChatUI) runWorkspaceQuery(ref ContextReference, document string) tea.Cm
 		return nil
 	}
 	u.workspaceMutationPending = true
+	// The note of an earlier Open data belongs to that read only: a read that
+	// was cancelled must not label the result of this one.
+	u.openDataNote = ""
 	sessionID, generation, sessions := u.sessionID, u.workspaceGeneration, u.sessions
 	operationID, ctx := u.beginOperation("Query")
 	interaction := u.workspaceInteraction

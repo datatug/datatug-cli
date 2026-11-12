@@ -68,6 +68,17 @@ func TestOpenDataShowsTheHiddenColumnsNoteWithItsResult(t *testing.T) {
 	u.workspaceMutationPending = false
 	u.cancelOperation(false)
 
+	// Opening the editor says what its document leaves out, and a read started
+	// after a cancelled Open data does not inherit that note.
+	if u.openWorkspaceQuery(customerObject(), false); u.workspaceFeedback != "2 sensitive columns hidden in Customer: Email, Phone" {
+		t.Fatalf("the query editor did not say what it leaves out: %q", u.workspaceFeedback)
+	}
+	fresh, _ := newTestChatUI(t, nil, Turn{})
+	fresh.openDataNote = "stale"
+	if cmd := fresh.runWorkspaceQuery(customerObject().Reference, "{}"); cmd == nil || fresh.openDataNote != "" {
+		t.Fatalf("a new read kept the note of a cancelled one: %q (%s)", fresh.openDataNote, fresh.workspaceFeedback)
+	}
+
 	note := "2 sensitive columns hidden in Customer: Email, Phone"
 	u.openDataNote = note
 	opID, _ := u.beginOperation("Query")
@@ -132,7 +143,7 @@ func TestChooseProjectClosesTheWorkspaceOnThatProject(t *testing.T) {
 
 // A hosted model with no key cannot answer; a local or named endpoint can.
 func TestMissingAPIKey(t *testing.T) {
-	for _, env := range []string{"OPENAI_API_KEY", "OPENAI_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "OLLAMA_API_KEY", "OLLAMA_HOST"} {
+	for _, env := range []string{"OPENAI_API_KEY", "OPENAI_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "OLLAMA_API_KEY", "OLLAMA_HOST", "AGENTGATEWAY_API_KEY", "OPENROUTER_API_KEY"} {
 		t.Setenv(env, "")
 	}
 	for name, tc := range map[string]struct {
@@ -144,6 +155,8 @@ func TestMissingAPIKey(t *testing.T) {
 		"key from the profile":         {model: "gpt-5.6-luna", apiKey: "k"},
 		"endpoint named by the caller": {model: "gpt-5.6-luna", baseURL: "http://127.0.0.1:9/v1"},
 		"local Ollama needs no key":    {model: "ollama/llama3"},
+		"local gateway needs no key":   {model: "agentgateway/openai/gpt-6-astra"},
+		"OpenRouter, no key":           {model: "openrouter/openai/gpt-6-astra", want: true},
 		"unknown model":                {model: "totally-unrecognized-model-xyz"},
 	} {
 		if got := MissingAPIKey(tc.model, tc.baseURL, tc.apiKey); got != tc.want {

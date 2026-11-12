@@ -33,16 +33,17 @@ func stubSampleDoors(t *testing.T) *sampleDoors {
 	t.Helper()
 	d := &sampleDoors{root: t.TempDir()}
 	oldReg, oldAdd, oldScan, oldFiles, oldRoot := sampleRegistration, sampleAddToSettings, sampleScan, sampleFixtureFiles, sampleProjectsRootDir
-	oldMkdir, oldWrite := demoInstallMkdirAll, demoInstallWriteFile
+	oldMkdir, oldWrite, oldRename := demoInstallMkdirAll, demoInstallWriteFile, sampleRename
 	t.Cleanup(func() {
 		sampleRegistration, sampleAddToSettings, sampleScan, sampleFixtureFiles, sampleProjectsRootDir = oldReg, oldAdd, oldScan, oldFiles, oldRoot
-		demoInstallMkdirAll, demoInstallWriteFile = oldMkdir, oldWrite
+		demoInstallMkdirAll, demoInstallWriteFile, sampleRename = oldMkdir, oldWrite, oldRename
 	})
 	sampleRegistration = func(string) (string, error) { return d.registered, nil }
 	sampleAddToSettings = func(ref dtconfig.ProjectRef) error { d.added = append(d.added, ref); return nil }
-	sampleScan = func(_ context.Context, dir, database string) error {
+	sampleScan = func(dir, database string) error {
 		d.scanned = append(d.scanned, dir+"|"+database)
-		return nil
+		// What the real scan leaves, and what a later run looks for.
+		return os.MkdirAll(filepath.Join(dir, "dbmodels", demofixtures.ChinookSource), 0o755)
 	}
 	sampleFixtureFiles = func() ([]demofixtures.File, error) {
 		return []demofixtures.File{
@@ -56,7 +57,7 @@ func stubSampleDoors(t *testing.T) *sampleDoors {
 
 func TestInstallSampleWritesScansAndRegisters(t *testing.T) {
 	d := stubSampleDoors(t)
-	id, err := installSample(context.Background())
+	id, err := installSample()
 	if err != nil || id != sampleProjectID {
 		t.Fatalf("id=%q err=%v", id, err)
 	}
@@ -75,24 +76,39 @@ func TestInstallSampleWritesScansAndRegisters(t *testing.T) {
 		t.Fatalf("registered = %+v", d.added)
 	}
 
-	// A database from an earlier run is kept, not written again.
-	if err := os.WriteFile(database, []byte("kept"), 0o644); err != nil {
-		t.Fatal(err)
+	if _, statErr := os.Stat(database + ".partial"); statErr == nil {
+		t.Fatal("the partial file was left behind")
 	}
-	if _, err := installSample(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if content, _ := os.ReadFile(database); string(content) != "kept" {
-		t.Fatalf("an existing sample database was overwritten: %q", content)
-	}
-}
 
-func TestInstallSampleReusesARegisteredSample(t *testing.T) {
-	d := stubSampleDoors(t)
-	d.registered = "/somewhere/else"
-	id, err := installSample(context.Background())
-	if err != nil || id != sampleProjectID || len(d.scanned) != 0 || len(d.added) != 0 {
-		t.Fatalf("id=%q err=%v scanned=%v added=%v", id, err, d.scanned, d.added)
+	// A second run finds everything in place: nothing is written, scanned or
+	// registered again.
+	d.registered = dir
+	if _, err := installSample(); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.scanned) != 1 || len(d.added) != 1 {
+		t.Fatalf("a healthy sample was redone: scanned=%v added=%v", d.scanned, d.added)
+	}
+
+	// A database cut short by an interrupted write is replaced, and a sample
+	// whose folder was deleted while registered is put back where it was.
+	if err := os.WriteFile(database, []byte("sqli"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := installSample(); err != nil {
+		t.Fatal(err)
+	}
+	if content, _ := os.ReadFile(database); string(content) != "sqlite bytes" {
+		t.Fatalf("a damaged sample database was kept: %q", content)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := installSample(); err != nil {
+		t.Fatal(err)
+	}
+	if content, _ := os.ReadFile(database); string(content) != "sqlite bytes" || len(d.scanned) != 2 || len(d.added) != 1 {
+		t.Fatalf("a deleted sample was not restored in place: db=%q scanned=%v added=%v", content, d.scanned, d.added)
 	}
 }
 
@@ -105,13 +121,14 @@ func TestInstallSampleFailures(t *testing.T) {
 		"database cannot be written": func() {
 			demoInstallWriteFile = func(string, []byte, os.FileMode) error { return boom }
 		},
-		"scan fails":              func() { sampleScan = func(context.Context, string, string) error { return boom } },
-		"registration is refused": func() { sampleAddToSettings = func(dtconfig.ProjectRef) error { return boom } },
+		"database cannot be put in place": func() { sampleRename = func(string, string) error { return boom } },
+		"scan fails":                      func() { sampleScan = func(string, string) error { return boom } },
+		"registration is refused":         func() { sampleAddToSettings = func(dtconfig.ProjectRef) error { return boom } },
 	} {
 		t.Run(name, func(t *testing.T) {
 			stubSampleDoors(t)
 			breakDoor()
-			if id, err := installSample(context.Background()); !errors.Is(err, boom) || id != "" {
+			if id, err := installSample(); !errors.Is(err, boom) || id != "" {
 				t.Fatalf("id=%q err=%v, want the failure", id, err)
 			}
 		})
@@ -137,7 +154,7 @@ func TestScanSampleMakesAScannedProject(t *testing.T) {
 			}
 		}
 	}
-	if err := scanSample(context.Background(), dir, database); err != nil {
+	if err := scanSample(dir, database); err != nil {
 		t.Fatalf("scan: %v", err)
 	}
 	columns := filepath.Join(dir, "dbmodels", demofixtures.ChinookSource, "main", "tables", "Invoice", "main.Invoice.columns.json")
@@ -179,7 +196,7 @@ func TestWelcomeKeys(t *testing.T) {
 
 	// The sample: a failure is said and can be retried; success opens it.
 	press("up")
-	installSampleFunc = func(context.Context) (string, error) { return "", errors.New("disk\nfull") }
+	installSampleFunc = func() (string, error) { return "", errors.New("disk\nfull") }
 	cmd, done := press("enter")
 	if cmd == nil || done || !w.busy {
 		t.Fatalf("Enter on the sample: cmd=%v done=%v busy=%v", cmd, done, w.busy)
@@ -191,13 +208,13 @@ func TestWelcomeKeys(t *testing.T) {
 		t.Fatal("no progress line while the sample is prepared")
 	}
 	w.update(cmd())
-	if w.busy || w.failed != "The sample could not be prepared: disk full" || len(chosen) != 0 {
+	if w.busy || w.failed != "The sample could not be prepared: disk full. Press Enter to try again, or Esc for your own projects." || len(chosen) != 0 {
 		t.Fatalf("after a failed install: busy=%v failed=%q chosen=%v", w.busy, w.failed, chosen)
 	}
 	if !strings.Contains(ansi.Strip(w.view(80, 24)), "disk full") {
 		t.Fatal("the failure is not shown")
 	}
-	installSampleFunc = func(context.Context) (string, error) { return sampleProjectID, nil }
+	installSampleFunc = func() (string, error) { return sampleProjectID, nil }
 	cmd, _ = press("enter")
 	if w.failed != "" {
 		t.Fatal("a retry keeps the old failure on screen")
@@ -232,7 +249,7 @@ func TestFirstRunStartsOnTheWelcomeScreen(t *testing.T) {
 	oldSettings, oldInstall := getChatSettings, installSampleFunc
 	t.Cleanup(func() { getChatSettings, installSampleFunc = oldSettings, oldInstall })
 	getChatSettings = func() (dtconfig.Settings, error) { return dtconfig.Settings{}, os.ErrNotExist }
-	installSampleFunc = func(context.Context) (string, error) { return sampleProjectID, nil }
+	installSampleFunc = func() (string, error) { return sampleProjectID, nil }
 	start := workspaceStart{modules: []datatugui.Module{{ID: "projects", Text: "Projects", Shortcut: 'p', Root: func() nav.Page {
 		return nav.Page{Content: nav.Static("Projects", "Projects page content")}
 	}}}, options: datatugui.Options{Start: "projects"}}
@@ -272,6 +289,26 @@ func TestFirstRunStartsOnTheWelcomeScreen(t *testing.T) {
 		t.Fatalf("Esc did not show the Projects page: %s", view)
 	}
 
+	// Through the shell, as a person presses them: F3 leaves the welcome for
+	// Projects, and a sample that finishes after that is announced, not opened.
+	pane.welcome = &welcome{choose: ui.ChooseProject}
+	ui.Model().Update(uitest.Key("f3"))
+	if pane.welcome != nil {
+		t.Fatal("F3 did not leave the welcome screen")
+	}
+	if _, cmd := pane.Update(sampleReadyMsg{project: sampleProjectID}); cmd != nil || pane.notice != "The sample music store is ready: press F3 to open it." {
+		t.Fatalf("a late sample: cmd=%v notice=%q", cmd, pane.notice)
+	}
+	if pane.Update(sampleReadyMsg{err: errors.New("disk full")}); pane.notice != "The sample could not be prepared: disk full." {
+		t.Fatalf("a late failure: notice=%q", pane.notice)
+	}
+	pane.welcome = &welcome{choose: ui.ChooseProject}
+	ui.Model().Update(uitest.Key("down"))
+	ui.Model().Update(uitest.Key("enter"))
+	if pane.welcome != nil {
+		t.Fatal("Enter on my own database, through the shell, did not leave the welcome screen")
+	}
+
 	// The real setup workspace shows the welcome only when nothing is registered.
 	if next, err := runSetupWorkspace(start, "", nil); err != nil || next != "" {
 		t.Fatalf("next=%q err=%v", next, err)
@@ -281,8 +318,10 @@ func TestFirstRunStartsOnTheWelcomeScreen(t *testing.T) {
 // Choosing the sample opens it with its first table and a line of guidance;
 // another project gets neither.
 func TestWorkspaceLoopOpensTheSampleWithItsFirstTable(t *testing.T) {
-	oldRun, oldSetup := runChatProjectFunc, runSetupWorkspaceFunc
-	t.Cleanup(func() { runChatProjectFunc, runSetupWorkspaceFunc = oldRun, oldSetup })
+	oldRun, oldSetup, oldInstall := runChatProjectFunc, runSetupWorkspaceFunc, installSampleFunc
+	t.Cleanup(func() { runChatProjectFunc, runSetupWorkspaceFunc, installSampleFunc = oldRun, oldSetup, oldInstall })
+	ensured := 0
+	installSampleFunc = func() (string, error) { ensured++; return sampleProjectID, nil }
 	var seen []chatOptions
 	runChatProjectFunc = func(_ *cobra.Command, options chatOptions) (string, error) {
 		seen = append(seen, options)
@@ -297,6 +336,9 @@ func TestWorkspaceLoopOpensTheSampleWithItsFirstTable(t *testing.T) {
 	runSetupWorkspaceFunc = func(workspaceStart, string, []tea.ProgramOption) (string, error) { return sampleProjectID, nil }
 	if err := runWorkspaceLoop(chatCommand(), chatOptions{project: ".", workspace: &workspaceStart{}}); err != nil {
 		t.Fatal(err)
+	}
+	if ensured != 1 {
+		t.Fatalf("the sample was checked %d time(s) before it was opened", ensured)
 	}
 	if len(seen) != 3 || seen[1].project != sampleProjectID || seen[1].notice != sampleNotice || seen[1].openAtStart != sampleFirstTable {
 		t.Fatalf("the sample was opened as %+v", seen)

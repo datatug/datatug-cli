@@ -734,8 +734,12 @@ type providerUnavailableConversation struct{}
 // Without an AI provider the workspace still opens tables and runs queries;
 // only questions in plain words need one. Both texts say where to set it up.
 const (
-	providerUnavailableNotice = "No AI is set up yet, so questions in plain words cannot be answered. Opening tables in the Explorer and New query work without it. To add AI: Ctrl+P → Explore → Settings → AI."
-	providerUnavailableReply  = "I can't answer yet: no AI is set up. Add an AI profile under Ctrl+P → Explore → Settings → AI. Meanwhile, open any table from the Explorer (Shift+←, then Enter) or write a query with Ctrl+N. No query was executed."
+	providerUnavailableNotice = "No AI is set up yet, so questions in plain words cannot be answered. Opening tables from the Explorer works without it. " + providerSetupAdvice
+	providerUnavailableReply  = "I can't answer yet: no AI is set up. Tables still open from the Explorer. " + providerSetupAdvice + " No query was executed."
+	// providerSetupAdvice names the two ways that exist today: DataTug's hosted
+	// AI after a sign-in, or a provider key in the environment. It names no key
+	// of the terminal: the browser shows the same text.
+	providerSetupAdvice = "To add AI, quit and either sign in for DataTug's hosted AI (datatug auth login, then datatug chat --model cloud) or set a provider key such as OPENAI_API_KEY and start datatug again."
 )
 
 func (providerUnavailableConversation) AskWithContext(context.Context, string, string) (chat.Turn, error) {

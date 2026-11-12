@@ -76,6 +76,9 @@ func runWorkspaceLoop(cmd *cobra.Command, options chatOptions) error {
 			// Choosing the same project again is a retry, never a silent exit.
 			switchChatProject(&options, next)
 			if next == sampleProjectID {
+				// A sample that was damaged since (its folder deleted, say) is
+				// put back; when that fails, opening it says why.
+				_, _ = installSampleFunc()
 				options.notice, options.openAtStart = sampleNotice, sampleFirstTable
 			}
 			chosen = true
@@ -245,6 +248,15 @@ func (p *explorePane) Update(msg tea.Msg) (chatshell.SidePanel, tea.Cmd) {
 			}
 			return p, cmd
 		}
+	}
+	if ready, ok := msg.(sampleReadyMsg); ok {
+		// The person left the welcome screen (F3) while the sample was being
+		// prepared: say how it ended instead of closing the page under them.
+		p.notice = "The sample music store is ready: press F3 to open it."
+		if ready.err != nil {
+			p.notice = sampleFailure(ready.err)
+		}
+		return p, nil
 	}
 	if alert, ok := msg.(nav.AlertMsg); ok {
 		// The pane draws the page only, so a modal of the page would be an

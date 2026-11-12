@@ -41,7 +41,7 @@ F9 and visible Expand enlarge the selected grid across the covered side panels u
 
 A machine with no settings file, or an empty one, has no projects: nothing there is an error. With no registered project the workspace opens on a welcome screen with two choices and nothing to learn first:
 
-- **Explore the sample music store** installs the sample project (`datatug-sample`: the bundled Chinook SQLite database alone, its schema scanned, no access policy), registers it and reopens the workspace on it with its `Invoice` table already open. It needs no network, no signup and no AI provider, and prints nothing to the terminal while the workspace is on screen. A sample that is already registered is reused as it is.
+- **Explore the sample music store** installs the sample project (`datatug-sample`: the bundled Chinook SQLite database alone, its schema scanned, no access policy), registers it and reopens the workspace on it with its `Invoice` table already open. It needs no network, no signup and no AI provider, and prints nothing to the terminal while the workspace is on screen. A sample that is already there is reused; a missing or damaged database, scan or folder is restored.
 - **Use my own database** (and Esc) leaves the welcome screen for the Projects page.
 
 The sample project is not the Perimeter demo of `datatug demo install`: that project's policy admits an agent role to a few rows and is driven from an AI agent, not from this workspace.
@@ -192,7 +192,7 @@ Given a table with protected-label columns (stored or suggested), Explorer Open 
 
 ### AC: no-ai-plain-answer
 
-Given a hosted model with no API key and no explicit endpoint, the session notice and every chat reply say that AI is not set up and where to configure it, no request is sent to the provider, and Open data and New query work.
+Given a hosted model with no API key and no explicit endpoint, the session notice and every chat reply say that AI is not set up and name the ways to add it that exist (hosted AI after `datatug auth login`, or a provider key), no request is sent to the provider, and Open data and New query work.
 
 ### AC: visual-focus
 

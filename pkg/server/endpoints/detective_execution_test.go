@@ -28,7 +28,9 @@ func TestDetectiveExistingExecutionUsesReceiptAndSameRows(t *testing.T) {
 	require.NoError(t, err)
 	ref := apicontract.ExecutionRef{ProjectID: project, StoreID: project, ExecutionID: "exact-rows"}
 	rows := apicontract.Recordset{Columns: []apicontract.Column{{Name: "id", Type: string(apicontract.ValueTypeInteger)}}, Rows: [][]apicontract.TypedValue{{apicontract.NewIntegerValue("1")}, {apicontract.NewIntegerValue("2")}}}
-	at := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
+	// A recent moment: a fixed date ages past the snapshot retention window
+	// and the test then fails with SNAPSHOT_EXPIRED (it did on 2026-11-12).
+	at := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
 	snapshotRef, stored, err := store.PutSnapshot(ctx, ref, rows, at)
 	require.NoError(t, err)
 	require.True(t, stored)

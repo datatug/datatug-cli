@@ -3,6 +3,7 @@ package commands
 import (
 	tea "charm.land/bubbletea/v2"
 	"context"
+	"fmt"
 	"strings"
 	"unicode/utf8"
 
@@ -48,6 +49,7 @@ func switchChatProject(options *chatOptions, project string) {
 
 func runWorkspaceLoop(cmd *cobra.Command, options chatOptions) error {
 	programOptions := options.workspace.programOptions
+	chosen := false // options.project was chosen by the person in this run
 	for {
 		if options.ai != "" {
 			if err := resolveChatAIProfile(&options, cmd); err != nil {
@@ -56,34 +58,90 @@ func runWorkspaceLoop(cmd *cobra.Command, options chatOptions) error {
 		}
 		next, err := runChatProjectFunc(cmd, options)
 		if err != nil {
-			ui := chat.NewChatUI(context.Background(), setupConversation{}, "setup")
-			choices := []chat.ProjectChoice{}
-			if settings, loadErr := getChatSettings(); loadErr == nil {
-				for _, p := range settings.Projects {
-					if p != nil && p.Path != "" {
-						choices = append(choices, chat.ProjectChoice{Key: p.ID, Title: p.Title, Detail: p.Path})
-					}
-				}
+			// The project the person chose could not be opened for chat: say
+			// why on the setup screen. The project of the start (the current
+			// folder, or the last one used) simply is not there on a first run.
+			reason := ""
+			if chosen {
+				reason = fmt.Sprintf("Could not open project %q for chat: %s", options.project, strings.Join(strings.Fields(err.Error()), " "))
 			}
-			ui.SetProjectChoices(choices)
-			ui.SetSessionNotices([]string{"Choose a project with F3 or browse Projects and Settings in Explorer. Configure an AI profile to start querying with chat."})
-			mountExplore(ui, *options.workspace)
-			if runErr := ui.Run(programOptions...); runErr != nil {
-				return runErr
+			next, err = runSetupWorkspaceFunc(*options.workspace, reason, programOptions)
+			if err != nil {
+				return err
 			}
-			next = ui.SelectedProject()
+			if next == "" {
+				return nil
+			}
+			// Choosing the same project again is a retry, never a silent exit.
+			switchChatProject(&options, next)
+			chosen = true
+			continue
 		}
 		if next == "" || next == options.project {
 			return nil
 		}
 		switchChatProject(&options, next)
+		chosen = true
 	}
 }
 
-type setupConversation struct{}
+// runSetupWorkspaceFunc shows the workspace without a project and returns the
+// project chosen there with F3, or "" when the person quit.
+var runSetupWorkspaceFunc = runSetupWorkspace
 
-func (setupConversation) Ask(context.Context, string) (chat.Turn, error) {
-	return chat.Turn{Text: "Chat is ready for setup. Choose a project with F3. Configure a provider under Settings → AI, then reopen this workspace. Your draft stays editable; no query has been executed."}, nil
+func runSetupWorkspace(start workspaceStart, reason string, programOptions []tea.ProgramOption) (string, error) {
+	ui := chat.NewChatUI(context.Background(), setupConversation{reason: reason}, "setup")
+	ui.SetProjectChoicesLoader(registeredProjectChoices)
+	notices := []string{setupNotice}
+	if reason != "" {
+		notices = []string{reason, setupNotice}
+	}
+	ui.SetSessionNotices(notices)
+	mountExplore(ui, start)
+	if err := ui.Run(programOptions...); err != nil {
+		return "", err
+	}
+	return ui.SelectedProject(), nil
+}
+
+// The setup texts name only what works in this state: F3 lists the registered
+// projects, and with none it opens Projects, where the first is created or
+// added. A chosen project opens for chat when it has what chat needs; when it
+// does not, the reason is shown above these texts.
+const (
+	setupNotice = "No project is open. Press F3 to choose a project; with none yet it opens Projects, where you create or add your first. Chat needs a project with a database, and an AI profile, configured under Settings."
+	setupReply  = "Chat cannot answer yet: no project is open. Press F3 to choose a project; with none yet it opens Projects, where you create or add your first. Chat needs a project with a database, and an AI profile, configured under Settings. No query has been executed."
+)
+
+// registeredProjectChoices lists the projects of the settings file as they are
+// now; none when there is no settings file yet.
+func registeredProjectChoices() []chat.ProjectChoice {
+	choices := []chat.ProjectChoice{}
+	settings, err := getChatSettings()
+	if err != nil {
+		return choices
+	}
+	for _, p := range settings.Projects {
+		if p != nil && p.Path != "" {
+			title := p.Title
+			if title == "" {
+				title = p.ID
+			}
+			choices = append(choices, chat.ProjectChoice{Key: p.ID, Title: title, Detail: p.Path})
+		}
+	}
+	return choices
+}
+
+type setupConversation struct {
+	reason string // why the chosen project did not open for chat, if one was chosen
+}
+
+func (c setupConversation) Ask(context.Context, string) (chat.Turn, error) {
+	if c.reason != "" {
+		return chat.Turn{Text: c.reason + " " + setupReply}, nil
+	}
+	return chat.Turn{Text: setupReply}, nil
 }
 
 type exploreWorkspace struct {
@@ -97,6 +155,8 @@ type explorePane struct {
 	contentFocused bool
 	index          int
 	search         string
+	notice         string // the last alert of a page, shown until the next key
+	opened         int    // the module whose page is shown
 }
 
 func mountExplore(ui *chat.ChatUI, start workspaceStart) {
@@ -104,7 +164,7 @@ func mountExplore(ui *chat.ChatUI, start workspaceStart) {
 	pane := &explorePane{workspace: state}
 	for i, module := range start.modules {
 		if module.ID == start.options.Start {
-			pane.index = i
+			pane.index, pane.opened = i, i
 		}
 	}
 	ui.SetExplorePanel(pane)
@@ -142,6 +202,10 @@ func (p *explorePane) View(w, h int, focused bool) string {
 	if p.search != "" {
 		selected += " · Search: " + p.search
 	}
+	if p.notice != "" {
+		// In place of the key legend, so the page keeps its full height.
+		label = p.notice
+	}
 	return ansi.Truncate(label, max(1, w), "…") + "\n" + ansi.Truncate(selected, max(1, w), "…") + "\n" + shell.Content().View()
 }
 
@@ -159,7 +223,14 @@ func (p *explorePane) CapturesEsc() bool { return p.search != "" }
 
 func (p *explorePane) Update(msg tea.Msg) (chatshell.SidePanel, tea.Cmd) {
 	state := p.workspace
+	if alert, ok := msg.(nav.AlertMsg); ok {
+		// The pane draws the page only, so a modal of the page would be an
+		// invisible dialog that swallows the next key. Say it in the pane.
+		p.notice = strings.TrimSuffix(alert.Title+": "+alert.Message, ": ")
+		return p, nil
+	}
 	if k, ok := msg.(tea.KeyPressMsg); ok {
+		p.notice = ""
 		if k.String() == "tab" || k.String() == "shift+tab" {
 			p.contentFocused = !p.contentFocused
 			return p, state.update(nav.SetFocusMsg{To: nav.FocusToContent})
@@ -174,6 +245,7 @@ func (p *explorePane) Update(msg tea.Msg) (chatshell.SidePanel, tea.Cmd) {
 			case "enter":
 				if len(visible) > 0 {
 					p.contentFocused = true
+					p.opened = visible[min(p.index, len(visible)-1)]
 					return p, state.update(datatugui.OpenModuleMsg{ID: state.modules[visible[min(p.index, len(visible)-1)]].ID, Focus: nav.FocusToContent})
 				}
 			case "esc":
@@ -198,6 +270,25 @@ func (s *exploreWorkspace) update(msg tea.Msg) tea.Cmd {
 	model, cmd := s.app.Update(msg)
 	s.app = model.(datatugui.App)
 	return cmd
+}
+
+// OpenProjects shows the Projects page with the keyboard on it: where F3 leads
+// while no project is registered.
+func (p *explorePane) OpenProjects() tea.Cmd {
+	state := p.workspace
+	for i, module := range state.modules {
+		if module.ID == datatugui.ScreenProjects {
+			wasOpen := p.opened == i
+			p.search, p.index, p.opened, p.contentFocused = "", i, i, true
+			if wasOpen {
+				// Already on Projects, perhaps in a half-filled form: reopening
+				// the module would discard its pages.
+				return state.update(nav.SetFocusMsg{To: nav.FocusToContent})
+			}
+			return state.update(datatugui.OpenModuleMsg{ID: module.ID, Focus: nav.FocusToContent})
+		}
+	}
+	return nil
 }
 
 func (p *explorePane) Init() tea.Cmd { return p.workspace.app.Init() }

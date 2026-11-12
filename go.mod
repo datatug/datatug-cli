@@ -55,7 +55,7 @@ require (
 	github.com/dal-go/dalgo2typesense v0.0.0-20261028075318-b1ba445d3434
 	github.com/dal-go/record v0.1.5
 	github.com/datatug/cliformat v0.0.8
-	github.com/datatug/datatug-core v0.143.0
+	github.com/datatug/datatug-core v0.143.2
 	github.com/datatug/sql2csv v0.0.3
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/go-sql-driver/mysql v1.10.0
@@ -91,7 +91,7 @@ require (
 	github.com/strongo/random v0.0.3
 	github.com/strongo/slice v0.3.14
 	github.com/strongo/validation v0.0.17
-	github.com/tuigoff/tuigoff v0.8.0
+	github.com/tuigoff/tuigoff v0.8.1
 	github.com/xo/dburl v0.24.2
 	github.com/xuri/excelize/v2 v2.11.0
 	github.com/zalando/go-keyring v0.2.8

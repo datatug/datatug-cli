@@ -265,6 +265,18 @@ A machine with no project starts on a welcome screen; one key installs, scans an
 
 **Evidence:** datatug/datatug-cli#605 (dead-end fixes, released v0.153.2); unit and journey tests of the welcome screen, the sample install, protected columns and the no-AI answer; a first-run walk in a terminal with a cleared environment and an empty home directory. Not verified on Windows Terminal.
 
+### Task 18: Ready-made questions and hosted AI on the sample
+
+**Id:** task-18
+**Verifies:** unified-tui#ac:sample-ready-made-questions, unified-tui#ac:sample-hosted-ai
+**Status:** complete
+**Owner:** CLI implementation owner
+**Depends on:** Task 17
+
+Without AI the sample answers four ready-made questions by running queries written in advance through the chat executor; signed in and with no other AI, the sample alone switches to DataTug's hosted AI and says what goes to the cloud.
+
+**Evidence:** unit tests of matching, the scripted conversation and the switch; a test that installs the real sample, opens its chat and gets rows for each question under strict labels; a test of the signed-in path against a stand-in plan endpoint; a walk in a terminal with a cleared environment. The hosted path was not exercised against the real DataTug cloud.
+
 ## Open Questions
 
 Shortcut choices, server-scope defaults and supported/refused query shapes are resolved for the released baseline in the feature and inventory. Broader terminal/OS/modifier compatibility remains unproven beyond the recorded configurations; no automatic support claim is made. Grid-specific browser handoff and nested ancestor paths remain deferred to separate specifications. Incoming user corrections require their own source/evidence reconciliation rather than weakening existing acceptance criteria.

@@ -52,6 +52,13 @@ Opening a table from the Explorer never refuses because of sensitive columns alo
 
 Without an AI provider (none configured, or a hosted model with no API key) the workspace still opens tables and runs queries. A question in plain words gets one plain answer saying that AI is not set up and where to set it up; it never shows a provider's authentication error.
 
+On the sample project a first-time user gets an answer to a question in plain words before any AI is set up:
+
+- **Not signed in, no AI.** The sample opens with four numbered ready-made questions. Typing a number, or the question itself, runs a query written in advance through the chat's own policy-bound executor and shows its result; the answer says that no AI was used. Any other question gets the list again and the way to real AI. No model is asked and nothing leaves the machine.
+- **Signed in (`datatug auth login`), no other AI.** The sample uses DataTug's hosted AI by itself and says so in its first notice, including that questions and the sample's table definitions go to the DataTug cloud and how to stay local (`--model none`). Any doubt (no sign-in, no network, a plan that does not allow it) leaves the ready-made questions in place.
+
+Only the sample project is ever switched to hosted AI without being asked: it is public data. Every other project keeps the plain no-AI answer until the person chooses a model.
+
 ### Input, discovery and Explorer actions
 
 Global bindings and visible controls are:
@@ -193,6 +200,14 @@ Given a table with protected-label columns (stored or suggested), Explorer Open 
 ### AC: no-ai-plain-answer
 
 Given a hosted model with no API key and no explicit endpoint, the session notice and every chat reply say that AI is not set up and name the ways to add it that exist (hosted AI after `datatug auth login`, or a provider key), no request is sent to the provider, and Open data and New query work.
+
+### AC: sample-ready-made-questions
+
+Given the sample project, no AI key and no DataTug sign-in, the first notice lists four numbered questions; each number (or the question text, any case) returns between 1 and 10 rows through the chat executor with strict sensitivity labels and says no AI was used; any other message returns the list and the sign-in advice and runs no query.
+
+### AC: sample-hosted-ai
+
+Given the sample project, a DataTug sign-in whose personal plan allows hosted AI, and no API key, AI profile or explicit model, the chat opens with the hosted model and a notice naming what goes to the cloud; given no sign-in, an unreadable plan, `--model none`, an AI profile or a key, or any project other than the sample, nothing is switched.
 
 ### AC: visual-focus
 

@@ -270,6 +270,10 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	var cloudClient *cloud.Client
 	var cloudContext ai.ClientContext
 	var hostedSession cloudSession
+	isSample := projectCatalog.ID == sampleProjectID
+	if isSample && sampleHostedAI(ctx, cmd, &options) {
+		sessionNotices = append(sessionNotices, sampleHostedNotice)
+	}
 	if options.model == "cloud" {
 		cloudSession, loadErr := loadCloudSession(ctx, options)
 		if loadErr != nil {
@@ -310,7 +314,14 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 			if providerErr != nil || options.model == "none" || chat.MissingAPIKey(options.model, options.baseURL, options.apiKey) {
 				provider = nil
 				conversation = providerUnavailableConversation{}
-				sessionNotices = append(sessionNotices, providerUnavailableNotice)
+				notice := providerUnavailableNotice
+				if isSample {
+					conversation = sampleConversation{source: sourceURL, sourceID: database, run: func(ctx context.Context, tugql []byte) (secureread.Result, error) {
+						return executor.RunTugQL(ctx, sourceURL, tugql, nil)
+					}}
+					notice = sampleQuestionsNotice()
+				}
+				sessionNotices = append(sessionNotices, notice)
 			}
 		}
 		if provider != nil {

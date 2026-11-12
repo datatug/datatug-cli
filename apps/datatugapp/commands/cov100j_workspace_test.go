@@ -21,7 +21,8 @@ func TestSetupConversationAsk(t *testing.T) {
 	conv := setupConversation{}
 	turn, err := conv.Ask(context.Background(), "prompt")
 	require.NoError(t, err)
-	require.Contains(t, turn.Text, "Chat is ready for setup")
+	require.Contains(t, turn.Text, "Press F3 to open Projects")
+	require.Contains(t, turn.Text, "datatug demo install")
 }
 
 func TestExplorePaneTitleAndEsc(t *testing.T) {

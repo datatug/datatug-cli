@@ -66,7 +66,7 @@ func runWorkspaceLoop(cmd *cobra.Command, options chatOptions) error {
 				}
 			}
 			ui.SetProjectChoices(choices)
-			ui.SetSessionNotices([]string{"Choose a project with F3 or browse Projects and Settings in Explorer. Configure an AI profile to start querying with chat."})
+			ui.SetSessionNotices([]string{"No project is open. F3 opens Projects, where you create, add or choose one. Chat answers once a project is open and an AI profile is configured under Settings."})
 			mountExplore(ui, *options.workspace)
 			if runErr := ui.Run(programOptions...); runErr != nil {
 				return runErr
@@ -83,7 +83,7 @@ func runWorkspaceLoop(cmd *cobra.Command, options chatOptions) error {
 type setupConversation struct{}
 
 func (setupConversation) Ask(context.Context, string) (chat.Turn, error) {
-	return chat.Turn{Text: "Chat is ready for setup. Choose a project with F3. Configure a provider under Settings → AI, then reopen this workspace. Your draft stays editable; no query has been executed."}, nil
+	return chat.Turn{Text: "Chat cannot answer yet: no project is open. Press F3 to open Projects, then create, add or choose one. To try DataTug on sample data, quit and run: datatug demo install. An AI provider is configured under Settings → AI. No query has been executed."}, nil
 }
 
 type exploreWorkspace struct {
@@ -198,6 +198,19 @@ func (s *exploreWorkspace) update(msg tea.Msg) tea.Cmd {
 	model, cmd := s.app.Update(msg)
 	s.app = model.(datatugui.App)
 	return cmd
+}
+
+// OpenProjects shows the Projects page with the keyboard on it: where F3 leads
+// while no project is registered.
+func (p *explorePane) OpenProjects() tea.Cmd {
+	state := p.workspace
+	for i, module := range state.modules {
+		if module.ID == datatugui.ScreenProjects {
+			p.search, p.index, p.contentFocused = "", i, true
+			return state.update(datatugui.OpenModuleMsg{ID: module.ID, Focus: nav.FocusToContent})
+		}
+	}
+	return nil
 }
 
 func (p *explorePane) Init() tea.Cmd { return p.workspace.app.Init() }

@@ -63,3 +63,54 @@ func TestUnifiedEntryCompactModulesSearchThenExplicitOpen(t *testing.T) {
 		t.Fatal("Esc did not clear one module search layer")
 	}
 }
+
+// A first run has no project. After the first message the transcript replaces
+// the Explore pane; F3 must bring the Projects page back with the keyboard on it.
+func TestFirstRunF3ReturnsToProjectsAfterChat(t *testing.T) {
+	var modules []datatugui.Module
+	for _, name := range []string{"Projects", "Settings"} {
+		name := name
+		modules = append(modules, datatugui.Module{ID: strings.ToLower(name), Text: name, Shortcut: rune(strings.ToLower(name)[0]), Root: func() nav.Page { return nav.Page{Content: nav.Static(name, name+" page content")} }})
+	}
+	ui := chat.NewChatUI(context.Background(), setupConversation{}, "setup")
+	mountExplore(ui, workspaceStart{modules: modules, options: datatugui.Options{Start: "settings"}})
+	ui.Model().Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	var drain func(tea.Cmd)
+	drain = func(cmd tea.Cmd) {
+		if cmd == nil {
+			return
+		}
+		msg := cmd()
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			for _, next := range batch {
+				drain(next)
+			}
+			return
+		}
+		_, next := ui.Model().Update(msg)
+		drain(next)
+	}
+	drain(ui.Model().CenterPanel().(*explorePane).Init())
+	if view := ansi.Strip(ui.Model().View().Content); !strings.Contains(view, "Settings page content") {
+		t.Fatalf("start module not shown: %s", view)
+	}
+
+	ui.Model().ShowTranscript()
+	if view := ansi.Strip(ui.Model().View().Content); strings.Contains(view, "page content") {
+		t.Fatalf("transcript did not replace Explore: %s", view)
+	}
+
+	_, open := ui.Model().Update(uitest.Key("f3"))
+	drain(open)
+	view := ansi.Strip(ui.Model().View().Content)
+	if !strings.Contains(view, "Projects page content") || !strings.Contains(view, "‹ Projects ›") || !strings.Contains(view, "Page · Tab modules") {
+		t.Fatalf("F3 without projects did not return to the Projects page: %s", view)
+	}
+}
+
+func TestExplorePaneOpenProjectsWithoutProjectsModule(t *testing.T) {
+	pane := &explorePane{workspace: &exploreWorkspace{modules: []datatugui.Module{{ID: "settings", Text: "Settings"}}}}
+	if cmd := pane.OpenProjects(); cmd != nil || pane.contentFocused {
+		t.Fatal("a pane without a Projects module must stay as it is")
+	}
+}

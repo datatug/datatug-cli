@@ -31,6 +31,21 @@ func (u *ChatUI) SetExplorePanel(p chatshell.SidePanel) {
 	u.shell.SetCenterPanel(p, true)
 }
 
+// showExplore returns the center to Projects and Settings: the transcript
+// replaces that pane on the first message, and without a project it is the
+// only place where one can be created, added or chosen.
+func (u *ChatUI) showExplore() tea.Cmd {
+	if u.explorePanel == nil {
+		u.workspaceFeedback = "No projects yet. Run: datatug demo install"
+		return nil
+	}
+	u.shell.SetCenterPanel(u.explorePanel, true)
+	if p, ok := u.explorePanel.(interface{ OpenProjects() tea.Cmd }); ok {
+		return p.OpenProjects()
+	}
+	return nil
+}
+
 // SetExplorer replaces the left explorer for a setup/navigation workspace.
 func (u *ChatUI) SetExplorer(p chatshell.SidePanel) { u.shell.SetLeftPanel(p) }
 
@@ -48,7 +63,7 @@ func (u *ChatUI) workspaceHints(width int) []string {
 		return []string{"←/→ choose chat", "Enter activate", "Esc return", "Ctrl+Tab next chat", "Ctrl+Shift+Tab previous chat", "Ctrl+W close chat", "Ctrl+P Actions / New chat"}
 	case "explorer":
 		if !u.HasCatalogExplorer() {
-			return []string{"↑↓ navigate", "Enter open", "F3 projects", "Shift+→ center"}
+			return []string{"F3 Projects and Settings", "Shift+→ center", "F4 composer"}
 		}
 		return []string{"Ctrl+F filter objects", "type to search", "←→ tree", "Enter Open data", "Ctrl+P Actions", "Ctrl+N New query", "Ctrl+Shift+←/→ resize panel", "F7 Inspect", "Shift+→ center"}
 	case "center":
@@ -93,6 +108,9 @@ func (u *ChatUI) workspaceHints(width int) []string {
 		tab := "Tab Select text"
 		if len(u.shell.Chips()) > 0 {
 			tab = "Tab attachments / Select text"
+		}
+		if !u.HasCatalogExplorer() && u.explorePanel != nil {
+			return []string{"F3 Projects and Settings", mouse, "Enter send", "Shift+Enter newline", "Shift+↑ history", tab, "Esc previous control", "Ctrl+C quit"}
 		}
 		return append([]string{mouse}, []string{"Enter send", "Shift+Enter newline", "Shift+↑ history", tab, "Esc previous control", "Ctrl+Tab next chat", "Ctrl+C quit"}...)
 	default:

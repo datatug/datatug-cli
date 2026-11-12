@@ -116,7 +116,7 @@ func (u *ChatUI) globalKeys(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		if len(u.projectChoices) == 0 {
-			return nil, true
+			return u.showExplore(), true
 		}
 		return u.shell.PushOverlay(newProjectPickerOverlay(u, u.projectChoices)), true
 	case "f10":

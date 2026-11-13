@@ -171,6 +171,21 @@ func TestServeRecording_EndsWhenTheClientGoes(t *testing.T) {
 				require.NoError(t, err)
 			}
 		},
+		// A client that says goodbye. A pool does so when it closes, but whether
+		// the server reads that message before the pipe is gone is a matter of
+		// timing, so this case sends it itself: the pipe hands the message over
+		// before Flush returns.
+		"when the client terminates": func(t *testing.T, client net.Conn) {
+			frontend := pgproto3.NewFrontend(client, client)
+			frontend.Send(startup)
+			require.NoError(t, frontend.Flush())
+			for range 2 {
+				_, err := frontend.Receive()
+				require.NoError(t, err)
+			}
+			frontend.Send(&pgproto3.Terminate{})
+			require.NoError(t, frontend.Flush())
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

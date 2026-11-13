@@ -70,13 +70,11 @@ func installSample() (string, error) {
 		return sampleProjectID, nil
 	}
 	marker := filepath.Join(dir, filepath.FromSlash(sampleInstallMarker))
-	if entries, _ := os.ReadDir(dir); len(entries) > 0 {
-		if _, statErr := os.Stat(marker); statErr != nil {
-			if registered != "" {
-				return sampleProjectID, nil
-			}
-			return "", fmt.Errorf("%s holds files the sample did not make; move that folder away and try again", dbcopy.PathDisplay(dir))
+	if sampleFolderIsForeign(dir) {
+		if registered != "" {
+			return sampleProjectID, nil
 		}
+		return "", fmt.Errorf("%s holds files the sample did not make; move that folder away and try again", dbcopy.PathDisplay(dir))
 	}
 	// The marker goes first: a run that fails after it can be repeated, and
 	// the next run recognises the folder as its own.
@@ -95,6 +93,11 @@ func installSample() (string, error) {
 	if !sampleScanned(dir) {
 		if err := sampleScan(dir, database); err != nil {
 			return "", fmt.Errorf("cannot read the sample database: %w", err)
+		}
+		// Written only after the whole scan: a scan cut short at any point,
+		// after its first tables too, is run again.
+		if err := demoInstallWriteFile(filepath.Join(dir, filepath.FromSlash(sampleScannedMarker)), []byte("scanned\n"), 0o644); err != nil {
+			return "", fmt.Errorf("cannot finish the sample folder: %w", err)
 		}
 	}
 	if registered == "" {
@@ -129,19 +132,33 @@ func writeSampleDatabase(path string) error {
 	return nil
 }
 
-// sampleScanned reports that a scan of the sample ran to its end: the catalog
-// of the database and the columns of its first table are the last files a scan
-// writes, so a scan that was interrupted is done again.
+// sampleScannedMarker is written when a scan of the sample ran to its end.
+const sampleScannedMarker = ".datatug/sample-scanned"
+
+// sampleScanned reports that a scan of the sample ran to its end.
 func sampleScanned(dir string) bool {
-	for _, file := range []string{
-		filepath.Join("environments", sampleEnvironment, "catalogs", demofixtures.ChinookSource, demofixtures.ChinookSource+".db.json"),
-		filepath.Join("dbmodels", demofixtures.ChinookSource, "main", "tables", sampleFirstTable, "main."+sampleFirstTable+".columns.json"),
-	} {
-		if _, err := os.Stat(filepath.Join(dir, file)); err != nil {
-			return false
+	_, err := os.Stat(filepath.Join(dir, filepath.FromSlash(sampleScannedMarker)))
+	return err == nil
+}
+
+// sampleFolderIsForeign reports that dir holds something installSample did not
+// make. A folder with the install marker is the sample's. So is a folder that
+// is missing, empty, or holds nothing but an empty .datatug folder: what an
+// install leaves when it is stopped before it wrote its marker.
+func sampleFolderIsForeign(dir string) bool {
+	if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(sampleInstallMarker))); err == nil {
+		return false
+	}
+	entries, _ := os.ReadDir(dir)
+	for _, entry := range entries {
+		if entry.Name() != filepath.Dir(sampleInstallMarker) {
+			return true
+		}
+		if inside, _ := os.ReadDir(filepath.Join(dir, entry.Name())); len(inside) > 0 {
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 // scanSample runs the scan of `datatug scan` on the sample database with its

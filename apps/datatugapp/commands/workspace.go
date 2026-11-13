@@ -77,7 +77,8 @@ func runWorkspaceLoop(cmd *cobra.Command, options chatOptions) error {
 			// registered, so the welcome screen would not explain it.
 			reason := ""
 			if chosen || sampleFailed {
-				reason = fmt.Sprintf("Could not open project %q for chat: %s", options.project, strings.Join(strings.Fields(err.Error()), " "))
+				// Without the advice for the command line: F3 is the way here.
+				reason = fmt.Sprintf("Could not open project %q for chat: %s", options.project, strings.Join(strings.Fields(strings.ReplaceAll(err.Error(), projectNotFoundAdvice, "")), " "))
 			}
 			next, err = runSetupWorkspaceFunc(*options.workspace, reason, programOptions)
 			if err != nil {

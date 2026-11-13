@@ -3,11 +3,13 @@ package commands
 import (
 	tea "charm.land/bubbletea/v2"
 	"context"
+	"errors"
 	"fmt"
 	"github.com/dal-go/dalgo/dal"
 	"github.com/datatug/datatug-cli/pkg/labelguard"
 	"github.com/datatug/datatug-core/pkg/meaninglabels"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"slices"
@@ -56,8 +58,12 @@ type chatOptions struct {
 	// modelExplicit: the AI was named on this command line, so the AI chosen
 	// for the project in the workspace does not replace it.
 	modelExplicit bool
-	aiFromChoice  bool        // the AI is the one chosen for this project in the workspace
-	aiState       *aiRunState // shared by the reopenings of one run
+	aiFromChoice  bool // the AI is the one chosen for this project in the workspace
+	aiExact       bool // the endpoint and key were typed in the workspace: the environment adds nothing
+	// modelRemembered: the model is the one remembered from an earlier
+	// command line, not named on this one.
+	modelRemembered bool
+	aiState         *aiRunState // shared by the reopenings of one run
 }
 
 func chatCommand() *cobra.Command {
@@ -136,10 +142,12 @@ func runChat(cmd *cobra.Command, options chatOptions) error {
 			return Exit(err.Error(), exitCodeUsage)
 		}
 	}
+	explicit := options.modelExplicit
 	for {
 		nextProject, err := runChatProjectFunc(cmd, options)
 		if err == nil && options.aiState != nil && options.aiState.reopen {
 			// The AI was set up in the workspace: open it again, in place.
+			// What was just chosen for this project wins over the command line.
 			options.aiState.reopen = false
 			options.modelExplicit = false
 			continue
@@ -147,6 +155,7 @@ func runChat(cmd *cobra.Command, options chatOptions) error {
 		if err != nil || nextProject == "" || nextProject == options.project {
 			return err
 		}
+		options.modelExplicit = explicit // the command line holds for another project
 		options.project = nextProject
 		options.database = ""      // resolve the new project's source independently
 		options.cloudDecision = "" // a consent choice is for the project it was given for
@@ -194,7 +203,7 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	}
 	projectDir, projectStore, err := resolveQueryProject(options.project)
 	if err != nil {
-		return "", Exit(err.Error()+"\nChoose an existing project: datatug projects, then datatug chat --project <ID-or-directory>\nStart a new project: datatug init <ID> <directory>", exitCodeUsage)
+		return "", Exit(err.Error()+projectNotFoundAdvice, exitCodeUsage)
 	}
 
 	if options.cloudDecision != "" {
@@ -217,6 +226,12 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	choiceNotice := ""
 	if !options.modelExplicit {
 		choiceNotice = applyProjectAIChoice(&options, projectDir)
+		if options.model == "cloud" && options.modelRemembered && !options.aiFromChoice {
+			// DataTug AI remembered from an earlier command line is not a
+			// consent for this project: it is offered, not switched on.
+			options.model = "none"
+			choiceNotice = "DataTug AI was used before on this machine, but it is now chosen per project. Type " + aiCommand + " to choose it for this one."
+		}
 	}
 
 	database := options.database
@@ -345,10 +360,14 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 			provider = cloudUserProvider{cloudClient}
 		} else {
 			var providerErr error
-			if options.model != "none" && !hostedDown {
+			switch {
+			case options.model == "none" || hostedDown:
+			case options.aiExact:
+				provider, providerErr = chat.NewLLMProviderExact(options.model, options.baseURL, options.apiKey)
+			default:
 				provider, providerErr = chat.NewLLMProvider(options.model, options.baseURL, options.apiKey)
 			}
-			if hostedDown || providerErr != nil || options.model == "none" || chat.MissingAPIKey(options.model, options.baseURL, options.apiKey) {
+			if hostedDown || providerErr != nil || options.model == "none" || (!options.aiExact && chat.MissingAPIKey(options.model, options.baseURL, options.apiKey)) {
 				provider = nil
 				aiMissing = true
 				conversation = providerUnavailableConversation{}
@@ -456,6 +475,9 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 		if options.aiState.pending != "" {
 			ready += " Your question is in the composer: press Enter to ask it."
 		}
+		if options.aiState.keyNote != "" {
+			ready += " " + options.aiState.keyNote
+		}
 		sessionNotices = append([]string{ready}, sessionNotices...)
 	}
 	if len(sessionNotices) > 0 {
@@ -479,7 +501,7 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 		if options.aiFromChoice {
 			toSave = lastOptions
 		}
-		if err := saveLastChatOptions(cmd, toSave); err != nil {
+		if err := saveLastChatOptionsFunc(cmd, toSave); err != nil {
 			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: save chat options: %v\n", err)
 		}
 	}
@@ -488,13 +510,14 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 		mountExplore(ui, *options.workspace)
 	}
 	ui.OpenTableAtStart(options.openAtStart)
-	ui.SetAISetup(chatAISetup(ctx, options, projectDir, projectCatalog.Title, aiMissing, isSample))
+	noneChosen := options.aiFromChoice && options.model == "none"
+	ui.SetAISetup(chatAISetup(ctx, options, projectDir, projectCatalog.Title, aiMissing, noneChosen, isSample))
 	if options.aiState.chosen {
 		// Reopened after the AI setup: continue in the chat, with the
 		// question that opened the setup back in the composer.
 		ui.ShowChat()
 		ui.SetComposerText(options.aiState.pending)
-		options.aiState.chosen, options.aiState.pending = false, ""
+		options.aiState.chosen, options.aiState.pending, options.aiState.keyNote = false, "", ""
 	}
 	var programOptions []tea.ProgramOption
 	if options.workspace != nil {
@@ -507,6 +530,13 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	options.aiState.chosen = options.aiState.reopen
 	return ui.SelectedProject(), nil
 }
+
+// projectNotFoundAdvice is for the command line; the workspace leaves it out.
+const projectNotFoundAdvice = "\nChoose an existing project: datatug projects, then datatug chat --project <ID-or-directory>\nStart a new project: datatug init <ID> <directory>"
+
+// saveLastChatOptionsFunc is saveLastChatOptions; a seam so a test sees what
+// is remembered for the next chat.
+var saveLastChatOptionsFunc = saveLastChatOptions
 
 // currentAI says in words what answers questions in this chat.
 func currentAI(options chatOptions, missing bool) string {
@@ -523,6 +553,9 @@ func currentAI(options chatOptions, missing bool) string {
 
 func writeHostedPlan(ctx context.Context, session cloudSession, project string, w io.Writer) error {
 	plan, err := session.getPlan(ctx, project)
+	if errors.Is(err, planHTTPError{status: http.StatusUnauthorized}) {
+		return fmt.Errorf("%w: type %s", err, aiCommand)
+	}
 	if err != nil {
 		return err
 	}

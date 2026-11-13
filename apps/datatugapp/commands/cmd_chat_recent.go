@@ -137,6 +137,7 @@ func applyLastChatOptions(cmd *cobra.Command, options *chatOptions) error {
 			switch field.flag {
 			case "model":
 				options.model = field.value
+				options.modelRemembered = true
 			case "base-url":
 				options.baseURL = field.value
 			case "thinking":

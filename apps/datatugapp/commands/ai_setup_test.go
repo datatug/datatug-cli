@@ -297,9 +297,10 @@ func TestAISetupFreeAIAsksConsentThenSignsIn(t *testing.T) {
 	if d.step != aiStepMenu || log.signIns != 0 || len(log.choices) != 0 {
 		t.Fatal("declining did not go back untouched")
 	}
-	press(t, d, "1", "x") // a key that means nothing on the consent screen
-	if d.step != aiStepConsent {
-		t.Fatal("an unrelated key answered the consent")
+	// Neither an unrelated key nor a second Enter is consent.
+	press(t, d, "1", "x", "enter")
+	if d.step != aiStepConsent || log.signIns != 0 {
+		t.Fatal("a key other than Y answered the consent")
 	}
 
 	press(t, d, "y")
@@ -327,7 +328,7 @@ func TestAISetupSignInScreens(t *testing.T) {
 	d, log := newTestAIDialog(t, "")
 	d.step = aiStepSignIn
 	wantView(t, d, "Sign in to DataTug", "Checking your sign-in…", "Esc cancel")
-	d.Update(aiSignInLine("Copy this one-time code: ABCD-1234"))
+	d.Update(aiSignInLine{text: "Copy this one-time code: ABCD-1234"})
 	wantView(t, d, "Your browser opens the sign-in page", "Copy this one-time code: ABCD-1234", "Waiting for you to finish in the browser…")
 
 	// Esc cancels the sign-in; its late result changes nothing.
@@ -341,10 +342,19 @@ func TestAISetupSignInScreens(t *testing.T) {
 	if d.step != aiStepMenu || d.email != "" {
 		t.Fatal("a cancelled sign-in still signed in")
 	}
+	// Nor does the late result of an earlier attempt answer a newer one, and
+	// nothing waits for an attempt that was abandoned.
+	d.step, d.attempt, d.lines = aiStepSignIn, 2, nil
+	d.Update(aiSignedIn{attempt: 1, email: "late@example.com"})
+	_, stale, _ := d.Update(aiSignInLine{attempt: 1, text: "old code"})
+	if d.step != aiStepSignIn || d.email != "" || len(d.lines) != 0 || stale != nil {
+		t.Fatalf("an abandoned sign-in reached the new one: step=%v lines=%q", d.step, d.lines)
+	}
+	d.step, d.attempt = aiStepMenu, 0
 
 	// A sign-in that fails says why, without sending the person to a command.
 	log.signInErr = errors.New("DataTug cloud chat requires 'datatug auth login': denied\n in the browser.")
-	press(t, d, "1", "enter")
+	press(t, d, "1", "y")
 	if d.step != aiStepMenu {
 		t.Fatalf("a failed sign-in did not return to the choices: %v", d.step)
 	}
@@ -364,11 +374,21 @@ func TestAISetupSignInScreens(t *testing.T) {
 	if done, _ := press(t, d, "esc"); !done {
 		t.Fatal("Esc did not close the dialog")
 	}
+	// Ctrl+C quits the workspace from the dialog too, ending a sign-in.
+	cancelled = false
+	d.cancel = func() { cancelled = true }
+	_, quit, done := d.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	if !done || quit == nil || !cancelled {
+		t.Fatal("Ctrl+C did not quit from the dialog")
+	}
+	if _, isQuit := quit().(tea.QuitMsg); !isQuit {
+		t.Fatal("Ctrl+C did not quit the program")
+	}
 }
 
 func TestAISetupProLeadsToTheSubscriptionPage(t *testing.T) {
 	d, log := newTestAIDialog(t, "")
-	press(t, d, "2", "enter")
+	press(t, d, "2", "y")
 	if d.step != aiStepPlan || !d.wantPro {
 		t.Fatalf("DataTug Pro did not reach the plan: step=%v", d.step)
 	}
@@ -431,29 +451,30 @@ func TestAISetupProLeadsToTheSubscriptionPage(t *testing.T) {
 func TestAISetupOwnKey(t *testing.T) {
 	d, log := newTestAIDialog(t, "")
 	press(t, d, "3")
-	wantView(t, d, "Your own API key", "‹ OpenAI ›", "Model", defaultChatModel, "API key", "go to this provider, not to DataTug", "operating system's keyring, never in a file")
+	wantView(t, d, "Your own API key", "Provider", "‹ OpenAI ›   ←→ change", "Model", defaultChatModel, "API key", "go to this provider, not to DataTug", "operating system's keyring, never in a file")
 
-	// ←→ changes the provider, and its documented model with it.
-	press(t, d, "right")
-	if d.values[0] != "claude-haiku" {
-		t.Fatalf("the model did not follow the provider: %q", d.values[0])
+	// ←→ changes the provider on its own row, and its documented model with
+	// it. Nothing can be typed there.
+	press(t, d, "right", "x", "backspace")
+	if aiProviders[d.provider].family != "anthropic" || d.values != [3]string{"", "claude-haiku", ""} {
+		t.Fatalf("the model did not follow the provider: %q", d.values)
 	}
 	press(t, d, "left", "left")
-	if aiProviders[d.provider].family != "openrouter" || d.values[0] != "" {
-		t.Fatalf("left of the first provider: %+v %q", aiProviders[d.provider], d.values[0])
+	if aiProviders[d.provider].family != "openrouter" || d.values[1] != "" {
+		t.Fatalf("left of the first provider: %+v %q", aiProviders[d.provider], d.values[1])
 	}
 	// A model the person typed is kept when the provider changes.
-	press(t, d, "m", "1", "right")
-	if aiProviders[d.provider].family != "openai" || d.values[0] != "m1" {
-		t.Fatalf("a typed model was replaced: %q", d.values[0])
+	press(t, d, "down", "m", "1", "up", "right")
+	if aiProviders[d.provider].family != "openai" || d.values[1] != "m1" {
+		t.Fatalf("a typed model was replaced: %q", d.values[1])
 	}
-	press(t, d, "backspace", "backspace", "backspace")
-	if done, _ := press(t, d, "down", "enter"); done || d.field != 0 {
+	press(t, d, "down", "backspace", "backspace", "backspace")
+	if done, _ := press(t, d, "down", "enter"); done || d.field != 1 {
 		t.Fatal("an empty model was accepted")
 	}
 	wantView(t, d, "Type the model name as OpenAI lists it.")
 	press(t, d, "g", "p", "t", "-", "x", "tab", "shift+tab", "enter")
-	if d.field != 1 {
+	if d.field != 2 {
 		t.Fatalf("Enter did not move to the key: field=%d", d.field)
 	}
 	if done, _ := press(t, d, "enter"); done {
@@ -466,33 +487,37 @@ func TestAISetupOwnKey(t *testing.T) {
 	if view := aiView(d); strings.Contains(view, "sk-secret") || !strings.Contains(view, "•••••••••••▏") {
 		t.Fatalf("the key is shown:\n%s", view)
 	}
-	press(t, d, "up", "down")
+	// An arrow pressed on the key never changes where the key is sent.
+	press(t, d, "left", "right", "right")
+	if aiProviders[d.provider].family != "openai" {
+		t.Fatalf("an arrow on the key row changed the provider to %s", aiProviders[d.provider].family)
+	}
 	done, cmd := press(t, d, "enter")
 	if !done || cmd == nil {
 		t.Fatal("the key was not saved")
 	}
 	want := aiChoice{Kind: aiKindKey, Model: "openai/gpt-x", KeyAccount: "ai-key:openai"}
-	if len(log.choices) != 1 || log.choices[0] != want || log.keys["ai-key:openai"] != "sk-secret-1" {
+	if len(log.choices) != 1 || log.choices[0] != want || log.keys["ai-key:openai"] != "sk-secret-1" || d.state.keyNote != "" {
 		t.Fatalf("saved %+v keys=%v", log.choices, log.keys)
 	}
 
 	// A model already named for the provider is kept as typed, and a keyring
-	// that cannot store the key leaves it for this run only.
+	// that cannot store the key leaves it for this run only, and says so.
 	d, log = newTestAIDialog(t, "")
 	log.keyErr = errors.New("no keyring")
 	press(t, d, "3")
-	d.values = [3]string{"OpenAI/gpt-y", "sk-2"}
-	d.field = 1
+	d.values = [3]string{"", "OpenAI/gpt-y", "sk-2"}
+	d.field = 2
 	if done, _ := press(t, d, "enter"); !done {
 		t.Fatal("a key without a keyring was refused")
 	}
-	if log.choices[0].Model != "OpenAI/gpt-y" || d.state.sessionKeys["ai-key:openai"] != "sk-2" || len(log.keys) != 0 {
-		t.Fatalf("choice=%+v session=%v", log.choices, d.state.sessionKeys)
+	if log.choices[0].Model != "OpenAI/gpt-y" || d.state.sessionKeys["ai-key:openai"] != "sk-2" || len(log.keys) != 0 || !strings.Contains(d.state.keyNote, "works until you close DataTug") {
+		t.Fatalf("choice=%+v session=%v note=%q", log.choices, d.state.sessionKeys, d.state.keyNote)
 	}
 	// Pasting outside a form types nothing.
 	d.step = aiStepMenu
 	d.Update(tea.PasteMsg{Content: "stray"})
-	if d.values[1] != "sk-2" {
+	if d.values[2] != "sk-2" {
 		t.Fatal("a paste outside a form changed a field")
 	}
 }
@@ -517,6 +542,11 @@ func TestAISetupOwnEndpoint(t *testing.T) {
 		t.Fatal("a base URL without a scheme was accepted")
 	}
 	wantView(t, d, "The base URL must start with http:// or https://")
+	d.values[0], d.field = "https://me:secret@ai.corp.example/v1", 2
+	if done, _ := press(t, d, "enter"); done || d.field != 0 {
+		t.Fatal("a base URL with a password in it was accepted")
+	}
+	wantView(t, d, "Leave the user name and password out of the URL")
 	d.values[0], d.field = aiDefaultEndpoint, 2
 	if done, _ := press(t, d, "enter"); done || d.field != 1 {
 		t.Fatal("an empty model was accepted")
@@ -531,12 +561,13 @@ func TestAISetupOwnEndpoint(t *testing.T) {
 		t.Fatalf("saved %+v keys=%v", log.choices, log.keys)
 	}
 
-	// With a key, it is kept under the endpoint's host.
+	// With a key, it is kept under the endpoint's host, never under the
+	// entry of a provider.
 	d, log = newTestAIDialog(t, "")
 	press(t, d, "4")
 	d.values, d.field = [3]string{"https://ai.corp.example/v1", "big", "tok"}, 2
 	press(t, d, "enter")
-	if log.choices[0].KeyAccount != "ai-key:ai.corp.example" || log.keys["ai-key:ai.corp.example"] != "tok" {
+	if log.choices[0].KeyAccount != "ai-endpoint:ai.corp.example" || log.keys["ai-endpoint:ai.corp.example"] != "tok" {
 		t.Fatalf("saved %+v keys=%v", log.choices, log.keys)
 	}
 
@@ -549,8 +580,8 @@ func TestAISetupOwnEndpoint(t *testing.T) {
 
 func TestAILineWriterNeverBlocksTheSignIn(t *testing.T) {
 	events := make(chan tea.Msg, 1)
-	n, err := aiLineWriter{events}.Write([]byte("first\n\n  second\n"))
-	if n != 16 || err != nil || len(events) != 1 || <-events != aiSignInLine("first") {
+	n, err := aiLineWriter{events: events, attempt: 3}.Write([]byte("first\n\n  second\n"))
+	if n != 16 || err != nil || len(events) != 1 || <-events != (aiSignInLine{attempt: 3, text: "first"}) {
 		t.Fatalf("Write = %d, %v", n, err)
 	}
 }
@@ -617,7 +648,7 @@ func TestAISetupRealDoors(t *testing.T) {
 
 func TestChatAISetupOfAProject(t *testing.T) {
 	ui := chat.NewChatUI(context.Background(), setupConversation{}, "test")
-	setup := chatAISetup(context.Background(), chatOptions{model: "cloud", aiState: &aiRunState{}}, "/p", "Shop", false, false)
+	setup := chatAISetup(context.Background(), chatOptions{model: "cloud", aiState: &aiRunState{}}, "/p", "Shop", false, false, false)
 	if setup.Missing || setup.AnswersWithoutAI != nil {
 		t.Fatalf("setup = %+v", setup)
 	}
@@ -625,7 +656,11 @@ func TestChatAISetupOfAProject(t *testing.T) {
 	if dialog.current != "DataTug AI" || dialog.pending != "why?" || dialog.projectTitle != "Shop" || dialog.projectDir != "/p" {
 		t.Fatalf("dialog = %+v", dialog)
 	}
-	sample := chatAISetup(context.Background(), chatOptions{}, "/p", "Sample", true, true)
+	// With "No AI" chosen a question no longer opens the dialog by itself.
+	if none := chatAISetup(context.Background(), chatOptions{}, "/p", "Shop", true, true, false); none.Missing || none.Open == nil {
+		t.Fatal("No AI still opens the dialog on every question")
+	}
+	sample := chatAISetup(context.Background(), chatOptions{}, "/p", "Sample", true, false, true)
 	if !sample.Missing || !sample.AnswersWithoutAI("1") || sample.AnswersWithoutAI("who buys the most?") {
 		t.Fatal("the sample does not answer its ready-made questions by itself")
 	}
@@ -698,6 +733,15 @@ func TestChatReopensOnTheChosenAI(t *testing.T) {
 	if len(notices) == 0 || notices[0] != want {
 		t.Fatalf("notices = %q", notices)
 	}
+	// A key the keyring did not take is said once, on the reopening.
+	notices = nil
+	state.chosen, state.keyNote = true, "The key works until you close DataTug."
+	if _, err := runChatProject(chatCommand(), options); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(notices[0], "Change it any time with /ai. The key works until you close DataTug.") || state.keyNote != "" {
+		t.Fatalf("notices = %q, keyNote = %q", notices, state.keyNote)
+	}
 	if state.chosen || state.pending != "" || state.reopen {
 		t.Fatalf("the state of the reopening was kept: %+v", state)
 	}
@@ -729,12 +773,18 @@ func TestChatLoopsReopenAfterTheAISetup(t *testing.T) {
 				options.aiState.reopen = true
 				return "", nil
 			}
-			if options.modelExplicit || options.aiState.reopen {
-				t.Errorf("the reopening still prefers the command line: %+v", options)
+			if calls == 2 {
+				if options.modelExplicit || options.aiState.reopen {
+					t.Errorf("the reopening still prefers the command line: %+v", options)
+				}
+				return "other", nil // F3: another project
+			}
+			if !options.modelExplicit || options.project != "other" {
+				t.Errorf("the command line's model was lost for another project: %+v", options)
 			}
 			return "", nil
 		})
-		if err := runChat(chatCommand(), chatOptions{project: "p", model: "none", modelExplicit: true, aiState: &aiRunState{}}); err != nil || calls != 2 {
+		if err := runChat(chatCommand(), chatOptions{project: "p", model: "none", modelExplicit: true, aiState: &aiRunState{}}); err != nil || calls != 3 {
 			t.Fatalf("runChat: calls=%d err=%v", calls, err)
 		}
 	})
@@ -759,4 +809,140 @@ func TestChatLoopsReopenAfterTheAISetup(t *testing.T) {
 			t.Fatalf("runWorkspaceLoop: calls=%d err=%v", calls, err)
 		}
 	})
+}
+
+// The two promises of the per-project choice: DataTug AI agreed to for one
+// project is not remembered as the model of the next chat, and another
+// project opens with no AI and no request for a sign-in.
+func TestDataTugAIOfOneProjectIsNotAppliedToAnother(t *testing.T) {
+	for _, env := range []string{"OPENAI_API_KEY", "OPENAI_BASE_URL"} {
+		t.Setenv(env, "")
+	}
+	aiConfigDir(t)
+	dir := installedSample(t)
+	if err := writeAIChoice(dir, aiChoice{Kind: aiKindHosted}); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"v":1,"payer":"personal","effectivePlan":"free","ai":{"used":3,"limit":50,"left":47}}`)
+	}))
+	defer server.Close()
+	signIns := 0
+	covDSetVar(t, &loadCloudSession, func(context.Context, chatOptions) (cloudSession, error) {
+		signIns++
+		return fakeCloudSession(server.URL + "/v0/"), nil
+	})
+	var saved []chatOptions
+	covDSetVar(t, &saveLastChatOptionsFunc, func(_ *cobra.Command, options chatOptions) error {
+		saved = append(saved, options)
+		return nil
+	})
+	t.Cleanup(chat.SetRunTeaProgramForTest(func(*tea.Program) (tea.Model, error) { return nil, nil }))
+	cmd := chatCommand()
+	if err := cmd.Flags().Set("model", defaultChatModel); err != nil { // as a remembered model marks it
+		t.Fatal(err)
+	}
+	options := chatOptions{project: dir, env: sampleEnvironment, model: defaultChatModel, thinking: "low"}
+	if _, err := runChatProject(cmd, options); err != nil {
+		t.Fatal(err)
+	}
+	if signIns != 1 {
+		t.Fatalf("the chosen DataTug AI was not used: sign-in lookups = %d", signIns)
+	}
+	if len(saved) != 1 || saved[0].model != defaultChatModel || saved[0].aiFromChoice {
+		t.Fatalf("the choice of one project was remembered for the next chat: %+v", saved)
+	}
+
+	// The same sample installed elsewhere is another project: no choice, no
+	// sign-in looked for, the no-AI answer.
+	options.project = installedSample(t) // a second install, in another folder
+	if _, err := runChatProject(cmd, options); err != nil {
+		t.Fatal(err)
+	}
+	if signIns != 1 {
+		t.Fatalf("another project looked for a DataTug sign-in: lookups = %d", signIns)
+	}
+
+	// DataTug AI remembered from an old command line is not consent either:
+	// it is offered, and nothing is contacted.
+	var notices []string
+	covDSetVar(t, &setSessionNotices, func(_ *chat.ChatUI, lines []string) { notices = append(notices, lines...) })
+	options.model, options.modelRemembered = "cloud", true
+	if _, err := runChatProject(cmd, options); err != nil {
+		t.Fatal(err)
+	}
+	if signIns != 1 || !strings.Contains(strings.Join(notices, "\n"), "it is now chosen per project. Type /ai to choose it for this one.") {
+		t.Fatalf("a remembered DataTug AI was switched on: lookups=%d notices=%q", signIns, notices)
+	}
+	// Named on this command line it is used as before.
+	options.modelExplicit = true
+	if _, err := runChatProject(cmd, options); err != nil || signIns != 2 {
+		t.Fatalf("--model cloud: lookups=%d err=%v", signIns, err)
+	}
+}
+
+// A key or endpoint typed in the workspace is used exactly: no key of the
+// environment goes to the typed endpoint.
+func TestOwnEndpointNeverGetsAKeyOfTheEnvironment(t *testing.T) {
+	var auth []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth = append(auth, r.Header.Get("Authorization"))
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	defer server.Close()
+	t.Setenv("OPENAI_API_KEY", "sk-from-the-environment")
+	aiConfigDir(t)
+	dir := installedSample(t)
+	if err := writeAIChoice(dir, aiChoice{Kind: aiKindEndpoint, Model: "llama3.2", BaseURL: server.URL + "/v1"}); err != nil {
+		t.Fatal(err)
+	}
+	_, conversation := openSampleChat(t, dir)
+	_, _ = conversation.AskWithContext(context.Background(), "who buys the most?", "")
+	if len(auth) == 0 {
+		t.Fatal("the typed endpoint was not asked")
+	}
+	for _, header := range auth {
+		if strings.Contains(header, "sk-from-the-environment") {
+			t.Fatalf("the environment's key was sent to the typed endpoint: %q", header)
+		}
+	}
+}
+
+func TestSignInExpiredSaysWhereToSignIn(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusUnauthorized) }))
+	defer server.Close()
+	session := fakeCloudSession(server.URL + "/v0/")
+	// Inside the workspace: /ai.
+	if err := writeHostedPlan(context.Background(), session, "", io.Discard); err == nil || err.Error() != "DataTug sign-in expired; sign in again: type /ai" {
+		t.Fatalf("/plan with an expired sign-in: %v", err)
+	}
+	// On the command line: the command.
+	covDSetVar(t, &loadCloudSession, func(context.Context, chatOptions) (cloudSession, error) { return session, nil })
+	cmd := planCommand()
+	cmd.SetArgs(nil)
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	if err := cmd.Execute(); err == nil || err.Error() != "DataTug sign-in expired; sign in again: run 'datatug auth login'" {
+		t.Fatalf("datatug plan with an expired sign-in: %v", err)
+	}
+}
+
+// A project chosen with F3 that cannot be opened says why on the setup
+// screen, without the advice that belongs to the command line.
+func TestSetupScreenNamesNoCommandToRunOutside(t *testing.T) {
+	var reasons []string
+	choices := []string{"shop", ""}
+	covDSetVar(t, &runSetupWorkspaceFunc, func(_ workspaceStart, reason string, _ []tea.ProgramOption) (string, error) {
+		reasons = append(reasons, reason)
+		return choices[len(reasons)-1], nil
+	})
+	covDSetVar(t, &runChatProjectFunc, func(*cobra.Command, chatOptions) (string, error) {
+		return "", Exit("project not found"+projectNotFoundAdvice, exitCodeUsage)
+	})
+	if err := runWorkspaceLoop(chatCommand(), chatOptions{project: ".", workspace: &workspaceStart{}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(reasons) != 2 || reasons[1] != `Could not open project "shop" for chat: project not found` {
+		t.Fatalf("reasons = %q", reasons)
+	}
 }

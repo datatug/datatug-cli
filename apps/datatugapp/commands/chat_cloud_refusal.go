@@ -76,7 +76,7 @@ func formatCloudRefusal(source *ai.Error) *ai.Error {
 		parts = append(parts, "resets at "+limit.ResetsAt)
 	}
 	if limit.Reason == "model_class" {
-		parts = append(parts, "choose an allowed hosted model shown by 'datatug plan'")
+		parts = append(parts, "choose an allowed hosted model (/plan lists them)")
 	}
 	if limit.CanUpgrade {
 		parts = append(parts, "get a plan at "+limit.UpgradeURL)
@@ -84,7 +84,7 @@ func formatCloudRefusal(source *ai.Error) *ai.Error {
 		parts = append(parts, "ask an admin of "+limit.AccountTitle)
 	}
 	if limit.OwnKeyWorks {
-		parts = append(parts, "your own AI key still works")
+		parts = append(parts, "your own AI key still works: type "+aiCommand+" to use it")
 	}
 	if len(parts) > 0 {
 		copy.Message = source.Message + " " + strings.Join(parts, "; ") + "."

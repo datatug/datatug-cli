@@ -58,7 +58,7 @@ func TestSampleConversation(t *testing.T) {
 	if err != nil || len(turn.Queries) != 0 || len(ran) != 0 {
 		t.Fatalf("a question that is not ready-made ran a query: turn=%+v ran=%d err=%v", turn, len(ran), err)
 	}
-	for _, want := range []string{"no AI is set up", "1. Which countries bring in the most revenue?", "type /ai or just ask one", "after you agree and sign in with your browser, right here", "No query was executed."} {
+	for _, want := range []string{"no AI is set up", "1. Which countries bring in the most revenue?", "To ask your own questions, type /ai", "after you agree and sign in with your browser, right here", "No query was executed."} {
 		if !strings.Contains(turn.Text, want) {
 			t.Fatalf("reply lacks %q: %s", want, turn.Text)
 		}

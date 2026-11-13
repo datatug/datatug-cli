@@ -121,6 +121,7 @@ type aiRunState struct {
 	reopen  bool   // the workspace closed to open again on the same project
 	pending string // the question to put back into the composer
 	chosen  bool   // the next opening follows an AI setup
+	keyNote string // what to say about a key the keyring did not take
 	// sessionKeys holds, by keyring account, a key the keyring could not
 	// store: it works until the workspace is closed.
 	sessionKeys map[string]string
@@ -156,7 +157,7 @@ func applyProjectAIChoice(options *chatOptions, projectDir string) string {
 	case aiKindNone:
 		options.model, options.baseURL, options.apiKey = "none", "", ""
 	default:
-		options.model, options.baseURL, options.apiKey = choice.Model, choice.BaseURL, key
+		options.model, options.baseURL, options.apiKey, options.aiExact = choice.Model, choice.BaseURL, key, true
 	}
 	return ""
 }

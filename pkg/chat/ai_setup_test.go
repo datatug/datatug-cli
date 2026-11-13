@@ -45,6 +45,13 @@ func TestAISetupOpensFromTheComposer(t *testing.T) {
 	}
 	u.shell.CloseOverlay(dialog)
 
+	u.Submit(AISetupCommand + " 3")
+	if !u.shell.HasOverlay(dialog) || pendings[1] != "" {
+		t.Fatalf("/ai with text after it did not open the dialog: pendings=%q", pendings)
+	}
+	u.shell.CloseOverlay(dialog)
+	pendings = pendings[:1]
+
 	u.Submit("who buys the most?")
 	if !u.shell.HasOverlay(dialog) || pendings[1] != "who buys the most?" {
 		t.Fatalf("a question without AI did not open the dialog: pendings=%q", pendings)
@@ -115,5 +122,31 @@ func TestReopenKeepsTheQuestionForTheNextOpening(t *testing.T) {
 	u.ShowChat()
 	if u.shell.ComposerText() != "my question" || u.shell.WorkspaceFocus() != "input" || u.shell.CenterPanel() != nil {
 		t.Fatalf("the reopened workspace is not on the chat: focus=%q", u.shell.WorkspaceFocus())
+	}
+}
+
+// An endpoint and key a person typed are used exactly: the environment adds
+// neither a key nor another address.
+func TestNewLLMProviderExactIgnoresTheEnvironment(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-from-the-environment")
+	t.Setenv("OPENAI_BASE_URL", "https://elsewhere.example/v1")
+	endpoint, err := resolveEndpointEnv("llama3.2", "http://localhost:11434/v1", "", false)
+	if err != nil || endpoint.apiKey != "" || endpoint.baseURL != "http://localhost:11434/v1" {
+		t.Fatalf("typed endpoint = %+v, %v", endpoint, err)
+	}
+	endpoint, err = resolveEndpointEnv("openai/gpt-x", "", "sk-typed", false)
+	if err != nil || endpoint.apiKey != "sk-typed" || endpoint.baseURL != familyDefaults["openai"].defaultBaseURL {
+		t.Fatalf("typed key = %+v, %v", endpoint, err)
+	}
+	// The ordinary resolution still reads the environment.
+	endpoint, err = resolveEndpoint("openai/gpt-x", "", "")
+	if err != nil || endpoint.apiKey != "sk-from-the-environment" || endpoint.baseURL != "https://elsewhere.example/v1" {
+		t.Fatalf("environment endpoint = %+v, %v", endpoint, err)
+	}
+	if provider, err := NewLLMProviderExact("openai/gpt-x", "", "sk-typed"); err != nil || provider == nil {
+		t.Fatalf("NewLLMProviderExact: %v", err)
+	}
+	if _, err := NewLLMProviderExact("", "", ""); err == nil {
+		t.Fatal("a provider without a model")
 	}
 }

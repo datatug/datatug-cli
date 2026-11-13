@@ -139,7 +139,7 @@ limit: 10
 
 // sampleSignInAdvice is how the sample gets real AI: chosen by the person in
 // the workspace, for this project only. Nothing switches it on by itself.
-const sampleSignInAdvice = "To ask your own questions, type " + aiCommand + " or just ask one: DataTug AI is free to try after you agree and sign in with your browser, right here."
+const sampleSignInAdvice = "To ask your own questions, type " + aiCommand + ": DataTug AI is free to try after you agree and sign in with your browser, right here."
 
 // sampleQuestionsList is the numbered list of the ready-made questions.
 func sampleQuestionsList() string {

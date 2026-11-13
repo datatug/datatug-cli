@@ -48,7 +48,7 @@ type planHTTPError struct{ status int }
 func (e planHTTPError) Error() string {
 	switch e.status {
 	case http.StatusUnauthorized:
-		return "DataTug sign-in expired; sign in again (" + aiCommand + " in the workspace, or datatug auth login)"
+		return "DataTug sign-in expired; sign in again"
 	case http.StatusForbidden:
 		return "this account is unavailable for your sign-in"
 	case http.StatusServiceUnavailable:
@@ -156,7 +156,7 @@ func resolveCloudSelection(ctx context.Context, cmd *cobra.Command, options *cha
 		return cloudPlan{}, err
 	}
 	if options.cloudModel != "" && !plan.hasModel(options.cloudModel) {
-		return cloudPlan{}, fmt.Errorf("hosted model %q is unavailable for %s; choose a model shown by 'datatug plan' or clear the choice", options.cloudModel, plan.AccountTitle)
+		return cloudPlan{}, fmt.Errorf("hosted model %q is unavailable for %s; choose a model the plan lists or clear the choice", options.cloudModel, plan.AccountTitle)
 	}
 	return plan, nil
 }
@@ -215,6 +215,9 @@ func planCommand() *cobra.Command {
 			return err
 		}
 		plan, err := session.getPlan(cmd.Context(), options.cloudProject)
+		if errors.Is(err, planHTTPError{status: http.StatusUnauthorized}) {
+			return fmt.Errorf("%w: run 'datatug auth login'", err)
+		}
 		if err != nil {
 			return err
 		}

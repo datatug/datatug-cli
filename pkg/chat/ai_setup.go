@@ -36,7 +36,9 @@ func (u *ChatUI) aiSetupFor(text string) (tea.Cmd, bool) {
 		return nil, false
 	}
 	trimmed := strings.TrimSpace(text)
-	if trimmed == AISetupCommand {
+	// Completing the command in the composer leaves a space after it, and
+	// whatever is typed after that is not a reason to refuse it.
+	if trimmed == AISetupCommand || strings.HasPrefix(trimmed, AISetupCommand+" ") {
 		return u.shell.PushOverlay(u.aiSetup.Open(u, "")), true
 	}
 	if !u.aiSetup.Missing || strings.HasPrefix(trimmed, "/") {

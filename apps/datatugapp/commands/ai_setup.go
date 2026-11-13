@@ -24,7 +24,7 @@ const aiCommand = chat.AISetupCommand
 
 // aiSetupAdvice is the one way AI is set up, said wherever AI is missing. It
 // never sends a person out of the workspace.
-const aiSetupAdvice = "To add AI, type " + aiCommand + " or just ask a question: choose DataTug AI (free, limited), DataTug Pro, your own API key, or your own endpoint. Nothing is sent anywhere until you choose."
+const aiSetupAdvice = "To add AI, type " + aiCommand + ": choose DataTug AI (free, limited), DataTug Pro, your own API key, or your own endpoint. Nothing is sent anywhere until you choose."
 
 // aiConsentLines is what a person agrees to before DataTug AI is used for a
 // project. It is shown every time the choice is made, never implied.
@@ -35,9 +35,11 @@ var aiConsentLines = []string{
 	"  • your questions and the conversation so far",
 	"  • the names and types of this project's tables and columns",
 	"  • data read from the database to answer them",
+	"  • your DataTug account, an installation ID, and this app's version and OS",
 	"",
 	"Columns labelled sensitive are never read. Your database password and",
-	"connection details are not sent.",
+	"connection details are not sent. Unless telemetry is off, a usage report per",
+	"question (its length and outcome, never its text) goes to DataTug.",
 	"",
 	"The free plan is for trying DataTug: a limited number of questions a month.",
 	"DataTug Pro raises that limit. Your own API key or endpoint has no DataTug",
@@ -146,24 +148,29 @@ type aiSetupDialog struct {
 	problem string
 
 	// Sign-in.
-	cancel context.CancelFunc
-	events chan tea.Msg
-	lines  []string
-	email  string
-	plan   cloudPlan
+	attempt int // counts sign-ins: the result of an abandoned one is dropped
+	cancel  context.CancelFunc
+	events  map[int]chan tea.Msg // the channel of the current sign-in, by attempt
+	lines   []string
+	email   string
+	plan    cloudPlan
 
 	// The forms of "own key" and "own endpoint".
 	provider int
 	field    int
-	values   [3]string // model, key | base URL, model, key
+	values   [3]string // (provider), model, key | base URL, model, key
 }
 
 type (
-	aiSignInLine string
-	aiSignedIn   struct {
-		email string
-		plan  cloudPlan
-		err   error
+	aiSignInLine struct {
+		attempt int
+		text    string
+	}
+	aiSignedIn struct {
+		attempt int // the sign-in this is the result of
+		email   string
+		plan    cloudPlan
+		err     error
 	}
 )
 
@@ -178,8 +185,10 @@ func (d *aiSetupDialog) WorkspaceBorderlessCard() bool { return true }
 func (d *aiSetupDialog) Update(msg tea.Msg) (chatshell.Overlay, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case aiSignInLine:
-		d.lines = append(d.lines, string(msg))
-		return d, d.nextEvent(), false
+		if msg.attempt == d.attempt {
+			d.lines = append(d.lines, msg.text)
+		}
+		return d, d.nextEvent(msg.attempt), false
 	case aiSignedIn:
 		return d.signedIn(msg)
 	case tea.PasteMsg:
@@ -193,8 +202,12 @@ func (d *aiSetupDialog) Update(msg tea.Msg) (chatshell.Overlay, tea.Cmd, bool) {
 
 func (d *aiSetupDialog) key(key tea.KeyPressMsg) (chatshell.Overlay, tea.Cmd, bool) {
 	name := key.String()
-	if name == "esc" {
+	switch name {
+	case "esc":
 		return d.back()
+	case "ctrl+c":
+		d.stopSignIn()
+		return d, tea.Quit, true
 	}
 	d.problem = ""
 	switch d.step {
@@ -212,7 +225,7 @@ func (d *aiSetupDialog) key(key tea.KeyPressMsg) (chatshell.Overlay, tea.Cmd, bo
 		}
 	case aiStepConsent:
 		switch name {
-		case "y", "Y", "enter":
+		case "y", "Y": // never Enter: a second Enter from the menu is not consent
 			d.step, d.lines = aiStepSignIn, nil
 			return d, d.startSignIn(), false
 		case "n", "N":
@@ -236,15 +249,20 @@ func (d *aiSetupDialog) key(key tea.KeyPressMsg) (chatshell.Overlay, tea.Cmd, bo
 
 // back leaves the current step: to the menu, or out of the dialog from it.
 func (d *aiSetupDialog) back() (chatshell.Overlay, tea.Cmd, bool) {
-	if d.cancel != nil {
-		d.cancel()
-		d.cancel = nil
-	}
+	d.stopSignIn()
 	if d.step == aiStepMenu {
 		return d, nil, true
 	}
 	d.step, d.problem = aiStepMenu, ""
 	return d, nil, false
+}
+
+// stopSignIn abandons the sign-in in progress, if any.
+func (d *aiSetupDialog) stopSignIn() {
+	if d.cancel != nil {
+		d.cancel()
+		d.cancel = nil
+	}
 }
 
 func (d *aiSetupDialog) choose() (chatshell.Overlay, tea.Cmd, bool) {
@@ -255,7 +273,7 @@ func (d *aiSetupDialog) choose() (chatshell.Overlay, tea.Cmd, bool) {
 		d.step = aiStepConsent
 	case aiMenuKey:
 		d.step = aiStepKey
-		d.values[0] = aiProviders[d.provider].model
+		d.values[1] = aiProviders[d.provider].model
 	case aiMenuEndpoint:
 		d.step = aiStepEndpoint
 		d.values[0] = aiDefaultEndpoint
@@ -268,37 +286,47 @@ func (d *aiSetupDialog) choose() (chatshell.Overlay, tea.Cmd, bool) {
 // startSignIn signs in and reads the plan in the background. What the sign-in
 // prints (the one-time code and the URL) arrives line by line.
 func (d *aiSetupDialog) startSignIn() tea.Cmd {
+	d.stopSignIn()
 	ctx, cancel := context.WithCancel(d.ctx)
 	d.cancel = cancel
+	d.attempt++
+	attempt := d.attempt
+	// Each sign-in has its own channel, read by its own commands only.
 	events := make(chan tea.Msg, 64)
-	d.events = events
 	doors := d.doors
 	go func() {
-		email, err := doors.signIn(ctx, aiLineWriter{events})
+		email, err := doors.signIn(ctx, aiLineWriter{events: events, attempt: attempt})
 		var plan cloudPlan
 		if err == nil {
 			plan, err = doors.plan(ctx)
 		}
-		events <- aiSignedIn{email: email, plan: plan, err: err}
+		events <- aiSignedIn{attempt: attempt, email: email, plan: plan, err: err}
 	}()
-	return d.nextEvent()
+	d.events = map[int]chan tea.Msg{attempt: events}
+	return d.nextEvent(attempt)
 }
 
 // nextEvent waits for the next thing the sign-in says.
-func (d *aiSetupDialog) nextEvent() tea.Cmd {
-	events := d.events
+func (d *aiSetupDialog) nextEvent(attempt int) tea.Cmd {
+	events, ok := d.events[attempt]
+	if !ok {
+		return nil // an abandoned sign-in: nothing waits for it
+	}
 	return func() tea.Msg { return chat.OverlayMsg{Overlay: d, Msg: <-events} }
 }
 
 // aiLineWriter turns what the sign-in prints into lines of the dialog. A line
 // that does not fit is dropped rather than blocking the sign-in.
-type aiLineWriter struct{ events chan<- tea.Msg }
+type aiLineWriter struct {
+	events  chan<- tea.Msg
+	attempt int
+}
 
 func (w aiLineWriter) Write(p []byte) (int, error) {
 	for _, line := range strings.Split(strings.TrimRight(string(p), "\n"), "\n") {
 		if line = strings.TrimSpace(line); line != "" {
 			select {
-			case w.events <- aiSignInLine(line):
+			case w.events <- aiSignInLine{attempt: w.attempt, text: line}:
 			default:
 			}
 		}
@@ -307,10 +335,10 @@ func (w aiLineWriter) Write(p []byte) (int, error) {
 }
 
 func (d *aiSetupDialog) signedIn(msg aiSignedIn) (chatshell.Overlay, tea.Cmd, bool) {
-	d.cancel = nil
-	if d.step != aiStepSignIn {
-		return d, nil, false // the person went back meanwhile
+	if msg.attempt != d.attempt || d.step != aiStepSignIn {
+		return d, nil, false // the person went back, or started again, meanwhile
 	}
+	d.stopSignIn() // it is over: release its context
 	if msg.err != nil {
 		d.step = aiStepMenu
 		d.problem = "DataTug AI could not be set up: " + aiPublicError(msg.err) + ". Try again, or choose another way."
@@ -351,7 +379,7 @@ func (d *aiSetupDialog) upgrade() (chatshell.Overlay, tea.Cmd, bool) {
 // form describes the fields of the step: their labels and which hide input.
 func (d *aiSetupDialog) form() (labels []string, secret int) {
 	if d.step == aiStepKey {
-		return []string{"Model", "API key"}, 1
+		return []string{"Provider", "Model", "API key"}, 2
 	}
 	return []string{"Base URL", "Model", "API key (optional)"}, 2
 }
@@ -364,19 +392,24 @@ func (d *aiSetupDialog) formKey(key tea.KeyPressMsg) (chatshell.Overlay, tea.Cmd
 	case "down", "tab":
 		d.field = min(len(labels)-1, d.field+1)
 	case "left", "right":
-		if d.step == aiStepKey {
+		// Only on the provider's own row: an arrow pressed on the key must
+		// never change where that key is sent.
+		if d.providerRow() {
 			step := 1
 			if key.String() == "left" {
 				step = len(aiProviders) - 1
 			}
-			known := d.values[0] == aiProviders[d.provider].model
+			known := d.values[1] == aiProviders[d.provider].model
 			d.provider = (d.provider + step) % len(aiProviders)
 			if known {
 				// A model the person typed themself is kept.
-				d.values[0] = aiProviders[d.provider].model
+				d.values[1] = aiProviders[d.provider].model
 			}
 		}
 	case "backspace":
+		if d.providerRow() {
+			break
+		}
 		_, size := utf8.DecodeLastRuneInString(d.values[d.field])
 		d.values[d.field] = d.values[d.field][:len(d.values[d.field])-size]
 	case "enter":
@@ -395,22 +428,25 @@ func (d *aiSetupDialog) formKey(key tea.KeyPressMsg) (chatshell.Overlay, tea.Cmd
 
 // typeText adds typed or pasted text to the field of a form.
 func (d *aiSetupDialog) typeText(text string) {
-	if d.step != aiStepKey && d.step != aiStepEndpoint {
+	if (d.step != aiStepKey && d.step != aiStepEndpoint) || d.providerRow() {
 		return
 	}
 	d.values[d.field] += strings.Join(strings.Fields(text), "")
 }
 
+// providerRow reports that the keyboard is on the provider of the own-key form.
+func (d *aiSetupDialog) providerRow() bool { return d.step == aiStepKey && d.field == 0 }
+
 func (d *aiSetupDialog) submitForm() (chatshell.Overlay, tea.Cmd, bool) {
 	if d.step == aiStepKey {
 		provider := aiProviders[d.provider]
-		model, key := strings.TrimSpace(d.values[0]), strings.TrimSpace(d.values[1])
+		model, key := strings.TrimSpace(d.values[1]), strings.TrimSpace(d.values[2])
 		switch {
 		case model == "":
-			d.field, d.problem = 0, "Type the model name as "+provider.title+" lists it."
+			d.field, d.problem = 1, "Type the model name as "+provider.title+" lists it."
 			return d, nil, false
 		case key == "":
-			d.field, d.problem = 1, "Paste your "+provider.title+" API key."
+			d.field, d.problem = 2, "Paste your "+provider.title+" API key."
 			return d, nil, false
 		}
 		if !strings.HasPrefix(strings.ToLower(model), provider.family+"/") {
@@ -421,6 +457,9 @@ func (d *aiSetupDialog) submitForm() (chatshell.Overlay, tea.Cmd, bool) {
 	base, model, key := strings.TrimSpace(d.values[0]), strings.TrimSpace(d.values[1]), strings.TrimSpace(d.values[2])
 	parsed, err := url.Parse(base)
 	switch {
+	case err == nil && parsed.User != nil:
+		d.field, d.problem = 0, "Leave the user name and password out of the URL: put the key in the API key field, which is kept in the keyring."
+		return d, nil, false
 	case err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "":
 		d.field, d.problem = 0, "The base URL must start with http:// or https://, for example "+aiDefaultEndpoint
 		return d, nil, false
@@ -430,7 +469,7 @@ func (d *aiSetupDialog) submitForm() (chatshell.Overlay, tea.Cmd, bool) {
 	}
 	choice := aiChoice{Kind: aiKindEndpoint, Model: model, BaseURL: base}
 	if key != "" {
-		choice.KeyAccount = "ai-key:" + parsed.Host
+		choice.KeyAccount = "ai-endpoint:" + parsed.Host // never the entry of a provider
 	}
 	return d.finish(choice, key)
 }
@@ -445,6 +484,7 @@ func (d *aiSetupDialog) finish(choice aiChoice, key string) (chatshell.Overlay, 
 				d.state.sessionKeys = map[string]string{}
 			}
 			d.state.sessionKeys[choice.KeyAccount] = key
+			d.state.keyNote = "The key could not be kept in the OS keyring, so it works until you close DataTug and is asked for again next time."
 		}
 	}
 	if err := d.doors.saveChoice(d.projectDir, choice); err != nil {
@@ -486,7 +526,7 @@ func (d *aiSetupDialog) View(width, height int) string {
 		lines = append(lines, title.Render("✦ DataTug AI")+muted.Render("  what leaves this machine"), "")
 		lines = append(lines, aiConsentLines...)
 		lines = append(lines, "", "This applies to "+bold.Render(d.projectTitle)+" only. You can change it any time with "+aiCommand+".")
-		lines = append(lines, "", hint("Y", "I agree, sign in", "N", "back", "Esc", "back"))
+		lines = append(lines, "", hint("Y", "I agree, sign in", "N", "back"))
 	case aiStepSignIn:
 		lines = append(lines, title.Render("✦ Sign in to DataTug"), "")
 		if len(d.lines) == 0 {
@@ -521,13 +561,24 @@ func (d *aiSetupDialog) View(width, height int) string {
 		labels, secret := d.form()
 		if d.step == aiStepKey {
 			lines = append(lines, title.Render("✦ Your own API key"), "")
-			lines = append(lines, "Provider   "+chosen.Render("‹ "+aiProviders[d.provider].title+" ›")+muted.Render("   ←→ change"), "")
 		} else {
 			lines = append(lines, title.Render("✦ Your own endpoint"), "")
 			lines = append(lines, "Any OpenAI-compatible URL: Ollama, LM Studio, a gateway, your company's.", "")
 		}
 		for i, label := range labels {
 			value := d.values[i]
+			if d.step == aiStepKey && i == 0 {
+				value = "‹ " + aiProviders[d.provider].title + " ›"
+				if d.field == 0 {
+					value = chosen.Render(value) + muted.Render("   ←→ change")
+				}
+				marker := "  "
+				if d.field == 0 {
+					marker = "▸ "
+				}
+				lines = append(lines, marker+bold.Render(fmt.Sprintf("%-19s", label))+value)
+				continue
+			}
 			if i == secret && value != "" {
 				value = strings.Repeat("•", min(utf8.RuneCountInString(value), 24))
 			}
@@ -576,8 +627,11 @@ func (d *aiSetupDialog) planLine() string {
 
 // chatAISetup is the AI setup of one project's chat: the dialog, and what
 // opens it by itself.
-func chatAISetup(ctx context.Context, options chatOptions, projectDir, projectTitle string, missing, isSample bool) chat.AISetup {
-	setup := chat.AISetup{Missing: missing, Open: func(ui *chat.ChatUI, pending string) chatshell.Overlay {
+//
+// With "No AI" chosen a question is answered with the way back to this
+// dialog instead of opening it every time.
+func chatAISetup(ctx context.Context, options chatOptions, projectDir, projectTitle string, missing, noneChosen, isSample bool) chat.AISetup {
+	setup := chat.AISetup{Missing: missing && !noneChosen, Open: func(ui *chat.ChatUI, pending string) chatshell.Overlay {
 		return newAISetupDialog(ctx, ui, options, projectDir, projectTitle, currentAI(options, missing), pending)
 	}}
 	if isSample {

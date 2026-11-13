@@ -44,7 +44,7 @@ func TestChatUIPlanCommandRefreshesHostedUsage(t *testing.T) {
 	u, _ := newTestChatUI(t, nil)
 	// Direct-provider chat has no hosted plan lookup.
 	drainCmd(t, u, u.Submit("/plan"))
-	if !strings.Contains(flattenView(u.shell.View().Content), "available in hosted cloud chat") {
+	if !strings.Contains(flattenView(u.shell.View().Content), "allowance of DataTug AI") {
 		t.Fatal("direct-provider /plan did not explain its scope")
 	}
 	var calls int

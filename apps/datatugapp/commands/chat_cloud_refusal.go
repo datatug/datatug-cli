@@ -51,7 +51,7 @@ type cloudLimit struct {
 func formatCloudRefusal(source *ai.Error) *ai.Error {
 	copy := *source
 	if source.Code == ai.ErrCodeAuth {
-		copy.Message = "DataTug sign-in expired; run 'datatug auth login'"
+		copy.Message = "DataTug sign-in expired; type " + aiCommand + " to sign in again"
 		return &copy
 	}
 	if source.Code == ai.ErrCodeContextChanged {

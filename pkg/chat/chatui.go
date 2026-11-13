@@ -117,6 +117,9 @@ type ChatUI struct {
 	// projectChoicesLoader, when set, re-reads the choices each time F3 asks.
 	projectChoicesLoader func() []ProjectChoice
 	selectedProject      string
+	aiSetup              AISetup
+	reopen               bool
+	reopenPending        string
 	browserURL           string
 	webLinkVisible       bool
 	// openBrowser is ui.go's browser.OpenURL seam: F5 tries it first and
@@ -410,6 +413,9 @@ func (u *ChatUI) Submit(text string) tea.Cmd {
 		u.sessionFence()
 		u.shell.SetComposerText(text)
 		return nil
+	}
+	if cmd, taken := u.aiSetupFor(text); taken {
+		return cmd
 	}
 	u.shell.ShowTranscript()
 	if len(u.catalog.Objects) > 0 {
@@ -760,6 +766,8 @@ func (u *ChatUI) chatWidth() int {
 // OnMsg satisfies chatshell.MsgHandler.
 func (u *ChatUI) OnMsg(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
+	case OverlayMsg:
+		return u.overlayMsg(msg)
 	case resultColumnsLoadedMsg:
 		if msg.overlay != nil && u.shell.HasOverlay(msg.overlay) && msg.overlay.valid() {
 			_, _, _ = msg.overlay.Update(msg)
@@ -1218,6 +1226,7 @@ var chatCommands = []chatshell.Command{
 	{Name: "/export", Help: "export current|bucket <format> <path>"},
 	{Name: "/settings", Help: "show or change result versions to keep"},
 	{Name: "/plan", Help: "refresh hosted plan and AI usage"},
+	{Name: AISetupCommand, Help: "set up AI: DataTug AI, your own key or your own endpoint"},
 	// M5 (r1 adversarial review of #289): these were already handled by
 	// runCommand below, but missing from the "/" menu itself -- typing them
 	// out fully worked, but they weren't discoverable by opening "/" and
@@ -1315,7 +1324,7 @@ func (u *ChatUI) runCommand(input string) tea.Cmd {
 		if argument != "" {
 			err = fmt.Errorf("usage: /plan")
 		} else if u.hostedPlan == nil {
-			err = fmt.Errorf("/plan is available in hosted cloud chat; use datatug plan outside chat")
+			err = fmt.Errorf("/plan shows the allowance of DataTug AI; type /ai to choose it")
 		} else {
 			u.activeCommandAsync = true
 			lookup := u.hostedPlan

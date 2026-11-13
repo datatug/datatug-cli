@@ -48,7 +48,7 @@ type planHTTPError struct{ status int }
 func (e planHTTPError) Error() string {
 	switch e.status {
 	case http.StatusUnauthorized:
-		return "DataTug sign-in expired; run 'datatug auth login'"
+		return "DataTug sign-in expired; sign in again (" + aiCommand + " in the workspace, or datatug auth login)"
 	case http.StatusForbidden:
 		return "this account is unavailable for your sign-in"
 	case http.StatusServiceUnavailable:

@@ -137,13 +137,9 @@ limit: 10
 	},
 }
 
-// sampleSignInAdvice is how the sample gets real AI. Hosted AI is the person's
-// own choice, made by naming it: nothing switches a project to it by itself.
-//
-// The command names the sample, and the text says that the choice is
-// remembered: --model is saved for the next chats, whatever project they open,
-// so a person must know how to go back before they open their own data.
-const sampleSignInAdvice = "To ask your own questions with DataTug's hosted AI, quit and run: datatug auth login, then: datatug chat --project " + sampleProjectID + " --model cloud. A personal Free plan includes a monthly allowance of questions. DataTug remembers that model for your next chats, on any project; datatug chat --model none goes back to local."
+// sampleSignInAdvice is how the sample gets real AI: chosen by the person in
+// the workspace, for this project only. Nothing switches it on by itself.
+const sampleSignInAdvice = "To ask your own questions, type " + aiCommand + " or just ask one: DataTug AI is free to try after you agree and sign in with your browser, right here."
 
 // sampleQuestionsList is the numbered list of the ready-made questions.
 func sampleQuestionsList() string {

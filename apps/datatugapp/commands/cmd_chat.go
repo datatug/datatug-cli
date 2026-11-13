@@ -53,6 +53,11 @@ type chatOptions struct {
 	groups          []string
 	// result is a stored query result the workspace opens on (`ui --result`).
 	result *resultOpen
+	// modelExplicit: the AI was named on this command line, so the AI chosen
+	// for the project in the workspace does not replace it.
+	modelExplicit bool
+	aiFromChoice  bool        // the AI is the one chosen for this project in the workspace
+	aiState       *aiRunState // shared by the reopenings of one run
 }
 
 func chatCommand() *cobra.Command {
@@ -90,6 +95,9 @@ not shown can cost a describe_relation round trip.
   Schemas above 255 tables are not sent to it.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			flags := cmd.Flags()
+			options.modelExplicit = flags.Changed("model") || flags.Changed("ai") || flags.Changed("base-url")
+			options.aiState = &aiRunState{}
 			if err := applyLastChatOptions(cmd, &options); err != nil {
 				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: load previous chat options: %v\n", err)
 			}
@@ -130,6 +138,12 @@ func runChat(cmd *cobra.Command, options chatOptions) error {
 	}
 	for {
 		nextProject, err := runChatProjectFunc(cmd, options)
+		if err == nil && options.aiState != nil && options.aiState.reopen {
+			// The AI was set up in the workspace: open it again, in place.
+			options.aiState.reopen = false
+			options.modelExplicit = false
+			continue
+		}
 		if err != nil || nextProject == "" || nextProject == options.project {
 			return err
 		}
@@ -192,6 +206,17 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 		if advice := consentAdvice(projectDir, options.cloudDecision); advice != "" {
 			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "note: %s\n", advice)
 		}
+	}
+
+	if options.aiState == nil {
+		options.aiState = &aiRunState{}
+	}
+	// What is remembered for the next chat is what was asked for on the
+	// command line, never the AI chosen for this one project.
+	lastOptions := options
+	choiceNotice := ""
+	if !options.modelExplicit {
+		choiceNotice = applyProjectAIChoice(&options, projectDir)
 	}
 
 	database := options.database
@@ -271,16 +296,29 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	var cloudContext ai.ClientContext
 	var hostedSession cloudSession
 	isSample := projectCatalog.ID == sampleProjectID
+	aiMissing := false // nothing answers a question in plain words
+	hostedDown := false
+	if choiceNotice != "" {
+		sessionNotices = append(sessionNotices, choiceNotice)
+	}
 	if options.model == "cloud" {
 		cloudSession, loadErr := loadCloudSession(ctx, options)
-		if loadErr != nil {
-			return "", Exit(fmt.Sprintf("configure cloud chat: %v", loadErr), exitCodeUsage)
+		var plan cloudPlan
+		planErr := loadErr
+		if loadErr == nil {
+			plan, planErr = resolveCloudSelection(ctx, cmd, &options, cloudSession)
 		}
-		plan, planErr := resolveCloudSelection(ctx, cmd, &options, cloudSession)
-		if planErr != nil {
+		switch {
+		case planErr != nil && options.aiFromChoice:
+			// DataTug AI was chosen in the workspace: a sign-in that expired
+			// or a service that is away never closes the project. It opens
+			// without AI and says how to get it back.
+			hostedDown = true
+			sessionNotices = append(sessionNotices, "DataTug AI is not available right now: "+aiPublicError(planErr)+". Type "+aiCommand+" to sign in again or choose another AI. Tables still open from the Explorer.")
+		case planErr != nil:
 			return "", Exit(fmt.Sprintf("configure cloud chat: %v", planErr), exitCodeUsage)
 		}
-		if plan.V == 1 {
+		if planErr == nil && plan.V == 1 {
 			notice := fmt.Sprintf("Hosted AI payer: %s (%s), %s; %d of %d questions left until %s", plan.AccountTitle, plan.AccountID, plan.EffectivePlan, *plan.AI.Left, *plan.AI.Limit, plan.AI.ResetsAt)
 			if !plan.AI.Enforced {
 				notice += "; AI allowance is currently observed, not enforced"
@@ -291,11 +329,13 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), notice)
 			sessionNotices = append(sessionNotices, notice)
 		}
-		cloudClient, cloudContext, err = cloudChatClientFromSession(options, cloudSession)
-		if err != nil {
-			return "", Exit(fmt.Sprintf("configure cloud chat: %v", err), exitCodeUsage)
+		if planErr == nil {
+			cloudClient, cloudContext, err = cloudChatClientFromSession(options, cloudSession)
+			if err != nil {
+				return "", Exit(fmt.Sprintf("configure cloud chat: %v", err), exitCodeUsage)
+			}
+			hostedSession = cloudSession
 		}
-		hostedSession = cloudSession
 	}
 	if !hasQueryableProjectTables(projectCatalog, sourceURLs) {
 		conversation = unavailableSchemaConversation{database: database}
@@ -305,11 +345,12 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 			provider = cloudUserProvider{cloudClient}
 		} else {
 			var providerErr error
-			if options.model != "none" {
+			if options.model != "none" && !hostedDown {
 				provider, providerErr = chat.NewLLMProvider(options.model, options.baseURL, options.apiKey)
 			}
-			if providerErr != nil || options.model == "none" || chat.MissingAPIKey(options.model, options.baseURL, options.apiKey) {
+			if hostedDown || providerErr != nil || options.model == "none" || chat.MissingAPIKey(options.model, options.baseURL, options.apiKey) {
 				provider = nil
+				aiMissing = true
 				conversation = providerUnavailableConversation{}
 				notice := providerUnavailableNotice
 				if isSample {
@@ -318,7 +359,9 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 					}}
 					notice = sampleQuestionsNotice()
 				}
-				sessionNotices = append(sessionNotices, notice)
+				if !hostedDown {
+					sessionNotices = append(sessionNotices, notice)
+				}
 			}
 		}
 		if provider != nil {
@@ -408,6 +451,13 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	if options.notice != "" {
 		sessionNotices = append([]string{options.notice}, sessionNotices...)
 	}
+	if options.aiState.chosen && !aiMissing {
+		ready := "AI is set up: " + currentAI(options, false) + " answers your questions in this project. Change it any time with " + aiCommand + "."
+		if options.aiState.pending != "" {
+			ready += " Your question is in the composer: press Enter to ask it."
+		}
+		sessionNotices = append([]string{ready}, sessionNotices...)
+	}
 	if len(sessionNotices) > 0 {
 		// The terminal UI uses the alternate screen: what was printed to stderr
 		// above is not visible until the user quits, so show it in the chat too.
@@ -425,7 +475,11 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	// Opening a stored result is not a choice of project, environment or
 	// database for the next chat, so it leaves the saved choices as they were.
 	if options.result == nil {
-		if err := saveLastChatOptions(cmd, options); err != nil {
+		toSave := options
+		if options.aiFromChoice {
+			toSave = lastOptions
+		}
+		if err := saveLastChatOptions(cmd, toSave); err != nil {
 			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: save chat options: %v\n", err)
 		}
 	}
@@ -434,6 +488,14 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 		mountExplore(ui, *options.workspace)
 	}
 	ui.OpenTableAtStart(options.openAtStart)
+	ui.SetAISetup(chatAISetup(ctx, options, projectDir, projectCatalog.Title, aiMissing, isSample))
+	if options.aiState.chosen {
+		// Reopened after the AI setup: continue in the chat, with the
+		// question that opened the setup back in the composer.
+		ui.ShowChat()
+		ui.SetComposerText(options.aiState.pending)
+		options.aiState.chosen, options.aiState.pending = false, ""
+	}
 	var programOptions []tea.ProgramOption
 	if options.workspace != nil {
 		programOptions = options.workspace.programOptions
@@ -441,7 +503,22 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	if err := ui.Run(programOptions...); err != nil {
 		return "", err
 	}
+	options.aiState.reopen, options.aiState.pending = ui.Reopened()
+	options.aiState.chosen = options.aiState.reopen
 	return ui.SelectedProject(), nil
+}
+
+// currentAI says in words what answers questions in this chat.
+func currentAI(options chatOptions, missing bool) string {
+	switch {
+	case missing:
+		return "no AI"
+	case options.model == "cloud":
+		return "DataTug AI"
+	case options.baseURL != "":
+		return options.model + " at your own endpoint"
+	}
+	return options.model + " with your own key"
 }
 
 func writeHostedPlan(ctx context.Context, session cloudSession, project string, w io.Writer) error {
@@ -744,10 +821,8 @@ type providerUnavailableConversation struct{}
 const (
 	providerUnavailableNotice = "No AI is set up yet, so questions in plain words cannot be answered. Opening tables from the Explorer works without it. " + providerSetupAdvice
 	providerUnavailableReply  = "I can't answer yet: no AI is set up. Tables still open from the Explorer. " + providerSetupAdvice + " No query was executed."
-	// providerSetupAdvice names the two ways that exist today: DataTug's hosted
-	// AI after a sign-in, or a provider key in the environment. It names no key
-	// of the terminal: the browser shows the same text.
-	providerSetupAdvice = "To add AI, quit and either sign in for DataTug's hosted AI (datatug auth login, then datatug chat --model cloud) or set OPENAI_API_KEY and start datatug again (for another provider, its key and datatug chat --model <its model>)."
+	// providerSetupAdvice is the way AI is set up inside the workspace.
+	providerSetupAdvice = aiSetupAdvice
 )
 
 func (providerUnavailableConversation) AskWithContext(context.Context, string, string) (chat.Turn, error) {

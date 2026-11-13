@@ -56,7 +56,7 @@ func TestCloudRefusalsShowContractStateAndActions(t *testing.T) {
 			t.Fatalf("malformed or unknown state invented allowance: %q", got.Message)
 		}
 	}
-	if got := formatCloudRefusal(&ai.Error{Code: ai.ErrCodeAuth, Message: "body ignored"}); !strings.Contains(got.Message, "auth login") {
+	if got := formatCloudRefusal(&ai.Error{Code: ai.ErrCodeAuth, Message: "body ignored"}); !strings.Contains(got.Message, "type /ai to sign in again") {
 		t.Fatalf("401 action: %q", got.Message)
 	}
 	if got := formatCloudRefusal(&ai.Error{Code: ai.ErrCodeContextChanged, Message: "payer changed"}); !strings.Contains(got.Message, "fresh UUID") {

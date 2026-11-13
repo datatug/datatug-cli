@@ -32,7 +32,7 @@ func runUnifiedApp(modules []datatugui.Module, opts datatugui.Options, programOp
 // defaults, then the person's last chat choices.
 func workspaceOptions(modules []datatugui.Module, opts datatugui.Options, programOptions []tea.ProgramOption) (*cobra.Command, chatOptions) {
 	cmd := chatCommand()
-	options := chatOptions{project: ".", env: "local", model: defaultChatModel, thinking: "low", workspace: &workspaceStart{modules: modules, options: opts, programOptions: programOptions}}
+	options := chatOptions{project: ".", env: "local", model: defaultChatModel, thinking: "low", workspace: &workspaceStart{modules: modules, options: opts, programOptions: programOptions}, aiState: &aiRunState{}}
 	_ = applyLastChatOptions(cmd, &options)
 	return cmd, options
 }
@@ -92,6 +92,12 @@ func runWorkspaceLoop(cmd *cobra.Command, options chatOptions) error {
 				options.notice, options.openAtStart = sampleNotice, sampleFirstTable
 			}
 			chosen = true
+			continue
+		}
+		if options.aiState != nil && options.aiState.reopen {
+			// The AI was set up in the workspace: open it again, in place.
+			options.aiState.reopen = false
+			options.notice, options.openAtStart = "", ""
 			continue
 		}
 		if next == "" || next == options.project {

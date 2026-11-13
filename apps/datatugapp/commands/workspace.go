@@ -65,6 +65,7 @@ func runWorkspaceLoop(cmd *cobra.Command, options chatOptions) error {
 			// back, and a sample that cannot be prepared says so itself.
 			_, err = installSampleFunc()
 		}
+		sampleFailed := err != nil
 		if err == nil {
 			next, err = runChatProjectFunc(cmd, options)
 		}
@@ -72,8 +73,10 @@ func runWorkspaceLoop(cmd *cobra.Command, options chatOptions) error {
 			// The project the person chose could not be opened for chat: say
 			// why on the setup screen. The project of the start (the current
 			// folder, or the last one used) simply is not there on a first run.
+			// A sample that could not be prepared is said in either case: it is
+			// registered, so the welcome screen would not explain it.
 			reason := ""
-			if chosen {
+			if chosen || sampleFailed {
 				reason = fmt.Sprintf("Could not open project %q for chat: %s", options.project, strings.Join(strings.Fields(err.Error()), " "))
 			}
 			next, err = runSetupWorkspaceFunc(*options.workspace, reason, programOptions)

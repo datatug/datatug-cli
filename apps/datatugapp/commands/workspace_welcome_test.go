@@ -42,15 +42,6 @@ func stubSampleDoors(t *testing.T) *sampleDoors {
 	sampleAddToSettings = func(ref dtconfig.ProjectRef) error { d.added = append(d.added, ref); return nil }
 	sampleScan = func(dir, database string) error {
 		d.scanned = append(d.scanned, dir+"|"+database)
-		// The two files a real scan writes last, which a later run looks for.
-		for _, file := range d.scanFiles(dir) {
-			if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
-				return err
-			}
-			if err := os.WriteFile(file, []byte("{}"), 0o644); err != nil {
-				return err
-			}
-		}
 		return nil
 	}
 	sampleFixtureFiles = func() ([]demofixtures.File, error) {
@@ -66,12 +57,6 @@ func stubSampleDoors(t *testing.T) *sampleDoors {
 func (d *sampleDoors) dir() string { return filepath.Join(d.root, sampleProjectID) }
 func (d *sampleDoors) database() string {
 	return filepath.Join(d.dir(), filepath.FromSlash(demofixtures.ChinookPath))
-}
-func (d *sampleDoors) scanFiles(dir string) []string {
-	return []string{
-		filepath.Join(dir, "environments", sampleEnvironment, "catalogs", demofixtures.ChinookSource, demofixtures.ChinookSource+".db.json"),
-		filepath.Join(dir, "dbmodels", demofixtures.ChinookSource, "main", "tables", sampleFirstTable, "main."+sampleFirstTable+".columns.json"),
-	}
 }
 
 // One test per state the sample can be found in.
@@ -139,15 +124,46 @@ func TestInstallSampleStates(t *testing.T) {
 
 	t.Run("an interrupted scan is done again", func(t *testing.T) {
 		d := stubSampleDoors(t)
+		boom := errors.New("killed half-way")
+		sampleScan = func(dir, database string) error {
+			d.scanned = append(d.scanned, dir+"|"+database)
+			// As a scan stopped after its first tables leaves it.
+			if err := os.MkdirAll(filepath.Join(dir, "dbmodels", demofixtures.ChinookSource, "main", "tables", sampleFirstTable), 0o755); err != nil {
+				return err
+			}
+			return boom
+		}
+		if _, err := installSample(); !errors.Is(err, boom) {
+			t.Fatalf("err = %v", err)
+		}
+		sampleScan = func(dir, database string) error { d.scanned = append(d.scanned, dir+"|"+database); return nil }
 		install(t)
-		d.registered = d.dir()
-		// As a scan stopped half-way leaves it: the model folder, no columns.
-		if err := os.Remove(d.scanFiles(d.dir())[1]); err != nil {
+		if len(d.scanned) != 2 || !sampleScanned(d.dir()) {
+			t.Fatalf("a half-finished scan was taken for a finished one: scanned=%v", d.scanned)
+		}
+	})
+
+	t.Run("an install stopped before its marker is continued", func(t *testing.T) {
+		d := stubSampleDoors(t)
+		if err := os.MkdirAll(filepath.Join(d.dir(), ".datatug"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 		install(t)
-		if len(d.scanned) != 2 {
-			t.Fatalf("a half-finished scan was taken for a finished one: scanned=%v", d.scanned)
+		if len(d.scanned) != 1 || len(d.added) != 1 {
+			t.Fatalf("scanned=%v added=%v", d.scanned, d.added)
+		}
+	})
+
+	t.Run("a .datatug folder with someone's files is foreign", func(t *testing.T) {
+		d := stubSampleDoors(t)
+		if err := os.MkdirAll(filepath.Join(d.dir(), ".datatug"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d.dir(), ".datatug", "demo-install.json"), []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if id, err := installSample(); err == nil || id != "" || len(d.scanned) != 0 {
+			t.Fatalf("id=%q err=%v scanned=%v", id, err, d.scanned)
 		}
 	})
 
@@ -231,8 +247,16 @@ func TestInstallSampleFailures(t *testing.T) {
 			}
 		},
 		"database cannot be put in place": func() { sampleRename = func(string, string) error { return boom } },
-		"scan fails":                      func() { sampleScan = func(string, string) error { return boom } },
-		"registration is refused":         func() { sampleAddToSettings = func(dtconfig.ProjectRef) error { return boom } },
+		"scan cannot be marked as done": func() {
+			demoInstallWriteFile = func(path string, content []byte, mode os.FileMode) error {
+				if strings.HasSuffix(filepath.ToSlash(path), sampleScannedMarker) {
+					return boom
+				}
+				return os.WriteFile(path, content, mode)
+			}
+		},
+		"scan fails":              func() { sampleScan = func(string, string) error { return boom } },
+		"registration is refused": func() { sampleAddToSettings = func(dtconfig.ProjectRef) error { return boom } },
 	} {
 		t.Run(name, func(t *testing.T) {
 			stubSampleDoors(t)
@@ -496,6 +520,15 @@ func TestWorkspaceLoopOpensTheSampleWithItsFirstTable(t *testing.T) {
 	}
 	if len(seen) != 1 || len(reasons) != 2 || reasons[1] != `Could not open project "datatug-sample" for chat: disk full` {
 		t.Fatalf("opened=%d reasons=%q", len(seen), reasons)
+	}
+
+	// A sample remembered from the last run, not chosen now, says so too.
+	reasons, choices = nil, []string{""}
+	if err := runWorkspaceLoop(chatCommand(), chatOptions{project: sampleProjectID, workspace: &workspaceStart{}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(reasons) != 1 || reasons[0] != `Could not open project "datatug-sample" for chat: disk full` {
+		t.Fatalf("a remembered sample that could not be prepared: reasons=%q", reasons)
 	}
 }
 

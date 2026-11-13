@@ -453,6 +453,12 @@ func TestAISetupOwnKey(t *testing.T) {
 	press(t, d, "3")
 	wantView(t, d, "Your own API key", "Provider", "‹ OpenAI ›   ←→ change", "Model", defaultChatModel, "API key", "go to this provider, not to DataTug", "operating system's keyring, never in a file")
 
+	// A key pasted as the form opens, on the provider row, goes to the key.
+	d.Update(tea.PasteMsg{Content: "sk-pasted-early"})
+	if d.field != 2 || d.values[2] != "sk-pasted-early" {
+		t.Fatalf("a key pasted on the provider row was dropped: field=%d values=%q", d.field, d.values)
+	}
+	d.field, d.values[2] = 0, ""
 	// ←→ changes the provider on its own row, and its documented model with
 	// it. Nothing can be typed there.
 	press(t, d, "right", "x", "backspace")
@@ -944,5 +950,49 @@ func TestSetupScreenNamesNoCommandToRunOutside(t *testing.T) {
 	}
 	if len(reasons) != 2 || reasons[1] != `Could not open project "shop" for chat: project not found` {
 		t.Fatalf("reasons = %q", reasons)
+	}
+}
+
+// DataTug AI chosen in the workspace drops a hosted model remembered from
+// before that the plan no longer has, instead of staying unavailable; named
+// on the command line, an expired sign-in still says which command signs in.
+func TestChosenDataTugAIDropsAModelThePlanLost(t *testing.T) {
+	for _, env := range []string{"OPENAI_API_KEY", "OPENAI_BASE_URL"} {
+		t.Setenv(env, "")
+	}
+	aiConfigDir(t)
+	dir := installedSample(t)
+	if err := writeAIChoice(dir, aiChoice{Kind: aiKindHosted}); err != nil {
+		t.Fatal(err)
+	}
+	status := http.StatusOK
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if status != http.StatusOK {
+			w.WriteHeader(status)
+			return
+		}
+		_, _ = io.WriteString(w, `{"v":1,"payer":"personal","effectivePlan":"free","ai":{"used":3,"limit":50,"left":47,"models":[{"id":"small","default":true}]}}`)
+	}))
+	defer server.Close()
+	covDSetVar(t, &loadCloudSession, func(context.Context, chatOptions) (cloudSession, error) {
+		return fakeCloudSession(server.URL + "/v0/"), nil
+	})
+	var notices []string
+	covDSetVar(t, &setSessionNotices, func(_ *chat.ChatUI, lines []string) { notices = append(notices, lines...) })
+	t.Cleanup(chat.SetRunTeaProgramForTest(func(*tea.Program) (tea.Model, error) { return nil, nil }))
+	options := chatOptions{project: dir, env: sampleEnvironment, model: defaultChatModel, thinking: "low", cloudModel: "retired"}
+	if _, err := runChatProject(chatCommand(), options); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(notices, "\n")
+	if strings.Contains(joined, "not available right now") || !strings.Contains(joined, "Hosted AI payer") {
+		t.Fatalf("a retired hosted model kept DataTug AI away: %q", joined)
+	}
+
+	status = http.StatusUnauthorized
+	options.model, options.modelExplicit, options.cloudModel = "cloud", true, ""
+	_, err := runChatProject(chatCommand(), options)
+	if err == nil || !strings.Contains(err.Error(), "DataTug sign-in expired; sign in again: run 'datatug auth login'") {
+		t.Fatalf("explicit --model cloud with an expired sign-in: %v", err)
 	}
 }

@@ -428,8 +428,14 @@ func (d *aiSetupDialog) formKey(key tea.KeyPressMsg) (chatshell.Overlay, tea.Cmd
 
 // typeText adds typed or pasted text to the field of a form.
 func (d *aiSetupDialog) typeText(text string) {
-	if (d.step != aiStepKey && d.step != aiStepEndpoint) || d.providerRow() {
+	if d.step != aiStepKey && d.step != aiStepEndpoint {
 		return
+	}
+	if d.providerRow() {
+		if utf8.RuneCountInString(text) < 8 {
+			return // a stray character: the provider is chosen with ←→
+		}
+		d.field = 2 // a key pasted as the form opens goes to the key field
 	}
 	d.values[d.field] += strings.Join(strings.Fields(text), "")
 }

@@ -322,6 +322,12 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 		planErr := loadErr
 		if loadErr == nil {
 			plan, planErr = resolveCloudSelection(ctx, cmd, &options, cloudSession)
+			if planErr != nil && options.aiFromChoice && options.cloudModel != "" {
+				// A hosted model remembered from before may have left the
+				// plan: DataTug AI chosen in the workspace uses the plan's own.
+				options.cloudModel = ""
+				plan, planErr = resolveCloudSelection(ctx, cmd, &options, cloudSession)
+			}
 		}
 		switch {
 		case planErr != nil && options.aiFromChoice:
@@ -330,6 +336,8 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 			// without AI and says how to get it back.
 			hostedDown = true
 			sessionNotices = append(sessionNotices, "DataTug AI is not available right now: "+aiPublicError(planErr)+". Type "+aiCommand+" to sign in again or choose another AI. Tables still open from the Explorer.")
+		case errors.Is(planErr, planHTTPError{status: http.StatusUnauthorized}):
+			return "", Exit(fmt.Sprintf("configure cloud chat: %v: run 'datatug auth login'", planErr), exitCodeUsage)
 		case planErr != nil:
 			return "", Exit(fmt.Sprintf("configure cloud chat: %v", planErr), exitCodeUsage)
 		}

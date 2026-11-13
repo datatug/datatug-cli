@@ -212,7 +212,7 @@ Given a DataTug sign-in and no API key, AI profile or explicit model, opening an
 
 ### AC: ai-setup-in-workspace
 
-Given no AI, a question in plain words or `/ai` opens the AI setup dialog and keeps the question; choosing DataTug AI shows what leaves the machine and contacts nothing until the person agrees; the sign-in code and URL, and the plan, are shown in the dialog; an own key or endpoint is validated and saved; after any choice the workspace reopens on the chat of the same project with the question in the composer. No session notice, reply or dialog text tells the person to quit or to run a command outside.
+Given no AI, a question in plain words or `/ai` opens the AI setup dialog and keeps the question; choosing DataTug AI shows what leaves the machine and contacts nothing until the person agrees; the sign-in code and URL, and the plan, are shown in the dialog; an own key or endpoint is validated and saved; after any choice the workspace reopens on the chat of the same project with the question in the composer. No AI setup text (the no-AI notice and reply, the dialog, sign-in and plan refusals) tells the person to quit or to run a command outside. Two other texts still name a command and are open: the cloud table-narrowing consent notice (`datatug chat --cloud-decision allow`) and the unscanned-source issue (`datatug scan`).
 
 ### AC: ai-choice-per-project
 

@@ -37,6 +37,8 @@
 
 ## Quick start
 
+DataTug uses [TugQL](https://tugql.org/) for SQL-like, structured read queries; the [language specification](https://github.com/tugql/tugql) and [DALgo implementation](https://github.com/dal-go/dalgo/tree/main/tugql) document the contract and current Go support. [QueryDock](https://querydock.run/) is a related no-sign-up SQL playground for PostgreSQL-compatible PGlite, SQLite and DuckDB. Its current editors run SQL, not TugQL.
+
 Install the CLI (macOS and Linux with Homebrew; the other ways are in [Installation](#installation)):
 
 ```bash

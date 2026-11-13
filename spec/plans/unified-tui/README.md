@@ -277,6 +277,18 @@ Without AI the sample answers four ready-made questions by running queries writt
 
 **Evidence:** unit tests of matching and the scripted conversation; a test that installs the real sample, opens its chat as the workspace does, fails if a sign-in is looked for, and gets rows for each question; a walk in a terminal with a cleared environment.
 
+### Task 19: AI setup inside the workspace
+
+**Id:** task-19
+**Verifies:** unified-tui#ac:ai-setup-in-workspace, unified-tui#ac:ai-choice-per-project, unified-tui#ac:no-ai-plain-answer
+**Status:** complete
+**Owner:** CLI implementation owner
+**Depends on:** Task 18
+
+`/ai`, or a question while no AI answers, opens a dialog: DataTug AI after consent and a browser sign-in shown in the dialog, DataTug Pro through the account's subscription page, an own API key (OS keyring), an own endpoint, or no AI. The choice is stored per project directory in the user's config directory and the workspace reopens in place. Texts that told a person to quit and run a command are replaced.
+
+**Evidence:** unit tests of the dialog with the sign-in, plan, browser and keyring stood in for; tests that open the real sample with each stored choice, with an expired sign-in and after a reopening; a walk in a terminal with a cleared environment for the menu, the consent screen, the own-endpoint form, `/ai` and No AI. Not exercised against the real DataTug cloud: the sign-in and plan steps are covered by stand-ins only. Left open: an in-workspace control for the cloud table-narrowing consent and for scanning a source, whose texts still name a command.
+
 ## Open Questions
 
 Shortcut choices, server-scope defaults and supported/refused query shapes are resolved for the released baseline in the feature and inventory. Broader terminal/OS/modifier compatibility remains unproven beyond the recorded configurations; no automatic support claim is made. Grid-specific browser handoff and nested ancestor paths remain deferred to separate specifications. Incoming user corrections require their own source/evidence reconciliation rather than weakening existing acceptance criteria.

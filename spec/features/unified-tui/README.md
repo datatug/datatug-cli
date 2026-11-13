@@ -54,7 +54,11 @@ Without an AI provider (none configured, or a hosted model with no API key) the 
 
 On the sample project a first-time user gets an answer to a question in plain words before any AI is set up. With no AI, the sample opens with four numbered ready-made questions. Typing a number, or the question itself, runs a query written in advance through the chat's own policy-bound executor and shows its result; the answer says that no AI was used. Any other question gets the list again and the way to real AI. No model is asked and nothing leaves the machine.
 
-Hosted AI is only ever the person's explicit choice (`--model cloud` after `datatug auth login`). No project, the sample included, is switched to it automatically: a sign-in alone sends nothing to the cloud.
+AI is set up inside the workspace, and no text of the workspace tells a person to quit it. `/ai`, or a question in plain words while no AI answers, opens a dialog with five choices: DataTug AI (free, limited), DataTug Pro, the person's own API key, their own OpenAI-compatible endpoint, or no AI. The question that opened the dialog stays in the composer.
+
+DataTug AI is used only after consent: before any sign-in the dialog says what leaves the machine (the questions and conversation, table and column names and types, data read to answer) and that the free plan is limited, and the person agrees with a key. The browser sign-in then runs in the dialog, which shows the one-time code and URL, and the plan and remaining allowance; DataTug Pro opens the account's subscription page from there. An own key is kept in the OS keyring only (for the run only where there is no keyring), never in a file.
+
+The choice is remembered per project directory in the user's config directory, never in the project and never as the default of other projects: a project opened for the first time has no AI until its owner chooses. A model named on the command line wins over it, and DataTug AI remembered from an earlier command line is not used for a project without its own choice: it is offered there. An endpoint or key typed in the dialog is used exactly as typed: the environment adds neither a key nor another address. After a choice the workspace reopens in place on the chat. A chosen DataTug AI whose sign-in has expired or whose service is away opens the project without AI and says so; it never closes the project.
 
 ### Input, discovery and Explorer actions
 
@@ -196,15 +200,23 @@ Given a table with protected-label columns (stored or suggested), Explorer Open 
 
 ### AC: no-ai-plain-answer
 
-Given a hosted model with no API key and no explicit endpoint, the session notice and every chat reply say that AI is not set up and name the ways to add it that exist (hosted AI after `datatug auth login`, or a provider key), no request is sent to the provider, and Open data and New query work.
+Given a hosted model with no API key and no explicit endpoint, the session notice and every chat reply say that AI is not set up and name the way to add it inside the workspace (`/ai`, or asking a question), no request is sent to the provider, and Open data and New query work.
 
 ### AC: sample-ready-made-questions
 
-Given the sample project, no AI key and no DataTug sign-in, the first notice lists four numbered questions; each number (or the question text, any case) returns between 1 and 10 rows through the chat executor with strict sensitivity labels and says no AI was used; any other message returns the list and the way to hosted AI and runs no query.
+Given the sample project, no AI key and no DataTug sign-in, the first notice lists four numbered questions; each number (or the question text, any case) returns between 1 and 10 rows through the chat executor with strict sensitivity labels and says no AI was used; any other message opens the AI setup dialog and runs no query.
 
 ### AC: hosted-ai-is-explicit
 
-Given a DataTug sign-in and no API key, AI profile or explicit model, opening any project, the sample included, makes no request for a sign-in or a plan and keeps the no-AI answer; hosted AI starts only with `--model cloud`.
+Given a DataTug sign-in and no API key, AI profile or explicit model, opening any project, the sample included, makes no request for a sign-in or a plan and keeps the no-AI answer; hosted AI starts only with `--model cloud` or after the person chose DataTug AI for that project in the AI setup dialog.
+
+### AC: ai-setup-in-workspace
+
+Given no AI, a question in plain words or `/ai` opens the AI setup dialog and keeps the question; choosing DataTug AI shows what leaves the machine and contacts nothing until the person agrees; the sign-in code and URL, and the plan, are shown in the dialog; an own key or endpoint is validated and saved; after any choice the workspace reopens on the chat of the same project with the question in the composer. No AI setup text (the no-AI notice and reply, the dialog, sign-in and plan refusals) tells the person to quit or to run a command outside. Two other texts still name a command and are open: the cloud table-narrowing consent notice (`datatug chat --cloud-decision allow`) and the unscanned-source issue (`datatug scan`).
+
+### AC: ai-choice-per-project
+
+Given DataTug AI chosen for one project, another project opens with no AI and no request for a sign-in or plan; a model named on the command line is used instead of the choice; the choice is not written to the remembered chat options; an API key appears in no file; an expired sign-in opens the project without AI with a notice naming `/ai`.
 
 ### AC: visual-focus
 

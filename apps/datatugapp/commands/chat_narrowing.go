@@ -101,7 +101,7 @@ func chatTableNarrower(projectDir string, cloudClient *cloud.Client, relations [
 				notices = append(notices, fmt.Sprintf("the cloud decision engine is ON (enabled by %s): each turn sends %s. To turn it off: %s.", source, sentToThirdParty, off))
 			}
 		case provider == "cloud":
-			warnings = append(warnings, "the decision provider is \"cloud\" but the chat is not using --model cloud (run datatug auth login first); table narrowing by the cloud decider is off")
+			warnings = append(warnings, "the decision provider is \"cloud\" but the chat is not using --model cloud (choose DataTug AI with "+aiCommand+"); table narrowing by the cloud decider is off")
 		}
 	}
 	timeout := time.Duration(0)

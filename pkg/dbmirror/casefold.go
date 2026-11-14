@@ -52,7 +52,9 @@ var errBudget = errors.New("the read budget is spent")
 
 // Leftovers of an interrupted run: a rename's temporary name (".tmp-case-",
 // random hex, "-" and the old name when it fits) and writeFileIfChanged's
-// temporary files (".tmp-"). No record file name starts with ".".
+// temporary files (".tmp-"). No record file name starts with "." or ".tmp-":
+// an id with a leading dot is encoded, and a layout that names its files or
+// their folder with ".tmp-" is not written (Spec.layout).
 const (
 	leftoverPrefix   = ".tmp-"
 	caseRenamePrefix = ".tmp-case-"

@@ -113,6 +113,9 @@ func (s *Spec) layout() string {
 		switch {
 		case rf == nil:
 			return "the definition has no record_file"
+		case slices.ContainsFunc(append(strings.Split(filepath.ToSlash(rf.RecordsBasePath()), "/"), rf.Name), func(name string) bool { return strings.HasPrefix(name, leftoverPrefix) }):
+			// recoverLeftover removes or reports such names as left by an interrupted run
+			return fmt.Sprintf("record_file.name %q or records_dir %q starts with %q, which is the prefix of what an interrupted run leaves: name the files otherwise", rf.Name, rf.RecordsBasePath(), leftoverPrefix)
 		case rf.RecordType == ingitdb.SingleRecord:
 			if strings.Count(rf.Name, "{key}") != 1 || strings.Count(rf.Name, "{") != 1 || strings.ContainsAny(rf.Name, `/\`) {
 				return fmt.Sprintf("record_file.name %q must name the file by {key} alone", rf.Name)

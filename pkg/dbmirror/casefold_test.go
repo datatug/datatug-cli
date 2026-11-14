@@ -733,3 +733,62 @@ func TestRunProofLeavesRoomInTheReadBudget(t *testing.T) {
 		t.Errorf("no progress with an unchanged --max-reads: %+v", report)
 	}
 }
+
+// A record file named like a leftover of an interrupted run (astra-r2 blocker
+// 2): record_file.name ".tmp-{key}" names the record of document 2 ".tmp-2",
+// which recovery would remove as a temporary file. Such a layout is not
+// written: the run touches none of its files.
+func TestRunDoesNotWriteARecordNamedLikeALeftover(t *testing.T) {
+	for layout, live := range map[string]string{
+		"name: \".tmp-{key}\"\n  type: map[string]any":                          "notes/$records/.tmp-2",
+		"name: \"{key}.yaml\"\n  records_dir: .tmp-1\n  type: map[string]any":   "notes/.tmp-1/2.yaml",
+		"name: \"{key}.yaml\"\n  records_dir: r/.tmp-1\n  type: map[string]any": "notes/r/.tmp-1/2.yaml",
+		"name: .tmp-1\n  type: \"map[$record_id]map[$field_name]any\"":          "notes/.tmp-1",
+	} {
+		defsDir, out := t.TempDir(), t.TempDir()
+		for name, content := range map[string]string{
+			".ingitdb/root-collections.yaml":    "notes: notes\n",
+			"notes/.collection/definition.yaml": "record_file:\n  " + layout + "\n  format: yaml\ncolumns:\n  name:\n    type: string\n",
+			"policy.yaml":                       "format: datatug-mirror-policy/v1\ndefinitions: .\ncopy:\n  - notes\n",
+		} {
+			if err := os.MkdirAll(filepath.Dir(filepath.Join(defsDir, name)), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(defsDir, name), []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		defs, err := LoadDefinitions(defsDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		policy, err := ReadPolicy(filepath.Join(defsDir, "policy.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		mirror := func(src Source) *Report {
+			report, err := Run(context.Background(), src, defs, policy, Options{Output: out})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return report
+		}
+		mirror(newMemSource()) // the output is a mirror
+		live = filepath.Join(out, filepath.FromSlash(live))
+		if err := os.MkdirAll(filepath.Dir(live), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(live, []byte("two"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		src := newMemSource()
+		src.docs["notes/1"] = map[string]any{"name": "one"}
+		report := mirror(src)
+		if report.Complete || len(report.Recovered) != 0 || !strings.Contains(strings.Join(report.Incomplete, ";"), "is the prefix of what an interrupted run leaves") {
+			t.Errorf("%s: %+v", layout, report)
+		}
+		if got := readFile(t, live); got != "two" {
+			t.Errorf("%s: %q", layout, got)
+		}
+	}
+}

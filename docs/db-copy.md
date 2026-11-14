@@ -1067,8 +1067,9 @@ parts were read at different times. Counts are not read at the snapshot time.
   temporary name (`.tmp-case-…-<old name>`) is put back under its old name
   when that name is free, and the rename starts again; one that cannot be put
   back is left as it is and makes the run incomplete. A temporary file of an
-  interrupted write (`.tmp-…`) is removed: the file it was to replace was never
-  touched. Both are listed in the report (`recovered_leftovers`) and the log
+  interrupted write (`.tmp-` and digits, a regular file) is removed: the file
+  it was to replace was never touched. Any other `.tmp-…` entry is left as it
+  is and reported. Both are listed in the report (`recovered_leftovers`) and the log
   (`recovered:`).
 - **Rejected documents** (an undeclared field, a missing required field, a wrong
   type, a value a column does not allow, a date that does not parse, a name that
@@ -1100,7 +1101,9 @@ definition declares it in `record_file`, and the mirror writes:
 
 The format is `yaml` (or `yml`) or `json`; another format is `unsupported`. A
 parent of a sub-collection must keep one file per record, since its records are
-the folders of the sub-collection. Defaults, in the owner's words: "By default
+the folders of the sub-collection. A `record_file.name` or `records_dir` that
+starts with `.tmp-` is `unsupported`: that is the prefix of what an
+interrupted run leaves. Defaults, in the owner's words: "By default
 we export to YAML", and "default is all records in single yaml file": when the
 mirror writes a definition, it is one YAML file of all records,
 

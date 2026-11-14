@@ -232,7 +232,7 @@ func (d *Definitions) CopyTo(out string) (digest string, err error) {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(hash, "%s\x00%d\x00%s", filepath.ToSlash(rel), len(content), content)
+		_, _ = fmt.Fprintf(hash, "%s\x00%d\x00%s", filepath.ToSlash(rel), len(content), content)
 		_, err = writeFileIfChanged(filepath.Join(out, rel), content)
 		return err
 	})

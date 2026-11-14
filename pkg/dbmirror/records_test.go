@@ -151,7 +151,7 @@ func TestEncodeYAMLRoundTrips(t *testing.T) {
 	data := map[string]any{
 		"strings": []any{"true", "yes", "no", "on", "null", "~", "", "123", "0x1F", "1e3", "2026-01-01", "2026-01-01T00:00:00Z", ".inf", "-", "a: b", "#x", "- x",
 			"two\nlines", "trailing\n", " lead\nx", "tab\tin", "cr\r\n", "bell\a", "bom\uFEFF", "'quote", `"dq`, "é", "*star", "&amp", "!tag", "%p", "@at", "`bt"},
-		"numbers": []any{1.0, -0.0, 1e21, 1.5e-7, int64(math.MaxInt64), int64(math.MinInt64), int64(0)},
+		"numbers": []any{1.0, math.Copysign(0, -1), 1e21, 1.5e-7, int64(math.MaxInt64), int64(math.MinInt64), int64(0)},
 		"tags":    map[string]any{tagTime: "2026-11-01T09:00:00.000000Z"},
 		"map":     map[string]any{tagMap: map[string]any{tagFloat: "NaN"}},
 		"empty":   map[string]any{"list": []any{}, "map": map[string]any{}, "nil": nil, "bool": false},

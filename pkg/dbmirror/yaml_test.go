@@ -154,11 +154,18 @@ func assertYAML11Rules(t *testing.T, content string) {
 	}
 }
 
+// requirePyYAML is the variable that makes a missing PyYAML a failure, not a
+// skip: CI sets it where it installs PyYAML, so the read-back is binding there.
+const requirePyYAML = "DATATUG_REQUIRE_PYYAML"
+
 // readByPyYAML reads content with PyYAML (YAML 1.1) when python3 has it, and
 // compares the types and values with data.
 func readByPyYAML(t *testing.T, content []byte, data map[string]any) {
 	t.Helper()
 	if exec.Command("python3", "-c", "import yaml").Run() != nil {
+		if os.Getenv(requirePyYAML) != "" {
+			t.Fatalf("PyYAML is not available, and %s is set: install it (python3 -m pip install PyYAML)", requirePyYAML)
+		}
 		t.Log("PyYAML is not available: the YAML 1.1 rule table above stands in for it")
 		return
 	}

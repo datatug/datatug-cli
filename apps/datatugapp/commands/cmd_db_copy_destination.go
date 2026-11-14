@@ -18,61 +18,67 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// exitCodeIncomplete is the exit code of a db mirror run that finished but
-// whose output is not a complete copy of what was selected.
+// exitCodeIncomplete is the exit code of a `db copy --schema=destination` run
+// that finished but whose output is not a complete copy of what was selected.
 const exitCodeIncomplete = 3
 
-// dbMirrorCommand wires `datatug db mirror`: a read-only copy of a chosen part
-// of a Firestore database into an inGitDB database laid out as the inGitDB
-// definitions of a mirror say (see pkg/dbmirror and docs/db-mirror.md).
-func dbMirrorCommand() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "mirror",
-		Short: "Copy a chosen part of a Firestore database, read-only, into an inGitDB database laid out by a mirror's definitions",
-		Long: "Firestore has no schema, so `db copy` and `db export` cannot read it. `db mirror` takes what to read from the inGitDB definitions of a mirror " +
-			"(one collection definition per Firestore collection path, at any depth: teams/{team}/ext/{module}/events is the definition " +
-			"teams/ext/events) and from a mirror policy file of the DataTug project (format datatug-mirror-policy/v1) that lists the collections " +
-			"to copy, those excluded, the fields to mask, and the Firestore paths a collection is copied from (paths: teams/*/ext/calendar/events, so " +
-			"the events of another module are not copied). A defined collection the policy does not name is never copied, and is listed.\n\n" +
-			"The source is only read: no write request is ever sent, whatever the credentials allow (use an identity with read-only IAM, such as " +
-			"roles/datastore.viewer, as well). Credentials come only from the environment: Application Default Credentials " +
-			"(gcloud auth application-default login, or GOOGLE_APPLICATION_CREDENTIALS); --from is firestore://PROJECT[/DATABASE], env:NAME of a " +
-			"variable holding it, or a datatug:// reference to a project source.\n\n" +
-			"Every document is written as one JSON record file at the path its definition gives, its ids encoded so that any id is a safe file " +
-			"name (deterministic: a re-run over unchanged data changes no file), checked against its definition first. A document that does not " +
-			"fit is not written: the report lists its path, the reasons and the names of the fields concerned, never their values (--keep-rejected " +
-			"also keeps its masked record under <output>/.datatug-mirror/rejected/). The output then gets inGitDB's own validation. The run's " +
-			"report is <output>/.datatug-mirror/report.json.\n\n" +
-			"Choose what to read with --collections, --space and --path; --dry-run counts the documents of each collection and writes nothing; " +
-			"--max-reads stops before more Firestore reads than that (each read is billed), and the next run continues where it stopped " +
-			"(--restart starts over). A record file whose document no longer exists is reported; --prune deletes it. The output must be ignored " +
-			"by a .gitignore its git repository tracks, or be outside any repository. Exit codes: 0 complete, 1 a read or write failed, 2 a usage " +
-			"or policy error, 3 finished but incomplete (read budget reached, also in a dry run, documents rejected, or validation findings), " +
-			"4 the source cannot be opened.",
-		Args: cobra.NoArgs,
-		RunE: dbMirrorAction,
-	}
+// The --schema values of db copy: where the collections and their shapes come from.
+const (
+	copySchemaSource      = "source"
+	copySchemaDestination = "destination"
+)
+
+// destinationSchemaFlags are the db copy flags that apply only with
+// --schema=destination; sourceSchemaFlags the ones that apply only without it.
+var (
+	destinationSchemaFlags = []string{"policy", "definitions", "space", "path", "max-reads", "page-size", "keep-rejected", "continue-on-long-ids", "prune", "restart", "snapshot"}
+	sourceSchemaFlags      = []string{"from-schema", "to-schema", "fail-on-warning", "decimals", "recover-job-ref", "overwrite", "parallel-streams", "exclude", "where", "limit", "filter-config"}
+)
+
+// addDestinationSchemaFlags adds the flags of `db copy --schema=destination`:
+// a read-only copy of a chosen part of a Firestore database into an inGitDB
+// database laid out as the inGitDB definitions of a mirror say (see
+// pkg/dbmirror and docs/db-copy.md).
+func addDestinationSchemaFlags(cmd *cobra.Command) {
 	flags := cmd.Flags()
-	flags.String("from", "", "Firestore source: firestore://PROJECT[/DATABASE], env:NAME, or datatug://PROJECT/DB[?env=ENV]. Required.")
-	flags.String("policy", "", "Mirror policy file of the project (format datatug-mirror-policy/v1). Required.")
-	flags.String("definitions", "", "Folder of the inGitDB definitions of the mirror; default: the policy's definitions.")
-	flags.String("to", "", "Output folder (or ingitdb://folder); default: the policy's output, else data/<policy name> in the project.")
-	flags.String("collections", "", "Comma-separated defined collections to copy (e.g. teams,teams/ext/events); <path>/** adds every collection below it.")
-	flags.String("space", "", "Copy only the documents under spaces/<ID> (the same as --path spaces/<ID>).")
-	flags.String("path", "", "Copy only the documents at or below this Firestore path: a document (ext/billing) or a collection (spaces/abc/ext).")
-	flags.Bool("dry-run", false, "Count the documents of each selected collection and write nothing.")
-	flags.Int64("max-reads", 10000, "Stop before more than this many Firestore reads (0: no limit); the run then exits 3.")
-	flags.Int("page-size", dbmirror.DefaultPageSize, "Documents per read request.")
-	flags.Bool("progress", false, "Print one line per page read on stderr.")
-	flags.Bool("json", false, "Print the report as JSON on stdout.")
-	flags.Bool("keep-rejected", false, "Also write each rejected document under <output>/.datatug-mirror/rejected/ with only the policy's masks applied: its undeclared fields and the values that break its definition are written IN CLEAR (by default only its path, reasons and declared field names are kept).")
-	flags.Bool("continue-on-long-ids", false, "Do not stop at a document whose id is too long for its collection's one-file-per-record form (255 bytes): copy the rest, count it in the report, and exit 3.")
-	flags.Bool("prune", false, "Delete the record files whose document no longer exists, in the collections this run read completely (by default they are only reported).")
-	flags.Bool("restart", false, "Start over instead of continuing a run that stopped at its read budget.")
-	flags.Bool("snapshot", false, "Read every document as it was when the run started (Firestore keeps old versions for an hour), so the copy is consistent.")
-	_ = cmd.MarkFlagRequired("from")
-	_ = cmd.MarkFlagRequired("policy")
-	return cmd
+	flags.String("schema", copySchemaSource, "Where the collections to copy and their shapes come from: source (default: the source's own schema) or destination (the inGitDB definitions of a mirror, for a source without a schema such as Firestore: see \"Copying from a schemaless source\" in docs/db-copy.md).")
+	flags.String("policy", "", "--schema=destination: the mirror policy file of the project (format datatug-mirror-policy/v1). Required with --schema=destination.")
+	flags.String("definitions", "", "--schema=destination: folder of the inGitDB definitions of the mirror; default: the policy's definitions.")
+	flags.String("space", "", "--schema=destination: copy only the documents under spaces/<ID> (the same as --path spaces/<ID>).")
+	flags.String("path", "", "--schema=destination: copy only the documents at or below this Firestore path: a document (ext/billing) or a collection (spaces/abc/ext).")
+	flags.Int64("max-reads", 10000, "--schema=destination: stop before more than this many Firestore reads (0: no limit); the run then exits 3, and the next run continues where it stopped.")
+	flags.Int("page-size", dbmirror.DefaultPageSize, "--schema=destination: documents per read request.")
+	flags.Bool("keep-rejected", false, "--schema=destination: also write each rejected document under <output>/.datatug-mirror/rejected/ with only the policy's masks applied: its undeclared fields and the values that break its definition are written IN CLEAR (by default only its path, reasons and declared field names are kept).")
+	flags.Bool("continue-on-long-ids", false, "--schema=destination: do not stop at a document whose id is too long for its collection's one-file-per-record form (255 bytes): copy the rest, count it in the report, and exit 3.")
+	flags.Bool("prune", false, "--schema=destination: delete the record files whose document no longer exists, in the collections this run read completely (by default they are only reported).")
+	flags.Bool("restart", false, "--schema=destination: start over instead of continuing a run that stopped at its read budget.")
+	flags.Bool("snapshot", false, "--schema=destination: read every document as it was when the run started (Firestore keeps old versions for an hour), so the copy is consistent.")
+	// With --schema=destination, --to may be left out: the policy names the output.
+	cmd.PreRunE = func(cmd *cobra.Command, _ []string) error {
+		if schema, _ := cmd.Flags().GetString("schema"); schema == copySchemaDestination {
+			delete(cmd.Flags().Lookup("to").Annotations, cobra.BashCompOneRequiredFlag)
+		}
+		return nil
+	}
+}
+
+// copySchemaRefusal is the usage error of a flag given in the --schema mode
+// it does not apply to, or "".
+func copySchemaRefusal(cmd *cobra.Command, schema string) string {
+	if schema == copySchemaDestination {
+		for _, name := range sourceSchemaFlags {
+			if cmd.Flags().Changed(name) {
+				return fmt.Sprintf("--%s does not apply with --schema=destination: the collections and their shapes come from the destination's definitions and its policy", name)
+			}
+		}
+		return ""
+	}
+	for _, name := range destinationSchemaFlags {
+		if cmd.Flags().Changed(name) {
+			return fmt.Sprintf("--%s applies only with --schema=destination", name)
+		}
+	}
+	return ""
 }
 
 var (
@@ -83,6 +89,8 @@ var (
 		}
 		return source, source.Close, nil
 	}
+	// mirrorRun is the engine of --schema=destination (a test seam).
+	mirrorRun = dbmirror.Run
 	// mirrorAbs makes the output path absolute (a test seam).
 	mirrorAbs = filepath.Abs
 	// gitCommand runs git; a variable so tests can stand in for a missing git.
@@ -94,11 +102,23 @@ var (
 	}
 )
 
-func dbMirrorAction(cmd *cobra.Command, _ []string) error {
+// dbCopyFromDestinationSchema is `db copy --schema=destination`: the
+// collections and their shapes come from the inGitDB definitions of the
+// destination, and a policy says which of them are copied (pkg/dbmirror).
+func dbCopyFromDestinationSchema(cmd *cobra.Command) error {
 	ctx := cmd.Context()
 	flags := cmd.Flags()
+	if reason := copySchemaRefusal(cmd, copySchemaDestination); reason != "" {
+		return Exit(reason, exitCodeUsage)
+	}
 	from, _ := flags.GetString("from")
 	policyPath, _ := flags.GetString("policy")
+	if from == "" {
+		return Exit("required flag(s) \"from\" not set", exitCodeUsage)
+	}
+	if policyPath == "" {
+		return Exit("--schema=destination requires --policy: the mirror policy file of the project that says which defined collections are copied", exitCodeUsage)
+	}
 	space, _ := flags.GetString("space")
 	under, _ := flags.GetString("path")
 	dryRun, _ := flags.GetBool("dry-run")
@@ -125,7 +145,7 @@ func dbMirrorAction(cmd *cobra.Command, _ []string) error {
 		})
 	}
 	if ref.Scheme != "firestore" {
-		return Exit("--from: db mirror reads Firestore only (firestore://PROJECT[/DATABASE]); for other databases use db copy or db export", exitCodeUsage)
+		return Exit("--from: --schema=destination reads a Firestore source only (firestore://PROJECT[/DATABASE]); for other databases leave out --schema", exitCodeUsage)
 	}
 	policy, err := dbmirror.ReadPolicy(policyPath)
 	if err != nil {
@@ -149,7 +169,7 @@ func dbMirrorAction(cmd *cobra.Command, _ []string) error {
 		}
 	}
 	var collections []string
-	if list, _ := flags.GetString("collections"); list != "" {
+	if list, _ := flags.GetString("include"); list != "" {
 		for _, name := range strings.Split(list, ",") {
 			if name = strings.TrimSpace(name); name != "" {
 				collections = append(collections, name)
@@ -163,9 +183,9 @@ func dbMirrorAction(cmd *cobra.Command, _ []string) error {
 	}
 	defer func() { _ = closeSource() }()
 	sourceDisplay := dbcopy.SourceDisplay(from)
-	_, _ = fmt.Fprintf(stderr, "db mirror: reading Firestore project %s, database %s%s (read-only)\n", ref.ProjectID, ref.DatasetID, emulatorNote())
+	_, _ = fmt.Fprintf(stderr, "db copy: reading Firestore project %s, database %s%s (read-only)\n", ref.ProjectID, ref.DatasetID, emulatorNote())
 	if output != "" {
-		_, _ = fmt.Fprintf(stderr, "db mirror: writing %s\n", output)
+		_, _ = fmt.Fprintf(stderr, "db copy: writing %s\n", output)
 	}
 	opts := dbmirror.Options{
 		Output: output, Collections: collections, Under: under, DryRun: dryRun,
@@ -174,7 +194,7 @@ func dbMirrorAction(cmd *cobra.Command, _ []string) error {
 	}
 	opts.KeepRejected, _ = flags.GetBool("keep-rejected")
 	if opts.KeepRejected && !dryRun {
-		_, _ = fmt.Fprintln(stderr, "db mirror: warning: --keep-rejected writes each rejected document with only the policy's masks applied: its undeclared fields and the values that break its definition are written in clear under .datatug-mirror/rejected/")
+		_, _ = fmt.Fprintln(stderr, "db copy: warning: --keep-rejected writes each rejected document with only the policy's masks applied: its undeclared fields and the values that break its definition are written in clear under .datatug-mirror/rejected/")
 	}
 	opts.ContinueOnLongIDs, _ = flags.GetBool("continue-on-long-ids")
 	opts.Prune, _ = flags.GetBool("prune")
@@ -183,7 +203,7 @@ func dbMirrorAction(cmd *cobra.Command, _ []string) error {
 	if progress, _ := flags.GetBool("progress"); progress {
 		opts.Progress = stderr
 	}
-	report, err := dbmirror.Run(ctx, source, defs, policy, opts)
+	report, err := mirrorRun(ctx, source, defs, policy, opts)
 	if errors.Is(err, dbmirror.ErrUsage) {
 		return Exit(strings.TrimPrefix(err.Error(), dbmirror.ErrUsage.Error()+": "), exitCodeUsage)
 	}
@@ -192,7 +212,7 @@ func dbMirrorAction(cmd *cobra.Command, _ []string) error {
 		if asJSON && report != nil {
 			writeMirrorJSON(cmd.OutOrStdout(), report)
 		}
-		return Exit(fmt.Sprintf("db mirror: %v", err), 1)
+		return Exit(fmt.Sprintf("db copy: %v", err), 1)
 	}
 	if err != nil {
 		return Exit(dbcopy.RedactErrorWithSecrets(err, from).Error(), 1)
@@ -201,10 +221,10 @@ func dbMirrorAction(cmd *cobra.Command, _ []string) error {
 		writeMirrorJSON(cmd.OutOrStdout(), report)
 	}
 	if dryRun && report.BudgetReached {
-		return Exit(fmt.Sprintf("db mirror: the dry run stopped at the read budget of %d reads: the counts are incomplete", maxReads), exitCodeIncomplete)
+		return Exit(fmt.Sprintf("db copy: the dry run stopped at the read budget of %d reads: the counts are incomplete", maxReads), exitCodeIncomplete)
 	}
 	if !dryRun && !report.Complete {
-		return Exit(fmt.Sprintf("db mirror: the output is incomplete: %s", strings.Join(report.Incomplete, "; ")), exitCodeIncomplete)
+		return Exit(fmt.Sprintf("db copy: the output is incomplete: %s", strings.Join(report.Incomplete, "; ")), exitCodeIncomplete)
 	}
 	return nil
 }
@@ -369,10 +389,10 @@ func gitEnvironment() []string {
 	})
 }
 
-// hintFirestoreMirror points a db copy or db export from Firestore at db
-// mirror: Firestore has no schema to list collections from.
+// hintFirestoreMirror points a db copy or db export from Firestore at db copy
+// --schema=destination: Firestore has no schema to list collections from.
 func hintFirestoreMirror(w io.Writer, source dbcopy.BackendRef) {
 	if source.Scheme == "firestore" {
-		_, _ = fmt.Fprintln(w, "hint: Firestore has no schema to list its collections from; to copy it into inGitDB, use `datatug db mirror` with the inGitDB definitions of a mirror (see docs/db-mirror.md)")
+		_, _ = fmt.Fprintln(w, "hint: Firestore has no schema to list its collections from; to copy it into inGitDB, use `datatug db copy --schema=destination` with the inGitDB definitions of a mirror and its policy (see docs/db-copy.md)")
 	}
 }

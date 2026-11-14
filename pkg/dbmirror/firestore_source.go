@@ -39,7 +39,7 @@ func readOnlyCall(method string) error {
 	if readRPCs[method] {
 		return nil
 	}
-	return status.Errorf(codes.PermissionDenied, "datatug db mirror only reads: the request %s was not sent", method)
+	return status.Errorf(codes.PermissionDenied, "datatug db copy only reads its source: the request %s was not sent", method)
 }
 
 func readOnlyUnary(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {

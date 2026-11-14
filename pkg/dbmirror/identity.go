@@ -31,7 +31,7 @@ func (s SourceIdentity) String() string {
 // inGitDB record key) a mirror writes, and a file name back into the id.
 //
 // The encoding is tildeHexKeyEncoding ("~XX", ids.go; specified in
-// docs/db-mirror.md "Key encoding"). It is to be declared in the inGitDB schema
+// docs/db-copy.md "Key encoding"). It is to be declared in the inGitDB schema
 // and implemented once in ingitdb-go; until then the mirror implements it here,
 // behind this interface, and records its name in the output's state
 // (.datatug-mirror/output.json) instead of the collection definitions. A run
@@ -82,7 +82,7 @@ func (r *run) claimOutput() error {
 		var have outputState
 		switch {
 		case json.Unmarshal(content, &have) != nil || have.Format != outputFormat:
-			return fmt.Errorf("%w: %s is not a db mirror output state: choose an empty folder for the output", ErrUsage, outputFile(out))
+			return fmt.Errorf("%w: %s is not the output state of a db copy --schema=destination: choose an empty folder for the output", ErrUsage, outputFile(out))
 		case have.Source != want.Source:
 			return fmt.Errorf("%w: the output %s is a mirror of %s, not of %s: one output never mixes two databases, so choose an empty folder for this one", ErrUsage, out, have.Source, want.Source)
 		case have.Encoding != want.Encoding:

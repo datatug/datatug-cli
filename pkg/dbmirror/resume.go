@@ -98,7 +98,7 @@ func (r *run) loadState(plan []*planItem) *resumeState {
 	}
 	state, want := &resumeState{}, r.newState()
 	if json.Unmarshal(content, state) != nil || state.Format != resumeFormat || state.Items == nil {
-		_, _ = fmt.Fprintln(r.opts.Log, "db mirror: the resume state of an earlier run cannot be read: starting over")
+		_, _ = fmt.Fprintln(r.opts.Log, "db copy: the resume state of an earlier run cannot be read: starting over")
 		return nil
 	}
 	var changed []string
@@ -113,7 +113,7 @@ func (r *run) loadState(plan []*planItem) *resumeState {
 	}
 	if len(changed) > 0 {
 		slices.Sort(changed)
-		_, _ = fmt.Fprintf(r.opts.Log, "db mirror: %s changed since the run that stopped at its read budget: starting over, not resuming\n", strings.Join(changed, " and "))
+		_, _ = fmt.Fprintf(r.opts.Log, "db copy: %s changed since the run that stopped at its read budget: starting over, not resuming\n", strings.Join(changed, " and "))
 		return nil
 	}
 	for lower, file := range state.Files {
@@ -136,7 +136,7 @@ func (r *run) loadState(plan []*planItem) *resumeState {
 			}
 		}
 	}
-	_, _ = fmt.Fprintln(r.opts.Log, "db mirror: resuming an earlier run that stopped at its read budget (--restart starts over)")
+	_, _ = fmt.Fprintln(r.opts.Log, "db copy: resuming an earlier run that stopped at its read budget (--restart starts over)")
 	return state
 }
 

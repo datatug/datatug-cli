@@ -229,13 +229,13 @@ go test ./...
 
 
 <!-- dev-approach:v1 -->
-## Mirror Firestore into inGitDB
+## Copy Firestore into inGitDB: `db copy --schema=destination`
 
-`datatug db mirror` copies a chosen part of a Firestore database, read-only, into an inGitDB database laid out by the inGitDB definitions of a mirror, with a policy file of the project that lists the collections to copy, those excluded and the fields to mask (a defined collection the policy does not name is never copied). It has a dry run with counts, a read budget with runs that resume where the last one stopped, selection by collection, by space and by path, and policy `paths` that pin a collection to its parents; a re-run over unchanged data changes no file, and a rejected document's values are never written unless asked for. See [docs/db-mirror.md](docs/db-mirror.md).
+`datatug db copy --schema=destination` copies a chosen part of a Firestore database, read-only, into an inGitDB database laid out by the inGitDB definitions of a mirror (the destination's schema: Firestore has none), with a policy file of the project that lists the collections to copy, those excluded and the fields to mask (a defined collection the policy does not name is never copied). It has a dry run with counts, a read budget with runs that resume where the last one stopped, selection by collection (`--include`), by space and by path, and policy `paths` that pin a collection to its parents; a re-run over unchanged data changes no file, and a rejected document's values are never written unless asked for. It replaces `datatug db mirror`, which is removed. See [Copying from a schemaless source](docs/db-copy.md#copying-from-a-schemaless-source---schemadestination).
 
 ```bash
-datatug db mirror --from env:DATATUG_FIRESTORE_SOURCE_URL --policy mirrors/backup.yaml --dry-run
-datatug db mirror --from env:DATATUG_FIRESTORE_SOURCE_URL --policy mirrors/backup.yaml
+datatug db copy --schema=destination --from env:DATATUG_FIRESTORE_SOURCE_URL --policy mirrors/backup.yaml --dry-run
+datatug db copy --schema=destination --from env:DATATUG_FIRESTORE_SOURCE_URL --policy mirrors/backup.yaml
 ```
 
 ## Export a database to inGitDB

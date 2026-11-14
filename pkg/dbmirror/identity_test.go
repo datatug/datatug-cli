@@ -79,8 +79,8 @@ func TestClaimOutputRefuses(t *testing.T) {
 	}
 	// A state that is not one, or of another key encoding.
 	for content, want := range map[string]string{
-		"not json":           "is not a db mirror output state",
-		`{"format":"other"}`: "is not a db mirror output state",
+		"not json":           "is not the output state of a db copy --schema=destination",
+		`{"format":"other"}`: "is not the output state of a db copy --schema=destination",
 		`{"format":"` + outputFormat + `","source":{"project":"","database":""},"id_encoding":"percent/v1"}`: "by the key encoding percent/v1, and this version uses tilde-hex/v1",
 	} {
 		out := t.TempDir()

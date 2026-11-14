@@ -1171,7 +1171,7 @@ func (r *run) summarize() {
 		}
 		return
 	}
-	_, _ = fmt.Fprintf(log, "db mirror: %d records (%d written, %d unchanged), %d rejected, %d Firestore reads\n", r.report.Records, r.report.Written, r.report.Unchanged, len(r.report.Rejected), r.report.Reads)
+	_, _ = fmt.Fprintf(log, "db copy: %d records (%d written, %d unchanged), %d rejected, %d Firestore reads\n", r.report.Records, r.report.Written, r.report.Unchanged, len(r.report.Rejected), r.report.Reads)
 	if r.report.Resumed {
 		_, _ = fmt.Fprintf(log, "resumed: an earlier run stopped at its read budget; %d reads in all\n", r.report.ReadsTotal)
 	}

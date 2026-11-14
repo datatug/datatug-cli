@@ -31,23 +31,35 @@ func dbCopyCommand() *cobra.Command {
 			"Other pairs copy source collections and rows through DALgo adapters. A BigQuery destination uses the authenticated Google identity configured on this machine and requires an explicit dataset location. Existing BigQuery tables are never replaced. An ingitdb:// destination that does not exist yet is written as a complete native inGitDB project, staged and published only after every collection succeeded (also available as `datatug db export`); it takes ?records-format=json|jsonl|ingr|csv|yaml, --include, --exclude, --where, --limit, --dry-run, --json and --fail-on-warning. An ingitdb:// destination that exists is copied into.\n\n" +
 			"A sqlscript:///PATH.sql?dialect=mysql (or dialect=mssql, a SQL Server script run with sqlcmd, or dialect=oracle, an Oracle 23ai script run with SQL*Plus) destination (a SQLite --from only) writes a deterministic script instead of copying into a database: the same tables, keys, indexes, checks, defaults and values, every value written as a safe literal, and the same warnings, --json report, --dry-run, --fail-on-warning, --include and --exclude; it refuses to replace an existing file unless --overwrite=recreate. See docs/db-copy.md.\n\n" +
 			"A PostgreSQL (postgres://) --from is read through a read-only session, " +
-			"and a --from URL that turns the session's default_transaction_read_only off is refused. --to is the only place a PostgreSQL database is opened for writing.",
+			"and a --from URL that turns the session's default_transaction_read_only off is refused. --to is the only place a PostgreSQL database is opened for writing.\n\n" +
+			"--schema=destination copies from a source without a schema (Firestore: --from firestore://PROJECT[/DATABASE], env:NAME, or a datatug:// " +
+			"reference) into an inGitDB database: the collections and their shapes come from the inGitDB definitions of a mirror (one collection " +
+			"definition per Firestore collection path, at any depth: teams/{team}/ext/{module}/events is the definition teams/ext/events), and " +
+			"--policy, a mirror policy file of the project (format datatug-mirror-policy/v1), lists the collections to copy, those excluded, the " +
+			"fields to mask and the Firestore paths a collection is copied from. A defined collection the policy does not name is never copied, and " +
+			"is listed. The source is only read: no write request is ever sent, whatever the credentials allow. Records are written in the storage " +
+			"form and format the definitions give (YAML by default), their ids encoded so that any id is a safe file name, each checked against its " +
+			"definition first; a document that does not fit is not written and is reported without its values. --include, --space and --path " +
+			"choose what to read; --dry-run counts and writes nothing; --max-reads bounds the billed reads and the next run continues (--restart " +
+			"starts over); --prune deletes the records of documents that are gone; --snapshot reads one consistent version. --to defaults to the " +
+			"policy's output, which must be ignored by a committed .gitignore of its repository, or be outside any repository. Exit codes: 0 " +
+			"complete, 1 a read or write failed, 2 a usage or policy error, 3 finished but incomplete, 4 the source cannot be opened.",
 		RunE: dbCopyAction,
 	}
 	flags := cmd.Flags()
-	flags.String("from", "", "Source URL (sqlite://, ingitdb://, postgres:// read-only, http(s):// DataTug project, openvaultdb://). Required.")
+	flags.String("from", "", "Source URL (sqlite://, ingitdb://, postgres:// read-only, http(s):// DataTug project, openvaultdb://). Required. With --schema=destination: firestore://PROJECT[/DATABASE], env:NAME, or datatug://PROJECT/DB[?env=ENV].")
 	flags.String("from-schema", "", "PostgreSQL source schema to read; defaults to public.")
-	flags.String("to", "", "Target DALgo URL (sqlite://, ingitdb://, postgres://: the only way DataTug opens PostgreSQL for writing; bigquery://PROJECT/DATASET?location=LOCATION; sqlscript:///path/out.sql?dialect=mysql|mssql|oracle writes a SQL script file). Required.")
+	flags.String("to", "", "Target DALgo URL (sqlite://, ingitdb://, postgres://: the only way DataTug opens PostgreSQL for writing; bigquery://PROJECT/DATASET?location=LOCATION; sqlscript:///path/out.sql?dialect=mysql|mssql|oracle writes a SQL script file). Required. With --schema=destination: the output folder (or ingitdb://folder); default: the policy's output, else data/<policy name> in the project.")
 	flags.String("to-schema", "", "PostgreSQL target schema (SQLite <-> PostgreSQL copies); defaults to public. Created when missing.")
-	flags.Bool("json", false, "SQLite <-> PostgreSQL copies: print a machine-readable summary (tables, rows, created keys and indexes, warnings, exit code) on stdout.")
-	flags.Bool("dry-run", false, "SQLite <-> PostgreSQL copies: print the plan (DDL, row counts, every warning) and change nothing; the target is not opened.")
+	flags.Bool("json", false, "SQLite <-> PostgreSQL copies: print a machine-readable summary (tables, rows, created keys and indexes, warnings, exit code) on stdout. With --schema=destination: the run's report as JSON on stdout.")
+	flags.Bool("dry-run", false, "SQLite <-> PostgreSQL copies: print the plan (DDL, row counts, every warning) and change nothing; the target is not opened. With --schema=destination: count the documents of each selected collection and write nothing.")
 	flags.Bool("fail-on-warning", false, "SQLite <-> PostgreSQL copies: exit 3 when anything could not be carried exactly (the copy itself is still made).")
 	flags.String("decimals", "numeric", "SQLite -> PostgreSQL copies: how a DECIMAL_TEXT column whose texts numeric would spell differently (.0000, -0.00, 1.5 for 1.50) is carried: numeric (default; the new spelling is a warning that counts the values) or text (byte-exact).")
 	flags.String("recover-job-ref", "", "Recover the same uncertain BigQuery load job using the credential-free JSON reference printed by an interrupted `db copy`; requires --to and does not resubmit source rows.")
 	flags.String("overwrite", "", "Conflict policy when target already contains source-named collections. One of: recreate, reload.")
 	flags.Int("parallel-streams", 0, "Maximum number of source tables copied concurrently. Capped to 1 when either driver advertises no concurrency.")
-	flags.Bool("progress", false, "Emit per-table progress lines on stderr.")
-	flags.String("include", "", "Comma-separated list of source tables to copy. Mutually exclusive with --exclude.")
+	flags.Bool("progress", false, "Emit per-table progress lines on stderr. With --schema=destination: one line per page read.")
+	flags.String("include", "", "Comma-separated list of source tables to copy. Mutually exclusive with --exclude. With --schema=destination: the defined collections to copy (e.g. teams,teams/ext/events); <path>/** adds every collection below it.")
 	flags.String("exclude", "", "Comma-separated list of source tables to skip. Mutually exclusive with --include.")
 	// StringArray (not StringSlice): repeated --where/--limit flags accumulate
 	// verbatim, with no comma-splitting — matching github.com/urfave/cli/v3's
@@ -55,11 +67,22 @@ func dbCopyCommand() *cobra.Command {
 	flags.StringArray("where", nil, "Row predicate: <table>:<field>:<op>:<value>. Repeatable; multiple on the same table AND-compose. Operators: =, <, <=, >, >=, in.")
 	flags.StringArray("limit", nil, "Per-table row limit: <table>:<N> (positive integer). Repeatable; one per table.")
 	flags.String("filter-config", "", "Path to a YAML filter config file. Mutually exclusive with any other filter flag.")
+	addDestinationSchemaFlags(cmd)
 	_ = cmd.MarkFlagRequired("to")
 	return cmd
 }
 
 func dbCopyAction(cmd *cobra.Command, _ []string) error {
+	switch schema, _ := cmd.Flags().GetString("schema"); schema {
+	case copySchemaDestination:
+		return dbCopyFromDestinationSchema(cmd)
+	case copySchemaSource:
+		if reason := copySchemaRefusal(cmd, schema); reason != "" {
+			return Exit(reason, 2)
+		}
+	default:
+		return Exit(fmt.Sprintf("invalid --schema value %q: valid values are source, destination", schema), 2)
+	}
 	ctx := cmd.Context()
 	fromURL, _ := cmd.Flags().GetString("from")
 	fromSchema, _ := cmd.Flags().GetString("from-schema")

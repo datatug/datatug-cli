@@ -30,12 +30,14 @@ func (s SourceIdentity) String() string {
 // KeyEncoding turns a Firestore document id into the file name (and so the
 // inGitDB record key) a mirror writes, and a file name back into the id.
 //
-// The encoding is tildeHexKeyEncoding ("~XX", ids.go; specified in
-// docs/db-copy.md "Key encoding"). It is to be declared in the inGitDB schema
-// and implemented once in ingitdb-go; until then the mirror implements it here,
-// behind this interface, and records its name in the output's state
-// (.datatug-mirror/output.json) instead of the collection definitions. A run
-// refuses an output written with another encoding, so two are never mixed.
+// The encoding is tildeKeyEncoding ("~XX", ids.go; specified in
+// docs/db-copy.md "Key encoding"), the encoding inGitDB declares in a schema
+// as record_file.key_encoding: tilde-v1. The mirror implements it here, behind
+// this interface, and records its name in the output's state
+// (.datatug-mirror/output.json). A run refuses an output written with another
+// encoding, so two are never mixed.
+//
+// TODO(ingitdb-go#47): use ingitdb-go's tilde-v1 functions once released.
 type KeyEncoding interface {
 	// Name identifies the encoding in the output's state.
 	Name() string
@@ -45,16 +47,28 @@ type KeyEncoding interface {
 	Decode(name string) (string, bool)
 }
 
-// tildeHexKeyEncoding is encodeID/decodeID: the mirror's own implementation
-// until ingitdb-go provides the schema-declared one.
-type tildeHexKeyEncoding struct{}
+// tildeKeyEncoding is encodeID/decodeID, inGitDB's tilde-v1: the mirror's own
+// implementation until ingitdb-go provides it (ingitdb-go#47).
+type tildeKeyEncoding struct{}
 
-func (tildeHexKeyEncoding) Name() string                      { return "tilde-hex/v1" }
-func (tildeHexKeyEncoding) Encode(id string) string           { return encodeID(id) }
-func (tildeHexKeyEncoding) Decode(name string) (string, bool) { return decodeID(name) }
+func (tildeKeyEncoding) Name() string                      { return "tilde-v1" }
+func (tildeKeyEncoding) Encode(id string) string           { return encodeID(id) }
+func (tildeKeyEncoding) Decode(name string) (string, bool) { return decodeID(name) }
 
 // keyEncoding is the encoding the mirror writes ids with.
-var keyEncoding KeyEncoding = tildeHexKeyEncoding{}
+var keyEncoding KeyEncoding = tildeKeyEncoding{}
+
+// encodingAliases are the earlier names of an encoding: v0.157.0 recorded
+// tilde-v1, byte for byte the same encoding, as tilde-hex/v1.
+var encodingAliases = map[string]string{"tilde-hex/v1": "tilde-v1"}
+
+// canonicalEncoding is the current name of the encoding a state names.
+func canonicalEncoding(name string) string {
+	if current, ok := encodingAliases[name]; ok {
+		return current
+	}
+	return name
+}
 
 const outputFormat = "datatug-mirror-output/v1"
 
@@ -85,9 +99,12 @@ func (r *run) claimOutput() error {
 			return fmt.Errorf("%w: %s is not the output state of a db copy --schema=destination: choose an empty folder for the output", ErrUsage, outputFile(out))
 		case have.Source != want.Source:
 			return fmt.Errorf("%w: the output %s is a mirror of %s, not of %s: one output never mixes two databases, so choose an empty folder for this one", ErrUsage, out, have.Source, want.Source)
-		case have.Encoding != want.Encoding:
+		case canonicalEncoding(have.Encoding) != canonicalEncoding(want.Encoding):
 			return fmt.Errorf("%w: the output %s names its record files by the key encoding %s, and this version uses %s: choose an empty folder", ErrUsage, out, have.Encoding, want.Encoding)
 		}
+		// The state is never rewritten: it keeps the name it was written with,
+		// and the resume state's digest is of that name.
+		r.encodingName = have.Encoding
 		return nil
 	}
 	if !errors.Is(err, fs.ErrNotExist) {

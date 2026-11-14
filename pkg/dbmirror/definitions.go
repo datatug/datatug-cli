@@ -66,7 +66,10 @@ func LoadDefinitions(dir string) (*Definitions, error) {
 	if err != nil {
 		return nil, err
 	}
-	def, err := readDefinition(abs)
+	// Validated as inGitDB validates them: a definition inGitDB does not accept
+	// (a column type it has not, a foreign key to no collection) fails here,
+	// naming it, instead of getting every record of the collection rejected.
+	def, err := readDefinition(abs, ingitdb.Validate())
 	if err != nil {
 		return nil, fmt.Errorf("read inGitDB definitions in %s: %w", dir, err)
 	}

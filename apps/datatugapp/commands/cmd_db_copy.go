@@ -73,15 +73,9 @@ func dbCopyCommand() *cobra.Command {
 }
 
 func dbCopyAction(cmd *cobra.Command, _ []string) error {
-	switch schema, _ := cmd.Flags().GetString("schema"); schema {
-	case copySchemaDestination:
+	// --schema and the flags of each mode are checked first, by checkCopySchema (PreRunE).
+	if schema, _ := cmd.Flags().GetString("schema"); schema == copySchemaDestination {
 		return dbCopyFromDestinationSchema(cmd)
-	case copySchemaSource:
-		if reason := copySchemaRefusal(cmd, schema); reason != "" {
-			return Exit(reason, 2)
-		}
-	default:
-		return Exit(fmt.Sprintf("invalid --schema value %q: valid values are source, destination", schema), 2)
 	}
 	ctx := cmd.Context()
 	fromURL, _ := cmd.Flags().GetString("from")

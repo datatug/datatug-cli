@@ -496,8 +496,20 @@ func TestDBCopySchemaModesRefuseTheFlagsOfTheOther(t *testing.T) {
 		"source still needs to": {[]string{"--schema=source", "--from", "firestore://demo-example"}, `required flag(s) "to" not set`},
 		"destination no from":   {[]string{"--schema=destination", "--policy", policy}, `required flag(s) "from" not set`},
 		"destination no policy": {[]string{"--schema=destination", "--from", "firestore://demo-example"}, "--schema=destination requires --policy"},
+		// The mode is checked before cobra's required flags: without --schema=destination
+		// (or with a wrong-case value) and without --to, the message is about the mode.
+		"forgot the mode":         {[]string{"--from", "firestore://demo-example", "--policy", policy}, "--policy applies only with --schema=destination: add --schema=destination"},
+		"wrong-case mode":         {[]string{"--schema=Destination", "--from", "firestore://demo-example", "--policy", policy}, `invalid --schema value "Destination": valid values are source, destination`},
+		"source flag, no --to":    {[]string{"--schema=destination", "--from", "firestore://demo-example", "--policy", policy, "--exclude", "x"}, "--exclude does not apply with --schema=destination"},
+		"a database as the --to":  {[]string{"--schema=destination", "--from", "firestore://demo-example", "--policy", policy, "--to", "sqlite:///out.db"}, "--to: --schema=destination writes an inGitDB folder (a path or ingitdb://PATH), not sqlite://"},
+		"a --to URL in a dry run": {[]string{"--schema=destination", "--from", "firestore://demo-example", "--policy", policy, "--dry-run", "--to", "bigquery://p/d?location=US"}, "not bigquery://"},
 	} {
-		if _, stderr, code := runDBCopy(t, test.args...); code == 0 || !strings.Contains(stderr, test.want) {
+		// cobra's own required-flag error is not an exit code of the command.
+		wantCode := exitCodeUsage
+		if name == "source still needs to" {
+			wantCode = -1
+		}
+		if _, stderr, code := runDBCopy(t, test.args...); code != wantCode || !strings.Contains(stderr, test.want) {
 			t.Errorf("%s: exit %d\n%s", name, code, stderr)
 		}
 	}
@@ -544,6 +556,17 @@ func TestDBMirrorIsNotACommand(t *testing.T) {
 	for _, command := range dbCommand().Commands() {
 		if command.Name() == "mirror" {
 			t.Error("db mirror is a command")
+		}
+	}
+}
+
+// The help of a flag of one mode starts with a word, so the help renderer's
+// capital letter never makes it --Schema=Destination.
+func TestDBCopyDestinationSchemaHelpLines(t *testing.T) {
+	cmd := dbCopyCommand()
+	for _, name := range destinationSchemaFlags {
+		if usage := cmd.Flags().Lookup(name).Usage; !strings.HasPrefix(usage, "With --schema=destination: ") {
+			t.Errorf("--%s: %q", name, usage)
 		}
 	}
 }

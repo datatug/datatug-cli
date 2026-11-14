@@ -163,3 +163,28 @@ func TestDefinitionFileAndCopyTo(t *testing.T) {
 		t.Error("wrote into a file")
 	}
 }
+
+// The definitions are loaded with inGitDB's own validation: a column type
+// inGitDB does not accept fails the load, naming the collection, instead of
+// getting every record of the collection rejected.
+func TestLoadDefinitionsValidatesThem(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join("testdata", "mirror"))); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(dir, "ext", ".collection", "subcollections", "customers", "definition.yaml")
+	content, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	broken := strings.Replace(string(content), `type: "[]any"`, `type: "[]map[string]any"`, 1)
+	if broken == string(content) {
+		t.Fatal("the fixture changed")
+	}
+	if err := os.WriteFile(file, []byte(broken), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadDefinitions(dir); err == nil || !strings.Contains(err.Error(), "not valid definition of subcollection 'ext/customers'") {
+		t.Errorf("%v", err)
+	}
+}

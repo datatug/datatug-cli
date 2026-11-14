@@ -42,24 +42,38 @@ var (
 func addDestinationSchemaFlags(cmd *cobra.Command) {
 	flags := cmd.Flags()
 	flags.String("schema", copySchemaSource, "Where the collections to copy and their shapes come from: source (default: the source's own schema) or destination (the inGitDB definitions of a mirror, for a source without a schema such as Firestore: see \"Copying from a schemaless source\" in docs/db-copy.md).")
-	flags.String("policy", "", "--schema=destination: the mirror policy file of the project (format datatug-mirror-policy/v1). Required with --schema=destination.")
-	flags.String("definitions", "", "--schema=destination: folder of the inGitDB definitions of the mirror; default: the policy's definitions.")
-	flags.String("space", "", "--schema=destination: copy only the documents under spaces/<ID> (the same as --path spaces/<ID>).")
-	flags.String("path", "", "--schema=destination: copy only the documents at or below this Firestore path: a document (ext/billing) or a collection (spaces/abc/ext).")
-	flags.Int64("max-reads", 10000, "--schema=destination: stop before more than this many Firestore reads (0: no limit); the run then exits 3, and the next run continues where it stopped.")
-	flags.Int("page-size", dbmirror.DefaultPageSize, "--schema=destination: documents per read request.")
-	flags.Bool("keep-rejected", false, "--schema=destination: also write each rejected document under <output>/.datatug-mirror/rejected/ with only the policy's masks applied: its undeclared fields and the values that break its definition are written IN CLEAR (by default only its path, reasons and declared field names are kept).")
-	flags.Bool("continue-on-long-ids", false, "--schema=destination: do not stop at a document whose id is too long for its collection's one-file-per-record form (255 bytes): copy the rest, count it in the report, and exit 3.")
-	flags.Bool("prune", false, "--schema=destination: delete the record files whose document no longer exists, in the collections this run read completely (by default they are only reported).")
-	flags.Bool("restart", false, "--schema=destination: start over instead of continuing a run that stopped at its read budget.")
-	flags.Bool("snapshot", false, "--schema=destination: read every document as it was when the run started (Firestore keeps old versions for an hour), so the copy is consistent.")
+	flags.String("policy", "", "With --schema=destination: the mirror policy file of the project (format datatug-mirror-policy/v1). Required with --schema=destination.")
+	flags.String("definitions", "", "With --schema=destination: folder of the inGitDB definitions of the mirror; default: the policy's definitions.")
+	flags.String("space", "", "With --schema=destination: copy only the documents under spaces/<ID> (the same as --path spaces/<ID>).")
+	flags.String("path", "", "With --schema=destination: copy only the documents at or below this Firestore path: a document (ext/billing) or a collection (spaces/abc/ext).")
+	flags.Int64("max-reads", 10000, "With --schema=destination: stop before more than this many Firestore reads (0: no limit); the run then exits 3, and the next run continues where it stopped.")
+	flags.Int("page-size", dbmirror.DefaultPageSize, "With --schema=destination: documents per read request.")
+	flags.Bool("keep-rejected", false, "With --schema=destination: also write each rejected document under <output>/.datatug-mirror/rejected/ with only the policy's masks applied: its undeclared fields and the values that break its definition are written IN CLEAR (by default only its path, reasons and declared field names are kept).")
+	flags.Bool("continue-on-long-ids", false, "With --schema=destination: do not stop at a document whose id is too long for its collection's one-file-per-record form (255 bytes): copy the rest, count it in the report, and exit 3.")
+	flags.Bool("prune", false, "With --schema=destination: delete the record files whose document no longer exists, in the collections this run read completely (by default they are only reported).")
+	flags.Bool("restart", false, "With --schema=destination: start over instead of continuing a run that stopped at its read budget.")
+	flags.Bool("snapshot", false, "With --schema=destination: read every document as it was when the run started (Firestore keeps old versions for an hour), so the copy is consistent.")
 	// With --schema=destination, --to may be left out: the policy names the output.
-	cmd.PreRunE = func(cmd *cobra.Command, _ []string) error {
-		if schema, _ := cmd.Flags().GetString("schema"); schema == copySchemaDestination {
-			delete(cmd.Flags().Lookup("to").Annotations, cobra.BashCompOneRequiredFlag)
-		}
-		return nil
+	// cobra checks required flags after PreRunE and before RunE.
+	cmd.PreRunE = checkCopySchema
+}
+
+// checkCopySchema checks --schema and the flags of each mode before cobra's
+// required-flag check, so a mode mistake gets its own message, not that --to
+// is missing. With --schema=destination, --to may be left out: the policy
+// names the output.
+func checkCopySchema(cmd *cobra.Command, _ []string) error {
+	schema, _ := cmd.Flags().GetString("schema")
+	if schema != copySchemaSource && schema != copySchemaDestination {
+		return Exit(fmt.Sprintf("invalid --schema value %q: valid values are source, destination", schema), exitCodeUsage)
 	}
+	if reason := copySchemaRefusal(cmd, schema); reason != "" {
+		return Exit(reason, exitCodeUsage)
+	}
+	if schema == copySchemaDestination {
+		delete(cmd.Flags().Lookup("to").Annotations, cobra.BashCompOneRequiredFlag)
+	}
+	return nil
 }
 
 // copySchemaRefusal is the usage error of a flag given in the --schema mode
@@ -75,7 +89,7 @@ func copySchemaRefusal(cmd *cobra.Command, schema string) string {
 	}
 	for _, name := range destinationSchemaFlags {
 		if cmd.Flags().Changed(name) {
-			return fmt.Sprintf("--%s applies only with --schema=destination", name)
+			return fmt.Sprintf("--%s applies only with --schema=destination: add --schema=destination to copy by the destination's definitions", name)
 		}
 	}
 	return ""
@@ -108,9 +122,6 @@ var (
 func dbCopyFromDestinationSchema(cmd *cobra.Command) error {
 	ctx := cmd.Context()
 	flags := cmd.Flags()
-	if reason := copySchemaRefusal(cmd, copySchemaDestination); reason != "" {
-		return Exit(reason, exitCodeUsage)
-	}
 	from, _ := flags.GetString("from")
 	policyPath, _ := flags.GetString("policy")
 	if from == "" {
@@ -118,6 +129,12 @@ func dbCopyFromDestinationSchema(cmd *cobra.Command) error {
 	}
 	if policyPath == "" {
 		return Exit("--schema=destination requires --policy: the mirror policy file of the project that says which defined collections are copied", exitCodeUsage)
+	}
+	// --to is the output folder: a DALgo URL of another database is refused,
+	// not taken for a folder name (a folder named "sqlite:").
+	if to, _ := flags.GetString("to"); strings.Contains(to, "://") && !strings.HasPrefix(to, "ingitdb://") {
+		scheme, _, _ := strings.Cut(to, "://")
+		return Exit(fmt.Sprintf("--to: --schema=destination writes an inGitDB folder (a path or ingitdb://PATH), not %s://", scheme), exitCodeUsage)
 	}
 	space, _ := flags.GetString("space")
 	under, _ := flags.GetString("path")

@@ -23,7 +23,7 @@ func TestRunKeepsAnOutputToOneSource(t *testing.T) {
 	if !first.BudgetReached || *first.SourceIdentity != production {
 		t.Fatalf("%+v", first)
 	}
-	if got := readFile(t, outputFile(out)); !strings.Contains(got, `"project": "p1"`) || !strings.Contains(got, `"id_encoding": "tilde-hex/v1"`) || strings.Contains(got, "emulator") {
+	if got := readFile(t, outputFile(out)); !strings.Contains(got, `"project": "p1"`) || !strings.Contains(got, `"id_encoding": "tilde-v1"`) || strings.Contains(got, "emulator") {
 		t.Error(got)
 	}
 	before := allBytes(t, out)
@@ -81,7 +81,7 @@ func TestClaimOutputRefuses(t *testing.T) {
 	for content, want := range map[string]string{
 		"not json":           "is not the output state of a db copy --schema=destination",
 		`{"format":"other"}`: "is not the output state of a db copy --schema=destination",
-		`{"format":"` + outputFormat + `","source":{"project":"","database":""},"id_encoding":"percent/v1"}`: "by the key encoding percent/v1, and this version uses tilde-hex/v1",
+		`{"format":"` + outputFormat + `","source":{"project":"","database":""},"id_encoding":"percent/v1"}`: "by the key encoding percent/v1, and this version uses tilde-v1",
 	} {
 		out := t.TempDir()
 		claimed(t, out, SourceIdentity{})
@@ -130,5 +130,36 @@ func TestClaimOutputCannotListTheFolder(t *testing.T) {
 	defer func() { _ = os.Chmod(out, 0o700) }()
 	if _, err := Run(context.Background(), exampleSource(), testDefinitions(t), testPolicy(t), Options{Output: out}); err == nil || errors.Is(err, ErrUsage) {
 		t.Error(err)
+	}
+}
+
+// oldEncodingName is tilde-v1 under the name v0.157.0 recorded for it.
+type oldEncodingName struct{ tildeKeyEncoding }
+
+func (oldEncodingName) Name() string { return "tilde-hex/v1" }
+
+// An output written by v0.157.0 records the encoding as tilde-hex/v1, the old
+// name of tilde-v1: it is read as the same encoding, keeps its state, and
+// resumes.
+func TestRunResumesAnOutputOfTheOldEncodingName(t *testing.T) {
+	out := t.TempDir()
+	src := exampleSource()
+	withSeam(t, &keyEncoding, KeyEncoding(oldEncodingName{}))
+	if first := runWith(t, src, testPolicy(t), Options{Output: out, Identity: production, MaxReads: 4, PageSize: 2}); !first.BudgetReached {
+		t.Fatalf("%+v", first)
+	}
+	withSeam(t, &keyEncoding, KeyEncoding(tildeKeyEncoding{}))
+	state := readFile(t, outputFile(out))
+	if !strings.Contains(state, `"id_encoding": "tilde-hex/v1"`) {
+		t.Fatal(state)
+	}
+	if resumed := runWith(t, src, testPolicy(t), Options{Output: out, Identity: production}); !resumed.Resumed {
+		t.Errorf("%+v", resumed)
+	}
+	if got := readFile(t, outputFile(out)); got != state {
+		t.Errorf("the output state changed:\n%s", got)
+	}
+	if canonicalEncoding("tilde-hex/v1") != "tilde-v1" || canonicalEncoding("percent/v1") != "percent/v1" {
+		t.Error("canonicalEncoding")
 	}
 }

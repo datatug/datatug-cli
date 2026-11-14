@@ -93,11 +93,16 @@ func TestApplyMasks(t *testing.T) {
 			map[string]any{"id": "2"},
 			"text",
 		},
-		"byID": map[string]any{"x": map[string]any{"phone": "1"}, "y": map[string]any{"phone": int64(2)}},
-		"list": []any{"a", "b"},
+		"byID":    map[string]any{"x": map[string]any{"phone": "1"}, "y": map[string]any{"phone": int64(2)}},
+		"list":    []any{"a", "b"},
+		"tags":    []any{"x"},
+		"plan":    map[string]any{"title": "x"},
+		"when":    map[string]any{"$time": "2026-11-20T07:00:00.000000Z"},
+		"wrapped": map[string]any{"$map": map[string]any{"$ref": "x"}},
+		"none":    map[string]any{},
 	}
-	hit := applyMasks(data, []string{"email", "age", "members.*.name", "byID.*.phone", "list.1", "nothing", "members.9.name"})
-	if !reflect.DeepEqual(hit, []string{"email", "age", "members.*.name", "byID.*.phone", "list.1"}) {
+	hit := applyMasks(data, []string{"email", "age", "members.*.name", "byID.*.phone", "list.1", "nothing", "members.9.name", "tags", "plan", "when", "wrapped", "none"})
+	if !reflect.DeepEqual(hit, []string{"email", "age", "members.*.name", "byID.*.phone", "list.1", "tags", "plan", "when", "wrapped", "none"}) {
 		t.Errorf("hit %v", hit)
 	}
 	want := map[string]any{
@@ -105,12 +110,16 @@ func TestApplyMasks(t *testing.T) {
 		"members": []any{map[string]any{"name": "***", "id": "1"}, map[string]any{"id": "2"}, "text"},
 		"byID":    map[string]any{"x": map[string]any{"phone": "***"}, "y": map[string]any{}},
 		"list":    []any{"a", "***"},
+		"tags":    []any{},
+		"plan":    map[string]any{},
+		"wrapped": map[string]any{},
+		"none":    map[string]any{},
 	}
 	if !reflect.DeepEqual(data, want) {
 		t.Errorf("%#v", data)
 	}
-	items := []any{map[string]any{"a": int64(1)}}
-	if !maskPath(items, []string{"*"}) || items[0] != nil {
+	items := []any{map[string]any{"a": int64(1)}, int64(2)}
+	if !maskPath(items, []string{"*"}) || !reflect.DeepEqual(items, []any{map[string]any{}, nil}) {
 		t.Errorf("%#v", items)
 	}
 }
@@ -145,7 +154,7 @@ func TestTemporalProblemsNameNoValue(t *testing.T) {
 	if got := temporalProblems(def, map[string]any{"at": "2026-11-20T07:00:00.000000Z", "day": "2026-11-20", "hour": "07:30", "s": "x"}); len(got) != 0 {
 		t.Error(got)
 	}
-	if got := temporalProblems(def, map[string]any{"hour": "07:30:15", "at": map[string]any{"$time": "x"}}); len(got) != 0 {
+	if got := temporalProblems(def, map[string]any{"hour": "07:30:15", "at": map[string]any{"$time": "x"}, "day": "***"}); len(got) != 0 {
 		t.Error(got)
 	}
 	got := temporalProblems(def, map[string]any{"at": "SECRET", "day": "2026-13-01", "hour": "25:00"})

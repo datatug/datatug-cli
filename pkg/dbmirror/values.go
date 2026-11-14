@@ -269,9 +269,21 @@ func maskPath(container any, path []string) bool {
 	visit := func(get func() any, set func(any), remove func()) {
 		value := get()
 		if len(path) == 1 {
-			if _, ok := value.(string); ok {
+			// A masked value keeps its kind where it can, so a required column
+			// still holds one: a string becomes "***", a map {} and a list [];
+			// a number, a bool, null or a tagged value ($time, $ref, ...) goes.
+			switch typed := value.(type) {
+			case string:
 				set(maskedString)
-			} else {
+			case []any:
+				set([]any{})
+			case map[string]any:
+				if isTagged(typed) {
+					remove()
+				} else {
+					set(map[string]any{})
+				}
+			default:
 				remove()
 			}
 			matched = true
@@ -304,6 +316,14 @@ func maskPath(container any, path []string) bool {
 	return matched
 }
 
+// isTagged reports whether a converted map is a tagged value, not a map of the source.
+func isTagged(value map[string]any) bool {
+	for key := range value {
+		return len(value) == 1 && key != tagMap && slices.Contains(tags, key)
+	}
+	return false
+}
+
 // temporalLayouts are the texts a date, time or datetime column accepts.
 var temporalLayouts = map[ingitdb.ColumnType][]string{
 	ingitdb.ColumnTypeDateTime: {time.RFC3339Nano},
@@ -319,7 +339,7 @@ func temporalProblems(def *ingitdb.CollectionDef, data map[string]any) []string 
 	for _, key := range sortedKeys(def.Columns) {
 		layouts := temporalLayouts[def.Columns[key].Type]
 		text, isText := data[key].(string)
-		if len(layouts) == 0 || !isText {
+		if len(layouts) == 0 || !isText || text == maskedString {
 			continue
 		}
 		parsed := false

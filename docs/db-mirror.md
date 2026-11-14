@@ -55,8 +55,10 @@ has none.
    A pattern must have the collection's own collection ids.
 
    **`mask`** paths are dot-separated (`members.*.displayName`: `*` is every key
-   of a map or every item of a list); a masked string becomes `"***"`, any other
-   masked value is removed. The policy check refuses a mask path that does not
+   of a map or every item of a list). A masked value keeps its kind where it can,
+   so a required column still holds one: a string becomes `"***"`, a map `{}`
+   and a list `[]`; a number, a bool, a timestamp or another tagged value is
+   removed. The policy check refuses a mask path that does not
    name a declared field: its first name must be a column of the collection
    (`emial` is an error), and each next name must be something the column's type
    holds (an item, `*` or an index, of a `[]T`; any key of a `map[K]V`; anything

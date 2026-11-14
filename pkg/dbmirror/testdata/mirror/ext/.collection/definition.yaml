@@ -1,0 +1,9 @@
+# Firestore: ext/{module}: the module documents do not exist, only their sub-collections
+record_file:
+  name: "{key}.json"
+  type: map[string]any
+  format: json
+  records_dir: .
+columns:
+  title:
+    type: string

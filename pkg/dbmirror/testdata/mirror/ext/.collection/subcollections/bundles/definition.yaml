@@ -1,0 +1,8 @@
+# Many records in one file: no Firestore document maps to it
+record_file:
+  name: "bundles.json"
+  type: "[]map[string]any"
+  format: json
+columns:
+  text:
+    type: string

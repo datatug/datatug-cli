@@ -1,0 +1,8 @@
+# Firestore: ext/{module}/loose/{id}: not declared in the policy
+record_file:
+  name: "{key}.json"
+  type: map[string]any
+  format: json
+columns:
+  text:
+    type: string

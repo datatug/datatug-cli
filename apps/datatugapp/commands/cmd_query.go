@@ -215,6 +215,9 @@ type queryOptions struct {
 	resultID   string
 	resultRows int
 	sink       *resultSink
+	// fromRef, when set, is the nested collection --from names in a Firestore
+	// or inGitDB source (see nestedFromRef); nil reads --from as one name.
+	fromRef *dal.CollectionRef
 }
 
 func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
@@ -423,6 +426,12 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	}
 	if project != nil {
 		masker = project
+	}
+	if ref, nested, nestedErr := nestedFromRef(o.from, backend); nestedErr != nil {
+		return nestedErr
+	} else if nested {
+		o.fromRef = &ref
+		query = fromQuery(o, nil)
 	}
 	variables, err := accesspolicies.ParseVariables(o.vars)
 	if dbcopy.IsClickHouseScheme(backend.Scheme) {
@@ -778,7 +787,11 @@ func refuseAdHocContextVariables(document string) error {
 // fromQuery selects every row of the --from collection, paged by --limit and
 // --offset and ordered by order (nil leaves the source's own order).
 func fromQuery(o queryOptions, order []dal.OrderExpression) dal.Query {
-	var builder dal.IQueryBuilder = dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef(o.from, "")))
+	ref := dal.NewRootCollectionRef(o.from, "")
+	if o.fromRef != nil {
+		ref = *o.fromRef
+	}
+	var builder dal.IQueryBuilder = dal.NewQueryBuilder(dal.From(ref))
 	if len(order) > 0 {
 		builder = builder.OrderBy(order...)
 	}

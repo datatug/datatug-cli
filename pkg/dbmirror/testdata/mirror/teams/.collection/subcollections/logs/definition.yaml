@@ -1,0 +1,8 @@
+# Firestore: teams/{team}/logs/{log}: YAML records, which the mirror does not write yet
+record_file:
+  name: "{key}.yaml"
+  type: map[string]any
+  format: yaml
+columns:
+  text:
+    type: string

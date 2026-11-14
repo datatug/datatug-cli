@@ -1,0 +1,193 @@
+package dbmirror
+
+import (
+	"fmt"
+	"io/fs"
+	"maps"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+
+	"github.com/ingitdb/ingitdb-go/ingitdb"
+	"github.com/ingitdb/ingitdb-go/ingitdb/validator"
+)
+
+// Spec is one defined collection of the mirror: one Firestore collection path
+// such as teams/{team}/ext/{module}/events, named by its collection
+// ids alone ("teams/ext/events"), the way inGitDB names a sub-collection.
+type Spec struct {
+	// ID is the collection ids of the path joined by "/".
+	ID string
+	// Segments are the collection ids of the path, root first.
+	Segments []string
+	// Def is the inGitDB definition of this collection.
+	Def *ingitdb.CollectionDef
+	// Unsupported, when not empty, says why records of this collection cannot
+	// be written; the collection is then reported and never read.
+	Unsupported string
+
+	rootRel string                   // the root collection's data folder, relative to the definitions folder
+	chain   []*ingitdb.CollectionDef // definitions from the root collection down to this one
+	prefix  string                   // record file name before {key}
+	suffix  string                   // record file name after {key}
+}
+
+// Leaf is the id of the collection itself (the last segment).
+func (s *Spec) Leaf() string { return s.Segments[len(s.Segments)-1] }
+
+// Depth is the number of collection levels of the path (1 for a root collection).
+func (s *Spec) Depth() int { return len(s.Segments) }
+
+// Definitions is the loaded mirror.
+type Definitions struct {
+	Dir   string // absolute folder of the definitions
+	Specs []*Spec
+	byID  map[string]*Spec
+}
+
+// Spec returns the defined collection named id, or nil.
+func (d *Definitions) Spec(id string) *Spec { return d.byID[id] }
+
+var (
+	readDefinition = validator.ReadDefinition
+	absPath        = filepath.Abs
+)
+
+// LoadDefinitions reads the inGitDB definitions of a mirror from dir (an
+// inGitDB database folder: .ingitdb/root-collections.yaml and the collection
+// definitions). Only definitions are used; any records in dir are ignored.
+func LoadDefinitions(dir string) (*Definitions, error) {
+	abs, err := absPath(dir)
+	if err != nil {
+		return nil, err
+	}
+	def, err := readDefinition(abs)
+	if err != nil {
+		return nil, fmt.Errorf("read inGitDB definitions in %s: %w", dir, err)
+	}
+	defs := &Definitions{Dir: abs, byID: map[string]*Spec{}}
+	for _, id := range slices.Sorted(maps.Keys(def.Collections)) {
+		col := def.Collections[id]
+		rel, err := filepath.Rel(abs, col.DirPath)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return nil, fmt.Errorf("root collection %q is stored outside the definitions folder", id)
+		}
+		defs.add(rel, nil, []string{id}, col)
+	}
+	if len(defs.Specs) == 0 {
+		return nil, fmt.Errorf("the inGitDB definitions in %s define no collection", dir)
+	}
+	return defs, nil
+}
+
+func (d *Definitions) add(rootRel string, chain []*ingitdb.CollectionDef, segments []string, col *ingitdb.CollectionDef) {
+	chain = append(slices.Clone(chain), col)
+	spec := &Spec{ID: strings.Join(segments, "/"), Segments: segments, Def: col, rootRel: rootRel, chain: chain}
+	spec.Unsupported = spec.layout()
+	d.Specs = append(d.Specs, spec)
+	d.byID[spec.ID] = spec
+	for _, sub := range slices.Sorted(maps.Keys(col.SubCollections)) {
+		d.add(rootRel, chain, append(slices.Clone(segments), sub), col.SubCollections[sub])
+	}
+}
+
+// layout checks that records of the collection are one JSON file per record
+// named from its key alone, the layout a Firestore document maps to, and sets
+// the file name around {key}. It returns why not, or "".
+func (s *Spec) layout() string {
+	for _, col := range s.chain {
+		rf := col.RecordFile
+		if rf == nil {
+			return "the definition has no record_file"
+		}
+		if rf.RecordType != ingitdb.SingleRecord {
+			return fmt.Sprintf("record_file.type %q keeps several records in one file; only one record per file (map[string]any) can hold a Firestore document", rf.RecordType)
+		}
+		if strings.Count(rf.Name, "{key}") != 1 || strings.Count(rf.Name, "{") != 1 || strings.ContainsAny(rf.Name, `/\`) {
+			return fmt.Sprintf("record_file.name %q must name the file by {key} alone", rf.Name)
+		}
+	}
+	rf := s.Def.RecordFile
+	if rf.Format != ingitdb.RecordFormatJSON {
+		return fmt.Sprintf("record_file.format %q is not written yet; use json", rf.Format)
+	}
+	s.prefix, s.suffix, _ = strings.Cut(rf.Name, "{key}")
+	return ""
+}
+
+// recordFile is the path, relative to the database folder, of the record file
+// of the document at parts (collection, id, collection, id, ...), which must
+// match the spec.
+func (s *Spec) recordFile(parts []string) string {
+	dir := s.rootRel
+	last := len(s.chain) - 1
+	for level, col := range s.chain[:last] {
+		dir = filepath.Join(dir, col.RecordFile.RecordsBasePath(), parts[2*level+1], parts[2*level+2])
+	}
+	return filepath.Join(dir, s.Def.RecordFile.RecordsBasePath(), s.prefix+parts[2*last+1]+s.suffix)
+}
+
+// matches reports whether a document path (split on "/") is a document of
+// this collection.
+func (s *Spec) matches(parts []string) bool {
+	if len(parts) != 2*len(s.Segments) {
+		return false
+	}
+	for i, segment := range s.Segments {
+		if parts[2*i] != segment {
+			return false
+		}
+	}
+	return true
+}
+
+// definitionFile reports whether a file of the definitions folder (relative
+// path) is part of the definitions rather than a record: it is in a folder
+// whose name starts with "." (.ingitdb, .collection, .collections), or it is a
+// root collection's definition.yaml.
+func (d *Definitions) definitionFile(rel string) bool {
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	for _, part := range parts[:len(parts)-1] {
+		if strings.HasPrefix(part, ".") {
+			return part != ".git"
+		}
+	}
+	if parts[len(parts)-1] != ingitdb.CollectionDefFileName {
+		return false
+	}
+	dir := filepath.Dir(rel)
+	for _, spec := range d.Specs {
+		if spec.Depth() == 1 && spec.rootRel == dir {
+			return true
+		}
+	}
+	return false
+}
+
+// CopyTo writes the definition files (never the records) of the mirror into
+// out, so that out is an inGitDB database with the same collections. A file
+// already holding the same bytes is not rewritten.
+func (d *Definitions) CopyTo(out string) error {
+	return filepath.WalkDir(d.Dir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(d.Dir, path)
+		if entry.IsDir() {
+			if entry.Name() == ".git" || entry.Name() == stateDirName {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !entry.Type().IsRegular() || !d.definitionFile(rel) {
+			return nil
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		_, err = writeFileIfChanged(filepath.Join(out, rel), content)
+		return err
+	})
+}

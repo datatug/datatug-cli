@@ -173,6 +173,18 @@ type Report struct {
 	Pruned                   []string           `json:"pruned_record_files,omitempty"`
 	Validation               []string           `json:"validation_errors,omitempty"`
 
+	// Renamed are the files and folders renamed to the case of their id, as
+	// "old -> new": the id changed only in case, on a filesystem that folds case.
+	Renamed []string `json:"renamed_record_files,omitempty"`
+	// Kept are record files that look stale by name but are the file of a
+	// document this run read, under a name that differs only in case on a
+	// filesystem that folds case: never pruned.
+	Kept []string `json:"kept_case_folded_files,omitempty"`
+	// Recovered are what an interrupted run left in a folder this run wrote
+	// to: a rename's temporary name put back ("tmp -> old"), or a temporary
+	// file of a write removed ("removed tmp").
+	Recovered []string `json:"recovered_leftovers,omitempty"`
+
 	// Written and Unchanged count record files of this run (not in the
 	// report file: they differ between a first run and a re-run).
 	Written   int64 `json:"-"`
@@ -204,6 +216,11 @@ type run struct {
 	folders  map[string]string     // lower-cased folder of a record -> the folder as written
 	salt     []byte                // of the fingerprints of undeclared names, new each run
 	defsHash string                // digest of the definition files
+
+	names map[string]map[string]string // output folder -> its names by their lower case (alignRecord)
+	owned map[string][]string          // lower-cased record file of a document this run read -> every spelling read
+	gone  map[string]bool              // document path -> the source proved it and all below it gone
+
 	masked   map[string]map[string]bool
 	others   map[string]map[string]bool // spec id -> other-parent paths
 	outside  map[string]int64
@@ -240,6 +257,9 @@ func Run(ctx context.Context, src Source, defs *Definitions, policy *Policy, opt
 		copied:   map[string]bool{},
 		files:    map[string]string{},
 		folders:  map[string]string{},
+		names:    map[string]map[string]string{},
+		owned:    map[string][]string{},
+		gone:     map[string]bool{},
 		multi:    map[string]*multiFile{},
 		salt:     make([]byte, 16),
 		masked:   map[string]map[string]bool{},
@@ -280,17 +300,29 @@ func Run(ctx context.Context, src Source, defs *Definitions, policy *Policy, opt
 	}
 	var failed error
 	for _, item := range plan {
-		if err := r.execute(item); (errors.Is(err, ErrIDTooLong) || errors.Is(err, ErrRoundTrip)) && !opts.DryRun {
+		if err := r.execute(item); (errors.Is(err, ErrIDTooLong) || errors.Is(err, ErrRoundTrip) || errors.Is(err, ErrCaseFold) || errors.Is(err, errBudget)) && !opts.DryRun {
 			// Keep the report and the resume state true to what was written: the
 			// run stopped at this document, and a resume starts at its page.
-			failed = err
+			if errors.Is(err, errBudget) {
+				r.stop() // a proof's reads would pass the budget: a budget stop
+			} else {
+				failed = err
+			}
 			r.stopped = true
 			for _, multi := range r.multi {
 				// The resume state's cursor is before this page: a resume reads its
-				// records again, so they are not kept as a partial save.
+				// records again, so they are not kept as a partial save, nor counted.
+				r.results[multi.spec.ID].Records -= int64(len(multi.unsaved))
+				r.report.Records -= int64(len(multi.unsaved))
 				multi.unsaved = map[string]map[string]any{}
 			}
-			r.report.Incomplete = append(r.report.Incomplete, "stopped: "+strings.TrimPrefix(strings.TrimPrefix(err.Error(), ErrIDTooLong.Error()+": "), ErrRoundTrip.Error()+": "))
+			if failed != nil {
+				reason := failed.Error()
+				for _, kind := range []error{ErrIDTooLong, ErrRoundTrip, ErrCaseFold} {
+					reason = strings.TrimPrefix(reason, kind.Error()+": ")
+				}
+				r.report.Incomplete = append(r.report.Incomplete, "stopped: "+reason)
+			}
 			break
 		} else if err != nil {
 			return nil, err
@@ -605,12 +637,18 @@ func (r *run) execute(item *planItem) error {
 	query := item.query
 	query.After = cursor.After
 	var read int64
+	reserve := r.proofReserve(item)
 	for {
-		query.Limit = r.budget(r.opts.PageSize)
-		if query.Limit == 0 {
+		// A page leaves room in the budget for the proof of one of its documents
+		// (goneFromSource): else a resume with the same --max-reads would read the
+		// same page again and stop at the same proof, for ever. Only the last
+		// pages before the budget is spent are smaller; no read is left unused.
+		left := r.budget(r.opts.PageSize + reserve)
+		if left == 0 {
 			r.stop()
 			return nil
 		}
+		query.Limit = max(1, left-reserve)
 		docs, err := r.src.Page(r.ctx, query)
 		if err != nil {
 			return fmt.Errorf("read %s: %w", item.label, err)
@@ -739,7 +777,8 @@ func (r *run) process(item *planItem, doc Doc) error {
 		_, _ = fmt.Fprintf(r.opts.Log, "not copied (id too long for one file per record): %s: %s\n", shown(doc.Path), tooLong)
 		return nil
 	}
-	if collision := r.caseCollision(file, spec.multi); collision != "" {
+	r.noteRead(file) // written or rejected, its file is never pruned under another case
+	if collision := r.caseCollision(file, spec.multi, doc.Path); collision != "" {
 		return r.reject(spec, doc.Path, []string{collision}, nil, nil)
 	}
 	converted, err := convertRecord(doc.Data, spec.Def)
@@ -795,6 +834,13 @@ func (r *run) process(item *planItem, doc Doc) error {
 	if len(problems) > 0 {
 		return r.reject(spec, doc.Path, problems, fields, content)
 	}
+	renamed, err := r.alignRecord(spec, parts)
+	if err != nil {
+		return err
+	}
+	// A record the run this one resumes wrote in the page it stopped in is
+	// read again: it is written again, and counted once.
+	again := !spec.multi && r.files[strings.ToLower(file)] == doc.Path
 	if spec.multi {
 		multi := r.pending(spec, file)
 		multi.records[id], multi.unsaved[id] = converted, converted
@@ -804,7 +850,8 @@ func (r *run) process(item *planItem, doc Doc) error {
 			return err
 		}
 		r.files[strings.ToLower(file)] = doc.Path
-		if written {
+		r.noteWritten(file)
+		if written || renamed {
 			r.report.Written++
 		} else {
 			r.report.Unchanged++
@@ -813,8 +860,10 @@ func (r *run) process(item *planItem, doc Doc) error {
 	for dir := filepath.Dir(file); dir != "."; dir = filepath.Dir(dir) {
 		r.folders[strings.ToLower(dir)] = dir
 	}
-	result.Records++
-	r.report.Records++
+	if !again {
+		result.Records++
+		r.report.Records++
+	}
 	r.copied[doc.Path] = true
 	return nil
 }
@@ -825,16 +874,18 @@ func splitLast(path string) (string, string) {
 	return path[:at], path[at+1:]
 }
 
-// caseCollision says why a record file cannot be written because it, or a
-// folder it is in, differs only in case from one an earlier document of this
-// run (or of the runs it resumes) was written to, or is "". On a
+// caseCollision says why the record file of the document at path cannot be
+// written because it, or a folder it is in, differs only in case from one an
+// earlier document of this run (or of the runs it resumes) was written to, or
+// is "". The document's own file, written by the run it resumes, is no
+// collision: a resume reads the page it stopped in again. On a
 // case-insensitive filesystem (macOS and Windows by default) the two would be
 // one file, or one folder holding the records of two parents.
 //
 // The ids in a file that keeps all records of a collection are keys of one
 // map, which no filesystem folds: only its folders are checked (multi).
-func (r *run) caseCollision(file string, multi bool) string {
-	if other, taken := r.files[strings.ToLower(file)]; taken && !multi {
+func (r *run) caseCollision(file string, multi bool, path string) string {
+	if other, taken := r.files[strings.ToLower(file)]; taken && !multi && other != path {
 		return fmt.Sprintf("its record file name differs only in case from the one of %s: a case-insensitive filesystem would keep one of them", other)
 	}
 	var dirs []string
@@ -978,6 +1029,13 @@ func (r *run) finish() error {
 				continue
 			}
 			file, _ := spec.recordFile(strings.Split(path, "/"))
+			if r.isOwned(file) {
+				// The file of a document this run read (written or rejected), under a
+				// name that differs only in case on a filesystem that folds case: it
+				// holds that document's record, so it is not stale.
+				r.report.Kept = appendOnce(r.report.Kept, filepath.ToSlash(file))
+				continue
+			}
 			shownAs := filepath.ToSlash(file)
 			if spec.multi {
 				_, id := splitLast(path)
@@ -1016,6 +1074,7 @@ func (r *run) finish() error {
 	}
 	slices.Sort(r.report.Stale)
 	slices.Sort(r.report.Pruned)
+	slices.Sort(r.report.Kept)
 	for collection, n := range r.state.Outside {
 		r.report.Outside = append(r.report.Outside, OutsideRead{Collection: collection, Defined: r.defs.Spec(collection) != nil, Documents: n})
 	}
@@ -1157,6 +1216,15 @@ func (r *run) summarize() {
 	}
 	for _, stale := range r.report.Stale {
 		_, _ = fmt.Fprintf(log, "stale: %s is in the output but no longer in the source (left as it is; --prune deletes it)\n", shown(stale))
+	}
+	for _, recovered := range r.report.Recovered {
+		_, _ = fmt.Fprintf(log, "recovered: %s (left by an interrupted run)\n", shown(recovered))
+	}
+	for _, renamed := range r.report.Renamed {
+		_, _ = fmt.Fprintf(log, "renamed: %s (the id changed only in case)\n", shown(renamed))
+	}
+	for _, kept := range r.report.Kept {
+		_, _ = fmt.Fprintf(log, "kept: %s is the file of a record this run read, under a name that differs only in case (the filesystem folds case): not stale, never pruned\n", shown(kept))
 	}
 	for _, pruned := range r.report.Pruned {
 		_, _ = fmt.Fprintf(log, "pruned: %s (no longer in the source)\n", shown(pruned))

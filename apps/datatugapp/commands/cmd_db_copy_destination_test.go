@@ -522,6 +522,23 @@ func TestDBCopyDestinationSchemaPrintsTheReportOfAFileThatWouldNotReadBack(t *te
 	}
 }
 
+// A run that stops at two ids it cannot keep apart on a filesystem that folds
+// case exits 1 with its message, which names both.
+func TestDBCopyDestinationSchemaStopsAtACaseFoldCollision(t *testing.T) {
+	project := mirrorProject(t)
+	useMirrorSource(t, &mirrorTestSource{docs: mirrorDocs()}, nil)
+	saved := mirrorRun
+	t.Cleanup(func() { mirrorRun = saved })
+	mirrorRun = func(context.Context, dbmirror.Source, *dbmirror.Definitions, *dbmirror.Policy, dbmirror.Options) (*dbmirror.Report, error) {
+		return &dbmirror.Report{Records: 1}, fmt.Errorf(`%w: collection teams: the ids "Bob" and "bob"`, dbmirror.ErrCaseFold)
+	}
+	args := []string{"--from", "firestore://demo-example", "--policy", filepath.Join(project, "mirrors", "backup.yaml"), "--json"}
+	stdout, stderr, code := runMirror(t, args...)
+	if code != 1 || !strings.Contains(stderr, `db copy: `+dbmirror.ErrCaseFold.Error()+`: collection teams: the ids "Bob" and "bob"`) || !strings.Contains(stdout, `"records": 1`) {
+		t.Errorf("exit %d\nstdout %s\nstderr %s", code, stdout, stderr)
+	}
+}
+
 // runDBCopy runs `datatug db copy` with args.
 func runDBCopy(t *testing.T, args ...string) (stdout, stderr string, code int) {
 	t.Helper()

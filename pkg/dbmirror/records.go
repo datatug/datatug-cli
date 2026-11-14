@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
-	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -182,7 +181,7 @@ func (r *run) pending(spec *Spec, file string) *multiFile {
 
 // readRecords reads a file of records by id, or none when it does not exist.
 func readRecords(path string, spec *Spec) (map[string]map[string]any, error) {
-	content, err := os.ReadFile(path)
+	content, err := outFS.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return map[string]map[string]any{}, nil
 	}
@@ -246,14 +245,10 @@ func (r *run) savePartials() error {
 func (r *run) loadPartials() error {
 	root := partialDir(r.opts.Output)
 	byFile := map[string][]string{}
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() {
-			return err
-		}
+	err := walkFiles(root, func(path string) {
 		dir, _ := filepath.Rel(root, filepath.Dir(path))
 		file := strings.TrimSuffix(dir, ".parts")
 		byFile[file] = append(byFile[file], path)
-		return nil
 	})
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
@@ -271,6 +266,24 @@ func (r *run) loadPartials() error {
 				return err
 			}
 			maps.Copy(multi.records, records)
+		}
+	}
+	return nil
+}
+
+// walkFiles calls found with each file below dir, read through the output's
+// filesystem (outFS).
+func walkFiles(dir string, found func(path string)) error {
+	entries, err := outFS.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		path := filepath.Join(dir, entry.Name())
+		if !entry.IsDir() {
+			found(path)
+		} else if err := walkFiles(path, found); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -352,6 +365,7 @@ func (r *run) flushPending() error {
 		if _, err := writeFileIfChanged(path, content); err != nil {
 			return err
 		}
+		r.noteWritten(file)
 	}
 	r.multi = map[string]*multiFile{}
 	return removeAll(partialDir(r.opts.Output))

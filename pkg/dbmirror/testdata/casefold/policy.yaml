@@ -1,0 +1,7 @@
+format: datatug-mirror-policy/v1
+definitions: .
+copy:
+  - perrec
+  - single
+  - parents
+  - parents/kids

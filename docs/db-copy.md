@@ -1040,6 +1040,37 @@ parts were read at different times. Counts are not read at the snapshot time.
   `<file>#<encoded id>` for a record kept in one file; reported, and deleted only
   with `--prune`, and only for a collection this run read from its start to its
   end, so a run stopped by its budget deletes nothing it did not see).
+- **An id that changed only in case** between runs (`Bob` became `bob`): on a
+  filesystem that folds case (macOS and Windows by default), `Bob.yaml` and
+  `bob.yaml` are one file, kept under its old name. **A run never deletes or
+  writes over a live record because of that.** It renames the record file, and
+  the folder of its sub-collections, to the new case (through a temporary
+  name) only when the source proves the old id gone: one read of the old
+  document, and one per defined sub-collection below it (Firestore keeps the
+  sub-collections of a deleted document). These reads come out of
+  `--max-reads`: when they would pass it, the run stops as at its budget, and
+  the resume renames. Each rename is listed in the report
+  (`renamed_record_files`) and the log (`renamed: old -> new`). When the old id
+  is still in the source, or the old name is not one the mirror writes, the run
+  stops (exit 1) with an error that names both ids, and writes neither: copy
+  into a folder on a case-sensitive filesystem, or give one of them another id.
+  On macOS a case-sensitive folder is a case-sensitive APFS volume: Disk
+  Utility > Add Volume > format "APFS (Case-sensitive)", or
+  `diskutil apfs addVolume <container disk> "Case-sensitive APFS" <name>`.
+  Whether a folder folds case is found on the folder itself (are the two names
+  one file?), never from the operating system's name. `--prune` never deletes
+  the file of a document the run read (written or rejected) under another
+  case: such a file is listed as kept (`kept_case_folded_files`, `kept:` in the
+  log), not stale. On a case-sensitive filesystem the two names are two files:
+  nothing is renamed, and the old one is stale.
+- **What an interrupted run left** in a folder the run writes to: a rename's
+  temporary name (`.tmp-case-…-<old name>`) is put back under its old name
+  when that name is free, and the rename starts again; one that cannot be put
+  back is left as it is and makes the run incomplete. A temporary file of an
+  interrupted write (`.tmp-` and digits, a regular file) is removed: the file
+  it was to replace was never touched. Any other `.tmp-…` entry is left as it
+  is and reported. Both are listed in the report (`recovered_leftovers`) and the log
+  (`recovered:`).
 - **Rejected documents** (an undeclared field, a missing required field, a wrong
   type, a value a column does not allow, a date that does not parse, a name that
   differs only in case from another's) are not written into the database. The
@@ -1070,7 +1101,9 @@ definition declares it in `record_file`, and the mirror writes:
 
 The format is `yaml` (or `yml`) or `json`; another format is `unsupported`. A
 parent of a sub-collection must keep one file per record, since its records are
-the folders of the sub-collection. Defaults, in the owner's words: "By default
+the folders of the sub-collection. A `record_file.name` or `records_dir` that
+starts with `.tmp-` is `unsupported`: that is the prefix of what an
+interrupted run leaves. Defaults, in the owner's words: "By default
 we export to YAML", and "default is all records in single yaml file": when the
 mirror writes a definition, it is one YAML file of all records,
 

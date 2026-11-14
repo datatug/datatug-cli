@@ -65,7 +65,8 @@ func dbMirrorCommand() *cobra.Command {
 	flags.Int("page-size", dbmirror.DefaultPageSize, "Documents per read request.")
 	flags.Bool("progress", false, "Print one line per page read on stderr.")
 	flags.Bool("json", false, "Print the report as JSON on stdout.")
-	flags.Bool("keep-rejected", false, "Also write each rejected document, masked, under <output>/.datatug-mirror/rejected/ (by default only its path, reasons and field names are kept).")
+	flags.Bool("keep-rejected", false, "Also write each rejected document under <output>/.datatug-mirror/rejected/ with only the policy's masks applied: its undeclared fields and the values that break its definition are written IN CLEAR (by default only its path, reasons and declared field names are kept).")
+	flags.Bool("continue-on-long-ids", false, "Do not stop at a document whose id is too long for its collection's one-file-per-record form (255 bytes): copy the rest, count it in the report, and exit 3.")
 	flags.Bool("prune", false, "Delete the record files whose document no longer exists, in the collections this run read completely (by default they are only reported).")
 	flags.Bool("restart", false, "Start over instead of continuing a run that stopped at its read budget.")
 	flags.Bool("snapshot", false, "Read every document as it was when the run started (Firestore keeps old versions for an hour), so the copy is consistent.")
@@ -169,8 +170,13 @@ func dbMirrorAction(cmd *cobra.Command, _ []string) error {
 	opts := dbmirror.Options{
 		Output: output, Collections: collections, Under: under, DryRun: dryRun,
 		MaxReads: maxReads, PageSize: pageSize, Source: sourceDisplay, Log: stderr,
+		Identity: dbmirror.SourceIdentity{Project: ref.ProjectID, Database: ref.DatasetID, Emulator: os.Getenv("FIRESTORE_EMULATOR_HOST")},
 	}
 	opts.KeepRejected, _ = flags.GetBool("keep-rejected")
+	if opts.KeepRejected && !dryRun {
+		_, _ = fmt.Fprintln(stderr, "db mirror: warning: --keep-rejected writes each rejected document with only the policy's masks applied: its undeclared fields and the values that break its definition are written in clear under .datatug-mirror/rejected/")
+	}
+	opts.ContinueOnLongIDs, _ = flags.GetBool("continue-on-long-ids")
 	opts.Prune, _ = flags.GetBool("prune")
 	opts.Restart, _ = flags.GetBool("restart")
 	opts.Snapshot, _ = flags.GetBool("snapshot")
@@ -181,10 +187,17 @@ func dbMirrorAction(cmd *cobra.Command, _ []string) error {
 	if errors.Is(err, dbmirror.ErrUsage) {
 		return Exit(strings.TrimPrefix(err.Error(), dbmirror.ErrUsage.Error()+": "), exitCodeUsage)
 	}
+	asJSON, _ := flags.GetBool("json")
+	if errors.Is(err, dbmirror.ErrIDTooLong) {
+		if asJSON && report != nil {
+			writeMirrorJSON(cmd.OutOrStdout(), report)
+		}
+		return Exit(fmt.Sprintf("db mirror: %v", err), 1)
+	}
 	if err != nil {
 		return Exit(dbcopy.RedactErrorWithSecrets(err, from).Error(), 1)
 	}
-	if asJSON, _ := flags.GetBool("json"); asJSON {
+	if asJSON {
 		writeMirrorJSON(cmd.OutOrStdout(), report)
 	}
 	if dryRun && report.BudgetReached {
@@ -309,6 +322,10 @@ func gitIgnoreProblem(path string) (string, error) {
 	}
 	if err := gitCommand(root, "ls-files", "--error-unmatch", "--", source).Run(); err != nil {
 		return "ignored only by " + source + ", which the repository does not track (other clones would not ignore it)", nil
+	}
+	// The rule must be committed: an edit not in HEAD (staged or not) does not count.
+	if err := gitCommand(root, "diff", "--quiet", "HEAD", "--", source).Run(); err != nil {
+		return "ignored by " + source + ":" + line + ", but " + source + " has changes that are not committed (other clones would not have them): commit it", nil
 	}
 	return "", nil
 }

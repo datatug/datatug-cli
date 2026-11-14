@@ -215,8 +215,8 @@ func TestDBMirrorFlagsReachTheRun(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(out, ".datatug-mirror", "rejected")); !os.IsNotExist(err) {
 		t.Error("a rejected document was written without --keep-rejected")
 	}
-	if _, _, code := runMirror(t, append(args, "--keep-rejected", "--snapshot")...); code != exitCodeIncomplete {
-		t.Errorf("exit %d", code)
+	if _, stderr, code := runMirror(t, append(args, "--keep-rejected", "--snapshot")...); code != exitCodeIncomplete || !strings.Contains(stderr, "warning: --keep-rejected writes each rejected document") {
+		t.Errorf("exit %d\n%s", code, stderr)
 	}
 	if _, err := os.Stat(filepath.Join(out, ".datatug-mirror", "rejected", "teams", "t3.json")); err != nil {
 		t.Error(err)
@@ -232,6 +232,27 @@ func TestDBMirrorFlagsReachTheRun(t *testing.T) {
 		t.Errorf("exit %d", code)
 	}
 	if _, stderr, code := runMirror(t, append(args, "--restart")...); code != 0 || strings.Contains(stderr, "resuming") {
+		t.Errorf("exit %d\n%s", code, stderr)
+	}
+	// M6: the output is a mirror of one database: the emulator, or another
+	// project, is refused; the identity is in the output's state.
+	if state, err := os.ReadFile(filepath.Join(out, ".datatug-mirror", "output.json")); err != nil || !strings.Contains(string(state), `"project": "demo-example"`) {
+		t.Errorf("%s %v", state, err)
+	}
+	t.Setenv("FIRESTORE_EMULATOR_HOST", "127.0.0.1:1")
+	if _, stderr, code := runMirror(t, append(args, "--prune")...); code != exitCodeUsage || !strings.Contains(stderr, "is a mirror of Firestore project demo-example, database (default), not of Firestore project demo-example, database (default), on the emulator at 127.0.0.1:1") {
+		t.Errorf("exit %d\n%s", code, stderr)
+	}
+	t.Setenv("FIRESTORE_EMULATOR_HOST", "")
+	if _, _, code := runMirror(t, "--from", "firestore://demo-other", "--policy", policy, "--collections", "teams"); code != exitCodeUsage {
+		t.Errorf("exit %d", code)
+	}
+	// An id too long for one file per record fails the run, unless asked to go on.
+	docs["teams/"+strings.Repeat("x", 300)] = map[string]any{"title": "long"}
+	if stdout, stderr, code := runMirror(t, append(args, "--json")...); code != 1 || !strings.Contains(stderr, "id too long for one file per record: collection teams") || !strings.Contains(stdout, `"complete": false`) {
+		t.Errorf("exit %d\n%s", code, stderr)
+	}
+	if _, stderr, code := runMirror(t, append(args, "--continue-on-long-ids")...); code != exitCodeIncomplete || !strings.Contains(stderr, "not copied: id too long") {
 		t.Errorf("exit %d\n%s", code, stderr)
 	}
 	// A dry run that reaches its budget exits 3: its counts are incomplete.
@@ -329,6 +350,23 @@ func TestGitIgnoreProblem(t *testing.T) {
 	runGit(t, project, "add", "tracked/.gitignore")
 	runGit(t, project, "commit", "-q", "-m", "tracked")
 	runGit(t, project, "config", "core.excludesFile", global)
+	// m7: a rule that is not committed does not count, staged or not.
+	edited := filepath.Join(project, "tracked", ".gitignore")
+	if err := os.WriteFile(edited, []byte("out*\n!out2\nfresh\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, stage := range []bool{false, true} {
+		if stage {
+			runGit(t, project, "add", "tracked/.gitignore")
+		}
+		if got, err := gitIgnoreProblem(filepath.Join(project, "tracked", "fresh")); err != nil || !strings.HasPrefix(got, "ignored by tracked/.gitignore:3, but tracked/.gitignore has changes that are not committed") {
+			t.Errorf("staged %v: %q %v", stage, got, err)
+		}
+	}
+	runGit(t, project, "commit", "-q", "-m", "fresh")
+	if got, err := gitIgnoreProblem(filepath.Join(project, "tracked", "fresh")); err != nil || got != "" {
+		t.Errorf("committed: %q %v", got, err)
+	}
 	// A variable that points git elsewhere is not used.
 	t.Setenv("GIT_DIR", filepath.Join(t.TempDir(), "elsewhere"))
 	for path, want := range map[string]string{

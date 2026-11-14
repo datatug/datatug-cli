@@ -637,12 +637,18 @@ func (r *run) execute(item *planItem) error {
 	query := item.query
 	query.After = cursor.After
 	var read int64
+	reserve := r.proofReserve(item)
 	for {
-		query.Limit = r.budget(r.opts.PageSize)
-		if query.Limit == 0 {
+		// A page leaves room in the budget for the proof of one of its documents
+		// (goneFromSource): else a resume with the same --max-reads would read the
+		// same page again and stop at the same proof, for ever. Only the last
+		// pages before the budget is spent are smaller; no read is left unused.
+		left := r.budget(r.opts.PageSize + reserve)
+		if left == 0 {
 			r.stop()
 			return nil
 		}
+		query.Limit = max(1, left-reserve)
 		docs, err := r.src.Page(r.ctx, query)
 		if err != nil {
 			return fmt.Errorf("read %s: %w", item.label, err)

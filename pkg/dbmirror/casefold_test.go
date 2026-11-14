@@ -702,3 +702,34 @@ func TestRunPruneRemembersEverySpellingOfAFile(t *testing.T) {
 		t.Errorf("k1 of bob was pruned: %q", got)
 	}
 }
+
+// A resume with the same --max-reads makes progress (astra-r2 major 3): with
+// a budget of 10, the root listing and a page of 9 documents would spend it
+// all, and the first document (Bob became bob) needs a proof read; every
+// resume would read the same page again and stop at the same place. The page
+// leaves room for one document's proof, so the runs settle.
+func TestRunProofLeavesRoomInTheReadBudget(t *testing.T) {
+	_, out := newFoldFS(t)
+	ids := []string{"c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8"}
+	seed := newMemSource()
+	seed.docs["perrec/Bob"] = map[string]any{"name": "Bob"}
+	for _, id := range ids {
+		seed.docs["perrec/"+id] = map[string]any{"name": id}
+	}
+	caseRun(t, seed, Options{Output: out, Collections: []string{"perrec"}})
+	src := newMemSource()
+	src.docs["perrec/bob"] = map[string]any{"name": "bob"}
+	for _, id := range ids {
+		src.docs["perrec/"+id] = map[string]any{"name": id}
+	}
+	var report *Report
+	for range 4 {
+		report = caseRun(t, src, Options{Output: out, Collections: []string{"perrec"}, MaxReads: 10})
+		if report.Complete {
+			break
+		}
+	}
+	if !report.Complete || !slices.Contains(names(t, filepath.Join(out, "perrec", "$records")), "bob.yaml") {
+		t.Errorf("no progress with an unchanged --max-reads: %+v", report)
+	}
+}

@@ -269,12 +269,7 @@ func (r *run) goneFromSource(path string, spec *Spec) (bool, error) {
 	if gone, ok := r.gone[path]; ok {
 		return gone, nil
 	}
-	var below []*Spec
-	for _, other := range r.defs.Specs {
-		if strings.HasPrefix(other.ID, spec.ID+"/") {
-			below = append(below, other)
-		}
-	}
+	below := r.below(spec)
 	if need := 1 + len(below); r.budget(need) < need {
 		return false, errBudget
 	}
@@ -295,6 +290,34 @@ func (r *run) goneFromSource(path string, spec *Spec) (bool, error) {
 	}
 	r.gone[path] = gone
 	return gone, nil
+}
+
+// below is the defined collections below spec.
+func (r *run) below(spec *Spec) []*Spec {
+	var below []*Spec
+	for _, other := range r.defs.Specs {
+		if strings.HasPrefix(other.ID, spec.ID+"/") {
+			below = append(below, other)
+		}
+	}
+	return below
+}
+
+// proofReserve is the most reads the proofs of one document of item can cost:
+// one proof per name of its record that holds an id (see alignRecord).
+func (r *run) proofReserve(item *planItem) int {
+	most := 0
+	for _, spec := range item.specs {
+		reads := 0
+		for level := range spec.Segments {
+			if level == len(spec.Segments)-1 && spec.multi {
+				break // a record kept in one file has no name of its own
+			}
+			reads += 1 + len(r.below(r.defs.Spec(strings.Join(spec.Segments[:level+1], "/"))))
+		}
+		most = max(most, reads)
+	}
+	return most
 }
 
 // noteRead records the record file (relative to the output) of a document

@@ -18,7 +18,7 @@ func mirroredDB(t *testing.T) string {
 	useMirrorSource(t, &mirrorTestSource{docs: mirrorDocs()}, nil)
 	out := filepath.Join(project, "data", "db")
 	if _, stderr, code := runMirror(t, "--from", "firestore://demo-example", "--policy", filepath.Join(project, "mirrors", "backup.yaml"),
-		"--collections", "teams,teams/ext/**", "--to", out); code != 0 {
+		"--include", "teams,teams/ext/**", "--to", out); code != 0 {
 		t.Fatalf("mirror: exit %d\n%s", code, stderr)
 	}
 	return out

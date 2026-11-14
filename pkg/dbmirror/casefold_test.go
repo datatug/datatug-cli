@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -102,7 +103,10 @@ func (f *foldFS) RemoveAll(path string) error {
 }
 
 // strictFS is a case-sensitive filesystem as far as Lstat tells (the one check
-// alignID makes of a folder), on any host.
+// alignID makes of a folder), on any host. It is no full simulation: every
+// other call is the host's, so on a folding host a test with it checks only
+// what alignID decides from Lstat. The case-sensitive behaviour end to end is
+// checked on a real case-sensitive filesystem (Linux CI).
 type strictFS struct{ osFS }
 
 func (strictFS) Lstat(name string) (fs.FileInfo, error) {
@@ -790,5 +794,62 @@ func TestRunDoesNotWriteARecordNamedLikeALeftover(t *testing.T) {
 		if got := readFile(t, live); got != "two" {
 			t.Errorf("%s: %q", layout, got)
 		}
+	}
+}
+
+// recordingFS is the filesystem of the operating system that records which
+// paths were read through the seam.
+type recordingFS struct {
+	osFS
+	read map[string]bool
+}
+
+func (f *recordingFS) ReadFile(name string) ([]byte, error) {
+	f.read[name] = true
+	return f.osFS.ReadFile(name)
+}
+
+func (f *recordingFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	f.read[name] = true
+	return f.osFS.ReadDir(name)
+}
+
+// Every read of the output goes through the seam (astra-r2 minor 4): the
+// output's identity, the resume state and the saved partial records too, so
+// a test double stands in for the whole output, not only for the records.
+func TestRunReadsTheOutputThroughTheSeam(t *testing.T) {
+	out := t.TempDir()
+	src := newMemSource()
+	for _, id := range []string{"a", "b", "c"} {
+		src.docs["single/"+id] = map[string]any{"name": id}
+	}
+	stopped := caseRun(t, src, Options{Output: out, Collections: []string{"single"}, PageSize: 1, MaxReads: 2})
+	if !stopped.BudgetReached {
+		t.Fatalf("%+v", stopped)
+	}
+	seam := &recordingFS{read: map[string]bool{}}
+	withSeam(t, &outFS, fileSystem(seam))
+	caseRun(t, src, Options{Output: out, Collections: []string{"single"}})
+	for _, path := range []string{outputFile(out), resumeFile(out), partialDir(out)} {
+		if !seam.read[path] {
+			t.Errorf("%s was not read through the seam: %v", path, slices.Sorted(maps.Keys(seam.read)))
+		}
+	}
+}
+
+func TestWalkFilesReportsAFailedFolder(t *testing.T) {
+	fake, out := newFoldFS(t)
+	if err := os.MkdirAll(filepath.Join(out, "a", "b"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	broken := errors.New("broken")
+	fake.fail["ReadDir"] = func(path string) error {
+		if filepath.Base(path) == "b" {
+			return broken
+		}
+		return nil
+	}
+	if err := walkFiles(out, func(string) {}); !errors.Is(err, broken) {
+		t.Errorf("%v", err)
 	}
 }

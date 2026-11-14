@@ -61,7 +61,11 @@ const (
 )
 
 // fileSystem is what a run does to its output folder (a test seam: a test
-// stands in a case-insensitive filesystem on a case-sensitive one).
+// stands in a case-insensitive filesystem on a case-sensitive one). Every
+// read and write of the output by this package goes through it. Two do not:
+// inGitDB's validation of the written output (validateOutput) and its reading
+// of the copied definitions, which are the dependency's own and read the real
+// filesystem; tests that run them use a real folder.
 type fileSystem interface {
 	ReadFile(name string) ([]byte, error)
 	ReadDir(name string) ([]fs.DirEntry, error)

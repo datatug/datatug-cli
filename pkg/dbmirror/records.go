@@ -245,14 +245,10 @@ func (r *run) savePartials() error {
 func (r *run) loadPartials() error {
 	root := partialDir(r.opts.Output)
 	byFile := map[string][]string{}
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() {
-			return err
-		}
+	err := walkFiles(root, func(path string) {
 		dir, _ := filepath.Rel(root, filepath.Dir(path))
 		file := strings.TrimSuffix(dir, ".parts")
 		byFile[file] = append(byFile[file], path)
-		return nil
 	})
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
@@ -270,6 +266,24 @@ func (r *run) loadPartials() error {
 				return err
 			}
 			maps.Copy(multi.records, records)
+		}
+	}
+	return nil
+}
+
+// walkFiles calls found with each file below dir, read through the output's
+// filesystem (outFS).
+func walkFiles(dir string, found func(path string)) error {
+	entries, err := outFS.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		path := filepath.Join(dir, entry.Name())
+		if !entry.IsDir() {
+			found(path)
+		} else if err := walkFiles(path, found); err != nil {
+			return err
 		}
 	}
 	return nil

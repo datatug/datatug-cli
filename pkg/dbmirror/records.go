@@ -26,20 +26,55 @@ func (s *Spec) isYAML() bool { return s.Def.RecordFile.Format != ingitdb.RecordF
 // the same bytes.
 func (s *Spec) encode(data map[string]any) []byte {
 	if s.isYAML() {
-		return encodeYAML(data)
+		return yamlWriter(data)
 	}
 	return encodeRecord(data)
 }
 
-// decode reads record file content back the way inGitDB reads it.
+// yamlWriter is encodeYAML (a test seam: a writer that breaks must stop the run).
+var yamlWriter = encodeYAML
+
+// decode reads record file content back with the types it was written with:
+// YAML by inGitDB's own parser, JSON with its numbers as written (inGitDB's
+// JSON reader turns whole numbers into doubles).
 func (s *Spec) decode(content []byte) (map[string]any, error) {
-	return ingitdb.ParseRecordContent(content, s.Def.RecordFile.Format)
+	if s.isYAML() {
+		return ingitdb.ParseRecordContent(content, s.Def.RecordFile.Format)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(content))
+	decoder.UseNumber()
+	var data map[string]any
+	if err := decoder.Decode(&data); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+// ErrRoundTrip is the failure of a run that would write a record file that
+// does not read back as what it was meant to hold. The file is not written;
+// the run stops there, like at an id too long (ErrIDTooLong).
+var ErrRoundTrip = errors.New("a record file would not read back as written")
+
+// encodeChecked encodes data and reads it back: content that does not decode,
+// or decodes to anything but data, is an error, never a file.
+func (s *Spec) encodeChecked(data map[string]any, what string) ([]byte, error) {
+	content := s.encode(data)
+	back, err := s.decode(content)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s: %v", ErrRoundTrip, what, err)
+	}
+	if !reflect.DeepEqual(canonical(back), any(data)) {
+		return nil, fmt.Errorf("%w: %s reads back as other data", ErrRoundTrip, what)
+	}
+	return content, nil
 }
 
 // encodeYAML is the canonical YAML of a record: keys in byte order, indented
-// by two spaces, a string always read back as a string (quoted when it would
-// read as a number, a bool, a date or null), a double always with a decimal
-// point or an exponent so it is read back as a double, and a final newline.
+// by two spaces, every string and every key double-quoted (with escapes), so
+// no YAML 1.1 or 1.2 reader takes one for a bool, a number, a date, null, a
+// merge key or a tag; a double always with a decimal point in its mantissa
+// (1.0, 1.0e+21) so both read it as a double; integers in decimal; and a final
+// newline.
 func encodeYAML(data map[string]any) []byte {
 	var buf bytes.Buffer
 	encoder := yaml.NewEncoder(&buf)
@@ -47,6 +82,10 @@ func encodeYAML(data map[string]any) []byte {
 	_ = encoder.Encode(yamlNode(data)) // a node tree of scalars, maps and lists always encodes
 	_ = encoder.Close()
 	return buf.Bytes()
+}
+
+func yamlString(s string) *yaml.Node {
+	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: s, Style: yaml.DoubleQuotedStyle}
 }
 
 func yamlNode(v any) *yaml.Node {
@@ -57,7 +96,7 @@ func yamlNode(v any) *yaml.Node {
 			node.Style = yaml.FlowStyle
 		}
 		for _, key := range slices.Sorted(maps.Keys(value)) {
-			node.Content = append(node.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, yamlNode(value[key]))
+			node.Content = append(node.Content, yamlString(key), yamlNode(value[key]))
 		}
 		return node
 	case []any:
@@ -70,16 +109,9 @@ func yamlNode(v any) *yaml.Node {
 		}
 		return node
 	case string:
-		node := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value}
-		if strings.Contains(value, "\n") {
-			node.Style = yaml.LiteralStyle
-		}
-		if !yamlPlainSafe(value) {
-			node.Style = yaml.DoubleQuotedStyle
-		}
-		return node
+		return yamlString(value)
 	case float64:
-		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!float", Value: floatText(value)}
+		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!float", Value: yamlFloat(value)}
 	case int64:
 		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int", Value: strconv.FormatInt(value, 10)}
 	case bool:
@@ -89,28 +121,18 @@ func yamlNode(v any) *yaml.Node {
 	}
 }
 
-// yamlPlainSafe reports whether a string reads back unchanged in a literal
-// block or as a plain or single-quoted scalar; one that does not (a control
-// character, a carriage return, trailing spaces or newlines in a block) is
-// written double-quoted, with escapes.
-func yamlPlainSafe(s string) bool {
-	for _, c := range s {
-		if c < 0x20 && c != '\n' && c != '\t' || c == 0x7f || c == 0xFEFF {
-			return false
-		}
-	}
-	if strings.Contains(s, "\n") {
-		return !strings.HasSuffix(s, "\n") && !strings.HasSuffix(s, " ") && !strings.HasPrefix(s, " ") && !strings.Contains(s, " \n")
-	}
-	return true
-}
-
-func floatText(f float64) string {
+// yamlFloat is a double as both YAML 1.1 (which needs a "." and a signed
+// exponent) and YAML 1.2 read it: 1.0, -0.0, 1.5, 1.0e+21, 5.0e-324.
+func yamlFloat(f float64) string {
 	text := strconv.FormatFloat(f, 'g', -1, 64)
-	if !strings.ContainsAny(text, ".e") {
-		text += ".0"
+	mantissa, exponent, scientific := strings.Cut(text, "e")
+	if !strings.Contains(mantissa, ".") {
+		mantissa += ".0"
 	}
-	return text
+	if scientific {
+		return mantissa + "e" + exponent // strconv always signs the exponent
+	}
+	return mantissa
 }
 
 // canonical is a value read back from a record file in the types the mirror
@@ -182,12 +204,13 @@ func readRecords(path string, spec *Spec) (map[string]map[string]any, error) {
 	return records, nil
 }
 
-func encodeRecords(spec *Spec, records map[string]map[string]any) []byte {
+// encodeRecords is the checked content of a file of records by id.
+func encodeRecords(spec *Spec, records map[string]map[string]any, file string) ([]byte, error) {
 	data := make(map[string]any, len(records))
 	for id, record := range records {
 		data[id] = record
 	}
-	return spec.encode(data)
+	return spec.encodeChecked(data, filepath.ToSlash(file))
 }
 
 func partialDir(out string) string { return filepath.Join(out, stateDirName, "partial") }
@@ -206,7 +229,11 @@ func (r *run) savePartials() error {
 		}
 		r.state.Chunks++
 		chunk := filepath.Join(partialDir(r.opts.Output), file+".parts", fmt.Sprintf("%08d%s", r.state.Chunks, filepath.Ext(file)))
-		if _, err := writeFileIfChanged(chunk, encodeRecords(multi.spec, multi.unsaved)); err != nil {
+		content, err := encodeRecords(multi.spec, multi.unsaved, file)
+		if err != nil {
+			return err
+		}
+		if _, err := writeFileIfChanged(chunk, content); err != nil {
 			return err
 		}
 		multi.unsaved = map[string]map[string]any{}
@@ -318,7 +345,11 @@ func (r *run) flushPending() error {
 			}
 			records[id] = record
 		}
-		if _, err := writeFileIfChanged(path, encodeRecords(multi.spec, records)); err != nil {
+		content, err := encodeRecords(multi.spec, records, file)
+		if err != nil {
+			return err
+		}
+		if _, err := writeFileIfChanged(path, content); err != nil {
 			return err
 		}
 	}
@@ -340,6 +371,10 @@ func pruneRecords(out, file string, spec *Spec, ids []string) error {
 	if len(records) == 0 {
 		return removeFile(path)
 	}
-	_, err = writeFileIfChanged(path, encodeRecords(spec, records))
+	content, err := encodeRecords(spec, records, file)
+	if err != nil {
+		return err
+	}
+	_, err = writeFileIfChanged(path, content)
 	return err
 }

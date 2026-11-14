@@ -280,12 +280,17 @@ func Run(ctx context.Context, src Source, defs *Definitions, policy *Policy, opt
 	}
 	var failed error
 	for _, item := range plan {
-		if err := r.execute(item); errors.Is(err, ErrIDTooLong) && !opts.DryRun {
+		if err := r.execute(item); (errors.Is(err, ErrIDTooLong) || errors.Is(err, ErrRoundTrip)) && !opts.DryRun {
 			// Keep the report and the resume state true to what was written: the
 			// run stopped at this document, and a resume starts at its page.
 			failed = err
 			r.stopped = true
-			r.report.Incomplete = append(r.report.Incomplete, "stopped: "+strings.TrimPrefix(err.Error(), ErrIDTooLong.Error()+": "))
+			for _, multi := range r.multi {
+				// The resume state's cursor is before this page: a resume reads its
+				// records again, so they are not kept as a partial save.
+				multi.unsaved = map[string]map[string]any{}
+			}
+			r.report.Incomplete = append(r.report.Incomplete, "stopped: "+strings.TrimPrefix(strings.TrimPrefix(err.Error(), ErrIDTooLong.Error()+": "), ErrRoundTrip.Error()+": "))
 			break
 		} else if err != nil {
 			return nil, err
@@ -753,12 +758,20 @@ func (r *run) process(item *planItem, doc Doc) error {
 		}
 		r.masked[spec.ID][field] = true
 	}
-	content := spec.encode(converted)
+	// The content must read back as what it is meant to hold (in a file kept
+	// by id, under its id), or the run stops: no file holds other data.
+	content, err := spec.encodeChecked(converted, shown(doc.Path))
 	key := recordKey(id)
 	if spec.multi {
 		key = id // a record kept in one file is keyed by its id as it is
+		if err == nil {
+			_, err = encodeRecords(spec, map[string]map[string]any{id: converted}, file)
+		}
 	}
-	readBack, _ := spec.decode(content) // the mirror's own encoding always reads back (TestEncodeYAMLRoundTrips)
+	if err != nil {
+		return err
+	}
+	readBack, _ := ingitdb.ParseRecordContent(content, spec.Def.RecordFile.Format) // as inGitDB validates it: it read back above
 	var problems, fields, undeclared []string
 	for _, problem := range datavalidator.ValidateRecordData(spec.Def, key, readBack) {
 		switch {

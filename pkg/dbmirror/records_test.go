@@ -121,14 +121,14 @@ func TestRunWritesCollectionsKeptInOneFile(t *testing.T) {
 	}
 	tags := readFile(t, filepath.Join(out, "tags/tags.yaml"))
 	records, err := readRecords(filepath.Join(out, "tags/tags.yaml"), yamlDefinitions(t).Spec("tags"))
-	if err != nil || records[strings.Repeat("é", 200)]["email"] != maskedString || strings.Contains(tags, "someone@example.com") || !strings.Contains(tags, `"123":`) || !strings.Contains(tags, `title: "true"`) {
+	if err != nil || records[strings.Repeat("é", 200)]["email"] != maskedString || strings.Contains(tags, "someone@example.com") || !strings.Contains(tags, `"123":`) || !strings.Contains(tags, `"title": "true"`) {
 		t.Errorf("tags.yaml (%v):\n%s", err, tags)
 	}
 	// Ids that differ only in case are two keys of one map: both are kept.
-	if !strings.Contains(tags, "Work:") || !strings.Contains(tags, "work:") || result(t, report, "tags").Records != 4 {
+	if !strings.Contains(tags, `"Work":`) || !strings.Contains(tags, `"work":`) || result(t, report, "tags").Records != 4 {
 		t.Errorf("%s", tags)
 	}
-	if got := readFile(t, filepath.Join(out, "groups/g1/members/members.yaml")); got != "m1:\n  name: One\nm2:\n  name: Two\n" {
+	if got := readFile(t, filepath.Join(out, "groups/g1/members/members.yaml")); got != "\"m1\":\n  \"name\": \"One\"\n\"m2\":\n  \"name\": \"Two\"\n" {
 		t.Errorf("members of g1:\n%s", got)
 	}
 	if _, err := os.Stat(filepath.Join(out, "groups/g2/members/members.yaml")); err != nil {
@@ -223,7 +223,7 @@ func TestRunPrunesKeysOfACollectionKeptInOneFile(t *testing.T) {
 		t.Errorf("%v", report.Stale)
 	}
 	pruned := runYAML(t, src, Options{Output: out, Prune: true})
-	if len(pruned.Pruned) != 2 || readFile(t, filepath.Join(out, "groups/g1/members/members.yaml")) != "m1:\n  name: One\n" {
+	if len(pruned.Pruned) != 2 || readFile(t, filepath.Join(out, "groups/g1/members/members.yaml")) != "\"m1\":\n  \"name\": \"One\"\n" {
 		t.Errorf("%+v", pruned)
 	}
 	if _, err := os.Stat(filepath.Join(out, "groups/g2/members/members.yaml")); !os.IsNotExist(err) {

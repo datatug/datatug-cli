@@ -231,7 +231,7 @@ go test ./...
 <!-- dev-approach:v1 -->
 ## Mirror Firestore into inGitDB
 
-`datatug db mirror` copies a chosen part of a Firestore database, read-only, into an inGitDB database laid out by the inGitDB definitions of a mirror, with a policy file of the project that lists the collections to copy, those excluded and the fields to mask (a defined collection the policy does not name is never copied). It has a dry run with counts, a read budget, and selection by collection, by space and by path; a re-run over unchanged data changes no file. See [docs/db-mirror.md](docs/db-mirror.md).
+`datatug db mirror` copies a chosen part of a Firestore database, read-only, into an inGitDB database laid out by the inGitDB definitions of a mirror, with a policy file of the project that lists the collections to copy, those excluded and the fields to mask (a defined collection the policy does not name is never copied). It has a dry run with counts, a read budget with runs that resume where the last one stopped, selection by collection, by space and by path, and policy `paths` that pin a collection to its parents; a re-run over unchanged data changes no file, and a rejected document's values are never written unless asked for. See [docs/db-mirror.md](docs/db-mirror.md).
 
 ```bash
 datatug db mirror --from env:DATATUG_FIRESTORE_SOURCE_URL --policy mirrors/backup.yaml --dry-run

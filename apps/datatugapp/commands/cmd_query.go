@@ -29,6 +29,7 @@ const (
 	queryDBFlag          = "db"
 	queryFileFlag        = "file"
 	queryFromFlag        = "from"
+	queryFromPathFlag    = "from-path"
 	queryLimitFlag       = "limit"
 	queryOffsetFlag      = "offset"
 	queryFormatFlag      = "format"
@@ -160,6 +161,8 @@ permissions or DataTug Cloud approvals.`,
 	flags.StringArray(queryDBFlag, nil, "Database URL ("+dbSchemesHelp()+"), or datatug://<project>/<db>[?env=<ENV>] for a database that is a source of a registered project (datatug:///<db> for the current project); repeat as --db <alias>=<url|datatug://...> to bind each database a -f query's databases block declares")
 	flags.StringP(queryFileFlag, "f", "", "TugQL query document: TugQL text (a .tugql file), or YAML or JSON; '-' reads stdin")
 	flags.String(queryFromFlag, "", "Select every row and field of this root collection (alternative to -f)")
+	flags.Bool(queryFromPathFlag, false, "Read --from as the path of a nested collection of a Firestore or inGitDB source (collection/document/collection, e.g. ext/billing/payments), "+
+		"and fail with a usage error when it is not one or, in inGitDB, is not defined (a Firestore --from of that shape is read so without it too)")
 	flags.String(querySQLFlag, "", "SQL query to run against --db (alternative to -f): on PostgreSQL, MySQL, Oracle and SQL Server one SELECT or WITH query, read-only; '-' reads stdin")
 	flags.String(queryProjectFlag, "", "Project directory or registered project ID (alternative to --db; runs a saved --query by ID)")
 	flags.String(queryQueryFlag, "", "Saved query ID to run, e.g. customers/customer-invoices (requires --project)")
@@ -217,7 +220,8 @@ type queryOptions struct {
 	sink       *resultSink
 	// fromRef, when set, is the nested collection --from names in a Firestore
 	// or inGitDB source (see nestedFromRef); nil reads --from as one name.
-	fromRef *dal.CollectionRef
+	fromRef  *dal.CollectionRef
+	fromPath bool // --from-path
 }
 
 func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
@@ -230,6 +234,7 @@ func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
 	}
 	o.file, _ = flags.GetString(queryFileFlag)
 	o.from, _ = flags.GetString(queryFromFlag)
+	o.fromPath, _ = flags.GetBool(queryFromPathFlag)
 	o.sql, _ = flags.GetString(querySQLFlag)
 	o.limit, _ = flags.GetInt(queryLimitFlag)
 	o.limitSet = flags.Changed(queryLimitFlag)
@@ -427,7 +432,7 @@ func runQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	if project != nil {
 		masker = project
 	}
-	if ref, nested, nestedErr := nestedFromRef(o.from, backend); nestedErr != nil {
+	if ref, nested, nestedErr := nestedFromRef(o.from, backend, o.fromPath); nestedErr != nil {
 		return nestedErr
 	} else if nested {
 		o.fromRef = &ref

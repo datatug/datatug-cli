@@ -18,18 +18,29 @@ var readInGitDBDefinition = validator.ReadDefinition
 // nestedFromRef is the collection a `--from` path names in a source whose
 // collections nest under documents (Firestore, inGitDB): for
 // ext/billing/payments the collection payments of the document
-// ext/billing. ok is false for any other source, and for a --from with no
-// "/", which keep their meaning (a table or a root collection by name).
+// ext/billing. ok is false when --from keeps the meaning it always had (one
+// name, read as given).
 //
-// A path that is not collection/document/collection... is a usage error, and
-// so is an inGitDB path whose collections are not defined: before, both read
-// as an empty result.
-func nestedFromRef(from string, backend dbcopy.BackendRef) (ref dal.CollectionRef, ok bool, err error) {
-	if !strings.Contains(from, "/") || (backend.Scheme != "firestore" && backend.Scheme != "ingitdb") {
-		return ref, false, nil
-	}
+// Without --from-path (explicit false) only a Firestore --from of that shape
+// is read as nested: Firestore refused the whole path as one collection name,
+// so nothing that worked changes. Every other --from is read as before.
+//
+// With --from-path, an inGitDB --from is read as nested too, and a --from
+// that is not collection/document/collection..., an inGitDB path whose
+// collections are not defined, or another source, is a usage error.
+func nestedFromRef(from string, backend dbcopy.BackendRef, explicit bool) (ref dal.CollectionRef, ok bool, err error) {
 	parts := strings.Split(from, "/")
-	if len(parts)%2 == 0 || slices.Contains(parts, "") {
+	shaped := len(parts)%2 == 1 && !slices.Contains(parts, "")
+	if !explicit {
+		if backend.Scheme != "firestore" || len(parts) == 1 || !shaped {
+			return ref, false, nil
+		}
+		return nestedRef(parts), true, nil
+	}
+	if backend.Scheme != "firestore" && backend.Scheme != "ingitdb" {
+		return ref, false, Exit(fmt.Sprintf("--from-path reads a nested collection of a Firestore or inGitDB source, not of %s", backend.Scheme), exitCodeUsage)
+	}
+	if !shaped {
 		return ref, false, Exit(fmt.Sprintf("--from %q is not a collection path: name a collection as collection/document/collection (for example ext/billing/payments)", from), exitCodeUsage)
 	}
 	if backend.Scheme == "ingitdb" {
@@ -37,11 +48,16 @@ func nestedFromRef(from string, backend dbcopy.BackendRef) (ref dal.CollectionRe
 			return ref, false, err
 		}
 	}
+	return nestedRef(parts), true, nil
+}
+
+// nestedRef is the collection of parts (collection, document, ..., collection).
+func nestedRef(parts []string) dal.CollectionRef {
 	var parent *record.Key
 	for i := 0; i+1 < len(parts); i += 2 {
 		parent = record.NewKeyWithParentAndID(parent, parts[i], parts[i+1])
 	}
-	return dal.NewCollectionRef(parts[len(parts)-1], "", parent), true, nil
+	return dal.NewCollectionRef(parts[len(parts)-1], "", parent)
 }
 
 // inGitDBCollectionDefined fails unless the collections of a --from path

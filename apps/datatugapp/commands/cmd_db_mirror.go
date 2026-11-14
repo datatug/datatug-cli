@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
@@ -31,19 +32,23 @@ func dbMirrorCommand() *cobra.Command {
 		Long: "Firestore has no schema, so `db copy` and `db export` cannot read it. `db mirror` takes what to read from the inGitDB definitions of a mirror " +
 			"(one collection definition per Firestore collection path, at any depth: teams/{team}/ext/{module}/events is the definition " +
 			"teams/ext/events) and from a mirror policy file of the DataTug project (format datatug-mirror-policy/v1) that lists the collections " +
-			"to copy, those excluded, and the fields to mask. A defined collection the policy does not name is never copied, and is listed.\n\n" +
+			"to copy, those excluded, the fields to mask, and the Firestore paths a collection is copied from (paths: teams/*/ext/calendar/events, so " +
+			"the events of another module are not copied). A defined collection the policy does not name is never copied, and is listed.\n\n" +
 			"The source is only read: no write request is ever sent, whatever the credentials allow (use an identity with read-only IAM, such as " +
 			"roles/datastore.viewer, as well). Credentials come only from the environment: Application Default Credentials " +
 			"(gcloud auth application-default login, or GOOGLE_APPLICATION_CREDENTIALS); --from is firestore://PROJECT[/DATABASE], env:NAME of a " +
 			"variable holding it, or a datatug:// reference to a project source.\n\n" +
-			"Every document is written as one JSON record file at the path its definition gives (deterministic: a re-run over unchanged data " +
-			"changes no file), checked against its definition first; a document that does not fit is not written into the database but kept under " +
-			"<output>/.datatug-mirror/rejected/ and listed with the reason. The output then gets inGitDB's own validation. The run's report is " +
-			"<output>/.datatug-mirror/report.json.\n\n" +
+			"Every document is written as one JSON record file at the path its definition gives, its ids encoded so that any id is a safe file " +
+			"name (deterministic: a re-run over unchanged data changes no file), checked against its definition first. A document that does not " +
+			"fit is not written: the report lists its path, the reasons and the names of the fields concerned, never their values (--keep-rejected " +
+			"also keeps its masked record under <output>/.datatug-mirror/rejected/). The output then gets inGitDB's own validation. The run's " +
+			"report is <output>/.datatug-mirror/report.json.\n\n" +
 			"Choose what to read with --collections, --space and --path; --dry-run counts the documents of each collection and writes nothing; " +
-			"--max-reads stops before more Firestore reads than that (each read is billed). The output must be a folder git ignores when it is " +
-			"inside a git repository. Exit codes: 0 complete, 1 a read or write failed, 2 a usage or policy error, 3 finished but incomplete " +
-			"(read budget reached, documents rejected, or validation findings), 4 the source cannot be opened.",
+			"--max-reads stops before more Firestore reads than that (each read is billed), and the next run continues where it stopped " +
+			"(--restart starts over). A record file whose document no longer exists is reported; --prune deletes it. The output must be ignored " +
+			"by a .gitignore its git repository tracks, or be outside any repository. Exit codes: 0 complete, 1 a read or write failed, 2 a usage " +
+			"or policy error, 3 finished but incomplete (read budget reached, also in a dry run, documents rejected, or validation findings), " +
+			"4 the source cannot be opened.",
 		Args: cobra.NoArgs,
 		RunE: dbMirrorAction,
 	}
@@ -60,6 +65,10 @@ func dbMirrorCommand() *cobra.Command {
 	flags.Int("page-size", dbmirror.DefaultPageSize, "Documents per read request.")
 	flags.Bool("progress", false, "Print one line per page read on stderr.")
 	flags.Bool("json", false, "Print the report as JSON on stdout.")
+	flags.Bool("keep-rejected", false, "Also write each rejected document, masked, under <output>/.datatug-mirror/rejected/ (by default only its path, reasons and field names are kept).")
+	flags.Bool("prune", false, "Delete the record files whose document no longer exists, in the collections this run read completely (by default they are only reported).")
+	flags.Bool("restart", false, "Start over instead of continuing a run that stopped at its read budget.")
+	flags.Bool("snapshot", false, "Read every document as it was when the run started (Firestore keeps old versions for an hour), so the copy is consistent.")
 	_ = cmd.MarkFlagRequired("from")
 	_ = cmd.MarkFlagRequired("policy")
 	return cmd
@@ -79,6 +88,7 @@ var (
 	gitCommand = func(dir string, args ...string) *exec.Cmd {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
+		cmd.Env = gitEnvironment()
 		return cmd
 	}
 )
@@ -160,6 +170,10 @@ func dbMirrorAction(cmd *cobra.Command, _ []string) error {
 		Output: output, Collections: collections, Under: under, DryRun: dryRun,
 		MaxReads: maxReads, PageSize: pageSize, Source: sourceDisplay, Log: stderr,
 	}
+	opts.KeepRejected, _ = flags.GetBool("keep-rejected")
+	opts.Prune, _ = flags.GetBool("prune")
+	opts.Restart, _ = flags.GetBool("restart")
+	opts.Snapshot, _ = flags.GetBool("snapshot")
 	if progress, _ := flags.GetBool("progress"); progress {
 		opts.Progress = stderr
 	}
@@ -172,6 +186,9 @@ func dbMirrorAction(cmd *cobra.Command, _ []string) error {
 	}
 	if asJSON, _ := flags.GetBool("json"); asJSON {
 		writeMirrorJSON(cmd.OutOrStdout(), report)
+	}
+	if dryRun && report.BudgetReached {
+		return Exit(fmt.Sprintf("db mirror: the dry run stopped at the read budget of %d reads: the counts are incomplete", maxReads), exitCodeIncomplete)
 	}
 	if !dryRun && !report.Complete {
 		return Exit(fmt.Sprintf("db mirror: the output is incomplete: %s", strings.Join(report.Incomplete, "; ")), exitCodeIncomplete)
@@ -211,10 +228,10 @@ func mirrorOutput(cmd *cobra.Command, policy *dbmirror.Policy, definitionsDir st
 	if within(abs, definitionsDir) || within(definitionsDir, abs) {
 		return "", Exit(fmt.Sprintf("the output %s must be outside the definitions folder %s, and must not hold it", abs, definitionsDir), exitCodeUsage)
 	}
-	if tracked, err := committable(abs); err != nil {
-		return "", Exit(fmt.Sprintf("check the output against .gitignore: %v", err), 1)
-	} else if tracked {
-		return "", Exit(fmt.Sprintf("the output %s is inside a git repository and not ignored by it, so the copied records could be committed: add the folder (for example /data/) to .gitignore, or choose a folder outside the repository", abs), exitCodeUsage)
+	if problem, err := gitIgnoreProblem(abs); err != nil {
+		return "", Exit(fmt.Sprintf("check the output against .gitignore: %v (the output must be ignored by a .gitignore the repository tracks, or be outside any repository)", err), 1)
+	} else if problem != "" {
+		return "", Exit(fmt.Sprintf("the output %s is inside a git repository and %s, so the copied records could be committed: add the folder (for example /data/) to a .gitignore of the repository and commit it, or choose a folder outside the repository", abs, problem), exitCodeUsage)
 	}
 	return abs, nil
 }
@@ -240,30 +257,99 @@ func projectRootOf(dir string) string {
 	}
 }
 
-// committable reports whether path is inside a git work tree and not ignored
-// there. A folder outside any repository, or a machine without git, is not.
-func committable(path string) (bool, error) {
-	dir := path
-	for {
-		if info, err := os.Stat(dir); err == nil && info.IsDir() {
-			break
-		}
-		dir = filepath.Dir(dir)
-	}
+// gitIgnoreProblem says why git could commit what is written at path, or "".
+// The check fails closed. An output is allowed only when
+//
+//   - it is outside any git work tree (git says "not a git repository", or,
+//     without git installed, no folder at or above it holds a .git), or
+//   - the rule git ignores it by is a non-negated pattern of a .gitignore file
+//     inside the work tree that the repository tracks, so every clone ignores
+//     it too.
+//
+// An output ignored only by a rule of this machine (core.excludesFile, the
+// global ignore file, .git/info/exclude) or of an untracked .gitignore is
+// refused, and so is one git does not ignore. Any other git failure is an
+// error. git runs without the GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE and
+// GIT_COMMON_DIR of the environment, so it looks at the folder itself.
+func gitIgnoreProblem(path string) (string, error) {
+	dir := existingDir(path)
 	top, err := gitCommand(dir, "rev-parse", "--show-toplevel").Output()
-	if err != nil {
-		return false, nil // not in a work tree, or no git on this machine
-	}
-	check := gitCommand(strings.TrimSpace(string(top)), "check-ignore", "-q", path)
-	err = check.Run()
 	var exitErr *exec.ExitError
 	switch {
-	case err == nil:
-		return false, nil // ignored
-	case errors.As(err, &exitErr) && exitErr.ExitCode() == 1:
-		return true, nil // not ignored
+	case errors.Is(err, exec.ErrNotFound):
+		if repo := enclosingRepository(dir); repo != "" {
+			return "", fmt.Errorf("git is not installed, and %s holds a git repository, so whether it ignores the output cannot be checked", repo)
+		}
+		return "", nil
+	case errors.As(err, &exitErr) && exitErr.ExitCode() == 128 && strings.Contains(string(exitErr.Stderr), "not a git repository"):
+		return "", nil
+	case err != nil:
+		return "", fmt.Errorf("git rev-parse: %w %s", err, gitStderr(err))
 	}
-	return false, err
+	root := strings.TrimSpace(string(top))
+	check := gitCommand(root, "check-ignore", "--verbose", "-z", "--stdin")
+	check.Stdin = strings.NewReader(path + "\x00")
+	out, err := check.Output()
+	switch {
+	case errors.As(err, &exitErr) && exitErr.ExitCode() == 1:
+		return "not ignored by it", nil
+	case err != nil:
+		return "", fmt.Errorf("git check-ignore: %w %s", err, gitStderr(err))
+	}
+	fields := strings.Split(string(out), "\x00")
+	if len(fields) < 4 {
+		return "", fmt.Errorf("git check-ignore printed %q, not source, line, pattern and path", out)
+	}
+	source, line, pattern := fields[0], fields[1], fields[2]
+	switch {
+	case strings.HasPrefix(pattern, "!"):
+		return "not ignored by it (" + source + ":" + line + " re-includes it)", nil
+	case filepath.IsAbs(source) || !filepath.IsLocal(source) || filepath.Base(source) != ".gitignore" || slices.Contains(strings.Split(filepath.ToSlash(source), "/"), ".git"):
+		return "ignored only by " + source + ", which is not a .gitignore of the repository (other clones would not ignore it)", nil
+	}
+	if err := gitCommand(root, "ls-files", "--error-unmatch", "--", source).Run(); err != nil {
+		return "ignored only by " + source + ", which the repository does not track (other clones would not ignore it)", nil
+	}
+	return "", nil
+}
+
+// existingDir is the nearest folder at or above path that exists.
+func existingDir(path string) string {
+	for {
+		if info, err := os.Stat(path); err == nil && info.IsDir() {
+			return path
+		}
+		path = filepath.Dir(path)
+	}
+}
+
+// enclosingRepository is the nearest folder at or above dir holding .git, or "".
+func enclosingRepository(dir string) string {
+	for current := dir; ; current = filepath.Dir(current) {
+		if _, err := os.Lstat(filepath.Join(current, ".git")); err == nil {
+			return current
+		}
+		if filepath.Dir(current) == current {
+			return ""
+		}
+	}
+}
+
+func gitStderr(err error) string {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return strings.TrimSpace(string(exitErr.Stderr))
+	}
+	return ""
+}
+
+// gitEnvironment is the environment without the variables that point git at
+// another repository than the folder it runs in.
+func gitEnvironment() []string {
+	return slices.DeleteFunc(os.Environ(), func(variable string) bool {
+		name, _, _ := strings.Cut(variable, "=")
+		return slices.Contains([]string{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_CEILING_DIRECTORIES"}, name)
+	})
 }
 
 // hintFirestoreMirror points a db copy or db export from Firestore at db

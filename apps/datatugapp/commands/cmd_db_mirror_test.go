@@ -31,7 +31,8 @@ func (s *mirrorTestSource) Page(_ context.Context, q dbmirror.Query) ([]dbmirror
 	var paths []string
 	for path := range s.docs {
 		parts := strings.Split(path, "/")
-		if parts[len(parts)-2] == q.Collection && (q.Group || len(parts) == 2) && strings.HasPrefix(path, q.Under) && path > q.After {
+		inCollection := q.Group && parts[len(parts)-2] == q.Collection || !q.Group && strings.Join(parts[:len(parts)-1], "/") == q.Collection
+		if inCollection && (q.Under == "" || path == q.Under || strings.HasPrefix(path, q.Under+"/")) && path > q.After {
 			paths = append(paths, path)
 		}
 	}
@@ -53,14 +54,29 @@ func (s *mirrorTestSource) Get(_ context.Context, path string) (*dbmirror.Doc, e
 }
 
 func (s *mirrorTestSource) Count(_ context.Context, q dbmirror.Query) (int64, error) {
-	docs, _ := s.Page(context.Background(), dbmirror.Query{Collection: q.Collection, Group: q.Group, Under: q.Under, Limit: 1000})
+	limit := q.Limit
+	if limit == 0 {
+		limit = 1000
+	}
+	docs, _ := s.Page(context.Background(), dbmirror.Query{Collection: q.Collection, Group: q.Group, Under: q.Under, Limit: limit})
 	return int64(len(docs)), nil
 }
 
-// mirrorProject is a DataTug project in a git repository that ignores /data/,
-// holding the example mirror of pkg/dbmirror and a policy without an output.
+// git runs git in dir with the test's settings only.
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	if out, err := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=test", "-c", "user.email=test@example.invalid"}, args...)...).CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v %s", args, err, out)
+	}
+}
+
+// mirrorProject is a DataTug project in a git repository whose tracked
+// .gitignore ignores /data/, holding the example mirror of pkg/dbmirror and a
+// policy without an output. git reads no global or system settings.
 func mirrorProject(t *testing.T) string {
 	t.Helper()
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	project := t.TempDir()
 	if err := os.CopyFS(filepath.Join(project, "mirror"), os.DirFS(filepath.Join("..", "..", "..", "pkg", "dbmirror", "testdata", "mirror"))); err != nil {
 		t.Fatal(err)
@@ -83,9 +99,9 @@ func mirrorProject(t *testing.T) string {
 			t.Fatal(err)
 		}
 	}
-	if out, err := exec.Command("git", "-C", project, "init", "-q").CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v %s", err, out)
-	}
+	runGit(t, project, "init", "-q")
+	runGit(t, project, "add", ".gitignore")
+	runGit(t, project, "commit", "-q", "-m", "ignore data")
 	return project
 }
 
@@ -179,7 +195,47 @@ func TestDBMirrorDryRunAndOneSpace(t *testing.T) {
 	}
 	// --space selects spaces/<id>: the example mirror defines no spaces, which is an error, not an empty copy.
 	_, stderr, code = runMirror(t, "--from", "firestore://demo-example", "--policy", policy, "--space", "s1", "--to", "ingitdb://"+filepath.Join(project, "data", "s1"))
-	if code != exitCodeUsage || !strings.Contains(stderr, "no collection defined in the mirror is at or below spaces/s1") {
+	if code != exitCodeUsage || !strings.Contains(stderr, "no collection defined in the mirror (at a path its policy allows) is at or below spaces/s1") {
+		t.Errorf("exit %d\n%s", code, stderr)
+	}
+}
+
+func TestDBMirrorFlagsReachTheRun(t *testing.T) {
+	project := mirrorProject(t)
+	policy := filepath.Join(project, "mirrors", "backup.yaml")
+	out := filepath.Join(project, "data", "backup")
+	args := []string{"--from", "firestore://demo-example", "--policy", policy, "--collections", "teams"}
+	docs := mirrorDocs()
+	docs["teams/t3"] = map[string]any{"title": int64(3), "phone": "+353-PII"}
+	useMirrorSource(t, &mirrorTestSource{docs: docs}, nil)
+	// By default a rejected document leaves no value on disk; --keep-rejected keeps it.
+	if _, stderr, code := runMirror(t, args...); code != exitCodeIncomplete || strings.Contains(stderr, "+353-PII") {
+		t.Fatalf("exit %d\n%s", code, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(out, ".datatug-mirror", "rejected")); !os.IsNotExist(err) {
+		t.Error("a rejected document was written without --keep-rejected")
+	}
+	if _, _, code := runMirror(t, append(args, "--keep-rejected", "--snapshot")...); code != exitCodeIncomplete {
+		t.Errorf("exit %d", code)
+	}
+	if _, err := os.Stat(filepath.Join(out, ".datatug-mirror", "rejected", "teams", "t3.json")); err != nil {
+		t.Error(err)
+	}
+	// --prune deletes the record of a document that is gone.
+	delete(docs, "teams/t2")
+	delete(docs, "teams/t3")
+	if _, stderr, code := runMirror(t, append(args, "--prune")...); code != 0 || !strings.Contains(stderr, "pruned: teams/t2.json") {
+		t.Errorf("exit %d\n%s", code, stderr)
+	}
+	// A budget stop leaves a resume state; --restart ignores it.
+	if _, _, code := runMirror(t, append(args, "--max-reads", "2", "--page-size", "1")...); code != exitCodeIncomplete {
+		t.Errorf("exit %d", code)
+	}
+	if _, stderr, code := runMirror(t, append(args, "--restart")...); code != 0 || strings.Contains(stderr, "resuming") {
+		t.Errorf("exit %d\n%s", code, stderr)
+	}
+	// A dry run that reaches its budget exits 3: its counts are incomplete.
+	if _, stderr, code := runMirror(t, append(args, "--dry-run", "--max-reads", "1")...); code != exitCodeIncomplete || !strings.Contains(stderr, "dry run stopped at the read budget of 1 reads") {
 		t.Errorf("exit %d\n%s", code, stderr)
 	}
 }
@@ -242,7 +298,7 @@ func TestDBMirrorFailures(t *testing.T) {
 	}
 	// A document that does not fit its definition makes the copy incomplete.
 	useMirrorSource(t, &mirrorTestSource{docs: map[string]map[string]any{"teams/t1": {"title": int64(1)}}}, nil)
-	if _, stderr, code := runMirror(t, append(args, "--collections", "teams")...); code != exitCodeIncomplete || !strings.Contains(stderr, "did not fit") {
+	if _, stderr, code := runMirror(t, append(args, "--collections", "teams")...); code != exitCodeIncomplete || !strings.Contains(stderr, "were not written into the database") {
 		t.Errorf("exit %d\n%s", code, stderr)
 	}
 	// The output path cannot be made absolute.
@@ -254,34 +310,95 @@ func TestDBMirrorFailures(t *testing.T) {
 	}
 }
 
-func TestCommittable(t *testing.T) {
+func TestGitIgnoreProblem(t *testing.T) {
 	project := mirrorProject(t)
-	if tracked, err := committable(filepath.Join(project, "data", "x", "y")); err != nil || tracked {
-		t.Errorf("an ignored folder: %v %v", tracked, err)
+	global := filepath.Join(t.TempDir(), "ignore")
+	for name, content := range map[string]string{
+		global: "global/\n",
+		filepath.Join(project, ".git", "info", "exclude"): "local/\n",
+		filepath.Join(project, "sub", ".gitignore"):       "untracked/\n",
+		filepath.Join(project, "tracked", ".gitignore"):   "out*\n!out2\n",
+	} {
+		if err := os.MkdirAll(filepath.Dir(name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(name, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if tracked, err := committable(filepath.Join(project, "kept")); err != nil || !tracked {
-		t.Errorf("a folder git would commit: %v %v", tracked, err)
+	runGit(t, project, "add", "tracked/.gitignore")
+	runGit(t, project, "commit", "-q", "-m", "tracked")
+	runGit(t, project, "config", "core.excludesFile", global)
+	// A variable that points git elsewhere is not used.
+	t.Setenv("GIT_DIR", filepath.Join(t.TempDir(), "elsewhere"))
+	for path, want := range map[string]string{
+		"data/x/y":        "",
+		"tracked/out1":    "",
+		"kept":            "not ignored by it",
+		"tracked/out2":    "not ignored by it (tracked/.gitignore:2 re-includes it)",
+		"global/out":      "ignored only by " + global + ", which is not a .gitignore of the repository",
+		"local/out":       "ignored only by .git/info/exclude, which is not a .gitignore",
+		"sub/untracked/o": "ignored only by sub/.gitignore, which the repository does not track",
+	} {
+		if got, err := gitIgnoreProblem(filepath.Join(project, path)); err != nil || !strings.HasPrefix(got, want) || (want == "") != (got == "") {
+			t.Errorf("%s: %q %v", path, got, err)
+		}
 	}
-	if tracked, err := committable(t.TempDir()); err != nil || tracked {
-		t.Errorf("a folder outside git: %v %v", tracked, err)
+	if got, err := gitIgnoreProblem(t.TempDir()); err != nil || got != "" {
+		t.Errorf("a folder outside git: %q %v", got, err)
 	}
+
 	saved := gitCommand
 	t.Cleanup(func() { gitCommand = saved })
-	gitCommand = func(string, ...string) *exec.Cmd { return exec.Command(filepath.Join(project, "no-git")) }
-	if tracked, err := committable(project); err != nil || tracked {
-		t.Errorf("no git: %v %v", tracked, err)
+	// Without git, a folder below a .git folder is refused, and one outside any is allowed.
+	gitCommand = func(string, ...string) *exec.Cmd { return exec.Command("datatug-test-no-such-git") }
+	if _, err := gitIgnoreProblem(filepath.Join(project, "data")); err == nil || !strings.Contains(err.Error(), "git is not installed, and "+project+" holds a git repository") {
+		t.Errorf("no git: %v", err)
 	}
-	gitCommand = func(_ string, args ...string) *exec.Cmd {
-		if args[0] == "rev-parse" {
-			return exec.Command("git", "-C", project, "rev-parse", "--show-toplevel")
+	if got, err := gitIgnoreProblem(t.TempDir()); err != nil || got != "" {
+		t.Errorf("no git, no repository: %q %v", got, err)
+	}
+	// Any other git failure is an error: the check fails closed.
+	for name, fake := range map[string]func(args []string) *exec.Cmd{
+		"rev-parse fails":  func([]string) *exec.Cmd { return exec.Command("sh", "-c", "exit 1") },
+		"git cannot start": func([]string) *exec.Cmd { return exec.Command(filepath.Join(project, "not-a-git")) },
+		"rev-parse exits 128 for another reason": func([]string) *exec.Cmd {
+			return exec.Command("sh", "-c", "echo 'fatal: detected dubious ownership' >&2; exit 128")
+		},
+		"check-ignore fails": func(args []string) *exec.Cmd {
+			if args[0] == "rev-parse" {
+				return exec.Command("git", "-C", project, "rev-parse", "--show-toplevel")
+			}
+			return exec.Command("git", "-C", project, "check-ignore", "--no-such-flag")
+		},
+		"check-ignore prints too little": func(args []string) *exec.Cmd {
+			if args[0] == "rev-parse" {
+				return exec.Command("git", "-C", project, "rev-parse", "--show-toplevel")
+			}
+			return exec.Command("printf", ".gitignore")
+		},
+	} {
+		gitCommand = func(_ string, args ...string) *exec.Cmd {
+			cmd := fake(args)
+			cmd.Env = gitEnvironment()
+			return cmd
 		}
-		return exec.Command("git", "-C", project, "check-ignore", "--no-such-flag")
-	}
-	if _, err := committable(project); err == nil {
-		t.Error("a failing git check is no error")
+		if _, err := gitIgnoreProblem(filepath.Join(project, "data")); err == nil {
+			t.Errorf("%s: no error", name)
+		}
 	}
 	if _, stderr, code := runMirror(t, "--from", "firestore://demo-example", "--policy", filepath.Join(project, "mirrors", "backup.yaml")); code != 1 || !strings.Contains(stderr, "check the output against .gitignore") {
 		t.Errorf("exit %d\n%s", code, stderr)
+	}
+}
+
+func TestGitEnvironmentDropsRepositoryVariables(t *testing.T) {
+	t.Setenv("GIT_DIR", "/x")
+	t.Setenv("GIT_WORK_TREE", "/y")
+	t.Setenv("GIT_AUTHOR_NAME", "kept")
+	env := strings.Join(gitEnvironment(), "\n")
+	if strings.Contains(env, "GIT_DIR=") || strings.Contains(env, "GIT_WORK_TREE=") || !strings.Contains(env, "GIT_AUTHOR_NAME=kept") {
+		t.Error(env)
 	}
 }
 

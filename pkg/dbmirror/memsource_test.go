@@ -47,10 +47,12 @@ func (m *memSource) matching(q Query) []string {
 	var paths []string
 	for path := range m.docs {
 		parts := strings.Split(path, "/")
-		if parts[len(parts)-2] != q.Collection || (!q.Group && len(parts) != 2) {
+		switch {
+		case q.Group && parts[len(parts)-2] != q.Collection:
 			continue
-		}
-		if q.Under != "" && (comparePaths(path, q.Under) < 0 || comparePaths(path, q.Under+"") >= 0) {
+		case !q.Group && strings.Join(parts[:len(parts)-1], "/") != q.Collection:
+			continue
+		case q.Under != "" && (comparePaths(path, q.Under) < 0 || comparePaths(path, q.Under+"\x00") >= 0):
 			continue
 		}
 		paths = append(paths, path)
@@ -94,7 +96,11 @@ func (m *memSource) Count(_ context.Context, q Query) (int64, error) {
 	if err := m.fail["Count"]; err != nil {
 		return 0, err
 	}
-	return int64(len(m.matching(q))), nil
+	n := len(m.matching(q))
+	if q.Limit > 0 {
+		n = min(n, q.Limit)
+	}
+	return int64(n), nil
 }
 
 var errBoom = errors.New("boom")

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ingitdb/ingitdb-go/ingitdb"
 )
 
 func TestReadPolicy(t *testing.T) {
@@ -40,15 +42,49 @@ func TestReadPolicy(t *testing.T) {
 func TestPolicyCheck(t *testing.T) {
 	defs := testDefinitions(t)
 	for policy, want := range map[*Policy]string{
-		{Copy: []string{"nope"}}:                                                `copy: collection "nope" is not defined`,
-		{Exclude: []string{"nope"}}:                                             `exclude: collection "nope" is not defined`,
-		{Copy: []string{"teams"}, Exclude: []string{"teams"}}:                   "both copy and exclude",
-		{Mask: map[string][]string{"teams": {"x"}}}:                             "must also be listed in copy",
-		{Copy: []string{"teams"}, Mask: map[string][]string{"teams": {"a..b"}}}: "is not a field path",
-		{Copy: []string{"teams"}, Mask: map[string][]string{"teams": {""}}}:     "is not a field path",
+		{Copy: []string{"nope"}}:                                                                 `copy: collection "nope" is not defined`,
+		{Exclude: []string{"nope"}}:                                                              `exclude: collection "nope" is not defined`,
+		{Copy: []string{"teams"}, Exclude: []string{"teams"}}:                                    "both copy and exclude",
+		{Mask: map[string][]string{"teams": {"x"}}}:                                              "must also be listed in copy",
+		{Copy: []string{"teams"}, Mask: map[string][]string{"teams": {"a..b"}}}:                  "is not a field path",
+		{Copy: []string{"teams"}, Mask: map[string][]string{"teams": {""}}}:                      "is not a field path",
+		{Copy: []string{"teams"}, Mask: map[string][]string{"teams": {"titel"}}}:                 `"titel" is not a column of the collection (columns: $ID, createdAt,`,
+		{Copy: []string{"teams"}, Mask: map[string][]string{"teams": {"title.x"}}}:               `"title" has type string, which holds no field "x"`,
+		{Paths: map[string][]string{"teams/ext": {"teams/*/ext"}}}:                               "must also be listed in copy",
+		{Copy: []string{"teams/ext"}, Paths: map[string][]string{"teams/ext": {}}}:               "lists no path",
+		{Copy: []string{"teams/ext"}, Paths: map[string][]string{"teams/ext": {"teams"}}}:        "has 3 segments (a collection path) or 4",
+		{Copy: []string{"teams/ext"}, Paths: map[string][]string{"teams/ext": {"teams//ext"}}}:   "a segment is empty",
+		{Copy: []string{"teams/ext"}, Paths: map[string][]string{"teams/ext": {"teams/*/ex"}}}:   `segment 3 must be the collection id "ext"`,
+		{Copy: []string{"teams/ext"}, Paths: map[string][]string{"teams/ext": {"teams/t*/ext"}}}: `segment 2 is a document id or "*"`,
 	} {
 		if err := policy.Check(defs); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%+v: %v", policy, err)
+		}
+	}
+	good := &Policy{Copy: []string{"teams/ext", "ext/customers"}, Paths: map[string][]string{"teams/ext": {"teams/*/ext", "teams/t1/ext/cal"}},
+		Mask: map[string][]string{"teams/ext": {"data.a.b"}, "ext/customers": {"contacts.*.phone", "contacts.0"}}}
+	if err := good.Check(defs); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestMaskFieldProblem(t *testing.T) {
+	def := &ingitdb.CollectionDef{Columns: map[string]*ingitdb.ColumnDef{
+		"tags": {Type: "[]string"}, "byKey": {Type: "map[string][]map[string]string"}, "loose": {Type: ingitdb.ColumnTypeAny},
+		"names": {Type: ingitdb.ColumnTypeL10N}, "n": {Type: ingitdb.ColumnTypeInt},
+	}}
+	for path, want := range map[string]string{
+		"tags.*": "", "tags.3": "", "byKey.k.*.x": "", "byKey.k.0.x": "", "loose.a.b.c": "", "names.en": "",
+		"tags.x":        `"tags" is a list ([]string): name its items by "*" or an index, not "x"`,
+		"tags.*.x":      `"tags.*" has type string, which holds no field "x"`,
+		"byKey.k.x":     `"byKey.k" is a list`,
+		"byKey.k.*.x.y": `"byKey.k.*.x" has type string`,
+		"names.en.x":    `"names.en" has type string`,
+		"n.x":           `"n" has type int`,
+		"emial":         `"emial" is not a column`,
+	} {
+		if got := maskFieldProblem(def, path); !strings.HasPrefix(got, want) || (want == "") != (got == "") {
+			t.Errorf("%s: %q", path, got)
 		}
 	}
 }

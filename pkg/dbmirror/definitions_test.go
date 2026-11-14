@@ -22,8 +22,19 @@ func TestLoadDefinitions(t *testing.T) {
 	if spec.Leaf() != "notes" || spec.Depth() != 4 || defs.Spec("nope") != nil {
 		t.Errorf("%+v", spec)
 	}
-	if got := spec.recordFile(strings.Split("teams/a/ext/b/events/c/notes/d", "/")); got != filepath.FromSlash("teams/a/ext/b/events/c/notes/d.json") {
+	if got, problem := spec.recordFile(strings.Split("teams/a/ext/b/events/c/notes/d", "/")); got != filepath.FromSlash("teams/a/ext/b/events/c/notes/d.json") || problem != "" {
+		t.Error(got, problem)
+	}
+	// Every id is encoded, so no id leaves its folder, and an id too long for a file name is a problem, not an error.
+	if got, _ := spec.recordFile(strings.Split(`teams/../ext/..\x/events/C:d/notes/.n`, "/")); got != filepath.FromSlash("teams/~2E~2E/ext/~2E.~5Cx/events/C~3Ad/notes/~2En.json") {
 		t.Error(got)
+	}
+	long := strings.Repeat("x", maxNameBytes)
+	if _, problem := spec.recordFile([]string{"teams", long + "x", "ext", "b", "events", "c", "notes", "d"}); !strings.Contains(problem, "parent document at level 1 is too long") {
+		t.Error(problem)
+	}
+	if _, problem := spec.recordFile([]string{"teams", "a", "ext", "b", "events", "c", "notes", long}); !strings.Contains(problem, "the document id is too long") {
+		t.Error(problem)
 	}
 	if !spec.matches(strings.Split("teams/a/ext/b/events/c/notes/d", "/")) || spec.matches(strings.Split("teams/a/ext/b/other/c/notes/d", "/")) || spec.matches([]string{"teams", "a"}) {
 		t.Error("matches")
@@ -79,8 +90,11 @@ func TestSpecLayout(t *testing.T) {
 	records := "$records"
 	spec := &Spec{chain: []*ingitdb.CollectionDef{{RecordFile: &ingitdb.RecordFileDef{Name: "{key}.json", Format: "json", RecordType: ingitdb.SingleRecord, RecordsDir: &records}}}}
 	spec.Def = spec.chain[0]
-	if spec.layout() != "" || spec.recordFile([]string{"a", "1"}) != filepath.FromSlash("$records/1.json") {
-		t.Error(spec.recordFile([]string{"a", "1"}))
+	if layout := spec.layout(); layout != "" {
+		t.Error(layout)
+	}
+	if got, _ := spec.recordFile([]string{"a", "1"}); got != filepath.FromSlash("$records/1.json") {
+		t.Error(got)
 	}
 }
 

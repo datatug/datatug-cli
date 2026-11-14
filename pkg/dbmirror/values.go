@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
+	"github.com/ingitdb/ingitdb-go/ingitdb"
 	"google.golang.org/genproto/googleapis/type/latlng"
 )
 
@@ -24,20 +25,66 @@ const (
 	tagGeoPoint  = "$geo"    // {"latitude": ..., "longitude": ...}
 	tagVector    = "$vector" // the vector's numbers
 	tagFloat     = "$float"  // "NaN", "Infinity" or "-Infinity"
+	tagTime      = "$time"   // a timestamp outside a datetime column, as timeLayout text
+	tagMap       = "$map"    // a map of the source that would read as one of these tags
 	maskedString = "***"     // what a masked string field holds
-	timeLayout   = time.RFC3339Nano
+	// timeLayout is RFC 3339 in UTC with the 6 fraction digits Firestore keeps,
+	// always written, so timestamps sort as text.
+	timeLayout = "2006-01-02T15:04:05.000000Z07:00"
 )
+
+var tags = []string{tagBytes, tagReference, tagGeoPoint, tagVector, tagFloat, tagTime, tagMap}
+
+// convertRecord converts the fields of a document into those of its record:
+// a timestamp in a datetime column (or an item of a []datetime column) is the
+// column's text, every other value is jsonValue's.
+func convertRecord(data map[string]any, def *ingitdb.CollectionDef) (map[string]any, error) {
+	fields := make(map[string]any, len(data))
+	for key, value := range data {
+		typ := ""
+		if column := def.Columns[key]; column != nil {
+			typ = string(column.Type)
+		}
+		var err error
+		switch typed := value.(type) {
+		case time.Time:
+			if typ == string(ingitdb.ColumnTypeDateTime) {
+				fields[key] = typed.UTC().Format(timeLayout)
+				continue
+			}
+		case []any:
+			if typ == "[]"+string(ingitdb.ColumnTypeDateTime) {
+				items := make([]any, len(typed))
+				for i, item := range typed {
+					if at, isTime := item.(time.Time); isTime {
+						items[i] = at.UTC().Format(timeLayout)
+					} else if items[i], err = jsonValue(item, key+"."+strconv.Itoa(i)); err != nil {
+						return nil, err
+					}
+				}
+				fields[key] = items
+				continue
+			}
+		}
+		if fields[key], err = jsonValue(value, key); err != nil {
+			return nil, err
+		}
+	}
+	return fields, nil
+}
 
 // jsonValue converts a value read from Firestore (as the Google SDK returns
 // it) into the value its record file holds:
 //
-//   - null, booleans, strings, maps and arrays as themselves;
+//   - null, booleans and strings as themselves, maps and arrays item by item;
 //   - integers as JSON integers and doubles as JSON numbers that always carry a
 //     decimal point or exponent, so 1.0 stays a double;
-//   - timestamps as RFC 3339 text in UTC with every digit Firestore keeps
-//     (inGitDB date-time columns hold this text);
+//   - timestamps as {"$time": RFC 3339 text in UTC with 6 fraction digits}
+//     (convertRecord writes the bare text into a datetime column);
 //   - bytes, references, geo points, vectors and the doubles NaN and ±Infinity
-//     as one-key objects tagged $bytes, $ref, $geo, $vector and $float.
+//     as one-key objects tagged $bytes, $ref, $geo, $vector and $float;
+//   - a map whose only key is one of these tags as {"$map": the map}, so it is
+//     not read back as the tagged value.
 //
 // path names the field for an error about a type Firestore added later.
 func jsonValue(v any, path string) (any, error) {
@@ -55,7 +102,7 @@ func jsonValue(v any, path string) (any, error) {
 		}
 		return value, nil
 	case time.Time:
-		return value.UTC().Format(timeLayout), nil
+		return map[string]any{tagTime: value.UTC().Format(timeLayout)}, nil
 	case []byte:
 		return map[string]any{tagBytes: base64.StdEncoding.EncodeToString(value)}, nil
 	case *firestore.DocumentRef:
@@ -92,6 +139,13 @@ func jsonValue(v any, path string) (any, error) {
 				return nil, err
 			}
 			fields[key] = converted
+		}
+		if len(fields) == 1 {
+			for key := range fields {
+				if slices.Contains(tags, key) {
+					return map[string]any{tagMap: fields}, nil
+				}
+			}
 		}
 		return fields, nil
 	}
@@ -248,4 +302,35 @@ func maskPath(container any, path []string) bool {
 		}
 	}
 	return matched
+}
+
+// temporalLayouts are the texts a date, time or datetime column accepts.
+var temporalLayouts = map[ingitdb.ColumnType][]string{
+	ingitdb.ColumnTypeDateTime: {time.RFC3339Nano},
+	ingitdb.ColumnTypeDate:     {time.DateOnly},
+	ingitdb.ColumnTypeTime:     {"15:04", time.TimeOnly},
+}
+
+// temporalProblems checks what inGitDB does not: that the text in each date,
+// time and datetime column of a record is one. It names the fields, never
+// their values.
+func temporalProblems(def *ingitdb.CollectionDef, data map[string]any) []string {
+	var problems []string
+	for _, key := range sortedKeys(def.Columns) {
+		layouts := temporalLayouts[def.Columns[key].Type]
+		text, isText := data[key].(string)
+		if len(layouts) == 0 || !isText {
+			continue
+		}
+		parsed := false
+		for _, layout := range layouts {
+			if _, err := time.Parse(layout, text); err == nil {
+				parsed = true
+			}
+		}
+		if !parsed {
+			problems = append(problems, fmt.Sprintf("field %q: not a valid %s (the value is not shown)", key, def.Columns[key].Type))
+		}
+	}
+	return problems
 }

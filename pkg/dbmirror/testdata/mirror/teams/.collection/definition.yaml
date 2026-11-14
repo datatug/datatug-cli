@@ -23,3 +23,6 @@ columns:
     type: "[]string"
   settings:
     type: map[string]any
+  kind:
+    type: string
+    enum: [open, closed]

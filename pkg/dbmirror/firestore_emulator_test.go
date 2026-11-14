@@ -55,15 +55,19 @@ func TestFirestoreMirrorEmulator(t *testing.T) {
 	defer func() { _ = source.Close() }()
 
 	out := t.TempDir()
-	report, err := Run(ctx, source, testDefinitions(t), testPolicy(t), Options{Output: out, PageSize: 2, MaxReads: 1000})
+	// The source's client cannot write, even to the emulator.
+	if _, err := source.client.Doc("teams/t1").Set(ctx, map[string]any{"title": "changed"}); err == nil || !strings.Contains(err.Error(), "only reads") {
+		t.Fatalf("a write was not refused: %v", err)
+	}
+	report, err := Run(ctx, source, testDefinitions(t), testPolicy(t), Options{Output: out, PageSize: 2, MaxReads: 1000, Snapshot: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Records != 9 || len(report.Rejected) != 2 || len(report.Validation) != 0 {
+	if report.Records != 10 || len(report.Rejected) != 1 || len(report.Validation) != 0 || report.ReadTime == "" {
 		t.Fatalf("%d records, rejected %+v, validation %v", report.Records, report.Rejected, report.Validation)
 	}
 	got := readFile(t, filepath.Join(out, "teams", "t1.json"))
-	for _, want := range []string{`"$bytes": "AAEC"`, `"$ref": "teams/t2"`, `"latitude": 52.5`, `"$float": "NaN"`, `"deep": "2026-11-01T09:00:00Z"`, `"score": 2.0`, `"createdAt": "2026-11-01T09:00:00Z"`} {
+	for _, want := range []string{`"$bytes": "AAEC"`, `"$ref": "teams/t2"`, `"latitude": 52.5`, `"$float": "NaN"`, `"$time": "2026-11-01T09:00:00.000000Z"`, `"score": 2.0`, `"createdAt": "2026-11-01T09:00:00.000000Z"`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("teams/t1.json lacks %s:\n%s", want, got)
 		}
@@ -71,13 +75,36 @@ func TestFirestoreMirrorEmulator(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(out, "teams/t1/ext/cal/events/e1/notes/n1.json")); err != nil {
 		t.Error(err)
 	}
-	if r := result(t, report, "teams/ext/events"); r.BelowMissingParent != 2 {
+	if _, err := os.Stat(filepath.Join(out, "teams/t2/ext/cal/events/~2Ehidden.json")); err != nil {
+		t.Error(err)
+	}
+	if r := result(t, report, "teams/ext/events"); r.BelowMissingParent != 3 {
 		t.Errorf("%+v", r)
 	}
-	// One space-like slice, a dry run, and a re-run that changes nothing.
+	// One space-like slice reads nothing of the sibling t1x, and a pinned module only its own records.
 	under, err := Run(ctx, source, testDefinitions(t), testPolicy(t), Options{Output: t.TempDir(), Under: "teams/t1"})
-	if err != nil || under.Records != 5 || under.Reads > 10 {
+	if err != nil || under.Records != 5 || under.Reads > 10 || len(under.Outside) != 0 {
 		t.Fatalf("%v %+v", err, under)
+	}
+	pinned := testPolicy(t)
+	pinned.Paths = map[string][]string{"teams/ext/events": {"teams/*/ext/cal/events"}}
+	only, err := Run(ctx, source, testDefinitions(t), pinned, Options{Output: t.TempDir(), Collections: []string{"teams/ext/events"}})
+	if r := result(t, only, "teams/ext/events"); err != nil || r.Records != 3 || r.OtherParents != 1 {
+		t.Fatalf("%v %+v", err, r)
+	}
+	// A budgeted run resumes where it stopped.
+	budgeted := t.TempDir()
+	for runs := 0; ; runs++ {
+		step, err := Run(ctx, source, testDefinitions(t), testPolicy(t), Options{Output: budgeted, PageSize: 2, MaxReads: 6})
+		if err != nil || runs > 20 {
+			t.Fatalf("%v after %d runs", err, runs)
+		}
+		if !step.BudgetReached {
+			if step.Records != report.Records {
+				t.Fatalf("resumed runs copied %d records, one run %d", step.Records, report.Records)
+			}
+			break
+		}
 	}
 	dry, err := Run(ctx, source, testDefinitions(t), testPolicy(t), Options{DryRun: true})
 	if err != nil || *result(t, dry, "teams").Count != 3 {

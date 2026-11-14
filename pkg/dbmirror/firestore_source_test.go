@@ -13,8 +13,11 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
+	"google.golang.org/api/option"
 	"google.golang.org/genproto/googleapis/type/latlng"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 )
 
@@ -38,9 +41,15 @@ func TestFirestoreSourceReads(t *testing.T) {
 	fake.put("teams/t1/ext/a/events/e1", map[string]any{"title": "e1"})
 	fake.put("teams/t1/ext/a/events/e2", map[string]any{"title": "e2"})
 	fake.put("teams/t2/ext/a/events/e3", map[string]any{"title": "e3"})
+	fake.put("teams/t1x/ext/a/events/e4", map[string]any{"title": "a sibling's id starts with t1"})
+	fake.put("teams/t1-2/ext/a/events/e5", map[string]any{"title": "and so does this one's"})
 
 	roots, err := source.RootCollections(ctx)
 	if err != nil || !slices.Equal(roots, []string{"teams"}) {
+		t.Fatal(roots, err)
+	}
+	source.ReadAt(created) // the fake ignores the read time; the SDK sends it
+	if roots, err = source.RootCollections(ctx); err != nil {
 		t.Fatal(roots, err)
 	}
 	docs, err := source.Page(ctx, Query{Collection: "teams", Limit: 1})
@@ -60,7 +69,13 @@ func TestFirestoreSourceReads(t *testing.T) {
 		t.Fatal(docs, err)
 	}
 	n, err := source.Count(ctx, Query{Collection: "events", Group: true})
-	if err != nil || n != 3 {
+	if err != nil || n != 5 {
+		t.Fatal(n, err)
+	}
+	if n, err = source.Count(ctx, Query{Collection: "events", Group: true, Limit: 2}); err != nil || n != 2 {
+		t.Fatal(n, err)
+	}
+	if n, err = source.Count(ctx, Query{Collection: "teams/t1/ext/a/events"}); err != nil || n != 2 {
 		t.Fatal(n, err)
 	}
 	doc, err := source.Get(ctx, "teams/t2")
@@ -118,7 +133,7 @@ func TestFirestoreSourceSendsNoWrite(t *testing.T) {
 	if len(fake.writes) != 0 {
 		t.Fatalf("write RPCs sent: %v", fake.writes)
 	}
-	if report.Records != 9 || len(report.Outside) != 2 || readFile(t, filepath.Join(out, "teams/t1/ext/cal/events/e1.json")) != "{\n  \"at\": \"2026-11-01T10:30:00Z\",\n  \"title\": \"Event\"\n}\n" {
+	if report.Records != 10 || len(report.Outside) != 2 || readFile(t, filepath.Join(out, "teams/t1/ext/cal/events/e1.json")) != "{\n  \"at\": \"2026-11-01T10:30:00.000000Z\",\n  \"title\": \"Event\"\n}\n" {
 		t.Errorf("%d records", report.Records)
 	}
 	if _, _ = runExample(t, source, Options{DryRun: true, Under: "teams/t1"}); len(fake.writes) != 0 {
@@ -185,5 +200,79 @@ func TestNoWriteCallInPackage(t *testing.T) {
 	}
 	if _, err := os.Stat("firestore_source.go"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestFirestoreClientRefusesWrites: the client a source opens cannot send a
+// write, whatever code holds it: the request is refused before it is sent.
+func TestFirestoreClientRefusesWrites(t *testing.T) {
+	ctx := context.Background()
+	check := func(name string, fake *fakeFirestore, client *firestore.Client) {
+		t.Helper()
+		_, err := client.Doc("teams/t1").Set(ctx, map[string]any{"title": "changed"})
+		if status.Code(err) != codes.PermissionDenied || !strings.Contains(err.Error(), "only reads") {
+			t.Errorf("%s: Set: %v", name, err)
+		}
+		err = client.RunTransaction(ctx, func(context.Context, *firestore.Transaction) error { return nil })
+		if status.Code(err) != codes.PermissionDenied {
+			t.Errorf("%s: RunTransaction: %v", name, err)
+		}
+		// A streaming RPC that is not a read the mirror makes (here a listen) is refused too.
+		snapshots := client.Collection("teams").Snapshots(ctx)
+		_, err = snapshots.Next()
+		snapshots.Stop()
+		if status.Code(err) != codes.PermissionDenied {
+			t.Errorf("%s: Snapshots: %v", name, err)
+		}
+		if len(fake.writes) != 0 {
+			t.Errorf("%s: write RPCs reached the server: %v", name, fake.writes)
+		}
+	}
+	fake, source := openFake(t)
+	check("emulator", fake, source.client)
+	if _, err := source.RootCollections(ctx); err != nil { // reads still pass
+		t.Error(err)
+	}
+
+	// Without an emulator the filter rides on the SDK's own connection: here
+	// pointed at the fake server, without credentials.
+	address := os.Getenv("FIRESTORE_EMULATOR_HOST")
+	t.Setenv("FIRESTORE_EMULATOR_HOST", "")
+	withSeam(t, &newFirestoreClient, func(ctx context.Context, project, database string, opts ...optionClientOption) (*firestore.Client, error) {
+		return firestore.NewClientWithDatabase(ctx, project, database, append(opts, option.WithEndpoint(address), option.WithoutAuthentication(),
+			option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))...)
+	})
+	direct, err := OpenFirestore(ctx, "demo-mirror", "(default)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = direct.Close() }()
+	if direct.conn != nil {
+		t.Error("dialled an emulator connection")
+	}
+	check("direct", fake, direct.client)
+	if _, err := direct.RootCollections(ctx); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestReadOnlyCall(t *testing.T) {
+	for method := range readRPCs {
+		if readOnlyCall(method) != nil {
+			t.Error(method)
+		}
+	}
+	for _, method := range []string{"/google.firestore.v1.Firestore/Commit", "/google.firestore.v1.Firestore/Write", "/google.firestore.v1.Firestore/Listen", ""} {
+		if status.Code(readOnlyCall(method)) != codes.PermissionDenied {
+			t.Error(method)
+		}
+	}
+}
+
+func TestOpenFirestoreClosesItsConnectionOnFailure(t *testing.T) {
+	startFakeFirestore(t, "demo-mirror")
+	withSeam(t, &newGRPCClient, func(string, ...grpc.DialOption) (*grpc.ClientConn, error) { return nil, errBoom })
+	if _, err := OpenFirestore(context.Background(), "p", "d"); err != errBoom {
+		t.Error(err)
 	}
 }

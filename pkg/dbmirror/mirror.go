@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/ingitdb/ingitdb-go/ingitdb"
 	"github.com/ingitdb/ingitdb-go/ingitdb/datavalidator"
@@ -29,6 +30,9 @@ const ReportFormat = "datatug-mirror-report/v1"
 // DefaultPageSize is how many documents one read request asks for.
 const DefaultPageSize = 300
 
+// maxOtherParentPaths is how many distinct other-parent paths a collection lists.
+const maxOtherParentPaths = 50
+
 // ErrUsage marks an error in what the caller asked for (exit code 2).
 var ErrUsage = errors.New("usage")
 
@@ -44,10 +48,22 @@ type Options struct {
 	Under string
 	// DryRun counts the documents of each collection and writes nothing.
 	DryRun bool
-	// MaxReads stops the run once this many Firestore reads were made (0: no limit).
+	// MaxReads stops the run before more than this many Firestore reads (0: no limit).
 	MaxReads int64
 	// PageSize is how many documents one request reads (default DefaultPageSize).
 	PageSize int
+	// KeepRejected also writes each rejected document (masked) under
+	// .datatug-mirror/rejected/. By default only its path, reasons and field
+	// names are kept, in the report.
+	KeepRejected bool
+	// Prune deletes the record files whose document no longer exists, in the
+	// collections this run read completely. By default they are only reported.
+	Prune bool
+	// Restart ignores the resume state an earlier run left (see Resume).
+	Restart bool
+	// Snapshot reads every document as it was when the run (or the run it
+	// resumes, within the hour) started, when the source can.
+	Snapshot bool
 	// Source is how the source is shown in the report (never a credential).
 	Source string
 	// Log receives one line per collection and the summary (nil: discarded).
@@ -58,30 +74,41 @@ type Options struct {
 
 // CollectionResult is what happened to one defined collection.
 type CollectionResult struct {
-	Collection string   `json:"collection"`
-	Action     string   `json:"action"`
-	Selected   bool     `json:"selected"`
-	Note       string   `json:"note,omitempty"`
-	Query      string   `json:"query,omitempty"`
-	Count      *int64   `json:"count,omitempty"`
-	Records    int64    `json:"records"`
-	Rejected   int64    `json:"rejected,omitempty"`
-	Masked     []string `json:"masked_fields,omitempty"`
+	Collection string `json:"collection"`
+	Action     string `json:"action"`
+	Selected   bool   `json:"selected"`
+	Note       string `json:"note,omitempty"`
+	Query      string `json:"query,omitempty"`
+	Count      *int64 `json:"count,omitempty"`
+	// CountAtLeast says Count stopped at the read budget: there are at least that many.
+	CountAtLeast bool     `json:"count_at_least,omitempty"`
+	Records      int64    `json:"records"`
+	Rejected     int64    `json:"rejected,omitempty"`
+	Masked       []string `json:"masked_fields,omitempty"`
 	// BelowMissingParent counts records whose parent document does not exist
 	// in the source (Firestore keeps such sub-collections).
 	BelowMissingParent int64 `json:"below_missing_parent,omitempty"`
-	Complete           bool  `json:"complete"`
+	// OtherParents counts documents of the collection that were read but not
+	// copied because their path is not one the policy's paths allow, and
+	// OtherParentPaths shows those paths with every unpinned id as "*".
+	OtherParents     int64    `json:"other_parents,omitempty"`
+	OtherParentPaths []string `json:"other_parent_paths,omitempty"`
+	// Resumed says part of the collection was read by an earlier run.
+	Resumed  bool `json:"resumed,omitempty"`
+	Complete bool `json:"complete"`
 
 	inSelection bool // asked for by Collections and Under, whatever the policy says
 }
 
-// Rejection is a document that was read but not written into the database
-// because it does not fit its definition. Its record is kept under
-// .datatug-mirror/rejected/ so nothing is lost.
+// Rejection is a document that was read but not written into the database:
+// it does not fit its definition, or its file cannot be written. The report
+// keeps its path, the reasons and the names of the fields concerned, never
+// its values; Options.KeepRejected also keeps its masked record.
 type Rejection struct {
 	Path       string   `json:"path"`
 	Collection string   `json:"collection"`
 	Reasons    []string `json:"reasons"`
+	Fields     []string `json:"fields,omitempty"`
 }
 
 // OutsideRead counts documents a collection-group read returned that belong
@@ -93,16 +120,22 @@ type OutsideRead struct {
 	Documents  int64  `json:"documents"`
 }
 
-// Report is the result of a run. It holds no time, host or credential, so the
-// same source and options give the same report.
+// Report is the result of a run. Without Snapshot and resume it holds no
+// time, host or credential, so the same source and options give the same report.
 type Report struct {
-	Format                   string             `json:"format"`
-	Source                   string             `json:"source"`
-	Under                    string             `json:"under,omitempty"`
-	DryRun                   bool               `json:"dry_run,omitempty"`
-	Complete                 bool               `json:"complete"`
-	Incomplete               []string           `json:"incomplete,omitempty"`
+	Format        string `json:"format"`
+	Source        string `json:"source"`
+	Under         string `json:"under,omitempty"`
+	DryRun        bool   `json:"dry_run,omitempty"`
+	Complete      bool   `json:"complete"`
+	BudgetReached bool   `json:"budget_reached,omitempty"`
+	// Resumed says the run continued one that stopped at its read budget.
+	Resumed    bool     `json:"resumed,omitempty"`
+	ReadTime   string   `json:"read_time,omitempty"`
+	Incomplete []string `json:"incomplete,omitempty"`
+	// Reads are this run's billed reads; ReadsTotal adds those of the runs it resumed.
 	Reads                    int64              `json:"reads"`
+	ReadsTotal               int64              `json:"reads_total,omitempty"`
 	MaxReads                 int64              `json:"max_reads,omitempty"`
 	Records                  int64              `json:"records"`
 	Collections              []CollectionResult `json:"collections"`
@@ -110,6 +143,7 @@ type Report struct {
 	UndefinedRootCollections []string           `json:"undefined_root_collections,omitempty"`
 	Outside                  []OutsideRead      `json:"read_outside_selection,omitempty"`
 	Stale                    []string           `json:"stale_record_files,omitempty"`
+	Pruned                   []string           `json:"pruned_record_files,omitempty"`
 	Validation               []string           `json:"validation_errors,omitempty"`
 
 	// Written and Unchanged count record files of this run (not in the
@@ -135,12 +169,19 @@ type run struct {
 	report   *Report
 	results  map[string]*CollectionResult
 	under    []string
-	seen     map[string]bool // every document path read
-	copied   map[string]bool // document paths written into the database
+	patterns map[string][][]string // spec id -> allowed paths, 2*depth segments, "*" for any id
+	seen     map[string]bool       // every document path read and matched to a collection
+	copied   map[string]bool       // document paths written into the database
+	files    map[string]string     // lower-cased record file -> document path, for collisions
 	masked   map[string]map[string]bool
+	others   map[string]map[string]bool // spec id -> other-parent paths
 	outside  map[string]int64
 	stopped  bool
 	complete map[string]bool // collection ids read to the end
+	resumed  map[string]bool // collection ids partly read by an earlier run
+	rejected []Rejection     // this run's rejections
+	planned  []*planItem
+	state    *resumeState
 }
 
 // Run copies what the policy and options select from src into opts.Output
@@ -163,11 +204,15 @@ func Run(ctx context.Context, src Source, defs *Definitions, policy *Policy, opt
 		ctx: ctx, src: src, defs: defs, policy: policy, opts: opts,
 		report:   &Report{Format: ReportFormat, Source: opts.Source, Under: opts.Under, DryRun: opts.DryRun, MaxReads: opts.MaxReads},
 		results:  map[string]*CollectionResult{},
+		patterns: map[string][][]string{},
 		seen:     map[string]bool{},
 		copied:   map[string]bool{},
+		files:    map[string]string{},
 		masked:   map[string]map[string]bool{},
+		others:   map[string]map[string]bool{},
 		outside:  map[string]int64{},
 		complete: map[string]bool{},
+		resumed:  map[string]bool{},
 	}
 	if opts.Under != "" {
 		r.under = strings.Split(opts.Under, "/")
@@ -175,15 +220,20 @@ func Run(ctx context.Context, src Source, defs *Definitions, policy *Policy, opt
 			return nil, fmt.Errorf("%w: %q is not a Firestore path", ErrUsage, opts.Under)
 		}
 	}
+	for _, spec := range defs.Specs {
+		r.patterns[spec.ID] = specPatterns(spec, policy.Paths[spec.ID])
+	}
 	if err := r.selectCollections(); err != nil {
 		return nil, err
 	}
 	plan := r.plan()
+	r.planned = plan
 	if !opts.DryRun {
-		if err := r.prepareOutput(); err != nil {
+		if err := r.prepareOutput(plan); err != nil {
 			return nil, err
 		}
 	}
+	r.startSnapshot()
 	if err := r.listRoots(); err != nil {
 		return nil, err
 	}
@@ -193,13 +243,64 @@ func Run(ctx context.Context, src Source, defs *Definitions, policy *Policy, opt
 		}
 	}
 	if !opts.DryRun {
-		r.finish()
+		if err := r.finish(); err != nil {
+			return nil, err
+		}
 		if err := r.writeReport(); err != nil {
 			return nil, err
 		}
 	}
 	r.summarize()
 	return r.report, nil
+}
+
+// specPatterns are the allowed paths of spec as 2*depth segments: the
+// policy's patterns (a collection path gets "*" for the document id), or one
+// that allows every path.
+func specPatterns(spec *Spec, patterns []string) [][]string {
+	if len(patterns) == 0 {
+		patterns = []string{strings.Join(anyPath(spec), "/")}
+	}
+	var all [][]string
+	for _, pattern := range patterns {
+		segments := strings.Split(pattern, "/")
+		if len(segments) == 2*spec.Depth()-1 {
+			segments = append(segments, "*")
+		}
+		all = append(all, segments)
+	}
+	return all
+}
+
+func anyPath(spec *Spec) []string {
+	var segments []string
+	for _, id := range spec.Segments {
+		segments = append(segments, id, "*")
+	}
+	return segments
+}
+
+// bind narrows a pattern to opts.Under: it returns the pattern with the ids
+// Under fixes, or nil when no document of the pattern is at or below Under.
+func (r *run) bind(pattern []string) []string {
+	if len(r.under) > len(pattern) {
+		return nil
+	}
+	bound := slices.Clone(pattern)
+	for i, segment := range r.under {
+		switch {
+		case bound[i] == "*" && i%2 == 1:
+			bound[i] = segment
+		case bound[i] != segment:
+			return nil
+		}
+	}
+	return bound
+}
+
+// matchesPattern reports whether a document path (split on "/") is allowed by a pattern.
+func matchesPattern(pattern, parts []string) bool {
+	return slices.EqualFunc(pattern, parts, func(segment, part string) bool { return segment == "*" || segment == part })
 }
 
 // selectCollections fills one result per defined collection.
@@ -242,22 +343,20 @@ func (r *run) selectCollections() error {
 		inScope = inScope || result.inSelection
 	}
 	if !inScope {
-		return fmt.Errorf("%w: no collection defined in the mirror is at or below %s", ErrUsage, r.opts.Under)
+		return fmt.Errorf("%w: no collection defined in the mirror (at a path its policy allows) is at or below %s", ErrUsage, r.opts.Under)
 	}
 	return nil
 }
 
-// covers reports whether documents of spec can be at or below opts.Under.
+// covers reports whether documents of spec, at a path its patterns allow,
+// can be at or below opts.Under.
 func (r *run) covers(spec *Spec) bool {
-	if len(r.under) > 2*spec.Depth() {
-		return false
-	}
-	for i := 0; 2*i < len(r.under); i++ {
-		if r.under[2*i] != spec.Segments[i] {
-			return false
+	for _, pattern := range r.patterns[spec.ID] {
+		if r.bind(pattern) != nil {
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 // inScope reports whether a document path is at or below opts.Under.
@@ -265,44 +364,62 @@ func (r *run) inScope(path string) bool {
 	return r.opts.Under == "" || path == r.opts.Under || strings.HasPrefix(path, r.opts.Under+"/")
 }
 
-// plan is the reads that cover every selected collection: one document read
-// when Under is a document of the collection, one query per root collection
-// whose id no deeper collection shares, and otherwise one collection-group
-// query per collection id, shared by every selected collection with that id.
+// plan is the reads that cover every selected collection, as narrow as the
+// patterns bound to Under allow: one document read when the path is fixed, a
+// query of one collection when its parents are fixed (nothing else is read),
+// and otherwise a collection-group query per collection id (shared by the
+// collections with that id), limited to the fixed path prefix. A group query
+// also reads same-named collections elsewhere below that prefix: they are
+// counted as outside reads or other parents, not copied.
 func (r *run) plan() []*planItem {
-	byLeaf := map[string][]*Spec{}
+	byLabel := map[string]*planItem{}
 	var items []*planItem
+	add := func(item *planItem, spec *Spec) {
+		if existing := byLabel[item.label]; existing != nil {
+			if !slices.Contains(existing.specs, spec) {
+				existing.specs = append(existing.specs, spec)
+			}
+			return
+		}
+		item.specs = []*Spec{spec}
+		byLabel[item.label] = item
+		items = append(items, item)
+	}
 	for _, spec := range r.defs.Specs {
 		if !r.results[spec.ID].Selected {
 			continue
 		}
-		if len(r.under) == 2*spec.Depth() {
-			items = append(items, &planItem{get: r.opts.Under, specs: []*Spec{spec}, label: "document " + r.opts.Under})
-			continue
+		for _, pattern := range r.patterns[spec.ID] {
+			bound := r.bind(pattern)
+			if bound == nil {
+				continue
+			}
+			fixed := 0 // length of the prefix with no "*"
+			for fixed < len(bound) && bound[fixed] != "*" {
+				fixed++
+			}
+			switch {
+			case fixed == len(bound):
+				path := strings.Join(bound, "/")
+				add(&planItem{get: path, label: "document " + path}, spec)
+			case fixed == len(bound)-1:
+				path := strings.Join(bound[:fixed], "/")
+				add(&planItem{query: Query{Collection: path}, label: "collection " + path}, spec)
+			default:
+				query := Query{Collection: spec.Leaf(), Group: true}
+				label := "collection group " + spec.Leaf()
+				if prefix := fixed / 2 * 2; prefix >= 2 {
+					query.Under = strings.Join(bound[:prefix], "/")
+					label += " under " + query.Under
+				}
+				add(&planItem{query: query, label: label}, spec)
+			}
 		}
-		byLeaf[spec.Leaf()] = append(byLeaf[spec.Leaf()], spec)
-	}
-	for _, leaf := range sortedKeys(byLeaf) {
-		specs := byLeaf[leaf]
-		roots := true
-		for _, spec := range specs {
-			roots = roots && spec.Depth() == 1
-		}
-		if roots { // one spec: two root collections cannot share an id
-			items = append(items, &planItem{query: Query{Collection: leaf}, specs: specs, label: "collection " + leaf})
-			continue
-		}
-		query := Query{Collection: leaf, Group: true}
-		label := "collection group " + leaf
-		if len(r.under) >= 2 {
-			query.Under = strings.Join(r.under[:len(r.under)/2*2], "/")
-			label += " under " + query.Under
-		}
-		items = append(items, &planItem{query: query, specs: specs, label: label})
 	}
 	for _, item := range items {
 		for _, spec := range item.specs {
-			r.results[spec.ID].Query = item.label
+			result := r.results[spec.ID]
+			result.Query = strings.TrimPrefix(result.Query+"; "+item.label, "; ")
 		}
 	}
 	return items
@@ -324,10 +441,39 @@ func (r *run) budget(limit int) int {
 func (r *run) stop() {
 	if !r.stopped {
 		r.stopped = true
+		r.report.BudgetReached = true
 		r.report.Incomplete = append(r.report.Incomplete, fmt.Sprintf("stopped at the read budget of %d reads", r.opts.MaxReads))
 	}
 }
 
+// now is the clock of a snapshot (a test seam).
+var now = time.Now
+
+// snapshotWindow is how long Firestore keeps the versions a snapshot reads
+// (without point-in-time recovery), less a margin.
+const snapshotWindow = 55 * time.Minute
+
+func (r *run) startSnapshot() {
+	reader, ok := r.src.(snapshotSource)
+	if !r.opts.Snapshot || !ok {
+		return
+	}
+	at := now().UTC().Truncate(time.Microsecond) // Firestore reads at microsecond precision within the hour
+	if r.state != nil && r.state.ReadTime != "" {
+		if earlier, err := time.Parse(time.RFC3339Nano, r.state.ReadTime); err == nil && at.Sub(earlier) < snapshotWindow {
+			at = earlier
+		} else {
+			r.report.Incomplete = append(r.report.Incomplete, "the resumed run was read at another time than the run it continues (its snapshot is older than an hour)")
+		}
+	}
+	reader.ReadAt(at)
+	r.report.ReadTime = at.Format(timeLayout)
+	if r.state != nil {
+		r.state.ReadTime = r.report.ReadTime
+	}
+}
+
+// listRoots is the first read of a run: a budget allows at least one.
 func (r *run) listRoots() error {
 	roots, err := r.src.RootCollections(r.ctx)
 	if err != nil {
@@ -347,6 +493,11 @@ func (r *run) execute(item *planItem) error {
 	if r.opts.DryRun {
 		return r.count(item)
 	}
+	cursor := r.state.item(item.label)
+	if cursor.Done {
+		r.markDone(item)
+		return nil
+	}
 	if item.get != "" {
 		if r.budget(1) == 0 {
 			r.stop()
@@ -362,10 +513,10 @@ func (r *run) execute(item *planItem) error {
 				return err
 			}
 		}
-		r.markDone(item)
-		return nil
+		return r.markDone(item)
 	}
 	query := item.query
+	query.After = cursor.After
 	var read int64
 	for {
 		query.Limit = r.budget(r.opts.PageSize)
@@ -388,51 +539,76 @@ func (r *run) execute(item *planItem) error {
 			_, _ = fmt.Fprintf(r.opts.Progress, "  %s: %d documents read (%d reads in total)\n", item.label, read, r.report.Reads)
 		}
 		if len(docs) < query.Limit {
-			r.markDone(item)
-			return nil
+			return r.markDone(item)
 		}
 		query.After = docs[len(docs)-1].Path
+		cursor.After = query.After
+		if err := r.saveState(); err != nil {
+			return err
+		}
 	}
 }
 
-func (r *run) markDone(item *planItem) {
+// markDone records that item was read to its end.
+func (r *run) markDone(item *planItem) error {
 	item.done = true
+	r.state.item(item.label).Done = true
 	for _, spec := range item.specs {
-		r.complete[spec.ID] = true
+		if r.plannedDone(spec) {
+			r.complete[spec.ID] = true
+		}
 	}
+	return r.saveState()
+}
+
+// plannedDone reports whether every read of the plan that covers spec is done.
+func (r *run) plannedDone(spec *Spec) bool {
+	for _, item := range r.planned {
+		if !item.done && slices.Contains(item.specs, spec) {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *run) count(item *planItem) error {
 	var n int64
+	atLeast := false
 	if item.get != "" {
 		n = 1 // one document read; whether it exists is not asked in a dry run
 	} else {
-		if r.budget(1) == 0 {
+		left := r.budget(1)
+		if left == 0 {
 			r.stop()
 			return nil
 		}
+		query := item.query
+		if r.opts.MaxReads > 0 {
+			// a count is billed one read per 1000 documents: count no more than the budget pays for
+			query.Limit = int(min(r.opts.MaxReads-r.report.Reads, 1<<20)) * 1000
+		}
 		var err error
-		if n, err = r.src.Count(r.ctx, item.query); err != nil {
+		if n, err = r.src.Count(r.ctx, query); err != nil {
 			return fmt.Errorf("count %s: %w", item.label, err)
 		}
-		r.report.Reads += max(1, (n+999)/1000) // a count is billed one read per 1000 documents
+		r.report.Reads += max(1, (n+999)/1000)
+		if query.Limit > 0 && n >= int64(query.Limit) {
+			atLeast = true
+			r.stop()
+		}
 	}
 	for _, spec := range item.specs {
+		result := r.results[spec.ID]
 		count := n
-		r.results[spec.ID].Count = &count
-		if len(item.specs) > 1 {
-			r.results[spec.ID].Note = "count is the whole collection group: shared by " + specIDs(item.specs)
+		if result.Count != nil { // several reads cover the collection
+			count += *result.Count
+		}
+		result.Count, result.CountAtLeast = &count, result.CountAtLeast || atLeast
+		if item.query.Group {
+			result.Note = "the count is of every collection " + spec.Leaf() + " the group query reads, wherever its parents are"
 		}
 	}
 	return nil
-}
-
-func specIDs(specs []*Spec) string {
-	ids := make([]string, len(specs))
-	for i, spec := range specs {
-		ids[i] = spec.ID
-	}
-	return strings.Join(ids, ", ")
 }
 
 // process writes one document read by item.
@@ -445,51 +621,59 @@ func (r *run) process(item *planItem, doc Doc) error {
 		}
 	}
 	if spec == nil || !r.inScope(doc.Path) {
-		var collection []string
-		for i := 0; i < len(parts); i += 2 {
-			collection = append(collection, parts[i])
-		}
-		r.outside[strings.Join(collection, "/")]++
+		r.outside[strings.Join(collectionIDs(parts), "/")]++
+		return nil
+	}
+	if r.seen[doc.Path] {
+		return nil // read by another query of this run
+	}
+	result := r.results[spec.ID]
+	if !r.allowed(spec, parts) {
+		result.OtherParents++
+		r.noteOtherParent(spec, parts)
 		return nil
 	}
 	r.seen[doc.Path] = true
-	result := r.results[spec.ID]
 	id := parts[len(parts)-1]
-	reasons := []string(nil)
-	var content []byte
-	converted, err := jsonValue(doc.Data, "")
-	switch {
-	case strings.HasPrefix(id, "."):
-		reasons = append(reasons, "the document id starts with \".\": inGitDB does not read such a file")
-	case err != nil:
-		reasons = append(reasons, err.Error())
-	default:
-		data := converted.(map[string]any)
-		for _, field := range applyMasks(data, r.policy.Mask[spec.ID]) {
-			if r.masked[spec.ID] == nil {
-				r.masked[spec.ID] = map[string]bool{}
-			}
-			r.masked[spec.ID][field] = true
+	file, reasons := spec.recordFile(parts)
+	var fields []string
+	if reasons != "" {
+		return r.reject(spec, doc.Path, []string{reasons}, nil, nil)
+	}
+	if other, taken := r.files[strings.ToLower(file)]; taken {
+		return r.reject(spec, doc.Path, []string{fmt.Sprintf("its record file name differs only in case from the one of %s: a case-insensitive filesystem would keep one of them", other)}, nil, nil)
+	}
+	converted, err := convertRecord(doc.Data, spec.Def)
+	if err != nil {
+		return r.reject(spec, doc.Path, []string{err.Error()}, nil, nil)
+	}
+	for _, field := range applyMasks(converted, r.policy.Mask[spec.ID]) {
+		if r.masked[spec.ID] == nil {
+			r.masked[spec.ID] = map[string]bool{}
 		}
-		content = encodeRecord(data)
-		for _, problem := range datavalidator.ValidateRecordData(spec.Def, id, decodeRecord(content)) {
-			reasons = append(reasons, describe(problem))
+		r.masked[spec.ID][field] = true
+	}
+	content := encodeRecord(converted)
+	var problems []string
+	for _, problem := range datavalidator.ValidateRecordData(spec.Def, recordKey(id), decodeRecord(content)) {
+		problems = append(problems, reasonOf(problem))
+		if problem.FieldName != "" && !slices.Contains(fields, problem.FieldName) {
+			fields = append(fields, problem.FieldName)
 		}
 	}
-	if len(reasons) > 0 {
-		result.Rejected++
-		r.report.Rejected = append(r.report.Rejected, Rejection{Path: doc.Path, Collection: spec.ID, Reasons: reasons})
-		if content != nil {
-			if _, err := writeFileIfChanged(filepath.Join(r.opts.Output, stateDirName, "rejected", filepath.FromSlash(doc.Path)+".json"), content); err != nil {
-				return err
-			}
-		}
-		return nil
+	for _, problem := range temporalProblems(spec.Def, converted) {
+		problems = append(problems, problem)
+		name, _, _ := strings.Cut(strings.TrimPrefix(problem, `field "`), `"`)
+		fields = append(fields, name)
 	}
-	written, err := writeFileIfChanged(filepath.Join(r.opts.Output, spec.recordFile(parts)), content)
+	if len(problems) > 0 {
+		return r.reject(spec, doc.Path, problems, fields, content)
+	}
+	written, err := writeFileIfChanged(filepath.Join(r.opts.Output, file), content)
 	if err != nil {
 		return err
 	}
+	r.files[strings.ToLower(file)] = doc.Path
 	if written {
 		r.report.Written++
 	} else {
@@ -501,6 +685,72 @@ func (r *run) process(item *planItem, doc Doc) error {
 	return nil
 }
 
+// allowed reports whether the policy's paths allow a document path of spec.
+func (r *run) allowed(spec *Spec, parts []string) bool {
+	for _, pattern := range r.patterns[spec.ID] {
+		if matchesPattern(pattern, parts) {
+			return true
+		}
+	}
+	return false
+}
+
+// noteOtherParent records the path of a document at a path the policy does
+// not allow, with every id the patterns do not pin shown as "*".
+func (r *run) noteOtherParent(spec *Spec, parts []string) {
+	shown := slices.Clone(parts)
+	for i := 1; i < len(shown); i += 2 {
+		pinned := false
+		for _, pattern := range r.patterns[spec.ID] {
+			pinned = pinned || pattern[i] != "*"
+		}
+		if !pinned || i == len(shown)-1 {
+			shown[i] = "*"
+		}
+	}
+	if r.others[spec.ID] == nil {
+		r.others[spec.ID] = map[string]bool{}
+	}
+	if len(r.others[spec.ID]) < maxOtherParentPaths {
+		r.others[spec.ID][strings.Join(shown, "/")] = true
+	}
+}
+
+// reject records a document that is not written into the database. Its
+// masked content goes to the rejected folder only with KeepRejected.
+func (r *run) reject(spec *Spec, path string, reasons, fields []string, content []byte) error {
+	r.results[spec.ID].Rejected++
+	slices.Sort(fields)
+	r.rejected = append(r.rejected, Rejection{Path: path, Collection: spec.ID, Reasons: reasons, Fields: slices.Compact(fields)})
+	if !r.opts.KeepRejected || content == nil {
+		return nil
+	}
+	file := filepath.Join(r.opts.Output, stateDirName, "rejected")
+	for _, part := range strings.Split(path, "/") {
+		file = filepath.Join(file, encodeID(part)) // the record file of a rejected document was writable: its names fit
+	}
+	_, err := writeFileIfChanged(file+".json", content)
+	return err
+}
+
+// valueFreeMessages start the inGitDB findings that name no value.
+var valueFreeMessages = []string{"missing required field", "wrong type for field", "undeclared field", "computed column"}
+
+// reasonOf describes a validation finding without the value it concerns: a
+// finding that may quote a value (an enum or length check) is named by its
+// field alone.
+func reasonOf(problem ingitdb.ValidationError) string {
+	for _, prefix := range valueFreeMessages {
+		if strings.HasPrefix(problem.Message, prefix) {
+			return describe(problem)
+		}
+	}
+	if problem.FieldName != "" {
+		return fmt.Sprintf("field %q: the value does not meet the column's constraints (the value is not shown)", problem.FieldName)
+	}
+	return "the record does not meet its definition (the finding is not shown, as it may quote a value)"
+}
+
 func describe(problem ingitdb.ValidationError) string {
 	if problem.FieldName != "" && !strings.Contains(problem.Message, problem.FieldName) {
 		return fmt.Sprintf("field %q: %s", problem.FieldName, problem.Message)
@@ -508,28 +758,44 @@ func describe(problem ingitdb.ValidationError) string {
 	return problem.Message
 }
 
-// prepareOutput writes the definitions into the output and clears the state
-// folder of the previous run.
-func (r *run) prepareOutput() error {
-	if err := removeAll(filepath.Join(r.opts.Output, stateDirName)); err != nil {
-		return err
+// prepareOutput loads the resume state, clears what a previous run left in
+// the state folder (unless it is resumed), and writes the definitions.
+func (r *run) prepareOutput(plan []*planItem) error {
+	r.state = r.loadState(plan)
+	if r.state == nil {
+		r.state = r.newState()
+		if err := removeAll(filepath.Join(r.opts.Output, stateDirName, "rejected")); err != nil {
+			return err
+		}
 	}
 	return r.defs.CopyTo(r.opts.Output)
 }
 
 // finish fills what is known once every read is done.
-func (r *run) finish() {
+func (r *run) finish() error {
+	r.merge()
 	for _, spec := range r.defs.Specs {
 		result := r.results[spec.ID]
 		result.Complete = result.Selected && r.complete[spec.ID] && result.Rejected == 0
 		result.Masked = sortedKeys(r.masked[spec.ID])
-		if !r.complete[spec.ID] {
-			continue
+		result.OtherParentPaths = sortedKeys(r.others[spec.ID])
+		result.Resumed = r.resumed[spec.ID]
+		if !r.complete[spec.ID] || r.resumed[spec.ID] {
+			continue // stale files are known only for a collection this run read from its start
 		}
 		for _, path := range existingRecords(r.opts.Output, spec) {
-			if r.inScope(path) && !r.copied[path] {
-				r.report.Stale = append(r.report.Stale, filepath.ToSlash(spec.recordFile(strings.Split(path, "/"))))
+			if !r.inScope(path) || r.seen[path] || !r.allowed(spec, strings.Split(path, "/")) {
+				continue
 			}
+			file, _ := spec.recordFile(strings.Split(path, "/"))
+			if !r.opts.Prune {
+				r.report.Stale = append(r.report.Stale, filepath.ToSlash(file))
+				continue
+			}
+			if err := removeFile(filepath.Join(r.opts.Output, file)); err != nil {
+				return err
+			}
+			r.report.Pruned = append(r.report.Pruned, filepath.ToSlash(file))
 		}
 	}
 	for path := range r.copied {
@@ -539,20 +805,23 @@ func (r *run) finish() {
 		}
 		parent := strings.Join(parts[:len(parts)-2], "/")
 		parentSpec := r.defs.Spec(strings.Join(collectionIDs(parts[:len(parts)-2]), "/"))
-		if parentSpec != nil && r.complete[parentSpec.ID] && r.inScope(parent) && !r.seen[parent] {
+		if parentSpec != nil && r.complete[parentSpec.ID] && !r.resumed[parentSpec.ID] && r.inScope(parent) && !r.seen[parent] {
 			r.results[strings.Join(collectionIDs(parts), "/")].BelowMissingParent++
 		}
 	}
 	slices.Sort(r.report.Stale)
-	for collection, n := range r.outside {
+	slices.Sort(r.report.Pruned)
+	for collection, n := range r.state.Outside {
 		r.report.Outside = append(r.report.Outside, OutsideRead{Collection: collection, Defined: r.defs.Spec(collection) != nil, Documents: n})
 	}
 	slices.SortFunc(r.report.Outside, func(a, b OutsideRead) int { return strings.Compare(a.Collection, b.Collection) })
+	r.report.Rejected = slices.Clone(r.state.Rejected)
 	slices.SortFunc(r.report.Rejected, func(a, b Rejection) int { return strings.Compare(a.Path, b.Path) })
 	r.report.Validation = validateOutput(r.ctx, r.opts.Output)
 	if len(r.report.Validation) > 0 {
 		r.report.Incomplete = append(r.report.Incomplete, fmt.Sprintf("inGitDB validation of the output found %d error(s)", len(r.report.Validation)))
 	}
+	return r.endState()
 }
 
 func collectionIDs(parts []string) []string {
@@ -567,7 +836,7 @@ func collectionIDs(parts []string) []string {
 var validateDatabase = datavalidator.NewValidator().Validate
 
 // validateOutput runs inGitDB's own validation of the written database (the
-// checks `ingitdb validate` makes) and returns its findings.
+// checks `ingitdb validate` makes) and returns its findings, without values.
 func validateOutput(ctx context.Context, out string) []string {
 	def, err := readDefinition(out)
 	if err != nil {
@@ -588,7 +857,7 @@ func validateOutput(ctx context.Context, out string) []string {
 				where = filepath.ToSlash(rel)
 			}
 		}
-		findings = append(findings, where+": "+describe(problem))
+		findings = append(findings, where+": "+reasonOf(problem))
 	}
 	slices.Sort(findings)
 	return findings
@@ -611,7 +880,7 @@ func (r *run) fillReport() {
 		}
 	}
 	if len(r.report.Rejected) > 0 {
-		r.report.Incomplete = appendOnce(r.report.Incomplete, fmt.Sprintf("%d document(s) did not fit their definition and were not written (see rejected)", len(r.report.Rejected)))
+		r.report.Incomplete = appendOnce(r.report.Incomplete, fmt.Sprintf("%d document(s) were not written into the database (see rejected)", len(r.report.Rejected)))
 	}
 	if len(r.report.Incomplete) > 0 {
 		r.report.Complete = false
@@ -625,6 +894,14 @@ func appendOnce(list []string, item string) []string {
 	return append(list, item)
 }
 
+// shown shortens a document path for the log: an id may be 1500 bytes long.
+func shown(path string) string {
+	if len(path) > 200 {
+		return path[:200] + "…"
+	}
+	return path
+}
+
 // summarize writes the human summary to the log.
 func (r *run) summarize() {
 	if r.opts.DryRun {
@@ -634,13 +911,17 @@ func (r *run) summarize() {
 	for _, result := range r.report.Collections {
 		switch {
 		case r.opts.DryRun && result.Selected && result.Count != nil:
-			_, _ = fmt.Fprintf(log, "%-11s %-50s %8d documents  (%s)\n", result.Action, result.Collection, *result.Count, result.Query)
+			atLeast := map[bool]string{true: "≥"}[result.CountAtLeast]
+			_, _ = fmt.Fprintf(log, "%-11s %-50s %8s documents  (%s)\n", result.Action, result.Collection, fmt.Sprintf("%s%d", atLeast, *result.Count), result.Query)
 		case r.opts.DryRun && result.Selected:
 			_, _ = fmt.Fprintf(log, "%-11s %-50s %8s documents  (%s)\n", result.Action, result.Collection, "?", result.Query)
 		case result.Selected:
 			line := fmt.Sprintf("%-11s %-50s %8d records", result.Action, result.Collection, result.Records)
 			if result.Rejected > 0 {
 				line += fmt.Sprintf(", %d rejected", result.Rejected)
+			}
+			if result.OtherParents > 0 {
+				line += fmt.Sprintf(", %d at other parents not copied (%s)", result.OtherParents, strings.Join(result.OtherParentPaths, ", "))
 			}
 			if result.BelowMissingParent > 0 {
 				line += fmt.Sprintf(", %d below a parent document that does not exist", result.BelowMissingParent)
@@ -657,19 +938,28 @@ func (r *run) summarize() {
 		_, _ = fmt.Fprintf(log, "read, not copied: %d document(s) of %s (%s)\n", outside.Documents, outside.Collection, map[bool]string{true: "defined, not selected", false: "not defined in the mirror"}[outside.Defined])
 	}
 	for _, rejection := range r.report.Rejected {
-		_, _ = fmt.Fprintf(log, "rejected: %s: %s\n", rejection.Path, strings.Join(rejection.Reasons, "; "))
+		_, _ = fmt.Fprintf(log, "rejected: %s: %s\n", shown(rejection.Path), strings.Join(rejection.Reasons, "; "))
 	}
 	for _, stale := range r.report.Stale {
-		_, _ = fmt.Fprintf(log, "stale: %s is in the output but no longer in the source (left as it is)\n", stale)
+		_, _ = fmt.Fprintf(log, "stale: %s is in the output but no longer in the source (left as it is; --prune deletes it)\n", shown(stale))
+	}
+	for _, pruned := range r.report.Pruned {
+		_, _ = fmt.Fprintf(log, "pruned: %s (no longer in the source)\n", shown(pruned))
 	}
 	for _, finding := range r.report.Validation {
 		_, _ = fmt.Fprintf(log, "validation: %s\n", finding)
 	}
 	if r.opts.DryRun {
 		_, _ = fmt.Fprintf(log, "dry run: %d read(s) spent counting; nothing was written\n", r.report.Reads)
+		if r.report.BudgetReached {
+			_, _ = fmt.Fprintf(log, "incomplete: stopped at the read budget of %d reads\n", r.opts.MaxReads)
+		}
 		return
 	}
 	_, _ = fmt.Fprintf(log, "db mirror: %d records (%d written, %d unchanged), %d rejected, %d Firestore reads\n", r.report.Records, r.report.Written, r.report.Unchanged, len(r.report.Rejected), r.report.Reads)
+	if r.report.Resumed {
+		_, _ = fmt.Fprintf(log, "resumed: an earlier run stopped at its read budget; %d reads in all\n", r.report.ReadsTotal)
+	}
 	for _, reason := range r.report.Incomplete {
 		_, _ = fmt.Fprintf(log, "incomplete: %s\n", reason)
 	}

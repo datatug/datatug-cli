@@ -23,6 +23,7 @@ var (
 	createTemp = os.CreateTemp
 	renameFile = os.Rename
 	removeAll  = os.RemoveAll
+	removeFile = os.Remove
 )
 
 // writeFileIfChanged writes content to path atomically (a temporary file in
@@ -62,7 +63,8 @@ func firstError(errs ...error) error {
 }
 
 // existingRecords lists the document paths of the record files of spec that
-// are in out now, by walking the folders the layout puts them in.
+// are in out now, by walking the folders the layout puts them in. A name that
+// encodeID does not write (a hidden file, a temporary file) is no record.
 func existingRecords(out string, spec *Spec) []string {
 	var found []string
 	var walk func(level int, dir string, parts []string)
@@ -73,18 +75,21 @@ func existingRecords(out string, spec *Spec) []string {
 		if level == len(spec.chain)-1 {
 			for _, entry := range entries {
 				name := entry.Name()
-				if entry.Type().IsRegular() && !strings.HasPrefix(name, ".") && strings.HasPrefix(name, spec.prefix) && strings.HasSuffix(name, spec.suffix) && len(name) > len(spec.prefix)+len(spec.suffix) {
-					id := name[len(spec.prefix) : len(name)-len(spec.suffix)]
+				if !entry.Type().IsRegular() || !strings.HasPrefix(name, spec.prefix) || !strings.HasSuffix(name, spec.suffix) || len(name) <= len(spec.prefix)+len(spec.suffix) {
+					continue
+				}
+				if id, ok := decodeID(name[len(spec.prefix) : len(name)-len(spec.suffix)]); ok {
 					found = append(found, strings.Join(append(slices.Clone(parts), spec.Segments[level], id), "/"))
 				}
 			}
 			return
 		}
 		for _, entry := range entries {
-			if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			id, ok := decodeID(entry.Name())
+			if !entry.IsDir() || !ok {
 				continue
 			}
-			next := append(slices.Clone(parts), spec.Segments[level], entry.Name())
+			next := append(slices.Clone(parts), spec.Segments[level], id)
 			walk(level+1, filepath.Join(recordsDir, entry.Name(), spec.Segments[level+1]), next)
 		}
 	}

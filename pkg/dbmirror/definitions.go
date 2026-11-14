@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/ingitdb/ingitdb-go/ingitdb"
@@ -118,15 +119,29 @@ func (s *Spec) layout() string {
 
 // recordFile is the path, relative to the database folder, of the record file
 // of the document at parts (collection, id, collection, id, ...), which must
-// match the spec.
-func (s *Spec) recordFile(parts []string) string {
+// match the spec. Every id is written by encodeID, so the path stays inside
+// the folder whatever the ids hold. problem says why the file cannot be
+// written (a name too long), or is "".
+func (s *Spec) recordFile(parts []string) (path, problem string) {
 	dir := s.rootRel
 	last := len(s.chain) - 1
 	for level, col := range s.chain[:last] {
-		dir = filepath.Join(dir, col.RecordFile.RecordsBasePath(), parts[2*level+1], parts[2*level+2])
+		name := encodeID(parts[2*level+1])
+		if tooLong := nameTooLong(name); tooLong != "" {
+			problem = "the id of its parent document at level " + strconv.Itoa(level+1) + " is too long: " + tooLong
+		}
+		dir = filepath.Join(dir, col.RecordFile.RecordsBasePath(), name, parts[2*level+2])
 	}
-	return filepath.Join(dir, s.Def.RecordFile.RecordsBasePath(), s.prefix+parts[2*last+1]+s.suffix)
+	name := s.prefix + encodeID(parts[2*last+1]) + s.suffix
+	if tooLong := nameTooLong(name); tooLong != "" && problem == "" {
+		problem = "the document id is too long: " + tooLong
+	}
+	return filepath.Join(dir, s.Def.RecordFile.RecordsBasePath(), name), problem
 }
+
+// recordKey is the inGitDB key of the record of a document id: the id as its
+// file name holds it.
+func recordKey(id string) string { return encodeID(id) }
 
 // matches reports whether a document path (split on "/") is a document of
 // this collection.

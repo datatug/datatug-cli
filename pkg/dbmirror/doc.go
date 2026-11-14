@@ -13,9 +13,11 @@
 //
 // The source is only read. The engine depends on the Source interface, whose
 // methods only read; the one Firestore implementation (firestore_source.go)
-// calls no write method of the Google SDK, which TestNoWriteCallInPackage
-// checks on the source text, and a run against a fake Firestore server that
-// fails every write RPC proves none is sent (TestFirestoreSourceSendsNoWrite).
+// opens a client whose every request passes a filter that lets only the four
+// read RPCs through (TestFirestoreClientRefusesWrites sends writes through it),
+// calls no write method of the Google SDK (TestNoWriteCallInPackage checks the
+// source text), and a run against a fake Firestore server that fails every
+// write RPC proves none is sent (TestFirestoreSourceSendsNoWrite).
 // Credentials are never read or stored by this package: the Google SDK reads
 // Application Default Credentials from the operator's environment.
 package dbmirror

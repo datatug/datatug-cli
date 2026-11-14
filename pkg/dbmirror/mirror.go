@@ -176,6 +176,14 @@ type Report struct {
 	// Renamed are the files and folders renamed to the case of their id, as
 	// "old -> new": the id changed only in case, on a filesystem that folds case.
 	Renamed []string `json:"renamed_record_files,omitempty"`
+	// Kept are record files that look stale by name but are the file of a
+	// document this run read, under a name that differs only in case on a
+	// filesystem that folds case: never pruned.
+	Kept []string `json:"kept_case_folded_files,omitempty"`
+	// Recovered are what an interrupted run left in a folder this run wrote
+	// to: a rename's temporary name put back ("tmp -> old"), or a temporary
+	// file of a write removed ("removed tmp").
+	Recovered []string `json:"recovered_leftovers,omitempty"`
 
 	// Written and Unchanged count record files of this run (not in the
 	// report file: they differ between a first run and a re-run).
@@ -209,9 +217,9 @@ type run struct {
 	salt     []byte                // of the fingerprints of undeclared names, new each run
 	defsHash string                // digest of the definition files
 
-	names   map[string]map[string]string // output folder -> its names by their lower case (alignRecord)
-	written map[string]string            // lower-cased record file written by this run -> the file
-	gone    map[string]bool              // document path -> the source proved it and all below it gone
+	names map[string]map[string]string // output folder -> its names by their lower case (alignRecord)
+	owned map[string]string            // lower-cased record file of a document this run read -> the file
+	gone  map[string]bool              // document path -> the source proved it and all below it gone
 
 	masked   map[string]map[string]bool
 	others   map[string]map[string]bool // spec id -> other-parent paths
@@ -250,7 +258,7 @@ func Run(ctx context.Context, src Source, defs *Definitions, policy *Policy, opt
 		files:    map[string]string{},
 		folders:  map[string]string{},
 		names:    map[string]map[string]string{},
-		written:  map[string]string{},
+		owned:    map[string]string{},
 		gone:     map[string]bool{},
 		multi:    map[string]*multiFile{},
 		salt:     make([]byte, 16),
@@ -292,10 +300,14 @@ func Run(ctx context.Context, src Source, defs *Definitions, policy *Policy, opt
 	}
 	var failed error
 	for _, item := range plan {
-		if err := r.execute(item); (errors.Is(err, ErrIDTooLong) || errors.Is(err, ErrRoundTrip) || errors.Is(err, ErrCaseFold)) && !opts.DryRun {
+		if err := r.execute(item); (errors.Is(err, ErrIDTooLong) || errors.Is(err, ErrRoundTrip) || errors.Is(err, ErrCaseFold) || errors.Is(err, errBudget)) && !opts.DryRun {
 			// Keep the report and the resume state true to what was written: the
 			// run stopped at this document, and a resume starts at its page.
-			failed = err
+			if errors.Is(err, errBudget) {
+				r.stop() // a proof's reads would pass the budget: a budget stop
+			} else {
+				failed = err
+			}
 			r.stopped = true
 			for _, multi := range r.multi {
 				// The resume state's cursor is before this page: a resume reads its
@@ -304,11 +316,13 @@ func Run(ctx context.Context, src Source, defs *Definitions, policy *Policy, opt
 				r.report.Records -= int64(len(multi.unsaved))
 				multi.unsaved = map[string]map[string]any{}
 			}
-			reason := err.Error()
-			for _, kind := range []error{ErrIDTooLong, ErrRoundTrip, ErrCaseFold} {
-				reason = strings.TrimPrefix(reason, kind.Error()+": ")
+			if failed != nil {
+				reason := failed.Error()
+				for _, kind := range []error{ErrIDTooLong, ErrRoundTrip, ErrCaseFold} {
+					reason = strings.TrimPrefix(reason, kind.Error()+": ")
+				}
+				r.report.Incomplete = append(r.report.Incomplete, "stopped: "+reason)
 			}
-			r.report.Incomplete = append(r.report.Incomplete, "stopped: "+reason)
 			break
 		} else if err != nil {
 			return nil, err
@@ -757,6 +771,7 @@ func (r *run) process(item *planItem, doc Doc) error {
 		_, _ = fmt.Fprintf(r.opts.Log, "not copied (id too long for one file per record): %s: %s\n", shown(doc.Path), tooLong)
 		return nil
 	}
+	r.noteRead(file) // written or rejected, its file is never pruned under another case
 	if collision := r.caseCollision(file, spec.multi, doc.Path); collision != "" {
 		return r.reject(spec, doc.Path, []string{collision}, nil, nil)
 	}
@@ -1004,10 +1019,15 @@ func (r *run) finish() error {
 		}
 		gone := map[string][]string{} // record file kept in one file -> ids no longer in the source
 		for _, path := range existingRecords(r.opts.Output, spec) {
-			// A file that is the file of a record this run wrote, under a name that
-			// differs only in case on a filesystem that folds case, is not stale.
+			if !r.inScope(path) || r.seen[path] || !r.allowed(spec, strings.Split(path, "/")) {
+				continue
+			}
 			file, _ := spec.recordFile(strings.Split(path, "/"))
-			if !r.inScope(path) || r.seen[path] || !r.allowed(spec, strings.Split(path, "/")) || r.isWritten(file) {
+			if r.isOwned(file) {
+				// The file of a document this run read (written or rejected), under a
+				// name that differs only in case on a filesystem that folds case: it
+				// holds that document's record, so it is not stale.
+				r.report.Kept = appendOnce(r.report.Kept, filepath.ToSlash(file))
 				continue
 			}
 			shownAs := filepath.ToSlash(file)
@@ -1048,6 +1068,7 @@ func (r *run) finish() error {
 	}
 	slices.Sort(r.report.Stale)
 	slices.Sort(r.report.Pruned)
+	slices.Sort(r.report.Kept)
 	for collection, n := range r.state.Outside {
 		r.report.Outside = append(r.report.Outside, OutsideRead{Collection: collection, Defined: r.defs.Spec(collection) != nil, Documents: n})
 	}
@@ -1190,8 +1211,14 @@ func (r *run) summarize() {
 	for _, stale := range r.report.Stale {
 		_, _ = fmt.Fprintf(log, "stale: %s is in the output but no longer in the source (left as it is; --prune deletes it)\n", shown(stale))
 	}
+	for _, recovered := range r.report.Recovered {
+		_, _ = fmt.Fprintf(log, "recovered: %s (left by an interrupted run)\n", shown(recovered))
+	}
 	for _, renamed := range r.report.Renamed {
 		_, _ = fmt.Fprintf(log, "renamed: %s (the id changed only in case)\n", shown(renamed))
+	}
+	for _, kept := range r.report.Kept {
+		_, _ = fmt.Fprintf(log, "kept: %s is the file of a record this run read, under a name that differs only in case (the filesystem folds case): not stale, never pruned\n", shown(kept))
 	}
 	for _, pruned := range r.report.Pruned {
 		_, _ = fmt.Fprintf(log, "pruned: %s (no longer in the source)\n", shown(pruned))

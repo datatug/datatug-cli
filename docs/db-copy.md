@@ -1047,16 +1047,29 @@ parts were read at different times. Counts are not read at the snapshot time.
   the folder of its sub-collections, to the new case (through a temporary
   name) only when the source proves the old id gone: one read of the old
   document, and one per defined sub-collection below it (Firestore keeps the
-  sub-collections of a deleted document). Each rename is listed in the report
+  sub-collections of a deleted document). These reads come out of
+  `--max-reads`: when they would pass it, the run stops as at its budget, and
+  the resume renames. Each rename is listed in the report
   (`renamed_record_files`) and the log (`renamed: old -> new`). When the old id
   is still in the source, or the old name is not one the mirror writes, the run
   stops (exit 1) with an error that names both ids, and writes neither: copy
   into a folder on a case-sensitive filesystem, or give one of them another id.
+  On macOS a case-sensitive folder is a case-sensitive APFS volume: Disk
+  Utility > Add Volume > format "APFS (Case-sensitive)", or
+  `diskutil apfs addVolume <container disk> "Case-sensitive APFS" <name>`.
   Whether a folder folds case is found on the folder itself (are the two names
-  one file?), never from the operating system's name. `--prune` never deletes a
-  file that is the one this run wrote under another case. On a case-sensitive
-  filesystem the two names are two files: nothing is renamed, and the old one
-  is stale.
+  one file?), never from the operating system's name. `--prune` never deletes
+  the file of a document the run read (written or rejected) under another
+  case: such a file is listed as kept (`kept_case_folded_files`, `kept:` in the
+  log), not stale. On a case-sensitive filesystem the two names are two files:
+  nothing is renamed, and the old one is stale.
+- **What an interrupted run left** in a folder the run writes to: a rename's
+  temporary name (`.tmp-case-…-<old name>`) is put back under its old name
+  when that name is free, and the rename starts again; one that cannot be put
+  back is left as it is and makes the run incomplete. A temporary file of an
+  interrupted write (`.tmp-…`) is removed: the file it was to replace was never
+  touched. Both are listed in the report (`recovered_leftovers`) and the log
+  (`recovered:`).
 - **Rejected documents** (an undeclared field, a missing required field, a wrong
   type, a value a column does not allow, a date that does not parse, a name that
   differs only in case from another's) are not written into the database. The

@@ -88,8 +88,13 @@ func (f *foldFS) Rename(from, to string) error {
 	}
 	return os.Rename(source, target)
 }
-func (f *foldFS) Remove(name string) error    { return os.Remove(f.resolve(name)) }
-func (f *foldFS) RemoveAll(path string) error { return os.RemoveAll(f.resolve(path)) }
+func (f *foldFS) Remove(name string) error { return os.Remove(f.resolve(name)) }
+func (f *foldFS) RemoveAll(path string) error {
+	if err := f.failed("RemoveAll", path); err != nil {
+		return err
+	}
+	return os.RemoveAll(f.resolve(path))
+}
 
 // strictFS is a case-sensitive filesystem as far as Lstat tells (the one check
 // alignID makes of a folder), on any host.
@@ -286,18 +291,18 @@ func TestAlignIDLeavesACaseSensitiveFolder(t *testing.T) {
 
 // A prune never deletes a file that is the one this run wrote under a name
 // that differs only in case; a file that is another one is not protected.
-func TestIsWrittenComparesTheFilesNotTheNames(t *testing.T) {
+func TestIsOwnedComparesTheFilesNotTheNames(t *testing.T) {
 	_, out := newFoldFS(t)
 	if err := os.WriteFile(filepath.Join(out, "Bob.yaml"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	r := &run{opts: Options{Output: out}, names: map[string]map[string]string{}, written: map[string]string{}}
+	r := &run{opts: Options{Output: out}, names: map[string]map[string]string{}, owned: map[string]string{}}
 	r.noteWritten("bob.yaml")
-	if !r.isWritten("Bob.yaml") || r.isWritten("bob.yaml") || r.isWritten("other.yaml") {
+	if !r.isOwned("Bob.yaml") || r.isOwned("bob.yaml") || r.isOwned("other.yaml") {
 		t.Error("a file this run wrote is not recognised under another case")
 	}
 	withSeam(t, &outFS, fileSystem(strictFS{}))
-	if r.isWritten("Bob.yaml") {
+	if r.isOwned("Bob.yaml") {
 		t.Error("two files on a case-sensitive filesystem are taken for one")
 	}
 }
@@ -347,7 +352,7 @@ func TestRunStopsWhenItCannotKeepTwoIDsApart(t *testing.T) {
 	both := bobSource("bob")
 	both.docs["perrec/Bob"] = map[string]any{"name": "Bob"}
 	report, err := Run(context.Background(), both, caseDefinitions(t), casePolicy(t), Options{Output: out, Collections: []string{"perrec"}})
-	if !errors.Is(err, ErrCaseFold) || !strings.Contains(err.Error(), `the ids "Bob" (document perrec/Bob) and "bob" (document perrec/bob, in the output as perrec/$records/bob.yaml) differ only in case, and both are in the source`) {
+	if !errors.Is(err, ErrCaseFold) || !strings.Contains(err.Error(), `the ids "Bob" (document perrec/Bob) and "bob" (document perrec/bob, in the output as perrec/$records/bob.yaml) differ only in case, and both are in the source`) || !strings.Contains(err.Error(), `diskutil apfs addVolume <container disk> "Case-sensitive APFS" <name>`) {
 		t.Fatal(err)
 	}
 	if report == nil || report.Complete || !strings.Contains(strings.Join(report.Incomplete, ";"), "stopped: collection perrec: the ids") {
@@ -502,6 +507,133 @@ func TestOSFS(t *testing.T) {
 		t.Error(err)
 	}
 	if err := firstError(fsys.Remove(file), fsys.RemoveAll(filepath.Join(dir, "a"))); err != nil {
+		t.Error(err)
+	}
+}
+
+// The review's major: an output an earlier version left in case 3c's state
+// (Bob.yaml holds bob's data), and bob is rejected in this run. --prune must
+// keep the file: it is the file of a document this run read.
+func TestRunPruneKeepsTheFileOfARejectedRecord(t *testing.T) {
+	_, out := newFoldFS(t)
+	caseRun(t, bobSource("Bob"), Options{Output: out, Collections: []string{"perrec"}})
+	file := filepath.Join(out, "perrec", "$records", "Bob.yaml")
+	if err := os.WriteFile(file, []byte("\"name\": \"bob\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	src := newMemSource()
+	src.docs["perrec/bob"] = map[string]any{"name": "bob", "undeclared": "x"}
+	report := caseRun(t, src, Options{Output: out, Collections: []string{"perrec"}, Prune: true})
+	if len(report.Rejected) != 1 || len(report.Pruned) != 0 || len(report.Stale) != 0 || !slices.Equal(report.Kept, []string{"perrec/$records/Bob.yaml"}) {
+		t.Errorf("rejected %v, pruned %v, stale %v, kept %v", report.Rejected, report.Pruned, report.Stale, report.Kept)
+	}
+	if got := readFile(t, file); got != "\"name\": \"bob\"\n" {
+		t.Errorf("%q", got)
+	}
+}
+
+// The same for a record kept in one file below a parent folder in the old case.
+func TestRunPruneKeepsTheFileOfARejectedRecordInOneFile(t *testing.T) {
+	_, out := newFoldFS(t)
+	caseRun(t, bobSource("Bob"), Options{Output: out, Collections: []string{"parents/kids"}})
+	src := newMemSource()
+	src.docs["parents/bob/kids/k1"] = map[string]any{"name": "kid of Bob", "undeclared": "x"}
+	report := caseRun(t, src, Options{Output: out, Collections: []string{"parents/kids"}, Prune: true})
+	if len(report.Rejected) != 1 || len(report.Pruned) != 0 || !slices.Equal(report.Kept, []string{"parents/$records/Bob/kids/kids.yaml"}) {
+		t.Errorf("rejected %v, pruned %v, kept %v", report.Rejected, report.Pruned, report.Kept)
+	}
+	if got := readFile(t, filepath.Join(out, "parents", "$records", "Bob", "kids", "kids.yaml")); got != "\"k1\":\n  \"name\": \"kid of Bob\"\n" {
+		t.Errorf("%q", got)
+	}
+}
+
+// The proof that an old id is gone spends the read budget: when it would pass
+// --max-reads, the run stops as at its budget, renames nothing, and the
+// resume renames.
+func TestRunProofSpendsTheReadBudget(t *testing.T) {
+	_, out := newFoldFS(t)
+	caseRun(t, bobSource("Bob"), Options{Output: out, Collections: []string{"perrec"}})
+	src := bobSource("bob")
+	stopped := caseRun(t, src, Options{Output: out, Collections: []string{"perrec"}, MaxReads: 2})
+	if !stopped.BudgetReached || stopped.Complete || stopped.Reads != 2 || len(stopped.Renamed) != 0 || len(src.gets) != 0 {
+		t.Errorf("%+v %v", stopped, src.gets)
+	}
+	if got := names(t, filepath.Join(out, "perrec", "$records")); !slices.Equal(got, []string{"Bob.yaml"}) {
+		t.Errorf("%v", got)
+	}
+	resumed := caseRun(t, src, Options{Output: out, Collections: []string{"perrec"}})
+	if !resumed.Resumed || !slices.Equal(resumed.Renamed, []string{"perrec/$records/Bob.yaml -> perrec/$records/bob.yaml"}) || result(t, resumed, "perrec").Records != 1 {
+		t.Errorf("%+v", resumed)
+	}
+}
+
+// What an interrupted run left in a folder: a rename's temporary name is put
+// back and the rename starts again; one that cannot be put back is left and
+// reported; a temporary file of a write is removed.
+func TestRunRecoversWhatAnInterruptedRunLeft(t *testing.T) {
+	_, out := newFoldFS(t)
+	caseRun(t, bobSource("Bob"), Options{Output: out, Collections: []string{"perrec"}})
+	records := filepath.Join(out, "perrec", "$records")
+	// Killed between the two steps of the rename of Bob.yaml.
+	if err := os.Rename(filepath.Join(records, "Bob.yaml"), filepath.Join(records, ".tmp-case-0011223344556677-Bob.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(records, ".tmp-123"), []byte("half"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var log strings.Builder
+	report := caseRun(t, bobSource("bob"), Options{Output: out, Collections: []string{"perrec"}, Log: &log})
+	want := []string{"removed perrec/$records/.tmp-123", "perrec/$records/.tmp-case-0011223344556677-Bob.yaml -> perrec/$records/Bob.yaml"}
+	if !slices.Equal(report.Recovered, want) || len(report.Renamed) != 1 || !report.Complete || !strings.Contains(log.String(), "recovered: removed perrec/$records/.tmp-123 (left by an interrupted run)") {
+		t.Errorf("%+v", report)
+	}
+	if got := names(t, records); !slices.Equal(got, []string{"bob.yaml"}) {
+		t.Errorf("%v", got)
+	}
+	// A leftover whose old name is taken, or unknown, is left as it is and reported.
+	for _, leftover := range []string{".tmp-case-0011223344556677-BOB.yaml", ".tmp-case-0011223344556677"} {
+		if err := os.WriteFile(filepath.Join(records, leftover), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		report := caseRun(t, bobSource("bob"), Options{Output: out, Collections: []string{"perrec"}})
+		if report.Complete || !strings.Contains(strings.Join(report.Incomplete, ";"), "perrec/$records/"+leftover+" was left by an interrupted rename and cannot be put back") {
+			t.Errorf("%s: %v", leftover, report.Incomplete)
+		}
+		if _, err := os.Stat(filepath.Join(records, leftover)); err != nil {
+			t.Error(err)
+		}
+		_ = os.Remove(filepath.Join(records, leftover))
+	}
+}
+
+func TestRunReportsAFailedRecovery(t *testing.T) {
+	fake, out := newFoldFS(t)
+	caseRun(t, bobSource("Bob"), Options{Output: out, Collections: []string{"perrec"}})
+	records := filepath.Join(out, "perrec", "$records")
+	if err := os.WriteFile(filepath.Join(records, ".tmp-123"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fake.fail["RemoveAll"] = func(path string) error {
+		if strings.HasSuffix(path, ".tmp-123") {
+			return errBoom
+		}
+		return nil
+	}
+	if _, err := Run(context.Background(), bobSource("Bob"), caseDefinitions(t), casePolicy(t), Options{Output: out, Collections: []string{"perrec"}}); !errors.Is(err, errBoom) {
+		t.Error(err)
+	}
+	fake.fail = map[string]func(string) error{}
+	_ = os.Remove(filepath.Join(records, ".tmp-123"))
+	if err := os.Rename(filepath.Join(records, "Bob.yaml"), filepath.Join(records, ".tmp-case-0011223344556677-Bob.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	fake.fail["Rename"] = func(path string) error {
+		if strings.HasSuffix(path, string(filepath.Separator)+"Bob.yaml") {
+			return errBoom
+		}
+		return nil
+	}
+	if _, err := Run(context.Background(), bobSource("Bob"), caseDefinitions(t), casePolicy(t), Options{Output: out, Collections: []string{"perrec"}}); !errors.Is(err, errBoom) {
 		t.Error(err)
 	}
 }

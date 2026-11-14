@@ -42,6 +42,21 @@ import (
 // (ErrIDTooLong), and writes neither.
 var ErrCaseFold = errors.New("two ids differ only in case on a filesystem that folds case")
 
+// caseSensitiveHint says where a case-sensitive folder comes from.
+const caseSensitiveHint = ` (on macOS, a case-sensitive APFS volume: Disk Utility > Add Volume > format "APFS (Case-sensitive)", or diskutil apfs addVolume <container disk> "Case-sensitive APFS" <name>)`
+
+// errBudget stops a run whose proof that an old id is gone (goneFromSource)
+// would pass --max-reads: like a stop at the read budget, a resume continues.
+var errBudget = errors.New("the read budget is spent")
+
+// Leftovers of an interrupted run: a rename's temporary name (".tmp-case-",
+// random hex, "-" and the old name when it fits) and writeFileIfChanged's
+// temporary files (".tmp-"). No record file name starts with ".".
+const (
+	leftoverPrefix   = ".tmp-"
+	caseRenamePrefix = ".tmp-case-"
+)
+
 // fileSystem is what a run does to its output folder (a test seam: a test
 // stands in a case-insensitive filesystem on a case-sensitive one).
 type fileSystem interface {
@@ -90,11 +105,52 @@ func (r *run) namesIn(dir string) (map[string]string, error) {
 		return nil, err
 	}
 	names := make(map[string]string, len(entries))
+	var leftovers []string
 	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), leftoverPrefix) {
+			leftovers = append(leftovers, entry.Name())
+			continue
+		}
 		names[strings.ToLower(entry.Name())] = entry.Name()
 	}
 	r.names[dir] = names
+	for _, name := range leftovers {
+		if err := r.recoverLeftover(dir, name, names); err != nil {
+			return nil, err
+		}
+	}
 	return names, nil
+}
+
+// recoverLeftover deals with a name an interrupted run left in dir. A
+// rename's temporary name is put back under its old name when that name (in
+// any case) is free: the rename then starts again. When it is not, or the
+// old name is unknown, it is left as it is and the run says so (it may hold
+// the only copy of records). A temporary file of an interrupted write is
+// removed: the file it was to replace was never touched.
+func (r *run) recoverLeftover(dir, name string, names map[string]string) error {
+	path := filepath.Join(dir, name)
+	shownAs, _ := filepath.Rel(r.opts.Output, path)
+	shownAs = filepath.ToSlash(shownAs)
+	rest, rename := strings.CutPrefix(name, caseRenamePrefix)
+	if !rename {
+		if err := removeAll(path); err != nil {
+			return err
+		}
+		r.report.Recovered = append(r.report.Recovered, "removed "+shownAs)
+		return nil
+	}
+	_, original, _ := strings.Cut(rest, "-")
+	if _, taken := names[strings.ToLower(original)]; original == "" || taken {
+		r.report.Incomplete = appendOnce(r.report.Incomplete, fmt.Sprintf("%s was left by an interrupted rename and cannot be put back (its old name is unknown or taken): it is left as it is; compare it with the records next to it, then remove it", shown(shownAs)))
+		return nil
+	}
+	if err := renameFile(path, filepath.Join(dir, original)); err != nil {
+		return err
+	}
+	names[strings.ToLower(original)] = original
+	r.report.Recovered = append(r.report.Recovered, shownAs+" -> "+filepath.ToSlash(filepath.Join(filepath.Dir(shownAs), original)))
+	return nil
 }
 
 // alignRecord gives each name of the record of the document at parts that
@@ -157,7 +213,7 @@ func (r *run) alignID(dir, want string, doc []string, spec *Spec, idPart func(st
 	newID := doc[len(doc)-1]
 	oldID, decoded := keyEncoding.Decode(idPart(have))
 	if !decoded {
-		return false, fmt.Errorf("%w: collection %s: the document %s would be written into %s, whose name differs only in case and is not one the mirror writes: this filesystem keeps them as one, so it is not written; copy into a folder on a case-sensitive filesystem, or move that file away", ErrCaseFold, spec.ID, shown(strings.Join(doc, "/")), shown(shownFrom))
+		return false, fmt.Errorf("%w: collection %s: the document %s would be written into %s, whose name differs only in case and is not one the mirror writes: this filesystem keeps them as one, so it is not written; copy into a folder on a case-sensitive filesystem%s, or move that file away", ErrCaseFold, spec.ID, shown(strings.Join(doc, "/")), shown(shownFrom), caseSensitiveHint)
 	}
 	if oldID != newID {
 		oldDoc := strings.Join(append(doc[:len(doc)-1:len(doc)-1], oldID), "/")
@@ -166,12 +222,17 @@ func (r *run) alignID(dir, want string, doc []string, spec *Spec, idPart func(st
 			return false, err
 		}
 		if !gone {
-			return false, fmt.Errorf("%w: collection %s: the ids %q (document %s) and %q (document %s, in the output as %s) differ only in case, and both are in the source: this filesystem keeps them as one file or folder, so neither is written over; copy into a folder on a case-sensitive filesystem, or give one of them another id", ErrCaseFold, spec.ID, shown(newID), shown(strings.Join(doc, "/")), shown(oldID), shown(oldDoc), shown(shownFrom))
+			return false, fmt.Errorf("%w: collection %s: the ids %q (document %s) and %q (document %s, in the output as %s) differ only in case, and both are in the source: this filesystem keeps them as one file or folder, so neither is written over; copy into a folder on a case-sensitive filesystem%s, or give one of them another id", ErrCaseFold, spec.ID, shown(newID), shown(strings.Join(doc, "/")), shown(oldID), shown(oldDoc), shown(shownFrom), caseSensitiveHint)
 		}
 	}
 	random := make([]byte, 8)
 	_, _ = rand.Read(random) // never fails
-	from, temp, to := filepath.Join(dir, have), filepath.Join(dir, ".tmp-case-"+hex.EncodeToString(random)), filepath.Join(dir, want)
+	temp := caseRenamePrefix + hex.EncodeToString(random)
+	if len(temp)+1+len(have) <= maxNameBytes {
+		temp += "-" + have // so an interrupted rename can be put back
+	}
+	from, to := filepath.Join(dir, have), filepath.Join(dir, want)
+	temp = filepath.Join(dir, temp)
 	if err := renameFile(from, temp); err != nil {
 		return false, fmt.Errorf("rename %s to %s: %w", from, want, err)
 	}
@@ -187,10 +248,20 @@ func (r *run) alignID(dir, want string, doc []string, spec *Spec, idPart func(st
 // goneFromSource reports whether the source proves that the document at path
 // (of spec) does not exist, and that no document of a defined collection below
 // spec is below it: Firestore keeps the sub-collections of a deleted document.
-// It costs one read, and one per such collection; the answer is kept.
+// It costs one read, and one per such collection, from the read budget
+// (errBudget when that would pass it); the answer is kept.
 func (r *run) goneFromSource(path string, spec *Spec) (bool, error) {
 	if gone, ok := r.gone[path]; ok {
 		return gone, nil
+	}
+	var below []*Spec
+	for _, other := range r.defs.Specs {
+		if strings.HasPrefix(other.ID, spec.ID+"/") {
+			below = append(below, other)
+		}
+	}
+	if need := 1 + len(below); r.budget(need) < need {
+		return false, errBudget
 	}
 	doc, err := r.src.Get(r.ctx, path)
 	if err != nil {
@@ -198,13 +269,11 @@ func (r *run) goneFromSource(path string, spec *Spec) (bool, error) {
 	}
 	r.report.Reads++
 	gone := doc == nil
-	for _, below := range r.defs.Specs {
-		if !gone || !strings.HasPrefix(below.ID, spec.ID+"/") {
-			continue
-		}
-		docs, err := r.src.Page(r.ctx, Query{Collection: below.Leaf(), Group: true, Under: path, Limit: 1})
+	for i := 0; gone && i < len(below); i++ { // until one is found
+		sub := below[i]
+		docs, err := r.src.Page(r.ctx, Query{Collection: sub.Leaf(), Group: true, Under: path, Limit: 1})
 		if err != nil {
-			return false, fmt.Errorf("read collection group %s under %s: %w", below.Leaf(), path, err)
+			return false, fmt.Errorf("read collection group %s under %s: %w", sub.Leaf(), path, err)
 		}
 		r.report.Reads++
 		gone = len(docs) == 0
@@ -213,11 +282,20 @@ func (r *run) goneFromSource(path string, spec *Spec) (bool, error) {
 	return gone, nil
 }
 
+// noteRead records the record file (relative to the output) of a document
+// this run read, written or rejected, so a prune never deletes it under a
+// name that differs only in case.
+func (r *run) noteRead(file string) {
+	if _, ok := r.owned[strings.ToLower(file)]; !ok {
+		r.owned[strings.ToLower(file)] = file
+	}
+}
+
 // noteWritten records a file this run wrote (relative to the output): in the
-// names of the folders already read, and as written, so a prune never
-// deletes it under a name that differs only in case.
+// names of the folders already read, and as a file a prune never deletes
+// under a name that differs only in case.
 func (r *run) noteWritten(file string) {
-	r.written[strings.ToLower(file)] = file
+	r.noteRead(file)
 	dir := r.opts.Output
 	for _, name := range strings.Split(filepath.ToSlash(file), "/") {
 		if names, ok := r.names[dir]; ok {
@@ -229,10 +307,10 @@ func (r *run) noteWritten(file string) {
 	}
 }
 
-// isWritten reports whether file (relative to the output) is a file this run
-// wrote, under a name that differs only in case from it on a filesystem that
-// folds case. Deleting it would delete a record of this run.
-func (r *run) isWritten(file string) bool {
-	written, ok := r.written[strings.ToLower(file)]
-	return ok && written != file && sameFile(filepath.Join(r.opts.Output, file), filepath.Join(r.opts.Output, written))
+// isOwned reports whether file (relative to the output) is the record file of
+// a document this run read, under a name that differs only in case from it on
+// a filesystem that folds case. Deleting it would delete that record.
+func (r *run) isOwned(file string) bool {
+	owned, ok := r.owned[strings.ToLower(file)]
+	return ok && owned != file && sameFile(filepath.Join(r.opts.Output, file), filepath.Join(r.opts.Output, owned))
 }

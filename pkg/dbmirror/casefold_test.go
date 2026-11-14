@@ -88,7 +88,12 @@ func (f *foldFS) Rename(from, to string) error {
 	}
 	return os.Rename(source, target)
 }
-func (f *foldFS) Remove(name string) error { return os.Remove(f.resolve(name)) }
+func (f *foldFS) Remove(name string) error {
+	if err := f.failed("Remove", name); err != nil {
+		return err
+	}
+	return os.Remove(f.resolve(name))
+}
 func (f *foldFS) RemoveAll(path string) error {
 	if err := f.failed("RemoveAll", path); err != nil {
 		return err
@@ -613,7 +618,7 @@ func TestRunReportsAFailedRecovery(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(records, ".tmp-123"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	fake.fail["RemoveAll"] = func(path string) error {
+	fake.fail["Remove"] = func(path string) error {
 		if strings.HasSuffix(path, ".tmp-123") {
 			return errBoom
 		}
@@ -635,5 +640,45 @@ func TestRunReportsAFailedRecovery(t *testing.T) {
 	}
 	if _, err := Run(context.Background(), bobSource("Bob"), caseDefinitions(t), casePolicy(t), Options{Output: out, Collections: []string{"perrec"}}); !errors.Is(err, errBoom) {
 		t.Error(err)
+	}
+}
+
+// Only the temporary file of an interrupted write (a regular file named
+// ".tmp-" and digits) is removed; any other ".tmp-" entry may be the user's
+// own content, so it is left untouched and reported.
+func TestRunLeavesUserContentThatLooksLikeALeftover(t *testing.T) {
+	_, out := newFoldFS(t)
+	caseRun(t, bobSource("Bob"), Options{Output: out, Collections: []string{"perrec"}})
+	records := filepath.Join(out, "perrec", "$records")
+	mine := filepath.Join(records, ".tmp-notes", "mine.txt")
+	if err := os.MkdirAll(filepath.Dir(mine), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mine, []byte("mine"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(records, ".tmp-123"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(records, ".tmp-words"), []byte("mine"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(records, ".tmp-123456"), []byte("half"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	report := caseRun(t, bobSource("Bob"), Options{Output: out, Collections: []string{"perrec"}})
+	if got := names(t, records); !slices.Equal(got, []string{".tmp-123", ".tmp-notes", ".tmp-words", "Bob.yaml"}) {
+		t.Errorf("%v", got)
+	}
+	if _, err := os.Stat(mine); err != nil {
+		t.Error(err)
+	}
+	if !slices.Equal(report.Recovered, []string{"removed perrec/$records/.tmp-123456"}) || report.Complete {
+		t.Errorf("%+v", report)
+	}
+	for _, name := range []string{".tmp-123", ".tmp-notes", ".tmp-words"} {
+		if !strings.Contains(strings.Join(report.Incomplete, ";"), "perrec/$records/"+name+" ") {
+			t.Errorf("%s not reported: %v", name, report.Incomplete)
+		}
 	}
 }

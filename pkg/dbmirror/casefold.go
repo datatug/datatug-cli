@@ -105,17 +105,17 @@ func (r *run) namesIn(dir string) (map[string]string, error) {
 		return nil, err
 	}
 	names := make(map[string]string, len(entries))
-	var leftovers []string
+	var leftovers []fs.DirEntry
 	for _, entry := range entries {
 		if strings.HasPrefix(entry.Name(), leftoverPrefix) {
-			leftovers = append(leftovers, entry.Name())
+			leftovers = append(leftovers, entry)
 			continue
 		}
 		names[strings.ToLower(entry.Name())] = entry.Name()
 	}
 	r.names[dir] = names
-	for _, name := range leftovers {
-		if err := r.recoverLeftover(dir, name, names); err != nil {
+	for _, entry := range leftovers {
+		if err := r.recoverLeftover(dir, entry, names); err != nil {
 			return nil, err
 		}
 	}
@@ -126,15 +126,22 @@ func (r *run) namesIn(dir string) (map[string]string, error) {
 // rename's temporary name is put back under its old name when that name (in
 // any case) is free: the rename then starts again. When it is not, or the
 // old name is unknown, it is left as it is and the run says so (it may hold
-// the only copy of records). A temporary file of an interrupted write is
-// removed: the file it was to replace was never touched.
-func (r *run) recoverLeftover(dir, name string, names map[string]string) error {
+// the only copy of records). A temporary file of an interrupted write (a
+// regular file named ".tmp-" and digits, what CreateTemp makes) is removed:
+// the file it was to replace was never touched. Any other ".tmp-" entry may
+// be the user's own content: it is left untouched and reported.
+func (r *run) recoverLeftover(dir string, entry fs.DirEntry, names map[string]string) error {
+	name := entry.Name()
 	path := filepath.Join(dir, name)
 	shownAs, _ := filepath.Rel(r.opts.Output, path)
 	shownAs = filepath.ToSlash(shownAs)
 	rest, rename := strings.CutPrefix(name, caseRenamePrefix)
 	if !rename {
-		if err := removeAll(path); err != nil {
+		if !entry.Type().IsRegular() || !isWriteTemp(name) {
+			r.report.Incomplete = appendOnce(r.report.Incomplete, fmt.Sprintf("%s is not a temporary file of this tool, so it is left as it is; remove it if it is not yours", shown(shownAs)))
+			return nil
+		}
+		if err := removeFile(path); err != nil {
 			return err
 		}
 		r.report.Recovered = append(r.report.Recovered, "removed "+shownAs)
@@ -151,6 +158,13 @@ func (r *run) recoverLeftover(dir, name string, names map[string]string) error {
 	names[strings.ToLower(original)] = original
 	r.report.Recovered = append(r.report.Recovered, shownAs+" -> "+filepath.ToSlash(filepath.Join(filepath.Dir(shownAs), original)))
 	return nil
+}
+
+// isWriteTemp reports whether name is one CreateTemp(dir, ".tmp-*") makes:
+// the prefix and digits only.
+func isWriteTemp(name string) bool {
+	digits := name[len(leftoverPrefix):]
+	return digits != "" && strings.Trim(digits, "0123456789") == ""
 }
 
 // alignRecord gives each name of the record of the document at parts that

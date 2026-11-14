@@ -188,7 +188,7 @@ func dbMirrorAction(cmd *cobra.Command, _ []string) error {
 		return Exit(strings.TrimPrefix(err.Error(), dbmirror.ErrUsage.Error()+": "), exitCodeUsage)
 	}
 	asJSON, _ := flags.GetBool("json")
-	if errors.Is(err, dbmirror.ErrIDTooLong) {
+	if errors.Is(err, dbmirror.ErrIDTooLong) || errors.Is(err, dbmirror.ErrRoundTrip) {
 		if asJSON && report != nil {
 			writeMirrorJSON(cmd.OutOrStdout(), report)
 		}

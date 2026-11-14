@@ -117,8 +117,9 @@ descriptor names the environment variable (`{"dsnEnv": "DATATUG_FIRESTORE_SOURCE
 | `--restart` | Start over instead of resuming a run that stopped at its read budget. |
 | `--snapshot` | Read every document as it was when the run started (see below). |
 
-Exit codes: `0` complete; `1` a read or write failed, or a document's id is
-too long for its collection's one-file-per-record form; `2` usage or policy
+Exit codes: `0` complete; `1` a read or write failed, a document's id is
+too long for its collection's one-file-per-record form, or a record file would
+not read back as written; `2` usage or policy
 error (also an output of another source);
 `3` finished but incomplete (the read budget was reached, also by a dry run,
 documents were rejected, a selected collection is unsupported, or validation
@@ -271,14 +272,33 @@ larger than memory should keep one file per record.
 
 ### YAML
 
-The mirror writes its own canonical YAML (keys in byte order, two-space
-indent): a string is always read back as a string (one that would read as a
-number, a bool, a date or null, such as `"123"`, `"true"`, `"2026-01-01"`,
-`"null"`, `"~"`, is quoted), text with line breaks is a literal block (or a
-double-quoted string when it has a carriage return, a control character, or
-spaces or line breaks at its ends), a double always has a decimal point or an
-exponent (`1.0`), int64 is exact, and `$time`, `$map` and the other tags are
-plain keys. The tests read every such value back with inGitDB's own parser.
+The mirror writes its own canonical YAML: keys in byte order, two-space
+indent, and **every string and every key double-quoted**, with escapes for
+line breaks, controls and other special characters. So no YAML reader, 1.1
+(PyYAML) or 1.2 (yaml.v3, which inGitDB uses), takes a string or a document id
+for a bool (`yes`, `on`, `no`, `true`), a number (`010`, `0x1F`, `1:20`,
+`1e3`), a date, null (`~`, `null`), a merge key (`<<`) or a tag (`=`), and
+leading or trailing line breaks and spaces are kept. A double always has a
+decimal point in its mantissa (`1.0`, `-0.0`, `1.0e+21`, `5.0e-324`), which
+both versions read as a double; an integer is decimal (int64 exact); bools are
+`true`/`false` and null is `null`. `$time`, `$map` and the other tags are
+ordinary keys.
+
+**Every file is read back before it is written.** The mirror decodes the
+content it is about to write (YAML with inGitDB's own parser) and compares it
+with what it means to write; a decode error or any difference stops the run
+with exit code 1 (`a record file would not read back as written`), its report
+says `stopped:`, and that file (a record, a file of records by id, a partial
+chunk, a pruned file) is not written.
+
+What the tests prove: a corpus of strings YAML readers are known to take for
+something else (each as a value, a key, a list item, a nested key, and as the
+id of a file kept by id), the doubles and int64 extremes, and 3000 random
+strings of any code point read back exactly with inGitDB's parser; every
+scalar written is checked against the YAML 1.1 and 1.2 resolution rules
+(strings and keys double-quoted, doubles matching both float rules, decimal
+integers); and the corpus is read with PyYAML (YAML 1.1) too where python3 has
+it, comparing types and values.
 
 ### Key encoding
 

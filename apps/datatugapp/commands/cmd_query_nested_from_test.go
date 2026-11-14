@@ -10,7 +10,7 @@ import (
 	"github.com/ingitdb/ingitdb-go/ingitdb"
 )
 
-// mirroredDB is an inGitDB database written by db mirror: records of nested
+// mirroredDB is an inGitDB database written by db copy --schema=destination: records of nested
 // collections (teams/{team}/ext/{module}/events/{event}).
 func mirroredDB(t *testing.T) string {
 	t.Helper()

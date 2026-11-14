@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -129,36 +130,19 @@ func useMirrorSource(t *testing.T, source dbmirror.Source, openErr error) *[]dbc
 	return &opened
 }
 
+// runMirror runs db copy --schema=destination with args.
 func runMirror(t *testing.T, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
-	command := dbMirrorCommand()
-	command.SilenceUsage = true
-	command.SilenceErrors = true
-	var out, errOut bytes.Buffer
-	command.SetOut(&out)
-	command.SetErr(&errOut)
-	command.SetArgs(args)
-	err := command.Execute()
-	var coder ExitCoder
-	switch {
-	case err == nil:
-	case errors.As(err, &coder):
-		code = coder.ExitCode()
-		errOut.WriteString(err.Error())
-	default:
-		code = -1
-		errOut.WriteString(err.Error())
-	}
-	return out.String(), errOut.String(), code
+	return runDBCopy(t, append([]string{"--schema=destination"}, args...)...)
 }
 
-func TestDBMirrorCopiesIntoTheIgnoredDataFolder(t *testing.T) {
+func TestDBCopyDestinationSchemaCopiesIntoTheIgnoredDataFolder(t *testing.T) {
 	project := mirrorProject(t)
 	opened := useMirrorSource(t, &mirrorTestSource{docs: mirrorDocs()}, nil)
 	t.Setenv("FIRESTORE_EMULATOR_HOST", "127.0.0.1:1")
 	t.Setenv("MIRROR_SOURCE", "firestore://demo-example")
 	stdout, stderr, code := runMirror(t, "--from", "env:MIRROR_SOURCE", "--policy", filepath.Join(project, "mirrors", "backup.yaml"),
-		"--collections", "teams, ,teams/ext/**", "--json", "--progress")
+		"--include", "teams, ,teams/ext/**", "--json", "--progress")
 	if code != 0 {
 		t.Fatalf("exit %d\n%s", code, stderr)
 	}
@@ -182,11 +166,11 @@ func TestDBMirrorCopiesIntoTheIgnoredDataFolder(t *testing.T) {
 	}
 }
 
-func TestDBMirrorDryRunAndOneSpace(t *testing.T) {
+func TestDBCopyDestinationSchemaDryRunAndOneSpace(t *testing.T) {
 	project := mirrorProject(t)
 	useMirrorSource(t, &mirrorTestSource{docs: map[string]map[string]any{"spaces/s1": {}}}, nil)
 	policy := filepath.Join(project, "mirrors", "backup.yaml")
-	_, stderr, code := runMirror(t, "--from", "firestore://demo-example", "--policy", policy, "--dry-run", "--collections", "teams")
+	_, stderr, code := runMirror(t, "--from", "firestore://demo-example", "--policy", policy, "--dry-run", "--include", "teams")
 	if code != 0 || !strings.Contains(stderr, "nothing was written") || strings.Contains(stderr, "on the emulator") {
 		t.Errorf("exit %d\n%s", code, stderr)
 	}
@@ -200,11 +184,11 @@ func TestDBMirrorDryRunAndOneSpace(t *testing.T) {
 	}
 }
 
-func TestDBMirrorFlagsReachTheRun(t *testing.T) {
+func TestDBCopyDestinationSchemaFlagsReachTheRun(t *testing.T) {
 	project := mirrorProject(t)
 	policy := filepath.Join(project, "mirrors", "backup.yaml")
 	out := filepath.Join(project, "data", "backup")
-	args := []string{"--from", "firestore://demo-example", "--policy", policy, "--collections", "teams"}
+	args := []string{"--from", "firestore://demo-example", "--policy", policy, "--include", "teams"}
 	docs := mirrorDocs()
 	docs["teams/t3"] = map[string]any{"title": int64(3), "phone": "+353-PII"}
 	useMirrorSource(t, &mirrorTestSource{docs: docs}, nil)
@@ -244,7 +228,7 @@ func TestDBMirrorFlagsReachTheRun(t *testing.T) {
 		t.Errorf("exit %d\n%s", code, stderr)
 	}
 	t.Setenv("FIRESTORE_EMULATOR_HOST", "")
-	if _, _, code := runMirror(t, "--from", "firestore://demo-other", "--policy", policy, "--collections", "teams"); code != exitCodeUsage {
+	if _, _, code := runMirror(t, "--from", "firestore://demo-other", "--policy", policy, "--include", "teams"); code != exitCodeUsage {
 		t.Errorf("exit %d", code)
 	}
 	// An id too long for one file per record fails the run, unless asked to go on.
@@ -261,7 +245,7 @@ func TestDBMirrorFlagsReachTheRun(t *testing.T) {
 	}
 }
 
-func TestDBMirrorRefusals(t *testing.T) {
+func TestDBCopyDestinationSchemaRefusals(t *testing.T) {
 	project := mirrorProject(t)
 	useMirrorSource(t, &mirrorTestSource{docs: mirrorDocs()}, nil)
 	policy := filepath.Join(project, "mirrors", "backup.yaml")
@@ -281,14 +265,14 @@ func TestDBMirrorRefusals(t *testing.T) {
 		"zero page size":      {append(from, "--page-size", "0"), exitCodeUsage, "--page-size"},
 		"bad source":          {[]string{"--from", "nope://x", "--policy", policy}, exitCodeUsage, "--from"},
 		"unresolved datatug":  {[]string{"--from", "datatug:///" + filepath.Join(project, "none") + "/db", "--policy", policy}, 0, ""},
-		"not firestore":       {[]string{"--from", "ingitdb://" + project, "--policy", policy}, exitCodeUsage, "reads Firestore only"},
+		"not firestore":       {[]string{"--from", "ingitdb://" + project, "--policy", policy}, exitCodeUsage, "reads a Firestore source only"},
 		"missing policy":      {[]string{"--from", "firestore://demo-example", "--policy", filepath.Join(project, "none.yaml")}, exitCodeUsage, "--policy"},
 		"no definitions":      {[]string{"--from", "firestore://demo-example", "--policy", noDefinitions}, exitCodeUsage, "definitions of the mirror are not known"},
 		"bad definitions":     {append(from, "--definitions", filepath.Join(project, "mirrors")), exitCodeUsage, "define no collection"},
 		"output in mirror":    {append(from, "--to", filepath.Join(project, "mirror", "out")), exitCodeUsage, "outside the definitions folder"},
 		"output holds mirror": {append(from, "--to", project), exitCodeUsage, "outside the definitions folder"},
 		"committable output":  {append(from, "--to", filepath.Join(project, "kept")), exitCodeUsage, "not ignored by it"},
-		"unknown collection":  {append(from, "--dry-run", "--collections", "nope"), exitCodeUsage, `"nope" is not defined`},
+		"unknown collection":  {append(from, "--dry-run", "--include", "nope"), exitCodeUsage, `"nope" is not defined`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, stderr, code := runMirror(t, test.args...)
@@ -305,7 +289,7 @@ func TestDBMirrorRefusals(t *testing.T) {
 	}
 }
 
-func TestDBMirrorFailures(t *testing.T) {
+func TestDBCopyDestinationSchemaFailures(t *testing.T) {
 	project := mirrorProject(t)
 	policy := filepath.Join(project, "mirrors", "backup.yaml")
 	args := []string{"--from", "firestore://demo-example", "--policy", policy}
@@ -319,7 +303,7 @@ func TestDBMirrorFailures(t *testing.T) {
 	}
 	// A document that does not fit its definition makes the copy incomplete.
 	useMirrorSource(t, &mirrorTestSource{docs: map[string]map[string]any{"teams/t1": {"title": int64(1)}}}, nil)
-	if _, stderr, code := runMirror(t, append(args, "--collections", "teams")...); code != exitCodeIncomplete || !strings.Contains(stderr, "were not written into the database") {
+	if _, stderr, code := runMirror(t, append(args, "--include", "teams")...); code != exitCodeIncomplete || !strings.Contains(stderr, "were not written into the database") {
 		t.Errorf("exit %d\n%s", code, stderr)
 	}
 	// The output path cannot be made absolute.
@@ -468,14 +452,98 @@ func TestOpenMirrorSourceOpensFirestore(t *testing.T) {
 	}
 }
 
-func TestDBCopyFromFirestoreHintsAtDBMirror(t *testing.T) {
+func TestDBCopyFromFirestoreHintsAtDestinationSchema(t *testing.T) {
 	var hint bytes.Buffer
 	hintFirestoreMirror(&hint, dbcopy.BackendRef{Scheme: "sqlite"})
 	if hint.Len() != 0 {
 		t.Error(hint.String())
 	}
 	hintFirestoreMirror(&hint, dbcopy.BackendRef{Scheme: "firestore"})
-	if !strings.Contains(hint.String(), "datatug db mirror") {
+	if !strings.Contains(hint.String(), "datatug db copy --schema=destination") {
 		t.Error(hint.String())
+	}
+}
+
+func TestDBCopySchemaModesRefuseTheFlagsOfTheOther(t *testing.T) {
+	project := mirrorProject(t)
+	useMirrorSource(t, &mirrorTestSource{docs: mirrorDocs()}, nil)
+	policy := filepath.Join(project, "mirrors", "backup.yaml")
+	for _, name := range sourceSchemaFlags {
+		value := map[string]string{"recover-job-ref": "{}", "overwrite": "reload", "parallel-streams": "2", "fail-on-warning": "true", "where": "teams:title:=:x", "limit": "teams:1"}[name]
+		if value == "" {
+			value = "x"
+		}
+		_, stderr, code := runMirror(t, "--from", "firestore://demo-example", "--policy", policy, "--"+name+"="+value)
+		if code != exitCodeUsage || !strings.Contains(stderr, "--"+name+" does not apply with --schema=destination") {
+			t.Errorf("--%s: exit %d\n%s", name, code, stderr)
+		}
+	}
+	for _, name := range destinationSchemaFlags {
+		value := map[string]string{"max-reads": "1", "page-size": "1", "keep-rejected": "true", "continue-on-long-ids": "true", "prune": "true", "restart": "true", "snapshot": "true"}[name]
+		if value == "" {
+			value = "x"
+		}
+		_, stderr, code := runDBCopy(t, "--from", "sqlite:///"+filepath.Join(project, "none.db"), "--to", "sqlite:///"+filepath.Join(project, "out.db"), "--"+name+"="+value)
+		if code != exitCodeUsage || !strings.Contains(stderr, "--"+name+" applies only with --schema=destination") {
+			t.Errorf("--%s: exit %d\n%s", name, code, stderr)
+		}
+	}
+	for name, test := range map[string]struct {
+		args []string
+		want string
+	}{
+		"unknown schema":        {[]string{"--schema=target", "--from", "firestore://demo-example", "--to", project}, `invalid --schema value "target": valid values are source, destination`},
+		"source still needs to": {[]string{"--schema=source", "--from", "firestore://demo-example"}, `required flag(s) "to" not set`},
+		"destination no from":   {[]string{"--schema=destination", "--policy", policy}, `required flag(s) "from" not set`},
+		"destination no policy": {[]string{"--schema=destination", "--from", "firestore://demo-example"}, "--schema=destination requires --policy"},
+	} {
+		if _, stderr, code := runDBCopy(t, test.args...); code == 0 || !strings.Contains(stderr, test.want) {
+			t.Errorf("%s: exit %d\n%s", name, code, stderr)
+		}
+	}
+}
+
+func TestDBCopyDestinationSchemaPrintsTheReportOfAFileThatWouldNotReadBack(t *testing.T) {
+	project := mirrorProject(t)
+	useMirrorSource(t, &mirrorTestSource{docs: mirrorDocs()}, nil)
+	saved := mirrorRun
+	t.Cleanup(func() { mirrorRun = saved })
+	mirrorRun = func(context.Context, dbmirror.Source, *dbmirror.Definitions, *dbmirror.Policy, dbmirror.Options) (*dbmirror.Report, error) {
+		return &dbmirror.Report{Records: 1}, fmt.Errorf("%w: teams.yaml", dbmirror.ErrRoundTrip)
+	}
+	args := []string{"--from", "firestore://demo-example", "--policy", filepath.Join(project, "mirrors", "backup.yaml")}
+	stdout, stderr, code := runMirror(t, append(args, "--json")...)
+	if code != 1 || !strings.Contains(stderr, "db copy: "+dbmirror.ErrRoundTrip.Error()) || !strings.Contains(stdout, `"records": 1`) {
+		t.Errorf("exit %d\nstdout %s\nstderr %s", code, stdout, stderr)
+	}
+	// Without --json nothing is printed on stdout.
+	if stdout, _, code := runMirror(t, args...); code != 1 || stdout != "" {
+		t.Errorf("exit %d\n%s", code, stdout)
+	}
+}
+
+// runDBCopy runs `datatug db copy` with args.
+func runDBCopy(t *testing.T, args ...string) (stdout, stderr string, code int) {
+	t.Helper()
+	out, errOut, err := runCopy(t, append([]string{"db", "copy"}, args...)...)
+	var coder ExitCoder
+	switch {
+	case err == nil:
+	case errors.As(err, &coder):
+		code = coder.ExitCode()
+		errOut.WriteString(err.Error())
+	default:
+		code = -1
+		errOut.WriteString(err.Error())
+	}
+	return out.String(), errOut.String(), code
+}
+
+// There is one command: db mirror is db copy --schema=destination.
+func TestDBMirrorIsNotACommand(t *testing.T) {
+	for _, command := range dbCommand().Commands() {
+		if command.Name() == "mirror" {
+			t.Error("db mirror is a command")
+		}
 	}
 }

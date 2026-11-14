@@ -349,6 +349,15 @@ jobs:
         env:
           WATCH_FIRESTORE_ARTIFACTS: ${{ runner.temp }}/watch-firestore
         run: ./scripts/check-watch-firestore.sh
+      - name: Read the db copy YAML corpus back with PyYAML (YAML 1.1)
+        # DATATUG_REQUIRE_PYYAML makes a missing PyYAML a failure instead of a
+        # skip, so the read-back by a YAML 1.1 parser is binding here.
+        env:
+          DATATUG_REQUIRE_PYYAML: '1'
+        run: |
+          python3 -m pip install --user --break-system-packages 'PyYAML==6.0.2'
+          go test ./pkg/dbmirror -run '^TestYAMLCorpusRoundTrips$' -count=1 -v | tee "$RUNNER_TEMP/pyyaml.txt"
+          grep -q -- '--- PASS: TestYAMLCorpusRoundTrips' "$RUNNER_TEMP/pyyaml.txt"
       - name: Upload transaction evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

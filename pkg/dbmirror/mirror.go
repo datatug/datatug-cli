@@ -218,7 +218,7 @@ type run struct {
 	defsHash string                // digest of the definition files
 
 	names map[string]map[string]string // output folder -> its names by their lower case (alignRecord)
-	owned map[string]string            // lower-cased record file of a document this run read -> the file
+	owned map[string][]string          // lower-cased record file of a document this run read -> every spelling read
 	gone  map[string]bool              // document path -> the source proved it and all below it gone
 
 	masked   map[string]map[string]bool
@@ -258,7 +258,7 @@ func Run(ctx context.Context, src Source, defs *Definitions, policy *Policy, opt
 		files:    map[string]string{},
 		folders:  map[string]string{},
 		names:    map[string]map[string]string{},
-		owned:    map[string]string{},
+		owned:    map[string][]string{},
 		gone:     map[string]bool{},
 		multi:    map[string]*multiFile{},
 		salt:     make([]byte, 16),

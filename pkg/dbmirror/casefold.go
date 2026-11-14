@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -298,10 +299,12 @@ func (r *run) goneFromSource(path string, spec *Spec) (bool, error) {
 
 // noteRead records the record file (relative to the output) of a document
 // this run read, written or rejected, so a prune never deletes it under a
-// name that differs only in case.
+// name that differs only in case. Every spelling is kept: two documents can
+// name one file in two cases (parents Bob and bob), and only one may be written.
 func (r *run) noteRead(file string) {
-	if _, ok := r.owned[strings.ToLower(file)]; !ok {
-		r.owned[strings.ToLower(file)] = file
+	lower := strings.ToLower(file)
+	if !slices.Contains(r.owned[lower], file) {
+		r.owned[lower] = append(r.owned[lower], file)
 	}
 }
 
@@ -325,6 +328,10 @@ func (r *run) noteWritten(file string) {
 // a document this run read, under a name that differs only in case from it on
 // a filesystem that folds case. Deleting it would delete that record.
 func (r *run) isOwned(file string) bool {
-	owned, ok := r.owned[strings.ToLower(file)]
-	return ok && owned != file && sameFile(filepath.Join(r.opts.Output, file), filepath.Join(r.opts.Output, owned))
+	for _, owned := range r.owned[strings.ToLower(file)] {
+		if owned != file && sameFile(filepath.Join(r.opts.Output, file), filepath.Join(r.opts.Output, owned)) {
+			return true
+		}
+	}
+	return false
 }

@@ -301,7 +301,7 @@ func TestIsOwnedComparesTheFilesNotTheNames(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(out, "Bob.yaml"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	r := &run{opts: Options{Output: out}, names: map[string]map[string]string{}, owned: map[string]string{}}
+	r := &run{opts: Options{Output: out}, names: map[string]map[string]string{}, owned: map[string][]string{}}
 	r.noteWritten("bob.yaml")
 	if !r.isOwned("Bob.yaml") || r.isOwned("bob.yaml") || r.isOwned("other.yaml") {
 		t.Error("a file this run wrote is not recognised under another case")
@@ -680,5 +680,25 @@ func TestRunLeavesUserContentThatLooksLikeALeftover(t *testing.T) {
 		if !strings.Contains(strings.Join(report.Incomplete, ";"), "perrec/$records/"+name+" ") {
 			t.Errorf("%s not reported: %v", name, report.Incomplete)
 		}
+	}
+}
+
+// Two spellings of one file in one run (astra-r2 blocker 1): the legacy
+// output keeps bob's kid k1 in Bob/kids/kids.yaml; Bob/k2 is read first and
+// writes that file under its exact name, then bob/k1 is read and rejected (its
+// parent folder differs only in case). The prune must keep k1: its file is the
+// one of bob/k1, under another spelling.
+func TestRunPruneRemembersEverySpellingOfAFile(t *testing.T) {
+	_, out := newFoldFS(t)
+	caseRun(t, bobSource("Bob"), Options{Output: out, Collections: []string{"parents/kids"}})
+	src := newMemSource()
+	src.docs["parents/Bob/kids/k2"] = map[string]any{"name": "k2 of Bob"}
+	src.docs["parents/bob/kids/k1"] = map[string]any{"name": "kid of Bob"}
+	report := caseRun(t, src, Options{Output: out, Collections: []string{"parents/kids"}, Prune: true})
+	if len(report.Rejected) != 1 || len(report.Pruned) != 0 || !slices.Equal(report.Kept, []string{"parents/$records/Bob/kids/kids.yaml"}) {
+		t.Errorf("rejected %v, pruned %v, kept %v", report.Rejected, report.Pruned, report.Kept)
+	}
+	if got := readFile(t, filepath.Join(out, "parents", "$records", "Bob", "kids", "kids.yaml")); !strings.Contains(got, "\"k1\":") {
+		t.Errorf("k1 of bob was pruned: %q", got)
 	}
 }

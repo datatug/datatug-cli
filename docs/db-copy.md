@@ -1040,6 +1040,23 @@ parts were read at different times. Counts are not read at the snapshot time.
   `<file>#<encoded id>` for a record kept in one file; reported, and deleted only
   with `--prune`, and only for a collection this run read from its start to its
   end, so a run stopped by its budget deletes nothing it did not see).
+- **An id that changed only in case** between runs (`Bob` became `bob`): on a
+  filesystem that folds case (macOS and Windows by default), `Bob.yaml` and
+  `bob.yaml` are one file, kept under its old name. **A run never deletes or
+  writes over a live record because of that.** It renames the record file, and
+  the folder of its sub-collections, to the new case (through a temporary
+  name) only when the source proves the old id gone: one read of the old
+  document, and one per defined sub-collection below it (Firestore keeps the
+  sub-collections of a deleted document). Each rename is listed in the report
+  (`renamed_record_files`) and the log (`renamed: old -> new`). When the old id
+  is still in the source, or the old name is not one the mirror writes, the run
+  stops (exit 1) with an error that names both ids, and writes neither: copy
+  into a folder on a case-sensitive filesystem, or give one of them another id.
+  Whether a folder folds case is found on the folder itself (are the two names
+  one file?), never from the operating system's name. `--prune` never deletes a
+  file that is the one this run wrote under another case. On a case-sensitive
+  filesystem the two names are two files: nothing is renamed, and the old one
+  is stale.
 - **Rejected documents** (an undeclared field, a missing required field, a wrong
   type, a value a column does not allow, a date that does not parse, a name that
   differs only in case from another's) are not written into the database. The

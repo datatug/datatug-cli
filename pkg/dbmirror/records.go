@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
-	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -182,7 +181,7 @@ func (r *run) pending(spec *Spec, file string) *multiFile {
 
 // readRecords reads a file of records by id, or none when it does not exist.
 func readRecords(path string, spec *Spec) (map[string]map[string]any, error) {
-	content, err := os.ReadFile(path)
+	content, err := outFS.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return map[string]map[string]any{}, nil
 	}
@@ -352,6 +351,7 @@ func (r *run) flushPending() error {
 		if _, err := writeFileIfChanged(path, content); err != nil {
 			return err
 		}
+		r.noteWritten(file)
 	}
 	r.multi = map[string]*multiFile{}
 	return removeAll(partialDir(r.opts.Output))

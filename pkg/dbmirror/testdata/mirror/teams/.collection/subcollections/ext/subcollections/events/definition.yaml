@@ -1,0 +1,14 @@
+# Firestore: teams/{team}/ext/{module}/events/{event}
+record_file:
+  name: "{key}.json"
+  type: map[string]any
+  format: json
+  records_dir: .
+columns:
+  title:
+    type: string
+    required: true
+  at:
+    type: datetime
+  extra:
+    type: any

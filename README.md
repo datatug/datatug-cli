@@ -229,6 +229,15 @@ go test ./...
 
 
 <!-- dev-approach:v1 -->
+## Mirror Firestore into inGitDB
+
+`datatug db mirror` copies a chosen part of a Firestore database, read-only, into an inGitDB database laid out by the inGitDB definitions of a mirror, with a policy file of the project that lists the collections to copy, those excluded and the fields to mask (a defined collection the policy does not name is never copied). It has a dry run with counts, a read budget with runs that resume where the last one stopped, selection by collection, by space and by path, and policy `paths` that pin a collection to its parents; a re-run over unchanged data changes no file, and a rejected document's values are never written unless asked for. See [docs/db-mirror.md](docs/db-mirror.md).
+
+```bash
+datatug db mirror --from env:DATATUG_FIRESTORE_SOURCE_URL --policy mirrors/backup.yaml --dry-run
+datatug db mirror --from env:DATATUG_FIRESTORE_SOURCE_URL --policy mirrors/backup.yaml
+```
+
 ## Export a database to inGitDB
 
 `datatug db export` (a shortcut for `datatug db copy --to ingitdb://<folder>`; see [docs/db-copy.md](docs/db-copy.md#local-backup-to-a-folder-db-export-and---to-ingitdb)) writes each supported DALgo source collection into a native inGitDB project, a local backup. `--to` may be a plain folder path; without it the folder is `./<database name>.ingitdb`. `--include`, `--exclude`, `--where`, `--limit`, `--dry-run`, `--json` and `--fail-on-warning` work as for `db copy`. Cloud or remote backup is not this command (see `db copy --to` and the planned `backup` family). SQLite supplies a streaming row reader; other providers may materialize a collection in their query reader. For a local SQLite database:

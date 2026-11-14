@@ -126,6 +126,7 @@ func dbCopyAction(cmd *cobra.Command, _ []string) error {
 		return keepExit(err, func(err error) error { return Exit(fmt.Sprintf("--to: %v", err), 2) })
 	}
 	warnRemoteCopyTarget(errWriter, tgtRef)
+	hintFirestoreMirror(errWriter, srcRef)
 	// A failure of a PostgreSQL side says which flag its connection string is read from (or its variable).
 	srcRef, tgtRef = srcRef.WithFlag("--from"), tgtRef.WithFlag("--to")
 	if fromSchema != "" && srcRef.Scheme != "postgres" {

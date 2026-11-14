@@ -1,0 +1,12 @@
+# Firestore: ext/{module}/customers/{customer}: personal data, masked by the policy
+record_file:
+  name: "{key}.json"
+  type: map[string]any
+  format: json
+columns:
+  email:
+    type: string
+  name:
+    type: string
+  contacts:
+    type: "[]any"

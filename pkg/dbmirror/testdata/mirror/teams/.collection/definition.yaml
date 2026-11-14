@@ -1,0 +1,28 @@
+# Firestore: teams/{team} (an invented example mirror)
+record_file:
+  name: "{key}.json"
+  type: map[string]any
+  format: json
+  records_dir: .
+columns:
+  "$ID":
+    type: string
+    required: true
+    max_length: 10
+  title:
+    type: string
+    required: true
+  createdAt:
+    type: datetime
+    required: true
+  size:
+    type: int
+  score:
+    type: float
+  tags:
+    type: "[]string"
+  settings:
+    type: map[string]any
+  kind:
+    type: string
+    enum: [open, closed]

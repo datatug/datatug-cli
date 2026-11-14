@@ -1,0 +1,8 @@
+# Firestore: teams/{team}/logs/{log}: TOML records, which the mirror does not write yet
+record_file:
+  name: "{key}.toml"
+  type: map[string]any
+  format: toml
+columns:
+  text:
+    type: string

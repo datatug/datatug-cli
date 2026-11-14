@@ -495,8 +495,7 @@ func (r *run) execute(item *planItem) error {
 	}
 	cursor := r.state.item(item.label)
 	if cursor.Done {
-		r.markDone(item)
-		return nil
+		return r.markDone(item)
 	}
 	if item.get != "" {
 		if r.budget(1) == 0 {

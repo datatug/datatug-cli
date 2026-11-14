@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 )
 
 // A run that stops at its read budget leaves .datatug-mirror/resume.json: for
@@ -32,19 +33,30 @@ type priorCounts struct {
 	Records      int64    `json:"records,omitempty"`
 	Rejected     int64    `json:"rejected,omitempty"`
 	OtherParents int64    `json:"other_parents,omitempty"`
+	IDTooLong    int64    `json:"id_too_long,omitempty"`
 	Masked       []string `json:"masked,omitempty"`
 }
 
 // resumeState is the content of resume.json.
 type resumeState struct {
-	Format      string                  `json:"format"`
-	Fingerprint string                  `json:"fingerprint"`
-	ReadTime    string                  `json:"read_time,omitempty"`
-	Reads       int64                   `json:"reads"`
-	Items       map[string]*cursor      `json:"items"`
-	Counts      map[string]*priorCounts `json:"counts,omitempty"`
-	Rejected    []Rejection             `json:"rejected,omitempty"`
-	Outside     map[string]int64        `json:"outside,omitempty"`
+	Format string `json:"format"`
+	// Digests of what the run read, by: the source and selection, the
+	// definitions' files, and the policy. A run resumes only when all match.
+	Selection   string `json:"selection"`
+	Definitions string `json:"definitions"`
+	Policy      string `json:"policy"`
+	// Files and Folders are the case-folded record files and folders written
+	// so far, so a resumed run still finds names that differ only in case.
+	Files map[string]string `json:"files,omitempty"`
+	// Chunks counts the partial saves of collections kept in one file.
+	Chunks   int                     `json:"chunks,omitempty"`
+	Folders  map[string]string       `json:"folders,omitempty"`
+	ReadTime string                  `json:"read_time,omitempty"`
+	Reads    int64                   `json:"reads"`
+	Items    map[string]*cursor      `json:"items"`
+	Counts   map[string]*priorCounts `json:"counts,omitempty"`
+	Rejected []Rejection             `json:"rejected,omitempty"`
+	Outside  map[string]int64        `json:"outside,omitempty"`
 
 	merged bool // Counts, Rejected, Outside and Reads include this run
 }
@@ -57,22 +69,21 @@ func (s *resumeState) item(label string) *cursor {
 	return s.Items[label]
 }
 
-// fingerprint identifies what a run reads, so a resume state is used only by
-// a run that reads the same.
-func (r *run) fingerprint() string {
-	collections := slices.Clone(r.opts.Collections)
-	slices.Sort(collections)
-	var specs []string
-	for _, spec := range r.defs.Specs {
-		specs = append(specs, spec.ID+"|"+r.results[spec.ID].Action)
-	}
-	content, _ := json.Marshal([]any{r.opts.Source, r.opts.Under, collections, specs, r.policy.Copy, r.policy.Exclude, r.policy.Mask, r.policy.Paths})
+func digest(parts ...any) string {
+	content, _ := json.Marshal(parts) // strings, lists and maps of strings
 	sum := sha256.Sum256(content)
 	return hex.EncodeToString(sum[:])
 }
 
 func (r *run) newState() *resumeState {
-	return &resumeState{Format: resumeFormat, Fingerprint: r.fingerprint(), Items: map[string]*cursor{}, Counts: map[string]*priorCounts{}, Outside: map[string]int64{}}
+	collections := slices.Sorted(slices.Values(r.opts.Collections))
+	return &resumeState{
+		Format:      resumeFormat,
+		Selection:   digest(r.opts.Identity, r.opts.Under, collections, keyEncoding.Name()),
+		Definitions: r.defsHash,
+		Policy:      digest(r.policy.Copy, r.policy.Exclude, r.policy.Mask, r.policy.Paths),
+		Items:       map[string]*cursor{}, Counts: map[string]*priorCounts{}, Outside: map[string]int64{},
+	}
 }
 
 // loadState is the resume state of an earlier run that reads what this one
@@ -85,10 +96,31 @@ func (r *run) loadState(plan []*planItem) *resumeState {
 	if err != nil {
 		return nil
 	}
-	state := &resumeState{}
-	if json.Unmarshal(content, state) != nil || state.Format != resumeFormat || state.Fingerprint != r.fingerprint() || state.Items == nil {
-		_, _ = fmt.Fprintln(r.opts.Log, "db mirror: the resume state of an earlier run does not match this run: starting over")
+	state, want := &resumeState{}, r.newState()
+	if json.Unmarshal(content, state) != nil || state.Format != resumeFormat || state.Items == nil {
+		_, _ = fmt.Fprintln(r.opts.Log, "db mirror: the resume state of an earlier run cannot be read: starting over")
 		return nil
+	}
+	var changed []string
+	for name, same := range map[string]bool{
+		"the selection (--collections, --space, --path)": state.Selection == want.Selection,
+		"the definitions": state.Definitions == want.Definitions,
+		"the policy":      state.Policy == want.Policy,
+	} {
+		if !same {
+			changed = append(changed, name)
+		}
+	}
+	if len(changed) > 0 {
+		slices.Sort(changed)
+		_, _ = fmt.Fprintf(r.opts.Log, "db mirror: %s changed since the run that stopped at its read budget: starting over, not resuming\n", strings.Join(changed, " and "))
+		return nil
+	}
+	for lower, file := range state.Files {
+		r.files[lower] = file
+	}
+	for lower, folder := range state.Folders {
+		r.folders[lower] = folder
 	}
 	if state.Counts == nil {
 		state.Counts = map[string]*priorCounts{}
@@ -111,6 +143,7 @@ func (r *run) loadState(plan []*planItem) *resumeState {
 // snapshot is the state to save: the earlier runs' counts plus this run's.
 func (r *run) snapshot() *resumeState {
 	s := *r.state
+	s.Files, s.Folders = r.files, r.folders
 	if s.merged {
 		return &s
 	}
@@ -130,7 +163,7 @@ func (r *run) snapshot() *resumeState {
 			prior = &priorCounts{}
 		}
 		result := r.results[spec.ID]
-		counts := &priorCounts{Records: prior.Records + result.Records, Rejected: prior.Rejected + result.Rejected, OtherParents: prior.OtherParents + result.OtherParents}
+		counts := &priorCounts{Records: prior.Records + result.Records, Rejected: prior.Rejected + result.Rejected, OtherParents: prior.OtherParents + result.OtherParents, IDTooLong: prior.IDTooLong + result.IDTooLong}
 		counts.Masked = slices.Compact(slices.Sorted(slices.Values(append(slices.Clone(prior.Masked), sortedKeys(r.masked[spec.ID])...))))
 		s.Counts[spec.ID] = counts
 	}
@@ -146,7 +179,7 @@ func (r *run) merge() {
 	for _, spec := range r.defs.Specs {
 		result := r.results[spec.ID]
 		if counts := merged.Counts[spec.ID]; counts != nil {
-			result.Records, result.Rejected, result.OtherParents = counts.Records, counts.Rejected, counts.OtherParents
+			result.Records, result.Rejected, result.OtherParents, result.IDTooLong = counts.Records, counts.Rejected, counts.OtherParents, counts.IDTooLong
 			for _, field := range counts.Masked {
 				if r.masked[spec.ID] == nil {
 					r.masked[spec.ID] = map[string]bool{}
@@ -163,6 +196,9 @@ func (r *run) merge() {
 
 // saveState writes the resume state (a dry run has none and never saves it).
 func (r *run) saveState() error {
+	if err := r.savePartials(); err != nil {
+		return err
+	}
 	content, _ := json.MarshalIndent(r.snapshot(), "", "  ") // only strings, numbers and bools
 	_, err := writeFileIfChanged(resumeFile(r.opts.Output), append(content, '\n'))
 	return err

@@ -1,6 +1,8 @@
 package dbmirror
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"maps"
@@ -32,6 +34,7 @@ type Spec struct {
 	chain   []*ingitdb.CollectionDef // definitions from the root collection down to this one
 	prefix  string                   // record file name before {key}
 	suffix  string                   // record file name after {key}
+	multi   bool                     // all records of a collection (per parent) in one file, keyed by id
 }
 
 // Leaf is the id of the collection itself (the last segment).
@@ -93,27 +96,47 @@ func (d *Definitions) add(rootRel string, chain []*ingitdb.CollectionDef, segmen
 	}
 }
 
-// layout checks that records of the collection are one JSON file per record
-// named from its key alone, the layout a Firestore document maps to, and sets
-// the file name around {key}. It returns why not, or "".
+// layout checks that the definition stores records in a form the mirror
+// writes, and returns why not, or "". The definition decides the form:
+//
+//   - one file per record (type map[string]any), named from its key alone: the
+//     file name is the encoded document id, so it must fit 255 bytes;
+//   - all records of the collection in one file (type
+//     map[$record_id]map[$field_name]any, a fixed name), keyed by the real
+//     document ids; for a sub-collection, one such file per parent document.
+//
+// A parent of a sub-collection keeps one file per record (its records are
+// the folders of the sub-collection). The format is yaml, yml or json.
 func (s *Spec) layout() string {
-	for _, col := range s.chain {
+	for i, col := range s.chain {
 		rf := col.RecordFile
-		if rf == nil {
+		switch {
+		case rf == nil:
 			return "the definition has no record_file"
-		}
-		if rf.RecordType != ingitdb.SingleRecord {
-			return fmt.Sprintf("record_file.type %q keeps several records in one file; only one record per file (map[string]any) can hold a Firestore document", rf.RecordType)
-		}
-		if strings.Count(rf.Name, "{key}") != 1 || strings.Count(rf.Name, "{") != 1 || strings.ContainsAny(rf.Name, `/\`) {
-			return fmt.Sprintf("record_file.name %q must name the file by {key} alone", rf.Name)
+		case rf.RecordType == ingitdb.SingleRecord:
+			if strings.Count(rf.Name, "{key}") != 1 || strings.Count(rf.Name, "{") != 1 || strings.ContainsAny(rf.Name, `/\`) {
+				return fmt.Sprintf("record_file.name %q must name the file by {key} alone", rf.Name)
+			}
+		case rf.RecordType == ingitdb.MapOfRecords && i < len(s.chain)-1:
+			return "a parent collection keeps all its records in one file (map[$record_id]map[$field_name]any), which holds no folder for a sub-collection: declare the parent with one file per record"
+		case rf.RecordType == ingitdb.MapOfRecords:
+			if rf.Name == "" || strings.ContainsAny(rf.Name, `{}/\`) {
+				return fmt.Sprintf("record_file.name %q of a collection kept in one file must be a fixed file name", rf.Name)
+			}
+		default:
+			return fmt.Sprintf("record_file.type %q keeps several records in one list, which holds no Firestore document id; declare one file per record (map[string]any) or one file keyed by id (map[$record_id]map[$field_name]any)", rf.RecordType)
 		}
 	}
 	rf := s.Def.RecordFile
-	if rf.Format != ingitdb.RecordFormatJSON {
-		return fmt.Sprintf("record_file.format %q is not written yet; use json", rf.Format)
+	switch rf.Format {
+	case ingitdb.RecordFormatYAML, ingitdb.RecordFormatYML, ingitdb.RecordFormatJSON:
+	default:
+		return fmt.Sprintf("record_file.format %q is not written yet; use yaml or json", rf.Format)
 	}
-	s.prefix, s.suffix, _ = strings.Cut(rf.Name, "{key}")
+	s.multi = rf.RecordType == ingitdb.MapOfRecords
+	if !s.multi {
+		s.prefix, s.suffix, _ = strings.Cut(rf.Name, "{key}")
+	}
 	return ""
 }
 
@@ -126,22 +149,25 @@ func (s *Spec) recordFile(parts []string) (path, problem string) {
 	dir := s.rootRel
 	last := len(s.chain) - 1
 	for level, col := range s.chain[:last] {
-		name := encodeID(parts[2*level+1])
+		name := keyEncoding.Encode(parts[2*level+1])
 		if tooLong := nameTooLong(name); tooLong != "" {
 			problem = "the id of its parent document at level " + strconv.Itoa(level+1) + " is too long: " + tooLong
 		}
 		dir = filepath.Join(dir, col.RecordFile.RecordsBasePath(), name, parts[2*level+2])
 	}
-	name := s.prefix + encodeID(parts[2*last+1]) + s.suffix
+	if s.multi {
+		return filepath.Join(dir, s.Def.RecordFile.RecordsBasePath(), s.Def.RecordFile.Name), problem
+	}
+	name := s.prefix + keyEncoding.Encode(parts[2*last+1]) + s.suffix
 	if tooLong := nameTooLong(name); tooLong != "" && problem == "" {
-		problem = "the document id is too long: " + tooLong
+		problem = "the document id is too long for one file per record: " + tooLong
 	}
 	return filepath.Join(dir, s.Def.RecordFile.RecordsBasePath(), name), problem
 }
 
 // recordKey is the inGitDB key of the record of a document id: the id as its
 // file name holds it.
-func recordKey(id string) string { return encodeID(id) }
+func recordKey(id string) string { return keyEncoding.Encode(id) }
 
 // matches reports whether a document path (split on "/") is a document of
 // this collection.
@@ -183,8 +209,12 @@ func (d *Definitions) definitionFile(rel string) bool {
 // CopyTo writes the definition files (never the records) of the mirror into
 // out, so that out is an inGitDB database with the same collections. A file
 // already holding the same bytes is not rewritten.
-func (d *Definitions) CopyTo(out string) error {
-	return filepath.WalkDir(d.Dir, func(path string, entry fs.DirEntry, err error) error {
+//
+// It returns a digest of the files copied (their paths and content), which a
+// resumed run compares, so it never continues under changed definitions.
+func (d *Definitions) CopyTo(out string) (digest string, err error) {
+	hash := sha256.New()
+	err = filepath.WalkDir(d.Dir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -202,7 +232,9 @@ func (d *Definitions) CopyTo(out string) error {
 		if err != nil {
 			return err
 		}
+		fmt.Fprintf(hash, "%s\x00%d\x00%s", filepath.ToSlash(rel), len(content), content)
 		_, err = writeFileIfChanged(filepath.Join(out, rel), content)
 		return err
 	})
+	return hex.EncodeToString(hash.Sum(nil)), err
 }

@@ -13,4 +13,4 @@ copy:
 exclude:
   - ext/secrets
 mask:
-  ext/customers: [email, name, contacts.*.phone]
+  ext/customers: [email, name, contacts]

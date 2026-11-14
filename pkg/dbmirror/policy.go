@@ -166,7 +166,10 @@ func (p *Policy) Check(defs *Definitions) error {
 // maskFieldProblem is why a mask path does not name a field the collection
 // declares, or "". Its first name must be a column; each next one must be
 // something the type before it holds: a list ([]T) takes "*" or an item
-// index, a map (map[K]V) any key, and any any path. A scalar holds nothing.
+// index, a map (map[K]V) any key. A scalar holds nothing, and a path below an
+// untyped value (any) is refused: it cannot be checked, so the whole untyped
+// value is masked instead. The masked value must still fit the definition
+// (maskedValueProblem).
 func maskFieldProblem(def *ingitdb.CollectionDef, path string) string {
 	names := strings.Split(path, ".")
 	column := def.Columns[names[0]]
@@ -174,22 +177,49 @@ func maskFieldProblem(def *ingitdb.CollectionDef, path string) string {
 		return fmt.Sprintf("%q is not a column of the collection (columns: %s)", names[0], strings.Join(sortedKeys(def.Columns), ", "))
 	}
 	typ := string(column.Type)
+	item := false // the path ends at an item of a list
 	for i, name := range names[1:] {
 		at := strings.Join(names[:i+1], ".")
 		switch {
 		case typ == string(ingitdb.ColumnTypeAny):
-			return ""
+			return fmt.Sprintf("%q is untyped (any): the mirror cannot check a path below it, so a typo there would leave its data in clear; mask %q as a whole", at, at)
 		case strings.HasPrefix(typ, "[]"):
 			if _, err := strconv.ParseUint(name, 10, 31); name != "*" && err != nil {
 				return fmt.Sprintf("%q is a list (%s): name its items by \"*\" or an index, not %q", at, typ, name)
 			}
-			typ = typ[2:]
+			typ, item = typ[2:], true
 		case strings.HasPrefix(typ, "map["):
 			_, value, _ := strings.Cut(typ[len("map["):], "]")
-			typ = value
+			typ, item = value, false
 		default:
 			return fmt.Sprintf("%q has type %s, which holds no field %q", at, typ, name)
 		}
+	}
+	return maskedValueProblem(column, path, typ, len(names) == 1, item)
+}
+
+// maskedValueProblem is why the masked value of path (of type typ) would not
+// fit its definition, so every record holding it would be rejected and lost
+// to the mirror, or "". A masked string becomes "***", a map {} and a list
+// []; a number or bool goes (a list item becomes null); an untyped column
+// becomes "***" whatever it holds.
+func maskedValueProblem(column *ingitdb.ColumnDef, path, typ string, whole, item bool) string {
+	scalar := typ != string(ingitdb.ColumnTypeAny) && !strings.HasPrefix(typ, "[]") && !strings.HasPrefix(typ, "map[")
+	text := slices.Contains([]string{"string", "date", "time", "datetime"}, typ)
+	exclude := "; exclude the collection instead, or leave the column unmasked"
+	switch {
+	case item && scalar && !text:
+		return fmt.Sprintf("the items of %q are %s: a masked item becomes null, which the definition refuses: mask the whole list", strings.TrimSuffix(strings.TrimSuffix(path, ".*"), "."), typ)
+	case !whole:
+		return ""
+	case scalar && !text && (column.Required || column.RequiredWhen != ""):
+		return fmt.Sprintf("%q is a required %s: a masked number or bool is removed, so every record would be rejected as missing it%s", path, typ, exclude)
+	case len(column.Enum) > 0:
+		return fmt.Sprintf("%q takes one of a list of values (enum): %q is not one of them, so every record holding it would be rejected%s", path, maskedString, exclude)
+	case text && (column.Length != nil && *column.Length != len(maskedString) || column.MinLength != nil && *column.MinLength > len(maskedString) || column.MaxLength != nil && *column.MaxLength < len(maskedString)):
+		return fmt.Sprintf("%q has a length constraint that %q breaks, so every record holding it would be rejected%s", path, maskedString, exclude)
+	case text && (column.Format != "" || column.ForeignKey != ""):
+		return fmt.Sprintf("%q declares a format or a foreign key that %q breaks, so every record holding it would be rejected%s", path, maskedString, exclude)
 	}
 	return ""
 }

@@ -62,19 +62,37 @@ func TestPolicyCheck(t *testing.T) {
 		}
 	}
 	good := &Policy{Copy: []string{"teams/ext", "ext/customers"}, Paths: map[string][]string{"teams/ext": {"teams/*/ext", "teams/t1/ext/cal"}},
-		Mask: map[string][]string{"teams/ext": {"data.a.b"}, "ext/customers": {"contacts.*.phone", "contacts.0"}}}
+		Mask: map[string][]string{"teams/ext": {"data.a"}, "ext/customers": {"contacts", "contacts.0"}}}
 	if err := good.Check(defs); err != nil {
 		t.Error(err)
 	}
 }
 
 func TestMaskFieldProblem(t *testing.T) {
+	two, three, four := 2, 3, 4
 	def := &ingitdb.CollectionDef{Columns: map[string]*ingitdb.ColumnDef{
 		"tags": {Type: "[]string"}, "byKey": {Type: "map[string][]map[string]string"}, "loose": {Type: ingitdb.ColumnTypeAny},
 		"names": {Type: ingitdb.ColumnTypeL10N}, "n": {Type: ingitdb.ColumnTypeInt},
+		"data": {Type: "map[string]any"}, "items": {Type: "[]any"}, "scores": {Type: "[]int"}, "byScore": {Type: "map[string]int"},
+		"count": {Type: ingitdb.ColumnTypeInt, Required: true}, "flag": {Type: ingitdb.ColumnTypeBool, RequiredWhen: "x"}, "kind": {Type: "string", Enum: []any{"a"}},
+		"code": {Type: "string", Length: &two}, "short": {Type: "string", MaxLength: &two}, "long": {Type: "string", MinLength: &four}, "mail": {Type: "string", Format: "email"},
+		"ok": {Type: "string", Length: &three, MaxLength: &three, MinLength: &three}, "anyRequired": {Type: ingitdb.ColumnTypeAny, Required: true},
 	}}
 	for path, want := range map[string]string{
-		"tags.*": "", "tags.3": "", "byKey.k.*.x": "", "byKey.k.0.x": "", "loose.a.b.c": "", "names.en": "",
+		"tags.*": "", "tags.3": "", "byKey.k.*.x": "", "byKey.k.0.x": "", "loose": "", "names.en": "", "data": "", "data.k": "", "items": "", "items.*": "",
+		"byScore.*": "", "n": "", "ok": "", "anyRequired": "", "scores": "",
+		"loose.a.b.c":   `"loose" is untyped (any): the mirror cannot check a path below it`,
+		"data.k.x":      `"data.k" is untyped (any)`,
+		"items.*.x":     `"items.*" is untyped (any)`,
+		"scores.*":      `the items of "scores" are int: a masked item becomes null`,
+		"scores.2":      `the items of "scores.2" are int`,
+		"count":         `"count" is a required int`,
+		"flag":          `"flag" is a required bool`,
+		"kind":          `"kind" takes one of a list of values (enum)`,
+		"code":          `"code" has a length constraint`,
+		"short":         `"short" has a length constraint`,
+		"long":          `"long" has a length constraint`,
+		"mail":          `"mail" declares a format or a foreign key`,
 		"tags.x":        `"tags" is a list ([]string): name its items by "*" or an index, not "x"`,
 		"tags.*.x":      `"tags.*" has type string, which holds no field "x"`,
 		"byKey.k.x":     `"byKey.k" is a list`,

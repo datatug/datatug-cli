@@ -2,10 +2,14 @@ package dbmirror
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -36,6 +40,12 @@ const maxOtherParentPaths = 50
 // ErrUsage marks an error in what the caller asked for (exit code 2).
 var ErrUsage = errors.New("usage")
 
+// ErrIDTooLong is the failure of a run that read a document of a collection
+// kept one file per record whose file name (its encoded id) or path is too
+// long to write. The run stops there: the report says so, and a resume
+// starts again at that document.
+var ErrIDTooLong = errors.New("id too long for one file per record")
+
 // Options of a run.
 type Options struct {
 	// Output is the folder the inGitDB database is written to. Not used by a dry run.
@@ -52,10 +62,16 @@ type Options struct {
 	MaxReads int64
 	// PageSize is how many documents one request reads (default DefaultPageSize).
 	PageSize int
-	// KeepRejected also writes each rejected document (masked) under
-	// .datatug-mirror/rejected/. By default only its path, reasons and field
+	// KeepRejected also writes each rejected document under
+	// .datatug-mirror/rejected/, as read with only the policy's masks applied:
+	// its undeclared fields and the values that break its definition are
+	// written in clear. By default only its path, reasons and declared field
 	// names are kept, in the report.
 	KeepRejected bool
+	// ContinueOnLongIDs copies the rest when a document's id is too long for
+	// one file per record, and reports it (the run is then incomplete),
+	// instead of failing at the first one.
+	ContinueOnLongIDs bool
 	// Prune deletes the record files whose document no longer exists, in the
 	// collections this run read completely. By default they are only reported.
 	Prune bool
@@ -66,6 +82,10 @@ type Options struct {
 	Snapshot bool
 	// Source is how the source is shown in the report (never a credential).
 	Source string
+	// Identity is the database read. The output records the identity of the
+	// source it was created from, and every later run into it, its resume
+	// and its prune, must read the same one.
+	Identity SourceIdentity
 	// Log receives one line per collection and the summary (nil: discarded).
 	Log io.Writer
 	// Progress, when set, receives one line per page read.
@@ -93,6 +113,10 @@ type CollectionResult struct {
 	// OtherParentPaths shows those paths with every unpinned id as "*".
 	OtherParents     int64    `json:"other_parents,omitempty"`
 	OtherParentPaths []string `json:"other_parent_paths,omitempty"`
+	// IDTooLong counts documents not copied because their record file name
+	// (the encoded id) is longer than 255 bytes, or their path longer than the
+	// system writes: file per record does not hold them.
+	IDTooLong int64 `json:"not_copied_id_too_long,omitempty"`
 	// Resumed says part of the collection was read by an earlier run.
 	Resumed  bool `json:"resumed,omitempty"`
 	Complete bool `json:"complete"`
@@ -102,8 +126,10 @@ type CollectionResult struct {
 
 // Rejection is a document that was read but not written into the database:
 // it does not fit its definition, or its file cannot be written. The report
-// keeps its path, the reasons and the names of the fields concerned, never
-// its values; Options.KeepRejected also keeps its masked record.
+// keeps its path, the reasons and the names of the declared fields concerned,
+// never a value. A field name the definition does not declare, and a map key,
+// may be data (an email used as a key): they are only counted, with a
+// fingerprint that tells equal sets of names apart within one run.
 type Rejection struct {
 	Path       string   `json:"path"`
 	Collection string   `json:"collection"`
@@ -123,12 +149,13 @@ type OutsideRead struct {
 // Report is the result of a run. Without Snapshot and resume it holds no
 // time, host or credential, so the same source and options give the same report.
 type Report struct {
-	Format        string `json:"format"`
-	Source        string `json:"source"`
-	Under         string `json:"under,omitempty"`
-	DryRun        bool   `json:"dry_run,omitempty"`
-	Complete      bool   `json:"complete"`
-	BudgetReached bool   `json:"budget_reached,omitempty"`
+	Format         string          `json:"format"`
+	Source         string          `json:"source"`
+	SourceIdentity *SourceIdentity `json:"source_identity,omitempty"`
+	Under          string          `json:"under,omitempty"`
+	DryRun         bool            `json:"dry_run,omitempty"`
+	Complete       bool            `json:"complete"`
+	BudgetReached  bool            `json:"budget_reached,omitempty"`
 	// Resumed says the run continued one that stopped at its read budget.
 	Resumed    bool     `json:"resumed,omitempty"`
 	ReadTime   string   `json:"read_time,omitempty"`
@@ -173,6 +200,10 @@ type run struct {
 	seen     map[string]bool       // every document path read and matched to a collection
 	copied   map[string]bool       // document paths written into the database
 	files    map[string]string     // lower-cased record file -> document path, for collisions
+	multi    map[string]*multiFile // record files kept in one file, being read
+	folders  map[string]string     // lower-cased folder of a record -> the folder as written
+	salt     []byte                // of the fingerprints of undeclared names, new each run
+	defsHash string                // digest of the definition files
 	masked   map[string]map[string]bool
 	others   map[string]map[string]bool // spec id -> other-parent paths
 	outside  map[string]int64
@@ -208,11 +239,18 @@ func Run(ctx context.Context, src Source, defs *Definitions, policy *Policy, opt
 		seen:     map[string]bool{},
 		copied:   map[string]bool{},
 		files:    map[string]string{},
+		folders:  map[string]string{},
+		multi:    map[string]*multiFile{},
+		salt:     make([]byte, 16),
 		masked:   map[string]map[string]bool{},
 		others:   map[string]map[string]bool{},
 		outside:  map[string]int64{},
 		complete: map[string]bool{},
 		resumed:  map[string]bool{},
+	}
+	_, _ = rand.Read(r.salt) // never fails
+	if !opts.DryRun {
+		r.report.SourceIdentity = &opts.Identity
 	}
 	if opts.Under != "" {
 		r.under = strings.Split(opts.Under, "/")
@@ -228,6 +266,9 @@ func Run(ctx context.Context, src Source, defs *Definitions, policy *Policy, opt
 	}
 	plan := r.plan()
 	r.planned = plan
+	if problems := r.knownIDProblems(); len(problems) > 0 {
+		return nil, fmt.Errorf("%w: %s", ErrIDTooLong, strings.Join(problems, "; "))
+	}
 	if !opts.DryRun {
 		if err := r.prepareOutput(plan); err != nil {
 			return nil, err
@@ -237,8 +278,16 @@ func Run(ctx context.Context, src Source, defs *Definitions, policy *Policy, opt
 	if err := r.listRoots(); err != nil {
 		return nil, err
 	}
+	var failed error
 	for _, item := range plan {
-		if err := r.execute(item); err != nil {
+		if err := r.execute(item); errors.Is(err, ErrIDTooLong) && !opts.DryRun {
+			// Keep the report and the resume state true to what was written: the
+			// run stopped at this document, and a resume starts at its page.
+			failed = err
+			r.stopped = true
+			r.report.Incomplete = append(r.report.Incomplete, "stopped: "+strings.TrimPrefix(err.Error(), ErrIDTooLong.Error()+": "))
+			break
+		} else if err != nil {
 			return nil, err
 		}
 	}
@@ -251,7 +300,41 @@ func Run(ctx context.Context, src Source, defs *Definitions, policy *Policy, opt
 		}
 	}
 	r.summarize()
-	return r.report, nil
+	return r.report, failed
+}
+
+// knownIDProblems are the ids a run knows before it reads (those of --space or
+// --path, and those the policy's paths name) that are too long for the file
+// or folder name one file per record gives them, in the collections the run
+// reads. A dry run and a run fail on them before any read. The ids of the
+// documents a query returns are known only once read.
+func (r *run) knownIDProblems() []string {
+	var problems []string
+	for _, spec := range r.defs.Specs {
+		if !r.covers(spec) || r.results[spec.ID].Action != ActionCopy && r.results[spec.ID].Action != ActionMask {
+			continue
+		}
+		for _, pattern := range r.patterns[spec.ID] {
+			bound := r.bind(pattern)
+			if bound == nil {
+				continue
+			}
+			for i := 1; i < len(bound); i += 2 {
+				last := i == len(bound)-1
+				if bound[i] == "*" || last && spec.multi {
+					continue
+				}
+				name := keyEncoding.Encode(bound[i])
+				if last {
+					name = spec.prefix + name + spec.suffix
+				}
+				if tooLong := nameTooLong(name); tooLong != "" {
+					problems = appendOnce(problems, fmt.Sprintf("collection %s: the id %s at level %d: %s", spec.ID, shown(bound[i]), i/2+1, tooLong))
+				}
+			}
+		}
+	}
+	return problems
 }
 
 // specPatterns are the allowed paths of spec as 2*depth segments: the
@@ -550,6 +633,9 @@ func (r *run) execute(item *planItem) error {
 
 // markDone records that item was read to its end.
 func (r *run) markDone(item *planItem) error {
+	if err := r.flushPending(); err != nil {
+		return err
+	}
 	item.done = true
 	r.state.item(item.label).Done = true
 	for _, spec := range item.specs {
@@ -634,31 +720,59 @@ func (r *run) process(item *planItem, doc Doc) error {
 	}
 	r.seen[doc.Path] = true
 	id := parts[len(parts)-1]
-	file, reasons := spec.recordFile(parts)
-	var fields []string
-	if reasons != "" {
-		return r.reject(spec, doc.Path, []string{reasons}, nil, nil)
+	file, tooLong := spec.recordFile(parts)
+	if tooLong == "" {
+		tooLong = pathTooLong(filepath.Join(r.opts.Output, file))
 	}
-	if other, taken := r.files[strings.ToLower(file)]; taken {
-		return r.reject(spec, doc.Path, []string{fmt.Sprintf("its record file name differs only in case from the one of %s: a case-insensitive filesystem would keep one of them", other)}, nil, nil)
+	if tooLong != "" {
+		// The definition decides the form: one file per record holds an id only
+		// when its file name fits. The run fails here, unless asked to go on.
+		if !r.opts.ContinueOnLongIDs {
+			return fmt.Errorf("%w: collection %s, document %s: %s; declare the collection with all its records in one file (record_file.type map[$record_id]map[$field_name]any), or pass --continue-on-long-ids to copy the rest and report it", ErrIDTooLong, spec.ID, shown(doc.Path), tooLong)
+		}
+		result.IDTooLong++
+		_, _ = fmt.Fprintf(r.opts.Log, "not copied (id too long for one file per record): %s: %s\n", shown(doc.Path), tooLong)
+		return nil
+	}
+	if collision := r.caseCollision(file, spec.multi); collision != "" {
+		return r.reject(spec, doc.Path, []string{collision}, nil, nil)
 	}
 	converted, err := convertRecord(doc.Data, spec.Def)
-	if err != nil {
-		return r.reject(spec, doc.Path, []string{err.Error()}, nil, nil)
+	var bad *valueError
+	if errors.As(err, &bad) {
+		column, _, nested := strings.Cut(bad.path, ".")
+		if spec.Def.Columns[column] == nil {
+			return r.reject(spec, doc.Path, []string{r.undeclared([]string{column})}, nil, nil)
+		}
+		where := map[bool]string{true: " (inside it)"}[nested]
+		return r.reject(spec, doc.Path, []string{fmt.Sprintf("field %q holds a Firestore value of type %s%s that the mirror cannot write", column, bad.kind, where)}, []string{column}, nil)
 	}
-	for _, field := range applyMasks(converted, r.policy.Mask[spec.ID]) {
+	for _, field := range applyMasks(converted, r.policy.Mask[spec.ID], spec.Def) {
 		if r.masked[spec.ID] == nil {
 			r.masked[spec.ID] = map[string]bool{}
 		}
 		r.masked[spec.ID][field] = true
 	}
-	content := encodeRecord(converted)
-	var problems []string
-	for _, problem := range datavalidator.ValidateRecordData(spec.Def, recordKey(id), decodeRecord(content)) {
-		problems = append(problems, reasonOf(problem))
-		if problem.FieldName != "" && !slices.Contains(fields, problem.FieldName) {
-			fields = append(fields, problem.FieldName)
+	content := spec.encode(converted)
+	key := recordKey(id)
+	if spec.multi {
+		key = id // a record kept in one file is keyed by its id as it is
+	}
+	readBack, _ := spec.decode(content) // the mirror's own encoding always reads back (TestEncodeYAMLRoundTrips)
+	var problems, fields, undeclared []string
+	for _, problem := range datavalidator.ValidateRecordData(spec.Def, key, readBack) {
+		switch {
+		case problem.FieldName != "" && spec.Def.Columns[problem.FieldName] == nil:
+			undeclared = append(undeclared, problem.FieldName)
+		default:
+			problems = append(problems, reasonOf(problem))
+			if problem.FieldName != "" && !slices.Contains(fields, problem.FieldName) {
+				fields = append(fields, problem.FieldName)
+			}
 		}
+	}
+	if len(undeclared) > 0 {
+		problems = append([]string{r.undeclared(undeclared)}, problems...)
 	}
 	for _, problem := range temporalProblems(spec.Def, converted) {
 		problems = append(problems, problem)
@@ -668,20 +782,69 @@ func (r *run) process(item *planItem, doc Doc) error {
 	if len(problems) > 0 {
 		return r.reject(spec, doc.Path, problems, fields, content)
 	}
-	written, err := writeFileIfChanged(filepath.Join(r.opts.Output, file), content)
-	if err != nil {
-		return err
-	}
-	r.files[strings.ToLower(file)] = doc.Path
-	if written {
-		r.report.Written++
+	if spec.multi {
+		multi := r.pending(spec, file)
+		multi.records[id], multi.unsaved[id] = converted, converted
 	} else {
-		r.report.Unchanged++
+		written, err := writeFileIfChanged(filepath.Join(r.opts.Output, file), content)
+		if err != nil {
+			return err
+		}
+		r.files[strings.ToLower(file)] = doc.Path
+		if written {
+			r.report.Written++
+		} else {
+			r.report.Unchanged++
+		}
+	}
+	for dir := filepath.Dir(file); dir != "."; dir = filepath.Dir(dir) {
+		r.folders[strings.ToLower(dir)] = dir
 	}
 	result.Records++
 	r.report.Records++
 	r.copied[doc.Path] = true
 	return nil
+}
+
+// splitLast is a document path without its id, and the id.
+func splitLast(path string) (string, string) {
+	at := strings.LastIndexByte(path, '/')
+	return path[:at], path[at+1:]
+}
+
+// caseCollision says why a record file cannot be written because it, or a
+// folder it is in, differs only in case from one an earlier document of this
+// run (or of the runs it resumes) was written to, or is "". On a
+// case-insensitive filesystem (macOS and Windows by default) the two would be
+// one file, or one folder holding the records of two parents.
+//
+// The ids in a file that keeps all records of a collection are keys of one
+// map, which no filesystem folds: only its folders are checked (multi).
+func (r *run) caseCollision(file string, multi bool) string {
+	if other, taken := r.files[strings.ToLower(file)]; taken && !multi {
+		return fmt.Sprintf("its record file name differs only in case from the one of %s: a case-insensitive filesystem would keep one of them", other)
+	}
+	var dirs []string
+	for dir := filepath.Dir(file); dir != "."; dir = filepath.Dir(dir) {
+		dirs = append(dirs, dir)
+	}
+	for _, dir := range slices.Backward(dirs) { // the folder nearest the root names the parent
+		if other, taken := r.folders[strings.ToLower(dir)]; taken && other != dir {
+			return fmt.Sprintf("its folder %s differs only in case from the folder %s of other records: a case-insensitive filesystem would put both in one", filepath.ToSlash(dir), filepath.ToSlash(other))
+		}
+	}
+	return ""
+}
+
+// undeclared describes field names the definition does not declare without
+// naming them: a name can be data. The fingerprint is keyed by this run's
+// salt, so it cannot be looked up, and equal sets of names have equal
+// fingerprints within the run.
+func (r *run) undeclared(names []string) string {
+	names = slices.Compact(slices.Sorted(slices.Values(names)))
+	mac := hmac.New(sha256.New, r.salt)
+	mac.Write([]byte(strings.Join(names, "\x00")))
+	return fmt.Sprintf("%d field(s) the definition does not declare (names not shown, as they may be data; fingerprint %x)", len(names), mac.Sum(nil)[:4])
 }
 
 // allowed reports whether the policy's paths allow a document path of spec.
@@ -726,19 +889,27 @@ func (r *run) reject(spec *Spec, path string, reasons, fields []string, content 
 	}
 	file := filepath.Join(r.opts.Output, stateDirName, "rejected")
 	for _, part := range strings.Split(path, "/") {
-		file = filepath.Join(file, encodeID(part)) // the record file of a rejected document was writable: its names fit
+		file = filepath.Join(file, keyEncoding.Encode(part)) // the record file of a rejected document was writable: its names fit
+	}
+	if tooLong := pathTooLong(file + ".json"); tooLong != "" {
+		last := &r.rejected[len(r.rejected)-1]
+		last.Reasons = append(last.Reasons, "its rejected record was not kept: "+tooLong)
+		return nil
 	}
 	_, err := writeFileIfChanged(file+".json", content)
 	return err
 }
 
 // valueFreeMessages start the inGitDB findings that name no value.
-var valueFreeMessages = []string{"missing required field", "wrong type for field", "undeclared field", "computed column"}
+var valueFreeMessages = []string{"missing required field", "wrong type for field", "computed column"}
 
 // reasonOf describes a validation finding without the value it concerns: a
 // finding that may quote a value (an enum or length check) is named by its
-// field alone.
+// field alone, and an undeclared field is not named.
 func reasonOf(problem ingitdb.ValidationError) string {
+	if strings.HasPrefix(problem.Message, "undeclared field") {
+		return "a field the definition does not declare (its name is not shown, as it may be data)"
+	}
 	for _, prefix := range valueFreeMessages {
 		if strings.HasPrefix(problem.Message, prefix) {
 			return describe(problem)
@@ -760,14 +931,20 @@ func describe(problem ingitdb.ValidationError) string {
 // prepareOutput loads the resume state, clears what a previous run left in
 // the state folder (unless it is resumed), and writes the definitions.
 func (r *run) prepareOutput(plan []*planItem) error {
+	if err := r.claimOutput(); err != nil {
+		return err
+	}
+	digest, err := r.defs.CopyTo(r.opts.Output)
+	if err != nil {
+		return err
+	}
+	r.defsHash = digest
 	r.state = r.loadState(plan)
 	if r.state == nil {
 		r.state = r.newState()
-		if err := removeAll(filepath.Join(r.opts.Output, stateDirName, "rejected")); err != nil {
-			return err
-		}
+		return firstError(removeAll(filepath.Join(r.opts.Output, stateDirName, "rejected")), removeAll(partialDir(r.opts.Output)))
 	}
-	return r.defs.CopyTo(r.opts.Output)
+	return r.loadPartials()
 }
 
 // finish fills what is known once every read is done.
@@ -775,26 +952,42 @@ func (r *run) finish() error {
 	r.merge()
 	for _, spec := range r.defs.Specs {
 		result := r.results[spec.ID]
-		result.Complete = result.Selected && r.complete[spec.ID] && result.Rejected == 0
+		result.Complete = result.Selected && r.complete[spec.ID] && result.Rejected == 0 && result.IDTooLong == 0
 		result.Masked = sortedKeys(r.masked[spec.ID])
 		result.OtherParentPaths = sortedKeys(r.others[spec.ID])
 		result.Resumed = r.resumed[spec.ID]
 		if !r.complete[spec.ID] || r.resumed[spec.ID] {
 			continue // stale files are known only for a collection this run read from its start
 		}
+		gone := map[string][]string{} // record file kept in one file -> ids no longer in the source
 		for _, path := range existingRecords(r.opts.Output, spec) {
 			if !r.inScope(path) || r.seen[path] || !r.allowed(spec, strings.Split(path, "/")) {
 				continue
 			}
 			file, _ := spec.recordFile(strings.Split(path, "/"))
+			shownAs := filepath.ToSlash(file)
+			if spec.multi {
+				_, id := splitLast(path)
+				shownAs += "#" + keyEncoding.Encode(id)
+				gone[file] = append(gone[file], id)
+			}
 			if !r.opts.Prune {
-				r.report.Stale = append(r.report.Stale, filepath.ToSlash(file))
+				r.report.Stale = append(r.report.Stale, shownAs)
 				continue
 			}
-			if err := removeFile(filepath.Join(r.opts.Output, file)); err != nil {
-				return err
+			if !spec.multi {
+				if err := removeFile(filepath.Join(r.opts.Output, file)); err != nil {
+					return err
+				}
 			}
-			r.report.Pruned = append(r.report.Pruned, filepath.ToSlash(file))
+			r.report.Pruned = append(r.report.Pruned, shownAs)
+		}
+		for _, file := range slices.Sorted(maps.Keys(gone)) {
+			if r.opts.Prune {
+				if err := pruneRecords(r.opts.Output, file, spec, gone[file]); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	for path := range r.copied {
@@ -878,6 +1071,13 @@ func (r *run) fillReport() {
 			r.report.Incomplete = appendOnce(r.report.Incomplete, fmt.Sprintf("collection %s cannot be written: %s", spec.ID, result.Note))
 		}
 	}
+	var tooLong int64
+	for _, result := range r.report.Collections {
+		tooLong += result.IDTooLong
+	}
+	if tooLong > 0 {
+		r.report.Incomplete = appendOnce(r.report.Incomplete, fmt.Sprintf("%d document(s) were not copied: their id is too long for file per record (a record file name holds at most 255 bytes)", tooLong))
+	}
 	if len(r.report.Rejected) > 0 {
 		r.report.Incomplete = appendOnce(r.report.Incomplete, fmt.Sprintf("%d document(s) were not written into the database (see rejected)", len(r.report.Rejected)))
 	}
@@ -921,6 +1121,9 @@ func (r *run) summarize() {
 			}
 			if result.OtherParents > 0 {
 				line += fmt.Sprintf(", %d at other parents not copied (%s)", result.OtherParents, strings.Join(result.OtherParentPaths, ", "))
+			}
+			if result.IDTooLong > 0 {
+				line += fmt.Sprintf(", %d not copied: id too long for file per record", result.IDTooLong)
 			}
 			if result.BelowMissingParent > 0 {
 				line += fmt.Sprintf(", %d below a parent document that does not exist", result.BelowMissingParent)

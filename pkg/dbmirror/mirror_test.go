@@ -29,6 +29,18 @@ func runExample(t *testing.T, src Source, opts Options) (*Report, string) {
 	return report, opts.Output
 }
 
+// claimed writes the output state of a mirror of source into out.
+func claimed(t *testing.T, out string, source SourceIdentity) {
+	t.Helper()
+	content, _ := json.Marshal(outputState{Format: outputFormat, Source: source, Encoding: keyEncoding.Name()})
+	if err := os.MkdirAll(filepath.Join(out, stateDirName), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(outputFile(out), content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func runWith(t *testing.T, src Source, policy *Policy, opts Options) *Report {
 	t.Helper()
 	report, err := Run(context.Background(), src, testDefinitions(t), policy, opts)
@@ -94,8 +106,8 @@ func TestRunWritesTheMirrorLayout(t *testing.T) {
 		t.Errorf("teams/t1.json:\n%s", got)
 	}
 	// Masks: strings become ***, other values go.
-	if got := readFile(t, filepath.Join(out, "ext/crm/customers/$records/c1.json")); !strings.Contains(got, `"email": "***"`) || !strings.Contains(got, `"phone": "***"`) ||
-		strings.Contains(got, "someone@example.com") || strings.Contains(got, "+000") || !strings.Contains(got, `"not a map"`) {
+	if got := readFile(t, filepath.Join(out, "ext/crm/customers/$records/c1.json")); !strings.Contains(got, `"email": "***"`) || !strings.Contains(got, `"contacts": []`) ||
+		strings.Contains(got, "someone@example.com") || strings.Contains(got, "+000") || strings.Contains(got, `"work"`) {
 		t.Errorf("masked customer:\n%s", got)
 	}
 	// The definitions are copied; the mirror's own example records are not.
@@ -120,7 +132,7 @@ func TestRunWritesTheMirrorLayout(t *testing.T) {
 	if r := result(t, report, "ext/bundles"); r.Action != ActionUnsupported || !strings.Contains(r.Note, "several records") {
 		t.Errorf("%+v", r)
 	}
-	if r := result(t, report, "ext/customers"); r.Action != ActionMask || !slices.Equal(r.Masked, []string{"contacts.*.phone", "email", "name"}) {
+	if r := result(t, report, "ext/customers"); r.Action != ActionMask || !slices.Equal(r.Masked, []string{"contacts", "email", "name"}) {
 		t.Errorf("%+v", r)
 	}
 	events := result(t, report, "teams/ext/events")
@@ -194,13 +206,13 @@ func TestRunRejectedDocumentsKeepNoValues(t *testing.T) {
 		t.Fatalf("%+v", report.Rejected)
 	}
 	t3 := report.Rejected[0]
-	if t3.Path != "teams/t3" || !slices.Equal(t3.Fields, []string{"kind", "phone"}) || !strings.Contains(strings.Join(t3.Reasons, ";"), `undeclared field "phone"`) {
+	if t3.Path != "teams/t3" || !slices.Equal(t3.Fields, []string{"kind"}) || !strings.Contains(strings.Join(t3.Reasons, ";"), "1 field(s) the definition does not declare") {
 		t.Errorf("%+v", t3)
 	}
 	if t4 := report.Rejected[1]; !slices.Equal(t4.Fields, []string{"createdAt"}) || !strings.Contains(t4.Reasons[0], "not a valid datetime") {
 		t.Errorf("%+v", t4)
 	}
-	for _, secret := range []string{"+353-PII", "SECRET-KIND", "PERSONAL-123"} {
+	for _, secret := range []string{"+353-PII", "SECRET-KIND", "PERSONAL-123", "phone"} {
 		if strings.Contains(allBytes(t, out), secret) || strings.Contains(log.String(), secret) {
 			t.Errorf("%s reached the output or the log", secret)
 		}
@@ -441,7 +453,7 @@ func TestRunStopsAtTheReadBudgetAndResumes(t *testing.T) {
 	}
 	log.Reset()
 	other := runWith(t, src, testPolicy(t), Options{Output: out, MaxReads: 4, PageSize: 2, Collections: []string{"teams"}, Log: &log})
-	if other.Resumed || !strings.Contains(log.String(), "does not match this run: starting over") {
+	if other.Resumed || !strings.Contains(log.String(), "the selection (--collections, --space, --path) changed since the run that stopped at its read budget: starting over") {
 		t.Errorf("%v\n%s", other.Resumed, log.String())
 	}
 	if err := os.WriteFile(resumeFile(out), []byte("{"), 0o600); err != nil {
@@ -465,7 +477,7 @@ func TestRunResumesAMinimalState(t *testing.T) {
 	if err := json.Unmarshal([]byte(readFile(t, resumeFile(out))), &stopped); err != nil {
 		t.Fatal(err)
 	}
-	state := `{"format":"` + resumeFormat + `","fingerprint":"` + stopped.Fingerprint + `","items":{"collection teams":{"done":true}}}`
+	state := `{"format":"` + resumeFormat + `","selection":"` + stopped.Selection + `","definitions":"` + stopped.Definitions + `","policy":"` + stopped.Policy + `","items":{"collection teams":{"done":true}}}`
 	if err := os.WriteFile(resumeFile(out), []byte(state), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -517,25 +529,35 @@ func TestRunWritesEveryIDSafely(t *testing.T) {
 	for _, id := range []string{"c", "C", `..\x`, "a:b", "CON", "x.", long} {
 		src.docs["teams/"+id] = map[string]any{"title": "t", "createdAt": created}
 	}
+	// By default the run fails at the long id, and its report says so.
+	out := t.TempDir()
+	failed, err := Run(context.Background(), src, testDefinitions(t), testPolicy(t), Options{Output: out, Collections: []string{"teams"}})
+	if !errors.Is(err, ErrIDTooLong) || !strings.Contains(err.Error(), "collection teams") || !strings.Contains(err.Error(), "305 bytes") ||
+		failed == nil || failed.Complete || !strings.Contains(strings.Join(failed.Incomplete, ";"), "stopped: collection teams") {
+		t.Fatalf("%v %+v", err, failed)
+	}
+	if saved := readFile(t, filepath.Join(out, stateDirName, "report.json")); !strings.Contains(saved, `"complete": false`) {
+		t.Error(saved)
+	}
 	var log bytes.Buffer
-	report, out := runExample(t, src, Options{Collections: []string{"teams"}, Log: &log})
+	report, out := runExample(t, src, Options{Collections: []string{"teams"}, Log: &log, ContinueOnLongIDs: true})
 	for _, file := range []string{"C.json", "~2E.~5Cx.json", "a~3Ab.json", "~43ON.json", "x~2E.json"} {
 		if _, err := os.Stat(filepath.Join(out, "teams", file)); err != nil {
 			t.Errorf("%s: %v", file, err)
 		}
 	}
-	if len(report.Rejected) != 2 || report.Rejected[0].Path != "teams/c" {
+	if len(report.Rejected) != 1 || report.Rejected[0].Path != "teams/c" || !strings.Contains(report.Rejected[0].Reasons[0], "differs only in case") {
 		t.Fatalf("%+v", report.Rejected)
 	}
-	reasons := report.Rejected[0].Reasons[0] + report.Rejected[1].Reasons[0]
-	if !strings.Contains(reasons, "differs only in case") || !strings.Contains(reasons, "too long") {
-		t.Error(reasons)
+	// An id too long for file per record is counted, not rejected and not lost.
+	if r := result(t, report, "teams"); r.IDTooLong != 1 || r.Complete || !strings.Contains(strings.Join(report.Incomplete, ";"), "1 document(s) were not copied: their id is too long for file per record") {
+		t.Errorf("%+v %v", r, report.Incomplete)
 	}
 	if strings.Contains(log.String(), long) || !strings.Contains(log.String(), strings.Repeat("x", 194)+"…") {
 		t.Error("a long id is not shortened in the log")
 	}
 	// The re-run finds every record again (the names decode), so none is stale.
-	if again, _ := runExample(t, src, Options{Output: out, Collections: []string{"teams"}}); len(again.Stale) != 0 || again.Written != 0 {
+	if again, _ := runExample(t, src, Options{Output: out, Collections: []string{"teams"}, ContinueOnLongIDs: true}); len(again.Stale) != 0 || again.Written != 0 {
 		t.Errorf("%+v", again)
 	}
 }
@@ -608,22 +630,21 @@ func TestRunReportsReadAndWriteFailures(t *testing.T) {
 	}
 	// A record cannot be written.
 	out := t.TempDir()
+	claimed(t, out, SourceIdentity{})
 	if err := os.MkdirAll(filepath.Join(out, "teams", "t1.json"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Run(context.Background(), exampleSource(), testDefinitions(t), testPolicy(t), Options{Output: out, Under: "teams/t1"}); err == nil {
+	if _, err := Run(context.Background(), exampleSource(), testDefinitions(t), testPolicy(t), Options{Output: out, Under: "teams/t1"}); err == nil || errors.Is(err, ErrUsage) {
 		t.Error("no error for the record")
 	}
 	// A kept rejected record cannot be written.
 	out = t.TempDir()
-	if err := os.MkdirAll(filepath.Join(out, stateDirName), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	claimed(t, out, SourceIdentity{})
 	withSeam(t, &removeAll, func(path string) error {
 		_ = os.RemoveAll(path)
 		return os.WriteFile(path, nil, 0o600) // the rejected folder is a file
 	})
-	if _, err := Run(context.Background(), exampleSource(), testDefinitions(t), testPolicy(t), Options{Output: out, KeepRejected: true}); err == nil {
+	if _, err := Run(context.Background(), exampleSource(), testDefinitions(t), testPolicy(t), Options{Output: out, KeepRejected: true}); err == nil || errors.Is(err, ErrUsage) {
 		t.Error("no error for the rejected record")
 	}
 	// The rejected folder of the last run cannot be cleared.
@@ -635,6 +656,7 @@ func TestRunReportsReadAndWriteFailures(t *testing.T) {
 	// The report, the resume state, or a stopped run's state cannot be written, or a finished run's state removed.
 	for name, blocked := range map[string]string{"report": "report.json", "resume": "resume.json"} {
 		out := t.TempDir()
+		claimed(t, out, SourceIdentity{})
 		if err := os.MkdirAll(filepath.Join(out, stateDirName, blocked, "x"), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -642,8 +664,8 @@ func TestRunReportsReadAndWriteFailures(t *testing.T) {
 		if name == "resume" {
 			opts.Restart = true
 		}
-		if _, err := Run(context.Background(), exampleSource(), testDefinitions(t), testPolicy(t), opts); err == nil {
-			t.Errorf("%s: no error", name)
+		if _, err := Run(context.Background(), exampleSource(), testDefinitions(t), testPolicy(t), opts); err == nil || errors.Is(err, ErrUsage) {
+			t.Errorf("%s: %v", name, err)
 		}
 	}
 	withSeam(t, &removeFile, func(string) error { return errBoom })
@@ -661,6 +683,7 @@ func TestRunReportsValidationFindings(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(out, "teams", "much-too-long-id.json"), []byte("{\"title\":\"x\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"kind\":\"SECRET-KIND\"}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	claimed(t, out, SourceIdentity{})
 	src := newMemSource()
 	report, _ := runExample(t, src, Options{Output: out, Collections: []string{"teams"}})
 	if len(report.Validation) != 2 || !strings.HasPrefix(report.Validation[0], "teams/much-too-long-id.json: ") || report.Complete || strings.Contains(strings.Join(report.Validation, ";"), "SECRET-KIND") {
@@ -690,9 +713,10 @@ func TestReasonOf(t *testing.T) {
 
 func TestRunRejectsAValueItCannotKeep(t *testing.T) {
 	src := newMemSource()
-	src.docs["teams/t1"] = map[string]any{"title": "x", "createdAt": created, "odd": struct{}{}}
+	src.docs["teams/t1"] = map[string]any{"title": map[string]any{"SECRET-KEY": struct{}{}}, "createdAt": created}
+	src.docs["teams/t2"] = map[string]any{"title": "x", "createdAt": created, "SECRET-NAME": struct{}{}}
 	report, out := runExample(t, src, Options{Collections: []string{"teams"}, KeepRejected: true})
-	if len(report.Rejected) != 1 || !strings.Contains(report.Rejected[0].Reasons[0], "struct {}") {
+	if len(report.Rejected) != 2 || report.Rejected[0].Reasons[0] != `field "title" holds a Firestore value of type struct {} (inside it) that the mirror cannot write` || !strings.HasPrefix(report.Rejected[1].Reasons[0], "1 field(s) the definition does not declare") {
 		t.Errorf("%+v", report.Rejected)
 	}
 	if _, err := os.Stat(filepath.Join(out, stateDirName, "rejected", "teams", "t1.json")); !os.IsNotExist(err) {
@@ -702,7 +726,7 @@ func TestRunRejectsAValueItCannotKeep(t *testing.T) {
 
 func TestValidateOutputReportsAValidatorError(t *testing.T) {
 	out := t.TempDir()
-	if err := testDefinitions(t).CopyTo(out); err != nil {
+	if _, err := testDefinitions(t).CopyTo(out); err != nil {
 		t.Fatal(err)
 	}
 	withSeam(t, &validateDatabase, func(context.Context, string, *ingitdbDefinition) (*ingitdb.ValidationResult, error) {

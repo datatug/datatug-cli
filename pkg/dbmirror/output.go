@@ -2,10 +2,14 @@ package dbmirror
 
 import (
 	"bytes"
+	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
+	"unicode/utf16"
 )
 
 // stateDirName is the folder of the output that describes the last run: its
@@ -72,20 +76,30 @@ func existingRecords(out string, spec *Spec) []string {
 		col := spec.chain[level]
 		recordsDir := filepath.Join(dir, col.RecordFile.RecordsBasePath())
 		entries, _ := os.ReadDir(recordsDir) // a missing folder holds no record
+		if level == len(spec.chain)-1 && spec.multi {
+			records, err := readRecords(filepath.Join(recordsDir, spec.Def.RecordFile.Name), spec)
+			if err != nil {
+				return // a file the mirror cannot read: left as it is (a run that reads its records fails on it)
+			}
+			for _, id := range slices.Sorted(maps.Keys(records)) {
+				found = append(found, strings.Join(append(slices.Clone(parts), spec.Segments[level], id), "/"))
+			}
+			return
+		}
 		if level == len(spec.chain)-1 {
 			for _, entry := range entries {
 				name := entry.Name()
 				if !entry.Type().IsRegular() || !strings.HasPrefix(name, spec.prefix) || !strings.HasSuffix(name, spec.suffix) || len(name) <= len(spec.prefix)+len(spec.suffix) {
 					continue
 				}
-				if id, ok := decodeID(name[len(spec.prefix) : len(name)-len(spec.suffix)]); ok {
+				if id, ok := keyEncoding.Decode(name[len(spec.prefix) : len(name)-len(spec.suffix)]); ok {
 					found = append(found, strings.Join(append(slices.Clone(parts), spec.Segments[level], id), "/"))
 				}
 			}
 			return
 		}
 		for _, entry := range entries {
-			id, ok := decodeID(entry.Name())
+			id, ok := keyEncoding.Decode(entry.Name())
 			if !entry.IsDir() || !ok {
 				continue
 			}
@@ -95,4 +109,17 @@ func existingRecords(out string, spec *Spec) []string {
 	}
 	walk(0, filepath.Join(out, spec.rootRel), nil)
 	return found
+}
+
+// maxPathChars is the longest path of a file the output writes: Windows
+// counts 259 characters (UTF-16 code units) without long-path support, Linux
+// and macOS a little more than 1000 bytes at the least.
+var maxPathChars = map[bool]int{true: 259, false: 1023}[runtime.GOOS == "windows"]
+
+// pathTooLong is why a file cannot be written at path, or "".
+func pathTooLong(path string) string {
+	if n := len(utf16.Encode([]rune(path))); n > maxPathChars {
+		return fmt.Sprintf("its file path would be %d characters long; this system writes at most %d", n, maxPathChars)
+	}
+	return ""
 }

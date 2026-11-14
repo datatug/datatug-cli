@@ -149,7 +149,15 @@ func jsonValue(v any, path string) (any, error) {
 		}
 		return fields, nil
 	}
-	return nil, fmt.Errorf("field %q holds a Firestore value of type %T that the mirror cannot write", strings.TrimPrefix(path, "."), v)
+	return nil, &valueError{path: strings.TrimPrefix(path, "."), kind: fmt.Sprintf("%T", v)}
+}
+
+// valueError is a value of a type the mirror has no form for, at path (field
+// names and map keys joined by "."; the keys may be data).
+type valueError struct{ path, kind string }
+
+func (e *valueError) Error() string {
+	return fmt.Sprintf("field %q holds a Firestore value of type %s that the mirror cannot write", e.path, e.kind)
 }
 
 func joinField(path, key string) string {
@@ -254,9 +262,19 @@ func decodeRecord(content []byte) map[string]any {
 // value is removed (an item of an array becomes null). A path is field names
 // joined by "."; "*" stands for every key of a map or every item of an array.
 // It returns the masked paths that matched a value.
-func applyMasks(data map[string]any, masks []string) []string {
+//
+// A masked untyped column (any) becomes "***" whatever it holds, so a
+// required one still holds a value.
+func applyMasks(data map[string]any, masks []string, def *ingitdb.CollectionDef) []string {
 	var hit []string
 	for _, mask := range masks {
+		if column := def.Columns[mask]; column != nil && column.Type == ingitdb.ColumnTypeAny {
+			if _, ok := data[mask]; ok {
+				data[mask] = maskedString
+				hit = append(hit, mask)
+			}
+			continue
+		}
 		if maskPath(data, strings.Split(mask, ".")) {
 			hit = append(hit, mask)
 		}

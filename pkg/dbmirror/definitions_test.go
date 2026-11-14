@@ -76,11 +76,13 @@ func TestSpecLayout(t *testing.T) {
 		return &ingitdb.CollectionDef{RecordFile: &ingitdb.RecordFileDef{Name: name, Format: format, RecordType: ingitdb.SingleRecord}}
 	}
 	for want, chain := range map[string][]*ingitdb.CollectionDef{
-		"has no record_file":    {{}},
-		"must name the file":    {single("{key}-{title}.json", ingitdb.RecordFormatJSON)},
-		"must name the file by": {single("a/{key}.json", ingitdb.RecordFormatJSON)},
-		"is not written yet":    {single("{key}.yaml", "yaml")},
-		"keeps several records": {single("{key}.json", ingitdb.RecordFormatJSON), {RecordFile: &ingitdb.RecordFileDef{Name: "all.json", RecordType: ingitdb.ListOfRecords}}},
+		"has no record_file":                          {{}},
+		"must name the file":                          {single("{key}-{title}.json", ingitdb.RecordFormatJSON)},
+		"must name the file by":                       {single("a/{key}.json", ingitdb.RecordFormatJSON)},
+		"is not written yet; use yaml or json":        {single("{key}.toml", "toml")},
+		"keeps several records":                       {single("{key}.json", ingitdb.RecordFormatJSON), {RecordFile: &ingitdb.RecordFileDef{Name: "all.json", RecordType: ingitdb.ListOfRecords}}},
+		"declare the parent with one file per record": {{RecordFile: &ingitdb.RecordFileDef{Name: "all.yaml", RecordType: ingitdb.MapOfRecords}}, single("{key}.json", "json")},
+		"must be a fixed file name":                   {{RecordFile: &ingitdb.RecordFileDef{Name: "{key}.yaml", RecordType: ingitdb.MapOfRecords, Format: "yaml"}}},
 	} {
 		spec := &Spec{chain: chain, Def: chain[len(chain)-1]}
 		if got := spec.layout(); !strings.Contains(got, want) {
@@ -131,7 +133,7 @@ func TestDefinitionFileAndCopyTo(t *testing.T) {
 	}
 	copied := &Definitions{Dir: src, Specs: defs.Specs}
 	out := t.TempDir()
-	if err := copied.CopyTo(out); err != nil {
+	if _, err := copied.CopyTo(out); err != nil {
 		t.Fatal(err)
 	}
 	for _, missing := range []string{".git", stateDirName, ".ingitdb/link", "teams/t0.json"} {
@@ -144,20 +146,20 @@ func TestDefinitionFileAndCopyTo(t *testing.T) {
 	if err := os.Chmod(unreadable, 0); err != nil {
 		t.Fatal(err)
 	}
-	if err := copied.CopyTo(t.TempDir()); err == nil {
+	if _, err := copied.CopyTo(t.TempDir()); err == nil {
 		t.Error("copied an unreadable definition")
 	}
 	if err := os.Chmod(unreadable, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := (&Definitions{Dir: filepath.Join(src, "missing")}).CopyTo(out); err == nil {
+	if _, err := (&Definitions{Dir: filepath.Join(src, "missing")}).CopyTo(out); err == nil {
 		t.Error("walked a missing folder")
 	}
 	file := filepath.Join(t.TempDir(), "file")
 	if err := os.WriteFile(file, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := copied.CopyTo(file); err == nil {
+	if _, err := copied.CopyTo(file); err == nil {
 		t.Error("wrote into a file")
 	}
 }

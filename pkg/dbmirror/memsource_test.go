@@ -123,7 +123,7 @@ func exampleSource() *memSource {
 	m.docs["teams/t2/ext/cal/events/.hidden"] = map[string]any{"title": "hidden"}
 	m.docs["teams/t2/logs/l1"] = map[string]any{"text": "a log"}
 	m.docs["ext/crm/customers/c1"] = map[string]any{"email": "someone@example.com", "name": "Some One",
-		"contacts": []any{map[string]any{"phone": "+000", "kind": "home"}, "not a map"}}
+		"contacts": []any{map[string]any{"phone": "+000", "kind": "home"}, map[string]any{"kind": "work"}}}
 	m.docs["ext/crm/secrets/s1"] = map[string]any{"code": "SECRET"}
 	m.docs["ext/crm/loose/x1"] = map[string]any{"text": "undeclared"}
 	m.docs["other/o1"] = map[string]any{"title": "a root collection the mirror does not define"}

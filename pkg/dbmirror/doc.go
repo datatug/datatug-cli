@@ -11,6 +11,12 @@
 // and which fields are masked. A collection the policy does not declare is
 // never copied: it is listed in the report instead.
 //
+// The definitions decide how records are stored: one file per record (named
+// by the encoded id, KeyEncoding; an id too long for its file name fails the
+// run) or all records of a collection in one file keyed by the real ids, in
+// YAML or JSON. An output is a mirror of one database (SourceIdentity, kept in
+// .datatug-mirror/output.json): no run, resume or prune of another touches it.
+//
 // The source is only read. The engine depends on the Source interface, whose
 // methods only read; the one Firestore implementation (firestore_source.go)
 // opens a client whose every request passes a filter that lets only the four

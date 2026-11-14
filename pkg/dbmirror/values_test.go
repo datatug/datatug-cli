@@ -100,9 +100,11 @@ func TestApplyMasks(t *testing.T) {
 		"when":    map[string]any{"$time": "2026-11-20T07:00:00.000000Z"},
 		"wrapped": map[string]any{"$map": map[string]any{"$ref": "x"}},
 		"none":    map[string]any{},
+		"loose":   int64(7),
 	}
-	hit := applyMasks(data, []string{"email", "age", "members.*.name", "byID.*.phone", "list.1", "nothing", "members.9.name", "tags", "plan", "when", "wrapped", "none"})
-	if !reflect.DeepEqual(hit, []string{"email", "age", "members.*.name", "byID.*.phone", "list.1", "tags", "plan", "when", "wrapped", "none"}) {
+	def := &ingitdb.CollectionDef{Columns: map[string]*ingitdb.ColumnDef{"loose": {Type: ingitdb.ColumnTypeAny}, "gone": {Type: ingitdb.ColumnTypeAny}}}
+	hit := applyMasks(data, []string{"email", "age", "members.*.name", "byID.*.phone", "list.1", "nothing", "members.9.name", "tags", "plan", "when", "wrapped", "none", "loose", "gone"}, def)
+	if !reflect.DeepEqual(hit, []string{"email", "age", "members.*.name", "byID.*.phone", "list.1", "tags", "plan", "when", "wrapped", "none", "loose"}) {
 		t.Errorf("hit %v", hit)
 	}
 	want := map[string]any{
@@ -114,6 +116,7 @@ func TestApplyMasks(t *testing.T) {
 		"plan":    map[string]any{},
 		"wrapped": map[string]any{},
 		"none":    map[string]any{},
+		"loose":   "***",
 	}
 	if !reflect.DeepEqual(data, want) {
 		t.Errorf("%#v", data)

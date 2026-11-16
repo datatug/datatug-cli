@@ -1,6 +1,9 @@
 package dtproject
 
 import (
+	"errors"
+	"io"
+	"io/fs"
 	"time"
 
 	"github.com/atotto/clipboard"
@@ -18,7 +21,8 @@ import (
 // browser, the clipboard and the clock. Screens reach them only through these
 // variables, so tests replace them.
 var (
-	readSettings         = dtconfig.GetSettings
+	readSettings         = settingsOrNone
+	getSettings          = dtconfig.GetSettings
 	addProjectToSettings = dtconfig.AddProjectToSettings
 	readState            = dtstate.GetDatatugState
 	bumpRecentProject    = dtstate.BumpRecentProject
@@ -35,3 +39,14 @@ var (
 	requestDeviceCode = ghauth.RequestDeviceCode
 	pollForToken      = ghauth.PollForToken
 )
+
+// settingsOrNone reads the settings of this machine. A first run has no
+// settings file, or an empty one: that is a machine with no projects, not an
+// error, so every screen still offers to create or add a project.
+func settingsOrNone() (dtconfig.Settings, error) {
+	settings, err := getSettings()
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, io.EOF) {
+		return dtconfig.Settings{}, nil
+	}
+	return settings, err
+}

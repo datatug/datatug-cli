@@ -207,7 +207,19 @@ func resolveProviderFamily(modelName string) (family, bareModel string, ok bool)
 // defaulted to OpenAI's own API, which would send the caller's model name
 // and credential to the wrong host.
 func NewLLMProvider(modelName, baseURL, apiKey string) (ai.LLMProvider, error) {
-	endpoint, err := resolveEndpoint(modelName, baseURL, apiKey)
+	return newLLMProvider(modelName, baseURL, apiKey, true)
+}
+
+// NewLLMProviderExact is NewLLMProvider for an endpoint and key a person
+// entered themself: the environment is not consulted, so no key of the
+// environment is sent to the endpoint they typed, and no base URL of the
+// environment receives the key they typed.
+func NewLLMProviderExact(modelName, baseURL, apiKey string) (ai.LLMProvider, error) {
+	return newLLMProvider(modelName, baseURL, apiKey, false)
+}
+
+func newLLMProvider(modelName, baseURL, apiKey string, useEnv bool) (ai.LLMProvider, error) {
+	endpoint, err := resolveEndpointEnv(modelName, baseURL, apiKey, useEnv)
 	if err != nil {
 		return nil, err
 	}
@@ -219,6 +231,32 @@ func NewLLMProvider(modelName, baseURL, apiKey string) (ai.LLMProvider, error) {
 	default:
 		return openaicompat.New(openaicompat.Config{BaseURL: endpoint.baseURL, APIKey: endpoint.apiKey, Model: endpoint.model}), nil
 	}
+}
+
+// MissingAPIKey reports that modelName resolves to a provider's own hosted
+// endpoint with no API key from the profile or the environment: every request
+// would be refused there. An endpoint on this machine (a local Ollama daemon,
+// a local gateway) and one the caller named or configured may need no key and
+// are never reported.
+func MissingAPIKey(modelName, baseURL, apiKey string) bool {
+	if strings.TrimSpace(baseURL) != "" {
+		return false
+	}
+	endpoint, err := resolveEndpoint(modelName, baseURL, apiKey)
+	if err != nil || endpoint.apiKey != "" {
+		return false
+	}
+	family, _, _ := resolveProviderFamily(strings.TrimSpace(modelName))
+	if endpoint.baseURL != familyDefaults[family].defaultBaseURL {
+		return false
+	}
+	// A family default is a constant of this file: a prefix names its host.
+	for _, local := range []string{"http://localhost", "http://127.0.0.1", "http://[::1]"} {
+		if strings.HasPrefix(endpoint.baseURL, local) {
+			return false
+		}
+	}
+	return true
 }
 
 // wireProtocol names the adapter package a resolved endpoint is built
@@ -262,6 +300,12 @@ type resolvedEndpoint struct {
 // defaulted to OpenAI's own API, which would send the caller's model name
 // and credential to the wrong host.
 func resolveEndpoint(modelName, baseURL, apiKey string) (resolvedEndpoint, error) {
+	return resolveEndpointEnv(modelName, baseURL, apiKey, true)
+}
+
+// resolveEndpointEnv is resolveEndpoint; with useEnv false neither the base
+// URL nor the key is ever taken from the environment.
+func resolveEndpointEnv(modelName, baseURL, apiKey string, useEnv bool) (resolvedEndpoint, error) {
 	modelName = strings.TrimSpace(modelName)
 	if modelName == "" {
 		return resolvedEndpoint{}, errors.New("chat: model is required")
@@ -277,7 +321,7 @@ func resolveEndpoint(modelName, baseURL, apiKey string) (resolvedEndpoint, error
 	def := familyDefaults[family]
 
 	resolvedBaseURL := strings.TrimSpace(baseURL)
-	if !explicit && def.baseURLEnv != "" {
+	if !explicit && useEnv && def.baseURLEnv != "" {
 		resolvedBaseURL = strings.TrimSpace(os.Getenv(def.baseURLEnv))
 		if family == "ollama" && resolvedBaseURL != "" {
 			// OLLAMA_HOST is conventionally set as a bare "host:port" (e.g.
@@ -295,7 +339,7 @@ func resolveEndpoint(modelName, baseURL, apiKey string) (resolvedEndpoint, error
 	}
 
 	resolvedKey := apiKey
-	if resolvedKey == "" {
+	if resolvedKey == "" && useEnv {
 		for _, env := range def.apiKeyEnvs {
 			if v := os.Getenv(env); v != "" {
 				resolvedKey = v

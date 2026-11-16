@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
@@ -23,10 +24,34 @@ func objectQueryDocument(object ProjectObject) (string, error) {
 	collection := dal.NewQualifiedRootCollectionRef(parts[0], parts[1], "")
 	columns := make([]dal.Column, 0, len(object.Columns))
 	for _, name := range object.Columns {
+		if slices.Contains(object.ProtectedColumns, name) {
+			continue
+		}
 		columns = append(columns, dal.Column{Expression: dal.NewFieldRef("", name)})
+	}
+	if len(columns) == 0 && len(object.ProtectedColumns) > 0 {
+		return "", fmt.Errorf("every column of %s is marked sensitive, so there is nothing to show here", object.Reference.Title)
 	}
 	doc, err := tugql.Serialize(dal.From(collection).NewQuery().Limit(100).SelectColumns(columns...))
 	return string(doc), err
+}
+
+// hiddenColumnsNote says which columns opening object leaves out, or "".
+func hiddenColumnsNote(object ProjectObject) string {
+	var hidden []string
+	for _, name := range object.Columns {
+		if slices.Contains(object.ProtectedColumns, name) {
+			hidden = append(hidden, name)
+		}
+	}
+	if len(hidden) == 0 {
+		return ""
+	}
+	noun := "columns"
+	if len(hidden) == 1 {
+		noun = "column"
+	}
+	return fmt.Sprintf("%d sensitive %s hidden in %s: %s", len(hidden), noun, object.Reference.Title, strings.Join(hidden, ", "))
 }
 
 // executeWorkspaceQuery shares the policy-bound executor with chat. The

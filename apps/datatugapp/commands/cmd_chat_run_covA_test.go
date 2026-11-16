@@ -664,7 +664,7 @@ func TestRunChatProjectNewLLMProviderErrorReported(t *testing.T) {
 	if _, err := runChatProject(cmd, options); err != nil {
 		t.Fatalf("providerless local workspace failed: %v", err)
 	}
-	if text := strings.Join(notices, "\n"); !reached || !strings.Contains(text, "AI provider is not configured") || !strings.Contains(text, "Open data and New query work locally") || !strings.Contains(text, "Settings → AI") {
+	if text := strings.Join(notices, "\n"); !reached || !strings.Contains(text, providerUnavailableNotice) {
 		t.Fatalf("workspace reached=%v, provider recovery notices=%q", reached, text)
 	}
 }

@@ -335,6 +335,16 @@ func verifyExtracted(dir string, files extracted) (Manifest, []byte, error) {
 
 // VerifyDir re-checks an installed version against its manifest.
 func VerifyDir(dir string) (Manifest, error) {
+	return verifyDir(dir, false)
+}
+
+// VerifyRemovalDir checks that the files to be removed belong to a signed
+// release. An unsigned local build has no independent ownership proof.
+func VerifyRemovalDir(dir string) (Manifest, error) {
+	return verifyDir(dir, true)
+}
+
+func verifyDir(dir string, requireSignature bool) (Manifest, error) {
 	data, err := os.ReadFile(filepath.Join(dir, ManifestFile))
 	if err != nil {
 		return Manifest{}, err
@@ -351,6 +361,15 @@ func VerifyDir(dir string) (Manifest, error) {
 		return m, err
 	}
 	defer func() { _ = root.Close() }()
+	if requireSignature {
+		signature, err := root.ReadFile(SignatureFile)
+		if err != nil {
+			return m, fmt.Errorf("cannot prove ownership of web UI %s: %w", dir, err)
+		}
+		if _, err := verifySignature(data, signature, true, false, trustedKeys); err != nil {
+			return m, err
+		}
+	}
 	for _, want := range m.Files {
 		f, err := root.Open(want.Path)
 		if err != nil {

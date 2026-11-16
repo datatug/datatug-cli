@@ -84,6 +84,20 @@ func TestMainPanicTextIsRedacted(t *testing.T) {
 	assert.NotEmpty(t, enqueued, "the panic must still be reported")
 }
 
+func TestLocalMaintenanceDoesNotStartTelemetry(t *testing.T) {
+	for _, args := range [][]string{
+		{"uninstall", "--dry-run"},
+		{"disk", "--format", "json"},
+		{"demo", "reset", "--dry-run"},
+	} {
+		assert.True(t, isLocalMaintenanceInvocation(commands.DatatugCommand(), args), args)
+	}
+	assert.False(t, isLocalMaintenanceInvocation(commands.DatatugCommand(), []string{"demo", "install"}))
+	root := &cobra.Command{Use: "datatug"}
+	root.AddCommand(&cobra.Command{Use: "uninstall"})
+	assert.False(t, isLocalMaintenanceInvocation(root, []string{"invalid"}))
+}
+
 func TestMainFunc(t *testing.T) {
 	t.Run("getCommand_no_error", func(t *testing.T) {
 		getCommand = func() (*cobra.Command, []fang.Option) {

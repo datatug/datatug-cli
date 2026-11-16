@@ -20,7 +20,7 @@ var knownCallers = map[string]bool{"claude-mod": true, "codex-mod": true}
 // version/help/completion (probes) and the installers.
 var noDaemonCommands = map[string]bool{
 	"daemon": true, "serve": true, "mcp": true, "version": true, "help": true, "completion": true,
-	"self-update": true, "install": true, "upgrade": true,
+	"self-update": true, "install": true, "upgrade": true, "uninstall": true, "disk": true,
 }
 
 // policyPrincipalWarning is the one stderr line printed when the daemon cannot start because a
@@ -52,7 +52,7 @@ func EnsureDaemonForCaller(root *cobra.Command, args []string, stderr io.Writer)
 	for top.HasParent() && top.Parent() != root {
 		top = top.Parent()
 	}
-	if noDaemonCommands[top.Name()] {
+	if noDaemonCommands[top.Name()] || (top.Name() == "demo" && cmd.Name() == "reset") {
 		return
 	}
 	if v := cmd.Flags().Lookup("version"); v != nil && v.Value.String() == "true" {

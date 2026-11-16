@@ -178,3 +178,22 @@ func TestVerifySignature_NodeVector(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, keys[0].id, got.KeyID)
 }
+
+func TestVerifyRemovalDirRequiresTrustedManifest(t *testing.T) {
+	store := newStore(t)
+	in := install(t, store, "1.0.0", ">=1")
+	key := testKey(t)
+	useKeys(t, key)
+	manifest, err := os.ReadFile(filepath.Join(in.Dir, ManifestFile))
+	require.NoError(t, err)
+
+	_, err = VerifyRemovalDir(in.Dir)
+	require.ErrorContains(t, err, "cannot prove ownership")
+	writeFile(t, in.Dir, SignatureFile, []byte(signLine(key, string(manifest)+" ")))
+	_, err = VerifyRemovalDir(in.Dir)
+	require.ErrorContains(t, err, "changed after signing")
+	writeFile(t, in.Dir, SignatureFile, []byte(signLine(key, string(manifest))))
+	verified, err := VerifyRemovalDir(in.Dir)
+	require.NoError(t, err)
+	require.Equal(t, in.Manifest, verified)
+}

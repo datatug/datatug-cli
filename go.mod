@@ -14,7 +14,7 @@ go 1.27.3
 //                                    Decimal/Bytes type mapping)
 require (
 	charm.land/bubbles/v2 v2.2.1
-	charm.land/bubbletea/v2 v2.0.9
+	charm.land/bubbletea/v2 v2.1.1
 	charm.land/fang/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.6
 	cloud.google.com/go/firestore v1.29.2
@@ -25,9 +25,9 @@ require (
 	github.com/atotto/clipboard v0.1.4
 	github.com/aws/aws-sdk-go-v2 v1.47.5
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.72.3
-	github.com/charmbracelet/ultraviolet v0.0.0-20260812204455-68fa937c71be
-	github.com/charmbracelet/x/ansi v0.11.8
-	github.com/dal-go/dalgo v0.102.0
+	github.com/charmbracelet/ultraviolet v0.0.0-20261008173134-6b8d4baf91b4
+	github.com/charmbracelet/x/ansi v0.11.9
+	github.com/dal-go/dalgo v0.102.4
 	github.com/dal-go/dalgo2bigquery v0.3.2
 	github.com/dal-go/dalgo2clickhouse v0.0.0-20261030135300-99a44064132e
 	github.com/dal-go/dalgo2cloudflarekv v0.0.0-20261102080843-209a16cff7f5
@@ -55,16 +55,16 @@ require (
 	github.com/dal-go/dalgo2typesense v0.0.0-20261028075318-b1ba445d3434
 	github.com/dal-go/record v0.1.5
 	github.com/datatug/cliformat v0.0.8
-	github.com/datatug/datatug-core v0.143.2
+	github.com/datatug/datatug-core v0.144.0
 	github.com/datatug/sql2csv v0.0.3
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/go-sql-driver/mysql v1.10.0
-	github.com/gofrs/flock v0.13.1
+	github.com/gofrs/flock v0.13.2
 	github.com/google/go-github/v93 v93.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/gosuri/uitable v0.0.4
-	github.com/ingitdb/dalgo2ingitdb v0.7.3
+	github.com/ingitdb/dalgo2ingitdb v0.8.0
 	github.com/ingitdb/ingitdb-go/ingitdb v0.10.6
 	github.com/ingr-io/ingr-go v0.0.2
 	github.com/jackc/pgx/v5 v5.10.0
@@ -83,13 +83,13 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.12.1
-	github.com/strongo/aichat v0.15.3
+	github.com/strongo/aichat v0.15.6
 	github.com/strongo/buildinfo v0.3.0
 	github.com/strongo/cli-helpers v0.27.1
 	github.com/strongo/deviceauth v0.1.0
 	github.com/strongo/logus v0.4.8
 	github.com/strongo/random v0.0.3
-	github.com/strongo/slice v0.3.14
+	github.com/strongo/slice v0.3.15
 	github.com/strongo/validation v0.0.17
 	github.com/tuigoff/tuigoff v0.8.1
 	github.com/xo/dburl v0.24.2
@@ -99,11 +99,13 @@ require (
 	golang.org/x/mod v0.42.0
 	golang.org/x/net v0.61.0
 	golang.org/x/oauth2 v0.37.0
-	golang.org/x/sys v0.49.0
+	golang.org/x/sys v0.50.0
 	golang.org/x/term v0.47.0
 	golang.org/x/text v0.43.0
 	google.golang.org/api v0.310.0
+	google.golang.org/genproto v0.0.0-20261012220534-4341edf3f941
 	google.golang.org/grpc v1.85.0
+	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.61.1
 )
@@ -196,7 +198,7 @@ require (
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
-	github.com/mattn/go-runewidth v0.0.28 // indirect
+	github.com/mattn/go-runewidth v0.0.30 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
@@ -247,7 +249,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.47.0 // indirect
 	go.starlark.net v0.0.0-20261021141710-4f4267fb140d // indirect
 	go.uber.org/mock v0.6.0 // indirect
-	go.yaml.in/yaml/v3 v3.0.5 // indirect
+	go.yaml.in/yaml/v3 v3.0.6 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/exp v0.0.0-20260824195058-e88cd73687aa // indirect
 	golang.org/x/image v0.45.0 // indirect
@@ -256,10 +258,8 @@ require (
 	golang.org/x/time v0.16.0 // indirect
 	golang.org/x/tools v0.52.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
-	google.golang.org/genproto v0.0.0-20261012220534-4341edf3f941 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20261012220534-4341edf3f941 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261019180522-ce908d29299b // indirect
-	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 	modernc.org/libc v1.79.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

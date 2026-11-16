@@ -18,6 +18,23 @@
 
 </table>
 
+## Watch
+
+<table>
+  <tr>
+    <td valign="top">
+      <a href="https://youtu.be/P8c-uw29XyE"><img src="https://datatug.app/static/illustrations/datatug-in-30-poster-1280.webp" alt="DataTug in 30 seconds: every database, one workspace (0:30)" width="420"></a><br>
+      ▶ <b><a href="https://youtu.be/P8c-uw29XyE">Watch DataTug in 30 seconds (0:30)</a></b><br>
+      Sources, browsing, column meanings, the suggested join, cards and Perimeter. Longer: the <a href="https://youtu.be/8-KHMVIe1S0">intro (1:01)</a>.
+    </td>
+    <td valign="top">
+      <a href="https://youtu.be/ENjhplq2SQ0"><img src="https://datatug.app/static/illustrations/explainer-sales-per-capita-poster-1280.webp" alt="Where are we underselling? Sales per capita across three sources (1:30)" width="420"></a><br>
+      ▶ <b><a href="https://youtu.be/ENjhplq2SQ0">Where are we underselling? (1:30)</a></b><br>
+      The sales-per-capita query in this explainer runs with the DataTug CLI.
+    </td>
+  </tr>
+</table>
+
 ## Quick start
 
 Install the CLI (macOS and Linux with Homebrew; the other ways are in [Installation](#installation)):
@@ -119,12 +136,37 @@ datatug tui
 ```
 For details on widget layouts and keybindings, see [TUI Screens](docs/tui-screens.md).
 
+#### Open a page of the web app in the terminal
+
+The web app at [datatug.app](https://datatug.app) shows a command for the page you are on. Pass its address to `--deep-link` and the terminal UI opens on the matching project and screen:
+
+```bash
+datatug ui --deep-link https://datatug.app/project/github.com/acme/repo/some/dir/-/queries
+```
+
+A GitHub project is cloned to `~/datatug/github.com/<owner>/<repo>` the first time and added to your projects; a project of the local `datatug serve` agent opens by its id in your settings. Queries, boards, databases and environments pages open their section of the project; other pages open the project itself. DataTug Cloud projects and projects stored in the browser can't be opened in the terminal yet: the Projects screen says so. See [spec/features/cli/ui](spec/features/cli/ui/README.md#req-deep-link-flag).
+
 ### Local Server (`datatug serve`)
 Run the local DataTug HTTP agent daemon to serve the Web UI, REST endpoints, and IDE integrations:
 ```bash
 datatug serve
 ```
 By default, `datatug serve` binds strictly to loopback (`127.0.0.1`) with origin protection. It is completely free and unrestricted under Apache License 2.0—no license key is ever required for individual local development.
+
+## Web UI on your own machine, offline
+
+The DataTug web UI can run entirely on your machine, served by the CLI, with no internet connection and no account.
+
+```bash
+datatug web-ui install ./datatug-web-ui-0.1.0.tar.gz   # from a release of github.com/datatug/web-ui; never touches the network
+datatug serve --web-ui                                 # prints http://datatug-app.localhost:8989/… and a 127.0.0.1 link
+```
+
+- Get the archive (and its `.sha256`) from [datatug/web-ui releases](https://github.com/datatug/web-ui/releases) on any connected machine and copy both across; `install` checks the digest, every file and the DataTug release signature before anything is installed (a web UI you built yourself installs with `--allow-unsigned`). With internet, `datatug web-ui install --latest` downloads the newest compatible release, and only then.
+- Installed versions live in `~/datatug/web-ui` (`$DATATUG_WEB_UI_DIR`). `datatug web-ui list | use <version> | rollback | remove <version>` manage them; a version this CLI cannot serve is listed with the reason and never served.
+- The page can reach only the local agent (Content-Security-Policy `connect-src 'self'`), runs no telemetry, and the agent still enforces your access policies on every request. Cloud features (sign-in, cloud projects, hosted AI) are unavailable there unless you allow an origin with `--ui-connect-src`.
+
+Details: [spec/features/cli/web-ui](spec/features/cli/web-ui/README.md).
 
 ## Architecture Overview
 
@@ -187,6 +229,15 @@ go test ./...
 
 
 <!-- dev-approach:v1 -->
+## Copy Firestore into inGitDB: `db copy --schema=destination`
+
+`datatug db copy --schema=destination` copies a chosen part of a Firestore database, read-only, into an inGitDB database laid out by the inGitDB definitions of a mirror (the destination's schema: Firestore has none), with a policy file of the project that lists the collections to copy, those excluded and the fields to mask (a defined collection the policy does not name is never copied). It has a dry run with counts, a read budget with runs that resume where the last one stopped, selection by collection (`--include`), by space and by path, and policy `paths` that pin a collection to its parents; a re-run over unchanged data changes no file, and a rejected document's values are never written unless asked for. It replaces `datatug db mirror`, which is removed. See [Copying from a schemaless source](docs/db-copy.md#copying-from-a-schemaless-source---schemadestination).
+
+```bash
+datatug db copy --schema=destination --from env:DATATUG_FIRESTORE_SOURCE_URL --policy mirrors/backup.yaml --dry-run
+datatug db copy --schema=destination --from env:DATATUG_FIRESTORE_SOURCE_URL --policy mirrors/backup.yaml
+```
+
 ## Export a database to inGitDB
 
 `datatug db export` (a shortcut for `datatug db copy --to ingitdb://<folder>`; see [docs/db-copy.md](docs/db-copy.md#local-backup-to-a-folder-db-export-and---to-ingitdb)) writes each supported DALgo source collection into a native inGitDB project, a local backup. `--to` may be a plain folder path; without it the folder is `./<database name>.ingitdb`. `--include`, `--exclude`, `--where`, `--limit`, `--dry-run`, `--json` and `--fail-on-warning` work as for `db copy`. Cloud or remote backup is not this command (see `db copy --to` and the planned `backup` family). SQLite supplies a streaming row reader; other providers may materialize a collection in their query reader. For a local SQLite database:
@@ -228,18 +279,50 @@ Help wanted to [get test coverage to 100%](https://github.com/datatug/datatug-cl
 ### macOS / Linux — curl
 
 ```bash
-(p=$(mktemp) && trap 'rm -f "$p"' EXIT && curl -fsSL https://datatug.app/install/get-cli -o "$p" && sh "$p")
+(p=$(mktemp) && trap 'rm -f "$p"' EXIT && curl -fsSL https://datatug.app/get-cli -o "$p" && sh "$p")
 ```
 
 Environment overrides: `DATATUG_VERSION` (default: latest release), `DATATUG_INSTALL_DIR` (default: `~/.local/bin`).
 
+When the install directory is not on `PATH`, the installer appends one line that adds it to your shell's startup file (`~/.zshrc`, `~/.bashrc`, `~/.bash_profile` on macOS, fish's `config.fish`, otherwise `~/.profile`) and prints the file, line number and line it wrote. `DATATUG_MODIFY_PATH=0` skips that edit and prints the line to add yourself. `scripts/install.sh` is a copy of the published script, whose source is `apps/app/public/install/get-cli` in [datatug/websites](https://github.com/datatug/websites).
+
 ### Windows — PowerShell
 
 ```powershell
-$p=Join-Path $env:TEMP ("datatug-"+[guid]::NewGuid()+".ps1"); try { irm https://datatug.app/install/get-cli.ps1 -OutFile $p -EA Stop; & $p } finally { Remove-Item $p -EA SilentlyContinue }
+$p=Join-Path $env:TEMP ("datatug-"+[guid]::NewGuid()+".ps1"); try { irm https://datatug.app/get-cli.ps1 -OutFile $p -EA Stop; & $p } finally { Remove-Item $p -EA SilentlyContinue }
 ```
 
 Environment overrides: `DATATUG_VERSION`, `DATATUG_INSTALL_DIR` (default: `%LOCALAPPDATA%\DataTug\bin`). Current Windows releases support amd64.
+
+### Preview removal and inspect disk usage
+
+```bash
+datatug disk
+datatug uninstall --dry-run
+datatug uninstall --web-ui --dry-run
+datatug uninstall --full --skills codex --dry-run
+datatug demo reset --dry-run
+```
+
+Bare `uninstall` previews the CLI only. Use `--web-ui` for downloaded browser assets, `--skills codex` or `--skills claude` for one agent's user plugin, or `--full` for the CLI and web UI together. Add `--skills` explicitly to include a plugin in full removal. Stop a local server using the selected web UI files before removing them. After reviewing the plan, replace `--dry-run` with `--apply`. The standalone Unix executable can remove itself. Other installs report the owning package manager or require a manual step, including a running Windows executable. Projects, credentials, shell settings and marketplaces stay in place.
+
+The web UI preview lists every path in a verified signed release. Unsigned builds, modified files, and unrecognized paths are left in place. If deletion returns an error after the store has been detached, DataTug reports the private directory containing its remaining files.
+
+`demo reset` separately moves the default Perimeter demo into a numbered sibling backup and removes its matching registration. Run `datatug demo install` again to create a fresh copy. The backup keeps the demo audit and any edits, so it does not reclaim disk space.
+
+Add `--format json` for machine-readable paths, file and directory counts, and logical bytes. Disk usage includes the running CLI, downloaded web UI, settings, local registered projects, and the rest of the DataTug data directory. Symlink targets inside a directory are excluded. Filesystem allocation and plugin-manager removals may differ from the measured total.
+
+### Run without installing
+
+`https://datatug.app/run-cli` runs the CLI with the arguments you give it, so the command the web app shows works on a machine without DataTug:
+
+```bash
+curl -fsSL https://datatug.app/run-cli | sh -s -- ui --deep-link <address>
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://datatug.app/run-cli.ps1))) ui --deep-link '<address>'
+```
 
 ### macOS / Linux — Homebrew ([tap](https://github.com/datatug/homebrew-tap))
 
@@ -247,7 +330,7 @@ Environment overrides: `DATATUG_VERSION`, `DATATUG_INSTALL_DIR` (default: `%LOCA
 brew install --cask datatug/tap/datatug
 ```
 
-Homebrew gets a release only when the maintainers promote it, so it can be behind the direct installers (curl and PowerShell, which always take the latest release). `brew list --cask --versions datatug` shows the version installed.
+Every release updates the Homebrew cask a few minutes after it is published, so Homebrew carries the same version as the direct installers (curl and PowerShell). `brew list --cask --versions datatug` shows the version installed.
 
 The direct installers and Homebrew package do not require Go. See the full
 [installation guide](https://datatug.io/install/) or the official
@@ -386,7 +469,7 @@ It runs on your machine under your user account. The connection URL of a Postgre
 variable of yours, and a project never holds it.
 
 AI clients can use [`datatug mcp`](docs/mcp.md) over stdio to discover local
-projects and schemas and run saved SQL through that agent's read-only session.
+projects and schemas and run saved SQL or TugQL through that agent's read-only session.
 
 ## Would you steal my data?
 
@@ -509,7 +592,7 @@ the web app talks to (see [spec/features/cli/serve](spec/features/cli/serve/READ
 | inGitDB | not supported yet | supported: `--db ingitdb://./path-to-the-database` |
 | BigQuery | not supported yet | supported, read-only, through its own command, `datatug query bigquery` (`preview`, then `run` with the approved digest): one table described by a source profile, chosen columns, simple conditions and order, a limit, and a `--maximum-bytes-billed` cap; you sign in with your Google account (`--auth adc` or `--auth google`). See [pkg/bigqueryread](pkg/bigqueryread/README.md) |
 | REST APIs | not applicable | supported, read-only: `--db http://<project-dir>` reads the project's HTTP queries (`queries/**/*.query.json` of type `HTTP` with a `.query.http` URL template) as collections, calling the API live and falling back to the query's recorded snapshot in `fixtures/http/` when the call fails (the `source:` line says which); a parameter of the URL is set by a `where` condition on its column |
-| OpenVaultDB | not supported yet | not tested in this release |
+| OpenVaultDB | not supported yet | supported, read-only: `--db openvaultdb://./connection.json` (a connection descriptor with the server URL, database ID and the name of the environment variable that holds the token) with TugQL (`-f`, `--from`); OpenVaultDB enforces its own access policies. See [Layered ACL publication](docs/layered-acl-publication.md) |
 | MongoDB | not supported yet | supported, read-only: `--db env:NAME` with `mongodb://` or `mongodb+srv://`, TugQL (`-f`, `--from`), filtering, projection, ordering and bounded results; see [Query MongoDB](docs/databases/mongodb.md) |
 | Redis | not supported yet | supported, read-only, through `datatug query redis --db env:REDIS_URL -- GET key`: native string/hash reads and metadata; Redis ACLs control access. See [Query Redis keys](docs/query/redis.md). SQL, TugQL and saved queries are unavailable |
 | Firestore | not supported yet | supported, read-only: `--db firestore://PROJECT/DATABASE` with TugQL (`-f`, `--from`), filtering, projection, ordering and optional limits; see [Query Firestore](docs/sources/firestore.md) |
@@ -539,6 +622,10 @@ datatug scan -D sqlserver --dsn-env DATATUG_SALES_MS_URL --db sales --env local
 datatug query run --db env:DATATUG_SHOP_MY_URL -f top-customers.tugql
 datatug query run --db env:DATATUG_SHOP_MY_URL --sql 'SELECT id, name FROM customer ORDER BY id'
 ```
+
+One TugQL text query can also join tables of several databases: it declares them in a `databases (` block and binds
+each alias to a project source (`datatug://<project>/<db>`) or with `--db <alias>=<url>`. Each source is a separate
+secured read. See [cross-database queries](docs/query/cross-database.md).
 
 Every scan, of these servers, PostgreSQL and SQLite alike, saves the foreign keys of the database's tables in
 `dbmodels/<db>/<db>.refs.json` and their indexes in `dbmodels/<db>/<db>.indexes.json` (an index on an expression is

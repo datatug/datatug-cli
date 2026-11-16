@@ -70,7 +70,7 @@ func detectiveStore(project, securityContextID string) (*detective.LocalStore, s
 	// Case/Check resource grant. A query grant cannot authorize Case context.
 	// Until that grant exists, secured profiles fail closed; explicit local
 	// --no-policies owner mode alone can access this local private store.
-	if !api.SecureSessionUnrestricted() {
+	if !api.SecureLocalProjectOwner() {
 		return nil, "", newAccessDenied("Detective project assets require a project asset grant")
 	}
 	actor := api.SecurePrincipalID()
@@ -99,9 +99,14 @@ func detectiveStateHandler(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		state.Environments, err = detectiveEnvironments(r.Context(), r.URL.Query().Get("project"))
 	}
+
 	state.Capabilities.CanWrite = api.GetCapabilities().AllowWrites
 	state.Capabilities.CanRun = api.GetCapabilities().AllowWrites
-	writeContractResponse(w, r, detectiveError(err), state)
+	var response any = state
+	if err == nil {
+		response, err = annotateDetectiveVisibility(r.URL.Query().Get("project"), state)
+	}
+	writeContractResponse(w, r, detectiveError(err), response)
 }
 
 func detectiveEnvironments(ctx context.Context, project string) ([]string, error) {
@@ -109,7 +114,7 @@ func detectiveEnvironments(ctx context.Context, project string) ([]string, error
 	if err != nil {
 		return nil, newNotFound("project not found")
 	}
-	items, err := projectStore.LoadEnvironments(ctx)
+	items, err := projectStore.LoadEnvironments(ctx, datatug.ActiveItemsOnly())
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +207,7 @@ func detectiveActionHandler(w http.ResponseWriter, r *http.Request) {
 		writeContractResponse(w, r, detectiveError(err), detective.ActionResponse{})
 		return
 	}
-	response, err := store.ExecuteAction(r.Context(), body.OperationID, actor, req, detectiveQueryRunner(req.Project, req.SecurityContextID), detectiveExecutionMetadata(req.Project), result, proof, detectiveQueryRevisionLookup(req.Project))
+	response, err := store.ExecuteAction(withDetectiveReconciler(r.Context(), req.Project, req.SecurityContextID), body.OperationID, actor, req, detectiveQueryRunner(req.Project, req.SecurityContextID), detectiveExecutionMetadata(req.Project), result, proof, detectiveQueryRevisionLookup(req.Project))
 	linkStatus := ""
 	if err == nil && (req.Type == "run-check" || req.Type == "run-query-validators") {
 		linkStatus, err = store.ActionLinkStatus(r.Context(), body.OperationID, actor, req)
@@ -401,6 +406,8 @@ func detectiveError(err error) error {
 		return nil
 	}
 	switch {
+	case errors.Is(err, datatug.ErrProjectUsageIncomplete):
+		return newContractError(apicontract.ErrCodeSourceUnavailable, "all retained references must be verified before archive or restore", "usage")
 	case errors.Is(err, detective.ErrConflict):
 		return newContractError(apicontract.ErrCodeRevisionConflict, "item changed; reload before saving", "version")
 	case errors.Is(err, detective.ErrNotFound):

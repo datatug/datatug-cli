@@ -50,6 +50,6 @@ func AuthorizeProjectQueryWrite(ctx context.Context, projectID, queryID string, 
 	return accesspolicies.AuthorizeWrite(ctx, accesspolicies.WriteOptions{
 		Principal:    session.Principal,
 		Policies:     session.Policies,
-		Unrestricted: session.Unrestricted,
+		Unrestricted: session.LocalProjectOwner,
 	}, operation, resource)
 }

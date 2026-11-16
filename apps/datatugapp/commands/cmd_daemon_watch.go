@@ -318,7 +318,7 @@ func configureWatchExecution(cfg watchdaemon.Config, projectID string) (func(), 
 	}
 	// Detective deliberately has no secured project-asset grant yet. Preserve
 	// its existing fail-closed boundary instead of impersonating a local owner.
-	if !session.Unrestricted {
+	if !session.LocalProjectOwner {
 		return nil, errors.New("watch Check assets require explicit local owner mode; secured project asset grants are unavailable")
 	}
 	paths := map[string]string{projectID: cfg.Runner.ProjectDir}
@@ -332,7 +332,12 @@ func configureWatchExecution(cfg watchdaemon.Config, projectID string) (func(), 
 		}
 		evidence = filepath.Join(home, ".datatug", "watch-evidence")
 	}
-	api.ConfigureSecureSession(session, paths, api.Capabilities{EvidencePrivateDir: evidence, AllowOpaqueSQL: cfg.Runner.AllowOpaqueSQL})
+	if err = api.ConfigureSecureSessionChecked(session, paths, api.Capabilities{EvidencePrivateDir: evidence, AllowOpaqueSQL: cfg.Runner.AllowOpaqueSQL}); err != nil {
+		return nil, err
+	}
+	// A check that runs a federated saved query checks each leaf against the
+	// labels of the source its alias is bound to, as `datatug serve` does.
+	endpoints.SetFederatedLabelGuard(serveFederatedLabelGuard(session, os.Stderr))
 	if err = api.ConfigureExecutionEvidence(paths, nil, executionstore.Options{PrivateDir: evidence}); err != nil {
 		return nil, errors.New("watch execution evidence unavailable")
 	}

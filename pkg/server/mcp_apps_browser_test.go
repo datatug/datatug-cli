@@ -87,6 +87,9 @@ func TestMCPAppsBrowserHost(t *testing.T) {
 	if err = fixtureDB.Close(); err != nil {
 		t.Fatal(err)
 	}
+	// MCP callers are agents: their saved SQL runs only on a source whose
+	// suggested columns the owner has reviewed (this test is about the host).
+	reviewSuggestedSQLiteColumns(t, project, demoProjectSource, filepath.Join(project, "fixtures", "chinook-local.sqlite"))
 	privateQuery := filepath.Join(project, "queries", "acceptance")
 	if err := os.MkdirAll(privateQuery, 0700); err != nil {
 		t.Fatal(err)

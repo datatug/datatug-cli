@@ -12,6 +12,7 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
@@ -25,6 +26,13 @@ var loadModuleEntitiesHookRelated = loadModuleEntities
 var toContractRecordsetHook = toContractRecordset
 var secureExecutorHook = api.SecureExecutor
 var runStructuredRelatedHook = func(e *secureread.Executor, ctx context.Context, source string, query dal.StructuredQuery, variables map[string]any) (secureread.Result, error) {
+	ref, err := dbcopy.Parse(source)
+	if err != nil {
+		return secureread.Result{}, err
+	}
+	if dbcopy.IsClickHouseScheme(ref.Scheme) {
+		return secureread.Result{}, fmt.Errorf("%w: this related/keyed consumer requires record identities; ClickHouse rows are anonymous", dal.ErrNotSupported)
+	}
 	return e.RunStructured(ctx, source, query, variables)
 }
 

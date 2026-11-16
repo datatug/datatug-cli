@@ -108,10 +108,20 @@ type ChatUI struct {
 	savedQueryService SavedQueryService
 	savedQueries      []SavedQuery
 
-	projectChoices  []ProjectChoice
-	selectedProject string
-	browserURL      string
-	webLinkVisible  bool
+	projectChoices []ProjectChoice
+	// startTable is the title of a table opened when the program starts.
+	startTable string
+	// openDataNote names the sensitive columns the running Open data left out;
+	// it is shown once its result is on screen.
+	openDataNote string
+	// projectChoicesLoader, when set, re-reads the choices each time F3 asks.
+	projectChoicesLoader func() []ProjectChoice
+	selectedProject      string
+	aiSetup              AISetup
+	reopen               bool
+	reopenPending        string
+	browserURL           string
+	webLinkVisible       bool
 	// openBrowser is ui.go's browser.OpenURL seam: F5 tries it first and
 	// only falls back to showing the hyperlink (webLinkVisible) when it
 	// fails -- e.g. no GUI browser available over SSH. Overridable in
@@ -298,6 +308,41 @@ func (u *ChatUI) SetProjectChoices(choices []ProjectChoice) {
 	u.projectChoices = append([]ProjectChoice(nil), choices...)
 }
 
+// SetProjectChoicesLoader makes F3 list the projects registered at that
+// moment, so one created or added during the session needs no restart.
+func (u *ChatUI) SetProjectChoicesLoader(load func() []ProjectChoice) {
+	u.projectChoicesLoader = load
+	if load != nil {
+		u.projectChoices = load()
+	}
+}
+
+// OpenTableAtStart makes the workspace open the table with this title as it
+// starts, as Enter on it in the Explorer does. An unknown title opens nothing.
+func (u *ChatUI) OpenTableAtStart(title string) { u.startTable = title }
+
+// openStartTable is the command of OpenTableAtStart, run once from Init.
+func (u *ChatUI) openStartTable() tea.Cmd {
+	title := u.startTable
+	u.startTable = ""
+	if title == "" {
+		return nil
+	}
+	for _, object := range u.catalog.Objects {
+		if object.Reference.Kind == "table" && object.Reference.Title == title && object.Issue == "" {
+			return u.openWorkspaceQuery(object, true)
+		}
+	}
+	return nil
+}
+
+// ChooseProject closes this workspace so that its caller reopens it on
+// project, as choosing it with F3 does.
+func (u *ChatUI) ChooseProject(project string) tea.Cmd {
+	u.selectedProject = project
+	return tea.Quit
+}
+
 // SelectedProject mirrors UI.SelectedProject.
 func (u *ChatUI) SelectedProject() string { return u.selectedProject }
 
@@ -368,6 +413,9 @@ func (u *ChatUI) Submit(text string) tea.Cmd {
 		u.sessionFence()
 		u.shell.SetComposerText(text)
 		return nil
+	}
+	if cmd, taken := u.aiSetupFor(text); taken {
+		return cmd
 	}
 	u.shell.ShowTranscript()
 	if len(u.catalog.Objects) > 0 {
@@ -718,6 +766,8 @@ func (u *ChatUI) chatWidth() int {
 // OnMsg satisfies chatshell.MsgHandler.
 func (u *ChatUI) OnMsg(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
+	case OverlayMsg:
+		return u.overlayMsg(msg)
 	case resultColumnsLoadedMsg:
 		if msg.overlay != nil && u.shell.HasOverlay(msg.overlay) && msg.overlay.valid() {
 			_, _, _ = msg.overlay.Update(msg)
@@ -789,6 +839,8 @@ func (u *ChatUI) OnMsg(msg tea.Msg) tea.Cmd {
 			return nil
 		}
 		u.workspaceMutationPending = false
+		note := u.openDataNote
+		u.openDataNote = ""
 		if msg.err != nil {
 			u.workspaceFeedback = msg.err.Error()
 			return nil
@@ -801,6 +853,7 @@ func (u *ChatUI) OnMsg(msg tea.Msg) tea.Cmd {
 		u.loadSession(msg.snapshot)
 		u.shell.ShowTranscript()
 		u.shell.FocusEntry(u.lastGridEntryID)
+		u.workspaceFeedback = note
 		return nil
 	case hostedPlanMsg:
 		if msg.command != nil && u.sessions != nil {
@@ -1173,6 +1226,7 @@ var chatCommands = []chatshell.Command{
 	{Name: "/export", Help: "export current|bucket <format> <path>"},
 	{Name: "/settings", Help: "show or change result versions to keep"},
 	{Name: "/plan", Help: "refresh hosted plan and AI usage"},
+	{Name: AISetupCommand, Help: "set up AI: DataTug AI, your own key or your own endpoint"},
 	// M5 (r1 adversarial review of #289): these were already handled by
 	// runCommand below, but missing from the "/" menu itself -- typing them
 	// out fully worked, but they weren't discoverable by opening "/" and
@@ -1270,7 +1324,7 @@ func (u *ChatUI) runCommand(input string) tea.Cmd {
 		if argument != "" {
 			err = fmt.Errorf("usage: /plan")
 		} else if u.hostedPlan == nil {
-			err = fmt.Errorf("/plan is available in hosted cloud chat; use datatug plan outside chat")
+			err = fmt.Errorf("/plan shows the allowance of DataTug AI; type /ai to choose it")
 		} else {
 			u.activeCommandAsync = true
 			lookup := u.hostedPlan

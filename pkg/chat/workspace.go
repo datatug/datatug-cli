@@ -25,9 +25,13 @@ type ProjectObject struct {
 	Columns     []string
 	ColumnTypes map[string]string
 	PrimaryKey  []string // authoritative physical key columns in key order
-	QueryType   string   // saved query metadata, shown locally in Project explorer
-	QueryText   string   // loaded query document, not included in model context
-	Issue       string   // local metadata load error; never included in agent context
+	// ProtectedColumns are the columns a read of this session may not name:
+	// their sensitivity label is protected and such a read cannot mask yet.
+	// Opening the object reads the other columns and says which were left out.
+	ProtectedColumns []string
+	QueryType        string // saved query metadata, shown locally in Project explorer
+	QueryText        string // loaded query document, not included in model context
+	Issue            string // local metadata load error; never included in agent context
 }
 
 type ProjectCatalog struct {

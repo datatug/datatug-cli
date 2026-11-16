@@ -96,6 +96,9 @@ func ExecuteSelect(ctx context.Context, storeID string, request SelectRequest) (
 	if err != nil {
 		return QueryResultResponse{}, sourceLookupAnswer(err)
 	}
+	if driver == DriverClickHouse {
+		return QueryResultResponse{}, fmt.Errorf("ClickHouse anonymous recordsets require the typed CLI query route; this map-row endpoint is unsupported")
+	}
 
 	var result secureread.Result
 	// executionProfile/collection mirror exec/run_query's own

@@ -71,6 +71,15 @@ func getEntities(w http.ResponseWriter, r *http.Request) {
 
 // saveEntity handles save entity endpoint
 func saveEntity(w http.ResponseWriter, r *http.Request) {
+	writeEntity(w, r, api.SaveEntity)
+}
+
+// createEntity handles create entity endpoint: it refuses an ID that is taken.
+func createEntity(w http.ResponseWriter, r *http.Request) {
+	writeEntity(w, r, api.CreateEntity)
+}
+
+func writeEntity(w http.ResponseWriter, r *http.Request, write func(context.Context, dto.ProjectRef, *datatug.Entity) error) {
 	var ref dto.ProjectItemRef
 	var entity datatug.Entity
 	saveFunc := func(ctx context.Context) (apicore.ResponseDTO, error) {
@@ -79,7 +88,7 @@ func saveEntity(w http.ResponseWriter, r *http.Request) {
 		if ref.ID != "" {
 			entity.ID = ref.ID
 		}
-		return entity, api.SaveEntity(ctx, ref.ProjectRef, &entity)
+		return entity, write(ctx, ref.ProjectRef, &entity)
 	}
 	saveProjectItem(w, r, &ref, &entity, saveFunc)
 }

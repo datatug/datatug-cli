@@ -252,7 +252,7 @@ func TestCov100gChatSavedQueryRunAndLookup(t *testing.T) {
 	require.NoError(t, err)
 
 	executor := secureread.NewExecutor(secureread.Session{Unrestricted: true})
-	svc := chatSavedQueries{projectDir: projectDir, store: proj, executor: executor, env: "local", projectID: id, session: secureread.Session{Unrestricted: true}}
+	svc := chatSavedQueries{projectDir: projectDir, store: proj, executor: executor, env: "local", projectID: id, session: secureread.Session{LocalProjectOwner: true}}
 
 	result, err := svc.Run(ctx, "customers")
 	require.NoError(t, err)

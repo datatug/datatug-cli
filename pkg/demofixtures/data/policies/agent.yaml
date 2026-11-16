@@ -1,0 +1,49 @@
+# Curated Perimeter policy of the DataTug demo project (datatug demo install).
+#
+# Local Perimeter keeps an honest agent inside the lines. A real security
+# boundary needs DB-native permissions or DataTug Cloud approvals.
+#
+# The agent role may read Canadian customers (Email is listed so the Meaning
+# Graph label in datatug-labels.json shows it masked), Canadian invoices and
+# Canadian support notes. Everything else, Employee included, is denied by
+# default.
+apiVersion: dalgo.io/access/v1
+kind: AccessPolicy
+metadata:
+  name: agent
+default: deny
+ruleSets:
+  agent:
+    - path: /Customer
+      rules:
+        - id: agent-customers-canada
+          effect: allow
+          operations: [query]
+          where:
+            op: "=="
+            left: { field: Country }
+            right: { value: Canada }
+          fields: [CustomerId, FirstName, LastName, Company, City, State, Country, Email, SupportRepId]
+    - path: /Invoice
+      rules:
+        - id: agent-invoices-canada
+          effect: allow
+          operations: [query]
+          where:
+            op: "=="
+            left: { field: BillingCountry }
+            right: { value: Canada }
+          fields: [InvoiceId, CustomerId, InvoiceDate, BillingCity, BillingState, BillingCountry, Total]
+    - path: /support-notes
+      rules:
+        - id: agent-support-notes-canada
+          effect: allow
+          operations: [query]
+          where:
+            op: "=="
+            left: { field: Country }
+            right: { value: Canada }
+          fields: [CustomerId, Country, Author, CreatedAt, Note]
+bindings:
+  roles:
+    agent: [agent]

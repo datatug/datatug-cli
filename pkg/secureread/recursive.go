@@ -15,6 +15,15 @@ import (
 // source. Every nested leaf passes through the same policy session and bound
 // variables. Named databases are refused: they require a routing executor.
 func (e *Executor) RunRecursiveTugQL(ctx context.Context, sourceURL string, document []byte, variables map[string]any) (Result, error) {
+	if e.session.SourceBound() {
+		return Result{}, ErrSourceBinding
+	}
+	if err := e.session.configurationErr; err != nil {
+		return Result{}, err
+	}
+	if err := refuseContextVariables(document); err != nil {
+		return Result{}, err
+	}
 	variables, err := accesspolicies.ExactVariables(variables)
 	if err != nil {
 		return Result{}, err
@@ -28,6 +37,9 @@ func (e *Executor) RunRecursiveTugQL(ctx context.Context, sourceURL string, docu
 	}
 	query, err = bindRecursiveParameters(query, variables)
 	if err != nil {
+		return Result{}, err
+	}
+	if err := e.guardSource(ctx, sourceURL, query); err != nil {
 		return Result{}, err
 	}
 	db, closeSource, err := openSourceFn(ctx, sourceURL, false, len(e.session.Policies))

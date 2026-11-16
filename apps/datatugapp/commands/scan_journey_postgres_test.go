@@ -100,6 +100,10 @@ type fakePgDatabase struct {
 
 var _ dbcopy.SchemaScanDB = (*fakePgDatabase)(nil)
 
+func (f *fakePgDatabase) RunReadonlySchemaTransaction(ctx context.Context, worker func(context.Context, dbschema.SchemaReader) error) error {
+	return worker(ctx, f)
+}
+
 func (f *fakePgDatabase) Close() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -801,6 +805,10 @@ type failingPgDatabase struct {
 	err error
 }
 
+func (f *failingPgDatabase) RunReadonlySchemaTransaction(ctx context.Context, worker func(context.Context, dbschema.SchemaReader) error) error {
+	return worker(ctx, f)
+}
+
 func (f *failingPgDatabase) ListCollections(context.Context, *record.Key) ([]dal.CollectionRef, error) {
 	return nil, f.err
 }
@@ -812,6 +820,10 @@ type failedReadPgDatabase struct {
 	*fakePgDatabase
 	err   error
 	phase string
+}
+
+func (f *failedReadPgDatabase) RunReadonlySchemaTransaction(ctx context.Context, worker func(context.Context, dbschema.SchemaReader) error) error {
+	return worker(ctx, f)
 }
 
 func (f *failedReadPgDatabase) DescribeCollection(ctx context.Context, ref *dal.CollectionRef) (*dbschema.CollectionDef, error) {

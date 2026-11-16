@@ -113,9 +113,10 @@ func (c *Collector) FieldNames() [][]string {
 
 // Data is a built data.json and what meta.json says about it.
 type Data struct {
-	Bytes   []byte
-	Columns []Column
-	Rows    Rows
+	Anonymous bool
+	Bytes     []byte
+	Columns   []Column
+	Rows      Rows
 }
 
 // Build encodes data.json for id with the columns given, in that order ($key

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -110,7 +112,7 @@ func TestValidateServerRef(t *testing.T) {
 		}
 	}
 	// A server driver may have a host, and postgres may have none.
-	for _, server := range []datatug.ServerRef{{Driver: "postgres"}, {Driver: "postgres", Host: "db.example.com", Port: 5432}, {Driver: "mysql", Host: "db.example.com"}} {
+	for _, server := range []datatug.ServerRef{{Driver: "postgres"}, {Driver: "postgres", Host: "db.example.com", Port: 5432}, {Driver: "mysql", Host: "db.example.com"}, {Driver: "typesense"}, {Driver: "typesense", Host: "search.example.com", Port: 8108}} {
 		if err := ValidateServerRef(server); err != nil {
 			t.Errorf("%+v is refused: %v", server, err)
 		}
@@ -258,7 +260,11 @@ func askedStores(t *testing.T) *int {
 	}
 	projectStore := mockProjectStore{
 		dbServersStoreFunc: func(string) datatug.ProjDbServersStore { return servers },
-		loadBoardFunc: func(context.Context, string, ...datatug.StoreOption) (*datatug.Board, error) {
+		loadBoardFunc: func(_ context.Context, id string, _ ...datatug.StoreOption) (*datatug.Board, error) {
+			// A create uses an absent plain target; read/delete positives use b1.
+			if id == "new-board" {
+				return nil, os.ErrNotExist
+			}
 			return &datatug.Board{}, nil
 		},
 		loadEntityFunc: func(context.Context, string, ...datatug.StoreOption) (*datatug.Entity, error) {
@@ -273,7 +279,7 @@ func askedStores(t *testing.T) *int {
 	storage.NewDatatugStore = func(string) (storage.Store, error) {
 		return mockStore{getProjectStoreFunc: func(string) datatug.ProjectStore {
 			*asked++
-			return projectStore
+			return guardedBoardTestProject{ProjectStore: projectStore}
 		}}, nil
 	}
 	return asked
@@ -300,7 +306,7 @@ func itemRef(id string) dto.ProjectItemRef {
 }
 
 func plainBoard(id string) datatug.Board {
-	return datatug.Board{ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: id}}}
+	return datatug.Board{ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: id, Title: "Board", Folder: "~"}}}
 }
 
 func plainEntity(id, title string) *datatug.Entity {
@@ -533,7 +539,7 @@ func TestEntries_APlainRequestReachesTheStore(t *testing.T) {
 		"GetBoard":      func() error { _, err := GetBoard(ctx, itemRef("b1")); return err },
 		"DeleteBoard":   func() error { return DeleteBoard(ctx, itemRef("b1")) },
 		"SaveBoard":     func() error { _, err := SaveBoard(ctx, plainProject(), plainBoard("b1")); return err },
-		"CreateBoard":   func() error { _, err := CreateBoard(ctx, plainProject(), plainBoard("b1")); return err },
+		"CreateBoard":   func() error { _, err := CreateBoard(ctx, plainProject(), plainBoard("new-board")); return err },
 		"GetEntity":     func() error { _, err := GetEntity(ctx, itemRef("Customer")); return err },
 		"DeleteEntity":  func() error { return DeleteEntity(ctx, itemRef("Customer")) },
 		"SaveEntity":    func() error { return SaveEntity(ctx, plainProject(), plainEntity("Customer", "")) },
@@ -589,7 +595,7 @@ func TestEntries_AStoreFailureIsOneFixedAnswerThatQuotesNoPath(t *testing.T) {
 		previous := storage.NewDatatugStore
 		t.Cleanup(func() { storage.NewDatatugStore = previous })
 		storage.NewDatatugStore = func(string) (storage.Store, error) {
-			return mockStore{getProjectStoreFunc: func(string) datatug.ProjectStore { return project }}, nil
+			return mockStore{getProjectStoreFunc: func(string) datatug.ProjectStore { return guardedBoardTestProject{ProjectStore: project} }}, nil
 		}
 	}
 	for _, cause := range causes {
@@ -744,5 +750,40 @@ func TestExecuteRequests_RefuseAnUnsafeProject(t *testing.T) {
 	plainCommands := ExecuteCommandsRequest{Project: "p1", Commands: []ExecuteCommandRequest{{Type: "SQL", Text: "SELECT 1", Env: "local", DB: "shop"}}}
 	if err := plainCommands.Validate(); err != nil {
 		t.Errorf("a plain execute_commands request is refused: %v", err)
+	}
+}
+
+// A create writes only when the store says the ID is free: an entity that is
+// there is not replaced, and a store that cannot answer stops the create.
+func TestCreateEntityWritesOnlyAnIDThatIsFree(t *testing.T) {
+	serveProjects(t, "p1")
+	previous := storage.NewDatatugStore
+	t.Cleanup(func() { storage.NewDatatugStore = previous })
+	for name, tc := range map[string]struct {
+		loadErr   error
+		wantError string
+		wantSaved bool
+	}{
+		"taken":      {wantError: `entity "Customer" already exists`},
+		"unreadable": {loadErr: errors.New("disk"), wantError: `could not create entity "Customer"`},
+		"free":       {loadErr: fs.ErrNotExist, wantSaved: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			saved := false
+			storage.NewDatatugStore = func(string) (storage.Store, error) {
+				return mockStore{getProjectStoreFunc: func(string) datatug.ProjectStore {
+					return mockProjectStore{
+						loadEntityFunc: func(context.Context, string, ...datatug.StoreOption) (*datatug.Entity, error) {
+							return &datatug.Entity{}, tc.loadErr
+						},
+						saveEntityFunc: func(context.Context, *datatug.Entity) error { saved = true; return nil },
+					}
+				}}, nil
+			}
+			err := CreateEntity(context.Background(), plainProject(), plainEntity("Customer", ""))
+			if saved != tc.wantSaved || (tc.wantError == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.wantError)) {
+				t.Fatalf("create: %v, saved=%v", err, saved)
+			}
+		})
 	}
 }

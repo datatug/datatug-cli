@@ -274,7 +274,7 @@ func (s *Store) claimDueAttempt(ctx context.Context, identity RunnerIdentity, pr
 				return err
 			}
 			d.SourceFingerprint = obs.SourceFingerprint
-			result = &Claim{ClaimID: r.ID, RunID: r.ID, Fence: r.Fence, LeaseUntil: r.LeaseUntil, Definition: d}
+			result = &Claim{ClaimID: r.ID, RunID: r.ID, Fence: r.Fence, LeaseUntil: r.LeaseUntil, Deadline: r.Deadline, Definition: d}
 			return s.log(ctx, tx, r.Scope, identity.ID, "run.claim", r.ID)
 		}
 		return nil

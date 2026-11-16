@@ -25,7 +25,7 @@ func ParseVariables(pairs []string) (map[string]any, error) {
 		if !dal.ValidParamName(name) {
 			return nil, fmt.Errorf("invalid --var %q: name %q is not a valid parameter name", pair, name)
 		}
-		if name == "currentUser" || strings.HasPrefix(name, "principal.") || strings.HasPrefix(name, "path.") {
+		if reservedVariableName(name) {
 			return nil, fmt.Errorf("invalid --var %q: %q is reserved; use --as, --role and --group", pair, name)
 		}
 		value := parseValue(raw)
@@ -49,4 +49,8 @@ func parseValue(raw string) any {
 		return raw // dates stay the literal text so they compare with stored strings
 	}
 	return value
+}
+
+func reservedVariableName(name string) bool {
+	return name == "currentUser" || strings.HasPrefix(name, "principal.") || strings.HasPrefix(name, "path.")
 }

@@ -22,7 +22,6 @@ func accessCaps(t *testing.T) (Capabilities, []byte) {
 // With an access secret every registered route refuses a request that has no token, even from a
 // listed origin; with the token it is served as before. The exchange route is the one exception.
 func TestRoutes_EveryRouteNeedsTheTokenExceptTheExchange(t *testing.T) {
-	quietLog(t)
 	stubHandle(t)
 	caps, secret := accessCaps(t)
 	routes := recordRoutes(true, caps)

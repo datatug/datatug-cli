@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/dal-go/dalgo/dbschema"
 	"github.com/dal-go/dalgo2postgres"
 	"github.com/datatug/datatug-cli/internal/plainfs"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
@@ -318,6 +319,12 @@ func (*catalogReadError) Error() string {
 
 func (e *catalogReadError) Unwrap() error { return e.cause }
 
+// postgresSchemaTransaction is optional on the opened handle. Its callback owns
+// the complete scan and supplies the only reader the provider may use.
+type postgresSchemaTransaction interface {
+	RunReadonlySchemaTransaction(context.Context, func(context.Context, dbschema.SchemaReader) error) error
+}
+
 // scanPostgresCatalog scans a PostgreSQL, MySQL, Oracle or SQL Server database (driver) through DALgo's schema reader.
 // It opens the source through dbcopy, so a driver error comes back classified
 // (see BackendRef.OpenFailure), never as the driver wrote it; what the scan
@@ -339,17 +346,36 @@ func scanPostgresCatalog(ctx context.Context, driver string, connectionParams db
 	catalogID := connectionParams.Catalog()
 	var readMu sync.Mutex
 	var connectionReadError error
-	provider := dalgoschema.NewSchemaProviderWithErrorObserver(scanDB, nil, catalogID, DefaultSchemaForDriver(source.Scheme), func(readErr error) {
-		if !isConnectionReadError(readErr) {
-			return
+	var dbCatalog *datatug.DbCatalog
+	scan := func(ctx context.Context, reader dbschema.SchemaReader) error {
+		provider := dalgoschema.NewSchemaProviderWithErrorObserver(reader, nil, catalogID, DefaultSchemaForDriver(source.Scheme), func(readErr error) {
+			if !isConnectionReadError(readErr) {
+				return
+			}
+			readMu.Lock()
+			if connectionReadError == nil {
+				connectionReadError = readErr
+			}
+			readMu.Unlock()
+		})
+		var scanErr error
+		dbCatalog, scanErr = schemer.NewScanner(provider).ScanCatalog(ctx, catalogID)
+		return scanErr
+	}
+	if source.Scheme == DriverPostgres {
+		transaction, supported := scanDB.(postgresSchemaTransaction)
+		if !supported {
+			return nil, errors.New("a PostgreSQL schema scan requires a verified native read-only schema transaction")
 		}
-		readMu.Lock()
-		if connectionReadError == nil {
-			connectionReadError = readErr
+		err = transaction.RunReadonlySchemaTransaction(ctx, scan)
+		if err != nil {
+			// A transaction failure, including cancellation or failed rollback,
+			// must not publish metadata collected before that failure.
+			dbCatalog = nil
 		}
-		readMu.Unlock()
-	})
-	dbCatalog, err := schemer.NewScanner(provider).ScanCatalog(ctx, catalogID)
+	} else {
+		err = scan(ctx, scanDB)
+	}
 	if err != nil {
 		readMu.Lock()
 		if connectionReadError != nil {

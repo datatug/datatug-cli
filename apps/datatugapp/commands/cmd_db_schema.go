@@ -10,6 +10,7 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
+	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/schemers/dalgoschema"
 	"github.com/spf13/cobra"
@@ -25,7 +26,7 @@ const (
 
 // schemaProviders are the providers `db schema` lists, in the order the
 // unsupported-provider error names them.
-var schemaProviders = []string{"sqlite", "postgres"}
+var schemaProviders = []string{"sqlite", "postgres", "typesense", "clickhouse"}
 
 // schemaEntry is one table or view of the listing.
 type schemaEntry struct {
@@ -149,7 +150,9 @@ func (s *schemaSession) Close() {
 
 // openSchemaSession reads --db (a URL, env:NAME, a path or a datatug:// reference) and --format of cmd and
 // opens the source read-only: it is the one place a metadata command resolves, checks and opens
-// its source.
+// its source. A command that offers --counts is refused for Typesense here, after the source is
+// parsed and before it is opened, so every caller answers the refused flag before any credential
+// is read or any request is made.
 func openSchemaSession(cmd *cobra.Command, command string) (*schemaSession, error) {
 	dbArg, _ := cmd.Flags().GetString("db")
 	format, _ := cmd.Flags().GetString("format")
@@ -178,6 +181,12 @@ func openSchemaSession(cmd *cobra.Command, command string) (*schemaSession, erro
 	ref = ref.WithFlag("--db")
 	if !isSchemaProvider(ref.Scheme) {
 		return nil, Exit(fmt.Sprintf("unsupported provider %q for %s: supported providers are %s", ref.Scheme, command, strings.Join(schemaProviders, ", ")), exitCodeUsage)
+	}
+	if withCounts, _ := cmd.Flags().GetBool("counts"); withCounts && dbcopy.IsTypesenseScheme(ref.Scheme) {
+		return nil, Exit("--counts is not available for a Typesense source: Typesense has no bounded native count, and DataTug does not read a whole collection to count it", exitCodeUsage)
+	}
+	if withCounts, _ := cmd.Flags().GetBool("counts"); withCounts && dbcopy.IsClickHouseScheme(ref.Scheme) {
+		return nil, Exit("--counts is unavailable for ClickHouse schema commands; use an explicitly granted bounded native SQL count", exitCodeUsage)
 	}
 	db, err := openSchemaSource(ctx, ref)
 	if err != nil {
@@ -218,6 +227,13 @@ func dbSchemaAction(cmd *cobra.Command, _ []string) error {
 }
 
 func isSchemaProvider(scheme string) bool {
+	if dbcopy.IsClickHouseScheme(scheme) {
+		return true
+	}
+	if dbcopy.IsTypesenseScheme(scheme) {
+		// `typesense`, `typesense+https` and `typesense+http` are one provider.
+		return true
+	}
 	for _, p := range schemaProviders {
 		if p == scheme {
 			return true
@@ -229,6 +245,12 @@ func isSchemaProvider(scheme string) bool {
 // schemaTarget is the resolved source URL without userinfo, query or fragment.
 // An env:NAME source shows what the variable holds, stripped the same way.
 func schemaTarget(ref dbcopy.BackendRef) string {
+	if dbcopy.IsClickHouseScheme(ref.Scheme) {
+		if strings.HasPrefix(ref.Raw, "env:") {
+			return ref.Raw
+		}
+		return "ClickHouse source"
+	}
 	if ref.Scheme == "postgres" {
 		return dbcopy.SourceDisplay(ref.Path)
 	}
@@ -239,15 +261,41 @@ func schemaTarget(ref dbcopy.BackendRef) string {
 func listSchemaEntries(ctx context.Context, provider string, db dal.DB) ([]schemaEntry, error) {
 	var entries []schemaEntry
 	var err error
-	if provider == "postgres" {
+	switch {
+	case dbcopy.IsClickHouseScheme(provider):
+		refs, listErr := dbschema.ListCollections(ctx, db, nil)
+		if listErr != nil {
+			return nil, listErr
+		}
+		for _, ref := range refs {
+			entries = append(entries, schemaEntry{Schema: ref.Schema(), Name: ref.Name(), Kind: schemaKindTable, ref: ref})
+		}
+	case provider == "postgres":
 		entries, err = postgresEntries(ctx, db)
-	} else {
+	case dbcopy.IsTypesenseScheme(provider):
+		entries, err = typesenseEntries(ctx, db)
+	default:
 		entries, err = sqliteEntries(ctx, db)
 	}
 	if err != nil {
 		return nil, err
 	}
 	sortSchemaEntries(entries)
+	return entries, nil
+}
+
+// typesenseEntries lists the collections a Typesense credential can read through
+// the generic SchemaReader. Typesense has no views, so every collection is a
+// table, recorded under the logical ServerDefaultSchema grouping the scan uses.
+func typesenseEntries(ctx context.Context, db dal.DB) ([]schemaEntry, error) {
+	refs, err := dbschema.ListCollections(ctx, db, nil)
+	if err != nil {
+		return nil, fmt.Errorf("list collections: %w", err)
+	}
+	entries := make([]schemaEntry, 0, len(refs))
+	for _, ref := range refs {
+		entries = append(entries, schemaEntry{Schema: api.ServerDefaultSchema, Name: ref.Name(), Kind: schemaKindTable, ref: ref})
+	}
 	return entries, nil
 }
 

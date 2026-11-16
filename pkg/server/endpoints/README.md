@@ -107,7 +107,7 @@ and exact integers only (a float is never compared for equality, and the structu
 |  **Entities** |
 | GET | /entities/all_entities | |
 | GET | /entities/entity | |
-| POST | /entities/create_entity | |
+| POST | /entities/create_entity | Refuses an ID that is taken (400) |
 | PUT | /entities/save_entity | |
 | DELETE | /entities/delete_entity | 404 when the project has no such entity; 500 when the delete fails |
 |  **Projects** |

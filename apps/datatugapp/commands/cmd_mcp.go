@@ -15,7 +15,7 @@ import (
 func mcpCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "mcp", Short: "Serve read-only MCP tools over stdin/stdout using a local DataTug agent",
-		Long: "Serve MCP over stdin/stdout. Start datatug serve separately with your project and policy session. Discover project/schema/saved SQL queries and execute them through the agent's existing read-only SQL path. No project writes or raw SQL tools are exposed. Connection credentials stay with the agent. See docs/mcp.md.",
+		Long: "Serve MCP over stdin/stdout. Start datatug serve separately with your project and policy session. Discover project/schema/saved SQL queries and execute them through the agent's existing read-only SQL path. No raw SQL tools are exposed; the only project write is datatug_propose_label, which can only add a stricter sensitivity label (an owner confirms or dismisses it). Connection credentials stay with the agent. See docs/mcp.md.",
 		Args: cobra.NoArgs, SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			address, _ := cmd.Flags().GetString("agent-url")

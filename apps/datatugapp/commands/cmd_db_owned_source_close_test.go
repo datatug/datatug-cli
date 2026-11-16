@@ -218,7 +218,7 @@ func TestDBCopyClosesTheOwnedSourceAndTargetOnSuccess(t *testing.T) {
 	}
 }
 
-func TestDBCopyClosesTheOwnedSourceWhenDirectivesFailBeforeTheTargetOpens(t *testing.T) {
+func TestDBCopyReportsADirectiveErrorBeforeOpeningEitherSide(t *testing.T) {
 	path := covCSQLiteFile(t, "copy-directives.sqlite", `CREATE TABLE t (id INTEGER PRIMARY KEY)`)
 	source, target := &ownedSourceCounter{}, &ownedSourceCounter{}
 	restoreCopyOpenSeams(t)
@@ -234,8 +234,9 @@ func TestDBCopyClosesTheOwnedSourceWhenDirectivesFailBeforeTheTargetOpens(t *tes
 	if !errors.As(err, &coder) || coder.ExitCode() != 2 {
 		t.Fatalf("directive error = %v, want usage exit", err)
 	}
-	if source.closes != 1 {
-		t.Fatalf("close after a directive error = %d, want 1", source.closes)
+	// The filter is a usage error, reported before either side is opened.
+	if source.opens != 0 || source.closes != 0 {
+		t.Fatalf("source opens/closes after a directive error = %d/%d, want 0/0", source.opens, source.closes)
 	}
 	if target.opens != 0 {
 		t.Fatalf("the target was opened after a directive error: %d", target.opens)

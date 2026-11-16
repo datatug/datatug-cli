@@ -15,6 +15,9 @@ import (
 // codebase to consult instead) and default to "string" for an
 // all-null/empty column.
 func toContractRecordset(result secureread.Result) (apicontract.Recordset, error) {
+	if result.AnonymousRecordset != nil {
+		return *result.AnonymousRecordset, nil
+	}
 	columnTypes := make([]string, len(result.Columns))
 	for i, name := range result.Columns {
 		for _, row := range result.Rows {

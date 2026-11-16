@@ -46,7 +46,7 @@ func dbAddCommand() *cobra.Command {
 		Long: "Registers a database as a source of an environment of a registered DataTug project, in the files a scan writes, " +
 			"and does not open the database: no metadata is scanned and no row is read (`datatug scan` describes it later).\n\n" +
 			"--db is a SQLite file path (or a sqlite:// URL), stored as a scan stores it, or env:NAME, the name of an environment variable that " +
-			"holds a PostgreSQL URL: the project then holds only the name of the variable in a connection descriptor, never the URL. " +
+			"holds a PostgreSQL URL or a set ClickHouse URL: the project then holds only the name of the variable in a connection descriptor, never the URL. " +
 			"A connection URL with credentials is refused: put it in an environment variable and pass env:NAME.\n\n" +
 			"When the same database is already a source of the environment nothing is written and the existing id is printed with added false.",
 		Example: "  datatug db add --project shop --db ./shop.sqlite --env local\n" +
@@ -56,7 +56,7 @@ func dbAddCommand() *cobra.Command {
 	}
 	flags := cmd.Flags()
 	flags.StringP("project", "p", "", "Registered project id/name to add the source to (required)")
-	flags.String("db", "", "The database: a SQLite file path or sqlite:// URL, or env:NAME for a PostgreSQL URL held in an environment variable (required)")
+	flags.String("db", "", "The database: a SQLite file path or sqlite:// URL, or env:NAME for PostgreSQL or ClickHouse (set the variable before adding ClickHouse; required)")
 	flags.String("env", "", "Environment of the project the source belongs to: a plain name; made when the project has none of that id (default: the project's only environment, or \"local\" when it has several)")
 	flags.String("name", "", "Id of the source: a plain name (default for a SQLite file: its file name without the extension; required for env:NAME)")
 	flags.String("format", "json", "Output format: json or text (json carries dbRef, the --db value that addresses the source)")
@@ -65,7 +65,9 @@ func dbAddCommand() *cobra.Command {
 
 // dbAddSource is the database `db add` was given, resolved and checked without opening it.
 type dbAddSource struct {
+	driver     string
 	sqlitePath string // the absolute path of a SQLite file
+	ingitPath  string // the absolute path of a local inGitDB database root folder
 	dsnEnv     string // the variable that holds a PostgreSQL URL
 }
 
@@ -107,7 +109,7 @@ func dbAddAction(cmd *cobra.Command, _ []string) error {
 		}
 	}
 	added, err := api.AddProjectSource(ctx, store, base.ProjectDir, api.ProjectSourceRequest{
-		Environment: env, ID: name, SQLitePath: source.sqlitePath, DSNEnv: source.dsnEnv,
+		Environment: env, ID: name, SQLitePath: source.sqlitePath, IngitDBPath: source.ingitPath, DSNEnv: source.dsnEnv, Driver: source.driver,
 	})
 	if err != nil {
 		var refusal *api.ProjectSourceRefusal
@@ -145,11 +147,13 @@ func resolveDbAddSource(dbArg string, stderr io.Writer) (dbAddSource, error) {
 	}
 	switch ref.Scheme {
 	case "sqlite":
+	case "ingitdb":
+		return resolveDbAddIngitDB(ref.Path)
 	case "postgres":
 		// The URL is not echoed, and neither is any part of it: it may hold a password.
 		return dbAddSource{}, Exit("--db is a PostgreSQL connection URL, which carries credentials a project must not hold: put it in an environment variable and pass --db env:NAME", exitCodeUsage)
 	default:
-		return dbAddSource{}, Exit(fmt.Sprintf("--db: a %s source cannot be registered: give a SQLite file, or env:NAME naming an environment variable that holds a PostgreSQL URL", ref.Scheme), exitCodeUsage)
+		return dbAddSource{}, Exit(fmt.Sprintf("--db: a %s source cannot be registered: give a SQLite file, an ingitdb://<folder> inGitDB database, or env:NAME naming an environment variable that holds a PostgreSQL URL", ref.Scheme), exitCodeUsage)
 	}
 	path, err := absolutePath(ref.Path)
 	if err != nil {
@@ -164,6 +168,19 @@ func resolveDbAddSource(dbArg string, stderr io.Writer) (dbAddSource, error) {
 		return dbAddSource{}, Exit(fmt.Sprintf("%s is a folder, not a SQLite file", dbcopy.PathDisplay(path)), exitCodeUsage)
 	}
 	return dbAddSource{sqlitePath: path}, nil
+}
+
+// resolveDbAddIngitDB checks an ingitdb://<folder> source: a local folder
+// that holds .ingitdb/, looked at and never opened.
+func resolveDbAddIngitDB(folder string) (dbAddSource, error) {
+	path, err := absolutePath(folder)
+	if err != nil {
+		return dbAddSource{}, Exit(fmt.Sprintf("cannot resolve the --db path: %v", err), exitCodeUsage)
+	}
+	if info, err := os.Stat(filepath.Join(path, ".ingitdb")); err != nil || !info.IsDir() {
+		return dbAddSource{}, Exit(fmt.Sprintf("%s is not an inGitDB database: it has no .ingitdb folder", dbcopy.PathDisplay(path)), exitCodeUsage)
+	}
+	return dbAddSource{ingitPath: path}, nil
 }
 
 // resolveDbAddEnv checks the variable name of an env:NAME source. The variable is read only to tell
@@ -183,6 +200,9 @@ func resolveDbAddEnv(variable string, stderr io.Writer) (dbAddSource, error) {
 	if err != nil {
 		return dbAddSource{}, Exit("--db: "+err.Error(), exitCodeUsage)
 	}
+	if dbcopy.IsClickHouseScheme(ref.Scheme) {
+		return dbAddSource{dsnEnv: variable, driver: api.DriverClickHouse}, nil
+	}
 	if ref.Scheme != api.DriverPostgres {
 		return dbAddSource{}, Exit(fmt.Sprintf("--db: environment variable %s must hold a postgres:// URL, not a %s source: a SQLite file is given as its path", variable, ref.Scheme), exitCodeUsage)
 	}
@@ -193,10 +213,14 @@ func resolveDbAddEnv(variable string, stderr io.Writer) (dbAddSource, error) {
 // the extension, with every character a plain name does not allow written as "-". An env:NAME has
 // no file name, and a file name that makes no plain name must be named with --name.
 func defaultSourceName(source dbAddSource) (string, error) {
-	if source.sqlitePath == "" {
+	file := source.sqlitePath
+	if source.ingitPath != "" {
+		file = source.ingitPath
+	}
+	if file == "" {
 		return "", Exit("--name is required for an env:NAME source: the id the source is listed under", exitCodeUsage)
 	}
-	base := filepath.Base(source.sqlitePath)
+	base := filepath.Base(file)
 	base = strings.TrimSuffix(base, filepath.Ext(base))
 	name := strings.Map(func(r rune) rune {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '.' || r == '_' || r == '-' {

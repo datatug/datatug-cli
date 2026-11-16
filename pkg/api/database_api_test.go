@@ -306,6 +306,8 @@ func TestGetServerDatabases_OnlyASqlServerServerIsConnectedTo(t *testing.T) {
 		{Driver: "sqlite3"},
 		{Driver: "mysql", Host: "db1.example.com"},
 		{Driver: "postgres", Host: "db1.example.com", Port: 5432},
+		{Driver: "typesense"},
+		{Driver: "typesense", Host: "search.example.com", Port: 8108},
 	} {
 		recorded := datatug.ProjDbServer{Server: server}
 		recorded.ID = server.GetID()

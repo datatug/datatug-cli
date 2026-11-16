@@ -17,7 +17,6 @@ import (
 // A route that is not implemented answers 501 with a sentence built here, and never stops the
 // connection with no answer.
 func TestRoutes_ARouteThatIsNotImplementedAnswers501WithABuiltSentence(t *testing.T) {
-	quietLog(t)
 	for _, tc := range []struct {
 		name     string
 		handler  http.HandlerFunc
@@ -67,7 +66,6 @@ func TestWriteNotImplemented_AnAnswerThatCannotBeWrittenIsLogged(t *testing.T) {
 // create_project stays behind the write capability: without it the route answers the refusal of
 // every write, as before.
 func TestRoutes_CreateProjectIsAnswered501OnlyWithTheWriteCapability(t *testing.T) {
-	quietLog(t)
 	for _, tc := range []struct {
 		name   string
 		caps   Capabilities

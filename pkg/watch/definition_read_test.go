@@ -87,3 +87,35 @@ func TestReadDefinitionInTransactionRejectsInvalidCorruptAndCanceledReads(t *tes
 		t.Fatalf("canceled read admitted: %v", err)
 	}
 }
+
+func TestListDefinitionsInTransactionKeepsOwningVisibilityAndAuthority(t *testing.T) {
+	stores, _, _ := firestoreContractFixture(t)
+	s := stores[0]
+	ctx := context.Background()
+	create(t, s, actor("alice"), definition("private-alice"))
+	create(t, s, actor("bob"), definition("private-bob"))
+	shared := definition("shared")
+	shared.Visibility = "shared"
+	create(t, s, actor("alice"), shared)
+	db := s.cloud.db.(*contractFirestoreDB)
+	list := func() ([]Definition, error) {
+		var result []Definition
+		err := db.RunReadonlyTransaction(ctx, func(ctx context.Context, tx dal.ReadTransaction) error {
+			var err error
+			result, err = s.ListDefinitionsInTransaction(ctx, tx, actor("alice"))
+			if tx.(*contractFirestoreTX).wrote {
+				t.Fatal("list changed native state")
+			}
+			return err
+		})
+		return result, err
+	}
+	result, err := list()
+	if err != nil || len(result) != 2 || result[0].ID != "private-alice" || result[1].ID != "shared" {
+		t.Fatalf("wrong private inventory: %+v %v", result, err)
+	}
+	s.cloud.options.Authorize = func(context.Context, dal.ReadTransaction) error { return ErrForbidden }
+	if result, err = list(); !errors.Is(err, ErrForbidden) || len(result) != 0 {
+		t.Fatalf("revoked authority disclosed definitions: %+v %v", result, err)
+	}
+}

@@ -91,8 +91,14 @@ func TestLocalMeaningQuerySaveAndProtectedDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	remove.IfMatch = catalog.Revision
-	if _, err = LocalProjectMeaningChange(ctx, remove); err != nil {
-		t.Fatal(err)
+	if _, err = LocalProjectMeaningChange(ctx, remove); !errors.Is(err, datatug.ErrProjectUsageIncomplete) {
+		t.Fatalf("definition scan enabled delete without retained-history coverage: %v", err)
+	}
+	unchanged, err := LocalProjectMeaningsCatalog(ctx, ref, branch)
+	wantedJSON, _ := json.Marshal(catalog.Entities)
+	storedJSON, _ := json.Marshal(unchanged.Entities)
+	if err != nil || !bytes.Equal(storedJSON, wantedJSON) || unchanged.Revision != catalog.Revision {
+		t.Fatalf("refused deletion changed stored meaning: %+v, %v", unchanged, err)
 	}
 }
 

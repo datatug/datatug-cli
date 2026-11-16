@@ -110,9 +110,17 @@ func TestUnexpectedMetadataDoesNotBecomeAuthority(t *testing.T) {
 		t.Fatal("accepted invalid session metadata")
 	}
 	restore()
-	restore = reply(c, "queries/get_query", `{"id":"q","type":"TugQL"}`, 200)
-	if _, err := c.loadQuery(ctx, queryInput{"demo", "q"}); err == nil {
-		t.Fatal("accepted non-SQL")
+	for _, kind := range []string{"HTTP", "JavaScript", "DELETE", "unknown"} {
+		metadata, _ := json.Marshal(map[string]any{"id": "q", "type": kind})
+		restore = reply(c, "queries/get_query", string(metadata), 200)
+		if _, err := c.loadQuery(ctx, queryInput{"demo", "q"}); err == nil {
+			t.Fatalf("accepted forbidden executable type %q", kind)
+		}
+		restore()
+	}
+	restore = reply(c, "queries/get_query", `{"id":"q","title":"Qualified structured read","type":"TugQL","text":"from: {name: Customer}\n","parameters":[]}`, 200)
+	if q, err := c.loadQuery(ctx, queryInput{"demo", "q"}); err != nil || q.Type != datatug.QueryTypeTugQL || q.Text == "" {
+		t.Fatalf("qualified TugQL metadata was refused: %v", err)
 	}
 	restore()
 	for _, route := range []string{"agent-info", "exec/run_query"} {

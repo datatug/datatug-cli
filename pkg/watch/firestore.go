@@ -38,6 +38,11 @@ type FirestoreOptions struct {
 	AdmitDefinition  func(context.Context, dal.ReadTransaction, Definition, string) (string, error)
 	AdmitRunner      func(context.Context, dal.ReadTransaction, Definition, RunnerIdentity) (bool, error)
 	AdmitRecipient   func(context.Context, dal.ReadTransaction, Definition, string) (RecipientAuthority, error)
+	// AdmitRetainedWrite prepares reference admission after the complete buffered
+	// command, before any physical write. Its returned closure may only write and
+	// must commit the shared project fence in this same transaction. Installing
+	// this hook does not establish that other project writers participate.
+	AdmitRetainedWrite CloudRetainedWriteAdmission
 	// DefinitionChanged stages exactly one <=1KiB deterministic metadata event.
 	// It runs after every read, must not read/publish/network, and shares commit.
 	DefinitionChanged func(context.Context, dal.ReadwriteTransaction, Definition) error
@@ -203,6 +208,19 @@ func (f *firestoreDatabase) RunReadwriteTransaction(ctx context.Context, fn dal.
 		originalSweep := session.sweepCursor
 		if err := fn(context.WithValue(ctx, firestoreReadContext{}, session), session); err != nil {
 			return err
+		}
+		session.sealed = true
+		persistAdmission, err := session.prepareRetainedAdmission(ctx)
+		if err != nil {
+			return err
+		}
+		if persistAdmission != nil {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err = persistAdmission(); err != nil {
+				return err
+			}
 		}
 		if err := session.flush(ctx); err != nil {
 			return err

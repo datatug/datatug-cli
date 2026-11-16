@@ -62,7 +62,7 @@ jobs:
   strongo_workflow:
     permissions:
       contents: write
-    uses: strongo/cicd/.github/workflows/workflow.yml@a62ab9a0ed90f3fba476e37dd59d49002d4d86b6 # v1.23.1
+    uses: strongo/cicd/.github/workflows/workflow.yml@d0814eb1276ed093b4695a980a52fef043739e0b # v1.25.2
     secrets:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GOPRIVATE_GITHUB_APP_PRIVATE_KEY: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
@@ -83,12 +83,12 @@ jobs:
       # Must be >= go.mod's `go` directive, same constraint as release.yml.
       # This input drives setup-go for BOTH the Lint and Build & test jobs of
       # the shared workflow (workflow.yml@a62ab9a, lines 413 and 923), and its
-      # default is '1.27.0' — below this module's `go 1.27.1`, which failed both
+      # default is '1.27.0' — below this module's `go 1.27.3`, which failed both
       # jobs before any test ran with
-      # "go.mod requires go >= 1.27.1 (running go 1.27.0; GOTOOLCHAIN=local)".
+      # "go.mod requires go >= 1.27.3 (running go 1.27.1; GOTOOLCHAIN=local)".
       # Keep in sync with release.yml's go_version: a mismatch means CI proves
       # a build under a different toolchain than the release actually uses.
-      go_version: '1.27.1'
+      go_version: '1.27.3'
   # Fail fast on go.mod/go.sum drift — the gap that shipped v0.13.2.
   #
   # Renovate raised two PRs for the same go-github v90->v91 bump a minute
@@ -118,7 +118,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           # Must be >= go.mod's `go` directive, same constraint as release.yml.
-          go-version: '1.27.3'
+          go-version: '1.27.4'
           cache: true
       - name: go mod tidy -diff
         run: go mod tidy -diff
@@ -143,7 +143,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           # Must be >= go.mod's `go` directive, same constraint as release.yml.
-          go-version: '1.27.3'
+          go-version: '1.27.4'
           cache: true
       - name: check-hermetic-tests.sh
         env:
@@ -173,7 +173,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           # Must be >= go.mod's `go` directive, same constraint as release.yml.
-          go-version: '1.27.3'
+          go-version: '1.27.4'
           cache: true
       - name: Scan a SQLite file with cgo off
         env:
@@ -219,6 +219,7 @@ jobs:
   journey-postgres:
     name: Journey (PostgreSQL ${{ matrix.postgres }})
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -231,6 +232,9 @@ jobs:
         ports:
           - 54329:5432
         options: >-
+          --memory 1g
+          --cpus 1
+          --pids-limit 128
           --health-cmd "pg_isready -U postgres"
           --health-interval 5s
           --health-timeout 5s
@@ -238,6 +242,8 @@ jobs:
     env:
       DATATUG_TEST_POSTGRES_URL: postgres://postgres:ci-only-service-password@127.0.0.1:54329/postgres?sslmode=disable
       DATATUG_TEST_POSTGRES_MAJOR: ${{ matrix.postgres }}
+      DATATUG_NATIVE_ASSURANCE_CI: '1'
+      DATATUG_NATIVE_POOLER_CI: '1'
     steps:
       - uses: actions/checkout@v7
       - name: Authenticate private Core dependency
@@ -247,14 +253,21 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           # Must be >= go.mod's `go` directive, same constraint as release.yml.
-          go-version: '1.27.3'
+          go-version: '1.27.4'
           cache: true
+      - name: Check native pooler ownership without services
+        run: python3 -B scripts/native-postgres/test_fixture.py
+      - name: Build the pinned bounded PgBouncer fixture
+        run: bash scripts/native-postgres/build-fixture.sh
       - name: Scan and query a real PostgreSQL server
         env:
           # The test binary of the commands package links the cgo SQLite driver, as in
           # strongo_workflow above.
           CGO_ENABLED: '1'
         run: ./scripts/check-journey-postgres.sh
+      - name: Remove only owned native pooler resources
+        if: always()
+        run: bash scripts/native-postgres/cleanup-fixture.sh
 
   # Runs in the always-present Go CI workflow so exact-commit release gating
   # observes browser/asset regressions as well as Go tests. No path filter/skip.
@@ -275,7 +288,7 @@ jobs:
           private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: '1.27.3'
+          go-version: '1.27.4'
           cache: true
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
@@ -326,7 +339,7 @@ jobs:
           private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: '1.27.3'
+          go-version: '1.27.4'
           cache: true
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6
         with:
@@ -336,6 +349,15 @@ jobs:
         env:
           WATCH_FIRESTORE_ARTIFACTS: ${{ runner.temp }}/watch-firestore
         run: ./scripts/check-watch-firestore.sh
+      - name: Read the db copy YAML corpus back with PyYAML (YAML 1.1)
+        # DATATUG_REQUIRE_PYYAML makes a missing PyYAML a failure instead of a
+        # skip, so the read-back by a YAML 1.1 parser is binding here.
+        env:
+          DATATUG_REQUIRE_PYYAML: '1'
+        run: |
+          python3 -m pip install --user --break-system-packages 'PyYAML==6.0.2'
+          go test ./pkg/dbmirror -run '^TestYAMLCorpusRoundTrips$' -count=1 -v | tee "$RUNNER_TEMP/pyyaml.txt"
+          grep -q -- '--- PASS: TestYAMLCorpusRoundTrips' "$RUNNER_TEMP/pyyaml.txt"
       - name: Upload transaction evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

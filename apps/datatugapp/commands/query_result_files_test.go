@@ -492,16 +492,16 @@ func TestSavedQueryDB(t *testing.T) {
 	ctx := context.Background()
 	boom := errors.New("boom")
 	sqlDef := &datatug.QueryDef{Type: datatug.QueryTypeSQL}
-	assert.Equal(t, queryresults.DB{}, savedQueryDB(ctx, &covCStore{envsErr: boom}, "", "", "", sqlDef))
-	assert.Equal(t, queryresults.DB{}, savedQueryDB(ctx, &covCStore{catalogsErr: boom}, "", "", "local", sqlDef))
-	assert.Equal(t, queryresults.DB{}, savedQueryDB(ctx, &covCStore{catalogs: datatug.DbCatalogs{{}}, envErr: boom}, "", "", "local", sqlDef))
+	assert.Equal(t, queryresults.DB{}, savedQueryDB(ctx, &covCStore{envsErr: boom}, "", "", "", sqlDef, nil))
+	assert.Equal(t, queryresults.DB{}, savedQueryDB(ctx, &covCStore{catalogsErr: boom}, "", "", "local", sqlDef, nil))
+	assert.Equal(t, queryresults.DB{}, savedQueryDB(ctx, &covCStore{catalogs: datatug.DbCatalogs{{}}, envErr: boom}, "", "", "local", sqlDef, nil))
 	env := &datatug.Environment{DbServers: datatug.EnvDbServers{{ServerRef: datatug.ServerRef{Driver: "sqlite3"}}}}
 	ingit := &covCStore{catalogs: datatug.DbCatalogs{{}}, env: env, catalog: datatug.DbCatalog{Driver: "ingitdb", Path: "x"}}
-	got := savedQueryDB(ctx, ingit, t.TempDir(), "", "local", sqlDef)
+	got := savedQueryDB(ctx, ingit, t.TempDir(), "", "local", sqlDef, nil)
 	assert.Equal(t, "ingitdb", got.Driver)
 	assert.Nil(t, got.Ref)
 	unsupported := &covCStore{catalogs: datatug.DbCatalogs{{}}, env: env, catalog: datatug.DbCatalog{Driver: "mysql"}}
-	assert.Equal(t, queryresults.DB{}, savedQueryDB(ctx, unsupported, t.TempDir(), "", "local", sqlDef))
+	assert.Equal(t, queryresults.DB{}, savedQueryDB(ctx, unsupported, t.TempDir(), "", "local", sqlDef, nil))
 
 	// a federated TugQL query is described by its root's database
 	federated := &datatug.QueryDef{Type: datatug.QueryTypeTugQL, StructuredBody: true, Text: "from: {name: Item, database: main}\n"}

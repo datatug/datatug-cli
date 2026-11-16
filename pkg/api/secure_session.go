@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"github.com/datatug/datatug-cli/pkg/agentaccess"
@@ -41,6 +42,9 @@ var (
 // such grant". Both default false: Phase 1's read journey is safe-by-default
 // unless an operator explicitly opts a serve process into either capability.
 type Capabilities struct {
+	// ProjectsRoot is an operator-approved directory for HTTP project creation.
+	// Empty keeps existing serve invocations unable to create filesystem paths.
+	ProjectsRoot string
 	// EnvironmentMetadataPolicies explicitly grants the fixed principal project metadata access.
 	EnvironmentMetadataPolicies map[string]EnvironmentMetadataPolicy
 	EnvironmentPrivateDir       string
@@ -106,10 +110,21 @@ type Capabilities struct {
 // every scoped handler validates a request's securityContextId against
 // (see ValidateSecurityContext).
 //
+// Configuration failure installs a refused session. This compatibility wrapper
+// keeps its original signature; startup callers use ConfigureSecureSessionChecked
+// to stop instead of starting a listener or worker.
+//
 // Every request-handling call site MUST go through SecureExecutor rather
 // than open a source or run a query directly, so every read really does
 // pass through the one policy-enforced path (REQ:server-acl-all-reads).
 func ConfigureSecureSession(session secureread.Session, pathsByID map[string]string, caps Capabilities) {
+	_ = ConfigureSecureSessionChecked(session, pathsByID, caps)
+}
+
+// ConfigureSecureSessionChecked installs the same fixed CLI session and returns
+// a startup validation failure. On failure it installs a refused session and an
+// empty served registry; callers must not start a listener or worker.
+func ConfigureSecureSessionChecked(session secureread.Session, pathsByID map[string]string, caps Capabilities) error {
 	secureMu.Lock()
 	defer secureMu.Unlock()
 	// session.AllowOpaqueSQL is the single point secureread.Executor.
@@ -117,13 +132,43 @@ func ConfigureSecureSession(session secureread.Session, pathsByID map[string]str
 	// exec/run_query and the legacy exec/select/exec/execute_commands
 	// routes — shares this one Executor, so setting it here rather than
 	// per-endpoint is what makes the refusal apply uniformly).
+	var sessionErr error
+	session, sessionErr = secureread.NormalizeSession(session)
+	if sessionErr == nil {
+		sessionErr = session.ValidateBoundServer(pathsByID, caps.AllowWrites, caps.AllowOpaqueSQL, caps.AllowLiveConnections)
+	}
+	if sessionErr != nil {
+		// Invalid configuration cannot retain file, metadata or identity power.
+		// Bound validation already latches its refusal. Preserve the binding so
+		// the profile's route allowlist cannot fall back to legacy handling.
+		if !session.SourceBound() {
+			session = secureread.RefusedSession(sessionErr)
+		}
+		caps = Capabilities{}
+		pathsByID = map[string]string{}
+	}
 	session.AllowOpaqueSQL = caps.AllowOpaqueSQL
 	secureSession = session
 	secureExecutor = secureread.NewExecutor(session)
-	projectDirs = pathsByID
+	projectDirs = nil
+	if pathsByID != nil {
+		projectDirs = make(map[string]string, len(pathsByID))
+		for id, dir := range pathsByID {
+			projectDirs[id] = dir
+		}
+	}
+	localProjectRegistry = nil
+	visibilityInventoryFactory = nil
 	capabilities = caps
-	policyFingerprint = accesspolicies.Fingerprint(session.Policies, session.Unrestricted, session.Principal)
-	securityContextID = newSecurityContextID()
+	policyFingerprint = accesspolicies.Fingerprint(session.Policies, session.DatabaseProfile.PolicyFreeReads(), session.Principal)
+	if session.SourceBound() {
+		policyFingerprint += ":source:" + session.SourceBindingFingerprint()
+	}
+	securityContextID = ""
+	if sessionErr == nil {
+		securityContextID = newSecurityContextID()
+	}
+	return sessionErr
 }
 
 // SecurePolicyFingerprint identifies the exact policy session that decided
@@ -160,8 +205,9 @@ func SecurityContextID() string {
 // closed rather than accepting any value.
 func ValidateSecurityContext(id string) bool {
 	secureMu.RLock()
-	defer secureMu.RUnlock()
-	return securityContextID != "" && id == securityContextID
+	session, expected := secureSession, securityContextID
+	secureMu.RUnlock()
+	return expected != "" && id == expected && session.CheckSourceBinding(context.Background()) == nil
 }
 
 // GetCapabilities returns this process's configured Capabilities.
@@ -230,12 +276,30 @@ func SecureConfiguredProjectIDs() []string {
 	return ids
 }
 
+// SecureLocalProjectOwner reports local project-file and asset authority only.
+func SecureLocalProjectOwner() bool {
+	secureMu.RLock()
+	defer secureMu.RUnlock()
+	return secureSession.LocalProjectOwner
+}
+
 // SecureSessionUnrestricted reports whether this process's session runs
-// with no access-policy enforcement at all (--no-policies).
+// with the historical policy-free database-read profile. Loaded policies still
+// govern; this compatibility getter is never an authorization bypass.
+// Deprecated: use SecureLocalProjectOwner for local assets.
 func SecureSessionUnrestricted() bool {
 	secureMu.RLock()
 	defer secureMu.RUnlock()
-	return secureSession.Unrestricted
+	return secureSession.DatabaseProfile.PolicyFreeReads()
+}
+
+// SecurePolicyFreeReads reports whether this process's session runs with the
+// policy-free database-read profile of a local project owner. A read-time
+// sensitivity suggestion refuses a read of any other session.
+func SecurePolicyFreeReads() bool {
+	secureMu.RLock()
+	defer secureMu.RUnlock()
+	return secureSession.DatabaseProfile.PolicyFreeReads()
 }
 
 // projectDir returns the filesystem directory serve resolved for projectID,

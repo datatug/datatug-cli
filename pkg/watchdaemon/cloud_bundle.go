@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strconv"
 
 	"github.com/datatug/datatug-cli/pkg/watch"
@@ -100,6 +101,14 @@ func (c Client) Bundle(ctx context.Context, claim watch.Claim) (CloudExecutionBu
 	}
 	return result.Bundle, nil
 }
+
+// ErrHostedReconcileStep refuses a hosted Watch bundle whose Check graph
+// holds a reconcile step. A reconcile step names a local profile that reads
+// every selected local environment; a hosted bundle may read only the
+// operator's bound sources through its pinned queries, so reconciliation
+// runs only from the local agent.
+var ErrHostedReconcileStep = fmt.Errorf("%w: a hosted Watch bundle cannot run reconcile steps; run reconciliation from the local agent", watch.ErrForbidden)
+
 func (b CloudExecutionBundle) VerifiedCatalog(ctx context.Context, claim watch.Claim) (detective.Catalog, error) {
 	d := claim.Definition
 	if b.Contract != "watch-execution-bundle/1" || b.Scope != d.Scope || b.CheckID != d.CheckID || d.CheckVersion != "" && b.CheckVersion != d.CheckVersion || b.SourceRevision == "" || b.SourceRevision != d.SourceRevision || len(b.Queries) > 50 || len(b.Sources) > 50 {
@@ -145,6 +154,13 @@ func (b CloudExecutionBundle) VerifiedCatalog(ctx context.Context, claim watch.C
 	catalog, err := detective.LoadCatalog(ctx, b.CheckID, "", cloudBundleCatalogReader{b})
 	if err != nil {
 		return detective.Catalog{}, watch.ErrInvalid
+	}
+	for _, check := range catalog.Checks {
+		for _, step := range check.Steps {
+			if step.Kind == "reconcile" {
+				return detective.Catalog{}, ErrHostedReconcileStep
+			}
+		}
 	}
 	if strconv.FormatInt(catalog.Checks[b.CheckID].Version, 10) != b.CheckVersion {
 		return detective.Catalog{}, watch.ErrConflict

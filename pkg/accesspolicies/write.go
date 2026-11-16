@@ -47,7 +47,8 @@ type WriteOptions struct {
 	Principal *access.Principal
 	// Policies are the loaded documents; every one must allow the write.
 	Policies []Loaded
-	// Unrestricted is the explicit --no-policies local-owner profile.
+	// Unrestricted is the historical field name for local project ownership.
+	// Callers pass Session.LocalProjectOwner; it never decides data access.
 	Unrestricted bool
 }
 

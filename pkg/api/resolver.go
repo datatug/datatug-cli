@@ -58,10 +58,15 @@ const (
 // datatug-core's QueryDef.Validate enforces this — so it is not tied to any
 // environment/catalog record at all).
 type ResolvedSource struct {
-	ID    string
-	Label string
-	Kind  SourceKind
-	URL   string
+	ID string
+	// Catalog is the id of the environment catalog the source is, whichever
+	// alias (DbModel or catalog ID) resolved it; empty for a source that is
+	// no environment catalog. It is what an instance rule selector matches
+	// (policyscope), so an alias can never step around one.
+	Catalog string
+	Label   string
+	Kind    SourceKind
+	URL     string
 	// Collection is the fixed collection name a caller must query this
 	// source through: for SQL/inGitDB-via-catalog it is whatever the caller
 	// asks for (any table/collection in that database); for an HTTP source
@@ -81,6 +86,9 @@ type ResolvedSource struct {
 func ResolveSource(ctx context.Context, projStore datatug.ProjectStore, projectDir, environment, source string) (ResolvedSource, error) {
 	if source == "" {
 		return ResolvedSource{}, fmt.Errorf("resolver: source is required")
+	}
+	if resolved, bound, err := boundResolvedSource(ctx, projStore, projectDir, environment, source); bound {
+		return resolved, err
 	}
 	all, err := ListSources(ctx, projStore, projectDir, environment)
 	if err != nil {
@@ -104,6 +112,12 @@ func ResolveSource(ctx context.Context, projStore datatug.ProjectStore, projectD
 // then ID) so a Candidate's target list and an "unknown source" error's
 // implied option set are stable across calls.
 func ListSources(ctx context.Context, projStore datatug.ProjectStore, projectDir, environment string) ([]ResolvedSource, error) {
+	if resolved, bound, err := boundResolvedSource(ctx, projStore, projectDir, environment, ""); bound {
+		if err != nil {
+			return nil, err
+		}
+		return []ResolvedSource{resolved}, nil
+	}
 	var out []ResolvedSource
 
 	if environment != "" {
@@ -154,6 +168,12 @@ func ListSources(ctx context.Context, projStore datatug.ProjectStore, projectDir
 // catalog), or whose path or environment variable does not resolve, is
 // skipped rather than failing the whole listing.
 func catalogSources(ctx context.Context, projStore datatug.ProjectStore, projectDir, environment string) ([]ResolvedSource, error) {
+	if resolved, bound, err := boundResolvedSource(ctx, projStore, projectDir, environment, ""); bound {
+		if err != nil {
+			return nil, err
+		}
+		return []ResolvedSource{resolved}, nil
+	}
 	catalogs, err := projStore.LoadEnvDbCatalogs(ctx, environment)
 	if err != nil {
 		// The store's error quotes the path it built from the project folder, which is no part
@@ -185,7 +205,7 @@ func catalogSources(ctx context.Context, projStore datatug.ProjectStore, project
 				continue
 			}
 			seen[sourceKey(kind, id)] = true
-			out = append(out, ResolvedSource{ID: id, Label: label, Kind: kind, URL: url})
+			out = append(out, ResolvedSource{ID: id, Catalog: catalog.ID, Label: label, Kind: kind, URL: url})
 		}
 	}
 	return out, nil

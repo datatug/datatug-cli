@@ -12,6 +12,7 @@ import (
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/querybody"
+	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/storage"
 )
@@ -29,6 +30,12 @@ import (
 // directory, needed to resolve a catalog path that is relative rather than
 // "~"/"$HOME"-prefixed or already absolute — see ResolveCatalogPath.
 func resolveSourceURL(ctx context.Context, projStore datatug.ProjectStore, environment, database, projDir string) (sourceURL, driver string, err error) {
+	if SourceBoundProfile() && database == "" {
+		return "", "", secureread.ErrSourceBinding
+	}
+	if resolved, bound, bindingErr := boundResolvedSource(ctx, projStore, projDir, environment, database); bound {
+		return resolved.URL, "sqlite3", bindingErr
+	}
 	env, err := projStore.LoadEnvironment(ctx, environment)
 	if err != nil {
 		return "", "", sourceLookupFailed(`environment %q not found`, "load environment %q", err, environment)
@@ -172,6 +179,19 @@ func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, er
 			return "", fmt.Errorf("catalog %q: environment variable %s must hold a postgrest:// URL, not a %s source", catalog.ID, strings.TrimPrefix(source, "env:"), ref.Scheme)
 		}
 		return source, nil
+	case DriverClickHouse:
+		source, err := descriptorSource(catalog, projDir, "ClickHouse", dbcopy.ReadClickHouseDescriptor)
+		if err != nil {
+			return "", err
+		}
+		ref, err := dbcopyParse(source)
+		if err != nil {
+			return "", err
+		}
+		if !dbcopy.IsClickHouseScheme(ref.Scheme) {
+			return "", fmt.Errorf("catalog %q: descriptor must name a ClickHouse source", catalog.ID)
+		}
+		return source, nil
 	case DriverLibSQL:
 		// A libSQL catalog records a connection descriptor (a project file that
 		// names an environment variable and nothing else), exactly as a PostgreSQL or
@@ -194,6 +214,30 @@ func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, er
 		}
 		if !dbcopy.IsLibSQLScheme(ref.Scheme) {
 			return "", fmt.Errorf("catalog %q: environment variable %s must hold a libsql:// URL, not a %s source", catalog.ID, strings.TrimPrefix(source, "env:"), ref.Scheme)
+		}
+		return source, nil
+	case DriverTypesense:
+		// A Typesense catalog records a connection descriptor (a project file that
+		// names an environment variable and nothing else), exactly as a PostgreSQL,
+		// CouchDB, PostgREST or libSQL catalog does. The origin and the one collection
+		// come only from the operator's environment, so a project cannot point the
+		// operator's scoped Typesense key at a host of its own choosing; a project
+		// that records a literal endpoint is refused before anything is opened.
+		source, err := typesenseDescriptorSource(catalog, projDir)
+		if err != nil {
+			return "", err
+		}
+		// Resolving the variable refuses one that is not set, and the scheme check
+		// refuses a variable that holds another engine: a catalog labelled typesense
+		// whose variable held a postgres or http source would otherwise be opened as
+		// that engine while policy naming still used the typesense label. No error
+		// names the value, only the variable and the scheme.
+		ref, err := dbcopyParse(source)
+		if err != nil {
+			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
+		}
+		if !dbcopy.IsTypesenseScheme(ref.Scheme) {
+			return "", fmt.Errorf("catalog %q: environment variable %s must hold a typesense:// URL, not a %s source", catalog.ID, strings.TrimPrefix(source, "env:"), ref.Scheme)
 		}
 		return source, nil
 	case "firestore", DriverPostgres, DriverMySQL, DriverOracle, DriverSQLServer:
@@ -221,7 +265,7 @@ func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, er
 		}
 		return source, nil
 	default:
-		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3, ingitdb, openvaultdb, postgres, mysql, oracle, sqlserver, firestore, couchdb, postgrest or libsql)", catalog.Driver)
+		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3, ingitdb, openvaultdb, postgres, mysql, oracle, sqlserver, firestore, couchdb, postgrest, libsql or typesense)", catalog.Driver)
 	}
 }
 
@@ -276,6 +320,16 @@ func libSQLDescriptorSource(catalog datatug.DbCatalog, projDir string) (string, 
 // hold a literal API root nor pick an arbitrary variable (CheckDescriptorEnvName).
 func postgrestDescriptorSource(catalog datatug.DbCatalog, projDir string) (string, error) {
 	return descriptorSource(catalog, projDir, "PostgREST", dbcopy.ReadPostgRESTDescriptor)
+}
+
+// typesenseDescriptorSource is couchDBDescriptorSource for a Typesense catalog: the catalog's path is
+// a descriptor inside the project folder, the descriptor names the operator's variable, and the
+// origin and the one collection are read from that variable only when the source is opened. The
+// project can neither hold a literal endpoint nor pick an arbitrary variable
+// (CheckDescriptorEnvName). The scoped API key is not in the descriptor at all: it comes from
+// DATATUG_TYPESENSE_API_KEY for each request.
+func typesenseDescriptorSource(catalog datatug.DbCatalog, projDir string) (string, error) {
+	return descriptorSource(catalog, projDir, "Typesense", dbcopy.ReadTypesenseDescriptor)
 }
 
 // descriptorSource is the source "env:NAME" a catalog's connection descriptor names. title is the
@@ -378,7 +432,12 @@ func loadQueryDocument(projectID, queryID string, queryType datatug.QueryType) (
 	}
 	folder, id := queryFolderAndID(queryID)
 	fileName := fmt.Sprintf("%s.%s.%s", id, storage.QueryFileSuffix, strings.ToLower(string(queryType)))
-	filePath := filepath.Join(dir, storage.QueriesFolder, folder, fileName)
+	queriesRoot := filepath.Clean(filepath.Join(dir, storage.QueriesFolder))
+	filePath := filepath.Clean(filepath.Join(queriesRoot, folder, fileName))
+	if !strings.HasPrefix(filePath, queriesRoot+string(filepath.Separator)) {
+		// A query id from a request must never step outside the project's queries folder.
+		return "", fmt.Errorf("query %s is not inside the project's %s folder", dbcopy.SourceIDDisplay(queryID), storage.QueriesFolder)
+	}
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return "", fmt.Errorf("read query document %s: %w", filePath, err)

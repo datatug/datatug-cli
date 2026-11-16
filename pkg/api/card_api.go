@@ -100,7 +100,7 @@ func ListCards(ctx context.Context, ref dto.ProjectRef) ([]datatug.CardBrief, er
 	if err != nil {
 		return nil, err
 	}
-	cards, err := store.LoadCards(ctx)
+	cards, err := store.LoadCards(ctx, datatug.ActiveItemsOnly())
 	if err != nil {
 		return nil, itemsNotLoaded("cards", ref.ProjectID, err)
 	}

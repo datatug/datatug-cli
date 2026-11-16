@@ -2,7 +2,6 @@ package endpoints
 
 import (
 	"context"
-	"log"
 	"net/http"
 
 	"github.com/datatug/datatug-cli/pkg/agentaccess"
@@ -73,7 +72,6 @@ func RegisterDatatugHandlersWithCapabilities(
 	handler Handler,
 	caps Capabilities,
 ) {
-	log.Println("Registering DataTug handlers on pathPrefix:", pathPrefix)
 	if handler == nil {
 		panic("handler is not provided")
 	}

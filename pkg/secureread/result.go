@@ -62,7 +62,11 @@ type Row struct {
 // principal is allowed to see, and the limitations that applied to produce
 // them.
 type Result struct {
-	Columns []string
+	// AnonymousRecordset is an ordered, keyless result. Rows must never be
+	// reconstructed by column name: duplicate labels and rows are meaningful.
+	AnonymousRecordset *apicontract.Recordset
+	OrdinalColumns     []OrdinalColumn
+	Columns            []string
 	// ColumnTypes is optional executor-owned output metadata. Derived values
 	// have types without asserting physical entity or key provenance.
 	ColumnTypes map[string]string

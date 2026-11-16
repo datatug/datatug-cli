@@ -119,6 +119,9 @@ func proveNativeFactsBinding(ctx context.Context, queryID string, side apicontra
 	if err != nil {
 		return "", newNotFound(fmt.Sprintf("query %q not found", dbcopy.QueryIDDisplay(queryID)))
 	}
+	if err = queryDef.RefuseContextVariables(); err != nil {
+		return "", newInvalidRequest("queryId", err.Error())
+	}
 	if queryDef.Type != datatug.QueryTypeTugQL {
 		return "", newSourceUnavailable("facts comparison requires a saved structured TugQL query with native set binding")
 	}

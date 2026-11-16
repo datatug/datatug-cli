@@ -44,7 +44,7 @@ func authorizeReadOnlySQL(action sqlite.AuthorizerActionCode, arg1, arg2, _, _ s
 		}
 	case sqlite.AuthPragma:
 		switch strings.ToLower(arg1) {
-		case "table_info", "table_xinfo", "index_list", "index_info", "index_xinfo", "foreign_key_list":
+		case "table_info", "table_xinfo", "table_list", "index_list", "index_info", "index_xinfo", "foreign_key_list":
 			return sqlite.AuthorizerOK
 		case "query_only":
 			if arg2 == "" || strings.EqualFold(arg2, "ON") || arg2 == "1" {
@@ -108,8 +108,25 @@ var nativeSQLLimitation = Limitation{
 // connection authorizer described above. Other sources without SQL text
 // execution fail with ErrNativeSQLUnsupported.
 func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, args ...dal.QueryArg) (Result, error) {
-	if !e.session.Unrestricted && !e.session.AllowOpaqueSQL {
+	if err := e.session.configurationErr; err != nil {
+		return Result{}, err
+	}
+	// The policy-free profile retains its historical operator-level raw
+	// capability. runThroughPolicies still requires every loaded policy to
+	// grant OpaqueQueryScope; this gate never removes loaded policies.
+	if !e.session.DatabaseProfile.PolicyFreeReads() && !e.session.AllowOpaqueSQL {
 		return Result{}, ErrOpaqueSQLNotGranted
+	}
+	if guard := e.session.NativeSQL; guard != nil {
+		catalogs, err := e.sourceCatalogs(sourceURL)
+		if err != nil {
+			return Result{}, err
+		}
+		for _, catalog := range catalogs {
+			if err := guard(ctx, catalog, sourceURL); err != nil {
+				return Result{}, err
+			}
+		}
 	}
 	ref, err := dbcopy.Parse(sourceURL)
 	if err != nil {
@@ -117,6 +134,9 @@ func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, 
 	}
 	if dbcopy.IsServerScheme(ref.Scheme) {
 		return e.runServerNativeSQL(ctx, sourceURL, ref, sqlText, args)
+	}
+	if dbcopy.IsClickHouseScheme(ref.Scheme) {
+		return e.runClickHouseNative(ctx, ref, sqlText, args)
 	}
 	if ref.Scheme == "duckdb" {
 		return e.runDuckDBNativeSQL(ctx, ref, sqlText, args)
@@ -145,7 +165,7 @@ func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, 
 	if err != nil {
 		return Result{}, err
 	}
-	if !e.session.Unrestricted {
+	if !e.session.DatabaseProfile.PolicyFreeReads() || len(e.session.Policies) > 0 {
 		result.Limitations = append(result.Limitations, nativeSQLLimitation)
 	}
 	result.ColumnOrder = selectListOrder(ctx, sqlDB, sqlText, args)
@@ -209,8 +229,9 @@ func openReadOnlySQLiteDB(ctx context.Context, path string) (dal.DB, *sql.DB, fu
 	}
 	// The sqlite structured-query dialect is set like on every other SQLite
 	// open in this CLI, so no structured read can reach dalgo2sql's legacy
-	// text emitter. RunNativeSQL — this connection's only caller — always
-	// executes a dal.TextQuery, which the dialect does not touch.
+	// text emitter. Native SQL uses a dal.TextQuery, which the dialect does not
+	// touch. Configured exact-table reads reuse this connection through the
+	// SQLite structured dialect and the bound native-identity leaf.
 	db := newNativeSQLDatabase(sqlDB, dal.NewSchema(nil, nil), dalgo2sql.DbOptions{StructuredQueryDialect: "sqlite"})
 	return db, sqlDB, func() { _ = sqlDB.Close() }, nil
 }
@@ -219,10 +240,10 @@ func openReadOnlySQLiteDB(ctx context.Context, path string) (dal.DB, *sql.DB, fu
 // read-only too; in-memory sessions still allow Parquet SELECTs.
 func (e *Executor) runDuckDBNativeSQL(ctx context.Context, ref dbcopy.BackendRef, text string, args []dal.QueryArg) (Result, error) {
 	// DuckDB queries can read external files and URLs. A policy on a database
-	// cannot bound those resources, so only an operator's unrestricted session
-	// may use this native surface.
-	if !e.session.Unrestricted {
-		return Result{}, fmt.Errorf("DuckDB native SQL requires an unrestricted session because queries can read external files and URLs")
+	// cannot bound those resources, so this native surface requires the
+	// policy-free read profile and no loaded policies.
+	if !e.session.DatabaseProfile.PolicyFreeReads() || len(e.session.Policies) > 0 {
+		return Result{}, fmt.Errorf("DuckDB native SQL requires policy-free reads with no loaded policies because queries can read external files and URLs")
 	}
 	if ref.Path != "" {
 		if err := dbcopy.CheckSourceFile(ref.Path); err != nil {

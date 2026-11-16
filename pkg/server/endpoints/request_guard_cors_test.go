@@ -14,7 +14,6 @@ import (
 // status: a page reads a 401, a 404 or a 500 instead of a network failure (status 0). A refused
 // request still gets none.
 func TestRequestGuard_EveryAnswerToAListedOriginIsReadable(t *testing.T) {
-	quietLog(t)
 	secret, err := agentaccess.NewSecret()
 	require.NoError(t, err)
 	guard := Capabilities{ServedPort: 8989, Access: agentaccess.New(secret)}.RequestGuard()

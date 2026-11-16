@@ -101,7 +101,7 @@ func ResolveAcceptedSessionContext(ctx context.Context, storage, project string)
 	}
 	principal := sessioncontext.Principal{Actor: actor, DatabaseID: repo.DatabaseID(), ProjectID: project}
 	service, err := sessioncontext.NewNativePinService(repo, func(_ context.Context, access sessioncontext.Access) error {
-		if access.Principal.Actor != SecurePrincipalID() || access.Principal.DatabaseID != principal.DatabaseID || access.Principal.ProjectID != project || !GetCapabilities().AllowWrites || !SecureSessionUnrestricted() {
+		if access.Principal.Actor != SecurePrincipalID() || access.Principal.DatabaseID != principal.DatabaseID || access.Principal.ProjectID != project || !GetCapabilities().AllowWrites || !SecureLocalProjectOwner() {
 			return sessioncontext.ErrForbidden
 		}
 		current, ok := sessionContextProjectDir(project)

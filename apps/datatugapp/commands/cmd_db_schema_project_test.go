@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/dal-go/dalgo/dal"
+	"github.com/datatug/datatug-cli/pkg/callercontext"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -77,7 +78,11 @@ func TestQueryRunAndCopyOpenADatabaseOfAProjectByReference(t *testing.T) {
 	root.SilenceUsage, root.SilenceErrors = true, true
 	root.SetArgs([]string{"query", "run", "--db", "datatug://shop/shop", "--from", "Customer", "--no-policies", "--format", "json"})
 	require.NoError(t, root.Execute())
-	assert.Contains(t, out.String(), "Ada")
+	// A source of a project is read under its labels: a name is personal data
+	// by read-time suggestion until an owner labels it otherwise.
+	assert.Contains(t, out.String(), `"CustomerId":1`)
+	assert.NotContains(t, out.String(), "Ada")
+	assert.Contains(t, errOut.String(), "masked: Customer.FirstName (pii)")
 	assert.NotContains(t, out.String()+errOut.String(), dbPath)
 
 	root = DatatugCommand()
@@ -95,9 +100,23 @@ func TestQueryRunAndCopyOpenADatabaseOfAProjectByReference(t *testing.T) {
 	root.SetOut(&out)
 	root.SetErr(&errOut)
 	root.SilenceUsage, root.SilenceErrors = true, true
+	// Customer's names are personal data by read-time suggestion only, and a copy cannot mask: an agent is refused.
+	restoreVar(t, &callerLookup)
+	callerLookup = func(name string) (string, bool) { return "claude-code", name == callercontext.HarnessEnv }
+	root.SetArgs([]string{"db", "copy", "--from", "datatug://shop/shop", "--to", "ingitdb://" + target})
+	assert.Equal(t, exitCodeAccessDenied, exitCodeOf(t, root.Execute()))
+	assert.Empty(t, projectFilesOf(t, target), "nothing was copied")
+	// A person copies, and is warned.
+	callerLookup = func(string) (string, bool) { return "", false }
+	errOut.Reset()
+	root = DatatugCommand()
+	root.SetOut(&out)
+	root.SetErr(&errOut)
+	root.SilenceUsage, root.SilenceErrors = true, true
 	root.SetArgs([]string{"db", "copy", "--from", "datatug://shop/shop", "--to", "ingitdb://" + target})
 	require.NoError(t, root.Execute())
 	assert.NotEmpty(t, projectFilesOf(t, target), "the tables were copied")
+	assert.Contains(t, errOut.String(), "warning: this copy is not masked; read-time suggestions mark Customer.FirstName")
 	root = DatatugCommand()
 	root.SetOut(&out)
 	root.SetErr(&errOut)
@@ -191,7 +210,7 @@ func TestReferenceSaysWhyADatabaseCannotBeOpened(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "environments", "local", "local.env.json"), []byte(`{"id":"local"}`), 0o644))
 	_, err := runProjectMetadata(t, dbSchemaCommand(), "--db", "datatug://shop/mssql")
 	assert.Equal(t, 2, exitCodeOf(t, err))
-	assert.EqualError(t, err, `database "mssql" cannot be opened: its driver is not one that can be opened (sqlite3, ingitdb, openvaultdb, postgres, mysql, oracle, sqlserver, firestore, couchdb, postgrest or libsql)`)
+	assert.EqualError(t, err, `database "mssql" cannot be opened: its driver is not one that can be opened (sqlite3, ingitdb, openvaultdb, postgres, mysql, oracle, sqlserver, firestore, couchdb, postgrest, libsql or typesense)`)
 	for _, id := range []string{"url", "pg"} {
 		_, err = runProjectMetadata(t, dbSchemaCommand(), "--db", "datatug://shop/"+id)
 		assert.Equal(t, 2, exitCodeOf(t, err), id)

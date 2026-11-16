@@ -24,6 +24,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/chat"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
@@ -43,6 +44,11 @@ import (
 func writeChatRunProjectFixture(t *testing.T) (dir string) {
 	t.Helper()
 	dir = t.TempDir()
+	canonicalRoot, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir = canonicalRoot
 	write := func(path, content string) {
 		t.Helper()
 		full := filepath.Join(dir, path)
@@ -658,7 +664,7 @@ func TestRunChatProjectNewLLMProviderErrorReported(t *testing.T) {
 	if _, err := runChatProject(cmd, options); err != nil {
 		t.Fatalf("providerless local workspace failed: %v", err)
 	}
-	if text := strings.Join(notices, "\n"); !reached || !strings.Contains(text, "AI provider is not configured") || !strings.Contains(text, "Open data and New query work locally") || !strings.Contains(text, "Settings → AI") {
+	if text := strings.Join(notices, "\n"); !reached || !strings.Contains(text, providerUnavailableNotice) {
 		t.Fatalf("workspace reached=%v, provider recovery notices=%q", reached, text)
 	}
 }
@@ -899,7 +905,7 @@ func TestLoadChatJoinApplicationOpenMetadataDBErrorReported(t *testing.T) {
 	if _, statErr := os.Stat(real); statErr != nil {
 		t.Skipf("chinook fixture unavailable: %v", statErr)
 	}
-	_, closeFn, err := loadChatJoinApplication(context.Background(), "sqlite:///"+real, nil, false)
+	_, closeFn, err := loadChatJoinApplication(context.Background(), "sqlite:///"+real, nil, secureread.Session{})
 	if !errors.Is(err, injected) {
 		t.Fatalf("loadChatJoinApplication error = %v, want the injected sql.Open error", err)
 	}

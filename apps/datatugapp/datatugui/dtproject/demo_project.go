@@ -78,46 +78,58 @@ func cloneRepo(ctx context.Context, url, dir string, report func(tea.Msg), wrap 
 	return err
 }
 
-// cloneProgress is the latest progress text of the clone of the demo repository.
+// cloneProgress is the latest progress text of the clone of a project repository.
 type cloneProgress struct{ text string }
 
-// cloneDone ends the clone of the demo repository.
+// cloneDone ends the clone of a project repository.
 type cloneDone struct{ err error }
 
-// cloneDemo is the screen shown while the demo repository is cloned; it opens
-// the demo project when the clone is complete.
-type cloneDemo struct {
+// cloneProject is the screen shown while a project repository is cloned; it
+// replaces itself with the project when the clone is complete.
+type cloneProject struct {
 	geo    geometry
-	ref    dtconfig.ProjectRef
+	url    string
+	open   tea.Cmd
 	stream *stream
 	pane   widgets.TextPane
 }
 
 var (
-	_ nav.Screen = cloneDemo{}
-	_ nav.Titled = cloneDemo{}
+	_ nav.Screen = cloneProject{}
+	_ nav.Titled = cloneProject{}
 )
 
-func newCloneDemo(ref dtconfig.ProjectRef) cloneDemo {
-	c := cloneDemo{ref: ref, pane: widgets.NewTextPane("clone-demo")}
-	c.stream = newStream(cloneDemoWork)
+// newCloneProject clones the repository at url into dir (a `~` path), then
+// runs open.
+func newCloneProject(url, dir string, open tea.Cmd) cloneProject {
+	c := cloneProject{url: url, open: open, pane: widgets.NewTextPane("clone-demo")}
+	c.stream = newStream(cloneWork(url, dir))
 	return c
 }
 
-// cloneDemoWork is the work of the stream: clone the demo repository.
-func cloneDemoWork(ctx context.Context, report func(tea.Msg)) tea.Msg {
-	if err := os.MkdirAll(fsutil.ExpandHome(filepath.Dir(datatugDemoProjectsDir)), 0o755); err != nil {
-		return cloneDone{err: err}
-	}
-	wrap := func(text string) tea.Msg { return cloneProgress{text: text} }
-	return cloneDone{err: cloneRepo(ctx, datatugDemoProjectsGitURL, fsutil.ExpandHome(datatugDemoProjectsDir), report, wrap)}
+func newCloneDemo(ref dtconfig.ProjectRef) cloneProject {
+	return newCloneProject(datatugDemoProjectsGitURL, datatugDemoProjectsDir, openProject(ref))
 }
 
+// cloneWork is the work of the stream: clone url into dir.
+func cloneWork(url, dir string) func(ctx context.Context, report func(tea.Msg)) tea.Msg {
+	return func(ctx context.Context, report func(tea.Msg)) tea.Msg {
+		if err := os.MkdirAll(fsutil.ExpandHome(filepath.Dir(dir)), 0o755); err != nil {
+			return cloneDone{err: err}
+		}
+		wrap := func(text string) tea.Msg { return cloneProgress{text: text} }
+		return cloneDone{err: cloneRepo(ctx, url, fsutil.ExpandHome(dir), report, wrap)}
+	}
+}
+
+// cloneDemoWork clones the demo repository.
+var cloneDemoWork = cloneWork(datatugDemoProjectsGitURL, datatugDemoProjectsDir)
+
 // Init implements nav.Screen.
-func (c cloneDemo) Init() tea.Cmd { return c.stream.Start() }
+func (c cloneProject) Init() tea.Cmd { return c.stream.Start() }
 
 // Update implements nav.Screen.
-func (c cloneDemo) Update(msg tea.Msg) (nav.Screen, tea.Cmd) {
+func (c cloneProject) Update(msg tea.Msg) (nav.Screen, tea.Cmd) {
 	if c.geo.track(msg) {
 		c.pane.SetSize(c.geo.w, c.geo.h)
 		return c, nil
@@ -128,15 +140,15 @@ func (c cloneDemo) Update(msg tea.Msg) (nav.Screen, tea.Cmd) {
 		return c, c.stream.Next()
 	case cloneDone:
 		if msg.err != nil {
-			return c, datatugui.ReportError("clone "+datatugDemoProjectsGitURL, msg.err)
+			return c, datatugui.ReportError("clone "+c.url, msg.err)
 		}
-		return c, tea.Sequence(nav.Pop(), openProject(c.ref))
+		return c, tea.Sequence(nav.Pop(), c.open)
 	}
 	return c, nil
 }
 
 // View implements nav.Screen.
-func (c cloneDemo) View() string { return c.pane.View() }
+func (c cloneProject) View() string { return c.pane.View() }
 
 // Title implements nav.Titled.
-func (c cloneDemo) Title() string { return "Cloning project..." }
+func (c cloneProject) Title() string { return "Cloning project..." }

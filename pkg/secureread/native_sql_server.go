@@ -49,7 +49,7 @@ var errReadRolledBack = errors.New("the read is rolled back")
 // ExecuteQueryToRecordsReader runs query in a read-only transaction that is rolled back.
 func (r rolledBackReads) ExecuteQueryToRecordsReader(ctx context.Context, query dal.Query) (dal.RecordsReader, error) {
 	var records []record.Record
-	err := r.RunReadonlyTransaction(ctx, func(ctx context.Context, tx dal.ReadTransaction) error {
+	err := dbcopy.RunVerifiedPostgresReadonly(ctx, r.DB, func(ctx context.Context, tx dal.ReadTransaction) error {
 		reader, err := tx.ExecuteQueryToRecordsReader(ctx, query)
 		if err != nil {
 			return err

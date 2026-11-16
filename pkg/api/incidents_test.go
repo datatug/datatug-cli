@@ -38,7 +38,7 @@ func TestIncidentPolicyIsScopeQualifiedAndWithholdsSensitiveNotes(t *testing.T) 
 	}
 	stored, err := incidents.Fold(events, nil)
 	require.NoError(t, err)
-	policy := incidentViewPolicy(context.Background(), stored, events, secureread.Session{Unrestricted: true}, map[string]string{"demo": "/demo"})
+	policy := incidentViewPolicy(context.Background(), stored, events, secureread.Session{DatabaseProfile: secureread.DatabasePolicyFreeReads}, map[string]string{"demo": "/demo"})
 	require.Equal(t, incidents.FactVisible, policy.Facts[facts[0].Key()])
 	require.Equal(t, incidents.FactHidden, policy.Facts[facts[1].Key()])
 	require.True(t, policy.WithheldEvents["note"])
@@ -98,7 +98,7 @@ func TestIncidentPolicyIncludesImportedCreatedEventSensitivity(t *testing.T) {
 	}
 	stored, err := incidents.Fold(events, nil)
 	require.NoError(t, err)
-	policy := incidentViewPolicy(context.Background(), stored, events, secureread.Session{Unrestricted: true}, map[string]string{"demo": "/demo"})
+	policy := incidentViewPolicy(context.Background(), stored, events, secureread.Session{DatabaseProfile: secureread.DatabasePolicyFreeReads}, map[string]string{"demo": "/demo"})
 	view := incidents.ApplyIncidentView(stored, policy)
 	require.Equal(t, incidents.FactHidden, policy.Facts[hiddenFact.Key()])
 	require.True(t, policy.WithheldEvents[events[2].ID])
@@ -123,7 +123,7 @@ func TestIncidentPolicyAllowsOnlyCanonicalSourceClosingMergeReference(t *testing
 		mergeRef("arbitrary", arbitrary),
 		mergeRef("cross-store", crossStore),
 	}
-	policy := incidentViewPolicy(context.Background(), stored, events, secureread.Session{Unrestricted: true}, nil)
+	policy := incidentViewPolicy(context.Background(), stored, events, secureread.Session{DatabaseProfile: secureread.DatabasePolicyFreeReads}, nil)
 	require.False(t, policy.WithheldEvents["canonical"])
 	require.True(t, policy.WithheldEvents["arbitrary"])
 	require.True(t, policy.WithheldEvents["cross-store"])

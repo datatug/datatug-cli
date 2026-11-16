@@ -64,6 +64,9 @@ func loadResultForUI(ctx context.Context, id string) (resultOpen, error) {
 		return resultOpen{}, storeExit(err)
 	}
 	meta := loaded.Meta
+	if loaded.Anonymous {
+		return resultOpen{}, Exit("anonymous query result: use query results show --id to reopen typed ordinal rows; keyed terminal workspace operations are unavailable", exitCodeUsage)
+	}
 	if meta.DB.Ref == nil || meta.DB.Project == nil || meta.DB.Env == nil || meta.DB.Source == nil {
 		return resultOpen{}, Exit("query result: its database is not a source of a registered project; add the database to a project to open the result in the terminal UI", exitCodeUsage)
 	}

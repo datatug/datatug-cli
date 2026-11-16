@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/datatug/datatug-core/pkg/datatug"
 	"io"
 	"net/http"
 	"strconv"
@@ -51,6 +52,9 @@ type EntitlementChecker interface {
 }
 
 type Server struct {
+	// ActiveDefinitions applies project discovery visibility after owning Store
+	// authorization. It never affects GetDefinition, scheduling or execution.
+	ActiveDefinitions func(context.Context, watch.Actor, []watch.Definition) ([]watch.Definition, error)
 	// Display/discovery metadata supplied by the trusted hosted facade. It never
 	// selects authentication destinations or grants transport authority.
 	Coordination *CoordinatorReference
@@ -82,6 +86,8 @@ func reply(w http.ResponseWriter, status int, body any) {
 func fail(w http.ResponseWriter, err error) {
 	status, code, message := http.StatusServiceUnavailable, "UNAVAILABLE", "Watch service unavailable"
 	switch {
+	case errors.Is(err, datatug.ErrProjectUsageIncomplete):
+		status, code, message = 503, "REFERENCES_INCOMPLETE", "all retained project usage must be verified before deleting or restoring this Watch"
 	case errors.Is(err, watch.ErrForbidden):
 		status, code, message = 403, "FORBIDDEN", "Watch access denied"
 	case errors.Is(err, watch.ErrNotFound):
@@ -218,6 +224,9 @@ func (s *Server) userRequest(w http.ResponseWriter, r *http.Request, path string
 	case path == "definitions" && r.Method == "GET":
 		var list []watch.Definition
 		list, err = s.Store.ListDefinitions(r.Context(), a)
+		if err == nil && s.ActiveDefinitions != nil {
+			list, err = s.ActiveDefinitions(r.Context(), a, list)
+		}
 		result = map[string]any{"definitions": list}
 	case path == "definition" && r.Method == "GET":
 		var d watch.Definition
@@ -243,6 +252,9 @@ func (s *Server) userRequest(w http.ResponseWriter, r *http.Request, path string
 			ExpectedVersion int64  `json:"expectedVersion"`
 		}
 		err = decode(w, r, &b)
+		if err == nil && b.Lifecycle == "deleted" {
+			err = datatug.ErrProjectUsageIncomplete
+		}
 		if err == nil {
 			var d watch.Definition
 			d, err = s.Store.SetLifecycle(r.Context(), a, b.ID, b.Lifecycle, b.OperationID, b.ExpectedVersion)
@@ -268,7 +280,10 @@ func (s *Server) userRequest(w http.ResponseWriter, r *http.Request, path string
 		}
 		err = decode(w, r, &b)
 		if err == nil {
-			err = s.Store.DeleteDefinition(r.Context(), a, b.ID, b.OperationID, b.ExpectedVersion)
+			// The legacy management request has no complete project-usage proof.
+			// A verified lifecycle authority may use the store primitive later;
+			// public callers cannot bypass it through /delete or /lifecycle.
+			err = datatug.ErrProjectUsageIncomplete
 		}
 		result = map[string]bool{"ok": err == nil}
 	case path == "subscription" && r.Method == "POST":

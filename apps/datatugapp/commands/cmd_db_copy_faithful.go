@@ -72,7 +72,7 @@ func removeCreatedDirs(file, top string) {
 }
 
 // dbCopyFaithful runs `db copy` between SQLite and PostgreSQL.
-func dbCopyFaithful(cmd *cobra.Command, srcRef, tgtRef dbcopy.BackendRef, fromSchema, overwrite string) error {
+func dbCopyFaithful(cmd *cobra.Command, srcRef, tgtRef dbcopy.BackendRef, fromSchema, overwrite string, directives *filter.Directives) error {
 	ctx := cmd.Context()
 	errWriter := cmd.ErrOrStderr()
 	asJSON, _ := cmd.Flags().GetBool("json")
@@ -132,10 +132,6 @@ func dbCopyFaithful(cmd *cobra.Command, srcRef, tgtRef dbcopy.BackendRef, fromSc
 	}
 	if toSchema != "" && tgtRef.Scheme != "postgres" {
 		return finish(nil, 2, "--to-schema is supported only for PostgreSQL targets")
-	}
-	directives, err := buildDirectivesFromFlags(cmd)
-	if err != nil {
-		return finish(nil, 2, err.Error())
 	}
 	if cmd.Flags().Changed("parallel-streams") {
 		n, _ := cmd.Flags().GetInt("parallel-streams")

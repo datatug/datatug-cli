@@ -2,13 +2,16 @@ package endpoints
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"net/url"
 
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
 	"github.com/sneat-co/sneat-go-core/apicore"
 	"github.com/strongo/random"
+	"github.com/strongo/validation"
 )
 
 // getBoard handles get board endpoint
@@ -55,14 +58,41 @@ func getBoards(w http.ResponseWriter, r *http.Request) {
 	writeProjectMutationJSON(w, r, http.StatusOK, briefs)
 }
 
+var generateBoardID = func() string { return random.ID(9) }
+
+// Discovery and creation accept the same unambiguous native target. Reject
+// malformed escaping rather than silently dropping a selector via URL.Query.
+func guardedBoardCreateSelector(raw string) (url.Values, error) {
+	query, err := url.ParseQuery(raw)
+	if err == nil {
+		for key, values := range query {
+			if len(values) != 1 || (key != "storage" && key != "project" && key != "branch") {
+				err = errors.New("ambiguous or unknown selector")
+				break
+			}
+		}
+	}
+	if err != nil {
+		return nil, validation.NewBadRequestError(errors.New("invalid Board creation selector"))
+	}
+	return query, nil
+}
+
 // createBoard handles board creation endpoint
 func createBoard(w http.ResponseWriter, r *http.Request) {
 	var ref dto.ProjectRef
-	var board datatug.Board
-	//board.ID = datatug.AutoID
+	// Full Board validation runs during decode, before the worker is called.
+	// Seed its server-owned identity now and reassert it after decoding, so a
+	// client-supplied ID can never select the storage target.
+	id := generateBoardID()
+	board := datatug.Board{ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: id}}}
 	createProjectItem(w, r, &ref, &board, func(ctx context.Context) (apicore.ResponseDTO, error) {
-		board.ID = random.ID(9)
-		return api.CreateBoard(ctx, ref, board)
+		query, err := guardedBoardCreateSelector(r.URL.RawQuery)
+		if err != nil {
+			return nil, err
+		}
+		board.ID = id
+		return api.CreateLocalProjectBoard(ctx, ref, query.Get("branch"), board)
 	})
 }
 

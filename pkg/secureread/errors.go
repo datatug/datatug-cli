@@ -12,6 +12,9 @@ import (
 // sentinel value dal-go/dalgo/access uses, not a wrapped copy.
 var ErrAccessDenied = access.ErrAccessDenied
 
+// ErrInvalidSession rejects contradictory or unknown session configuration.
+var ErrInvalidSession = errors.New("secureread: invalid session configuration")
+
 // ErrNoPrincipal is returned by NewSession when the session is secured
 // (NoPolicies is unset) but no principal was named via --as/--role/--group.
 // REQ:principal-selection requires `datatug serve` to fix a principal for

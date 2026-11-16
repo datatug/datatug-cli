@@ -1,9 +1,11 @@
 package commands
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"github.com/datatug/datatug-cli/pkg/agentaccess"
+	"io"
 	"log"
 	"os"
 	"strings"
@@ -15,16 +17,20 @@ import (
 	"github.com/datatug/datatug-cli/pkg/personalqueries"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-cli/pkg/server"
+	"github.com/datatug/datatug-cli/pkg/server/endpoints"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
+	"github.com/strongo/buildinfo"
 )
 
 const (
+	serveSecurityProfileFlag    = "security-profile"
 	serveHostFlag               = "host"
 	servePortFlag               = "port"
 	serveProjectFlag            = "project"
+	serveProjectsRootFlag       = "projects-root"
 	serveAsFlag                 = "as"
 	serveRoleFlag               = "role"
 	serveGroupFlag              = "group"
@@ -49,10 +55,14 @@ const serveOpenBrowserFlag = "open-browser"
 // --as/--role/--group fix the principal every policy-enforced read in this
 // process runs as (REQ:principal-selection) — see resolveServeSession.
 type serveFlags struct {
+	securityProfile    string
+	policyFiles        []string
+	policiesDir        string
 	openBrowser        bool
 	host               string
 	port               int
 	projectDir         string
+	projectsRoot       string
 	as                 string
 	roles              []string
 	groups             []string
@@ -72,6 +82,18 @@ func readServeFlags(cmd *cobra.Command) (serveFlags, error) {
 	flags := cmd.Flags()
 	var f serveFlags
 	var err error
+	if f.securityProfile, err = flags.GetString(serveSecurityProfileFlag); err != nil {
+		return f, err
+	}
+	if f.policyFiles, err = flags.GetStringArray(queryPolicyFlag); err != nil {
+		return f, err
+	}
+	if len(f.policyFiles) == 0 {
+		f.policyFiles = nil
+	}
+	if f.policiesDir, err = flags.GetString(queryPoliciesDirFlag); err != nil {
+		return f, err
+	}
 	if f.host, err = flags.GetString(serveHostFlag); err != nil {
 		return f, err
 	}
@@ -82,6 +104,9 @@ func readServeFlags(cmd *cobra.Command) (serveFlags, error) {
 		return f, err
 	}
 	if f.projectDir, err = flags.GetString(serveProjectFlag); err != nil {
+		return f, err
+	}
+	if f.projectsRoot, err = flags.GetString(serveProjectsRootFlag); err != nil {
 		return f, err
 	}
 	if f.as, err = flags.GetString(serveAsFlag); err != nil {
@@ -165,6 +190,23 @@ func resolveServeAddr(host string, port int, config dtconfig.Settings) (string, 
 // at all runs Unrestricted, defaulting the reported principal to "admin"
 // unless the caller named one explicitly.
 func resolveServeSession(projectDir string, flags serveFlags) (secureread.Session, error) {
+	if flags.securityProfile != "" && flags.securityProfile != secureread.ExactTableReadProfile {
+		return secureread.Session{}, errors.New("serve: unsupported security profile")
+	}
+	bound, declared, bindingErr := secureread.LoadBoundSession(context.Background(), projectDir, secureread.BoundSessionOptions{Required: flags.securityProfile != "", As: flags.as, Roles: flags.roles, Groups: flags.groups, ExtraPolicyFiles: flags.policyFiles, ExtraPoliciesDir: flags.policiesDir})
+	if declared {
+		if bindingErr != nil {
+			return secureread.Session{}, bindingErr
+		}
+		if flags.allowWrites || flags.allowOpaqueSQL || flags.allowLiveConns || flags.projectsRoot != "" {
+			return secureread.Session{}, secureread.ErrSourceBinding
+		}
+		return bound, nil
+	}
+	if len(flags.policyFiles) != 0 || flags.policiesDir != "" {
+		return secureread.Session{}, errors.New("serve: extra policy flags require the configured source profile")
+	}
+
 	policiesDir := accesspolicies.ServePoliciesDir(projectDir)
 	hasPrincipal := flags.as != "" || len(flags.roles) > 0 || len(flags.groups) > 0
 
@@ -190,9 +232,9 @@ func resolveServeSession(projectDir string, flags serveFlags) (secureread.Sessio
 	}
 }
 
-// unrestrictedServeLog is the startup line when no policy files were found. It names the
+// unrestrictedServeNotice is the startup warning when no policy files were found. It names the
 // principal the session really runs as, never the (possibly empty) --as flag.
-func unrestrictedServeLog(session secureread.Session) string {
+func unrestrictedServeNotice(session secureread.Session) string {
 	id := ""
 	if session.Principal != nil {
 		id, _ = session.Principal.ID.(string)
@@ -200,7 +242,7 @@ func unrestrictedServeLog(session secureread.Session) string {
 	if id == "" {
 		id = "(roles/groups only)"
 	}
-	return "serve: no access policy files found; serving as the unrestricted principal " + id
+	return "No access policy files found: serving as the unrestricted principal " + id
 }
 
 // serveOpenURL and serveStartHTTP are test seams: they default to the real
@@ -222,10 +264,12 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return Exit(err.Error(), exitCodeUsage)
 	}
-	if session.Unrestricted {
-		log.Print(unrestrictedServeLog(session))
+	endpoints.SetFederatedLabelGuard(serveFederatedLabelGuard(session, log.Writer()))
+	var notices []serveNotice
+	if session.DatabaseProfile.PolicyFreeReads() && len(session.Policies) == 0 {
+		notices = append(notices, serveNotice{warn: true, text: unrestrictedServeNotice(session)})
 	} else {
-		log.Printf("serve: %d access policy document(s) loaded; serving as principal %+v", len(session.Policies), session.Principal)
+		notices = append(notices, serveNotice{text: fmt.Sprintf("%d access policy document(s) loaded; serving as principal %+v", len(session.Policies), session.Principal)})
 	}
 
 	config, err := dtconfig.GetSettings()
@@ -254,9 +298,21 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 		pathsByID = getProjPathsByID(config)
 	}
 
+	if err := session.ValidateBoundServer(pathsByID, flags.allowWrites, flags.allowOpaqueSQL, flags.allowLiveConns); err != nil {
+		return err
+	}
 	host, port := resolveServeAddr(flags.host, flags.port, config)
 
 	agentURL, url := serveAgentURLs(bannerAddr(host, flags.host), port)
+	webUI, err := prepareServeWebUI(cmd, host, runtimeSettings.Server.UIHost)
+	if err != nil {
+		return err
+	}
+	fallbackURL := ""
+	if webUI != nil {
+		defer func() { _ = webUI.handler.Close() }()
+		url, fallbackURL = webUI.links(port)
+	}
 
 	// Every route but a preflight and the exchange of a one-time code needs the session token.
 	// The secret lives in the state directory (mode 0600) for the CLI's own clients and for
@@ -274,19 +330,20 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 		// A hand-started server prints a link that opens. The daemon (--idle-timeout) writes its
 		// output to daemon.log, which never holds a code: `datatug daemon url` mints its links.
 		url += "#code=" + code
-	}
-
-	// Founder ruling 2026-09-09: serve never opens a browser by default; it
-	// prints the link and opens a browser only with --open-browser.
-	fmt.Printf("DataTug agent API: %s/datatug\nDataTug web UI for this agent: %s\n", agentURL, url)
-	if flags.openBrowser {
-		if err := serveOpenURL(url); err != nil {
-			_, _ = fmt.Printf("failed to open browser with URL=%v: %v\n", url, err)
+		if fallbackURL != "" {
+			// A code is accepted once: the fallback link carries its own.
+			fallbackCode, _ := agentaccess.MintCode(secret, time.Now())
+			fallbackURL += "#code=" + fallbackCode
 		}
 	}
+
 	httpServer := server.NewHttpServer()
 	httpServer.IdleTimeout = flags.idleTimeout
+	if webUI != nil {
+		httpServer.WebUI, httpServer.UIHost = webUI.handler, webUI.host
+	}
 	caps := api.Capabilities{
+		ProjectsRoot:                flags.projectsRoot,
 		NativeSessionDetective:      nativeContextFixtureEnabled,
 		Access:                      agentaccess.New(secret),
 		AllowWrites:                 flags.allowWrites,
@@ -314,22 +371,44 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 		caps.DetectiveAIProfile = &profile
 	}
 	if caps.AllowWrites {
-		log.Printf("serve: --allow-writes set; project-mutation routes are enabled")
+		notices = append(notices, serveNotice{warn: true, text: "--allow-writes: project-mutation routes are enabled"})
 	}
 	if caps.AllowOpaqueSQL {
-		log.Printf("serve: --allow-opaque-sql set; native SQL executes with opaque-privileged provenance (no row/column enforcement)")
+		notices = append(notices, serveNotice{warn: true, text: "--allow-opaque-sql: native SQL executes with opaque-privileged provenance (no row/column enforcement)"})
 	}
 	if caps.AllowLiveConnections {
-		log.Printf("serve: --allow-live-connections set; routes that connect to a db server recorded in the project (the list of its databases) connect under the identity of the person who runs this server")
+		notices = append(notices, serveNotice{warn: true, text: "--allow-live-connections: routes that connect to a db server recorded in the project (the list of its databases) connect under the identity of the person who runs this server"})
 	}
 	if caps.HTTPOffline {
-		log.Printf("serve: --http-offline set; every HTTP-typed saved query's live fetch fails as SOURCE_UNAVAILABLE without touching the network")
+		notices = append(notices, serveNotice{warn: true, text: "--http-offline: every HTTP-typed saved query's live fetch fails as SOURCE_UNAVAILABLE without touching the network"})
 	}
 	if caps.ExecTimeout > 0 {
-		log.Printf("serve: --exec-timeout=%s (api-contract.md's 30s ceiling still applies; values above it are clamped down)", caps.ExecTimeout)
+		notices = append(notices, serveNotice{text: fmt.Sprintf("--exec-timeout=%s (api-contract.md's 30s ceiling still applies; values above it are clamped down)", caps.ExecTimeout)})
 	}
 	if caps.EvidencePrivateDir != "" {
-		log.Printf("serve: execution snapshot sidecars use %s (default is ~/%s; override with --%s or $%s)", caps.EvidencePrivateDir, executionstore.DefaultDir, serveEvidenceDirFlag, executionstore.DirEnv)
+		notices = append(notices, serveNotice{text: fmt.Sprintf("Execution snapshot sidecars use %s (default is ~/%s; override with --%s or $%s)", caps.EvidencePrivateDir, executionstore.DefaultDir, serveEvidenceDirFlag, executionstore.DirEnv)})
+	}
+	banner := serveBanner{
+		version:  buildinfo.Get("datatug").Version,
+		webUI:    url,
+		fallback: fallbackURL,
+		api:      agentURL + "/datatug",
+		notices:  notices,
+		daemon:   flags.idleTimeout > 0,
+	}
+	if webUI != nil {
+		banner.localUI = &serveLocalUI{version: webUI.entry.Version, dir: webUI.entry.Dir, connect: webUI.connect}
+		if n := webUI.handler.InlineHandlers; n > 0 {
+			banner.notices = append(banner.notices, inlineHandlersNotice(n))
+		}
+	}
+	writeServeBanner(os.Stdout, banner)
+	// Founder ruling 2026-09-09: serve never opens a browser by default; it
+	// prints the link and opens a browser only with --open-browser.
+	if flags.openBrowser {
+		if err := serveOpenURL(url); err != nil {
+			_, _ = fmt.Printf("failed to open browser with URL=%v: %v\n", url, err)
+		}
 	}
 	// TODO: implement graceful shutdown
 	return serveStartHTTP(&httpServer, pathsByID, host, port, session, caps)
@@ -391,7 +470,11 @@ func serveCommandArgs() *cobra.Command {
 	flags := cmd.Flags()
 	flags.String(serveHostFlag, "", "Host to bind the agent HTTP server to (default: localhost, or the server.host setting)")
 	flags.Int(servePortFlag, 0, "Port to bind the agent HTTP server to (default: 8989, or the server.port setting)")
+	flags.String(serveSecurityProfileFlag, "", "Require the project exact-table-readonly-v1 security profile")
+	flags.StringArray(queryPolicyFlag, nil, "Additional mandatory policy file for the configured source profile")
+	flags.String(queryPoliciesDirFlag, "", "Additional mandatory policy directory for the configured source profile")
 	flags.String(serveProjectFlag, "", "Path to a single DataTug project directory to serve")
+	flags.String(serveProjectsRootFlag, "", "Directory containing local projects; enables root-bound project creation with --allow-writes")
 	flags.Bool(serveOpenBrowserFlag, false, "Open the web UI in a browser (off by default; the URL is always printed)")
 	flags.String(serveAsFlag, "", "Principal user ID to serve as; required when the project has a policies/ set (or $HOME/"+accesspolicies.DefaultDir+")")
 	flags.StringArray(serveRoleFlag, nil, "Principal role, repeatable")
@@ -406,5 +489,17 @@ func serveCommandArgs() *cobra.Command {
 	flags.Duration(serveSnapshotRetentionFlag, 0, "Execution snapshot retention before bytes are expired (default 30 days)")
 	flags.String(serveDetectiveAIProfileFlag, "", "Named AI profile for Detective proposals; credentials remain in its configured environment variable")
 	flags.Duration(serveIdleTimeoutFlag, 0, "Exit gracefully after this long with no HTTP request (0 serves until stopped); datatug daemon uses 2h")
+	addServeWebUIFlags(cmd)
 	return cmd
+}
+
+// serveFederatedLabelGuard is the label guard a federated saved query served
+// by `datatug serve` checks each leaf with: the labels of the project source
+// its alias is bound to (pkg/tugqlbind), strict as the served principal's reads
+// are, with suggestion warnings written to warn.
+func serveFederatedLabelGuard(session secureread.Session, warn io.Writer) func(projectDir string) secureread.FederatedColumnGuard {
+	strict := labelStrictness(session)
+	return func(projectDir string) secureread.FederatedColumnGuard {
+		return federatedLabelGuard(projectDir, strict, warn)
+	}
 }

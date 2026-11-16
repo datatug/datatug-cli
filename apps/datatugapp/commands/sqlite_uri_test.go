@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"errors"
+	"github.com/datatug/datatug-cli/pkg/secureread"
 	"os"
 	"path/filepath"
 	"testing"
@@ -38,7 +39,7 @@ func TestChat_OpensASQLiteSourceWithTheOneBuilderOfTheFileURI(t *testing.T) {
 			return nil, stop
 		}
 
-		_, _, err := loadChatJoinApplication(context.Background(), source, nil, false)
+		_, _, err := loadChatJoinApplication(context.Background(), source, nil, secureread.Session{})
 
 		require.ErrorIs(t, err, stop)
 		require.Len(t, opened, 1)

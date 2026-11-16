@@ -201,7 +201,7 @@ func dbCopySQLScript(cmd *cobra.Command, fromURL, toURL, overwrite string) error
 	if err != nil {
 		return fail(2, "%v", err)
 	}
-	srcRef, _, err := parseSourceArg(ctx, fromURL)
+	srcRef, srcProject, err := parseProjectSourceArg(ctx, fromURL)
 	if err != nil {
 		return keepExit(err, func(err error) error { return fail(2, "--from: %v", err) })
 	}
@@ -213,6 +213,9 @@ func dbCopySQLScript(cmd *cobra.Command, fromURL, toURL, overwrite string) error
 	}
 	if _, statErr := os.Stat(target.path); statErr == nil && overwrite != "recreate" && !dryRun {
 		return fail(1, "%s already exists; use --overwrite=recreate to replace it", filepath.Base(target.path))
+	}
+	if reason := copyLabelRefusal(cmd, srcRef, srcProject, ""); reason != "" {
+		return fail(copyRefusedCode, copyRefusedFormat, reason)
 	}
 	sum, err := fileSHA256(srcRef.Path)
 	if err != nil {

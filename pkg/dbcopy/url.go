@@ -34,6 +34,11 @@
 //     libsql+http:// names a loopback endpoint. The token comes
 //     from DATATUG_LIBSQL_BEARER for each request, never from
 //     the URL — see libsql_source.go
+//   - typesense://      one existing Typesense collection read through
+//     dal-go/dalgo2typesense; HTTPS unless typesense+http://
+//     names a loopback endpoint. The scoped API key comes from
+//     DATATUG_TYPESENSE_API_KEY for each request, never from
+//     the URL — see typesense_source.go
 package dbcopy
 
 import (
@@ -56,7 +61,7 @@ import (
 
 // supportedSchemes is the MVP-supported scheme list, used both for dispatch
 // and to construct the error message for REQ:unknown-scheme-rejected.
-var supportedSchemes = []string{"duckdb", "sqlite", "ingitdb", "postgres", "mysql", "oracle", "sqlserver", "http", "https", "openvaultdb", "bigquery", "mongodb", "mongodb+srv", "firestore", CouchDBScheme, CouchDBHTTPSScheme, CouchDBHTTPScheme, PostgRESTScheme, PostgRESTHTTPSScheme, PostgRESTHTTPScheme, LibSQLScheme, LibSQLHTTPSScheme, LibSQLHTTPScheme}
+var supportedSchemes = []string{"duckdb", "sqlite", "ingitdb", "postgres", "mysql", "oracle", "sqlserver", "http", "https", "openvaultdb", "bigquery", "mongodb", "mongodb+srv", "firestore", CouchDBScheme, CouchDBHTTPSScheme, CouchDBHTTPScheme, PostgRESTScheme, PostgRESTHTTPSScheme, PostgRESTHTTPScheme, LibSQLScheme, LibSQLHTTPSScheme, LibSQLHTTPScheme, TypesenseScheme, TypesenseHTTPSScheme, TypesenseHTTPScheme, ClickHouseScheme, ClickHouseHTTPSScheme, ClickHouseHTTPScheme}
 
 // SupportedSchemes returns the exact schemes Parse/Open dispatch, in
 // dispatch order. It is the single source of truth other packages should
@@ -185,9 +190,17 @@ type BackendRef struct {
 	// libSQL endpoint selectors: one existing libSQL database, whose tables and
 	// views are read as SQLite relations. The base address holds no credentials;
 	// the token is read from DATATUG_LIBSQL_BEARER for each request.
+	ClickHouseAddress       string
+	ClickHouseDatabase      string
 	LibSQLHost              string
 	LibSQLBasePath          string
 	LibSQLAllowLoopbackHTTP bool
+	// Typesense endpoint selectors: one existing Typesense collection. The
+	// endpoint is the server origin and holds no credentials; the scoped API key
+	// is read from DATATUG_TYPESENSE_API_KEY for each request.
+	TypesenseHost              string
+	TypesenseCollection        string
+	TypesenseAllowLoopbackHTTP bool
 	// BigQuery destination selectors. Credentials are never accepted in the URL;
 	// callers provide local Google credentials separately.
 	ProjectID string
@@ -298,8 +311,12 @@ func parseURL(rawURL string) (BackendRef, error) {
 		return parseCouchDBSource(scheme, rest, display)
 	case PostgRESTScheme, PostgRESTHTTPSScheme, PostgRESTHTTPScheme:
 		return parsePostgRESTSource(scheme, rest, display)
+	case ClickHouseScheme, ClickHouseHTTPSScheme, ClickHouseHTTPScheme:
+		return parseClickHouseSource(scheme, rest, display)
 	case LibSQLScheme, LibSQLHTTPSScheme, LibSQLHTTPScheme:
 		return parseLibSQLSource(scheme, rest, display)
+	case TypesenseScheme, TypesenseHTTPSScheme, TypesenseHTTPScheme:
+		return parseTypesenseSource(scheme, rest, display)
 	case "firestore":
 		return parseFirestoreSource(rest, display)
 	case "openvaultdb":
@@ -624,10 +641,10 @@ func (r BackendRef) openForTransfer(ctx context.Context, postgresSchema string) 
 }
 
 // OpenForWrite is Open for the one connection that is written through: the target of
-// `datatug db copy --to`. It differs from Open only for a postgres source, which Open and
-// OpenProtected open with a read-only session and refuse when the URL turns that off (see
-// postgresConnectionString); this opens it without the read-only default and keeps the URL's own
-// setting. Nothing else opens a PostgreSQL source for writing.
+// `datatug db copy --to`. SQLite targets may create and write their file; source opens are
+// native read-only. PostgreSQL sources use a read-only session and refuse when the URL turns
+// that off (see postgresConnectionString); a target keeps the URL's own setting instead.
+// Nothing else opens a PostgreSQL source for writing.
 func (r BackendRef) OpenForWrite(ctx context.Context) (dal.DB, error) {
 	return r.open(ctx, openMode{forWrite: true})
 }
@@ -758,8 +775,12 @@ func (r BackendRef) openSource(ctx context.Context, mode openMode) (dal.DB, erro
 		return openCouchDB(ctx, r, mode)
 	case PostgRESTScheme, PostgRESTHTTPSScheme, PostgRESTHTTPScheme:
 		return openPostgREST(ctx, r, mode)
+	case ClickHouseScheme, ClickHouseHTTPSScheme, ClickHouseHTTPScheme:
+		return openClickHouse(ctx, r, mode)
 	case LibSQLScheme, LibSQLHTTPSScheme, LibSQLHTTPScheme:
 		return openLibSQL(ctx, r, mode)
+	case TypesenseScheme, TypesenseHTTPSScheme, TypesenseHTTPScheme:
+		return openTypesense(ctx, r, mode)
 	case "firestore":
 		return r.openFirestore(ctx, mode)
 	case "duckdb":
@@ -777,8 +798,8 @@ func (r BackendRef) openSource(ctx context.Context, mode openMode) (dal.DB, erro
 		return OpenOpenVaultDBSource(r.Path)
 	case "sqlite":
 		// A SQLite file that is written (the target of `db copy`) is created when it is missing;
-		// one that is read must exist.
-		fileMode := SQLiteReadWrite
+		// one that is read must exist and is native read-only, independently of policies.
+		fileMode := SQLiteReadOnly
 		if mode.forWrite {
 			if err := r.prepareNewSQLiteFile(); err != nil {
 				return nil, err

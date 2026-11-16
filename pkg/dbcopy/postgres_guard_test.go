@@ -96,6 +96,7 @@ func TestGuardPostgresError(t *testing.T) {
 // runs them against the adapter itself and against the shared handle that guards it.
 type postgresCalls interface {
 	RunReadonlyTransaction(context.Context, dal.ROTxWorker, ...dal.TransactionOption) error
+	RunReadonlySchemaTransaction(context.Context, func(context.Context, dbschema.SchemaReader) error) error
 	RunReadwriteTransaction(context.Context, dal.RWTxWorker, ...dal.TransactionOption) error
 	Get(context.Context, dalrecord.Record) error
 	GetMulti(context.Context, []dalrecord.Record) error
@@ -145,6 +146,9 @@ func postgresCallTable() map[string]func(postgresCalls) error {
 	return map[string]func(postgresCalls) error{
 		"RunReadonlyTransaction": func(c postgresCalls) error {
 			return c.RunReadonlyTransaction(ctx, func(context.Context, dal.ReadTransaction) error { return nil })
+		},
+		"RunReadonlySchemaTransaction": func(c postgresCalls) error {
+			return c.RunReadonlySchemaTransaction(ctx, func(context.Context, dbschema.SchemaReader) error { return nil })
 		},
 		"RunReadwriteTransaction": func(c postgresCalls) error {
 			return c.RunReadwriteTransaction(ctx, func(context.Context, dal.ReadwriteTransaction) error { return nil })

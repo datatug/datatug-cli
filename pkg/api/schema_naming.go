@@ -18,7 +18,11 @@ func DefaultSchemaForDriver(driver string) string {
 		return "main"
 	case "postgres", "postgresql", "pgx":
 		return "public"
-	case DriverMySQL, DriverOracle, DriverSQLServer, DriverCouchDB, DriverPostgREST:
+	case DriverMySQL, DriverOracle, DriverSQLServer, DriverCouchDB, DriverPostgREST, DriverTypesense:
+		// A CouchDB or Typesense catalog has no SQL namespace: ServerDefaultSchema is
+		// only the logical grouping its one collection is recorded under, so a
+		// "default.<collection>" reference and a bare "<collection>" name the same
+		// collection and match the same policy.
 		return ServerDefaultSchema
 	case DriverLibSQL:
 		// libSQL is SQLite over HTTP: one implicit database, named "main".

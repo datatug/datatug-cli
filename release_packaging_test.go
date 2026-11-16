@@ -11,14 +11,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// These tests pin the release wiring around the Homebrew tap. Publishing to
-// the tap is manual, by the owner's decision of 2026-09-23 ("never update
-// downstream package managers as a side effect of merging code"): a merge to
-// main publishes nothing to the tap and no release can stop because of
-// Homebrew. That left the tap at v0.43.1 while 39 releases followed, and
-// nothing said so. The tests fail the build if the publishing wiring comes back
-// without a new decision, if the warning after a release goes away or could
-// fail the release, or if the manual workflow stops checking its own result.
+// These tests pin the release wiring around the Homebrew tap. Every release
+// updates the tap: release.yml calls publish-packages.yml after the release is
+// public (owner, 2026-11-06, reversing the manual-only decision of 2026-09-23
+// that left the tap at v0.103.2 for 39 releases). GoReleaser never writes the
+// tap itself, so publish-packages.yml stays the one path that does, and it
+// checks its own result by reading the tap back.
 
 type workflowStep struct {
 	Name string            `yaml:"name"`
@@ -37,8 +35,10 @@ type workflowJob struct {
 	ContinueOnError string            `yaml:"continue-on-error"`
 	Permissions     map[string]string `yaml:"permissions"`
 	With            map[string]any    `yaml:"with"`
-	Secrets         map[string]string `yaml:"secrets"`
-	Steps           []workflowStep    `yaml:"steps"`
+	// Secrets is a map, or the scalar "inherit" for a reusable-workflow call.
+	Secrets any            `yaml:"secrets"`
+	Uses    string         `yaml:"uses"`
+	Steps   []workflowStep `yaml:"steps"`
 }
 
 // workflowFile decodes the parts of a workflow file the tests below read.
@@ -75,7 +75,7 @@ func readWorkflow(t *testing.T, name string) workflowFile {
 	return wf
 }
 
-func TestReleaseWorkflow_PublishesNothingToTheTap(t *testing.T) {
+func TestReleaseWorkflow_GoReleaserNeverWritesTheTap(t *testing.T) {
 	t.Parallel()
 	release, ok := readWorkflow(t, "release.yml").Jobs["release"]
 	if !ok {
@@ -83,9 +83,11 @@ func TestReleaseWorkflow_PublishesNothingToTheTap(t *testing.T) {
 	}
 	args, _ := release.With["goreleaser_extra_args"].(string)
 	if !strings.Contains(args, "--skip=") || !strings.Contains(args, "homebrew") {
-		t.Errorf("goreleaser_extra_args = %q: the release must skip the homebrew publisher (publishing is manual)", args)
+		t.Errorf("goreleaser_extra_args = %q: GoReleaser must skip its homebrew publisher (publish-packages.yml writes the tap)", args)
 	}
-	for name, value := range release.Secrets {
+	secrets, _ := release.Secrets.(map[string]any)
+	for name, raw := range secrets {
+		value, _ := raw.(string)
 		if strings.Contains(name, "GORELEASER_GITHUB_TOKEN") || strings.Contains(value, "HOMEBREW_TAP") {
 			t.Errorf("release secret %s = %q: the release must carry no tap token", name, value)
 		}
@@ -113,63 +115,39 @@ func TestWorkflows_OnlyThePublishWorkflowNamesTheTapToken(t *testing.T) {
 	}
 }
 
-func TestReleaseWorkflow_WarnsWhenTheTapIsBehind(t *testing.T) {
+func TestReleaseWorkflow_PublishesTheCaskAfterEveryRelease(t *testing.T) {
 	t.Parallel()
 	var found bool
 	for name, job := range readWorkflow(t, "release.yml").Jobs {
-		if name == "release" || !contains(job.Needs, "release") {
-			continue
-		}
-		var script *workflowStep
-		for i, step := range job.Steps {
-			if strings.Contains(step.Run, "scripts/verify-homebrew-cask.sh") {
-				script = &job.Steps[i]
-			}
-		}
-		if script == nil {
+		if job.Uses != "./.github/workflows/publish-packages.yml" {
 			continue
 		}
 		found = true
-		if !strings.Contains(script.Run, "--warn-only") {
-			t.Errorf("job %q must run the script with --warn-only (a stale tap is a warning, not a failure), got %q", name, script.Run)
-		}
-		// The job may never turn the run red: a warning is the whole output.
-		if job.ContinueOnError != "true" {
-			t.Errorf("job %q must have continue-on-error: true so it can never fail the release run, got %q", name, job.ContinueOnError)
-		}
-		for _, step := range job.Steps {
-			if step.ContinueOnError == "false" {
-				t.Errorf("job %q step %q turns continue-on-error off", name, step.Name)
+		for _, need := range []string{"release", "publish-datatug-release"} {
+			if !contains(job.Needs, need) {
+				t.Errorf("job %q must need %q so it publishes only a public release, needs %v", name, need, job.Needs)
 			}
 		}
-		if !strings.Contains(job.If, "needs.release.outputs.tag") {
-			t.Errorf("job %q must run only when the release cut a tag (if: needs.release.outputs.tag != ''), got %q", name, job.If)
-		}
-		// Without !cancelled() the implicit success() skips the job when a smoke
-		// test fails after the release went public.
-		if !strings.Contains(job.If, "!cancelled()") {
-			t.Errorf("job %q must also run when a later job of the release failed (if: !cancelled() && ...), got %q", name, job.If)
-		}
-		// The job runs inside the workflow's `release` concurrency group, so a stalled
-		// gh call would hold every later release. gh has no request timeout.
-		if job.Timeout < 1 || job.Timeout > 5 {
-			t.Errorf("job %q needs timeout-minutes between 1 and 5 so it cannot hold later releases, got %d", name, job.Timeout)
-		}
-		if got := job.Permissions["contents"]; got != "read" || len(job.Permissions) != 1 {
-			t.Errorf("job %q permissions = %v, want only contents: read", name, job.Permissions)
-		}
-		allowedEnv := map[string]bool{"GH_TOKEN": true, "TAG": true, "ATTEMPTS": true, "INTERVAL": true}
-		for key, value := range script.Env {
-			if !allowedEnv[key] || strings.Contains(value, "secrets.") {
-				t.Errorf("job %q env %s = %q: the warning reads the public tap with the workflow's own token and needs no secret", name, key, value)
+		for _, want := range []string{"!cancelled()", "needs.release.outputs.tag", "needs.publish-datatug-release.result == 'success'"} {
+			if !strings.Contains(job.If, want) {
+				t.Errorf("job %q if = %q, missing %q", name, job.If, want)
 			}
 		}
-		if script.Env["GH_TOKEN"] != "${{ github.token }}" {
-			t.Errorf("job %q GH_TOKEN = %q, want the workflow's own ${{ github.token }}", name, script.Env["GH_TOKEN"])
+		if job.With["tag"] != "${{ needs.release.outputs.tag }}" {
+			t.Errorf("job %q must publish the release's own tag, with.tag = %v", name, job.With["tag"])
+		}
+		if job.With["publish_hub_release"] != false {
+			t.Errorf("job %q must not re-publish the hub release that publish-datatug-release just made, with.publish_hub_release = %v", name, job.With["publish_hub_release"])
+		}
+		if job.Secrets != "inherit" {
+			t.Errorf("job %q secrets = %v, want inherit (release.yml itself names no tap token)", name, job.Secrets)
+		}
+		if job.ContinueOnError == "true" {
+			t.Errorf("job %q must be able to fail the run: a tap that did not update must show red", name)
 		}
 	}
 	if !found {
-		t.Error("no job after `release` runs scripts/verify-homebrew-cask.sh")
+		t.Error("release.yml has no job calling ./.github/workflows/publish-packages.yml")
 	}
 }
 
@@ -205,6 +183,30 @@ func TestPublishWorkflow_VerifiesTheTapAfterPushing(t *testing.T) {
 	}
 	if last.Env["TAG"] == "" || last.Env["GH_TOKEN"] == "" {
 		t.Errorf("the verify step needs TAG and GH_TOKEN, got %v", last.Env)
+	}
+}
+
+// A manual run has no publish_hub_release input, and GitHub's loose equality
+// makes `null != false` false: the condition must name workflow_dispatch so a
+// manual republish still re-publishes the hub release.
+func TestPublishWorkflow_ManualRunRepublishesTheHubRelease(t *testing.T) {
+	t.Parallel()
+	job := readWorkflow(t, "publish-packages.yml").Jobs["homebrew"]
+	if job.Timeout < 1 || job.Timeout > 20 {
+		t.Errorf("homebrew job timeout-minutes = %d, want 1..20 (it can run inside the release concurrency group)", job.Timeout)
+	}
+	const want = "${{ github.event_name == 'workflow_dispatch' || inputs.publish_hub_release }}"
+	var n int
+	for _, step := range job.Steps {
+		if step.Name == "Mint exact public release token" || step.Name == "Ensure release is published to datatug/datatug" {
+			n++
+			if step.If != want {
+				t.Errorf("step %q if = %q, want %q", step.Name, step.If, want)
+			}
+		}
+	}
+	if n != 2 {
+		t.Errorf("found %d of the 2 hub re-publish steps", n)
 	}
 }
 

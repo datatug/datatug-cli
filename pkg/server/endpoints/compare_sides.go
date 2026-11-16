@@ -58,8 +58,40 @@ func executeCompareLiveSide(
 	parameters map[string]apicontract.TypedValueOrSet,
 	origins []apicontract.BindingOriginEntry,
 ) (compareSideData, error) {
-	execRequest := apicontract.ExecutionRequest{
+	return executeLiveInstance(ctx, liveInstanceRequest{
+		SecurityContextID: request.SecurityContextID, QueryID: request.QueryID,
 		StoreID: side.StoreID, Project: side.Project, Environment: side.Environment,
+		Incident: request.Incident,
+	}, parameters, origins)
+}
+
+// liveInstanceRequest names one live read of a saved query in one
+// environment: a compare live side, or one reconcile instance.
+type liveInstanceRequest struct {
+	SecurityContextID string
+	QueryID           string
+	StoreID           string
+	Project           string
+	Environment       string
+	// Source optionally names the catalog of the environment to read; empty
+	// lets the environment's only eligible target answer (compare's rule).
+	Source   string
+	Incident *apicontract.IncidentRef
+}
+
+// executeLiveInstance runs the saved query in one environment under the
+// caller's security context and Perimeter, records the execution with a row
+// snapshot, and returns the compared recordset with its receipt. Compare's
+// live sides and every reconcile instance read through it, so no instance is
+// ever read with another instance's access.
+func executeLiveInstance(
+	ctx context.Context,
+	request liveInstanceRequest,
+	parameters map[string]apicontract.TypedValueOrSet,
+	origins []apicontract.BindingOriginEntry,
+) (compareSideData, error) {
+	execRequest := apicontract.ExecutionRequest{
+		StoreID: request.StoreID, Project: request.Project, Environment: request.Environment, Source: request.Source,
 		SecurityContextID: request.SecurityContextID, QueryID: request.QueryID,
 		Parameters: parameters, BindingOrigins: origins,
 		Mode:     apicontract.ProvenanceModeLive,
@@ -75,7 +107,7 @@ func executeCompareLiveSide(
 	if result.Execution == nil {
 		return compareSideData{}, newContractError(codeInternal, "compare execution produced no receipt", "")
 	}
-	store, err := api.ExecutionEvidenceStoreByID(side.Project, result.Execution.StoreID)
+	store, err := api.ExecutionEvidenceStoreByID(request.Project, result.Execution.StoreID)
 	if err != nil {
 		return compareSideData{}, newContractError(codeInternal, "open persisted compare receipt", "")
 	}

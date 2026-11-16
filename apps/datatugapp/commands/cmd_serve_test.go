@@ -266,24 +266,24 @@ func TestResolveServeSession_MalformedPolicyPropagatesError(t *testing.T) {
 	}
 }
 
-func TestUnrestrictedServeLog(t *testing.T) {
+func TestUnrestrictedServeNotice(t *testing.T) {
 	noPoliciesFallbackDir(t)
 	session, err := resolveServeSession("", serveFlags{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	const prefix = "serve: no access policy files found; serving as the unrestricted principal "
-	if got := unrestrictedServeLog(session); got != prefix+"admin" {
+	const prefix = "No access policy files found: serving as the unrestricted principal "
+	if got := unrestrictedServeNotice(session); got != prefix+"admin" {
 		t.Fatalf("%q", got)
 	}
-	if got := unrestrictedServeLog(secureread.Session{}); got != prefix+"(roles/groups only)" {
+	if got := unrestrictedServeNotice(secureread.Session{}); got != prefix+"(roles/groups only)" {
 		t.Fatalf("%q", got)
 	}
 	roles, err := resolveServeSession("", serveFlags{roles: []string{"analyst"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := unrestrictedServeLog(roles); got != prefix+"(roles/groups only)" {
+	if got := unrestrictedServeNotice(roles); got != prefix+"(roles/groups only)" {
 		t.Fatalf("%q", got)
 	}
 }

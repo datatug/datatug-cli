@@ -1,0 +1,542 @@
+package commands
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/dalgo/dbschema"
+	"github.com/dal-go/record"
+	"github.com/datatug/datatug-cli/pkg/callercontext"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/datatug/datatug-cli/pkg/meaninglabelsfile"
+	"github.com/datatug/datatug-cli/pkg/secureread"
+	"github.com/datatug/datatug-core/pkg/meaninglabels"
+	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// notesWithCustomer joins the demo's support notes to chinook.Customer.
+func notesWithCustomer(columns string) string {
+	return `from:
+  database: support
+  name: support-notes
+  alias: n
+  joins:
+    - from: {database: chinook, name: Customer, alias: c, scan: {orderBy: [{field: CustomerId}], limit: 100}}
+      on: [{left: {field: CustomerId, source: n}, op: '==', right: {field: CustomerId, source: c}}]
+columns:
+` + columns
+}
+
+// The demo leak: a saved federated query joining support notes to Customer
+// must not hand an agent the Email the project labels pii, while a query of
+// unlabelled columns still returns rows.
+func TestSavedFederatedQueryRefusesLabelledColumnsForAnAgent(t *testing.T) {
+	dir := demoForTest(t)
+	queries := filepath.Join(dir, "queries")
+	require.NoError(t, os.MkdirAll(queries, 0o755))
+	writeSavedQuery(t, queries, "notes-emails", "TugQL", notesWithCustomer("  - {field: Note, source: n}\n  - {field: Email, source: c}\n"))
+	writeSavedQuery(t, queries, "notes-names", "TugQL", notesWithCustomer("  - {field: CustomerId, source: c}\n  - {field: FirstName, source: c}\n"))
+	writeSavedQuery(t, queries, "notes-by-email", "TugQL", notesWithCustomer("  - {field: FirstName, source: c}\n")+
+		"where: {op: '==', left: {field: Email, source: c}, right: {value: someone@example.com}}\n")
+	writeSavedQuery(t, queries, "notes-everything", "TugQL", strings.Split(notesWithCustomer(""), "columns:")[0])
+
+	stdout, stderr, code := runCLI(t, "", "query", "run", "--project", "datatug-demo", "--as", "agent", "--role", "agent", "--format", "json", "--query", "notes-emails")
+	require.Equal(t, exitCodeAccessDenied, code, stdout+stderr)
+	assert.NotContains(t, stdout+stderr, "@", "no email reaches the agent")
+	var denial denialJSON
+	require.NoError(t, json.Unmarshal([]byte(stderr), &denial), stderr)
+	assert.Equal(t, meaninglabels.CodeFieldProtected, denial.Error.Code)
+	assert.Contains(t, denial.Error.Reason, "chinook.Customer.Email is protected (pii)")
+	assert.Contains(t, denial.Error.Reason, "federated reads cannot mask labelled columns yet")
+
+	for _, id := range []string{"notes-by-email", "notes-everything"} {
+		_, stderr, code = runCLI(t, "", "query", "run", "--project", "datatug-demo", "--as", "agent", "--role", "agent", "--query", id)
+		assert.Equal(t, exitCodeAccessDenied, code, id)
+		assert.Contains(t, stderr, "access denied: ", id)
+		assert.Contains(t, stderr, "chinook.Customer", id)
+	}
+	// The streaming path refuses the same way: every column of Customer.
+	writeSavedQuery(t, queries, "customers-stream", "TugQL", "from: {database: chinook, name: Customer}\n")
+	stdout, stderr, code = runCLI(t, "", "query", "run", "--project", "datatug-demo", "--as", "agent", "--role", "agent", "--format", "jsonl", "--query", "customers-stream")
+	assert.Equal(t, exitCodeAccessDenied, code, stderr)
+	assert.Empty(t, stdout)
+	assert.Contains(t, stderr, "chinook.Customer.Email is protected (pii)")
+
+	stdout, stderr, code = runCLI(t, "", "query", "run", "--project", "datatug-demo", "--as", "agent", "--role", "agent", "--format", "json", "--query", "notes-names")
+	require.Equal(t, 0, code, stderr)
+	var rows []map[string]any
+	require.NoError(t, json.Unmarshal([]byte(stdout), &rows), stdout)
+	require.NotEmpty(t, rows)
+	for _, row := range rows {
+		assert.NotContains(t, row, "Email")
+		assert.NotEmpty(t, row["FirstName"])
+	}
+
+	// A label document that cannot be read refuses the read.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, meaninglabelsfile.FileName), []byte("{not json"), 0o644))
+	_, stderr, code = runCLI(t, "", "query", "run", "--project", "datatug-demo", "--as", "agent", "--role", "agent", "--query", "notes-names")
+	assert.Equal(t, exitCodeAccessDenied, code)
+	assert.Contains(t, stderr, "datatug-labels.json")
+}
+
+func TestFederatedLabelGuardWildcards(t *testing.T) {
+	restoreVar(t, &loadLabels)
+	restoreVar(t, &listCollections)
+	restoreVar(t, &describeCollection)
+	restoreVar(t, &listSourceViews)
+	doc := meaninglabels.NewDocument()
+	doc, _, err := meaninglabels.Apply(doc, meaninglabels.Change{Action: meaninglabels.ActionSet, Target: meaninglabels.Target{Source: "crm", Table: "Account", Column: "Hidden"}, Class: meaninglabels.ClassFinancial, Reason: "test"}, meaninglabels.Actor{ID: "owner"}, projectReadNow())
+	require.NoError(t, err)
+	loadLabels = func(context.Context, string) (meaninglabels.Document, error) { return doc, nil }
+	listCollections = func(context.Context, dal.DB, *record.Key) ([]dal.CollectionRef, error) {
+		return []dal.CollectionRef{dal.NewRootCollectionRef("Account", ""), dal.NewRootCollectionRef("Plain", "")}, nil
+	}
+	listSourceViews = func(context.Context, dal.DB) ([]dbschema.SourceViewDef, error) { return nil, nil }
+	fields := []dbschema.FieldDef{{Name: "Id"}, {Name: "Region"}}
+	describeCollection = func(context.Context, dal.DB, *dal.CollectionRef) (*dbschema.CollectionDef, error) {
+		return &dbschema.CollectionDef{Fields: fields}, nil
+	}
+	guard := federatedLabelGuard("/project", true, io.Discard)
+	ctx := context.Background()
+	leaf := func(table string, all bool, columns ...string) error {
+		return guard(ctx, secureread.FederatedLeaf{Database: "crm", Collection: table, Scheme: "sqlite", AllColumns: all, Columns: columns, Open: openNothing})
+	}
+	assert.NoError(t, leaf("Plain", true), "every column of an unlabelled table")
+	assert.NoError(t, leaf("Account", false, "Id", "Region"))
+	var protected *secureread.FieldProtectedError
+	// A stored label the description does not list still refuses a wildcard.
+	require.ErrorAs(t, leaf("Account", true), &protected)
+	assert.Contains(t, protected.Message, "crm.Account.Hidden is protected (financial)")
+	// A read-time suggestion on a listed column refuses a wildcard.
+	fields = append(fields, dbschema.FieldDef{Name: "email"})
+	require.ErrorAs(t, leaf("Plain", true), &protected)
+	assert.Contains(t, protected.Message, "crm.Plain.email is protected (pii)")
+	// Columns that cannot be listed refuse a wildcard.
+	describeCollection = func(context.Context, dal.DB, *dal.CollectionRef) (*dbschema.CollectionDef, error) {
+		return nil, errors.New("no description")
+	}
+	require.ErrorAs(t, leaf("Plain", true), &protected)
+	assert.Contains(t, protected.Message, "columns of crm.Plain cannot be listed")
+	assert.NoError(t, leaf("Plain", false, "Id"), "named columns need no description")
+}
+
+// writeTargetedQuery writes a saved query that names its catalog.
+func writeTargetedQuery(t *testing.T, queriesDir, id, queryType, catalog, text string) {
+	t.Helper()
+	writeSavedQuery(t, queriesDir, id, queryType, text)
+	meta := `{"createdAt":"2026-11-07T00:00:00Z","id":"` + id + `","type":"` + queryType + `","targets":[{"catalog":"` + catalog + `"}]}`
+	require.NoError(t, os.WriteFile(filepath.Join(queriesDir, id+".query.json"), []byte(meta), 0o644))
+}
+
+func agentSavedQuery(t *testing.T, id string, extra ...string) (stdout, stderr string, code int) {
+	t.Helper()
+	return runCLI(t, "", append([]string{"query", "run", "--project", "datatug-demo", "--as", "agent", "--role", "agent", "--format", "json", "--query", id}, extra...)...)
+}
+
+// A single-source saved TugQL query is checked as one leaf of its catalog.
+func TestSavedSingleSourceTugQLRefusesLabelledColumnsForAnAgent(t *testing.T) {
+	dir := demoForTest(t)
+	queries := filepath.Join(dir, "queries")
+	require.NoError(t, os.MkdirAll(queries, 0o755))
+	writeTargetedQuery(t, queries, "customer-emails", "TugQL", "chinook", "from: {name: Customer}\ncolumns: [{field: FirstName}, {field: Email}]\n")
+	writeTargetedQuery(t, queries, "customer-all", "TugQL", "chinook", "from: {name: Customer}\n")
+	writeTargetedQuery(t, queries, "customer-by-email", "TugQL", "chinook", "from: {name: Customer}\ncolumns: [{field: FirstName}]\nwhere: {op: '==', left: {field: Email}, right: {value: someone@example.com}}\n")
+	writeTargetedQuery(t, queries, "customer-names", "TugQL", "chinook", "from: {name: Customer}\ncolumns: [{field: CustomerId}, {field: FirstName}]\n")
+
+	for _, id := range []string{"customer-emails", "customer-all", "customer-by-email"} {
+		stdout, stderr, code := agentSavedQuery(t, id)
+		require.Equal(t, exitCodeAccessDenied, code, id+": "+stdout+stderr)
+		assert.NotContains(t, stdout+stderr, "@", id)
+		var denial denialJSON
+		require.NoError(t, json.Unmarshal([]byte(stderr), &denial), stderr)
+		assert.Equal(t, meaninglabels.CodeFieldProtected, denial.Error.Code, id)
+		assert.Contains(t, denial.Error.Reason, "chinook.Customer.Email is protected (pii)", id)
+	}
+	stdout, stderr, code := agentSavedQuery(t, "customer-names")
+	require.Equal(t, 0, code, stderr)
+	var rows []map[string]any
+	require.NoError(t, json.Unmarshal([]byte(stdout), &rows), stdout)
+	require.Len(t, rows, 8)
+	for _, row := range rows {
+		assert.NotContains(t, row, "Email")
+	}
+}
+
+// Saved native SQL is refused without an opaque-SQL grant, and with one it is
+// refused on a source with protected columns, even where a policy allows it.
+func TestSavedNativeSQLRefusesALabelledSourceForAnAgent(t *testing.T) {
+	dir := demoForTest(t)
+	queries := filepath.Join(dir, "queries")
+	require.NoError(t, os.MkdirAll(queries, 0o755))
+	writeTargetedQuery(t, queries, "customer-emails-sql", "SQL", "chinook", "SELECT FirstName, Email FROM Customer WHERE Country = 'Canada'")
+
+	stdout, stderr, code := agentSavedQuery(t, "customer-emails-sql")
+	assert.NotZero(t, code)
+	assert.NotContains(t, stdout+stderr, "@")
+	assert.Contains(t, stderr, "opaque-query grant")
+
+	expectProtected := func(name string) {
+		t.Helper()
+		stdout, stderr, code := agentSavedQuery(t, "customer-emails-sql", "--allow-opaque-sql")
+		require.Equal(t, exitCodeAccessDenied, code, name+": "+stdout+stderr)
+		assert.NotContains(t, stdout+stderr, "@", name)
+		var denial denialJSON
+		require.NoError(t, json.Unmarshal([]byte(stderr), &denial), stderr)
+		assert.Equal(t, meaninglabels.CodeFieldProtected, denial.Error.Code, name)
+		assert.Contains(t, denial.Error.Reason, "native SQL cannot be masked", name)
+		assert.Contains(t, denial.Error.Reason, "use a TugQL query", name)
+	}
+	expectProtected("the demo policy")
+	// A policy that grants the agent opaque SQL still cannot unmask Email.
+	policy := filepath.Join(dir, "policies", "agent.yaml")
+	data, err := os.ReadFile(policy)
+	require.NoError(t, err)
+	const grant = "ruleSets:\n  agent:\n    - opaqueQuery: true\n      rules:\n        - id: agent-opaque-sql\n          effect: allow\n          operations: [query]\n"
+	granted := strings.Replace(string(data), "ruleSets:\n  agent:\n", grant, 1)
+	require.NotEqual(t, string(data), granted)
+	require.NoError(t, os.WriteFile(policy, []byte(granted), 0o644))
+	expectProtected("an opaque-SQL grant")
+}
+
+func openNothing(context.Context) (dal.DB, error) { return nil, nil }
+
+func TestNativeSQLLabelGuard(t *testing.T) {
+	restoreVar(t, &loadLabels)
+	restoreVar(t, &openBackend)
+	restoreVar(t, &listCollections)
+	restoreVar(t, &describeCollection)
+	ctx := context.Background()
+	var warning strings.Builder
+	check := func(strict bool) error {
+		warning.Reset()
+		return nativeSQLLabelGuard("/p", strict, &warning)(ctx, "crm", "sqlite:///x.sqlite")
+	}
+	var protected *secureread.FieldProtectedError
+	loadLabels = func(context.Context, string) (meaninglabels.Document, error) {
+		return meaninglabels.Document{}, errors.New("broken")
+	}
+	require.ErrorAs(t, check(false), &protected)
+	assert.Contains(t, protected.Message, "datatug-labels.json")
+
+	doc := meaninglabels.NewDocument()
+	loadLabels = func(context.Context, string) (meaninglabels.Document, error) { return doc, nil }
+	openBackend = func(context.Context, dbcopy.BackendRef) (dal.DB, error) { return nil, errors.New("no source") }
+	require.ErrorAs(t, check(true), &protected, "a strict principal is refused a source it cannot check")
+	assert.Contains(t, protected.Message, "source crm cannot be opened")
+	assert.NoError(t, check(false), "an owner's read only could have warned")
+
+	openBackend = func(context.Context, dbcopy.BackendRef) (dal.DB, error) { return nil, nil }
+	listCollections = func(context.Context, dal.DB, *record.Key) ([]dal.CollectionRef, error) {
+		return []dal.CollectionRef{dal.NewRootCollectionRef("Account", "")}, nil
+	}
+	fields := []dbschema.FieldDef{{Name: "Id"}, {Name: "Region"}}
+	describeCollection = func(context.Context, dal.DB, *dal.CollectionRef) (*dbschema.CollectionDef, error) {
+		return &dbschema.CollectionDef{Fields: fields}, nil
+	}
+	assert.NoError(t, check(true), "no protected column")
+	assert.Empty(t, warning.String())
+	// (b) Read-time suggestions alone: a strict principal is refused, an owner warned.
+	fields = append(fields, dbschema.FieldDef{Name: "email"})
+	require.ErrorAs(t, check(true), &protected)
+	assert.Contains(t, protected.Message, "read-time suggestions mark sensitive (Account.email)")
+	assert.NoError(t, check(false))
+	assert.Contains(t, warning.String(), "warning: native SQL is not masked; read-time suggestions mark Account.email of source crm sensitive")
+	// (a) A stored label refuses every principal, before the source is opened.
+	listCollections = func(context.Context, dal.DB, *record.Key) ([]dal.CollectionRef, error) {
+		return nil, errors.New("no list")
+	}
+	assert.NoError(t, check(true), "an unlabelled source whose tables cannot be listed")
+	doc, _, err := meaninglabels.Apply(doc, meaninglabels.Change{Action: meaninglabels.ActionSet, Target: meaninglabels.Target{Source: "crm", Table: "Account", Column: "Hidden"}, Class: meaninglabels.ClassPII, Reason: "test"}, meaninglabels.Actor{ID: "owner"}, projectReadNow())
+	require.NoError(t, err)
+	openBackend = func(context.Context, dbcopy.BackendRef) (dal.DB, error) { return nil, errors.New("not opened") }
+	require.ErrorAs(t, check(false), &protected, "an owner too")
+	assert.Contains(t, protected.Message, "source crm has columns protected")
+}
+
+// Native SQL on a source with only read-time suggestions (no stored label):
+// the owner runs it with a warning; an agent is refused.
+func TestNativeSQLSuggestionsWarnTheOwnerAndRefuseAnAgent(t *testing.T) {
+	registeredSQLiteSource(t)
+	restoreVar(t, &callerLookup)
+	callerLookup = func(string) (string, bool) { return "", false }
+	stdout, stderr, code := runCLI(t, "", "query", "run", "--db", "datatug://shop/shop", "--sql", "SELECT FirstName FROM Customer", "--no-policies", "--format", "json")
+	require.Equal(t, 0, code, stderr)
+	assert.Contains(t, stdout, "Ada")
+	assert.Contains(t, stderr, "warning: native SQL is not masked; read-time suggestions mark Customer.FirstName")
+
+	callerLookup = func(name string) (string, bool) {
+		if name == callercontext.HarnessEnv {
+			return "claude-code", true
+		}
+		return "", false
+	}
+	stdout, stderr, code = runCLI(t, "", "query", "run", "--db", "datatug://shop/shop", "--sql", "SELECT FirstName FROM Customer", "--no-policies")
+	assert.Equal(t, exitCodeAccessDenied, code, stdout+stderr)
+	assert.NotContains(t, stdout, "Ada")
+	assert.Contains(t, stderr, "read-time suggestions mark sensitive (Customer.FirstName")
+}
+
+func TestFederatedLabelGuardOpensOnlyWhatItNeeds(t *testing.T) {
+	restoreVar(t, &loadLabels)
+	ctx := context.Background()
+	doc := meaninglabels.NewDocument()
+	loadLabels = func(context.Context, string) (meaninglabels.Document, error) { return doc, nil }
+	guard := federatedLabelGuard("/p", true, io.Discard)
+	opens := 0
+	failing := func(context.Context) (dal.DB, error) { opens++; return nil, errors.New("down") }
+	// An unlabelled source: named columns open nothing; a wildcard whose
+	// columns cannot be listed passes; a suggestion still refuses.
+	assert.NoError(t, guard(ctx, secureread.FederatedLeaf{Database: "crm", Collection: "Account", Columns: []string{"Id"}, Open: failing}))
+	assert.Zero(t, opens)
+	assert.NoError(t, guard(ctx, secureread.FederatedLeaf{Database: "crm", Collection: "Account", AllColumns: true, Open: failing}))
+	assert.Equal(t, 1, opens)
+	var protected *secureread.FieldProtectedError
+	require.ErrorAs(t, guard(ctx, secureread.FederatedLeaf{Database: "crm", Collection: "Account", Columns: []string{"email"}, Open: failing}), &protected)
+	// A labelled source that cannot be opened refuses.
+	doc, _, err := meaninglabels.Apply(doc, meaninglabels.Change{Action: meaninglabels.ActionSet, Target: meaninglabels.Target{Source: "crm", Table: "Other", Column: "Hidden"}, Class: meaninglabels.ClassPII, Reason: "test"}, meaninglabels.Actor{ID: "owner"}, projectReadNow())
+	require.NoError(t, err)
+	require.ErrorAs(t, guard(ctx, secureread.FederatedLeaf{Database: "crm", Collection: "Account", Columns: []string{"Id"}, Open: failing}), &protected)
+	assert.Contains(t, protected.Message, "source crm cannot be opened")
+}
+
+func TestChatSourceCatalogs(t *testing.T) {
+	assert.Equal(t, map[string][]string{"sqlite:///a": {"a"}, "unavailable://b": {"b"}}, chatSourceCatalogs(map[string]string{"a": "sqlite:///a"}, "unavailable://b", "b"))
+	// Two catalogs on one URL keep both ids; the chat's own database is not repeated.
+	assert.Equal(t, map[string][]string{"sqlite:///s": {"a", "b"}}, chatSourceCatalogs(map[string]string{"b": "sqlite:///s", "a": "sqlite:///s"}, "sqlite:///s", "a"))
+}
+
+// Without policies, a saved query still never prints a labelled column.
+func TestSavedQueriesCheckLabelsForEveryPrincipal(t *testing.T) {
+	dir := demoForTest(t)
+	require.NoError(t, os.RemoveAll(filepath.Join(dir, "policies")))
+	queries := filepath.Join(dir, "queries")
+	require.NoError(t, os.MkdirAll(queries, 0o755))
+	writeTargetedQuery(t, queries, "customer-emails", "TugQL", "chinook", "from: {name: Customer}\ncolumns: [{field: Email}]\n")
+	writeTargetedQuery(t, queries, "customer-emails-sql", "SQL", "chinook", "SELECT Email FROM Customer")
+	writeTargetedQuery(t, queries, "customer-names", "TugQL", "chinook", "from: {name: Customer}\ncolumns: [{field: FirstName}]\nlimit: 3\n")
+	for _, id := range []string{"customer-emails", "customer-emails-sql"} {
+		stdout, stderr, code := runCLI(t, "", "query", "run", "--project", "datatug-demo", "--format", "json", "--query", id)
+		require.Equal(t, exitCodeAccessDenied, code, id+": "+stdout+stderr)
+		assert.NotContains(t, stdout+stderr, "@", id)
+		assert.Contains(t, stderr, meaninglabels.CodeFieldProtected, id)
+	}
+	stdout, stderr, code := runCLI(t, "", "query", "run", "--project", "datatug-demo", "--format", "json", "--query", "customer-names")
+	require.Equal(t, 0, code, stderr)
+	assert.Contains(t, stdout, "FirstName")
+}
+
+// chat reads saved queries and the model's own TugQL through a session that
+// checks the demo's labels.
+func TestChatChecksTheProjectLabels(t *testing.T) {
+	dir := demoForTest(t)
+	queries := filepath.Join(dir, "queries")
+	require.NoError(t, os.MkdirAll(queries, 0o755))
+	writeTargetedQuery(t, queries, "customer-emails", "TugQL", "chinook", "from: {name: Customer}\ncolumns: [{field: FirstName}, {field: Email}]\n")
+	writeTargetedQuery(t, queries, "customer-emails-sql", "SQL", "chinook", "SELECT Email FROM Customer")
+	writeTargetedQuery(t, queries, "customer-names", "TugQL", "chinook", "from: {name: Customer}\ncolumns: [{field: FirstName}]\n")
+	ctx := context.Background()
+	projectDir, store, err := resolveQueryProject("datatug-demo")
+	require.NoError(t, err)
+	env, err := resolveQueryEnvironment(ctx, store, "")
+	require.NoError(t, err)
+	_, sourceURLs, err := buildChatProjectCatalog(ctx, projectDir, store, env)
+	require.NoError(t, err)
+	session, err := resolveServeSession(projectDir, serveFlags{projectDir: projectDir, as: "agent", roles: []string{"agent"}})
+	require.NoError(t, err)
+	session.AllowOpaqueSQL = true
+	installProjectLabels(&session, projectDir, chatSourceCatalogs(sourceURLs, sourceURLs["chinook"], "chinook"), io.Discard, true)
+	executor := secureread.NewExecutor(session)
+	service := chatSavedQueries{projectDir: projectDir, store: store, executor: executor, env: env, session: session}
+	var protected *secureread.FieldProtectedError
+	for _, id := range []string{"customer-emails", "customer-emails-sql"} {
+		_, err = service.Run(ctx, id)
+		require.ErrorAs(t, err, &protected, id)
+		assert.Contains(t, protected.Message, "chinook", id)
+	}
+	result, err := service.Run(ctx, "customer-names")
+	require.NoError(t, err)
+	assert.NotEmpty(t, result.Result.Rows)
+	// The model's generated TugQL runs through executor.RunTugQL.
+	_, err = executor.RunTugQL(ctx, sourceURLs["chinook"], []byte("from: {name: Customer}\ncolumns: [{field: Email}]\n"), nil)
+	require.ErrorAs(t, err, &protected)
+	assert.Contains(t, protected.Message, "chinook.Customer.Email is protected (pii)")
+}
+
+// A datatug:// read of a project source applies that project's labels even
+// with --no-policies: a table read masks, a filter on a labelled column and
+// native SQL refuse.
+func TestDatatugRefReadAppliesProjectLabels(t *testing.T) {
+	demoForTest(t)
+	ref := "datatug://datatug-demo/chinook"
+	stdout, stderr, code := runCLI(t, "", "query", "run", "--db", ref, "--from", "Customer", "--limit", "5", "--no-policies", "--format", "json")
+	require.Equal(t, 0, code, stderr)
+	var rows []map[string]any
+	require.NoError(t, json.Unmarshal([]byte(stdout), &rows), stdout)
+	require.Len(t, rows, 5)
+	for _, row := range rows {
+		assert.Equal(t, meaninglabels.MaskedValue, row["Email"])
+		assert.Equal(t, meaninglabels.MaskedValue, row["Phone"])
+		assert.NotEqual(t, meaninglabels.MaskedValue, row["FirstName"])
+	}
+	assert.NotContains(t, stdout, "@")
+	assert.Contains(t, stderr, "Customer.Email (pii)")
+
+	file := filepath.Join(t.TempDir(), "by-email.tugql.yaml")
+	require.NoError(t, os.WriteFile(file, []byte("from: {name: Customer}\ncolumns: [{field: FirstName}]\nwhere: {op: '==', left: {field: Email}, right: {value: someone@example.com}}\n"), 0o644))
+	_, stderr, code = runCLI(t, "", "query", "run", "--db", ref, "-f", file, "--no-policies")
+	assert.Equal(t, exitCodeAccessDenied, code, stderr)
+	assert.Contains(t, stderr, "Customer.Email is protected (pii)")
+
+	stdout, stderr, code = runCLI(t, "", "query", "run", "--db", ref, "--sql", "SELECT Email FROM Customer", "--no-policies", "--format", "json")
+	require.Equal(t, exitCodeAccessDenied, code, stdout+stderr)
+	assert.NotContains(t, stdout+stderr, "@")
+	lines := strings.Split(strings.TrimSpace(stderr), "\n")
+	var denial denialJSON
+	require.NoError(t, json.Unmarshal([]byte(lines[len(lines)-1]), &denial), stderr)
+	assert.Equal(t, meaninglabels.CodeFieldProtected, denial.Error.Code)
+	assert.Contains(t, denial.Error.Reason, "native SQL cannot be masked")
+}
+
+func TestClickHouseProjectSourceReadIsGuarded(t *testing.T) {
+	t.Setenv("DATATUG_CH_COMMAND_BOUNDARY", "clickhouse+http://127.0.0.1:18123/explore")
+	t.Setenv(dbcopy.DescriptorEnvAllowList, "")
+	restoreVar(t, &runClickHouseStructured)
+	var installed bool
+	runClickHouseStructured = func(_ context.Context, session secureread.Session, source string, _ dal.Query, _ map[string]any) (secureread.Result, error) {
+		installed = session.FederatedColumns != nil && session.NativeSQL != nil && session.SourceCatalogs[source][0] == "warehouse"
+		return secureread.Result{}, &secureread.FieldProtectedError{Message: "warehouse.events.email is protected (pii)"}
+	}
+	ref, err := dbcopy.Parse(clickHouseDispatchSource)
+	require.NoError(t, err)
+	var stderr strings.Builder
+	cmd := &cobra.Command{}
+	cmd.SetErr(&stderr)
+	err = runClickHouseQuery(cmd, queryOptions{from: "events", limit: 2, limitSet: true, noPolicies: true, format: "json", quiet: true}, ref, nil, "", nil, nil, nil, &projectSource{dir: t.TempDir(), catalog: "warehouse"})
+	assert.True(t, installed)
+	assert.Equal(t, exitCodeAccessDenied, exitCodeOf(t, err))
+	assert.Contains(t, stderr.String(), meaninglabels.CodeFieldProtected)
+}
+
+// With no stored labels, read-time suggestions refuse an agent's TugQL read
+// but let a policy-free owner read on, warned once.
+func TestSavedTugQLSuggestionsWarnTheOwnerAndRefuseAnAgent(t *testing.T) {
+	dir := demoForTest(t)
+	require.NoError(t, os.RemoveAll(filepath.Join(dir, "policies")))
+	require.NoError(t, os.Remove(filepath.Join(dir, meaninglabelsfile.FileName)))
+	queries := filepath.Join(dir, "queries")
+	require.NoError(t, os.MkdirAll(queries, 0o755))
+	writeTargetedQuery(t, queries, "customers", "TugQL", "chinook", "from: {name: Customer}\nlimit: 2\n")
+	stdout, stderr, code := runCLI(t, "", "query", "run", "--project", "datatug-demo", "--format", "json", "--query", "customers")
+	require.Equal(t, 0, code, stderr)
+	assert.Contains(t, stdout, "@", "the owner reads the suggested columns")
+	assert.Equal(t, 1, strings.Count(stderr, "warning: this TugQL read is not masked; read-time suggestions mark "), stderr)
+	assert.Contains(t, stderr, "Customer.Email")
+
+	restoreVar(t, &callerLookup)
+	callerLookup = func(name string) (string, bool) {
+		if name == callercontext.HarnessEnv {
+			return "claude-code", true
+		}
+		return "", false
+	}
+	stdout, stderr, code = runCLI(t, "", "query", "run", "--project", "datatug-demo", "--format", "json", "--query", "customers")
+	assert.Equal(t, exitCodeAccessDenied, code, stdout+stderr)
+	assert.NotContains(t, stdout+stderr, "@")
+}
+
+func TestFederatedLabelGuardForAnOwner(t *testing.T) {
+	restoreVar(t, &loadLabels)
+	ctx := context.Background()
+	doc := meaninglabels.NewDocument()
+	loadLabels = func(context.Context, string) (meaninglabels.Document, error) { return doc, nil }
+	var warning strings.Builder
+	guard := federatedLabelGuard("/p", false, &warning)
+	leaf := secureread.FederatedLeaf{Database: "crm", Collection: "Account", Columns: []string{"email", "Id"}, Open: openNothing}
+	require.NoError(t, guard(ctx, leaf))
+	require.NoError(t, guard(ctx, leaf), "a second read")
+	assert.Equal(t, "warning: this TugQL read is not masked; read-time suggestions mark Account.email of source crm sensitive: label them to protect them from agents\n", warning.String(), "warned once")
+	// A stored label refuses an owner too.
+	doc, _, err := meaninglabels.Apply(doc, meaninglabels.Change{Action: meaninglabels.ActionSet, Target: meaninglabels.Target{Source: "crm", Table: "Account", Column: "email"}, Class: meaninglabels.ClassPII, Reason: "test"}, meaninglabels.Actor{ID: "owner"}, projectReadNow())
+	require.NoError(t, err)
+	var protected *secureread.FieldProtectedError
+	require.ErrorAs(t, guard(ctx, leaf), &protected)
+	assert.Contains(t, protected.Message, "crm.Account.email is protected (pii)")
+}
+
+func TestLabelStrictness(t *testing.T) {
+	restoreVar(t, &callerLookup)
+	callerLookup = func(string) (string, bool) { return "", false }
+	assert.False(t, labelStrictness(secureread.Session{DatabaseProfile: secureread.DatabasePolicyFreeReads}))
+	assert.False(t, labelStrictness(secureread.Session{Unrestricted: true}), "a ClickHouse --no-policies session")
+	assert.True(t, labelStrictness(secureread.Session{DatabaseProfile: secureread.DatabasePolicyGoverned}))
+	assert.True(t, labelStrictness(secureread.Session{}), "an unspecified profile settles as policy-governed")
+	callerLookup = func(name string) (string, bool) {
+		if name == callercontext.HarnessEnv {
+			return "codex", true
+		}
+		return "", false
+	}
+	assert.True(t, labelStrictness(secureread.Session{DatabaseProfile: secureread.DatabasePolicyFreeReads}), "an agent")
+}
+
+// A stored table-level label decides, even where a tied suggestion with a
+// kind becomes the column's effective label: an owner is refused.
+func TestStoredTableLabelRefusesAnOwnerUnderASuggestion(t *testing.T) {
+	dir := demoForTest(t)
+	require.NoError(t, os.RemoveAll(filepath.Join(dir, "policies")))
+	doc, _, err := meaninglabels.Apply(meaninglabels.NewDocument(), meaninglabels.Change{Action: meaninglabels.ActionSet, Target: meaninglabels.Target{Source: "chinook", Table: "Customer"}, Class: meaninglabels.ClassPII, Reason: "customer table"}, meaninglabels.Actor{ID: "owner"}, projectReadNow())
+	require.NoError(t, err)
+	effective := meaninglabels.Effective(doc, "chinook", "Customer", []meaninglabels.Column{{Name: "Email"}})[0]
+	require.Equal(t, meaninglabels.FromSuggested, effective.Origin, "the repro: the suggestion is the effective label")
+	body, err := meaninglabels.Encode(doc)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, meaninglabelsfile.FileName), body, 0o644))
+	queries := filepath.Join(dir, "queries")
+	require.NoError(t, os.MkdirAll(queries, 0o755))
+	writeTargetedQuery(t, queries, "emails", "TugQL", "chinook", "from: {name: Customer}\ncolumns: [{field: Email}]\n")
+	stdout, stderr, code := runCLI(t, "", "query", "run", "--project", "datatug-demo", "--format", "json", "--query", "emails")
+	require.Equal(t, exitCodeAccessDenied, code, stdout+stderr)
+	assert.NotContains(t, stdout+stderr, "@")
+	assert.Contains(t, stderr, meaninglabels.CodeFieldProtected)
+	assert.Contains(t, stderr, "chinook.Customer.Email is protected (pii)")
+}
+
+// chat is strict whatever the profile: a policy-free project's chat is refused
+// a column only a suggestion protects, which a policy-free owner may read.
+func TestChatIsStrictOnAPolicyFreeProject(t *testing.T) {
+	dir := demoForTest(t)
+	require.NoError(t, os.RemoveAll(filepath.Join(dir, "policies")))
+	require.NoError(t, os.Remove(filepath.Join(dir, meaninglabelsfile.FileName)))
+	queries := filepath.Join(dir, "queries")
+	require.NoError(t, os.MkdirAll(queries, 0o755))
+	writeTargetedQuery(t, queries, "emails", "TugQL", "chinook", "from: {name: Customer}\ncolumns: [{field: Email}]\n")
+	ctx := context.Background()
+	projectDir, store, err := resolveQueryProject("datatug-demo")
+	require.NoError(t, err)
+	env, err := resolveQueryEnvironment(ctx, store, "")
+	require.NoError(t, err)
+	_, sourceURLs, err := buildChatProjectCatalog(ctx, projectDir, store, env)
+	require.NoError(t, err)
+	run := func(alwaysStrict bool) error {
+		session, err := resolveServeSession(projectDir, serveFlags{projectDir: projectDir})
+		require.NoError(t, err)
+		require.True(t, session.DatabaseProfile.PolicyFreeReads())
+		installProjectLabels(&session, projectDir, chatSourceCatalogs(sourceURLs, sourceURLs["chinook"], "chinook"), io.Discard, alwaysStrict)
+		service := chatSavedQueries{projectDir: projectDir, store: store, executor: secureread.NewExecutor(session), env: env, session: session}
+		_, err = service.Run(ctx, "emails")
+		return err
+	}
+	var protected *secureread.FieldProtectedError
+	require.ErrorAs(t, run(true), &protected, "chat")
+	assert.Contains(t, protected.Message, "chinook.Customer.Email is protected (pii)")
+	assert.NoError(t, run(false), "the same owner outside chat")
+}

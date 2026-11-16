@@ -66,3 +66,32 @@ func TestExtensionRecordsTheRepresentation(t *testing.T) {
 		}
 	}
 }
+
+func TestParseTextKeepsDeclaredDatabases(t *testing.T) {
+	text := "databases (\n  sales = 'datatug://chinook/main'\n  geo\n)\nfrom sales::Invoice as i\njoin geo::countries as c\n  on i.BillingCountry = c.name\nselect i.InvoiceId, c.code"
+	document, databases, err := ParseText(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(databases) != 2 || databases[0] != (tugql.TugQLDatabase{Name: "sales", Target: "datatug://chinook/main"}) || databases[1] != (tugql.TugQLDatabase{Name: "geo"}) {
+		t.Fatalf("databases=%v", databases)
+	}
+	if !strings.Contains(document, `"database":"sales"`) || !strings.Contains(document, `"database":"geo"`) {
+		t.Fatalf("alias not lowered to database: %s", document)
+	}
+	got, err := Databases(&datatug.QueryDef{Type: datatug.QueryTypeTugQL, Text: text})
+	if err != nil || len(got) != 2 {
+		t.Fatalf("Databases=%v / %v", got, err)
+	}
+	for _, query := range []datatug.QueryDef{
+		{Type: datatug.QueryTypeTugQL, StructuredBody: true, Text: "from: {database: sales, name: Invoice}\n"},
+		{Type: datatug.QueryTypeSQL, Text: "SELECT 1"},
+	} {
+		if got, err := Databases(&query); err != nil || got != nil {
+			t.Fatalf("a structured or SQL body declares no databases: %v / %v", got, err)
+		}
+	}
+	if _, err := Databases(&datatug.QueryDef{Type: datatug.QueryTypeTugQL, Text: "from"}); err == nil {
+		t.Fatal("invalid text accepted")
+	}
+}

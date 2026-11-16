@@ -12,5 +12,8 @@ import (
 // internal/hermetictest for why and scripts/check-hermetic-tests.sh for the
 // CI gate that catches a regression here.
 func TestMain(m *testing.M) {
+	// The agent harness a developer runs the tests under must not make every
+	// exec/run_query read strict; a test that wants a strict read says so.
+	serveCallerIsAgent = func() bool { return false }
 	os.Exit(hermetictest.Main(m))
 }

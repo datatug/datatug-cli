@@ -81,6 +81,9 @@ func detectiveUICommand(name string) *cobra.Command {
 	cmd.Flags().String("space", "", "Space ID for a hosted cloud project")
 	cmd.Flags().String("base-url", "", "hosted API /v0/ base URL (cloud; default DataTug API)")
 	cmd.Flags().Bool("insecure-storage", false, "use the DataTug login stored with auth login --insecure-storage")
+	if name == "checks" {
+		cmd.AddCommand(checksRunCommand())
+	}
 	return cmd
 }
 

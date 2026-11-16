@@ -94,8 +94,15 @@ func LocalProjectBoards(ctx context.Context, ref dto.ProjectRef, branch string) 
 		if err != nil {
 			return nil, itemsNotLoaded("boards", ref.ProjectID, err)
 		}
+		archived, err := filestore.ReadProjectArchivedItemsFromRoot(reader.root)
+		if err != nil {
+			return nil, err
+		}
 		briefs := make([]datatug.ProjBoardBrief, 0, len(boards))
 		for _, board := range boards {
+			if archived[datatug.ProjectObjectRef{Kind: "board", ID: board.ID}] {
+				continue
+			}
 			briefs = append(briefs, datatug.ProjBoardBrief{ProjItemBrief: datatug.ProjItemBrief{ID: board.ID, Title: board.Title, Folder: board.Folder, ListOfTags: board.ListOfTags}, Parameters: board.Parameters, RequiredParams: board.RequiredParams})
 		}
 		return briefs, nil
@@ -131,7 +138,18 @@ func LocalProjectCards(ctx context.Context, ref dto.ProjectRef, branch string) (
 		if err != nil {
 			return nil, itemsNotLoaded("cards", ref.ProjectID, err)
 		}
-		return cards.Briefs(), nil
+		archived, err := filestore.ReadProjectArchivedItemsFromRoot(reader.root)
+		if err != nil {
+			return nil, err
+		}
+		briefs := cards.Briefs()
+		active := briefs[:0]
+		for _, card := range briefs {
+			if !archived[datatug.ProjectObjectRef{Kind: "card", ID: card.ID}] {
+				active = append(active, card)
+			}
+		}
+		return active, nil
 	})
 	if err != nil {
 		return nil, err
@@ -164,8 +182,15 @@ func LocalProjectEntities(ctx context.Context, ref dto.ProjectRef, branch string
 		if err != nil {
 			return nil, itemsNotLoaded("entities", ref.ProjectID, err)
 		}
+		archived, err := filestore.ReadProjectArchivedItemsFromRoot(reader.root)
+		if err != nil {
+			return nil, err
+		}
 		briefs := make([]datatug.ProjEntityBrief, 0, len(entities))
 		for _, entity := range entities {
+			if archived[datatug.ProjectObjectRef{Kind: "entity", ID: entity.ID}] {
+				continue
+			}
 			briefs = append(briefs, datatug.ProjEntityBrief{ProjItemBrief: datatug.ProjItemBrief{ID: entity.ID, Title: entity.Title, Folder: entity.Folder, ListOfTags: entity.ListOfTags}})
 		}
 		return briefs, nil
@@ -272,8 +297,15 @@ func LocalProjectSummary(ctx context.Context, ref dto.ProjectRef, branch string)
 		if err != nil {
 			return nil, itemsNotLoaded("entities", ref.ProjectID, err)
 		}
+		archived, err := filestore.ReadProjectArchivedItemsFromRoot(reader.root)
+		if err != nil {
+			return nil, err
+		}
 		summary := &datatug.ProjectSummary{ProjectFile: projectFile, Entities: make([]*datatug.ProjEntityBrief, 0, len(entities))}
 		for _, entity := range entities {
+			if archived[datatug.ProjectObjectRef{Kind: "entity", ID: entity.ID}] {
+				continue
+			}
 			summary.Entities = append(summary.Entities, &datatug.ProjEntityBrief{ProjItemBrief: datatug.ProjItemBrief{ID: entity.ID, Title: entity.Title, Folder: entity.Folder, ListOfTags: entity.ListOfTags}})
 		}
 		return summary, nil
@@ -288,26 +320,20 @@ func LocalProjectSummary(ctx context.Context, ref dto.ProjectRef, branch string)
 // particular, the Environment model's dbServers and connection declarations
 // are never serialized by this response.
 func LocalProjectEnvironments(ctx context.Context, ref dto.ProjectRef, branch string) ([]LocalEnvironmentBrief, error) {
+	if branch == "" {
+		return localNonGitProjectEnvironments(ctx, ref)
+	}
 	value, err := withCurrentBranchRead(ctx, ref, branch, func(reader *qualifiedProjectReader) (any, error) {
 		// Only the environment read waits for an environment mutation in progress (and its
 		// recovery); other branch reads never take the environment-file lock.
-		var environments []qualifiedEnvironmentData
+		var briefs []LocalEnvironmentBrief
 		err := filestore.ReadEnvironmentFiles(ctx, reader.root.Name(), func(*filestore.EnvironmentFiles) error {
 			var e error
-			environments, e = readQualifiedEnvironments(reader)
+			briefs, e = readActiveEnvironmentBriefs(reader)
 			return e
 		})
 		if err != nil {
 			return nil, itemsNotLoaded("environments", ref.ProjectID, err)
-		}
-		briefs := make([]LocalEnvironmentBrief, 0, len(environments))
-		for _, environment := range environments {
-			env := environment.env
-			title := env.Title
-			if title == "" {
-				title = env.ID
-			}
-			briefs = append(briefs, LocalEnvironmentBrief{ID: env.ID, Title: title, Presentation: environment.presentation})
 		}
 		return briefs, nil
 	})

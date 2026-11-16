@@ -23,7 +23,7 @@ func TestChatSavedQuerySaveIsCreateOnlyAndListed(t *testing.T) {
 		t.Fatal(err)
 	}
 	store, id := filestore.NewSingleProjectStore(projectDir, "saved-query-test")
-	service := chatSavedQueries{projectDir: projectDir, store: store.GetProjectStore(id), projectID: id, session: secureread.Session{Unrestricted: true}}
+	service := chatSavedQueries{projectDir: projectDir, store: store.GetProjectStore(id), projectID: id, session: secureread.Session{LocalProjectOwner: true}}
 	created, err := service.Save(ctx, chat.SavedQuerySaveRequest{Title: "Prague customers", Type: "TugQL", Text: "from: {name: Customer}\nlimit: 50\n", Database: "chinook", Tags: []string{"customers", "Prague"}})
 	if err != nil {
 		t.Fatal(err)
@@ -88,7 +88,7 @@ func TestChatSavedQueryRejectsUndeclaredCapturedParameters(t *testing.T) {
 		t.Fatal(err)
 	}
 	store, id := filestore.NewSingleProjectStore(projectDir, "parameter-capture-test")
-	service := chatSavedQueries{projectDir: projectDir, store: store.GetProjectStore(id), projectID: id, session: secureread.Session{Unrestricted: true}}
+	service := chatSavedQueries{projectDir: projectDir, store: store.GetProjectStore(id), projectID: id, session: secureread.Session{LocalProjectOwner: true}}
 	_, err := service.Save(ctx, chat.SavedQuerySaveRequest{Title: "Customer invoices", Type: "TugQL", Text: "from: {name: Invoice}\nwhere: {op: '==', left: {field: CustomerId}, right: {param: CustomerId}}\nlimit: 10\n"})
 	if err == nil || !strings.Contains(err.Error(), "parameter declarations") {
 		t.Fatalf("parameterized query was silently saved: %v", err)
@@ -152,5 +152,24 @@ func TestChatSavedQueryParameterErrorDoesNotEchoValue(t *testing.T) {
 	_, err := service.RunWithVariables(context.Background(), "ignored", map[string]string{"CustomerId": "{token: private}"})
 	if err == nil || strings.Contains(err.Error(), "private") || strings.Contains(err.Error(), "token") {
 		t.Fatalf("parameter error exposed input: %v", err)
+	}
+}
+
+func TestChatSavedQueryReadProfileDoesNotPermitProjectSave(t *testing.T) {
+	ctx := context.Background()
+	projectDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(projectDir, "queries"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	store, id := filestore.NewSingleProjectStore(projectDir, "read-only-query-test")
+	service := chatSavedQueries{projectDir: projectDir, store: store.GetProjectStore(id), projectID: id,
+		session: secureread.Session{DatabaseProfile: secureread.DatabasePolicyFreeReads}}
+	_, err := service.Save(ctx, chat.SavedQuerySaveRequest{Title: "Denied", Type: "TugQL", Text: "from: {name: Customer}\n"})
+	if err == nil || !strings.Contains(err.Error(), "denied") {
+		t.Fatalf("database reader acquired project ownership: %v", err)
+	}
+	listed, err := service.List(ctx)
+	if err != nil || len(listed) != 0 {
+		t.Fatalf("denied save changed project: %+v %v", listed, err)
 	}
 }

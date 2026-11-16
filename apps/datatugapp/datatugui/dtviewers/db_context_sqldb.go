@@ -71,9 +71,9 @@ func GetSQLiteDbContext(path string) *SqlDBContext {
 	path = fsutil.ExpandHome(path)
 
 	getSqlDB := func(_ context.Context, driverName string) (*sql.DB, error) {
-		// The file is opened by its URI (see dbcopy.SQLiteFileURIMode), read-write and
+		// The file is opened by its URI (see dbcopy.SQLiteFileURIMode), read-only and
 		// never created: a path with a "?", a "#" or a "%" in it is the file it names.
-		return sql.Open(driverName, dbcopy.SQLiteFileURIMode(path, dbcopy.SQLiteReadWrite))
+		return sql.Open(driverName, dbcopy.SQLiteFileURIMode(path, dbcopy.SQLiteReadOnly))
 	}
 
 	dbName := filepath.Base(path)

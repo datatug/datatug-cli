@@ -153,6 +153,18 @@ func TestAppInitialPageIsPushedOverTheStartModule(t *testing.T) {
 	d.requireContains("db body")
 }
 
+func TestAppThenRunsAfterTheStartModuleOpens(t *testing.T) {
+	fakeSeams(t)
+	then := func() tea.Msg {
+		return nav.PushMsg{Page: nav.Page{Title: "Linked", Content: nav.Static("linked", "linked body")}}
+	}
+	d := newDriver(t, testModules(), Options{Start: ScreenProjects, Then: then})
+	if got := d.crumbs(); got != RootTitle+" > Projects > Linked" {
+		t.Fatalf("breadcrumbs = %q", got)
+	}
+	d.requireContains("linked body")
+}
+
 func TestAppHighlightOpensModuleKeepingFocusOnMenu(t *testing.T) {
 	r := fakeSeams(t)
 	d := newDriver(t, testModules(), Options{Start: ScreenProjects})

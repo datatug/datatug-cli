@@ -59,11 +59,11 @@ echo "starting $image"
 docker run -d --name "$name" -e ORACLE_PASSWORD="$password" -p 127.0.0.1::1521 "$image" >/dev/null
 ready=0
 for _ in $(seq 1 300); do
-	if docker logs "$name" 2>&1 | grep -q 'DATABASE IS READY TO USE'; then ready=1; break; fi
+	if docker logs "$name" 2>&1 | grep -F 'DATABASE IS READY TO USE' >/dev/null; then ready=1; break; fi
 	sleep 3
 done
 [ "$ready" = 1 ] || { echo "the Oracle database did not come up" >&2; docker logs "$name" >&2; exit 1; }
-port=$(docker port "$name" 1521/tcp | head -1 | sed 's/.*://')
+port=$(docker port "$name" 1521/tcp | sed -n '1s/.*://p')
 
 # sql_as USER: runs the SQL on stdin as USER with SQL*Plus inside the container (silent, no feedback).
 sql_as() {
@@ -74,9 +74,9 @@ sql_as() {
 sql_root() { sql_as system; }
 scalar() { # USER SQL -> the first value
 	local user=$1; shift
-	printf '%s;\n' "$*" | sql_as "$user" | tr -d '[:space:]' | head -c 200
+	printf '%s;\n' "$*" | sql_as "$user" | tr -d '[:space:]' | cut -c1-200
 }
-sql_root <<<"select banner_full from v\$version;" | head -2 | sed 's/^/server version /'
+sql_root <<<"select banner_full from v\$version;" | sed -n '1,2s/^/server version /p'
 docker exec "$name" sqlplus -V | tr -s '\n' ' ' | sed 's/^ //; s/^/client /'
 echo
 printf '%s\n' "select 'characterset ' || value from nls_database_parameters where parameter = 'NLS_CHARACTERSET';" "select 'compatible ' || value from v\$parameter where name = 'compatible';" "select 'max_string_size ' || value from v\$parameter where name = 'max_string_size';" | sql_root | sed 's/^/server /'

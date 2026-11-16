@@ -54,7 +54,6 @@ func TestRequireLiveConnections(t *testing.T) {
 // The route of the table is behind the gate: with the capability off nothing reaches the api, with
 // it on the request does.
 func TestRoutes_DbServerDatabasesIsBehindTheLiveConnectionsCapability(t *testing.T) {
-	quietLog(t)
 	reached := 0
 	saved := getServerDatabasesFunc
 	t.Cleanup(func() { getServerDatabasesFunc = saved })

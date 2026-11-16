@@ -484,3 +484,13 @@ func (stubNoopRecordsetSession) ExecuteQueryToRecordsReader(context.Context, dal
 func (stubNoopRecordsetSession) ExecuteQueryToRecordsetReader(context.Context, dal.Query, ...recordset.Option) (dal.RecordsetReader, error) {
 	return nil, nil
 }
+
+func TestReferencedFieldsExported(t *testing.T) {
+	t.Parallel()
+	f := dal.NewFieldRef("", "f1")
+	q := dal.From(dal.NewCollectionRef("users", "", nil)).NewQuery().
+		SelectColumns(dal.Column{Expression: &f, Alias: "f1"})
+	names, err := ReferencedFields(q)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"f1"}, names)
+}

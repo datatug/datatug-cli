@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -149,9 +150,7 @@ func TestDbAddPostgresHoldsTheVariableNameOnly(t *testing.T) {
 	files := projectFilesOf(t, dir)
 	assert.JSONEq(t, `{"dsnEnv":"DATATUG_SHOP_PG"}`, files["connections/prod/shop-pg.json"])
 	for name, content := range files {
-		for _, secret := range []string{"alice", "s3cr3tpw", "db.internal", "5432"} {
-			assert.NotContains(t, content, secret, name)
-		}
+		assert.Empty(t, dbAddPostgresConnectionLeaks(content), name)
 	}
 	shown, _, err := runShowCommand(t, "-p", "shop", "--format", "json", "--depth", "sources")
 	require.NoError(t, err)
@@ -193,6 +192,48 @@ func TestDbAddPostgresHoldsTheVariableNameOnly(t *testing.T) {
 	}
 }
 
+// A port is a complete token, not four digits inside an opaque owner digest or
+// namespace. Every file is still checked; JSON port fields are checked at any
+// depth, including string/number values, alongside all original secret parts.
+var dbAddPostgresPortToken = regexp.MustCompile(`(^|[^[:alnum:]_])5432([^[:alnum:]_]|$)`)
+
+func dbAddPostgresConnectionLeaks(content string) (leaks []string) {
+	for _, part := range []string{"alice", "s3cr3tpw", "db.internal", "postgres://", "postgresql://"} {
+		if strings.Contains(content, part) {
+			leaks = append(leaks, part)
+		}
+	}
+	if dbAddPostgresPortToken.MatchString(content) {
+		leaks = append(leaks, "5432 port token")
+	}
+	var value any
+	if json.Unmarshal([]byte(content), &value) == nil {
+		leaks = append(leaks, keysNamed(value, []string{"port"})...)
+	}
+	return leaks
+}
+
+func TestDbAddPostgresLeakCheckDistinguishesOpaqueIDsFromConnectionParts(t *testing.T) {
+	digest := strings.Repeat("a", 20) + "5432" + strings.Repeat("b", 40)
+	namespace := strings.Repeat("c", 12) + "5432" + strings.Repeat("d", 16)
+	for _, content := range []string{
+		`{"format":"datatug-environment-owner/1","rootDigest":"` + digest + `","uid":1001,"namespaceId":"` + namespace + `","directory":"/tmp/operations/` + digest + `-598201058"}`,
+		"environment-owner/1:" + digest + ":" + namespace,
+	} {
+		assert.Contains(t, content, "5432", "deterministic witness of the old substring false positive")
+		assert.Empty(t, dbAddPostgresConnectionLeaks(content), content)
+	}
+	for _, content := range []string{
+		`{"port":5432}`, `{"nested":[{"PoRt":"5432"}]}`,
+		`{"port":15432}`, `{"endpoint":"search:5432/shop"}`, "port=5432", "5432",
+		`{"username":"alice"}`, `{"password":"s3cr3tpw"}`, `{"host":"db.internal"}`,
+		`{"dsn":"postgres://alice:s3cr3tpw@db.internal:5432/shop"}`,
+		`{"dsn":"postgresql://other:another@elsewhere:1234/db"}`,
+	} {
+		assert.NotEmpty(t, dbAddPostgresConnectionLeaks(content), "actual connection part must be detected: %s", content)
+	}
+}
+
 func TestDbAddRefusesCredentialedURLsWithoutEchoingThem(t *testing.T) {
 	dir := addProject(t)
 	for _, url := range []string{
@@ -209,9 +250,12 @@ func TestDbAddRefusesCredentialedURLsWithoutEchoingThem(t *testing.T) {
 	}
 	assert.Len(t, projectFilesOf(t, dir), 1, "nothing is written")
 
-	_, _, err := runDbAdd(t, "--project", "shop", "--db", "ingitdb://./x", "--name", "x", "--env", "prod")
+	_, _, err := runDbAdd(t, "--project", "shop", "--db", "openvaultdb://./x", "--name", "x", "--env", "prod")
 	assert.Equal(t, 2, exitCodeOf(t, err))
-	assert.ErrorContains(t, err, "a ingitdb source cannot be registered")
+	assert.ErrorContains(t, err, "a openvaultdb source cannot be registered")
+	_, _, err = runDbAdd(t, "--project", "shop", "--db", "ingitdb://./x", "--name", "x", "--env", "prod")
+	assert.Equal(t, 2, exitCodeOf(t, err))
+	assert.ErrorContains(t, err, "is not an inGitDB database")
 	_, _, err = runDbAdd(t, "--project", "shop", "--db", "nonsense:thing", "--name", "x", "--env", "prod")
 	assert.Equal(t, 2, exitCodeOf(t, err))
 }
@@ -389,4 +433,20 @@ func TestDbAddIsAListedSubcommandWithHelp(t *testing.T) {
 	for _, want := range []string{"--project", "--db", "--env", "--name", "--format", "env:NAME", "never"} {
 		assert.Contains(t, out.String(), want)
 	}
+}
+
+func TestDbAddIngitDB(t *testing.T) {
+	dir := addProject(t)
+	folder := filepath.Join(t.TempDir(), "support")
+	require.NoError(t, os.MkdirAll(filepath.Join(folder, ".ingitdb"), 0o755))
+	stdout, stderr, err := runDbAdd(t, "--project", "shop", "--db", "ingitdb://"+folder, "--env", "local")
+	require.NoError(t, err, stderr)
+	assert.Equal(t, `{"added":true,"id":"support","env":"local","driver":"ingitdb","dbRef":"datatug://shop/support?env=local"}`+"\n", stdout)
+	assert.Contains(t, projectFilesOf(t, dir)["environments/local/catalogs/support/support.db.json"], `"driver": "ingitdb"`)
+
+	previous := absolutePath
+	absolutePath = func(string) (string, error) { return "", errors.New("no working directory") }
+	t.Cleanup(func() { absolutePath = previous })
+	_, _, err = runDbAdd(t, "--project", "shop", "--db", "ingitdb://"+folder, "--env", "local")
+	assert.ErrorContains(t, err, "cannot resolve the --db path")
 }

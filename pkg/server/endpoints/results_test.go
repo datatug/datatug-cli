@@ -41,7 +41,6 @@ func resultsStore(t *testing.T, marker string) string {
 // GET /datatug/results/:id answers a stored result behind the guard and the
 // session token, and refuses with a reason code that names no id or path.
 func TestResultRoute(t *testing.T) {
-	quietLog(t)
 	const marker = "row-value-marker-7f3"
 	root := resultsStore(t, marker)
 	caps, secret := accessCaps(t)
@@ -156,7 +155,6 @@ func TestResultHandlerStoreFailureAndWriteOnly(t *testing.T) {
 // The answer carries query and, once annotated, prompt as plain text; a
 // result without them answers without a prompt.
 func TestResultRouteQueryAndPrompt(t *testing.T) {
-	quietLog(t)
 	root := resultsStore(t, "v")
 	caps, secret := accessCaps(t)
 	router := httprouter.New()

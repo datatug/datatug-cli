@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/datatug/datatug-core/pkg/apicontract"
+	"github.com/datatug/datatug-core/pkg/datatug"
 	core "github.com/datatug/datatug-core/pkg/detective"
 	ai "github.com/datatug/datatug-core/pkg/detectiveai"
 )
@@ -223,6 +224,9 @@ func (s *LocalStore) ExecuteAction(ctx context.Context, operationID, actor strin
 	if err != nil {
 		return empty, err
 	}
+	if req.Type == "update-case" && req.Case != nil && req.Case.Status == "archived" {
+		return empty, datatug.ErrProjectUsageIncomplete
+	}
 	var prior actionOperation
 	err = s.withLock(ctx, func() error {
 		collection, resourceID := actionResourceTarget(req)
@@ -396,7 +400,7 @@ func (s *LocalStore) executeRunAction(ctx context.Context, id, actor string, req
 	}
 	var run CheckRun
 	if checkID != "" {
-		run, err = core.EvaluateCheck(ctx, coreReq, catalog, runner, metadata)
+		run, err = evaluateCheckWithContextOptions(ctx, coreReq, catalog, runner, metadata)
 	} else if result == nil {
 		run, err = core.EvaluateQueryValidators(ctx, coreReq, catalog, runner, metadata)
 	} else {
@@ -513,6 +517,27 @@ func (s *LocalStore) finishAction(ctx context.Context, id string, op *actionOper
 		dir := s.privateItemDir(collection)
 		if collection == "checks" || collection == "validators" || collection == "query-validators" || collection == "scenarios" {
 			dir = s.definitionDir(collection)
+		}
+		// Older versions could prepare an archive before losing its acknowledgement.
+		// Recovery may finish its audit only when that exact image already exists;
+		// it must not materialize an unreviewed lifecycle transition now.
+		if collection == "cases" {
+			var after Case
+			if err := json.Unmarshal(op.After, &after); err != nil {
+				return ErrInvalid
+			}
+			if after.Status == "archived" {
+				current, err := actionSafeReadFile(dir, resourceID)
+				if errors.Is(err, os.ErrNotExist) {
+					return datatug.ErrProjectUsageIncomplete
+				}
+				if err != nil {
+					return err
+				}
+				if !jsonSame(current, op.After) {
+					return datatug.ErrProjectUsageIncomplete
+				}
+			}
 		}
 		if err := s.finishNativeActionFile(op, dir, resourceID, op.Before, json.RawMessage(op.After)); err != nil {
 			return err

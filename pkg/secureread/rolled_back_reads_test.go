@@ -35,11 +35,23 @@ func (d *txDB) RunReadonlyTransaction(ctx context.Context, f dal.ROTxWorker, _ .
 // readTx is a read transaction whose query answers reader, or err.
 type readTx struct {
 	dal.ReadTransaction
-	reader dal.RecordsReader
-	err    error
+	reader  dal.RecordsReader
+	err     error
+	mode    string
+	queries *[]string
 }
 
-func (t readTx) ExecuteQueryToRecordsReader(context.Context, dal.Query) (dal.RecordsReader, error) {
+func (t readTx) ExecuteQueryToRecordsReader(_ context.Context, query dal.Query) (dal.RecordsReader, error) {
+	if t.queries != nil {
+		*t.queries = append(*t.queries, query.String())
+	}
+	if text, ok := query.(dal.TextQuery); ok && text.Text() == "SHOW transaction_read_only" {
+		mode := t.mode
+		if mode == "" {
+			mode = "on"
+		}
+		return dal.NewRecordsReader([]record.Record{record.NewRecordWithData(record.NewKeyWithID("mode", "1"), map[string]any{"transaction_read_only": mode})}), nil
+	}
 	return t.reader, t.err
 }
 
@@ -91,4 +103,14 @@ func TestRunNativeSQL_PostgresSQLTextIsRolledBack(t *testing.T) {
 	assert.Contains(t, strings.ToUpper(statements[0]), "BEGIN")
 	assert.Contains(t, strings.ToUpper(statements[0]), "READ ONLY")
 	assert.Equal(t, "ROLLBACK", strings.ToUpper(statements[1]))
+}
+
+func TestRolledBackReadsRefusesUnverifiedNativeMode(t *testing.T) {
+	var queries []string
+	db := &txDB{tx: readTx{mode: "off", queries: &queries}}
+	reader, err := rolledBackReads{DB: db}.ExecuteQueryToRecordsReader(context.Background(), dal.NewTextQuery("SELECT private_values FROM customers", nil))
+	require.ErrorIs(t, err, dbcopy.ErrPostgresReadOnlyUnverified)
+	require.Nil(t, reader)
+	require.Len(t, queries, 1)
+	require.Equal(t, "SHOW transaction_read_only", queries[0])
 }

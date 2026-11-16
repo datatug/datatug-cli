@@ -6,6 +6,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
+	"github.com/datatug/datatug-cli/pkg/cloudproject"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/tuigoff/tuigoff/pkg/nav"
 	"github.com/tuigoff/tuigoff/pkg/widgets"
@@ -28,11 +29,17 @@ const (
 
 // projectPage is the page of an open project: its menu on the left and the
 // section the menu points at on the right.
-func projectPage(data projectData) nav.Page {
+func projectPage(data projectData) nav.Page { return projectPageAt(data, sectionProject) }
+
+// projectPageAt is the page of an open project showing section s, its menu
+// cursor on that section.
+func projectPageAt(data projectData, s section) nav.Page {
+	menu := newProjectMenu(data)
+	menu.tree.Select(string(s))
 	return nav.Page{
 		Title:   data.title(),
-		Menu:    newProjectMenu(data),
-		Content: newSectionScreen(data, sectionProject),
+		Menu:    menu,
+		Content: newSectionScreen(data, s),
 		Focus:   nav.FocusToMenu,
 	}
 }
@@ -43,6 +50,9 @@ func newSectionScreen(data projectData, s section) nav.Screen {
 	case sectionDashboards:
 		return newTextScreen("Dashboards", "List of dashboards here")
 	case sectionQueries:
+		if data.hasQueries {
+			return newItemList("Queries", queryItems(data.queries), data.queriesErr)
+		}
 		return newTextScreen("Queries", "List of queries here")
 	case sectionEnvironments:
 		return newItemList("Environments", environmentItems(data.environments), data.envsErr)
@@ -61,6 +71,9 @@ func projectSummary(data projectData) string {
 	if data.ref.Url != "" {
 		text += "\nURL: " + data.ref.Url
 	}
+	if data.readOnly {
+		text += "\n\nDataTug Cloud project, read-only here. " + ReadOnlyHint + "."
+	}
 	return text
 }
 
@@ -68,6 +81,14 @@ func environmentItems(environments datatug.Environments) []widgets.MenuItem {
 	items := make([]widgets.MenuItem, len(environments))
 	for i, e := range environments {
 		items[i] = idTitleItem(e.ID, e.Title)
+	}
+	return items
+}
+
+func queryItems(queries []cloudproject.Item) []widgets.MenuItem {
+	items := make([]widgets.MenuItem, len(queries))
+	for i, q := range queries {
+		items[i] = idTitleItem(q.ID, q.Title)
 	}
 	return items
 }

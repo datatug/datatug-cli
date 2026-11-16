@@ -338,31 +338,26 @@ func TestCovCSQLAndTugQLRunnersFailEarly(t *testing.T) {
 	if _, err := runSQLSavedQuery(ctx, executor, broken, "", "", &datatug.QueryDef{}, nil); !errors.Is(err, boom) {
 		t.Fatalf("sql source error: %v", err)
 	}
-	if _, err := runTugQLSavedQuery(ctx, executor, broken, "", "", &datatug.QueryDef{Text: covCItemTugQL}, nil); !errors.Is(err, boom) {
+	if _, err := runTugQLSavedQuery(ctx, executor, broken, "", "", &datatug.QueryDef{Text: covCItemTugQL}, nil, nil); !errors.Is(err, boom) {
 		t.Fatalf("tugql source error: %v", err)
 	}
-	if _, err := runTugQLSavedQuery(ctx, executor, broken, "", "", &datatug.QueryDef{Text: "from: [unclosed"}, nil); err == nil {
+	if _, err := runTugQLSavedQuery(ctx, executor, broken, "", "", &datatug.QueryDef{Text: "from: [unclosed"}, nil, nil); err == nil {
 		t.Fatal("bad tugql text accepted")
 	}
 	federated := &datatug.QueryDef{Text: "from: {database: orders, name: Invoice}\n"}
-	if _, err := federatedTugQLURLs(ctx, broken, "", "", federated); !errors.Is(err, boom) {
+	federated.StructuredBody = true
+	if _, _, err := federatedTugQLBindings(ctx, broken, "", "", federated); !errors.Is(err, boom) {
 		t.Fatalf("federated env error: %v", err)
 	}
 	missingDB := &covCStore{envs: datatug.Environments{}, env: &datatug.Environment{DbServers: datatug.EnvDbServers{nil}}}
-	if _, err := federatedTugQLURLs(ctx, missingDB, "", "local", federated); err == nil {
+	if _, _, err := federatedTugQLBindings(ctx, missingDB, "", "local", federated); err == nil {
 		t.Fatal("unresolvable database accepted")
 	}
 	if _, err := resolveSQLOrTugQLSourceURL(ctx, &covCStore{catalogsErr: boom}, "", "local", &datatug.QueryDef{}); !errors.Is(err, boom) {
 		t.Fatalf("database error: %v", err)
 	}
-	if got, _, err := parseFederatedTugQL(ctx, broken, "", "", &datatug.QueryDef{Text: covCItemTugQL}); err != nil || got == nil {
+	if got, _, err := federatedTugQLBindings(ctx, broken, "", "", &datatug.QueryDef{Text: covCItemTugQL, StructuredBody: true}); err != nil || got == nil {
 		t.Fatalf("non-federated parse: %v %v", got, err)
-	}
-	collected := map[string]bool{}
-	from := dal.From(dal.NewRootCollectionRef("Root", "")).Join(dal.NewJoinedSource(dal.NewDatabaseCollectionRef("other", "", "Dim", ""), dal.JoinInner))
-	collectFederatedDatabases(from, collected)
-	if !collected["other"] || len(collected) != 1 {
-		t.Fatalf("collected: %v", collected)
 	}
 }
 
@@ -474,10 +469,10 @@ func TestCovCWriteStreamedRowsErrors(t *testing.T) {
 func TestSavedTugQLRunnersRejectMislabeledTextBeforeSourceAccess(t *testing.T) {
 	query := &datatug.QueryDef{Type: datatug.QueryTypeTugQL, Text: "from: {name: Invoice}\n"}
 	// No store/executor is supplied: malformed text must fail before either is used.
-	if _, err := runTugQLSavedQuery(context.Background(), nil, nil, "", "", query, nil); err == nil || !strings.Contains(err.Error(), "invalid TugQL text") {
+	if _, err := runTugQLSavedQuery(context.Background(), nil, nil, "", "", query, nil, nil); err == nil || !strings.Contains(err.Error(), "invalid TugQL text") {
 		t.Fatalf("runner did not reject mislabeled text: %v", err)
 	}
-	if _, _, err := parseFederatedTugQL(context.Background(), nil, "", "", query); err == nil || !strings.Contains(err.Error(), "invalid TugQL text") {
+	if _, _, err := federatedTugQLBindings(context.Background(), nil, "", "", query); err == nil || !strings.Contains(err.Error(), "invalid TugQL text") {
 		t.Fatalf("federated planner did not reject mislabeled text: %v", err)
 	}
 }

@@ -115,24 +115,11 @@ func loginCommand(rawIssuer *string, insecure *bool, deps dependencies) *cobra.C
 			if *insecure {
 				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Warning: --insecure-storage writes the Firebase session unencrypted to %s.\n", description)
 			}
-			auth, err := client.DeviceLoginAndStore(context.WithValue(cmd.Context(), oauth2.HTTPClient, deps.httpClient), deviceauth.DeviceLoginOptions{
-				DeviceInfo: deviceInfo(), OpenBrowser: deps.openBrowser, Output: cmd.OutOrStdout(), ErrorOutput: cmd.ErrOrStderr(),
-				TokenTransformer: func(ctx context.Context, token *oauth2.Token) (*oauth2.Token, error) {
-					if !strings.EqualFold(token.TokenType, customTokenType) {
-						return nil, errors.New("authorization server returned an unexpected token type")
-					}
-					sess, err := deps.exchange(ctx, token.AccessToken)
-					if err != nil {
-						return nil, fmt.Errorf("exchange device login for Firebase session: %w", err)
-					}
-					return &oauth2.Token{AccessToken: sess.IDToken, TokenType: "Bearer", RefreshToken: sess.RefreshToken, Expiry: sess.ExpiresAt}, nil
-				},
-			}, store)
+			subject, err := deviceLogin(cmd.Context(), client, store, deps, cmd.OutOrStdout(), cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
-			printWarnings(cmd.ErrOrStderr(), auth.Warnings)
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Logged in to %s as %s.\nToken storage: %s\n", client.Issuer(), auth.Identity.Subject, description)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Logged in to %s as %s.\nToken storage: %s\n", client.Issuer(), subject, description)
 			return nil
 		},
 	}
@@ -179,12 +166,42 @@ func logoutCommand(rawIssuer *string, insecure *bool, deps dependencies) *cobra.
 	}}
 }
 
+// deviceLogin runs the browser device flow, exchanges its custom token for a
+// Firebase session and stores it. It returns the signed-in subject.
+func deviceLogin(ctx context.Context, client *deviceauth.Client, store deviceauth.Store, deps dependencies, out, errOut io.Writer) (string, error) {
+	auth, err := client.DeviceLoginAndStore(context.WithValue(ctx, oauth2.HTTPClient, deps.httpClient), deviceauth.DeviceLoginOptions{
+		DeviceInfo: deviceInfo(), OpenBrowser: deps.openBrowser, Output: out, ErrorOutput: errOut,
+		TokenTransformer: func(ctx context.Context, token *oauth2.Token) (*oauth2.Token, error) {
+			if !strings.EqualFold(token.TokenType, customTokenType) {
+				return nil, errors.New("authorization server returned an unexpected token type")
+			}
+			sess, err := deps.exchange(ctx, token.AccessToken)
+			if err != nil {
+				return nil, fmt.Errorf("exchange device login for Firebase session: %w", err)
+			}
+			return &oauth2.Token{AccessToken: sess.IDToken, TokenType: "Bearer", RefreshToken: sess.RefreshToken, Expiry: sess.ExpiresAt}, nil
+		},
+	}, store)
+	if err != nil {
+		return "", err
+	}
+	printWarnings(errOut, auth.Warnings)
+	return auth.Identity.Subject, nil
+}
+
 func printWarnings(output io.Writer, warnings []error) {
 	for range warnings {
 		// Warning causes can carry provider response detail. Keep stderr useful
 		// without echoing a credential, token, or response body.
 		_, _ = fmt.Fprintln(output, "Warning: the previous device login could not be revoked; it may remain active until it expires.")
 	}
+}
+
+// refreshRefused reports whether a refresh answer means the refresh token
+// itself was refused. 408 (timeout) and 429 (rate limited) are 4xx too, but
+// they pass with time, so they never send the person to sign in again.
+func refreshRefused(status int) bool {
+	return status >= 400 && status < 500 && status != http.StatusRequestTimeout && status != http.StatusTooManyRequests
 }
 
 func exchangeCustomToken(ctx context.Context, token string) (session, error) {
@@ -233,6 +250,11 @@ func refreshFirebaseSession(ctx context.Context, refreshToken string) (session, 
 		return session{}, err
 	}
 	defer func() { _ = response.Body.Close() }()
+	if refreshRefused(response.StatusCode) {
+		// The refresh token was refused (revoked, expired): only a new
+		// sign-in helps.
+		return session{}, fmt.Errorf("%w: firebase session refresh returned HTTP %d", errRefreshRefused, response.StatusCode)
+	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return session{}, fmt.Errorf("firebase session refresh returned HTTP %d", response.StatusCode)
 	}

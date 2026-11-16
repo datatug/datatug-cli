@@ -302,13 +302,13 @@ func TestSameProjectDirectoryHandlesMissingPaths(t *testing.T) {
 // simply skipped), and that a source of another engine is read too.
 func TestLoadChatJoinApplicationSkipsUnavailableAndReadsOtherEngines(t *testing.T) {
 	ctx := context.Background()
-	app, closeFn, err := loadChatJoinApplication(ctx, "unavailable://chinook-local", nil, false)
+	app, closeFn, err := loadChatJoinApplication(ctx, "unavailable://chinook-local", nil, secureread.Session{})
 	if app != nil || closeFn != nil || err != nil {
 		t.Fatalf("unavailable source: app=%v close=%v err=%v, want all nil/zero", app, closeFn != nil, err)
 	}
 	// a source of another engine is read through the same schema calls
 	ingit := setupQueryDB(t)
-	app, closeFn, err = loadChatJoinApplication(ctx, ingit, nil, true)
+	app, closeFn, err = loadChatJoinApplication(ctx, ingit, nil, secureread.Session{DatabaseProfile: secureread.DatabasePolicyFreeReads})
 	if app == nil || closeFn == nil || err != nil {
 		t.Fatalf("inGitDB source: app=%v close=%v err=%v", app, closeFn != nil, err)
 	}
@@ -318,7 +318,7 @@ func TestLoadChatJoinApplicationSkipsUnavailableAndReadsOtherEngines(t *testing.
 	}
 	// a PostgreSQL source is opened like any other, and the failure of its open is the answer
 	opens := standInForPostgres(t, &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork})
-	if _, _, err = loadChatJoinApplication(ctx, "postgres://u@h/d", nil, true); err == nil {
+	if _, _, err = loadChatJoinApplication(ctx, "postgres://u@h/d", nil, secureread.Session{DatabaseProfile: secureread.DatabasePolicyFreeReads}); err == nil {
 		t.Fatal("a PostgreSQL source that cannot be opened was read")
 	}
 	if opens.calls.Load() == 0 {
@@ -341,7 +341,7 @@ func TestLoadChatJoinApplicationLoadsRealSQLiteSnapshot(t *testing.T) {
 		t.Skipf("chinook fixture unavailable: %v", statErr)
 	}
 	executor := secureread.NewExecutor(secureread.Session{Unrestricted: true})
-	app, closeFn, err := loadChatJoinApplication(ctx, "sqlite:///"+path, executor, true)
+	app, closeFn, err := loadChatJoinApplication(ctx, "sqlite:///"+path, executor, secureread.Session{DatabaseProfile: secureread.DatabasePolicyFreeReads})
 	if err != nil {
 		t.Fatalf("loadChatJoinApplication: %v", err)
 	}

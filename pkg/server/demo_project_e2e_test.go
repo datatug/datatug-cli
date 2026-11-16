@@ -324,6 +324,9 @@ func TestDemoProject_RunQuery_SQL_RealParameterEffect_WithGrant(t *testing.T) {
 	srcDir := resolveDemoProjectDir(t)
 	projectDir := copyDemoProjectToTempDir(t, srcDir)
 	installLocalChinookFixture(t, projectDir)
+	// Saved SQL cannot be masked: it runs for this policy-governed admin only
+	// once the owner has reviewed every column a suggestion marks sensitive.
+	reviewSuggestedSQLiteColumns(t, projectDir, demoProjectSource, filepath.Join(projectDir, "fixtures", "chinook-local.sqlite"))
 
 	session, err := secureread.NewSession(secureread.SessionOptions{
 		As: "admin", Roles: []string{"admin"}, PoliciesDir: filepath.Join(projectDir, "policies"),

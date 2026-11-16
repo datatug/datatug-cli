@@ -178,9 +178,12 @@ func ExecuteCommands(ctx context.Context, storeID string, request ExecuteCommand
 		if len(command.NamedParams) > 0 {
 			return ExecuteCommandsResponse{}, validation.NewErrBadRequestFieldValue("namedParams", "not supported for execute_commands; use GET /exec/select for a parameterized single query")
 		}
-		sourceURL, _, err := resolveSourceURL(ctx, projStore, command.Env, command.DB, projDir)
+		sourceURL, driver, err := resolveSourceURL(ctx, projStore, command.Env, command.DB, projDir)
 		if err != nil {
 			return ExecuteCommandsResponse{}, fmt.Errorf("command %d: %w", i, sourceLookupAnswer(err))
+		}
+		if driver == DriverClickHouse {
+			return ExecuteCommandsResponse{}, fmt.Errorf("ClickHouse anonymous recordsets require the typed CLI query route; this map-row endpoint is unsupported")
 		}
 		result, err := executor.RunNativeSQL(ctx, sourceURL, command.Text)
 		if err != nil {

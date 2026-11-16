@@ -38,7 +38,7 @@ func covCChatService(t *testing.T, dir string, unrestricted bool) chatSavedQueri
 	return chatSavedQueries{
 		projectDir: dir, store: store, projectID: "covc", env: "local",
 		executor: secureread.NewExecutor(secureread.Session{Unrestricted: true}),
-		session:  secureread.Session{Unrestricted: unrestricted},
+		session:  secureread.Session{LocalProjectOwner: unrestricted},
 	}
 }
 

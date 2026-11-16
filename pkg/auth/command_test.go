@@ -12,7 +12,7 @@ func TestCommand(t *testing.T) {
 	if cmd.Name() != "auth" {
 		t.Errorf("expected Name %q, got %q", "auth", cmd.Name())
 	}
-	want := map[string]bool{"login": false, "status": false, "logout": false, "google": false}
+	want := map[string]bool{"login": false, "product": false, "status": false, "logout": false, "google": false}
 	for _, child := range cmd.Commands() {
 		if _, ok := want[child.Name()]; ok {
 			want[child.Name()] = true
@@ -22,5 +22,15 @@ func TestCommand(t *testing.T) {
 		if !found {
 			t.Errorf("missing %q subcommand", name)
 		}
+	}
+}
+
+func TestWhoamiCommand(t *testing.T) {
+	cmd := WhoamiCommand()
+	if cmd == nil {
+		t.Fatal("WhoamiCommand() returned nil")
+	}
+	if cmd.Name() != "whoami" {
+		t.Errorf("expected Name %q, got %q", "whoami", cmd.Name())
 	}
 }

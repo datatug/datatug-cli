@@ -12,12 +12,23 @@ import (
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/personalqueries"
 	"github.com/datatug/datatug-cli/pkg/secureread"
+	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/strongo/validation"
 )
 
 // sourceFileMissingSentence is the answer for the data file of a source that is not there when the
 // route that answers does not know which source it was asked for.
 const sourceFileMissingSentence = "the data file of a source does not exist"
+
+// catalogNotFoundError adds absence metadata only at the catalog route's proven
+// absence branches, retaining the original error text and normal error handling.
+type catalogNotFoundError struct {
+	err   error
+	field string
+}
+
+func (e *catalogNotFoundError) Error() string { return e.err.Error() }
+func (e *catalogNotFoundError) Unwrap() error { return e.err }
 
 func handleError(err error, w http.ResponseWriter, r *http.Request) bool {
 	if err == nil {
@@ -86,6 +97,9 @@ func handleError(err error, w http.ResponseWriter, r *http.Request) bool {
 	// saved-query id to a clean 404 (never the store's own raw filesystem
 	// error text) and an ambiguous bare id to 400 INVALID_REQUEST naming the
 	// "query" parameter and every candidate.
+	case errors.Is(err, datatug.ErrProjectDoesNotExist):
+		response.Code, response.Field = "NOT_FOUND", "project"
+		w.WriteHeader(http.StatusNotFound)
 	case errors.Is(err, api.ErrQueryNotFound):
 		w.WriteHeader(http.StatusNotFound)
 	// api.GetCatalogTables (S121, Task 17 item A.2): an unknown project or a
@@ -93,6 +107,11 @@ func handleError(err error, w http.ResponseWriter, r *http.Request) bool {
 	// clean-404 treatment as ErrQueryNotFound above, never a raw
 	// filesystem error.
 	case errors.Is(err, api.ErrCatalogNotFound):
+		var absent *catalogNotFoundError
+		if errors.As(err, &absent) {
+			response.Code = "NOT_FOUND"
+			response.Field = absent.field
+		}
 		w.WriteHeader(http.StatusNotFound)
 	// A delete of a project item the project does not have (api.ErrItemNotFound):
 	// the answer of dbserver-delete, as a 404 with the sentence that says the item is

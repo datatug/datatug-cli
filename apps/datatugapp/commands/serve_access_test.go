@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -30,7 +31,11 @@ func TestServe_AccessKeyAndLink(t *testing.T) {
 	if call.caps.Access == nil {
 		t.Fatal("serve must require the session token")
 	}
-	_, frag, ok := strings.Cut(strings.TrimSpace(strings.Split(out, "DataTug web UI for this agent: ")[1]), "#code=")
+	m := regexp.MustCompile(`Web UI +(\S+)`).FindStringSubmatch(out)
+	if m == nil {
+		t.Fatalf("no web UI link: %q", out)
+	}
+	_, frag, ok := strings.Cut(m[1], "#code=")
 	if !ok {
 		t.Fatalf("a hand-started server prints a link with a code: %q", out)
 	}

@@ -25,6 +25,7 @@ func resultsRoutes(path string, router router, wrap wrapper, writeOnly bool) {
 // resultResponse is the answer of GET /datatug/results/:id: meta.json as it
 // was written and the recordset of data.json.
 type resultResponse struct {
+	Anonymous bool                  `json:"anonymous,omitempty"`
 	Meta      json.RawMessage       `json:"meta"`
 	Recordset apicontract.Recordset `json:"recordset"`
 	// Query and Prompt repeat meta.query and the text of meta.prompt for
@@ -77,6 +78,7 @@ func resultHandler(w http.ResponseWriter, r *http.Request) {
 
 func resultResponseOf(loaded queryresults.Loaded) resultResponse {
 	response := resultResponse{Meta: loaded.MetaJSON, Recordset: loaded.Recordset, Query: loaded.Meta.Query}
+	response.Anonymous = loaded.Anonymous
 	if loaded.Meta.Prompt != nil {
 		response.Prompt = loaded.Meta.Prompt.Text
 	}

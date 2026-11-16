@@ -314,3 +314,27 @@ func TestWatchHTTPExactlyOneClaimAndCancellationAfterPause(t *testing.T) {
 		t.Fatal("runner failed to cancel after lease revoked")
 	}
 }
+
+func TestWatchProjectVisibilityFiltersDiscoveryWithoutChangingDefinition(t *testing.T) {
+	f := protocolFixture(t)
+	f.create(t, "alice", "kept", "personal")
+	f.server.ActiveDefinitions = func(_ context.Context, actor watch.Actor, items []watch.Definition) ([]watch.Definition, error) {
+		if actor.ID != "alice" {
+			t.Fatal("projection lost authenticated actor")
+		}
+		return []watch.Definition{}, nil
+	}
+	code, body := f.request(t, "alice", "GET", "definitions", nil)
+	if code != 200 || bytes.Contains(body, []byte(`"id":"kept"`)) {
+		t.Fatalf("archive remained active: %d %s", code, body)
+	}
+	code, body = f.request(t, "alice", "GET", "definition?id=kept", nil)
+	if code != 200 || !bytes.Contains(body, []byte(`"id":"kept"`)) {
+		t.Fatalf("archive broke direct access: %d %s", code, body)
+	}
+	f.server.ActiveDefinitions = nil
+	code, body = f.request(t, "alice", "GET", "definitions", nil)
+	if code != 200 || !bytes.Contains(body, []byte(`"id":"kept"`)) {
+		t.Fatalf("restore did not reappear: %d %s", code, body)
+	}
+}

@@ -42,3 +42,20 @@ func (e *exitError) ExitCode() int { return e.code }
 func Exit(message string, code int) error {
 	return &exitError{msg: message, code: code}
 }
+
+// reportedError is an ExitCoder whose message the command has already written
+// to stderr in its own format (a JSON refusal): main exits with its code and
+// prints nothing more, so stderr holds exactly that one document.
+type reportedError struct{ exitError }
+
+// Reported returns an error main exits with code for, without printing
+// message: the command already reported it.
+func Reported(message string, code int) error {
+	return &reportedError{exitError{msg: message, code: code}}
+}
+
+// IsReported reports whether err was already written to stderr by its command.
+func IsReported(err error) bool {
+	var reported *reportedError
+	return errors.As(err, &reported)
+}

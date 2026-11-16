@@ -19,6 +19,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
+	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/gofrs/flock"
 	"github.com/strongo/validation"
 )
@@ -52,12 +53,20 @@ func authorizeMeaningWrite(ctx context.Context, project string) error {
 		return secureread.ErrAccessDenied
 	}
 	key := record.NewKeyWithParentAndID(record.NewKeyWithID(accesspolicies.ProjectsCollection, project), "meanings", "project")
-	return accesspolicies.AuthorizeWrite(ctx, accesspolicies.WriteOptions{Principal: session.Principal, Policies: session.Policies, Unrestricted: session.Unrestricted}, access.Set, access.RecordResourceForKey(key))
+	return accesspolicies.AuthorizeWrite(ctx, accesspolicies.WriteOptions{Principal: session.Principal, Policies: session.Policies, Unrestricted: session.LocalProjectOwner}, access.Set, access.RecordResourceForKey(key))
 }
 
 // withLocalMeanings holds the same lock as revisioned query writes. Branches
 // other than the checked-out branch and pinned/detached checkouts are refused.
 func withLocalMeanings(ctx context.Context, ref dto.ProjectRef, branch string, mutating bool, fn func(*os.Root, datatug.MeaningScope, gitState) error) error {
+	return withLocalProjectFiles(ctx, ref, branch, mutating, func(root *os.Root, state gitState) error {
+		return fn(root, datatug.MeaningScope{Storage: LocalStoreID, Project: ref.ProjectID, Branch: state.branch}, state)
+	})
+}
+
+// Shared branch/HEAD and project-file lock boundary. The owning command must
+// authorize its own resource before invoking it; it grants no lifecycle coverage.
+func withLocalProjectFiles(ctx context.Context, ref dto.ProjectRef, branch string, mutating bool, fn func(*os.Root, gitState) error) error {
 	if err := requireLocalReadPrincipal(); err != nil {
 		return err
 	}
@@ -77,6 +86,9 @@ func withLocalMeanings(ctx context.Context, ref dto.ProjectRef, branch string, m
 	}
 	state, err := localGitStateSeam(ctx, dir)
 	if err != nil {
+		if canceled := ctx.Err(); canceled != nil {
+			return canceled
+		}
 		return err
 	}
 	lock := flock.New(filepath.Join(state.gitDir, "datatug-project-api.lock"))
@@ -90,6 +102,9 @@ func withLocalMeanings(ctx context.Context, ref dto.ProjectRef, branch string, m
 	defer func() { _ = lock.Unlock() }()
 	state, err = localGitStateSeam(ctx, dir)
 	if err != nil {
+		if canceled := ctx.Err(); canceled != nil {
+			return canceled
+		}
 		return err
 	}
 	if branch != "" && branch != state.branch {
@@ -100,8 +115,7 @@ func withLocalMeanings(ctx context.Context, ref dto.ProjectRef, branch string, m
 		return err
 	}
 	defer func() { _ = root.Close() }()
-	scope := datatug.MeaningScope{Storage: LocalStoreID, Project: ref.ProjectID, Branch: state.branch}
-	if err = fn(root, scope, state); err != nil {
+	if err = fn(root, state); err != nil {
 		return err
 	}
 	after, err := localGitStateSeam(ctx, dir)
@@ -285,6 +299,10 @@ func randomMeaningSuffix() string {
 	return strings.ReplaceAll(time.Now().UTC().Format("20060102150405.000000000"), ".", "")
 }
 func LocalProjectMeaningsCatalog(ctx context.Context, ref dto.ProjectRef, branch string) (datatug.ProjectMeaningsCatalog, error) {
+	return localProjectMeaningsCatalog(ctx, ref, branch, false)
+}
+
+func localProjectMeaningsCatalog(ctx context.Context, ref dto.ProjectRef, branch string, discovery bool) (datatug.ProjectMeaningsCatalog, error) {
 	var result datatug.ProjectMeaningsCatalog
 	err := withLocalMeanings(ctx, ref, branch, false, func(root *os.Root, scope datatug.MeaningScope, _ gitState) error {
 		d, err := readLocalMeanings(root)
@@ -296,7 +314,17 @@ func LocalProjectMeaningsCatalog(ctx context.Context, ref dto.ProjectRef, branch
 			return err
 		}
 		result, err = datatug.BuildProjectMeaningsCatalog(d, q, b, scope, authorizeMeaningWrite(ctx, ref.ProjectID) == nil, true)
-		return err
+		if err != nil {
+			return err
+		}
+		if discovery {
+			archived, err := filestore.ReadProjectArchivedItemsFromRoot(root)
+			if err != nil {
+				return err
+			}
+			result = projectMeaningDiscovery(result, archived)
+		}
+		return nil
 	})
 	return result, err
 }
@@ -481,4 +509,30 @@ func stageLocalMeaningDocument(ctx context.Context, root *os.Root, state gitStat
 		return ErrProjectMutationOutcomeUncertain
 	}
 	return nil
+}
+
+// LocalProjectMeaningVisibilityItems inventories canonical identities without
+// consulting execution or private retained-history membership.
+func LocalProjectMeaningVisibilityItems(project string) ([]datatug.ProjectUsageItem, error) {
+	dir, ok := ProjectDir(project)
+	if !ok {
+		return nil, secureread.ErrAccessDenied
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	document, err := readLocalMeanings(root)
+	if err != nil {
+		return nil, err
+	}
+	items := []datatug.ProjectUsageItem{}
+	for _, entity := range document.Entities {
+		items = append(items, datatug.ProjectUsageItem{Ref: datatug.ProjectObjectRef{Kind: "meaning", ID: "project/" + entity.ConceptID}, Title: entity.Name})
+		for _, field := range entity.Fields {
+			items = append(items, datatug.ProjectUsageItem{Ref: datatug.ProjectObjectRef{Kind: "meaning", ID: "project/" + field.ConceptID}, Title: entity.Name + " / " + field.Name})
+		}
+	}
+	return items, nil
 }

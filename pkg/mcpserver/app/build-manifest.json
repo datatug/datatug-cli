@@ -7,7 +7,7 @@
     "integrity": "sha512-B+PcbuGiaf0e5I3uy4iO5tS3Abo+5w8JvZFzHMzQdq9yVwP836zJkw2+KCGOQ0r4TM1fuQi4JdnbuWjkS4aBvg==",
     "gitHead": "82221c0c8ce7661efa6771c9d461511b1650495f"
   },
-  "lockSHA256": "7b89efcac56911b0364e4c8cf288e8dd31144f242b5e791ca803820c8d38f107",
+  "lockSHA256": "da4218e411f145a5df835c9806bfbbb60b24b88e1c51fe63a76f7bdeaef359e2",
   "upstream": {
     "repository": "https://github.com/datatug/ai-plugin",
     "commit": "d4ff0c5beac346eb8ead527144630978c5052ff5",
@@ -69,7 +69,7 @@
     },
     {
       "path": "package.json",
-      "sha256": "8fb0f8f3ec54aed3ef2d60ef24082751f65a8f52e317fa9b49624b6890476516"
+      "sha256": "283141bce34b242f05a6c6183f5139775a2b3fd92ae286b48aac3d7958b047d2"
     },
     {
       "path": "scripts/build.mjs",

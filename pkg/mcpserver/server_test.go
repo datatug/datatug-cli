@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -24,7 +25,11 @@ func TestMain(m *testing.M) { os.Exit(hermetictest.Main(m)) }
 
 func newFixture(t *testing.T) (*Client, *httptest.Server) {
 	t.Helper()
-	t.Setenv(agentaccess.DirEnv, t.TempDir())
+	dir := filepath.Join(t.TempDir(), "daemon")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(agentaccess.DirEnv, dir)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/datatug/agent-info":
@@ -192,7 +197,11 @@ func TestTransportFailsClosed(t *testing.T) {
 }
 
 func TestRedirectCannotLeakAgentKey(t *testing.T) {
-	t.Setenv(agentaccess.DirEnv, t.TempDir())
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(agentaccess.DirEnv, dir)
 	seen := false
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { seen = true; t.Error("followed redirect") }))
 	defer target.Close()

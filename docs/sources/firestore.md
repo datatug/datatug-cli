@@ -29,5 +29,14 @@ adapter. Firestore indexes and provider query constraints still apply. SQL,
 joins, projection aliases, computed projections, GROUP BY and HAVING are unsupported. Copying into Firestore and DALgo read-write transactions are rejected. The
 query source still requires read-only IAM credentials as defense in depth;
 DataTug cannot reduce permissions already granted to your Google identity.
+To back up Firestore, or a part of it, into an inGitDB database, use
+[`datatug db copy --schema=destination`](../db-copy.md#copying-from-a-schemaless-source---schemadestination):
+the collections and their shapes come from the inGitDB definitions of the
+destination, since Firestore has no schema to describe them (without
+`--schema=destination`, `db copy` and `db export` need one, and a Firestore
+`--from` fails with a hint naming `--schema=destination`). A `--from` path with `/` names a
+nested collection, for example `--from teams/t1/ext/cal/events`; to read such a
+path from the inGitDB copy, add `--from-path` (without it an inGitDB `--from` is
+one collection name, as it always was).
 This source is separate from Firestore used internally to store DataTug projects
 or watch state; the URL always selects the user's queried database.

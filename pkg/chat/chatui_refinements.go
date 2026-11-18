@@ -130,6 +130,11 @@ func (p *workspacePanel) catalogInspectionView(width, height int) string {
 
 func (p *workspacePanel) inspectStackView(width, height int) string {
 	height = max(1, height)
+	if p.ui.nothingToInspect() {
+		// Before the first project and result, row/relationship/action
+		// vocabulary explains nothing: say what will appear here and when.
+		return fitPanelBody(ansi.Wrap("Nothing to inspect yet.\n\nOpen a project and run a query. Details of the row you select, its related records and the actions for it appear here.", max(1, width), " "), width, height)
+	}
 	// Give scrolling details the available viewport, then pack the visible
 	// sections naturally. Reserving fixed blank viewports left Related and
 	// Actions stranded near the bottom of a tall terminal.

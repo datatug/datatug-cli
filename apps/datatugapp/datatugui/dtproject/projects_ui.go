@@ -182,7 +182,7 @@ func selectProjectNode(node widgets.TreeNode) tea.Cmd {
 		case actionAddToGitHub:
 			return datatugui.Drill("Add to GitHub", newAddToGitHub())
 		default:
-			return nav.Alert("Add existing project", "Adding an existing project is not supported yet.", 0, nav.FocusToContent)
+			return nav.Alert("Add existing project", "run datatug projects add -p <id> -d <folder> (not in this screen yet)", 0, nav.FocusToContent)
 		}
 	}
 	return nil
@@ -232,7 +232,7 @@ func newProjectsTree(loaded projectsLoaded) widgets.Tree {
 	demo := newDemoProject1Ref()
 	local = append(local, widgets.TreeNode{
 		ID:   "local:" + demo.ID,
-		Text: repoEmoji + demo.Title + " " + theme.GrayText("@ "+demoProject1FullID),
+		Text: repoEmoji + demo.Title + " " + theme.GrayText("· sample data, downloaded from GitHub"),
 		Ref:  demo,
 	})
 	local = append(local,

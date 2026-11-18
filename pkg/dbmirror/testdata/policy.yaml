@@ -1,0 +1,16 @@
+format: datatug-mirror-policy/v1
+definitions: mirror
+output: out
+copy:
+  - teams
+  - teams/ext
+  - teams/ext/events
+  - teams/ext/events/notes
+  - teams/logs
+  - ext
+  - ext/customers
+  - ext/bundles
+exclude:
+  - ext/secrets
+mask:
+  ext/customers: [email, name, contacts]

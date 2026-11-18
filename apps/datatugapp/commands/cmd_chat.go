@@ -3,9 +3,13 @@ package commands
 import (
 	tea "charm.land/bubbletea/v2"
 	"context"
+	"errors"
 	"fmt"
 	"github.com/dal-go/dalgo/dal"
+	"github.com/datatug/datatug-cli/pkg/labelguard"
+	"github.com/datatug/datatug-core/pkg/meaninglabels"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"slices"
@@ -29,6 +33,8 @@ const defaultChatModel = "gpt-5.6-luna"
 
 type chatOptions struct {
 	workspace       *workspaceStart
+	notice          string // a line the workspace shows first in the chat of this project
+	openAtStart     string // a table the workspace opens as it starts, by its title
 	project         string
 	env             string
 	database        string
@@ -49,6 +55,15 @@ type chatOptions struct {
 	groups          []string
 	// result is a stored query result the workspace opens on (`ui --result`).
 	result *resultOpen
+	// modelExplicit: the AI was named on this command line, so the AI chosen
+	// for the project in the workspace does not replace it.
+	modelExplicit bool
+	aiFromChoice  bool // the AI is the one chosen for this project in the workspace
+	aiExact       bool // the endpoint and key were typed in the workspace: the environment adds nothing
+	// modelRemembered: the model is the one remembered from an earlier
+	// command line, not named on this one.
+	modelRemembered bool
+	aiState         *aiRunState // shared by the reopenings of one run
 }
 
 func chatCommand() *cobra.Command {
@@ -86,6 +101,9 @@ not shown can cost a describe_relation round trip.
   Schemas above 255 tables are not sent to it.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			flags := cmd.Flags()
+			options.modelExplicit = flags.Changed("model") || flags.Changed("ai") || flags.Changed("base-url")
+			options.aiState = &aiRunState{}
 			if err := applyLastChatOptions(cmd, &options); err != nil {
 				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: load previous chat options: %v\n", err)
 			}
@@ -124,11 +142,20 @@ func runChat(cmd *cobra.Command, options chatOptions) error {
 			return Exit(err.Error(), exitCodeUsage)
 		}
 	}
+	explicit := options.modelExplicit
 	for {
 		nextProject, err := runChatProjectFunc(cmd, options)
+		if err == nil && options.aiState != nil && options.aiState.reopen {
+			// The AI was set up in the workspace: open it again, in place.
+			// What was just chosen for this project wins over the command line.
+			options.aiState.reopen = false
+			options.modelExplicit = false
+			continue
+		}
 		if err != nil || nextProject == "" || nextProject == options.project {
 			return err
 		}
+		options.modelExplicit = explicit // the command line holds for another project
 		options.project = nextProject
 		options.database = ""      // resolve the new project's source independently
 		options.cloudDecision = "" // a consent choice is for the project it was given for
@@ -176,7 +203,7 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	}
 	projectDir, projectStore, err := resolveQueryProject(options.project)
 	if err != nil {
-		return "", Exit(err.Error()+"\nChoose an existing project: datatug projects, then datatug chat --project <ID-or-directory>\nStart a new project: datatug init <ID> <directory>", exitCodeUsage)
+		return "", Exit(err.Error()+projectNotFoundAdvice, exitCodeUsage)
 	}
 
 	if options.cloudDecision != "" {
@@ -187,6 +214,23 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "cloud decision engine for this project: %s (stored in %s)\n", options.cloudDecision, path)
 		if advice := consentAdvice(projectDir, options.cloudDecision); advice != "" {
 			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "note: %s\n", advice)
+		}
+	}
+
+	if options.aiState == nil {
+		options.aiState = &aiRunState{}
+	}
+	// What is remembered for the next chat is what was asked for on the
+	// command line, never the AI chosen for this one project.
+	lastOptions := options
+	choiceNotice := ""
+	if !options.modelExplicit {
+		choiceNotice = applyProjectAIChoice(&options, projectDir)
+		if options.model == "cloud" && options.modelRemembered && !options.aiFromChoice {
+			// DataTug AI remembered from an earlier command line is not a
+			// consent for this project: it is offered, not switched on.
+			options.model = "none"
+			choiceNotice = "DataTug AI was used before on this machine, but it is now chosen per project. Type " + aiCommand + " to choose it for this one."
 		}
 	}
 
@@ -266,16 +310,38 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	var cloudClient *cloud.Client
 	var cloudContext ai.ClientContext
 	var hostedSession cloudSession
+	isSample := projectCatalog.ID == sampleProjectID
+	aiMissing := false // nothing answers a question in plain words
+	hostedDown := false
+	if choiceNotice != "" {
+		sessionNotices = append(sessionNotices, choiceNotice)
+	}
 	if options.model == "cloud" {
 		cloudSession, loadErr := loadCloudSession(ctx, options)
-		if loadErr != nil {
-			return "", Exit(fmt.Sprintf("configure cloud chat: %v", loadErr), exitCodeUsage)
+		var plan cloudPlan
+		planErr := loadErr
+		if loadErr == nil {
+			plan, planErr = resolveCloudSelection(ctx, cmd, &options, cloudSession)
+			if planErr != nil && options.aiFromChoice && options.cloudModel != "" {
+				// A hosted model remembered from before may have left the
+				// plan: DataTug AI chosen in the workspace uses the plan's own.
+				options.cloudModel = ""
+				plan, planErr = resolveCloudSelection(ctx, cmd, &options, cloudSession)
+			}
 		}
-		plan, planErr := resolveCloudSelection(ctx, cmd, &options, cloudSession)
-		if planErr != nil {
+		switch {
+		case planErr != nil && options.aiFromChoice:
+			// DataTug AI was chosen in the workspace: a sign-in that expired
+			// or a service that is away never closes the project. It opens
+			// without AI and says how to get it back.
+			hostedDown = true
+			sessionNotices = append(sessionNotices, "DataTug AI is not available right now: "+aiPublicError(planErr)+". Type "+aiCommand+" to sign in again or choose another AI. Tables still open from the Explorer.")
+		case errors.Is(planErr, planHTTPError{status: http.StatusUnauthorized}):
+			return "", Exit(fmt.Sprintf("configure cloud chat: %v: run 'datatug auth login'", planErr), exitCodeUsage)
+		case planErr != nil:
 			return "", Exit(fmt.Sprintf("configure cloud chat: %v", planErr), exitCodeUsage)
 		}
-		if plan.V == 1 {
+		if planErr == nil && plan.V == 1 {
 			notice := fmt.Sprintf("Hosted AI payer: %s (%s), %s; %d of %d questions left until %s", plan.AccountTitle, plan.AccountID, plan.EffectivePlan, *plan.AI.Left, *plan.AI.Limit, plan.AI.ResetsAt)
 			if !plan.AI.Enforced {
 				notice += "; AI allowance is currently observed, not enforced"
@@ -286,11 +352,13 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), notice)
 			sessionNotices = append(sessionNotices, notice)
 		}
-		cloudClient, cloudContext, err = cloudChatClientFromSession(options, cloudSession)
-		if err != nil {
-			return "", Exit(fmt.Sprintf("configure cloud chat: %v", err), exitCodeUsage)
+		if planErr == nil {
+			cloudClient, cloudContext, err = cloudChatClientFromSession(options, cloudSession)
+			if err != nil {
+				return "", Exit(fmt.Sprintf("configure cloud chat: %v", err), exitCodeUsage)
+			}
+			hostedSession = cloudSession
 		}
-		hostedSession = cloudSession
 	}
 	if !hasQueryableProjectTables(projectCatalog, sourceURLs) {
 		conversation = unavailableSchemaConversation{database: database}
@@ -300,12 +368,27 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 			provider = cloudUserProvider{cloudClient}
 		} else {
 			var providerErr error
-			if options.model != "none" {
+			switch {
+			case options.model == "none" || hostedDown:
+			case options.aiExact:
+				provider, providerErr = chat.NewLLMProviderExact(options.model, options.baseURL, options.apiKey)
+			default:
 				provider, providerErr = chat.NewLLMProvider(options.model, options.baseURL, options.apiKey)
 			}
-			if providerErr != nil || options.model == "none" {
+			if hostedDown || providerErr != nil || options.model == "none" || (!options.aiExact && chat.MissingAPIKey(options.model, options.baseURL, options.apiKey)) {
+				provider = nil
+				aiMissing = true
 				conversation = providerUnavailableConversation{}
-				sessionNotices = append(sessionNotices, "AI provider is not configured. Explorer Open data and New query work locally; configure a provider under Settings → AI for chat.")
+				notice := providerUnavailableNotice
+				if isSample {
+					conversation = sampleConversation{source: sourceURL, sourceID: database, run: func(ctx context.Context, tugql []byte) (secureread.Result, error) {
+						return executor.RunTugQL(ctx, sourceURL, tugql, nil)
+					}}
+					notice = sampleQuestionsNotice()
+				}
+				if !hostedDown {
+					sessionNotices = append(sessionNotices, notice)
+				}
 			}
 		}
 		if provider != nil {
@@ -392,6 +475,19 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 			return output.String(), err
 		})
 	}
+	if options.notice != "" {
+		sessionNotices = append([]string{options.notice}, sessionNotices...)
+	}
+	if options.aiState.chosen && !aiMissing {
+		ready := "AI is set up: " + currentAI(options, false) + " answers your questions in this project. Change it any time with " + aiCommand + "."
+		if options.aiState.pending != "" {
+			ready += " Your question is in the composer: press Enter to ask it."
+		}
+		if options.aiState.keyNote != "" {
+			ready += " " + options.aiState.keyNote
+		}
+		sessionNotices = append([]string{ready}, sessionNotices...)
+	}
 	if len(sessionNotices) > 0 {
 		// The terminal UI uses the alternate screen: what was printed to stderr
 		// above is not visible until the user quits, so show it in the chat too.
@@ -409,13 +505,27 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	// Opening a stored result is not a choice of project, environment or
 	// database for the next chat, so it leaves the saved choices as they were.
 	if options.result == nil {
-		if err := saveLastChatOptions(cmd, options); err != nil {
+		toSave := options
+		if options.aiFromChoice {
+			toSave = lastOptions
+		}
+		if err := saveLastChatOptionsFunc(cmd, toSave); err != nil {
 			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: save chat options: %v\n", err)
 		}
 	}
 	ui.SetProjectChoices(chatProjectChoices(options.project, projectDir, projectCatalog))
 	if options.workspace != nil {
 		mountExplore(ui, *options.workspace)
+	}
+	ui.OpenTableAtStart(options.openAtStart)
+	noneChosen := options.aiFromChoice && options.model == "none"
+	ui.SetAISetup(chatAISetup(ctx, options, projectDir, projectCatalog.Title, aiMissing, noneChosen, isSample))
+	if options.aiState.chosen {
+		// Reopened after the AI setup: continue in the chat, with the
+		// question that opened the setup back in the composer.
+		ui.ShowChat()
+		ui.SetComposerText(options.aiState.pending)
+		options.aiState.chosen, options.aiState.pending, options.aiState.keyNote = false, "", ""
 	}
 	var programOptions []tea.ProgramOption
 	if options.workspace != nil {
@@ -424,11 +534,36 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	if err := ui.Run(programOptions...); err != nil {
 		return "", err
 	}
+	options.aiState.reopen, options.aiState.pending = ui.Reopened()
+	options.aiState.chosen = options.aiState.reopen
 	return ui.SelectedProject(), nil
+}
+
+// projectNotFoundAdvice is for the command line; the workspace leaves it out.
+const projectNotFoundAdvice = "\nChoose an existing project: datatug projects, then datatug chat --project <ID-or-directory>\nStart a new project: datatug init <ID> <directory>"
+
+// saveLastChatOptionsFunc is saveLastChatOptions; a seam so a test sees what
+// is remembered for the next chat.
+var saveLastChatOptionsFunc = saveLastChatOptions
+
+// currentAI says in words what answers questions in this chat.
+func currentAI(options chatOptions, missing bool) string {
+	switch {
+	case missing:
+		return "no AI"
+	case options.model == "cloud":
+		return "DataTug AI"
+	case options.baseURL != "":
+		return options.model + " at your own endpoint"
+	}
+	return options.model + " with your own key"
 }
 
 func writeHostedPlan(ctx context.Context, session cloudSession, project string, w io.Writer) error {
 	plan, err := session.getPlan(ctx, project)
+	if errors.Is(err, planHTTPError{status: http.StatusUnauthorized}) {
+		return fmt.Errorf("%w: type %s", err, aiCommand)
+	}
 	if err != nil {
 		return err
 	}
@@ -605,6 +740,7 @@ func buildChatProjectCatalog(ctx context.Context, projectDir string, projectStor
 		return catalog, nil, err
 	}
 	sort.Slice(dbs, func(i, j int) bool { return dbs[i].ID < dbs[j].ID })
+	labels, labelsErr := loadLabels(ctx, projectDir)
 	for _, database := range dbs {
 		if database == nil {
 			continue
@@ -660,7 +796,8 @@ func buildChatProjectCatalog(ctx context.Context, projectDir string, projectStor
 			sort.SliceStable(primaryKey, func(i, j int) bool { return keyPositions[primaryKey[i]] < keyPositions[primaryKey[j]] })
 			catalog.Objects = append(catalog.Objects, chat.ProjectObject{Reference: chat.ContextReference{
 				Kind: kind, ProjectID: project.ID, SourceID: id, ObjectID: name, Title: relation.Name,
-			}, Columns: columns, ColumnTypes: columnTypes, PrimaryKey: primaryKey, Issue: relation.Issue})
+			}, Columns: columns, ColumnTypes: columnTypes, PrimaryKey: primaryKey, Issue: relation.Issue,
+				ProtectedColumns: chatProtectedColumns(labels, labelsErr, id, relation.Name, kind, columns)})
 		}
 	}
 	queryIDs, err := queryIDIndexFunc(projectDir)
@@ -720,8 +857,17 @@ func projectCatalogHasSource(catalog chat.ProjectCatalog, id string) bool {
 // executor available while provider credentials are absent or offline is chosen.
 type providerUnavailableConversation struct{}
 
+// Without an AI provider the workspace still opens tables and runs queries;
+// only questions in plain words need one. Both texts say where to set it up.
+const (
+	providerUnavailableNotice = "No AI is set up yet, so questions in plain words cannot be answered. Opening tables from the Explorer works without it. " + providerSetupAdvice
+	providerUnavailableReply  = "I can't answer yet: no AI is set up. Tables still open from the Explorer. " + providerSetupAdvice + " No query was executed."
+	// providerSetupAdvice is the way AI is set up inside the workspace.
+	providerSetupAdvice = aiSetupAdvice
+)
+
 func (providerUnavailableConversation) AskWithContext(context.Context, string, string) (chat.Turn, error) {
-	return chat.Turn{Text: "Configure an AI provider under Settings → AI for chat. Use Explorer Open data or New query to work with your project locally. No query was executed."}, nil
+	return chat.Turn{Text: providerUnavailableReply}, nil
 }
 
 // chatSourceCatalogs names every project source URL of a chat by the catalog
@@ -741,4 +887,30 @@ func chatSourceCatalogs(sourceURLs map[string]string, sourceURL, database string
 	}
 	add(sourceURL, database)
 	return catalogs
+}
+
+// chatProtectedColumns lists the columns of a table that a chat read may not
+// name: chat is always strict, so a protected label refuses whether it is
+// stored or a read-time suggestion (see installProjectLabels). The workspace
+// opens the table without them instead of refusing the whole table.
+//
+// It lists nothing when the labels cannot be read, for a view, or when the
+// table as a whole is protected: those reads keep refusing at the guard.
+func chatProtectedColumns(doc meaninglabels.Document, labelsErr error, source, table, kind string, columns []string) []string {
+	if labelsErr != nil || kind != "table" {
+		return nil
+	}
+	for _, l := range doc.Labels {
+		// A label on the table itself protects all of it: nothing to open.
+		if l.Target.Column == "" && l.Class.Protected() && strings.EqualFold(l.Target.Source, source) && meaninglabels.TableMatches(l.Target.Table, table) {
+			return nil
+		}
+	}
+	var protected []string
+	for _, column := range columns {
+		if refused, _ := labelguard.CheckColumns(doc, source, table, false, []string{column}, true); refused != nil {
+			protected = append(protected, column)
+		}
+	}
+	return protected
 }

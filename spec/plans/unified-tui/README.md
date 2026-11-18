@@ -253,6 +253,42 @@ A context-aware searchable Actions registry dispatches existing paths, with Ctrl
 
 **Evidence:** full-shell searchable action/disabled reason/help/mouse routes, Ctrl+C/function-key diagnostic isolation, draft/caret return, compact layouts, parent actual key receipts and final independent review.
 
+### Task 17: First run: welcome, sample project and plain answers
+
+**Id:** task-17
+**Verifies:** unified-tui#ac:first-run-welcome, unified-tui#ac:first-run-no-dead-end, unified-tui#ac:sensitive-columns-open, unified-tui#ac:no-ai-plain-answer
+**Status:** complete
+**Owner:** CLI implementation owner
+**Depends on:** Tasks 1, 3
+
+A machine with no project starts on a welcome screen; one key installs, scans and registers the sample project in-process and reopens the workspace on it with a table open. F3 leads to Projects, lists projects as registered now, and a failed choice returns with its reason. Explorer Open data leaves protected-label columns out and names them. Without an AI key, chat answers plainly instead of relaying a provider error.
+
+**Evidence:** datatug/datatug-cli#605 (dead-end fixes, released v0.153.2); unit and journey tests of the welcome screen, the sample install, protected columns and the no-AI answer; a first-run walk in a terminal with a cleared environment and an empty home directory. Not verified on Windows Terminal.
+
+### Task 18: Ready-made questions on the sample
+
+**Id:** task-18
+**Verifies:** unified-tui#ac:sample-ready-made-questions, unified-tui#ac:hosted-ai-is-explicit
+**Status:** complete
+**Owner:** CLI implementation owner
+**Depends on:** Task 17
+
+Without AI the sample answers four ready-made questions by running queries written in advance through the chat executor. Hosted AI stays an explicit choice: nothing looks for a sign-in unless `--model cloud` is given.
+
+**Evidence:** unit tests of matching and the scripted conversation; a test that installs the real sample, opens its chat as the workspace does, fails if a sign-in is looked for, and gets rows for each question; a walk in a terminal with a cleared environment.
+
+### Task 19: AI setup inside the workspace
+
+**Id:** task-19
+**Verifies:** unified-tui#ac:ai-setup-in-workspace, unified-tui#ac:ai-choice-per-project, unified-tui#ac:no-ai-plain-answer
+**Status:** complete
+**Owner:** CLI implementation owner
+**Depends on:** Task 18
+
+`/ai`, or a question while no AI answers, opens a dialog: DataTug AI after consent and a browser sign-in shown in the dialog, DataTug Pro through the account's subscription page, an own API key (OS keyring), an own endpoint, or no AI. The choice is stored per project directory in the user's config directory and the workspace reopens in place. Texts that told a person to quit and run a command are replaced.
+
+**Evidence:** unit tests of the dialog with the sign-in, plan, browser and keyring stood in for; tests that open the real sample with each stored choice, with an expired sign-in and after a reopening; a walk in a terminal with a cleared environment for the menu, the consent screen, the own-endpoint form, `/ai` and No AI. Not exercised against the real DataTug cloud: the sign-in and plan steps are covered by stand-ins only. Left open: an in-workspace control for the cloud table-narrowing consent and for scanning a source, whose texts still name a command.
+
 ## Open Questions
 
 Shortcut choices, server-scope defaults and supported/refused query shapes are resolved for the released baseline in the feature and inventory. Broader terminal/OS/modifier compatibility remains unproven beyond the recorded configurations; no automatic support claim is made. Grid-specific browser handoff and nested ancestor paths remain deferred to separate specifications. Incoming user corrections require their own source/evidence reconciliation rather than weakening existing acceptance criteria.

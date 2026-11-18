@@ -121,8 +121,9 @@ func TestCov100eServe_PolicyWithoutPrincipal(t *testing.T) {
 }
 
 func TestCov100eServe_SettingsReadError(t *testing.T) {
-	// An empty settings file decodes to io.EOF, which is not os.ErrNotExist.
-	cov100eHome(t, "\n")
+	// A settings file that does not parse is an error; an empty one is not
+	// (datatug-core reads it as empty settings).
+	cov100eHome(t, "projects: [unterminated\n")
 	cov100eSeams(t, nil)
 	if err := serveCommandAction(serveCommandArgs(), nil); err == nil {
 		t.Fatal("want settings error")

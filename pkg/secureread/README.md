@@ -41,6 +41,28 @@ HTTP 403, matching `cmd_query.go`'s `exitCodeAccessDenied` convention);
 SQL-text surface; `errors.Is(err, secureread.ErrNoPrincipal)` only ever
 surfaces at `NewSession` time (server startup), never per-request.
 
+Native DuckDB SQL has materialized-result bounds of 10,000 rows and
+4,000,000 bytes, reusing `queryresults.MaxRows` and `MaxDataBytes`. The byte
+bound covers the JSON encoding of the executor's complete `Result`, including
+column order and statistics; row retention also checks the running row-array
+size. Exceeding either bound fails the entire query with
+`ErrDuckDBResultLimit`; it never returns a truncated success or writes partial
+CLI stdout. Use explicit SQL `ORDER BY`, `LIMIT` and `OFFSET` for bounded pages.
+Values below these bounds retain their existing Go types and CLI JSON shape:
+wide integers remain exact JSON number lexemes, which consumers must decode
+without an intermediate JavaScript `Number`, and decimals retain their legacy
+width/scale/unscaled-value object. This does not introduce a typed wire codec.
+
+These bounds do not constrain DuckDB working memory, query work, temporary
+normalization/encoding buffers or one allocation already made by its driver.
+Read-only transactions still permit external file and URL reads. Native DuckDB
+therefore retains the existing explicit policy-free, no-loaded-policies
+operator boundary; this is not the TypeScript adapter's filesystem sandbox.
+Reader and database handles are closed before successful delivery, with fresh
+context checks after reader cleanup, column metadata and database cleanup.
+The existing driver's one-SELECT validation continues using legacy `Prepare`;
+`PrepareContext` can execute preceding statements and is not interchangeable.
+
 ## The three call sites
 
 ### 1. `GET /datatug/exec/select` (existing — `pkg/server/endpoints/execute_endpoints.go: executeSelectHandler`)

@@ -20,7 +20,7 @@ services:
       retries: 60
 
   postgrest:
-    image: "${POSTGREST_IMAGE:-postgrest/postgrest:v16.5}"
+    image: "${POSTGREST_IMAGE:-postgrest/postgrest:v16.6}"
     depends_on:
       postgres:
         condition: service_healthy

@@ -851,7 +851,10 @@ mirror`, which was this command under another name and is removed.)
    under `ext` under `teams` (its id is `teams/ext/events`). **The definition
    decides how records are stored**, and the mirror writes what it declares (see
    [Storage forms](#storage-forms)); a definition in a form the mirror does not
-   write is reported as `unsupported` and not copied.
+   write is reported as `unsupported` and not copied. The definitions are read
+   with inGitDB's own validation: one inGitDB does not accept (a column type
+   it has not, such as `[]map[string]any`, or a foreign key to no collection)
+   stops the run before anything is read, naming the collection (exit 2).
 2. **A mirror policy** in the DataTug project (one YAML file; `format:
    datatug-mirror-policy/v1`). It says what may leave Firestore:
 
@@ -941,7 +944,7 @@ The flags of `db copy` that mean the same thing in both modes are the same flags
 | Flag | With `--schema=destination` |
 |------|---------|
 | `--from` | The Firestore source (required). |
-| `--to` | Output folder (or `ingitdb://folder`); optional here: default the policy's `output`, else `data/<policy name>` in the project. |
+| `--to` | Output folder (or `ingitdb://folder`); optional here: default the policy's `output`, else `data/<policy name>` in the project. Any other URL (`sqlite://...`, `bigquery://...`) is refused (exit 2): this mode writes an inGitDB folder. |
 | `--include` | Comma-separated collections of the policy's `copy` list (definition ids such as `teams/ext/events`, not source table names); `teams/**` adds every collection below `teams`. An excluded or undeclared name is an error. |
 | `--dry-run` | Count, with Firestore count queries, and write nothing. |
 | `--progress` | One line on stderr per page read. |
@@ -1159,9 +1162,12 @@ it, comparing types and values.
 A Firestore id can hold any byte but `/` and be up to 1500 bytes long; a file
 name cannot. Every id written as a file or folder name (a document of a
 one-file-per-record collection, and each parent document) is written by the
-encoding `tilde-hex/v1`, recorded in `.datatug-mirror/output.json`. It is to be
-declared in the inGitDB schema and implemented once in ingitdb-go; the mirror
-implements it until then. Exactly:
+encoding `tilde-v1`, recorded in `.datatug-mirror/output.json`. It is the
+encoding inGitDB declares in a collection's schema as
+`record_file.key_encoding: tilde-v1`; the copy implements it until ingitdb-go
+releases its own (ingitdb-go#47). An output written by DataTug CLI v0.157.0
+records the same encoding under its earlier name `tilde-hex/v1`, which is read
+as `tilde-v1`: such an output is kept, resumed and pruned as before. Exactly:
 
 - **Encode** an id (a non-empty byte string with no `/`) byte by byte. A byte
   is kept when it is `A-Z`, `a-z`, `0-9` or one of `-` `_` `.` `@` `+` `=` `,`,

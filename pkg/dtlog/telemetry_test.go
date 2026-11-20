@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/posthog/posthog-go"
+	"github.com/posthog/posthog-go/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -368,7 +368,7 @@ func TestNoOtherPackageImportsPostHog(t *testing.T) {
 		checked++
 		for _, imp := range f.Imports {
 			p, _ := strconv.Unquote(imp.Path.Value)
-			assert.False(t, strings.HasPrefix(p, "github.com/posthog/posthog-go"), "%s imports PostHog: send through pkg/dtlog so the opt-out applies", path)
+			assert.False(t, strings.HasPrefix(p, "github.com/posthog/posthog-go/v2"), "%s imports PostHog: send through pkg/dtlog so the opt-out applies", path)
 		}
 		return nil
 	})
@@ -697,7 +697,7 @@ func wire(t *testing.T, msg posthog.Message) (top map[string]any, props map[stri
 	return top, props
 }
 
-// The fields the SDK (posthog-go v1.24.3) may put on a stack frame and on a
+// The fields the SDK (posthog-go v2.0.0) may put on a stack frame and on a
 // debug image. Each is a code position, an address or a build identifier; none
 // holds a path, a host name or a process id.
 var (
@@ -741,7 +741,7 @@ func prepareFixture(t *testing.T) {
 // What every event carries: set by this package ($session_*) and by the SDK.
 // The SDK client adds two constants on top when it sends: $geoip_disable and
 // $is_server.
-var commonProps = []string{"$go_version", "$lib", "$lib_version", "$os", "$session_duration", "$session_id", "$session_start_time"}
+var commonProps = []string{"$lib", "$lib_version", "$session_duration", "$session_id", "$session_start_time"}
 
 func TestWire_StartedAndExited(t *testing.T) {
 	prepareFixture(t)

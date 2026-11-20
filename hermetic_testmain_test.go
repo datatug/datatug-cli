@@ -7,7 +7,7 @@ import (
 
 	"github.com/datatug/datatug-cli/internal/hermetictest"
 	"github.com/datatug/datatug-cli/pkg/dtlog"
-	"github.com/posthog/posthog-go"
+	"github.com/posthog/posthog-go/v2"
 )
 
 // TestMain keeps every test in this package from reading or writing the

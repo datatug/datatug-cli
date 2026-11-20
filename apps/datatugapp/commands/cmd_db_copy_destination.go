@@ -208,7 +208,7 @@ func dbCopyFromDestinationSchema(cmd *cobra.Command) error {
 		return Exit(strings.TrimPrefix(err.Error(), dbmirror.ErrUsage.Error()+": "), exitCodeUsage)
 	}
 	asJSON, _ := flags.GetBool("json")
-	if errors.Is(err, dbmirror.ErrIDTooLong) || errors.Is(err, dbmirror.ErrRoundTrip) {
+	if errors.Is(err, dbmirror.ErrIDTooLong) || errors.Is(err, dbmirror.ErrRoundTrip) || errors.Is(err, dbmirror.ErrCaseFold) {
 		if asJSON && report != nil {
 			writeMirrorJSON(cmd.OutOrStdout(), report)
 		}

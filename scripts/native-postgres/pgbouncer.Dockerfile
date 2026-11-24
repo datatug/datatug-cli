@@ -1,5 +1,5 @@
 # CI-only fixture: pinned upstream source, never a production image.
-FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2 AS build
+FROM debian:trixie-slim@sha256:8aa5a7bf5a1955bddbe7d74fcdd0b91ab30e74362a8b73af672b0481b35b44a0 AS build
 RUN apt-get update && apt-get install -y --no-install-recommends \
     autoconf automake build-essential ca-certificates git libevent-dev libssl-dev libtool pkg-config python3 \
     && rm -rf /var/lib/apt/lists/*
@@ -15,7 +15,7 @@ RUN git init . \
     && ./pgbouncer --version | grep -Fx 'PgBouncer 1.26.1' \
     && strip pgbouncer
 
-FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
+FROM debian:trixie-slim@sha256:8aa5a7bf5a1955bddbe7d74fcdd0b91ab30e74362a8b73af672b0481b35b44a0
 RUN apt-get update && apt-get install -y --no-install-recommends libevent-2.1-7t64 libssl3t64 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 pooler \

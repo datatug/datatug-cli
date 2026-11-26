@@ -34,11 +34,11 @@ const (
 	demoSSHDefaultEnv        = "local"
 	demoSSHPreferredDB       = "orders"
 
-	demoSSHDefaultRLimitAS     uint64 = 2147483648 // 2 GiB
+	demoSSHDefaultRLimitAS     uint64 = 8589934592 // 8 GiB (address space; see pkg/sshdemo RlimitAS)
 	demoSSHDefaultRLimitCPU    uint64 = 900        // 900 s
 	demoSSHDefaultRLimitFSize  uint64 = 67108864   // 64 MiB
 	demoSSHDefaultRLimitNoFile uint64 = 512
-	demoSSHDefaultRLimitNProc  uint64 = 64
+	demoSSHDefaultRLimitNProc  uint64 = 256
 )
 
 type demoSSHRlimits struct {
@@ -65,6 +65,7 @@ type demoSSHSessionFlags struct {
 // Seams for unit tests in cmd_demo_ssh_session_test.go.
 var (
 	demoSSHApplyRlimits     = applyDemoSSHRlimits
+	demoSSHRaiseOOMScore    = raiseDemoSSHOOMScore
 	demoSSHUseMemoryStore   = ghauth.UseMemoryStore
 	demoSSHRunWelcome       = dtdemo.RunWelcome
 	demoSSHRunWorkspaceLoop = runWorkspaceLoop
@@ -112,6 +113,10 @@ func runDemoSSHSession(ctx context.Context, f demoSSHSessionFlags) error {
 	if err := demoSSHApplyRlimits(f.rlimits); err != nil {
 		return fmt.Errorf("apply resource limits: %w", err)
 	}
+
+	// Under memory pressure the kernel kills a session child, never the
+	// supervisor (best effort: only raising the score needs no privilege).
+	_ = demoSSHRaiseOOMScore()
 
 	// Keep GitHub tokens strictly in process memory; never touch the OS keyring.
 	demoSSHUseMemoryStore()

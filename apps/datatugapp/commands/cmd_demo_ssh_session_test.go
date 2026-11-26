@@ -651,3 +651,19 @@ func TestDemoSSHSessionParseCanonicalRepoAndNotice(t *testing.T) {
 type nonUnixFileInfo struct{ os.FileInfo }
 
 func (nonUnixFileInfo) Sys() any { return nil }
+
+func TestRaiseDemoSSHOOMScore(t *testing.T) {
+	old := demoSSHOOMScoreAdjPath
+	t.Cleanup(func() { demoSSHOOMScoreAdjPath = old })
+	demoSSHOOMScoreAdjPath = filepath.Join(t.TempDir(), "oom_score_adj")
+	if err := os.WriteFile(demoSSHOOMScoreAdjPath, []byte("0"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := raiseDemoSSHOOMScore(); err != nil {
+		t.Fatalf("raiseDemoSSHOOMScore: %v", err)
+	}
+	got, _ := os.ReadFile(demoSSHOOMScoreAdjPath)
+	if string(got) != "900" {
+		t.Fatalf("oom_score_adj = %q, want 900", got)
+	}
+}

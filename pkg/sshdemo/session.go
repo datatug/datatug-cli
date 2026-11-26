@@ -84,6 +84,8 @@ func BuildChildEnv(homeDir, term, colorTerm, egressProxy string) []string {
 		"PATH=/usr/local/bin:/usr/bin:/bin",
 		"DATATUG_TELEMETRY=0",
 		"DO_NOT_TRACK=1",
+		// A soft cap on the Go heap of one session; the cgroup is the hard one.
+		"GOMEMLIMIT="+ChildGoMemLimit,
 	)
 	if egressProxy != "" {
 		env = append(env,

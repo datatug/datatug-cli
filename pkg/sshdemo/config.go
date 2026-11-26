@@ -34,11 +34,13 @@ const (
 	DefaultCleanupTimeout = 30 * time.Second
 
 	// Child rlimit defaults (spec D3).
-	RlimitAS     = 2147483648 // 2 GiB
+	RlimitAS     = 8589934592 // 8 GiB of address space: the cgo binary (Go + DuckDB) reserves more than 2 GiB at start; resident memory is bounded by GOMEMLIMIT, the container cgroup and oom_score_adj
 	RlimitCPU    = 900        // 900 s
 	RlimitFSize  = 67108864   // 64 MiB
 	RlimitNoFile = 512
-	RlimitNProc  = 256 // per uid; Linux counts threads too (Go runtime + DuckDB)
+	// ChildGoMemLimit is the GOMEMLIMIT of every session child.
+	ChildGoMemLimit = "768MiB"
+	RlimitNProc     = 256 // per uid; Linux counts threads too (Go runtime + DuckDB)
 
 	// PTY initial dimension bounds (spec D3).
 	MinPTYWidth  = 1

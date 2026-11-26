@@ -14,3 +14,5 @@ func applyDemoSSHRlimits(demoSSHRlimits) error {
 func fileOwnedByUID(os.FileInfo, int) bool {
 	return false
 }
+
+func raiseDemoSSHOOMScore() error { return nil }

@@ -67,6 +67,13 @@ func computeLoweredRlimit(cur unix.Rlimit, want uint64) unix.Rlimit {
 	return next
 }
 
+// raiseDemoSSHOOMScore makes this session child a preferred OOM-killer victim.
+func raiseDemoSSHOOMScore() error {
+	return os.WriteFile(demoSSHOOMScoreAdjPath, []byte("900"), 0)
+}
+
+var demoSSHOOMScoreAdjPath = "/proc/self/oom_score_adj"
+
 func fileOwnedByUID(info os.FileInfo, uid int) bool {
 	st, ok := info.Sys().(*syscall.Stat_t)
 	if !ok {

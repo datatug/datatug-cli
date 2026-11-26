@@ -213,6 +213,12 @@ func runCleanupCommand(
 	ops SysOps,
 	logger *slog.Logger,
 ) bool {
+	// A process that left the session's process group (setsid) survived the
+	// group kill: kill everything of the slot uid first, so nothing writes into
+	// the workspace while it is being removed.
+	if isolation == IsolationUID {
+		_ = killAndDrainUIDProcs(uid, ops)
+	}
 	args := append(append([]string(nil), execPrefix...), BuildCleanupArgs(dir)...)
 	cmd := exec.CommandContext(ctx, execPath, args...)
 	cmd.Env = buildCleanupEnv(filepath.Join(dir, "home"))

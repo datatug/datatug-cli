@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	noPTYMessage    = "This demo needs an interactive terminal: ssh -t -p 2222 demo.datatug.app\n"
+	noPTYMessage    = "This demo needs an interactive terminal: reconnect with ssh -t (and no command).\n"
 	demoFullMessage = "The DataTug demo is full, please try again in a few minutes.\r\n"
 
 	// Session end reasons logged in structured JSON output.

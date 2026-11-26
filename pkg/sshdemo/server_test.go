@@ -363,7 +363,7 @@ func TestServer_PTYContractEnvTermClampingAndCanary(t *testing.T) {
 		"--rlimit-cpu":       "900",
 		"--rlimit-fsize":     "67108864",
 		"--rlimit-nofile":    "512",
-		"--rlimit-nproc":     "64",
+		"--rlimit-nproc":     "256",
 	}
 	if len(rep.Args) < 2 || rep.Args[0] != "demo" || rep.Args[1] != "ssh-session" {
 		t.Fatalf("unexpected argv prefix: %v", rep.Args)

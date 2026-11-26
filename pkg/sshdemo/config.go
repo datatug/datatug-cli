@@ -38,7 +38,7 @@ const (
 	RlimitCPU    = 900        // 900 s
 	RlimitFSize  = 67108864   // 64 MiB
 	RlimitNoFile = 512
-	RlimitNProc  = 64
+	RlimitNProc  = 256 // per uid; Linux counts threads too (Go runtime + DuckDB)
 
 	// PTY initial dimension bounds (spec D3).
 	MinPTYWidth  = 1

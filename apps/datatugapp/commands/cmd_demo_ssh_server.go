@@ -7,7 +7,6 @@ package commands
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/big"
 	"os/signal"
@@ -18,9 +17,6 @@ import (
 	"github.com/datatug/datatug-cli/pkg/sshdemo"
 	"github.com/spf13/cobra"
 )
-
-// Retained while sibling stub cmd_demo_ssh_session.go references it.
-var errSSHDemoNotImplemented = errors.New("not implemented yet")
 
 // Package seams so unit tests can verify flag binding without binding real sockets.
 var (

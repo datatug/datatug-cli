@@ -195,7 +195,7 @@ func allocatedWorkspaceBytes(dir string, quota uint64) (uint64, error) {
 }
 
 func (scan *workspaceScan) countWorkspaceDir(dir *os.File, quota uint64, depth int) (uint64, error) {
-	defer dir.Close()
+	defer func() { _ = dir.Close() }()
 	fd := int(dir.Fd())
 	var stat unix.Stat_t
 	if err := unix.Fstat(fd, &stat); err != nil {

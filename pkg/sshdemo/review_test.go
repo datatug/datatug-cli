@@ -68,7 +68,7 @@ func TestServerProxyProtocolPeerPolicy(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer conn.Close()
+			defer func() { _ = conn.Close() }()
 			if err := conn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
 				t.Fatal(err)
 			}
@@ -136,7 +136,7 @@ func TestServerLogsSanitizedSSHUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	if err := sess.Shell(); err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestServerDeadlineTerminatesProcessGroup(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer sess.Close()
+			defer func() { _ = sess.Close() }()
 			if err := sess.RequestPty("xterm", 24, 80, gossh.TerminalModes{}); err != nil {
 				t.Fatal(err)
 			}

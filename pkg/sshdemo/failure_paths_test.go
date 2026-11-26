@@ -181,7 +181,7 @@ func TestHealthProxyPreludeWriteFailure(t *testing.T) {
 		}
 		return client, nil
 	}
-	requireErrorContains(t, checkHealthWithDialer(nil, "", 0, EncodeProxyV2(nil, nil), dial), "send PROXY header")
+	requireErrorContains(t, checkHealthWithDialer(context.Background(), "", 0, EncodeProxyV2(nil, nil), dial), "send PROXY header")
 }
 
 type brokenHijacker struct{ *httptest.ResponseRecorder }
@@ -215,10 +215,10 @@ func TestEdgeForwarderAndHijackFailures(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			down, downPeer := net.Pipe()
-			defer downPeer.Close()
+			defer func() { _ = downPeer.Close() }()
 			up, upPeer := net.Pipe()
-			defer up.Close()
-			defer upPeer.Close()
+			defer func() { _ = up.Close() }()
+			defer func() { _ = upPeer.Close() }()
 			var logs syncBuffer
 			edge := NewEdge(EdgeConfig{
 				Logger:      slog.New(slog.NewJSONHandler(&logs, nil)),
@@ -369,7 +369,7 @@ func TestRevocationClosesPendingUpstreamHandshake(t *testing.T) {
 			closed <- err
 			return
 		}
-		defer up.Close()
+		defer func() { _ = up.Close() }()
 		_ = up.SetDeadline(time.Now().Add(2 * time.Second))
 		req, err := http.ReadRequest(bufio.NewReader(up))
 		if err != nil || req.Method != http.MethodConnect {

@@ -38,9 +38,6 @@ func checkHealthWithDialer(ctx context.Context, addr string, timeout time.Durati
 	if timeout <= 0 {
 		timeout = DefaultHealthTimeout
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 
 	dialCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

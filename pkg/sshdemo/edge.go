@@ -345,7 +345,7 @@ func newIdleConn(c net.Conn, timeout time.Duration) *idleConn {
 
 func (c *idleConn) bump() {
 	if c.timeout > 0 {
-		_ = c.Conn.SetDeadline(time.Now().Add(c.timeout))
+		_ = c.SetDeadline(time.Now().Add(c.timeout))
 	}
 }
 

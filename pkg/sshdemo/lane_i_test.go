@@ -298,7 +298,7 @@ func TestSessionRelayFairnessAndRevocation(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		_, _ = rw.WriteString("HTTP/1.1 200 Connection Established\r\n\r\nready")
 		_ = rw.Flush()
 		_, _ = io.Copy(conn, rw)
@@ -359,7 +359,7 @@ func TestSessionRelayFairnessAndRevocation(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("second session HTTP %d", resp.StatusCode)
 	}
-	defer c2.Close()
+	defer func() { _ = c2.Close() }()
 	rejectAtCapacity(auth3)
 
 	revoke1()
@@ -413,12 +413,12 @@ func TestCappedListenerCloseAtCapacity(t *testing.T) {
 	tcp := loopbackListener(t)
 	listener := capListener(tcp, 1)
 	peer := proxyDial(t, tcp.Addr().String())
-	defer peer.Close()
+	defer func() { _ = peer.Close() }()
 	accepted, err := listener.Accept()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer accepted.Close()
+	defer func() { _ = accepted.Close() }()
 	if err := listener.Close(); err != nil {
 		t.Fatal(err)
 	}

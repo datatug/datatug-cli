@@ -51,7 +51,7 @@ func TestServer_BoundsPreShellRequests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 
 	if err := sess.Setenv("LANG", strings.Repeat("é", 129)); err == nil {
 		t.Fatal("accepted an env value over 256 bytes")
@@ -114,7 +114,8 @@ func TestServer_ShellStartDeadline(t *testing.T) {
 		done := make(chan error, 1)
 		go func() { done <- client.Wait() }()
 		select {
-		case <-done:
+		case err := <-done:
+			_ = err // only that the connection ended matters here
 		case <-time.After(2 * time.Second):
 			t.Fatalf("connection still open (PTY requested: %v)", withPTY)
 		}
@@ -433,7 +434,7 @@ func TestServer_WatchdogQuotaNoticeWhilePTYStreams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	if err := sess.RequestPty("xterm", 24, 80, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -484,7 +485,7 @@ func TestServer_WatchdogQuotaNoticeWhilePTYStreams(t *testing.T) {
 
 func TestWriteQuotaNotice_ClosesBlockedTransport(t *testing.T) {
 	server, client := net.Pipe()
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	done := make(chan struct{})
 	go func() {
 		writeQuotaNotice(server, server, "quota exceeded")

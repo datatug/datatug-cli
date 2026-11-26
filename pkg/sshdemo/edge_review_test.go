@@ -80,8 +80,10 @@ func TestEdgeTunnelLimits(t *testing.T) {
 func TestEdgeLimitKeepsRemainingConnectionsForAnIP(t *testing.T) {
 	limit := newConnectionLimit(4, 2)
 	const ip = "192.0.2.1"
-	if !limit.acquire(ip) || !limit.acquire(ip) {
-		t.Fatal("two connections should fit")
+	for range 2 {
+		if !limit.acquire(ip) {
+			t.Fatal("two connections should fit")
+		}
 	}
 	limit.release(ip)
 	if !limit.acquire(ip) || limit.acquire(ip) {
@@ -100,9 +102,9 @@ func (h closedClientHijacker) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 
 func TestEdgeClosedClientReleasesTunnel(t *testing.T) {
 	upstream, target := net.Pipe()
-	defer target.Close()
+	defer func() { _ = target.Close() }()
 	client, peer := net.Pipe()
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	_ = peer.Close()
 	edge := NewEdge(EdgeConfig{
 		MaxTunnels: 1,

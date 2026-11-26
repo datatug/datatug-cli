@@ -684,7 +684,8 @@ func (s *Server) handleSession(sess ssh.Session) {
 		}
 		if waitCh != nil && !reaped {
 			select {
-			case <-waitCh:
+			case err := <-waitCh:
+				_ = err // reaped; only the wait matters here
 			case <-time.After(5 * time.Second):
 			}
 		}

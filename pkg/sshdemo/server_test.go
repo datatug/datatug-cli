@@ -245,7 +245,9 @@ func startTestServerWithPeer(t *testing.T, peer net.IP, mutate func(*Config), op
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(ctx)
-		<-serveDone
+		if err := <-serveDone; err != nil {
+			t.Logf("serve: %v", err)
+		}
 	}
 	t.Cleanup(stop)
 

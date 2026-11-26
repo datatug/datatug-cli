@@ -61,7 +61,7 @@ func TestSessionStartupFailuresReleaseSlot(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer session.Close()
+			defer func() { _ = session.Close() }()
 			if err := session.RequestPty("xterm", 24, 80, nil); err != nil {
 				t.Fatal(err)
 			}
@@ -168,8 +168,8 @@ func TestPTYDrainPendingAndUnavailableFD(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer read.Close()
-	defer write.Close()
+	defer func() { _ = read.Close() }()
+	defer func() { _ = write.Close() }()
 	if _, err := write.WriteString("pending"); err != nil {
 		t.Fatal(err)
 	}

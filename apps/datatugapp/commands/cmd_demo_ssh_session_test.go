@@ -58,6 +58,9 @@ func TestDemoSSHSessionRlimitsLoweringOnlyAndFailClosed(t *testing.T) {
 			unix.RLIMIT_NOFILE:  {Cur: 2048, Max: 4096},
 			unix.RLIMIT_NPROC:   {Cur: 128, Max: 128},
 		}
+		if _, ok := current[demoSSHRlimitMsgQueue]; !ok {
+			current[demoSSHRlimitMsgQueue] = unix.Rlimit{Cur: 819200, Max: 819200}
+		}
 		applied := map[int]unix.Rlimit{}
 		stubSSHSession(t, &demoSSHGetrlimit, func(res int, r *unix.Rlimit) error {
 			*r = current[res]
@@ -80,6 +83,9 @@ func TestDemoSSHSessionRlimitsLoweringOnlyAndFailClosed(t *testing.T) {
 		}
 		if applied[unix.RLIMIT_CORE] != (unix.Rlimit{Cur: 0, Max: 0}) {
 			t.Fatalf("RLIMIT_CORE = %+v", applied[unix.RLIMIT_CORE])
+		}
+		if applied[demoSSHRlimitMsgQueue] != (unix.Rlimit{Cur: 0, Max: 0}) {
+			t.Fatalf("RLIMIT_MSGQUEUE = %+v", applied[demoSSHRlimitMsgQueue])
 		}
 		if applied[unix.RLIMIT_MEMLOCK] != (unix.Rlimit{Cur: 0, Max: 0}) {
 			t.Fatalf("RLIMIT_MEMLOCK = %+v", applied[unix.RLIMIT_MEMLOCK])

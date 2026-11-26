@@ -27,6 +27,7 @@ func applyDemoSSHRlimits(limits demoSSHRlimits) error {
 		// Locked pages cannot be reclaimed; locking page cache another slot
 		// faulted in first would keep that slot from being reused.
 		{"RLIMIT_MEMLOCK", unix.RLIMIT_MEMLOCK, 0, true},
+		{"RLIMIT_MSGQUEUE", demoSSHRlimitMsgQueue, 0, true},
 		{"RLIMIT_AS", unix.RLIMIT_AS, limits.AS, false},
 		{"RLIMIT_CPU", unix.RLIMIT_CPU, limits.CPU, false},
 		{"RLIMIT_FSIZE", unix.RLIMIT_FSIZE, limits.FSize, false},

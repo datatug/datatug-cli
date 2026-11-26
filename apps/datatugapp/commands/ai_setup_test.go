@@ -14,6 +14,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
 	"github.com/datatug/datatug-cli/pkg/auth/device"
 	"github.com/datatug/datatug-cli/pkg/chat"
 	"github.com/spf13/cobra"
@@ -994,5 +995,23 @@ func TestChosenDataTugAIDropsAModelThePlanLost(t *testing.T) {
 	_, err := runChatProject(chatCommand(), options)
 	if err == nil || !strings.Contains(err.Error(), "DataTug sign-in expired; sign in again: run 'datatug auth login'") {
 		t.Fatalf("explicit --model cloud with an expired sign-in: %v", err)
+	}
+}
+
+// A workspace that must not start a browser on its host (the SSH demo) gets
+// doors that never open one: no device flow and no browser for the upgrade page.
+func TestAISetupDoorsWithoutBrowser(t *testing.T) {
+	covDSetVar(t, &aiEnsureSignedIn, func(_ context.Context, opts device.SignInOptions) (device.Session, error) {
+		if opts.Interactive {
+			t.Error("a no-browser workspace started the device flow")
+		}
+		return device.Session{}, device.ErrNotSignedIn
+	})
+	doors := newAISetupDoors(chatOptions{workspace: &workspaceStart{options: datatugui.Options{DisableBrowser: true}}})
+	if _, err := doors.signIn(context.Background(), io.Discard); !errors.Is(err, device.ErrNotSignedIn) {
+		t.Fatalf("signIn err = %v", err)
+	}
+	if err := doors.openBrowser("https://example.com/upgrade"); !errors.Is(err, errNoBrowser) {
+		t.Fatalf("openBrowser err = %v, want errNoBrowser", err)
 	}
 }

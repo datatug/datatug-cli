@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -79,10 +80,19 @@ type aiSetupDoors struct {
 // aiEnsureSignedIn is device.EnsureSignedIn; a seam so no test starts a real sign-in.
 var aiEnsureSignedIn = device.EnsureSignedIn
 
+// errNoBrowser is what openBrowser returns in a workspace that must never start
+// a browser on its host (the SSH demo); the dialog then shows the link as text.
+var errNoBrowser = errors.New("this workspace does not open a browser")
+
 var newAISetupDoors = func(options chatOptions) aiSetupDoors {
+	noBrowser := options.workspace != nil && options.workspace.options.DisableBrowser
+	openBrowser := deviceauth.OpenBrowser
+	if noBrowser {
+		openBrowser = func(string) error { return errNoBrowser }
+	}
 	return aiSetupDoors{
 		signIn: func(ctx context.Context, out io.Writer) (string, error) {
-			session, err := aiEnsureSignedIn(ctx, device.SignInOptions{Insecure: options.insecureStorage, Interactive: true, Out: out, ErrOut: out})
+			session, err := aiEnsureSignedIn(ctx, device.SignInOptions{Insecure: options.insecureStorage, Interactive: !noBrowser, Out: out, ErrOut: out})
 			return session.Email, err
 		},
 		plan: func(ctx context.Context) (cloudPlan, error) {
@@ -96,7 +106,7 @@ var newAISetupDoors = func(options chatOptions) aiSetupDoors {
 			}
 			return plan, plan.requirePersonalFreeOrPro()
 		},
-		openBrowser: deviceauth.OpenBrowser,
+		openBrowser: openBrowser,
 		saveChoice:  writeAIChoice,
 		saveKey:     func(account, key string) error { return aiKeySet(aiKeyringService, account, key) },
 		now:         time.Now,

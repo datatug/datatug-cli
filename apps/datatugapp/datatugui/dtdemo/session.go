@@ -28,6 +28,9 @@ const (
 	GitHubScope = "public_repo"
 	// DefaultSaveBranch is the default branch name on the visitor's fork.
 	DefaultSaveBranch = "datatug-demo"
+	// SaveNotConfiguredNotice is displayed in the Save module when the demo
+	// server was started against a non-GitHub repository.
+	SaveNotConfiguredNotice = "Saving to GitHub is not configured on this demo server."
 	// ExternalDatabasesNotice states that external databases are not part of the repo.
 	ExternalDatabasesNotice = "Note: OpenVaultDB cloud databases and any other external databases are not part of this repository, so changes made there are neither saved nor undone."
 )
@@ -131,6 +134,12 @@ type Config struct {
 	RequestDeviceCode func(ctx context.Context, clientID, scope string) (*ghauth.DeviceCodeResponse, error)
 	PollForToken      func(ctx context.Context, clientID, clientSecret, deviceCode string, interval int, onAttempt func(int)) (*oauth2.Token, error)
 	SaveToken         func(token *oauth2.Token) error
+}
+
+// GitHubEnabled reports whether GitHub sign-in, fork opening, and saving are
+// configured for this demo session (i.e. Canonical names a GitHub owner/repo).
+func (c Config) GitHubEnabled() bool {
+	return c.Canonical.Owner != "" && c.Canonical.Name != ""
 }
 
 func (c Config) normalized() Config {

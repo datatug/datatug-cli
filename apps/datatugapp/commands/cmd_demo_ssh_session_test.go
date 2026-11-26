@@ -34,7 +34,7 @@ func TestDemoSSHSessionFlagsAndCommand(t *testing.T) {
 		"workspace", "template", "project-dir", "repo", "github-client-id",
 		"save-branch", "session-id", "deadline",
 		"rlimit-as", "rlimit-cpu", "rlimit-fsize", "rlimit-nofile", "rlimit-nproc",
-		"cleanup",
+		"cleanup", "prepare-template",
 	}
 	for _, name := range requiredFlags {
 		if cmd.Flags().Lookup(name) == nil {
@@ -148,8 +148,23 @@ func TestDemoSSHSessionCopyTemplateTree(t *testing.T) {
 			}
 		}
 
+		// Also include an executable script and verify its 0755 bit is preserved.
+		scriptPath := filepath.Join(src, "scripts", "run.sh")
+		if err := os.MkdirAll(filepath.Dir(scriptPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(scriptPath, 0o755); err != nil {
+			t.Fatal(err)
+		}
+
 		if err := copyTemplateTree(src, dst); err != nil {
 			t.Fatalf("copyTemplateTree: %v", err)
+		}
+		if sfi, err := os.Stat(filepath.Join(dst, "scripts", "run.sh")); err != nil || sfi.Mode().Perm() != 0o755 {
+			t.Fatalf("copied script mode = %v / %v, want 0755", sfi, err)
 		}
 		for _, rel := range []string{".git/HEAD", ".git/objects/pack/test.idx", "demo-project-1/datatug-project.json", "demo-project-1/queries/top.sql"} {
 			p := filepath.Join(dst, filepath.FromSlash(rel))
@@ -276,6 +291,14 @@ func TestDemoSSHSessionEndToEndWiringAndOptions(t *testing.T) {
 			t.Fatal(err)
 		}
 		tpl := makeDemoTemplate(t, "DataTug Demo Project", "chinook", "orders")
+		// Put a bundled chinook.sqlite in the template to verify chinook-local seeding.
+		chinookSrc := filepath.Join(tpl, "demo-project-1", ".demo-data", "chinook.sqlite")
+		if err := os.MkdirAll(filepath.Dir(chinookSrc), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(chinookSrc, []byte("sqlite-bytes"), 0o644); err != nil {
+			t.Fatal(err)
+		}
 
 		order := []string{}
 		var gotLimits demoSSHRlimits
@@ -343,9 +366,15 @@ func TestDemoSSHSessionEndToEndWiringAndOptions(t *testing.T) {
 			t.Fatalf("registered project = %+v", proj)
 		}
 
-		// Workspace chatOptions verified.
-		if captured.project != "demo" || captured.env != "local" || captured.database != "orders" {
-			t.Fatalf("chatOptions project/env/db = %q/%q/%q", captured.project, captured.env, captured.database)
+		// chinook-local seeded under <workspace>/home/datatug/dbs/chinook-local.sqlite.
+		chinookLocal, err := os.ReadFile(filepath.Join(ws, "home", "datatug", "dbs", "chinook-local.sqlite"))
+		if err != nil || string(chinookLocal) != "sqlite-bytes" {
+			t.Fatalf("chinook-local = (%q, %v), want sqlite-bytes", string(chinookLocal), err)
+		}
+
+		// Workspace chatOptions verified: opens chinook / Invoice so notice is visible.
+		if captured.project != "demo" || captured.env != "local" || captured.database != "chinook" || captured.openAtStart != "Invoice" {
+			t.Fatalf("chatOptions project/env/db/openAtStart = %q/%q/%q/%q", captured.project, captured.env, captured.database, captured.openAtStart)
 		}
 		if len(captured.roles) != 1 || captured.roles[0] != "admin" {
 			t.Fatalf("roles = %v", captured.roles)
@@ -419,11 +448,51 @@ func TestDemoSSHSessionEndToEndWiringAndOptions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("runDemoSSHSession: %v", err)
 		}
-		if captured.database != "alpha" {
-			t.Fatalf("expected first catalog alpha, got %q", captured.database)
+		if captured.database != "alpha" || captured.openAtStart != "" {
+			t.Fatalf("expected first catalog alpha with empty openAtStart, got %q / %q", captured.database, captured.openAtStart)
 		}
 		if !strings.Contains(captured.notice, "Temporary demo workspace") || strings.Contains(captured.notice, "UTC") {
 			t.Fatalf("notice without deadline = %q", captured.notice)
+		}
+	})
+
+	t.Run("non-GitHub --repo disables GitHub features instead of failing", func(t *testing.T) {
+		ws := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(ws, "home"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		tpl := makeDemoTemplate(t, "Local Repo Demo", "orders")
+
+		stubSSHSession(t, &demoSSHApplyRlimits, func(demoSSHRlimits) error { return nil })
+		stubSSHSession(t, &demoSSHUseMemoryStore, func() {})
+		var gotWelcomeCfg dtdemo.Config
+		stubSSHSession(t, &demoSSHRunWelcome, func(cfg dtdemo.Config, _ ...tea.ProgramOption) (dtdemo.WelcomeResult, error) {
+			gotWelcomeCfg = cfg
+			return dtdemo.WelcomeResult{Outcome: dtdemo.OutcomeExplore}, nil
+		})
+		var captured chatOptions
+		stubSSHSession(t, &demoSSHRunWorkspaceLoop, func(_ *cobra.Command, opts chatOptions) error {
+			captured = opts
+			return nil
+		})
+
+		err := runDemoSSHSession(context.Background(), demoSSHSessionFlags{
+			workspace:  ws,
+			template:   tpl,
+			projectDir: "demo-project-1",
+			repo:       "file:///tmp/local-demo-repo",
+		})
+		if err != nil {
+			t.Fatalf("non-GitHub repo should not fail session: %v", err)
+		}
+		if gotWelcomeCfg.GitHubEnabled() {
+			t.Fatalf("expected GitHubEnabled=false, got %+v", gotWelcomeCfg.Canonical)
+		}
+		if captured.database != "orders" || captured.openAtStart != "" {
+			t.Fatalf("expected orders fallback without chinook, got %q / %q", captured.database, captured.openAtStart)
+		}
+		if strings.Contains(captured.notice, "Save to GitHub") {
+			t.Fatalf("notice should not advertise Save to GitHub when disabled: %q", captured.notice)
 		}
 	})
 
@@ -440,9 +509,6 @@ func TestDemoSSHSessionEndToEndWiringAndOptions(t *testing.T) {
 		}
 		if err := runDemoSSHSession(context.Background(), demoSSHSessionFlags{workspace: "/tmp/ws"}); err == nil || !strings.Contains(err.Error(), "--template") {
 			t.Fatalf("expected missing template error, got %v", err)
-		}
-		if err := runDemoSSHSession(context.Background(), demoSSHSessionFlags{workspace: "/tmp/ws", template: "/tmp/tpl", repo: "invalid"}); err == nil || !strings.Contains(err.Error(), "--repo") {
-			t.Fatalf("expected invalid repo error, got %v", err)
 		}
 		if err := runDemoSSHSession(context.Background(), demoSSHSessionFlags{workspace: "/tmp/ws", template: "/tmp/tpl", repo: demoSSHDefaultRepo, deadline: "not-a-time"}); err == nil || !strings.Contains(err.Error(), "--deadline") {
 			t.Fatalf("expected invalid deadline error, got %v", err)
@@ -472,6 +538,14 @@ func TestDemoSSHSessionEndToEndWiringAndOptions(t *testing.T) {
 		//nolint:staticcheck // intentionally testing nil context fallback
 		if err := runDemoSSHSession(nil, demoSSHSessionFlags{workspace: wsBad, template: tplOK, repo: demoSSHDefaultRepo, projectDir: "demo-project-1"}); err == nil || !strings.Contains(err.Error(), "register demo project") {
 			t.Fatalf("expected register project failure, got %v", err)
+		}
+
+		// Seeding chinook-local fails when home is a regular file and chinook.sqlite exists.
+		tplWithChinook := makeDemoTemplate(t, "T")
+		_ = os.MkdirAll(filepath.Join(tplWithChinook, "demo-project-1", ".demo-data"), 0o755)
+		_ = os.WriteFile(filepath.Join(tplWithChinook, "demo-project-1", ".demo-data", "chinook.sqlite"), []byte("x"), 0o644)
+		if err := runDemoSSHSession(context.Background(), demoSSHSessionFlags{workspace: wsBad, template: tplWithChinook, repo: demoSSHDefaultRepo, projectDir: "demo-project-1"}); err == nil || !strings.Contains(err.Error(), "seed chinook-local") {
+			t.Fatalf("expected seed chinook-local failure, got %v", err)
 		}
 
 		// Corrupt settings file causes read settings error.
@@ -594,33 +668,41 @@ func TestDemoSSHSessionCleanupMode(t *testing.T) {
 	})
 }
 
-func TestDemoSSHSessionParseCanonicalRepoAndNotice(t *testing.T) {
+func TestDemoSSHSessionParseGitHubRepoNoticeAndSeeding(t *testing.T) {
 	cases := []struct {
 		raw  string
 		want string
 	}{
 		{"https://github.com/datatug/datatug-demo-project", "datatug/datatug-demo-project"},
 		{"https://github.com/datatug/datatug-demo-project.git", "datatug/datatug-demo-project"},
+		{"http://github.com/datatug/datatug-demo-project/", "datatug/datatug-demo-project"},
 		{"github.com/datatug/datatug-demo-project/", "datatug/datatug-demo-project"},
 		{"datatug/datatug-demo-project", "datatug/datatug-demo-project"},
 	}
 	for _, tc := range cases {
-		r, err := parseCanonicalRepo(tc.raw)
-		if err != nil || r.FullName() != tc.want {
-			t.Errorf("parseCanonicalRepo(%q) = (%q, %v), want %q", tc.raw, r.FullName(), err, tc.want)
+		r, ok := parseGitHubRepo(tc.raw)
+		if !ok || r.FullName() != tc.want {
+			t.Errorf("parseGitHubRepo(%q) = (%q, %v), want (%q, true)", tc.raw, r.FullName(), ok, tc.want)
 		}
 	}
-	for _, bad := range []string{"", "onlyone", "https://github.com/a/b/c", "://bad-url"} {
-		if _, err := parseCanonicalRepo(bad); err == nil {
-			t.Errorf("expected error for %q", bad)
+	for _, nonGH := range []string{
+		"", "onlyone", "https://github.com/a/b/c", "://bad-url",
+		"file:///tmp/repo", "/tmp/local/repo", "./local/repo", "~/repo",
+		"https://gitlab.com/a/b", "a/..", "a/b c",
+	} {
+		if r, ok := parseGitHubRepo(nonGH); ok {
+			t.Errorf("parseGitHubRepo(%q) = (%+v, true), want false", nonGH, r)
 		}
 	}
 
-	if got := demoSSHNotice(time.Date(2026, 11, 26, 9, 5, 0, 0, time.UTC)); !strings.Contains(got, "09:05 UTC") {
-		t.Fatalf("notice = %q", got)
+	if got := demoSSHNotice(time.Date(2026, 11, 26, 9, 5, 0, 0, time.UTC), true); !strings.Contains(got, "09:05 UTC") || !strings.Contains(got, "Save to GitHub") {
+		t.Fatalf("notice with github = %q", got)
 	}
-	if got := demoSSHNotice(time.Time{}); strings.Contains(got, "UTC") {
+	if got := demoSSHNotice(time.Time{}, true); strings.Contains(got, "UTC") || !strings.Contains(got, "Save to GitHub") {
 		t.Fatalf("zero deadline notice = %q", got)
+	}
+	if got := demoSSHNotice(time.Date(2026, 11, 26, 9, 5, 0, 0, time.UTC), false); !strings.Contains(got, "09:05 UTC") || strings.Contains(got, "Save to GitHub") {
+		t.Fatalf("notice without github = %q", got)
 	}
 
 	// Registering twice updates the existing demo entry instead of duplicating.
@@ -642,9 +724,21 @@ func TestDemoSSHSessionParseCanonicalRepoAndNotice(t *testing.T) {
 	if len(settings.Projects) != 1 || settings.Projects[0].Title != "Second Title" {
 		t.Fatalf("expected updated single project, got %+v", settings.Projects)
 	}
-	// Empty catalog list falls back to preferred database.
-	if db := resolveDemoSSHDatabase(context.Background(), filepath.Join(tpl1, "demo-project-1"), "local"); db != demoSSHPreferredDB {
-		t.Fatalf("fallback db = %q, want %q", db, demoSSHPreferredDB)
+	// Empty catalog list falls back to preferred database with empty openAtStart.
+	if db, tbl := resolveDemoSSHStartTarget(context.Background(), filepath.Join(tpl1, "demo-project-1"), "local"); db != demoSSHPreferredDB || tbl != "" {
+		t.Fatalf("fallback db/tbl = (%q, %q), want (%q, \"\")", db, tbl, demoSSHPreferredDB)
+	}
+
+	// seedDemoSSHChinookLocal edge cases: directory at chinook path is skipped; stat error returned.
+	dirChinookProj := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dirChinookProj, ".demo-data", "chinook.sqlite"), 0o755)
+	if err := seedDemoSSHChinookLocal(ws, dirChinookProj); err != nil {
+		t.Fatalf("dir at chinook.sqlite should skip: %v", err)
+	}
+	fileAsDemoData := t.TempDir()
+	_ = os.WriteFile(filepath.Join(fileAsDemoData, ".demo-data"), []byte("not-a-dir"), 0o600)
+	if err := seedDemoSSHChinookLocal(ws, fileAsDemoData); err == nil {
+		t.Fatal("expected stat error when .demo-data is a regular file")
 	}
 }
 

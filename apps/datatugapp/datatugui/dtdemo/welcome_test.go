@@ -65,6 +65,30 @@ func TestWelcomeChooseRouting(t *testing.T) {
 		}
 	})
 
+	t.Run("github disabled hides option 2 and ignores 2/down", func(t *testing.T) {
+		cfg := testConfig(NewAuthState(), nil, nil)
+		cfg.Canonical = demogit.Repo{}
+		var tm tea.Model = NewWelcomeModel(cfg)
+		tm, _ = feedModel(tm, tea.WindowSizeMsg{Width: 90, Height: 28})
+		v := welcomeView(tm)
+		if !strings.Contains(v, "[1] Explore the demo project") {
+			t.Fatalf("missing option 1:\n%s", v)
+		}
+		if strings.Contains(v, "Open my GitHub project") || strings.Contains(v, "1/2") {
+			t.Fatalf("option 2 should be hidden when GitHub disabled:\n%s", v)
+		}
+		// Pressing down or "2" must not open GitHub flow or move index.
+		tm, msgs := feedModel(tm, uitest.Key("down"), uitest.Key("2"))
+		if hasQuit(msgs) || tm.(WelcomeModel).step != welcomeStepChoose || tm.(WelcomeModel).index != 0 {
+			t.Fatalf("unexpected state after down/2: step=%d index=%d", tm.(WelcomeModel).step, tm.(WelcomeModel).index)
+		}
+		// Enter still explores.
+		tm, msgs = feedModel(tm, uitest.Key("enter"))
+		if !hasQuit(msgs) || tm.(WelcomeModel).Result().Outcome != OutcomeExplore {
+			t.Fatalf("expected explore on enter, got %+v", tm.(WelcomeModel).Result())
+		}
+	})
+
 	t.Run("tall render clips to height", func(t *testing.T) {
 		var tm tea.Model = NewWelcomeModel(testConfig(NewAuthState(), nil, nil))
 		tm, _ = feedModel(tm, tea.WindowSizeMsg{Width: 60, Height: 5})

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/zalando/go-keyring"
@@ -39,36 +40,94 @@ var (
 	accessTokenURL = "https://github.com/login/oauth/access_token"
 	newTicker      = func(d time.Duration) tickerIface { return &realTicker{time.NewTicker(d)} }
 	jsonMarshal    = json.Marshal
+	keyringSet     = keyring.Set
+	keyringGet     = keyring.Get
+	keyringDelete  = keyring.Delete
 )
 
-// SaveToken stores the GitHub OAuth token in the system keyring.
+// ErrNoToken is returned by GetToken when the in-memory token store is active
+// and no token has been saved yet.
+var ErrNoToken = errors.New("no token stored in memory")
+
+var (
+	tokenStoreMu   sync.RWMutex
+	useMemoryStore bool
+	memoryToken    []byte
+)
+
+// UseMemoryStore switches SaveToken, GetToken and DeleteToken to an in-memory
+// store for the rest of the process so the OS keyring is never touched.
+// Calling it more than once is a no-op and preserves any stored token.
+func UseMemoryStore() {
+	tokenStoreMu.Lock()
+	useMemoryStore = true
+	tokenStoreMu.Unlock()
+}
+
+// SaveToken stores the GitHub OAuth token in the active store (the system
+// keyring by default, or process memory after UseMemoryStore).
 func SaveToken(token *oauth2.Token) error {
 	data, err := jsonMarshal(token)
 	if err != nil {
 		return fmt.Errorf("failed to marshal token: %w", err)
 	}
-	if err := keyring.Set(keyringService, keyringUser, string(data)); err != nil {
+	tokenStoreMu.Lock()
+	if useMemoryStore {
+		for i := range memoryToken {
+			memoryToken[i] = 0
+		}
+		memoryToken = append([]byte(nil), data...)
+		tokenStoreMu.Unlock()
+		return nil
+	}
+	tokenStoreMu.Unlock()
+	if err := keyringSet(keyringService, keyringUser, string(data)); err != nil {
 		return fmt.Errorf("failed to save token to keyring: %w", err)
 	}
 	return nil
 }
 
-// GetToken retrieves the GitHub OAuth token from the system keyring.
+// GetToken retrieves the GitHub OAuth token from the active store (the system
+// keyring by default, or process memory after UseMemoryStore).
 func GetToken() (*oauth2.Token, error) {
-	data, err := keyring.Get(keyringService, keyringUser)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get token from keyring: %w", err)
+	var raw []byte
+	tokenStoreMu.RLock()
+	if useMemoryStore {
+		if len(memoryToken) == 0 {
+			tokenStoreMu.RUnlock()
+			return nil, ErrNoToken
+		}
+		raw = append([]byte(nil), memoryToken...)
+		tokenStoreMu.RUnlock()
+	} else {
+		tokenStoreMu.RUnlock()
+		data, err := keyringGet(keyringService, keyringUser)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get token from keyring: %w", err)
+		}
+		raw = []byte(data)
 	}
 	var token oauth2.Token
-	if err := json.Unmarshal([]byte(data), &token); err != nil {
+	if err := json.Unmarshal(raw, &token); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal token: %w", err)
 	}
 	return &token, nil
 }
 
-// DeleteToken removes the GitHub OAuth token from the system keyring.
+// DeleteToken removes the GitHub OAuth token from the active store (the system
+// keyring by default, or process memory after UseMemoryStore).
 func DeleteToken() error {
-	if err := keyring.Delete(keyringService, keyringUser); err != nil {
+	tokenStoreMu.Lock()
+	if useMemoryStore {
+		for i := range memoryToken {
+			memoryToken[i] = 0
+		}
+		memoryToken = nil
+		tokenStoreMu.Unlock()
+		return nil
+	}
+	tokenStoreMu.Unlock()
+	if err := keyringDelete(keyringService, keyringUser); err != nil {
 		return fmt.Errorf("failed to delete token from keyring: %w", err)
 	}
 	return nil
@@ -119,17 +178,22 @@ func postJSON(ctx context.Context, url string, data interface{}, target interfac
 	return nil
 }
 
-// RequestDeviceCode requests a device code from GitHub.
-func RequestDeviceCode(ctx context.Context, clientID string) (*DeviceCodeResponse, error) {
+// RequestDeviceCodeWithScope requests a device code from GitHub for the given OAuth scope.
+func RequestDeviceCodeWithScope(ctx context.Context, clientID, scope string) (*DeviceCodeResponse, error) {
 	data := map[string]string{
 		"client_id": clientID,
-		"scope":     "repo",
+		"scope":     scope,
 	}
 	var res DeviceCodeResponse
 	if err := postJSON(ctx, deviceCodeURL, data, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
+}
+
+// RequestDeviceCode requests a device code from GitHub.
+func RequestDeviceCode(ctx context.Context, clientID string) (*DeviceCodeResponse, error) {
+	return RequestDeviceCodeWithScope(ctx, clientID, "repo")
 }
 
 // PollForToken polls GitHub for an access token.

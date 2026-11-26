@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # renovate: pin digest
-FROM golang:1.27.3-trixie AS source
+FROM golang:1.27.4-trixie AS source
 
 WORKDIR /src
 COPY . .

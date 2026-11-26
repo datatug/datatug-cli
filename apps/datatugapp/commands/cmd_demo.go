@@ -51,7 +51,8 @@ func demoCommandArgs() *cobra.Command {
 	}
 	cmd.Flags().Bool("reset-db", false, "Re-downloads the demo SQLite fixture file(s) from the internet")
 	cmd.Flags().Bool("reset-project", false, "Re-clones the demo project from scratch")
-	cmd.AddCommand(demoInstallCommand(), demoResetCommand())
+	cmd.AddCommand(demoInstallCommand(), demoResetCommand(),
+		demoSSHServerCommand(), demoSSHHealthCommand(), demoSSHEdgeCommand(), demoSSHSessionCommand())
 	return cmd
 }
 

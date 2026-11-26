@@ -14,7 +14,7 @@ go 1.27.3
 //                                    Decimal/Bytes type mapping)
 require (
 	charm.land/bubbles/v2 v2.2.1
-	charm.land/bubbletea/v2 v2.1.1
+	charm.land/bubbletea/v2 v2.1.3
 	charm.land/fang/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.6
 	cloud.google.com/go/firestore v1.29.2
@@ -26,7 +26,7 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.47.5
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.72.3
 	github.com/charmbracelet/ultraviolet v0.0.0-20261008173134-6b8d4baf91b4
-	github.com/charmbracelet/x/ansi v0.11.9
+	github.com/charmbracelet/x/ansi v0.11.10
 	github.com/dal-go/dalgo v0.102.4
 	github.com/dal-go/dalgo2bigquery v0.3.2
 	github.com/dal-go/dalgo2clickhouse v0.0.0-20261030135300-99a44064132e
@@ -113,6 +113,9 @@ require (
 
 require (
 	charm.land/glamour/v2 v2.0.1 // indirect
+	charm.land/log/v2 v2.0.1 // indirect
+	charm.land/ssh v0.4.3 // indirect
+	charm.land/wish/v2 v2.0.6 // indirect
 	cloud.google.com/go v0.123.0 // indirect
 	cloud.google.com/go/auth v0.24.1-0.20261001053825-dbc26066f70a // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.3.0 // indirect
@@ -123,9 +126,10 @@ require (
 	github.com/ClickHouse/ch-go v0.74.0 // indirect
 	github.com/ClickHouse/clickhouse-go/v2 v2.49.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
-	github.com/ProtonMail/go-crypto v1.4.1 // indirect
+	github.com/ProtonMail/go-crypto v1.5.2 // indirect
 	github.com/RoaringBitmap/roaring/v2 v2.30.0 // indirect
 	github.com/andybalholm/brotli v1.2.6 // indirect
+	github.com/anmitsu/go-shlex v0.0.0-20200514113438-38f4b401e2be // indirect
 	github.com/apache/arrow-go/v18 v18.5.1 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.5.8 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.8.8 // indirect
@@ -137,15 +141,19 @@ require (
 	github.com/bits-and-blooms/bitset v1.24.6 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
+	github.com/charmbracelet/keygen v0.5.4 // indirect
+	github.com/charmbracelet/x/conpty v0.2.0 // indirect
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20250603201427-c31516f43444 // indirect
 	github.com/charmbracelet/x/exp/golden v0.0.0-20260330094520-2dce04b6f8a4 // indirect
 	github.com/charmbracelet/x/exp/slice v0.0.0-20260813141921-f091cedeaf78 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
+	github.com/charmbracelet/x/xpty v0.1.4 // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
-	github.com/cloudflare/circl v1.6.4 // indirect
+	github.com/cloudflare/circl v1.6.5 // indirect
+	github.com/creack/pty v1.1.24 // indirect
 	github.com/crediterra/money v0.4.2 // indirect
 	github.com/cyphar/filepath-securejoin v0.7.0 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
@@ -167,6 +175,7 @@ require (
 	github.com/go-faster/errors v0.7.1 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.9.1 // indirect
+	github.com/go-logfmt/logfmt v0.6.1 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
@@ -210,6 +219,7 @@ require (
 	github.com/paulmach/orb v0.13.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.4.3 // indirect
 	github.com/pierrec/lz4/v4 v4.1.27 // indirect
+	github.com/pires/go-proxyproto v0.16.0 // indirect
 	github.com/pjbgf/sha1cd v0.6.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/qri-io/jsonpointer v0.1.1 // indirect
@@ -222,7 +232,7 @@ require (
 	github.com/segmentio/asm v1.2.1 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect
 	github.com/sergi/go-diff v1.4.0 // indirect
-	github.com/skeema/knownhosts v1.3.2 // indirect
+	github.com/skeema/knownhosts v1.3.3 // indirect
 	github.com/strongo/analytics v0.2.12 // indirect
 	github.com/strongo/decimal v0.1.2 // indirect
 	github.com/strongo/gotwilio v0.0.0-20160123000810-f024bbefe80f // indirect
@@ -232,7 +242,7 @@ require (
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
 	github.com/xdg-go/scram v1.2.0 // indirect
 	github.com/xdg-go/stringprep v1.0.4 // indirect
-	github.com/xo/terminfo v1.0.0 // indirect
+	github.com/xo/terminfo v1.2.0 // indirect
 	github.com/xuri/efp v0.0.1 // indirect
 	github.com/xuri/nfp v0.0.2-0.20250530014748-2ddeb826f9a9 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
@@ -251,7 +261,7 @@ require (
 	go.uber.org/mock v0.6.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.6 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
-	golang.org/x/exp v0.0.0-20260824195058-e88cd73687aa // indirect
+	golang.org/x/exp v0.0.0-20260908205506-85c1c2202aba // indirect
 	golang.org/x/image v0.45.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/telemetry v0.0.0-20261009151841-97e8ea77aa2a // indirect

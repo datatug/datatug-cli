@@ -70,7 +70,7 @@ done
 
 server_header="$(curl -fsSI "$base/" | tr -d '\r' | awk 'tolower($1) == "server:" { print $2 }')"
 case "$server_header" in
-	postgrest/16.5*) ;;
+	postgrest/16.6*) ;;
 	*)
 		echo "unexpected PostgREST server header: ${server_header:-<missing>}" >&2
 		exit 1

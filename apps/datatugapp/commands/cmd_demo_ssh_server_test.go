@@ -113,6 +113,30 @@ func TestDemoSSHHealthCommand_Flags(t *testing.T) {
 	}
 }
 
+func TestDemoSSHHealthCommand_ProxyProtocol(t *testing.T) {
+	origPlain, origProxy := sshDemoCheckHealth, sshDemoCheckHealthProxyLocal
+	t.Cleanup(func() { sshDemoCheckHealth, sshDemoCheckHealthProxyLocal = origPlain, origProxy })
+
+	sshDemoCheckHealth = func(context.Context, string, time.Duration) error {
+		t.Fatal("plain probe used with --proxy-protocol")
+		return nil
+	}
+	var gotAddr string
+	sshDemoCheckHealthProxyLocal = func(_ context.Context, addr string, _ time.Duration) error {
+		gotAddr = addr
+		return nil
+	}
+	cmd := demoSSHHealthCommand()
+	cmd.SetContext(context.Background())
+	cmd.SetArgs([]string{"--addr", "127.0.0.1:2222", "--proxy-protocol"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if gotAddr != "127.0.0.1:2222" {
+		t.Fatalf("addr = %q", gotAddr)
+	}
+}
+
 func TestDemoSSHEdgeCommand_Flags(t *testing.T) {
 	orig := sshDemoRunEdge
 	t.Cleanup(func() { sshDemoRunEdge = orig })

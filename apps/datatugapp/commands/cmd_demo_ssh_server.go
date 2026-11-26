@@ -21,10 +21,11 @@ var errSSHDemoNotImplemented = errors.New("not implemented yet")
 
 // Package seams so unit tests can verify flag binding without binding real sockets.
 var (
-	sshDemoRunServer    = func(ctx context.Context, cfg sshdemo.Config) error { return sshdemo.RunServer(ctx, cfg) }
-	sshDemoPrintHostKey = func(path string, w io.Writer) error { return sshdemo.PrintHostKey(path, w) }
-	sshDemoCheckHealth  = sshdemo.CheckHealth
-	sshDemoRunEdge      = sshdemo.RunEdge
+	sshDemoRunServer             = func(ctx context.Context, cfg sshdemo.Config) error { return sshdemo.RunServer(ctx, cfg) }
+	sshDemoPrintHostKey          = func(path string, w io.Writer) error { return sshdemo.PrintHostKey(path, w) }
+	sshDemoCheckHealth           = sshdemo.CheckHealth
+	sshDemoCheckHealthProxyLocal = sshdemo.CheckHealthProxyLocal
+	sshDemoRunEdge               = sshdemo.RunEdge
 )
 
 func demoSSHServerCommand() *cobra.Command {
@@ -71,11 +72,15 @@ func demoSSHServerCommand() *cobra.Command {
 func demoSSHHealthCommand() *cobra.Command {
 	addr := sshdemo.DefaultHealthAddr
 	timeout := sshdemo.DefaultHealthTimeout
+	proxyProtocol := false
 
 	cmd := &cobra.Command{
 		Use:   "ssh-health",
 		Short: "Exit 0 when the SSH demo server answers (container health check)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if proxyProtocol {
+				return sshDemoCheckHealthProxyLocal(cmd.Context(), addr, timeout)
+			}
 			return sshDemoCheckHealth(cmd.Context(), addr, timeout)
 		},
 	}
@@ -83,6 +88,7 @@ func demoSSHHealthCommand() *cobra.Command {
 	f := cmd.Flags()
 	f.StringVar(&addr, "addr", addr, "TCP address of the SSH server to probe")
 	f.DurationVar(&timeout, "timeout", timeout, "Maximum time to wait for SSH banner")
+	f.BoolVar(&proxyProtocol, "proxy-protocol", false, "Send a PROXY v2 LOCAL header first (for a server started with --proxy-protocol)")
 	return cmd
 }
 

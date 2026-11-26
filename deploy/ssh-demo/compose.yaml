@@ -98,6 +98,13 @@ services:
     mem_limit: ${DEMO_MEM_LIMIT:-3g}
     cpus: "${DEMO_CPUS:-2}"
     pids_limit: "${DEMO_PIDS_LIMIT:-2048}"
+    # The demo listener expects a PROXY v2 header (from the edge); the probe sends LOCAL.
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/datatug", "demo", "ssh-health", "--addr", "127.0.0.1:2222", "--proxy-protocol"]
+      interval: 5s
+      timeout: 6s
+      start_period: 90s
+      retries: 5
     init: true
     stop_grace_period: 20s
     networks: [internal]

@@ -418,3 +418,14 @@ func TestEdge_CONNECTProxyAllowListAndPrivateIPRefusal(t *testing.T) {
 		t.Fatal("expected Serve error from failing forwarder listener")
 	}
 }
+
+func TestCheckHealthProxyLocal(t *testing.T) {
+	h := startTestServer(t, func(cfg *Config) { cfg.ProxyProtocol = true })
+	// A plain probe never sees a banner: the server waits for the PROXY header.
+	if err := CheckHealth(context.Background(), h.addr, 300*time.Millisecond); err == nil {
+		t.Fatal("plain CheckHealth against a --proxy-protocol server: want timeout error")
+	}
+	if err := CheckHealthProxyLocal(context.Background(), h.addr, 2*time.Second); err != nil {
+		t.Fatalf("CheckHealthProxyLocal: %v", err)
+	}
+}

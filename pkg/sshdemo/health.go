@@ -15,6 +15,17 @@ const maxBannerBytes = 1024
 // CheckHealth dials addr over TCP and verifies that the server answers with a
 // banner line starting with "SSH-2.0-".
 func CheckHealth(ctx context.Context, addr string, timeout time.Duration) error {
+	return checkHealth(ctx, addr, timeout, nil)
+}
+
+// CheckHealthProxyLocal probes a server that listens with --proxy-protocol:
+// it first sends a PROXY v2 LOCAL header, the command the PROXY protocol
+// defines for health checks (the server keeps the connection's real address).
+func CheckHealthProxyLocal(ctx context.Context, addr string, timeout time.Duration) error {
+	return checkHealth(ctx, addr, timeout, EncodeProxyV2(nil, nil))
+}
+
+func checkHealth(ctx context.Context, addr string, timeout time.Duration, prelude []byte) error {
 	if addr == "" {
 		addr = DefaultHealthAddr
 	}
@@ -39,7 +50,12 @@ func CheckHealth(ctx context.Context, addr string, timeout time.Duration) error 
 	if !ok {
 		deadline = time.Now().Add(timeout)
 	}
-	_ = conn.SetReadDeadline(deadline)
+	_ = conn.SetDeadline(deadline)
+	if len(prelude) > 0 {
+		if _, err := conn.Write(prelude); err != nil {
+			return fmt.Errorf("ssh-health: send PROXY header to %s: %w", addr, err)
+		}
+	}
 
 	line, err := bufio.NewReader(io.LimitReader(conn, maxBannerBytes)).ReadString('\n')
 	if err != nil {

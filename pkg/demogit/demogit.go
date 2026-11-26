@@ -100,8 +100,6 @@ var (
 	// ErrUntrustedContent: Open refused the fork's content (escaping symlink,
 	// too large, too many files, no DataTug project).
 	ErrUntrustedContent = errors.New("the repository cannot be opened in the demo")
-	// errNotImplemented marks the contract stubs below until implemented.
-	errNotImplemented = errors.New("demogit: not implemented")
 )
 
 // RateLimitError carries when GitHub accepts requests again.
@@ -116,49 +114,5 @@ func (e *RateLimitError) Unwrap() error { return ErrRateLimited }
 type Client struct {
 	cfg   Config
 	token string
+	sleep func(context.Context, time.Duration) error
 }
-
-// New returns a client that authenticates with token. token is never logged,
-// persisted, or put in a URL or git config.
-func New(cfg Config, token string) *Client { return &Client{cfg: cfg, token: token} }
-
-// User returns the login of the token's owner.
-func (c *Client) User(ctx context.Context) (string, error) { return "", errNotImplemented }
-
-// FindFork returns the visitor's fork of the canonical repository, or
-// ErrNoFork. It does not create one.
-func (c *Client) FindFork(ctx context.Context) (Repo, error) { return Repo{}, errNotImplemented }
-
-// EnsureFork returns the visitor's fork, creating it when there is none and
-// waiting until GitHub serves it. created reports whether it was made now.
-// Callers ask the visitor before calling it.
-func (c *Client) EnsureFork(ctx context.Context) (fork Repo, created bool, err error) {
-	return Repo{}, false, errNotImplemented
-}
-
-// Save commits every change of the workspace at repoDir (a go-git clone whose
-// HEAD is the base commit) and pushes it to the branch of fork, never forcing:
-// a branch that moved since the base is ErrDiverged.
-func (c *Client) Save(ctx context.Context, repoDir string, fork Repo, opts SaveOptions) (SaveResult, error) {
-	return SaveResult{}, errNotImplemented
-}
-
-// Open clones the saved branch of fork (Config.Branch, else the fork's default
-// branch) into destDir, which must not exist or be empty, and validates it
-// with ValidateWorkspace. It returns the branch it checked out.
-func (c *Client) Open(ctx context.Context, fork Repo, destDir, projectDir string) (branch string, err error) {
-	return "", errNotImplemented
-}
-
-// NewBranchName returns the branch offered after ErrDiverged:
-// "<Config.Branch>-<UTC yyyymmdd-hhmmss>".
-func (c *Client) NewBranchName() string { return "" }
-
-// Changes lists the workspace changes Save would commit, for the save screen.
-// It needs no token.
-func Changes(repoDir string) ([]Change, error) { return nil, errNotImplemented }
-
-// ValidateWorkspace rejects a checked-out tree that DataTug must not open: a
-// symlink that resolves outside root, more than limits allow, or no
-// <projectDir>/datatug-project.json. Errors wrap ErrUntrustedContent.
-func ValidateWorkspace(root, projectDir string, limits CloneLimits) error { return errNotImplemented }

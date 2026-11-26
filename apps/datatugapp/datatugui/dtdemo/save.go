@@ -302,7 +302,7 @@ func (s saveScreen) updateExplain(msg tea.Msg) (nav.Screen, tea.Cmd) {
 			OnCancel:          func() tea.Msg { return saveAuthCanceledMsg{} },
 			RequestDeviceCode: s.cfg.RequestDeviceCode,
 			PollForToken:      s.cfg.PollForToken,
-			SaveToken:         s.cfg.SaveToken,
+			SaveToken:         discardDeviceToken,
 		})
 		auth, _ = auth.Update(tea.WindowSizeMsg{Width: s.w, Height: s.h})
 		auth, _ = auth.Update(nav.ScreenFocusMsg{Focused: s.focused})

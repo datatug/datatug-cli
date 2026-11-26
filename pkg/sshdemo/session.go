@@ -46,7 +46,7 @@ func BuildChildArgs(cfg Config, workspace, templateDir, sessionID string, deadli
 		"--github-client-id", cfg.GitHubClientID,
 		"--save-branch", cfg.SaveBranch,
 		"--session-id", sessionID,
-		"--deadline", deadline.UTC().Format(time.RFC3339),
+		"--deadline", deadline.UTC().Format(time.RFC3339Nano),
 		"--rlimit-as", strconv.Itoa(RlimitAS),
 		"--rlimit-cpu", strconv.Itoa(RlimitCPU),
 		"--rlimit-fsize", strconv.Itoa(RlimitFSize),

@@ -66,6 +66,7 @@ func demoSSHServerCommand() *cobra.Command {
 	f := cmd.Flags()
 	f.StringVar(&cfg.Listen, "listen", cfg.Listen, "TCP address to listen on")
 	f.BoolVar(&cfg.ProxyProtocol, "proxy-protocol", cfg.ProxyProtocol, "Expect HAProxy PROXY protocol headers on incoming connections")
+	f.StringSliceVar(&cfg.ProxyProtocolTrust, "proxy-protocol-trust", nil, "Trusted PROXY protocol peer CIDRs (empty allows any non-loopback peer)")
 	f.StringVar(&cfg.HostKey, "host-key", "", "Path to SSH host private key (default <state-dir>/ssh_host_ed25519_key)")
 	f.BoolVar(&printHostKey, "print-host-key", false, "Print the public host key and SHA256 fingerprint, then exit")
 	f.StringVar(&cfg.StateDir, "state-dir", cfg.StateDir, "Directory for persistent supervisor state (host key, template)")
@@ -157,6 +158,8 @@ func demoSSHEdgeCommand() *cobra.Command {
 	f.StringSliceVar(&cfg.Allow, "allow", cfg.Allow, "Comma-separated list of hostnames allowed through the CONNECT proxy")
 	f.IntVar(&cfg.MaxConns, "max-conns", cfg.MaxConns, "Maximum concurrent forwarded TCP connections")
 	f.IntVar(&cfg.MaxConnsPerIP, "max-conns-per-ip", cfg.MaxConnsPerIP, "Maximum concurrent forwarded TCP connections per client IP")
+	f.IntVar(&cfg.MaxTunnels, "max-tunnels", cfg.MaxTunnels, "Maximum concurrent CONNECT tunnels")
+	f.IntVar(&cfg.MaxTunnelsPerIP, "max-tunnels-per-ip", cfg.MaxTunnelsPerIP, "Maximum concurrent CONNECT tunnels per client IP")
 	f.DurationVar(&cfg.IdleTimeout, "idle-timeout", cfg.IdleTimeout, "Idle timeout on CONNECT tunnels")
 	return cmd
 }

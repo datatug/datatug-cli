@@ -118,7 +118,7 @@ func TestEncodeProxyV2_RoundTrip(t *testing.T) {
 
 func TestEdge_TCPForwarderProxyV2EndToEndAndCaps(t *testing.T) {
 	// Start sshdemo.Server with ProxyProtocol enabled, then put Edge in front of it!
-	srvHarness := startTestServer(t, func(c *Config) {
+	srvHarness := startTestServerWithPeer(t, net.ParseIP("192.0.2.8"), func(c *Config) {
 		c.ProxyProtocol = true
 		c.SaveBranch = "exit-now"
 	})
@@ -142,7 +142,7 @@ func TestEdge_TCPForwarderProxyV2EndToEndAndCaps(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	serveDone := make(chan error, 1)
 	go func() {
-		serveDone <- edge.Serve(ctx, fwdLn, proxyLn)
+		serveDone <- edge.Serve(ctx, peerListener{Listener: fwdLn, ip: net.ParseIP("203.0.113.7")}, proxyLn)
 	}()
 	t.Cleanup(func() {
 		cancel()

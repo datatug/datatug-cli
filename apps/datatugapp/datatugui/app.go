@@ -11,6 +11,9 @@ import (
 // RootTitle is the root breadcrumb.
 const RootTitle = "⛴ DataTug"
 
+// BrowserUnavailable is the feedback for browser actions in the SSH demo.
+const BrowserUnavailable = "Not available in the SSH demo"
+
 // Options customise the app.
 type Options struct {
 	// Start is the ID of the module shown first; see StartScreen. An unknown or
@@ -23,6 +26,8 @@ type Options struct {
 	// for work that decides its page only when it runs, for example the
 	// project a `datatug ui --deep-link <address>` names.
 	Then tea.Cmd
+	// DisableBrowser suppresses the local browser handoff in the SSH demo.
+	DisableBrowser bool
 }
 
 // startMsg opens the start module once the program runs.
@@ -97,6 +102,9 @@ func (a App) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 	case OpenModuleMsg:
 		return a.open(msg)
 	case OpenWebUIMsg:
+		if a.opts.DisableBrowser {
+			return a, nav.Alert("", BrowserUnavailable, 0, nav.FocusToKeep)
+		}
 		return a, OpenCurrentScreenInWebUI()
 	}
 	return a.forward(msg)

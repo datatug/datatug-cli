@@ -18,10 +18,13 @@ import (
 
 	"charm.land/ssh"
 	"charm.land/wish/v2"
+	"github.com/pires/go-proxyproto"
 	gossh "golang.org/x/crypto/ssh"
 )
 
 const (
+	maxSessionTerminationGrace = 5 * time.Second
+
 	noPTYMessage    = "This demo needs an interactive terminal: reconnect with ssh -t (and no command).\n"
 	demoFullMessage = "The DataTug demo is full, please try again in a few minutes.\r\n"
 
@@ -78,6 +81,7 @@ type Server struct {
 	shutdownCh      chan struct{}
 	sessionWg       sync.WaitGroup
 	testPanicHook   func()
+	proxyPolicy     proxyproto.ConnPolicyFunc
 	connectionMu    sync.Mutex
 	connectionsByIP map[string]int
 }
@@ -89,6 +93,10 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
+	proxyPolicy, err := proxyConnectionPolicy(cfg.ProxyProtocolTrust)
+	if err != nil {
+		return nil, err
+	}
 
 	s := &Server{
 		cfg:             cfg,
@@ -96,6 +104,7 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 		ops:             DefaultSysOps(),
 		slots:           NewSlotManager(cfg.MaxSessions, cfg.MaxSessionsPerIP, cfg.UIDBase, cfg.Isolation),
 		shutdownCh:      make(chan struct{}),
+		proxyPolicy:     proxyPolicy,
 		connectionsByIP: make(map[string]int),
 	}
 	for _, opt := range opts {
@@ -160,10 +169,6 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 			return nil
 		},
 	}
-	if cfg.ProxyProtocol {
-		wishOpts = append(wishOpts, ssh.EnableProxyProtocol())
-	}
-
 	sshSrv, err := wish.NewServer(wishOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("sshdemo: create wish server: %w", err)
@@ -185,6 +190,11 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 
 	// Anonymous access still runs admission before any channel can be accepted.
 	sshSrv.ConnCallback = func(ctx ssh.Context, conn net.Conn) net.Conn {
+		// The listener checks the real peer first. Install the loopback
+		// validator before Wish starts reading the header.
+		if proxied, ok := conn.(*proxyproto.Conn); ok && proxied.Raw().RemoteAddr().(*net.TCPAddr).IP.IsLoopback() {
+			proxied.Validate = requireLocalProxyHeader
+		}
 		ctx.SetValue(connectionStateKey{}, &connectionState{
 			conn: conn, shellStarted: make(chan struct{}),
 		})
@@ -199,7 +209,8 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 		sshSrv.IdleTimeout = cfg.IdleTimeout + safetyMargin(cfg.IdleTimeout)
 	}
 	if cfg.MaxSessionDuration > 0 {
-		sshSrv.MaxTimeout = cfg.MaxSessionDuration + safetyMargin(cfg.MaxSessionDuration)
+		sshSrv.MaxTimeout = cfg.HandshakeTimeout + cfg.ShellStartTimeout +
+			cfg.MaxSessionDuration + max(cfg.ShutdownGrace, maxSessionTerminationGrace) + safetyMargin(cfg.MaxSessionDuration)
 	}
 
 	// Serve ONLY session channels; refuse forwarding, subsystems, exec, and global requests.
@@ -242,6 +253,9 @@ func (s *Server) TemplateDir() string {
 
 // Serve accepts SSH connections on ln until Shutdown or Close is called.
 func (s *Server) Serve(ln net.Listener) error {
+	if s.cfg.ProxyProtocol {
+		ln = &proxyproto.Listener{Listener: ln, ConnPolicy: s.proxyPolicy, ReadHeaderTimeout: s.cfg.HandshakeTimeout}
+	}
 	err := s.sshServer.Serve(ln)
 	if errors.Is(err, ssh.ErrServerClosed) {
 		return nil
@@ -288,6 +302,8 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // RunServer creates a Server, listens on cfg.Listen, serves until ctx is
 // canceled, then gracefully shuts down all sessions.
 func RunServer(ctx context.Context, cfg Config, opts ...ServerOption) error {
+	cfg = cfg.WithDefaults()
+	slog.SetDefault(cfg.Logger)
 	srv, err := NewServer(ctx, cfg, opts...)
 	if err != nil {
 		return err
@@ -551,7 +567,8 @@ func (s *Server) handleSession(sess ssh.Session) {
 	defer s.sessionWg.Done()
 
 	clientIP := clientIPFromAddr(sess.RemoteAddr())
-	sshUser := sess.User()
+	logIP := safeLogValue(clientIP)
+	sshUser := safeLogValue(sess.User())
 	ctx := sess.Context().(*sessionContext)
 	meta := ctx.meta
 	connection := ctx.Value(connectionStateKey{}).(*connectionState)
@@ -559,7 +576,7 @@ func (s *Server) handleSession(sess ssh.Session) {
 	pty, _, hasPty := sess.Pty()
 	if !hasPty {
 		s.logger.Info("session rejected: no pty",
-			"client_ip", clientIP,
+			"client_ip", logIP,
 			"ssh_user", sshUser,
 		)
 		_, _ = io.WriteString(sess, noPTYMessage)
@@ -571,7 +588,7 @@ func (s *Server) handleSession(sess ssh.Session) {
 	if err != nil {
 		s.logger.Info("session end",
 			"session_id", "",
-			"client_ip", clientIP,
+			"client_ip", logIP,
 			"ssh_user", sshUser,
 			"pty_width", pty.Window.Width,
 			"pty_height", pty.Window.Height,
@@ -609,7 +626,7 @@ func (s *Server) handleSession(sess ssh.Session) {
 
 	s.logger.Info("session start",
 		"session_id", sessionID,
-		"client_ip", clientIP,
+		"client_ip", logIP,
 		"ssh_user", sshUser,
 		"pty_width", pty.Window.Width,
 		"pty_height", pty.Window.Height,
@@ -659,7 +676,7 @@ func (s *Server) handleSession(sess ssh.Session) {
 
 		s.logger.Info("session end",
 			"session_id", sessionID,
-			"client_ip", clientIP,
+			"client_ip", logIP,
 			"ssh_user", sshUser,
 			"pty_width", pty.Window.Width,
 			"pty_height", pty.Window.Height,
@@ -716,12 +733,24 @@ func (s *Server) handleSession(sess ssh.Session) {
 	var maxTimer *time.Timer
 	var maxC <-chan time.Time
 	if s.cfg.MaxSessionDuration > 0 {
-		maxTimer = time.NewTimer(s.cfg.MaxSessionDuration)
+		maxTimer = time.NewTimer(time.Until(deadline))
 		defer maxTimer.Stop()
 		maxC = maxTimer.C
 	}
 	watchdog := time.NewTicker(s.cfg.WatchdogInterval)
 	defer watchdog.Stop()
+
+	terminate := func(grace time.Duration) {
+		_ = s.ops.Kill(-pgid, syscall.SIGTERM)
+		timer := time.NewTimer(grace)
+		defer timer.Stop()
+		select {
+		case waitErr := <-waitCh:
+			reaped = true
+			exitStatus = exitCodeFromWaitErr(waitErr)
+		case <-timer.C:
+		}
+	}
 
 	for {
 		select {
@@ -765,6 +794,7 @@ func (s *Server) handleSession(sess ssh.Session) {
 		case <-maxC:
 			endReason = EndReasonMaxDuration
 			exitStatus = -1
+			terminate(min(s.cfg.ShutdownGrace, maxSessionTerminationGrace))
 			return
 
 		case <-watchdog.C:
@@ -778,17 +808,7 @@ func (s *Server) handleSession(sess ssh.Session) {
 		case <-s.shutdownCh:
 			endReason = EndReasonShutdown
 			exitStatus = -1
-			if pgid > 0 {
-				_ = s.ops.Kill(-pgid, syscall.SIGTERM)
-			}
-			graceTimer := time.NewTimer(s.cfg.ShutdownGrace)
-			select {
-			case waitErr := <-waitCh:
-				graceTimer.Stop()
-				reaped = true
-				exitStatus = exitCodeFromWaitErr(waitErr)
-			case <-graceTimer.C:
-			}
+			terminate(s.cfg.ShutdownGrace)
 			return
 		}
 	}

@@ -65,6 +65,7 @@ type projects struct {
 	tree             widgets.Tree
 	loaded           bool
 	neutralWorkspace bool
+	demo             bool
 }
 
 var (
@@ -73,8 +74,6 @@ var (
 	_ nav.ShortHelper  = projects{}
 	_ widgets.Boundary = projects{}
 )
-
-func newProjects() projects { return projects{} }
 
 // Init implements nav.Screen.
 func (p projects) Init() tea.Cmd { return loadProjects() }
@@ -105,7 +104,7 @@ func (p projects) Update(msg tea.Msg) (nav.Screen, tea.Cmd) {
 		if msg.err != nil {
 			return p, datatugui.ReportError("load projects", msg.err)
 		}
-		p.tree = newProjectsTree(msg)
+		p.tree = newProjectsTree(msg, p.demo)
 		if p.neutralWorkspace {
 			neutralProjectActions(&p.tree)
 		}
@@ -189,7 +188,7 @@ func selectProjectNode(node widgets.TreeNode) tea.Cmd {
 }
 
 // newProjectsTree builds the tree of the loaded projects.
-func newProjectsTree(loaded projectsLoaded) widgets.Tree {
+func newProjectsTree(loaded projectsLoaded, demoMode bool) widgets.Tree {
 	group := func(id, text string, children ...widgets.TreeNode) widgets.TreeNode {
 		return widgets.TreeNode{ID: id, Text: text, Color: theme.AccentColor(), Unselectable: true, Children: children}
 	}
@@ -229,21 +228,22 @@ func newProjectsTree(loaded projectsLoaded) widgets.Tree {
 		github = addGitHubProject(github, ids[0], ids[1], project)
 	}
 
-	demo := newDemoProject1Ref()
-	local = append(local, widgets.TreeNode{
-		ID:   "local:" + demo.ID,
-		Text: repoEmoji + demo.Title + " " + theme.GrayText("· sample data, downloaded from GitHub"),
-		Ref:  demo,
-	})
-	local = append(local,
-		action("action:add-existing", actionAddExisting, "Add existing"),
-		action("action:create-local", actionCreateLocal, "Create new local project"),
-	)
-	github = append(github,
-		action("action:add-to-github", actionAddToGitHub, "Add DataTug project to existing GitHub Repo"),
-		action("action:add-github-repo", actionAddToGitHub, "Add GitHub repo with DataTug project"),
-	)
-
+	if !demoMode {
+		demo := newDemoProject1Ref()
+		local = append(local, widgets.TreeNode{
+			ID:   "local:" + demo.ID,
+			Text: repoEmoji + demo.Title + " " + theme.GrayText("· sample data, downloaded from GitHub"),
+			Ref:  demo,
+		})
+	}
+	local = append(local, action("action:add-existing", actionAddExisting, "Add existing"))
+	if !demoMode {
+		local = append(local, action("action:create-local", actionCreateLocal, "Create new local project"))
+		github = append(github,
+			action("action:add-to-github", actionAddToGitHub, "Add DataTug project to existing GitHub Repo"),
+			action("action:add-github-repo", actionAddToGitHub, "Add GitHub repo with DataTug project"),
+		)
+	}
 	tree := widgets.NewTree(projectsTreeID,
 		group("recent", "🕘 Recent projects", recent...),
 		group("local", "🖥️ Local projects", local...),

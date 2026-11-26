@@ -1,6 +1,7 @@
 package sshdemo
 
 import (
+	"cmp"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -25,14 +26,16 @@ var cgnatPrefix = netip.MustParsePrefix("100.64.0.0/10")
 
 // EdgeConfig configures `datatug demo ssh-edge` (spec D4).
 type EdgeConfig struct {
-	Listen        string
-	Upstream      string
-	ProxyListen   string
-	Allow         []string
-	MaxConns      int
-	MaxConnsPerIP int
-	IdleTimeout   time.Duration
-	DialTimeout   time.Duration
+	Listen          string
+	Upstream        string
+	ProxyListen     string
+	Allow           []string
+	MaxConns        int
+	MaxConnsPerIP   int
+	MaxTunnels      int
+	MaxTunnelsPerIP int
+	IdleTimeout     time.Duration
+	DialTimeout     time.Duration
 
 	Logger       *slog.Logger
 	LookupIPAddr func(ctx context.Context, host string) ([]net.IPAddr, error)
@@ -44,14 +47,16 @@ func DefaultEdgeConfig() EdgeConfig {
 	allow := make([]string, len(DefaultEdgeAllow))
 	copy(allow, DefaultEdgeAllow)
 	return EdgeConfig{
-		Listen:        DefaultEdgeListen,
-		Upstream:      DefaultEdgeUpstream,
-		ProxyListen:   DefaultEdgeProxyListen,
-		Allow:         allow,
-		MaxConns:      DefaultEdgeMaxConns,
-		MaxConnsPerIP: DefaultEdgeMaxConnsPerIP,
-		IdleTimeout:   DefaultEdgeIdleTimeout,
-		DialTimeout:   10 * time.Second,
+		Listen:          DefaultEdgeListen,
+		Upstream:        DefaultEdgeUpstream,
+		ProxyListen:     DefaultEdgeProxyListen,
+		Allow:           allow,
+		MaxConns:        DefaultEdgeMaxConns,
+		MaxConnsPerIP:   DefaultEdgeMaxConnsPerIP,
+		MaxTunnels:      DefaultEdgeMaxTunnels,
+		MaxTunnelsPerIP: DefaultEdgeMaxTunnelsPerIP,
+		IdleTimeout:     DefaultEdgeIdleTimeout,
+		DialTimeout:     10 * time.Second,
 	}
 }
 
@@ -74,6 +79,12 @@ func (c EdgeConfig) WithDefaults() EdgeConfig {
 	}
 	if c.MaxConnsPerIP <= 0 {
 		c.MaxConnsPerIP = DefaultEdgeMaxConnsPerIP
+	}
+	if c.MaxTunnels <= 0 {
+		c.MaxTunnels = DefaultEdgeMaxTunnels
+	}
+	if c.MaxTunnelsPerIP <= 0 {
+		c.MaxTunnelsPerIP = DefaultEdgeMaxTunnelsPerIP
 	}
 	if c.IdleTimeout <= 0 {
 		c.IdleTimeout = DefaultEdgeIdleTimeout
@@ -141,9 +152,9 @@ type Edge struct {
 	logger   *slog.Logger
 	allowSet map[string]struct{}
 
-	connMu    sync.Mutex
-	totalConn int
-	perIPConn map[string]int
+	forwardLimit connectionLimit
+	healthLimit  connectionLimit
+	tunnelLimit  connectionLimit
 }
 
 // NewEdge constructs an Edge instance from cfg.
@@ -158,39 +169,51 @@ func NewEdge(cfg EdgeConfig) *Edge {
 		allowSet[h] = struct{}{}
 	}
 	return &Edge{
-		cfg:       cfg,
-		logger:    cfg.Logger,
-		allowSet:  allowSet,
-		perIPConn: make(map[string]int),
+		cfg:          cfg,
+		logger:       cfg.Logger,
+		allowSet:     allowSet,
+		forwardLimit: newConnectionLimit(cfg.MaxConns, cfg.MaxConnsPerIP),
+		healthLimit:  newConnectionLimit(cfg.MaxConnsPerIP, cfg.MaxConnsPerIP),
+		tunnelLimit:  newConnectionLimit(cfg.MaxTunnels, cfg.MaxTunnelsPerIP),
 	}
 }
 
-func (e *Edge) acquireConn(ip string) bool {
-	e.connMu.Lock()
-	defer e.connMu.Unlock()
-	if e.totalConn >= e.cfg.MaxConns || e.perIPConn[ip] >= e.cfg.MaxConnsPerIP {
+type connectionLimit struct {
+	mu                 sync.Mutex
+	maxTotal, maxPerIP int
+	total              int
+	perIP              map[string]int
+}
+
+func newConnectionLimit(maxTotal, maxPerIP int) connectionLimit {
+	return connectionLimit{maxTotal: maxTotal, maxPerIP: maxPerIP, perIP: make(map[string]int)}
+}
+
+func (l *connectionLimit) acquire(ip string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.total >= l.maxTotal || l.perIP[ip] >= l.maxPerIP {
 		return false
 	}
-	e.totalConn++
-	e.perIPConn[ip]++
+	l.total++
+	l.perIP[ip]++
 	return true
 }
 
-func (e *Edge) releaseConn(ip string) {
-	e.connMu.Lock()
-	defer e.connMu.Unlock()
-	if e.totalConn > 0 {
-		e.totalConn--
-	}
-	if n := e.perIPConn[ip]; n <= 1 {
-		delete(e.perIPConn, ip)
+func (l *connectionLimit) release(ip string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.total--
+	if n := l.perIP[ip]; n == 1 {
+		delete(l.perIP, ip)
 	} else {
-		e.perIPConn[ip] = n - 1
+		l.perIP[ip] = n - 1
 	}
 }
 
 // ServeForwarder accepts TCP connections on ln, dials e.cfg.Upstream, writes a
-// PROXY protocol v2 header containing the client's address, and splices both ways.
+// PROXY protocol v2 header, and splices both ways. Loopback uses a reserved
+// pool and a LOCAL header so health checks work at public capacity.
 func (e *Edge) ServeForwarder(ctx context.Context, ln net.Listener) error {
 	var wg sync.WaitGroup
 	defer wg.Wait()
@@ -215,23 +238,28 @@ func (e *Edge) ServeForwarder(ctx context.Context, ln net.Listener) error {
 		}
 
 		ip := clientIPFromAddr(clientConn.RemoteAddr())
-		if !e.acquireConn(ip) {
-			e.logger.Warn("edge forwarder cap reached", "client_ip", ip)
+		loopback := net.ParseIP(ip).IsLoopback()
+		limit := &e.forwardLimit
+		if loopback {
+			limit = &e.healthLimit
+		}
+		if !limit.acquire(ip) {
+			e.logger.Warn("edge forwarder cap reached", "client_ip", safeLogValue(ip))
 			_ = clientConn.Close()
 			continue
 		}
 
 		wg.Add(1)
-		go func(c net.Conn, clientIP string) {
+		go func() {
 			defer wg.Done()
-			defer e.releaseConn(clientIP)
-			defer func() { _ = c.Close() }()
-			e.forwardConn(ctx, c)
-		}(clientConn, ip)
+			defer limit.release(ip)
+			defer func() { _ = clientConn.Close() }()
+			e.forwardConn(ctx, clientConn, loopback)
+		}()
 	}
 }
 
-func (e *Edge) forwardConn(ctx context.Context, clientConn net.Conn) {
+func (e *Edge) forwardConn(ctx context.Context, clientConn net.Conn, loopback bool) {
 	dialCtx, cancel := context.WithTimeout(ctx, e.cfg.DialTimeout)
 	upConn, err := e.cfg.DialContext(dialCtx, "tcp", e.cfg.Upstream)
 	cancel()
@@ -242,6 +270,9 @@ func (e *Edge) forwardConn(ctx context.Context, clientConn net.Conn) {
 	defer func() { _ = upConn.Close() }()
 
 	hdr := EncodeProxyV2(clientConn.RemoteAddr(), clientConn.LocalAddr())
+	if loopback {
+		hdr = EncodeProxyV2(nil, nil)
+	}
 	_ = upConn.SetWriteDeadline(time.Now().Add(e.cfg.DialTimeout))
 	if _, err := upConn.Write(hdr); err != nil {
 		e.logger.Warn("edge write proxy v2 header failed", "err", err)
@@ -259,79 +290,94 @@ func (e *Edge) ProxyHandler() http.Handler {
 
 func (e *Edge) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Never log request paths or query strings; log only host + result.
+	logHost := safeLogValue(hostOnly(r.Host))
+	logResult := func(result string) {
+		e.logger.Info("egress proxy request", "host", logHost, "result", result)
+	}
 	if r.Method != http.MethodConnect {
-		e.logger.Info("egress proxy request", "host", hostOnly(r.Host), "result", "denied-method")
+		logResult("denied-method")
 		http.Error(w, "method not allowed", http.StatusForbidden)
 		return
 	}
 
 	host, port, err := net.SplitHostPort(r.Host)
 	if err != nil || port != "443" {
-		e.logger.Info("egress proxy request", "host", hostOnly(r.Host), "result", "denied-port")
+		logResult("denied-port")
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 
 	if host == "" || strings.HasSuffix(host, ".") || net.ParseIP(host) != nil {
-		e.logger.Info("egress proxy request", "host", host, "result", "denied-host")
+		logResult("denied-host")
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 
 	lowerHost := strings.ToLower(host)
 	if _, ok := e.allowSet[lowerHost]; !ok {
-		e.logger.Info("egress proxy request", "host", lowerHost, "result", "denied-host")
+		logResult("denied-host")
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
+
+	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+	if !e.tunnelLimit.acquire(ip) {
+		logResult("tunnel-limit")
+		http.Error(w, "proxy busy", http.StatusServiceUnavailable)
+		return
+	}
+	defer e.tunnelLimit.release(ip)
 
 	resolveCtx, cancelResolve := context.WithTimeout(r.Context(), e.cfg.DialTimeout)
 	ips, err := e.cfg.LookupIPAddr(resolveCtx, lowerHost)
 	cancelResolve()
 	if err != nil || len(ips) == 0 {
-		e.logger.Info("egress proxy request", "host", lowerHost, "result", "resolve-failed")
+		logResult("resolve-failed")
 		http.Error(w, "bad gateway", http.StatusBadGateway)
 		return
 	}
 	for _, ipAddr := range ips {
 		if isForbiddenEgressIP(ipAddr.IP) {
-			e.logger.Info("egress proxy request", "host", lowerHost, "result", "denied-private-ip")
+			logResult("denied-private-ip")
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
 	}
 
-	target := net.JoinHostPort(ips[0].IP.String(), "443")
-	dialCtx, cancelDial := context.WithTimeout(r.Context(), e.cfg.DialTimeout)
-	upConn, err := e.cfg.DialContext(dialCtx, "tcp", target)
-	cancelDial()
+	var upConn net.Conn
+	for _, addr := range ips {
+		target := net.JoinHostPort(addr.IP.String(), "443")
+		dialCtx, cancelDial := context.WithTimeout(r.Context(), e.cfg.DialTimeout)
+		upConn, err = e.cfg.DialContext(dialCtx, "tcp", target)
+		cancelDial()
+		if err == nil {
+			break
+		}
+	}
 	if err != nil {
-		e.logger.Info("egress proxy request", "host", lowerHost, "result", "dial-failed")
+		logResult("dial-failed")
 		http.Error(w, "bad gateway", http.StatusBadGateway)
 		return
 	}
+	defer func() { _ = upConn.Close() }()
 
 	hj, ok := w.(http.Hijacker)
 	if !ok {
-		_ = upConn.Close()
 		http.Error(w, "hijacking not supported", http.StatusInternalServerError)
 		return
 	}
 	clientConn, bufRW, err := hj.Hijack()
 	if err != nil {
-		_ = upConn.Close()
 		return
 	}
 	defer func() { _ = clientConn.Close() }()
-	defer func() { _ = upConn.Close() }()
-
-	if _, err := io.WriteString(clientConn, "HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
-		return
-	}
-	e.logger.Info("egress proxy request", "host", lowerHost, "result", "allowed")
 
 	wrappedClient := newIdleConn(clientConn, e.cfg.IdleTimeout)
 	wrappedUp := newIdleConn(upConn, e.cfg.IdleTimeout)
+	if _, err := io.WriteString(wrappedClient, "HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
+		return
+	}
+	logResult("allowed")
 
 	// Flush any bytes already buffered by net/http's bufio.Reader.
 	if bufRW != nil && bufRW.Reader.Buffered() > 0 {
@@ -494,6 +540,8 @@ func (e *Edge) Serve(ctx context.Context, fwdLn, proxyLn net.Listener) error {
 	httpSrv := &http.Server{
 		Handler:           e.ProxyHandler(),
 		ReadHeaderTimeout: 10 * time.Second,
+		MaxHeaderBytes:    8 << 10,
+		BaseContext:       func(net.Listener) context.Context { return runCtx },
 	}
 
 	errCh := make(chan error, 2)
@@ -509,12 +557,14 @@ func (e *Edge) Serve(ctx context.Context, fwdLn, proxyLn net.Listener) error {
 	}()
 
 	var firstErr error
+	remaining := 2
 	select {
 	case <-ctx.Done():
 	case err := <-errCh:
 		firstErr = err
-		cancel()
+		remaining--
 	}
+	cancel()
 
 	shutCtx, shutCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutCancel()
@@ -522,19 +572,15 @@ func (e *Edge) Serve(ctx context.Context, fwdLn, proxyLn net.Listener) error {
 	_ = fwdLn.Close()
 
 	// Drain remaining worker error(s).
-	if firstErr == nil {
-		for i := 0; i < 2; i++ {
-			if err := <-errCh; err != nil && firstErr == nil {
-				firstErr = err
-			}
-		}
-	} else {
-		<-errCh
+	for range remaining {
+		firstErr = cmp.Or(firstErr, <-errCh)
 	}
 	return firstErr
 }
 
 // RunEdge constructs an Edge from cfg and runs it until ctx is canceled.
 func RunEdge(ctx context.Context, cfg EdgeConfig) error {
-	return NewEdge(cfg).Run(ctx)
+	edge := NewEdge(cfg)
+	slog.SetDefault(edge.logger)
+	return edge.Run(ctx)
 }

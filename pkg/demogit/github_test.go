@@ -21,8 +21,8 @@ const (
 	forkPath   = "/repos/alice/demo"
 	createPath = "/repos/team/demo/forks"
 	refPath    = forkPath + "/git/ref/heads/main"
-	forkJSON   = `{"full_name":"alice/demo","fork":true,"parent":{"full_name":"TeAm/DeMo"}}`
-	branchJSON = `{"default_branch":"main"}`
+	forkJSON   = `{"full_name":"alice/demo","owner":{"login":"ALICE"},"fork":true,"parent":{"full_name":"TeAm/DeMo"}}`
+	branchJSON = `{"name":"demo","owner":{"login":"alice"},"default_branch":"main"}`
 	refJSON    = `{"ref":"refs/heads/main","object":{"sha":"0123456789012345678901234567890123456789"}}`
 )
 
@@ -167,6 +167,8 @@ func TestFindFork(t *testing.T) {
 	}{
 		{"parent", 200, forkJSON, aliceFork, nil},
 		{"source", 200, `{"name":"demo","owner":{"login":"alice"},"fork":true,"parent":{"full_name":"bob/demo"},"source":{"full_name":"team/demo"}}`, aliceFork, nil},
+		{"wrong-owner", 200, `{"full_name":"alice/demo","owner":{"login":"bob"},"fork":true,"parent":{"full_name":"team/demo"}}`, Repo{}, ErrNoFork},
+		{"missing-owner", 200, `{"full_name":"alice/demo","fork":true,"parent":{"full_name":"team/demo"}}`, Repo{}, ErrNoFork},
 		{"not-a-fork", 200, `{"fork":false,"parent":{"full_name":"team/demo"}}`, Repo{}, ErrNoFork},
 		{"other-parent", 200, `{"fork":true,"parent":{"full_name":"other/demo"}}`, Repo{}, ErrNoFork},
 		{"not-found", 404, `{}`, Repo{}, ErrNoFork},
@@ -185,32 +187,43 @@ func TestFindFork(t *testing.T) {
 	}
 }
 
+func TestFindForkRejectsTransferredRepository(t *testing.T) {
+	moved := reply("GET", forkPath, 301, "{}")
+	moved.headers = map[string]string{"Location": "/repositories/42"}
+	c := testAPI(t, Config{}, userReply(), moved,
+		reply("GET", "/repositories/42", 200, `{"full_name":"bob/demo","owner":{"login":"bob"},"fork":true,"parent":{"full_name":"team/demo"}}`),
+		ownedReposReply(1, 200, "[]"))
+	if fork, err := c.FindFork(context.Background()); fork != (Repo{}) || !errors.Is(err, ErrNoFork) {
+		t.Fatalf("FindFork() = %+v, %v, want ErrNoFork", fork, err)
+	}
+}
+
 func TestFindForkRenamed(t *testing.T) {
 	for _, direct := range []apiReply{
 		reply("GET", forkPath, 404, "{}"),
 		reply("GET", forkPath, 200, `{"full_name":"alice/demo","fork":false}`),
-		reply("GET", forkPath, 200, `{"full_name":"bob/demo","fork":true,"parent":{"full_name":"team/demo"}}`),
+		reply("GET", forkPath, 200, `{"full_name":"bob/demo","owner":{"login":"bob"},"fork":true,"parent":{"full_name":"team/demo"}}`),
 	} {
 		t.Run(fmt.Sprintf("%d/%s", direct.status, direct.body), func(t *testing.T) {
 			page1 := ownedReposReply(1, 200, `[
 				{"full_name":"alice/not-a-fork","fork":false},
 				{"full_name":"bob/foreign","fork":true},
 				{"full_name":"alice/conflicting","owner":{"login":"bob"},"fork":true},
-				{"full_name":"alice/deleted","fork":true}
+				{"full_name":"alice/deleted","owner":{"login":"alice"},"fork":true}
 			]`)
 			page1.headers = map[string]string{"Link": `</user/repos?page=2>; rel="next"`}
 			page2 := ownedReposReply(2, 200, `[
-				{"full_name":"alice/moved","fork":true},
-				{"full_name":"alice/other","fork":true},
-				{"full_name":"ALICE/renamed","fork":true},
-				{"full_name":"alice/unused","fork":true}
+				{"full_name":"alice/moved","owner":{"login":"alice"},"fork":true},
+				{"full_name":"alice/other","owner":{"login":"alice"},"fork":true},
+				{"full_name":"ALICE/renamed","owner":{"login":"alice"},"fork":true},
+				{"full_name":"alice/unused","owner":{"login":"alice"},"fork":true}
 			]`)
 			page2.headers = map[string]string{"Link": `</user/repos?page=3>; rel="next"`}
 			c := testAPI(t, Config{}, userReply(), direct, page1,
 				reply("GET", "/repos/alice/deleted", 404, "{}"), page2,
-				reply("GET", "/repos/alice/moved", 200, `{"full_name":"bob/moved","fork":true,"parent":{"full_name":"team/demo"}}`),
-				reply("GET", "/repos/alice/other", 200, `{"full_name":"alice/other","fork":true,"parent":{"full_name":"team/other"}}`),
-				reply("GET", "/repos/ALICE/renamed", 200, `{"full_name":"Alice/renamed","fork":true,"source":{"full_name":"TEAM/DEMO"}}`))
+				reply("GET", "/repos/alice/moved", 200, `{"full_name":"bob/moved","owner":{"login":"bob"},"fork":true,"parent":{"full_name":"team/demo"}}`),
+				reply("GET", "/repos/alice/other", 200, `{"full_name":"alice/other","owner":{"login":"alice"},"fork":true,"parent":{"full_name":"team/other"}}`),
+				reply("GET", "/repos/ALICE/renamed", 200, `{"full_name":"Alice/renamed","owner":{"login":"ALICE"},"fork":true,"source":{"full_name":"TEAM/DEMO"}}`))
 			if fork, err := c.FindFork(context.Background()); err != nil || fork != (Repo{"Alice", "renamed"}) {
 				t.Fatalf("FindFork() = %+v, %v", fork, err)
 			}
@@ -240,7 +253,7 @@ func TestFindForkDiscoveryLimitsAndErrors(t *testing.T) {
 	})
 	t.Run("candidate forbidden", func(t *testing.T) {
 		c := testAPI(t, Config{}, userReply(), missing,
-			ownedReposReply(1, 200, `[{"full_name":"alice/renamed","fork":true}]`),
+			ownedReposReply(1, 200, `[{"full_name":"alice/renamed","owner":{"login":"alice"},"fork":true}]`),
 			reply("GET", "/repos/alice/renamed", 403, "{}"))
 		if _, err := c.FindFork(context.Background()); !errors.Is(err, ErrAuth) {
 			t.Fatalf("FindFork() = %v", err)
@@ -252,7 +265,7 @@ func TestEnsureFork(t *testing.T) {
 	ctx := context.Background()
 	missing := reply("GET", forkPath, 404, `{}`)
 	empty := ownedReposReply(1, 200, "[]")
-	accepted := reply("POST", createPath, 202, `{"full_name":"alice/demo"}`)
+	accepted := reply("POST", createPath, 202, `{"full_name":"alice/demo","owner":{"login":"ALICE"}}`)
 	t.Run("existing", func(t *testing.T) {
 		c := testAPI(t, Config{}, userReply(), reply("GET", forkPath, 200, forkJSON))
 		if fork, created, err := c.EnsureFork(ctx); fork != aliceFork || created || err != nil {
@@ -275,7 +288,7 @@ func TestEnsureFork(t *testing.T) {
 		renamePath := "/repos/alice/other-name"
 		c := testAPI(t, Config{}, userReply(), missing, empty,
 			reply("POST", createPath, 202, `{"owner":{"login":"alice"},"name":"other-name","created_at":"2000-01-01T00:00:00Z"}`),
-			reply("GET", renamePath, 200, branchJSON), reply("GET", renamePath+"/git/ref/heads/main", 200, refJSON))
+			reply("GET", renamePath, 200, `{"name":"other-name","owner":{"login":"ALICE"},"default_branch":"main"}`), reply("GET", renamePath+"/git/ref/heads/main", 200, refJSON))
 		if fork, created, err := c.EnsureFork(ctx); fork != (Repo{"alice", "other-name"}) || created || err != nil {
 			t.Fatalf("EnsureFork() = %+v, %t, %v", fork, created, err)
 		}
@@ -304,6 +317,9 @@ func TestEnsureFork(t *testing.T) {
 		{"canonical-missing", []apiReply{reply("POST", createPath, 404, `{}`)}, "demo repository not found"},
 		{"create-forbidden", []apiReply{reply("POST", createPath, 403, `{}`)}, ErrAuth.Error()},
 		{"create-malformed", []apiReply{reply("POST", createPath, 202, `{}`)}, "no repository name"},
+		{"create-wrong-owner", []apiReply{reply("POST", createPath, 202, `{"full_name":"bob/demo","owner":{"login":"bob"}}`)}, "does not belong"},
+		{"create-missing-owner", []apiReply{reply("POST", createPath, 202, `{"full_name":"alice/demo"}`)}, "does not belong"},
+		{"poll-wrong-owner", []apiReply{accepted, reply("GET", forkPath, 200, `{"name":"demo","owner":{"login":"bob"},"default_branch":"main"}`)}, "does not belong"},
 		{"poll-forbidden", []apiReply{accepted, reply("GET", forkPath, 403, `{}`)}, ErrAuth.Error()},
 		{"ref-forbidden", []apiReply{accepted, reply("GET", forkPath, 200, branchJSON), reply("GET", refPath, 403, `{}`)}, ErrAuth.Error()},
 	} {

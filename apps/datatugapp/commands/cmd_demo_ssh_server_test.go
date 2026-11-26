@@ -30,6 +30,7 @@ func TestDemoSSHServerCommand_Flags(t *testing.T) {
 	cmd.SetArgs([]string{
 		"--listen", "127.0.0.1:2299",
 		"--proxy-protocol",
+		"--proxy-protocol-trust", "192.0.2.0/24,2001:db8::/64",
 		"--host-key", "/tmp/hk",
 		"--state-dir", "/tmp/state",
 		"--sessions-dir", "/tmp/sess",
@@ -55,6 +56,7 @@ func TestDemoSSHServerCommand_Flags(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 	if gotCfg.Listen != "127.0.0.1:2299" || !gotCfg.ProxyProtocol || gotCfg.HostKey != "/tmp/hk" ||
+		strings.Join(gotCfg.ProxyProtocolTrust, ",") != "192.0.2.0/24,2001:db8::/64" ||
 		gotCfg.StateDir != "/tmp/state" || gotCfg.SessionsDir != "/tmp/sess" ||
 		gotCfg.Repo != "https://example.com/repo.git" || gotCfg.Ref != "main" ||
 		gotCfg.ProjectDir != "proj" || gotCfg.MaxSessions != 8 || gotCfg.MaxSessionsPerIP != 2 ||
@@ -189,6 +191,8 @@ func TestDemoSSHEdgeCommand_Flags(t *testing.T) {
 		"--allow", "github.com,api.github.com",
 		"--max-conns", "64",
 		"--max-conns-per-ip", "4",
+		"--max-tunnels", "10",
+		"--max-tunnels-per-ip", "3",
 		"--idle-timeout", "2m",
 	})
 	if err := cmd.Execute(); err != nil {
@@ -196,7 +200,8 @@ func TestDemoSSHEdgeCommand_Flags(t *testing.T) {
 	}
 	if gotCfg.Listen != ":2224" || gotCfg.Upstream != "demo:2225" || gotCfg.ProxyListen != ":3129" ||
 		len(gotCfg.Allow) != 2 || gotCfg.Allow[0] != "github.com" || gotCfg.Allow[1] != "api.github.com" ||
-		gotCfg.MaxConns != 64 || gotCfg.MaxConnsPerIP != 4 || gotCfg.IdleTimeout != 2*time.Minute {
+		gotCfg.MaxConns != 64 || gotCfg.MaxConnsPerIP != 4 || gotCfg.MaxTunnels != 10 || gotCfg.MaxTunnelsPerIP != 3 ||
+		gotCfg.IdleTimeout != 2*time.Minute {
 		t.Fatalf("unexpected edge config: %+v", gotCfg)
 	}
 }

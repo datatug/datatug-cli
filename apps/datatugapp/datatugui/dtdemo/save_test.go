@@ -133,6 +133,7 @@ func TestSaveScreenOverviewAndNothingToSave(t *testing.T) {
 }
 
 func TestSaveFlowNoForkConfirmThenCreateAndSave(t *testing.T) {
+	verifyShared := requireSharedTokenUntouched(t)
 	stub(t, &listChanges, func(string) ([]demogit.Change, error) {
 		return []demogit.Change{
 			{Path: "demo-project-1/queries/top.sql", Kind: "added"},
@@ -151,7 +152,12 @@ func TestSaveFlowNoForkConfirmThenCreateAndSave(t *testing.T) {
 			CommitURL: "https://github.com/alice/datatug-demo-project/commit/abc1234",
 		},
 	}
-	stub(t, &newGitClient, func(demogit.Config, string) GitClient { return fake })
+	stub(t, &newGitClient, func(_ demogit.Config, token string) GitClient {
+		if token != "gho_save_tok" {
+			t.Error("Save did not use the session token")
+		}
+		return fake
+	})
 
 	auth := NewAuthState()
 	cfg := testConfig(auth, &oauth2.Token{AccessToken: "gho_save_tok"}, nil)
@@ -190,6 +196,7 @@ func TestSaveFlowNoForkConfirmThenCreateAndSave(t *testing.T) {
 	if fake.ensureHits != 1 {
 		t.Fatalf("expected EnsureFork called once, got %d", fake.ensureHits)
 	}
+	verifyShared()
 	v = saveView(s)
 	for _, want := range []string{
 		"Saved to GitHub",
@@ -261,7 +268,6 @@ func TestSaveFlowAuthRateLimitAndOtherErrors(t *testing.T) {
 	stub(t, &listChanges, func(string) ([]demogit.Change, error) {
 		return []demogit.Change{{Path: "demo-project-1/queries/q.sql", Kind: "modified"}}, nil
 	})
-	stub(t, &deleteToken, func() error { return nil })
 
 	t.Run("ErrAuth offers sign in again", func(t *testing.T) {
 		fake := &fakeGitClient{

@@ -382,6 +382,9 @@ func TestDemoSSHSessionEndToEndWiringAndOptions(t *testing.T) {
 		if !strings.Contains(captured.notice, "Temporary demo workspace") || !strings.Contains(captured.notice, "15:45 UTC") || !strings.Contains(captured.notice, "Save to GitHub") {
 			t.Fatalf("notice = %q", captured.notice)
 		}
+		if !captured.workspace.options.DisableBrowser || !captured.workspace.sessionWarningAt.Equal(time.Date(2026, 11, 26, 15, 44, 0, 0, time.UTC)) {
+			t.Fatalf("demo browser setting = %t, warning time = %s", captured.workspace.options.DisableBrowser, captured.workspace.sessionWarningAt)
+		}
 		foundSaveMod := false
 		for _, m := range captured.workspace.modules {
 			if m.ID == dtdemo.ModuleID && m.Text == dtdemo.ModuleText {

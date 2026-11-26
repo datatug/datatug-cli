@@ -24,6 +24,27 @@ func stub[T any](t *testing.T, target *T, val T) {
 	t.Cleanup(func() { *target = orig })
 }
 
+func requireSharedTokenUntouched(t *testing.T) func() {
+	t.Helper()
+	ghauth.UseMemoryStore()
+	const shared = "unrelated-application-token"
+	if err := ghauth.SaveToken(&oauth2.Token{AccessToken: shared}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := ghauth.DeleteToken(); err != nil {
+			t.Error(err)
+		}
+	})
+	return func() {
+		t.Helper()
+		got, err := ghauth.GetToken()
+		if err != nil || got.AccessToken != shared {
+			t.Fatal("demo changed the shared token store")
+		}
+	}
+}
+
 type fakeGitClient struct {
 	userLogin  string
 	userErr    error
@@ -100,7 +121,6 @@ func testConfig(auth *AuthState, pollTok *oauth2.Token, pollErr error) Config {
 			}
 			return pollTok, pollErr
 		},
-		SaveToken: func(*oauth2.Token) error { return nil },
 	}
 }
 
@@ -129,8 +149,7 @@ func feedModel(m tea.Model, msgs ...tea.Msg) (tea.Model, []tea.Msg) {
 }
 
 func TestAuthStateAndConfig(t *testing.T) {
-	deleted := false
-	stub(t, &deleteToken, func() error { deleted = true; return nil })
+	verifyShared := requireSharedTokenUntouched(t)
 
 	a := NewAuthState()
 	if a.SignedIn() || a.Token() != "" || a.Login() != "" {
@@ -148,8 +167,9 @@ func TestAuthStateAndConfig(t *testing.T) {
 		t.Fatalf("login = %q", a.Login())
 	}
 	a.Clear()
-	if a.SignedIn() || a.Token() != "" || a.Login() != "" || !deleted {
-		t.Fatalf("Clear failed: signedIn=%v deleted=%v", a.SignedIn(), deleted)
+	verifyShared()
+	if a.SignedIn() || a.Token() != "" || a.Login() != "" {
+		t.Fatalf("Clear failed: signedIn=%v", a.SignedIn())
 	}
 
 	// Default Config normalization & default newGitClient seam.

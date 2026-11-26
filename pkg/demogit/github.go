@@ -154,9 +154,7 @@ func (c *Client) lookupFork(ctx context.Context, api *github.Client, candidate R
 
 func ownedFork(repo *github.Repository, login string) (Repo, bool) {
 	fork, ok := repoFromResponse(repo)
-	owner := repo.GetOwner().GetLogin()
-	return fork, ok && repo.GetFork() && strings.EqualFold(fork.Owner, login) &&
-		(owner == "" || strings.EqualFold(owner, login))
+	return fork, ok && repo.GetFork() && forkOwnedBy(repo, fork, login)
 }
 
 // EnsureFork returns the visitor's fork, creating it when there is none and
@@ -192,6 +190,9 @@ func (c *Client) EnsureFork(ctx context.Context) (fork Repo, created bool, err e
 	if !ok {
 		return Repo{}, false, errors.New("GitHub fork response has no repository name")
 	}
+	if !forkOwnedBy(repo, fork, user.GetLogin()) {
+		return Repo{}, false, errors.New("GitHub fork response does not belong to the signed-in user")
+	}
 
 	// The endpoint also returns existing forks. A different name or older
 	// creation timestamp identifies a fork that was already there.
@@ -212,6 +213,10 @@ func repoFromResponse(repo *github.Repository) (Repo, bool) {
 	return Repo{Owner: owner, Name: name}, owner != "" && name != ""
 }
 
+func forkOwnedBy(repo *github.Repository, fork Repo, login string) bool {
+	return strings.EqualFold(fork.Owner, login) && strings.EqualFold(repo.GetOwner().GetLogin(), login)
+}
+
 func (c *Client) waitForFork(ctx context.Context, api *github.Client, fork Repo) (err error) {
 	ctx, cancel := context.WithTimeoutCause(ctx, c.cfg.ForkWait, ErrForkNotReady)
 	defer cancel()
@@ -226,6 +231,10 @@ func (c *Client) waitForFork(ctx context.Context, api *github.Client, fork Repo)
 			return c.apiError("wait for GitHub fork", resp, err)
 		}
 		if err == nil && repo.GetDefaultBranch() != "" {
+			resolved, _ := repoFromResponse(repo)
+			if !forkOwnedBy(repo, resolved, fork.Owner) {
+				return errors.New("GitHub fork response does not belong to the signed-in user")
+			}
 			ref, resp, err := api.Git.GetRef(ctx, fork.Owner, fork.Name, "heads/"+repo.GetDefaultBranch())
 			if err == nil && ref.GetObject().GetSHA() != "" {
 				return nil

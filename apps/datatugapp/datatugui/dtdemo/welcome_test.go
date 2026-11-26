@@ -102,6 +102,7 @@ func TestWelcomeChooseRouting(t *testing.T) {
 }
 
 func TestWelcomeOpenForkSuccess(t *testing.T) {
+	verifyShared := requireSharedTokenUntouched(t)
 	fake := &fakeGitClient{
 		findFork: demogit.Repo{Owner: "alice", Name: "datatug-demo-project"},
 		openFn: func(_ context.Context, dir string) (string, error) {
@@ -143,6 +144,7 @@ func TestWelcomeOpenForkSuccess(t *testing.T) {
 	if gotToken != "gho_secret_abc" || auth.Token() != "gho_secret_abc" {
 		t.Fatalf("token not propagated to git client / auth state")
 	}
+	verifyShared()
 	if fake.openDir == cfg.RepoDir || filepath.Dir(fake.openDir) != filepath.Dir(cfg.RepoDir) || fake.openProj != "demo-project-1" {
 		t.Fatalf("Open called with dir=%q proj=%q", fake.openDir, fake.openProj)
 	}
@@ -317,7 +319,6 @@ func TestWelcomeOpenForkFailuresAndCancel(t *testing.T) {
 	})
 
 	t.Run("open auth error clears token and q quits", func(t *testing.T) {
-		stub(t, &deleteToken, func() error { return nil })
 		fake := &fakeGitClient{
 			findFork: demogit.Repo{Owner: "alice", Name: "datatug-demo-project"},
 			openErr:  demogit.ErrAuth,
@@ -338,7 +339,6 @@ func TestWelcomeOpenForkFailuresAndCancel(t *testing.T) {
 	})
 
 	t.Run("findFork auth error clears token", func(t *testing.T) {
-		stub(t, &deleteToken, func() error { return nil })
 		fake := &fakeGitClient{findErr: demogit.ErrAuth}
 		stub(t, &newGitClient, func(demogit.Config, string) GitClient { return fake })
 		auth := NewAuthState()
@@ -479,7 +479,9 @@ func TestRunWelcome(t *testing.T) {
 func TestRunWelcomeProgramExplores(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
-	res, err := RunWelcome(testConfig(NewAuthState(), nil, nil),
+	cfg := testConfig(NewAuthState(), nil, nil)
+	cfg.Deadline = time.Time{}
+	res, err := RunWelcome(cfg,
 		tea.WithContext(ctx), tea.WithInput(nil), tea.WithOutput(io.Discard), tea.WithoutRenderer(), tea.WithoutSignalHandler(),
 		tea.WithFilter(func(_ tea.Model, msg tea.Msg) tea.Msg {
 			if _, ok := msg.(tea.WindowSizeMsg); ok {
@@ -489,5 +491,33 @@ func TestRunWelcomeProgramExplores(t *testing.T) {
 		}))
 	if err != nil || res.Outcome != OutcomeExplore {
 		t.Fatalf("welcome program = %+v, %v", res, err)
+	}
+}
+
+func TestWelcomeWarnsOneMinuteBeforeDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	warnAt := time.Now().Add(20 * time.Millisecond)
+	cfg := Config{Deadline: warnAt.Add(time.Minute)}
+	model := NewWelcomeModel(cfg)
+	if strings.Contains(welcomeView(model), SessionWarning) {
+		t.Fatal("warning appeared before the timer")
+	}
+	var fired time.Time
+	_, err := runWelcomeProgram(model,
+		tea.WithContext(ctx), tea.WithInput(nil), tea.WithOutput(io.Discard), tea.WithoutRenderer(), tea.WithoutSignalHandler(),
+		tea.WithFilter(func(_ tea.Model, msg tea.Msg) tea.Msg {
+			if _, ok := msg.(welcomeSessionWarningMsg); ok {
+				fired = time.Now()
+				return tea.Quit()
+			}
+			return msg
+		}))
+	if err != nil || fired.IsZero() || fired.Before(warnAt) {
+		t.Fatalf("warning fired at %s, expected at %s, error %v", fired, warnAt, err)
+	}
+	expiring, _ := model.Update(welcomeSessionWarningMsg{})
+	if !strings.Contains(welcomeView(expiring), SessionWarning) {
+		t.Fatal("timer message did not add the warning to the welcome view")
 	}
 }

@@ -33,7 +33,17 @@ const (
 	SaveNotConfiguredNotice = "Saving to GitHub is not configured on this demo server."
 	// ExternalDatabasesNotice states that external databases are not part of the repo.
 	ExternalDatabasesNotice = "Note: OpenVaultDB cloud databases and any other external databases are not part of this repository, so changes made there are neither saved nor undone."
+	// SessionWarning is shown just before the supervisor ends a session.
+	SessionWarning = "Your SSH demo session ends in one minute or less."
 )
+
+// SessionWarningAt returns when to warn, or zero when there is no deadline.
+func SessionWarningAt(deadline time.Time) time.Time {
+	if deadline.IsZero() {
+		return time.Time{}
+	}
+	return deadline.Add(-time.Minute)
+}
 
 // GitClient is the subset of *demogit.Client used by dtdemo screens.
 // Production uses demogit.New; tests substitute a fake through newGitClient.
@@ -54,9 +64,12 @@ var (
 		return demogit.New(cfg, token)
 	}
 	listChanges = demogit.Changes
-	deleteToken = ghauth.DeleteToken
 	nowFunc     = time.Now
 )
+
+// The device-flow screen forwards the token in its completion message.
+// Only that message's recipient hands it to the session's AuthState.
+func discardDeviceToken(*oauth2.Token) error { return nil }
 
 // AuthState holds one visitor's GitHub sign-in state in process memory only.
 // The token is never persisted, logged, written to git config, or printed.
@@ -107,13 +120,12 @@ func (a *AuthState) SignedIn() bool {
 	return a.token != ""
 }
 
-// Clear forgets the in-memory token and login and deletes the in-memory ghauth copy.
+// Clear forgets the in-memory token and login.
 func (a *AuthState) Clear() {
 	a.mu.Lock()
 	a.token = ""
 	a.login = ""
 	a.mu.Unlock()
-	_ = deleteToken()
 }
 
 // String redacts the token so AuthState can never leak secrets through fmt.
@@ -133,7 +145,6 @@ type Config struct {
 	// Optional overrides for the device-flow screen in tests.
 	RequestDeviceCode func(ctx context.Context, clientID, scope string) (*ghauth.DeviceCodeResponse, error)
 	PollForToken      func(ctx context.Context, clientID, clientSecret, deviceCode string, interval int, onAttempt func(int)) (*oauth2.Token, error)
-	SaveToken         func(token *oauth2.Token) error
 }
 
 // GitHubEnabled reports whether GitHub sign-in, fork opening, and saving are

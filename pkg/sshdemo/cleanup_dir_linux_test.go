@@ -25,11 +25,18 @@ func TestCleanupDeepTree(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
 			built := buildCleanupTree(t, root, tc.depth, tc.width)
+			var renames int
+			rename := cleanupRename
+			t.Cleanup(func() { cleanupRename = rename })
+			cleanupRename = func(oldfd int, oldname string, newfd int, newname string, flags uint) error {
+				renames++
+				return rename(oldfd, oldname, newfd, newname, flags)
+			}
 			deletions := 0
 			if err := CleanWorkspaceContents(root, func() { deletions++ }); err != nil {
 				t.Fatal(err)
 			}
-			if want := built + built*tc.width; deletions != want {
+			if want := built + built*tc.width + renames; deletions != want {
 				t.Fatalf("deleted %d entries, want %d", deletions, want)
 			}
 			if entries, err := os.ReadDir(root); err != nil || len(entries) != 0 {
@@ -275,7 +282,7 @@ func TestCleanupHoistsPastPathBudget(t *testing.T) {
 		if err := cleanWorkspaceContents(root, len(root)+128, func() { deletions++ }); err != nil {
 			t.Fatal(err)
 		}
-		if want := built*2 + 3; deletions != want {
+		if want := built*2 + 3 + renames; deletions != want {
 			t.Fatalf("deleted %d entries, want %d", deletions, want)
 		}
 		if renames == 0 {

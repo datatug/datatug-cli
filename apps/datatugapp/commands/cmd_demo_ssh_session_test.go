@@ -50,12 +50,13 @@ func TestDemoSSHSessionFlagsAndCommand(t *testing.T) {
 func TestDemoSSHSessionRlimitsLoweringOnlyAndFailClosed(t *testing.T) {
 	t.Run("lowering only keeps lower hard/soft limits", func(t *testing.T) {
 		current := map[int]unix.Rlimit{
-			unix.RLIMIT_CORE:   {Cur: unix.RLIM_INFINITY, Max: unix.RLIM_INFINITY},
-			unix.RLIMIT_AS:     {Cur: 1024, Max: 1024}, // already lower than 2 GiB
-			unix.RLIMIT_CPU:    {Cur: unix.RLIM_INFINITY, Max: 1000},
-			unix.RLIMIT_FSIZE:  {Cur: 500, Max: 100000000}, // soft already lower than 64 MiB
-			unix.RLIMIT_NOFILE: {Cur: 2048, Max: 4096},
-			unix.RLIMIT_NPROC:  {Cur: 128, Max: 128},
+			unix.RLIMIT_CORE:    {Cur: unix.RLIM_INFINITY, Max: unix.RLIM_INFINITY},
+			unix.RLIMIT_MEMLOCK: {Cur: 8 << 20, Max: 8 << 20},
+			unix.RLIMIT_AS:      {Cur: 1024, Max: 1024}, // already lower than 2 GiB
+			unix.RLIMIT_CPU:     {Cur: unix.RLIM_INFINITY, Max: 1000},
+			unix.RLIMIT_FSIZE:   {Cur: 500, Max: 100000000}, // soft already lower than 64 MiB
+			unix.RLIMIT_NOFILE:  {Cur: 2048, Max: 4096},
+			unix.RLIMIT_NPROC:   {Cur: 128, Max: 128},
 		}
 		applied := map[int]unix.Rlimit{}
 		stubSSHSession(t, &demoSSHGetrlimit, func(res int, r *unix.Rlimit) error {
@@ -79,6 +80,9 @@ func TestDemoSSHSessionRlimitsLoweringOnlyAndFailClosed(t *testing.T) {
 		}
 		if applied[unix.RLIMIT_CORE] != (unix.Rlimit{Cur: 0, Max: 0}) {
 			t.Fatalf("RLIMIT_CORE = %+v", applied[unix.RLIMIT_CORE])
+		}
+		if applied[unix.RLIMIT_MEMLOCK] != (unix.Rlimit{Cur: 0, Max: 0}) {
+			t.Fatalf("RLIMIT_MEMLOCK = %+v", applied[unix.RLIMIT_MEMLOCK])
 		}
 		if applied[unix.RLIMIT_AS] != (unix.Rlimit{Cur: 1024, Max: 1024}) {
 			t.Fatalf("RLIMIT_AS must not be raised: %+v", applied[unix.RLIMIT_AS])

@@ -140,7 +140,7 @@ func walkCleanup(root *cleanupFrame, rootPathLen, budget int, progress func()) e
 				return fmt.Errorf("prepare cleanup directory %q: %w", name, err)
 			}
 			pin.close()
-			if err := hoistCleanupDirectory(fd, name, rootFD, budget-rootPathLen, &hoistSequence); err != nil {
+			if err := hoistCleanupDirectory(fd, name, rootFD, budget-rootPathLen, &hoistSequence, progress); err != nil {
 				return err
 			}
 			continue
@@ -156,7 +156,7 @@ func walkCleanup(root *cleanupFrame, rootPathLen, budget int, progress func()) e
 	}
 }
 
-func hoistCleanupDirectory(fd int, name string, rootFD, rootSpace int, sequence *uint64) error {
+func hoistCleanupDirectory(fd int, name string, rootFD, rootSpace int, sequence *uint64, progress func()) error {
 	for {
 		(*sequence)++
 		target := ".cleanup-" + strconv.FormatUint(*sequence, 10)
@@ -171,7 +171,10 @@ func hoistCleanupDirectory(fd int, name string, rootFD, rootSpace int, sequence 
 		if err != nil {
 			return fmt.Errorf("hoist cleanup directory %q: %w", name, err)
 		}
-		// Only deletions count as progress for retries.
+		// A hoist moves the directory to depth 1 and the tree is drained and
+		// finite, so hoists cannot repeat forever: count them as progress so
+		// a starved run of hoists does not read as a stuck cleanup.
+		progress()
 		return nil
 	}
 }

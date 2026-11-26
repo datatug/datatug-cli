@@ -316,7 +316,10 @@ check_session_in_slot_and_drained() {
     uid=$("${compose[@]}" exec -T demo /bin/sh -c "awk '/^Uid:/ {print \$2, \$3, \$4, \$5}' /proc/$(head -n1 <<< "$pids")/status") || { kill "$client"; return 1; }
     kill "$client" 2>/dev/null || true
     wait "$client" 2>/dev/null || true
-    [[ $uid =~ ^(20[0-9]{3})\ \1\ \1\ \1$ ]] || { printf 'slot process uids: %s\n' "$uid" >&2; return 1; }
+    local real eff saved fs
+    read -r real eff saved fs <<< "$uid"
+    [[ $real =~ ^20[0-9]{3}$ && $eff == "$real" && $saved == "$real" && $fs == "$real" ]] ||
+        { printf 'slot process uids: %s\n' "$uid" >&2; return 1; }
     sleep 6
     pids=$("${compose[@]}" exec -T demo /bin/sh -c "cat $slots_dir/slot-*/cgroup.procs") || return 1
     [[ -z $pids ]] || { printf 'slot not drained: %s\n' "$pids" >&2; return 1; }

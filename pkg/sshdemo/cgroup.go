@@ -111,46 +111,25 @@ func (g cgroup) ensureDir() (existed bool, err error) {
 	return false, err
 }
 
-// Discover the scope using namespace PIDs. A supervisor restarted via exec
-// may already be in the supervisor leaf while the scope itself is empty.
-func findCgroupScope(root cgroup, pid string, depth int) (cgroup, error) {
-	entries, err := os.ReadDir(root.path)
-	if err != nil {
-		return cgroup{}, err
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		dir := root.child(entry.Name())
-		if strings.HasSuffix(entry.Name(), ".scope") {
-			for _, candidate := range []cgroup{dir, dir.child("supervisor")} {
-				raw, err := candidate.read("cgroup.procs")
-				if err == nil && slices.Contains(strings.Fields(string(raw)), pid) {
-					return dir, nil
-				}
-			}
-		}
-		if depth > 1 {
-			scope, err := findCgroupScope(dir, pid, depth-1)
-			if err == nil {
-				return scope, nil
-			}
-		}
-	}
-	return cgroup{}, fmt.Errorf("no cgroup scope under %s contains PID %s", root.path, pid)
-}
-
 func (g cgroup) delegateSlots() error {
 	supervisor := g.child("supervisor")
-	if _, err := supervisor.ensureDir(); err != nil {
-		return err
-	}
 	raw, err := g.read("cgroup.procs")
 	if err != nil {
 		return err
 	}
-	for _, pid := range strings.Fields(string(raw)) {
+	procs := strings.Fields(string(raw))
+	pid := strconv.Itoa(os.Getpid())
+	if !slices.Contains(procs, pid) {
+		// A restarted supervisor may already be in the leaf.
+		current, err := supervisor.read("cgroup.procs")
+		if err != nil || !slices.Contains(strings.Fields(string(current)), pid) {
+			return fmt.Errorf("%s is not the supervisor's cgroup scope", g.path)
+		}
+	}
+	if _, err := supervisor.ensureDir(); err != nil {
+		return err
+	}
+	for _, pid := range procs {
 		if err := supervisor.write("cgroup.procs", pid); err != nil && !errors.Is(err, syscall.ESRCH) {
 			return err
 		}
@@ -158,12 +137,12 @@ func (g cgroup) delegateSlots() error {
 	return g.write("cgroup.subtree_control", "+memory +pids")
 }
 
-func (g cgroup) configureSlot(memoryMax uint64) error {
+func (g cgroup) configureLimits(memoryMax uint64, pidsMax int) error {
 	for _, setting := range []struct{ file, value string }{
 		{"memory.max", strconv.FormatUint(memoryMax, 10)},
 		{"memory.swap.max", "0"},
 		{"memory.oom.group", "1"},
-		{"pids.max", strconv.Itoa(RlimitNProc)},
+		{"pids.max", strconv.Itoa(pidsMax)},
 	} {
 		if err := g.write(setting.file, setting.value); err != nil {
 			return err
@@ -201,19 +180,15 @@ func slotCgroupName(index int) string {
 }
 
 func (s *Server) prepareCgroups(ctx context.Context) error {
-	root := cgroup{path: s.cfg.CgroupRoot, fs: s.ops.cgroups}
-	if root.path == "" {
-		return errors.New("sshdemo: --cgroup-root is required in uid isolation mode")
-	}
-	if err := root.fs.verify(root.path); err != nil {
-		return fmt.Errorf("sshdemo: unusable --cgroup-root %s: %w", root.path, err)
-	}
-	scope, err := findCgroupScope(root, strconv.Itoa(os.Getpid()), 2)
-	if err != nil {
-		return fmt.Errorf("sshdemo: find supervisor cgroup: %w", err)
+	scope := cgroup{path: s.cfg.CgroupRoot, fs: s.ops.cgroups}
+	if err := scope.fs.verify(scope.path); err != nil {
+		return fmt.Errorf("sshdemo: unusable --cgroup-root %s: %w", scope.path, err)
 	}
 	budget, err := checkMemoryCapacity(s.cfg, scope)
 	if err != nil {
+		return err
+	}
+	if err := checkPIDCapacity(s.cfg, scope); err != nil {
 		return err
 	}
 	if err := s.checkFilesystemCapacity(budget); err != nil {
@@ -230,7 +205,7 @@ func (s *Server) prepareCgroups(ctx context.Context) error {
 		return err
 	}
 	for _, entry := range entries {
-		if entry.IsDir() && entry.Name() != "supervisor" {
+		if entry.IsDir() && entry.Name() != "supervisor" && entry.Name() != "cleanup" {
 			index, err := strconv.Atoi(strings.TrimPrefix(entry.Name(), "slot-"))
 			if err == nil && index >= 0 && index < s.cfg.MaxSessions && entry.Name() == slotCgroupName(index) {
 				continue
@@ -256,13 +231,25 @@ func (s *Server) prepareCgroups(ctx context.Context) error {
 			}
 			continue
 		}
-		if err := group.configureSlot(budget); err != nil {
+		if err := group.configureLimits(budget, RlimitNProc); err != nil {
 			return fmt.Errorf("sshdemo: configure slot cgroup: %w", err)
 		}
 		if _, err := group.event("memory.events", "oom_group_kill"); err != nil {
 			return fmt.Errorf("sshdemo: read slot OOM counter: %w", err)
 		}
 	}
+
+	s.cleanupGroup = scope.child("cleanup")
+	if _, err := s.cleanupGroup.ensureDir(); err != nil {
+		return fmt.Errorf("sshdemo: create cleanup cgroup: %w", err)
+	}
+	if err := s.cleanupGroup.drain(ctx, cgroupDrainTimeout); err != nil {
+		return fmt.Errorf("sshdemo: drain cleanup cgroup: %w", err)
+	}
+	if err := s.cleanupGroup.configureLimits(s.cfg.CleanupMemLimit, s.cfg.CleanupPIDsLimit); err != nil {
+		return fmt.Errorf("sshdemo: configure cleanup cgroup: %w", err)
+	}
+	s.cleanupQueue = make(chan struct{}, 1)
 	return nil
 }
 
@@ -271,8 +258,52 @@ func (s *Server) quarantineSlot(index int, err error) bool {
 	if s.cfg.Isolation == IsolationProcess {
 		uid = os.Getuid()
 	}
-	s.logger.Error("quarantining session slot", "slot_index", index, "uid", uid, "err", err)
-	return s.slots.quarantine(index)
+	allQuarantined := s.slots.quarantine(index)
+	s.logger.Error("quarantining session slot", "slot_index", index, "uid", uid, "err", err,
+		"quarantined_slots", s.slots.quarantinedCount(), "max_sessions", s.cfg.MaxSessions)
+	return allQuarantined
+}
+
+// checkSlotReuse runs after successful drainage and cleanup, or while retrying
+// a slot held solely for outstanding memory charges.
+func (s *Server) checkSlotReuse(index int, retry bool) {
+	s.slotReuseMu.Lock()
+	defer s.slotReuseMu.Unlock()
+	pending := s.slots.awaitingMemory(index)
+	if retry && !pending {
+		return
+	}
+	current, err := s.cgroups[index].counter("memory.current")
+	threshold := s.cfg.SlotReuseMemoryThreshold
+	if err == nil && current < threshold {
+		if pending {
+			s.slots.setMemoryQuarantine(index, false)
+			s.logger.Info("session slot available again", "slot_index", index, "memory_current", current,
+				"quarantined_slots", s.slots.quarantinedCount(), "max_sessions", s.cfg.MaxSessions)
+		}
+		return
+	}
+	if !pending {
+		s.slots.setMemoryQuarantine(index, true)
+		s.logger.Warn("quarantining session slot pending memory release", "slot_index", index,
+			"memory_current", current, "threshold", threshold, "err", err,
+			"quarantined_slots", s.slots.quarantinedCount(), "max_sessions", s.cfg.MaxSessions)
+	}
+}
+
+func (s *Server) recheckSlotMemory(ctx context.Context, interval time.Duration) {
+	tick := time.NewTicker(interval)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			for i := range s.cgroups {
+				s.checkSlotReuse(i, true)
+			}
+		}
+	}
 }
 
 var slotReadyPipe = os.Pipe

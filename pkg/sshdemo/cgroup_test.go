@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
@@ -22,8 +23,6 @@ import (
 	gossh "golang.org/x/crypto/ssh"
 	"golang.org/x/sys/unix"
 )
-
-const fakeScopeName = "docker-fixture.scope"
 
 var fakeSlotFiles = map[string]string{
 	"cgroup.kill":      "0",
@@ -46,7 +45,7 @@ func writeFixtureFile(t *testing.T, dir, file, data string) {
 
 func addFakeSlot(t *testing.T, root, slot string) string {
 	t.Helper()
-	dir := filepath.Join(root, fakeScopeName, slot)
+	dir := filepath.Join(root, slot)
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -60,13 +59,11 @@ func fakeCgroupMount(t *testing.T) (string, cgroupFS) {
 	t.Helper()
 	root := t.TempDir()
 	writeFixtureFile(t, root, "cgroup.controllers", "memory pids")
-	scope := filepath.Join(root, fakeScopeName)
-	if err := os.Mkdir(scope, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	scope := root
 	writeFixtureFile(t, scope, "cgroup.procs", fmt.Sprintf("%d\n1\n", os.Getpid()))
 	writeFixtureFile(t, scope, "cgroup.subtree_control", "")
 	writeFixtureFile(t, scope, "memory.max", strconv.FormatUint(8<<30, 10))
+	writeFixtureFile(t, scope, "pids.max", "max\n")
 	fs := defaultCgroupFS()
 	fs.verify = func(string) error { return nil }
 	fs.mkdir = func(path string, perm os.FileMode) error {
@@ -90,6 +87,8 @@ func ampleSessionFilesystem(string) (uint64, uint64, error) {
 	return math.MaxUint64, math.MaxUint64, nil
 }
 
+func noSharedTemp(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
+
 func fakeCgroupServer(t *testing.T) (Config, SysOps) {
 	t.Helper()
 	cfg := failureTestConfig(t)
@@ -100,10 +99,10 @@ func fakeCgroupServer(t *testing.T) (Config, SysOps) {
 	}
 	ops := SysOps{
 		FilesystemCapacity: ampleSessionFilesystem,
+		StatSharedTemp:     noSharedTemp,
 		FileUID:            func(os.FileInfo) (int, bool) { return 0, true },
 		Chown:              func(string, int, int) error { return nil },
 		Fchown:             func(*os.File, int, int) error { return nil },
-		CredentialFor:      func(int, int) *syscall.Credential { return nil },
 	}
 	cfg.CgroupRoot, ops.cgroups = fakeCgroupMount(t)
 	return cfg, ops
@@ -126,8 +125,8 @@ func TestCgroupCapacityFailsClosed(t *testing.T) {
 		name, limit, want string
 		remove, overflow  bool
 	}{
-		{"exact", strconv.FormatUint(supervisorReserve+2*(DefaultSessionMemQuota+DefaultSessionDiskQuota), 10), "", false, false},
-		{"one byte short", strconv.FormatUint(supervisorReserve+2*(DefaultSessionMemQuota+DefaultSessionDiskQuota)-1, 10), "exceed the cgroup memory limit", false, false},
+		{"exact", strconv.FormatUint(supervisorReserve+DefaultCleanupMemLimit+2*(DefaultSessionMemQuota+DefaultSessionDiskQuota), 10), "", false, false},
+		{"one byte short", strconv.FormatUint(supervisorReserve+DefaultCleanupMemLimit+2*(DefaultSessionMemQuota+DefaultSessionDiskQuota)-1, 10), "exceed the cgroup memory limit", false, false},
 		{"reserve larger", "1", "exceed the cgroup memory limit", false, false},
 		{"missing", "", "require finite scope memory.max", true, false},
 		{"unlimited", "max\n", "require finite scope memory.max", false, false},
@@ -136,7 +135,7 @@ func TestCgroupCapacityFailsClosed(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, ops := fakeCgroupServer(t)
-			scope := filepath.Join(cfg.CgroupRoot, fakeScopeName)
+			scope := cfg.CgroupRoot
 			writeFixtureFile(t, scope, "memory.max", tc.limit)
 			if tc.remove {
 				if err := os.Remove(filepath.Join(scope, "memory.max")); err != nil {
@@ -156,10 +155,38 @@ func TestCgroupCapacityFailsClosed(t *testing.T) {
 	}
 }
 
+func TestCgroupPIDCapacityFailsClosed(t *testing.T) {
+	cfg, ops := fakeCgroupServer(t)
+	group := cgroup{path: cfg.CgroupRoot, fs: ops.cgroups}
+	exact := cfg.MaxSessions*RlimitNProc + cfg.CleanupPIDsLimit + supervisorPIDReserve
+	for _, tc := range []struct{ value, want string }{
+		{"max\n", ""},
+		{strconv.Itoa(exact), ""},
+		{strconv.Itoa(exact - 1), "scope pids.max"},
+		{"256", "scope pids.max"},
+		{"bad", "invalid scope pids.max"},
+	} {
+		writeFixtureFile(t, group.path, "pids.max", tc.value)
+		err := checkPIDCapacity(cfg, group)
+		if tc.want == "" {
+			if err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			requireErrorContains(t, err, tc.want)
+		}
+	}
+	if err := os.Remove(filepath.Join(group.path, "pids.max")); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewServer(t.Context(), cfg, WithSysOps(ops))
+	requireErrorContains(t, err, "read scope pids.max")
+}
+
 func TestUIDStartupChecksSharedTmpfsCapacity(t *testing.T) {
 	const total = uint64(2 * (DefaultSessionMemQuota + DefaultSessionDiskQuota))
 	const roundedSize = total + (total+9)/10
-	const requiredInodes = total / 512
+	const requiredInodes = total / 1024
 	for _, tc := range []struct {
 		name         string
 		size, inodes uint64
@@ -186,7 +213,7 @@ func TestUIDStartupChecksSharedTmpfsCapacity(t *testing.T) {
 			_, err := NewServer(t.Context(), cfg, WithSysOps(ops))
 			if tc.want != "" {
 				requireErrorContains(t, err, tc.want)
-				raw, err := os.ReadFile(filepath.Join(cfg.CgroupRoot, fakeScopeName, "cgroup.subtree_control"))
+				raw, err := os.ReadFile(filepath.Join(cfg.CgroupRoot, "cgroup.subtree_control"))
 				if err != nil || len(raw) != 0 {
 					t.Fatalf("failed sizing changed delegation: %q, %v", raw, err)
 				}
@@ -199,7 +226,7 @@ func TestUIDStartupChecksSharedTmpfsCapacity(t *testing.T) {
 
 func TestCgroupStartupUsesScopeAndDrainsSlots(t *testing.T) {
 	cfg, ops := fakeCgroupServer(t)
-	scope := filepath.Join(cfg.CgroupRoot, fakeScopeName)
+	scope := cfg.CgroupRoot
 	existing := addFakeSlot(t, cfg.CgroupRoot, "slot-0")
 	retired := addFakeSlot(t, cfg.CgroupRoot, "slot-9")
 	var moves []string
@@ -236,16 +263,15 @@ func TestCgroupStartupUsesScopeAndDrainsSlots(t *testing.T) {
 	}
 	assertFile(filepath.Join(retired, "cgroup.kill"), "1")
 	assertFile(filepath.Join(scope, "cgroup.subtree_control"), "+memory +pids")
-
-	// Restart in the supervisor leaf with the scope nested two levels down.
+	for file, want := range map[string]string{
+		"cgroup.kill": "1", "memory.max": strconv.Itoa(DefaultCleanupMemLimit),
+		"memory.swap.max": "0", "memory.oom.group": "1", "pids.max": strconv.Itoa(DefaultCleanupPIDsLimit),
+	} {
+		assertFile(filepath.Join(scope, "cleanup", file), want)
+	}
+	// Restart in the supervisor leaf.
 	writeFixtureFile(t, scope, "cgroup.procs", "")
-	parent := filepath.Join(cfg.CgroupRoot, "nested.slice")
-	if err := os.Mkdir(parent, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Rename(scope, filepath.Join(parent, fakeScopeName)); err != nil {
-		t.Fatal(err)
-	}
+	writeFixtureFile(t, filepath.Join(scope, "supervisor"), "cgroup.procs", strconv.Itoa(os.Getpid()))
 	if _, err := NewServer(t.Context(), cfg, WithSysOps(ops)); err != nil {
 		t.Fatal(err)
 	}
@@ -256,16 +282,18 @@ func TestCgroupStartupErrors(t *testing.T) {
 		name, want string
 		edit       func(*testing.T, *Config, *cgroupFS)
 	}{
-		{"empty root", "--cgroup-root is required", func(_ *testing.T, c *Config, _ *cgroupFS) { c.CgroupRoot = "" }},
+		{"relative root", "--cgroup-root must be absolute", func(_ *testing.T, c *Config, _ *cgroupFS) { c.CgroupRoot = "scope" }},
+		{"invalid cleanup limit", "--cleanup-pids-limit must be positive", func(_ *testing.T, c *Config, _ *cgroupFS) { c.CleanupPIDsLimit = -1 }},
 		{"not cgroupfs", "expected a cgroup v2", func(_ *testing.T, _ *Config, f *cgroupFS) { f.verify = verifyCgroupFS }},
 		{"missing root", "unusable --cgroup-root", func(_ *testing.T, c *Config, f *cgroupFS) {
 			c.CgroupRoot = filepath.Join(c.CgroupRoot, "missing")
 			f.verify = verifyCgroupFS
 		}},
-		{"no scope", "no cgroup scope", func(t *testing.T, c *Config, _ *cgroupFS) { c.CgroupRoot = t.TempDir() }},
-		{"unreadable root", "find supervisor cgroup", func(_ *testing.T, c *Config, _ *cgroupFS) { c.CgroupRoot = filepath.Join(c.CgroupRoot, "missing") }},
+		{"foreign scope", "is not the supervisor's cgroup scope", func(t *testing.T, c *Config, _ *cgroupFS) {
+			writeFixtureFile(t, c.CgroupRoot, "cgroup.procs", "")
+		}},
 		{"missing delegation files", "delegate session cgroups", func(t *testing.T, c *Config, _ *cgroupFS) {
-			if err := os.Remove(filepath.Join(c.CgroupRoot, fakeScopeName, "cgroup.subtree_control")); err != nil {
+			if err := os.Remove(filepath.Join(c.CgroupRoot, "cgroup.subtree_control")); err != nil {
 				t.Fatal(err)
 			}
 		}},
@@ -275,22 +303,18 @@ func TestCgroupStartupErrors(t *testing.T) {
 		{"move denied", "delegate session cgroups", func(_ *testing.T, _ *Config, f *cgroupFS) {
 			f.write = func(string, string) error { return syscall.EPERM }
 		}},
-		{"scope procs read", "delegate session cgroups", func(t *testing.T, c *Config, f *cgroupFS) {
-			procs := filepath.Join(c.CgroupRoot, fakeScopeName, "cgroup.procs")
+		{"scope procs read", "delegate session cgroups", func(_ *testing.T, c *Config, f *cgroupFS) {
+			procs := filepath.Join(c.CgroupRoot, "cgroup.procs")
 			read := f.read
-			scanned := false
 			f.read = func(path string) ([]byte, error) {
 				if path == procs {
-					if scanned {
-						return nil, errTestIO
-					}
-					scanned = true
+					return nil, errTestIO
 				}
 				return read(path)
 			}
 		}},
 		{"scope read dir", "read", func(t *testing.T, c *Config, f *cgroupFS) {
-			scope := filepath.Join(c.CgroupRoot, fakeScopeName)
+			scope := c.CgroupRoot
 			write := f.write
 			f.write = func(path, value string) error {
 				if filepath.Base(path) == "cgroup.subtree_control" {
@@ -306,6 +330,28 @@ func TestCgroupStartupErrors(t *testing.T) {
 					return errTestIO
 				}
 				return mkdir(p, m)
+			}
+		}},
+		{"cleanup mkdir", "create cleanup cgroup", func(_ *testing.T, _ *Config, f *cgroupFS) {
+			mkdir := f.mkdir
+			f.mkdir = func(path string, mode os.FileMode) error {
+				if filepath.Base(path) == "cleanup" {
+					return errTestIO
+				}
+				return mkdir(path, mode)
+			}
+		}},
+		{"cleanup drain", "drain cleanup cgroup", func(t *testing.T, cfg *Config, _ *cgroupFS) {
+			cleanup := addFakeSlot(t, cfg.CgroupRoot, "cleanup")
+			writeFixtureFile(t, cleanup, "cgroup.events", "bad")
+		}},
+		{"cleanup limit", "configure cleanup cgroup", func(_ *testing.T, _ *Config, f *cgroupFS) {
+			write := f.write
+			f.write = func(path, value string) error {
+				if strings.HasSuffix(path, "cleanup/pids.max") {
+					return errTestIO
+				}
+				return write(path, value)
 			}
 		}},
 		{"slot limit", "configure slot cgroup", func(_ *testing.T, _ *Config, f *cgroupFS) {
@@ -351,6 +397,49 @@ func TestCgroupStartupErrors(t *testing.T) {
 			_, err := NewServer(t.Context(), cfg, WithSysOps(ops))
 			requireErrorContains(t, err, tc.want)
 		})
+	}
+}
+
+func TestSlotReuseWaitsForResidualMemory(t *testing.T) {
+	cfg, ops := fakeCgroupServer(t)
+	var logs syncBuffer
+	cfg.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
+	existing := addFakeSlot(t, cfg.CgroupRoot, "slot-0")
+	file := filepath.Join(existing, "memory.current")
+	threshold := strconv.FormatUint(cfg.SlotReuseMemoryThreshold, 10)
+	writeFixtureFile(t, existing, "memory.current", threshold)
+	s, err := NewServer(t.Context(), cfg, WithSysOps(ops))
+	if err != nil {
+		t.Fatal(err)
+	}
+	slot, err := s.slots.Acquire("first")
+	if err != nil || slot.Index != 1 || s.slots.quarantinedCount() != 1 || !s.slots.awaitingMemory(0) {
+		t.Fatalf("slot at threshold was usable: acquired %+v, %v", slot, err)
+	}
+	s.quarantineSlot(1, errTestIO)
+	s.slots.Release(slot)
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	s.checkSlotReuse(0, true)
+	if _, err := s.slots.Acquire("first"); !errors.Is(err, ErrGlobalLimit) {
+		t.Fatalf("returned a slot with unreadable charges or failed cleanup: %v", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.recheckSlotMemory(ctx, time.Millisecond)
+	}()
+	defer func() { cancel(); <-done }()
+	writeFixtureFile(t, existing, "new.current", strconv.FormatUint(cfg.SlotReuseMemoryThreshold-1, 10))
+	if err := os.Rename(filepath.Join(existing, "new.current"), file); err != nil {
+		t.Fatal(err)
+	}
+	waitLogContains(t, &logs, "session slot available again", time.Second)
+	slot, err = s.slots.Acquire("first")
+	if err != nil || slot.Index != 0 || s.slots.quarantinedCount() != 1 {
+		t.Fatalf("reclaim returned slot %+v, %v", slot, err)
 	}
 }
 
@@ -569,6 +658,9 @@ func TestSessionCgroupMemoryNotices(t *testing.T) {
 		t.Fatalf("stderr = %q", got)
 	}
 	waitLogContains(t, h.logs, `"end_reason":"memory-quota"`, time.Second)
+	if !h.srv.slots.awaitingMemory(0) {
+		t.Fatal("slot with retained memory was returned to the pool")
+	}
 	waitForNoConnectionReservations(t, h.srv)
 	waitNoSessionDirs(t, cfg.SessionsDir, time.Second)
 }

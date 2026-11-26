@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -146,12 +145,7 @@ func TestServerRejectsSymlinkSessionsDir(t *testing.T) {
 	}
 }
 
-func TestUIDModeSeams_WorkspaceCredentialAndStaleCleanup(t *testing.T) {
-	// 1. CredentialFor sets uid/gid and empty supplementary groups.
-	cred := defaultCredentialFor(20007, 20007)
-	if cred.Uid != 20007 || cred.Gid != 20007 || len(cred.Groups) != 0 {
-		t.Fatalf("unexpected credential: %+v", cred)
-	}
+func TestUIDModeSeams_WorkspaceOwnershipAndStaleCleanup(t *testing.T) {
 	if _, ok := defaultFileUID(nil); ok {
 		t.Fatal("defaultFileUID(nil) should return false")
 	}
@@ -198,7 +192,7 @@ func TestUIDModeSeams_WorkspaceCredentialAndStaleCleanup(t *testing.T) {
 		t.Fatal("failed workspace should have been removed")
 	}
 
-	// 3. cleanStaleSessions in uid mode cleans in-range dirs and leaves out-of-range dirs alone.
+	// Stale cleanup includes retired slots and refuses owners below UIDBase.
 	staleRoot := t.TempDir()
 	inRangeDir := filepath.Join(staleRoot, "stale-in-range")
 	outRangeDir := filepath.Join(staleRoot, "stale-out-of-range")
@@ -207,22 +201,14 @@ func TestUIDModeSeams_WorkspaceCredentialAndStaleCleanup(t *testing.T) {
 	_ = os.MkdirAll(outRangeDir, 0o700)
 	_ = os.WriteFile(filepath.Join(outRangeDir, "keep.txt"), []byte("keep"), 0o600)
 
-	var credRequested []int
 	var logBuf bytes.Buffer
 	staleOps := DefaultSysOps()
 	staleOps.FileUID = func(fi os.FileInfo) (int, bool) {
 		if fi.Name() == "stale-in-range" {
 			return 20001, true
 		}
-		return 1000, true // outside slot range [20000, 20004)
+		return 20004, true // retired slot above the active range
 	}
-	// Return nil Credential so the child actually executes as the current non-root user
-	// while still verifying CredentialFor was called with the in-range slot uid!
-	staleOps.CredentialFor = func(uid, gid int) *syscall.Credential {
-		credRequested = append(credRequested, uid)
-		return nil
-	}
-
 	srv := &Server{
 		cfg: Config{
 			SessionsDir:    staleRoot,
@@ -232,25 +218,101 @@ func TestUIDModeSeams_WorkspaceCredentialAndStaleCleanup(t *testing.T) {
 			CleanupTimeout: 10 * time.Second,
 			ExecPrefixArgs: []string{"-test.run=^TestHelperProcess$", "--"},
 		},
-		executable: os.Args[0],
-		logger:     slog.New(slog.NewJSONHandler(&logBuf, nil)),
-		ops:        staleOps,
-		slots:      NewSlotManager(4, 2, 20000, IsolationUID),
+		executable:   os.Args[0],
+		logger:       slog.New(slog.NewJSONHandler(&logBuf, nil)),
+		ops:          staleOps,
+		slots:        NewSlotManager(4, 2, 20000, IsolationUID),
+		cleanupGroup: cgroup{path: t.TempDir()},
+		cleanupQueue: make(chan struct{}, 1),
 	}
 	if err := srv.cleanStaleSessions(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
-	if !slices.Equal(credRequested, []int{20001}) {
-		t.Fatalf("CredentialFor called with %v, want [20001]", credRequested)
+	raw, err := os.ReadFile(filepath.Join(srv.cleanupGroup.path, "cleanup-seen.json"))
+	if err != nil || !strings.Contains(string(raw), `"--slot-uid","20004","--slot-gid","20004"`) {
+		t.Fatalf("cleanup helper args = %q, %v", raw, err)
 	}
 	if _, err := os.Stat(inRangeDir); !os.IsNotExist(err) {
 		t.Fatalf("in-range stale dir should have been removed: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(outRangeDir, "keep.txt")); err != nil {
-		t.Fatalf("out-of-range dir must be left alone: %v", err)
+	if _, err := os.Stat(outRangeDir); !os.IsNotExist(err) {
+		t.Fatalf("retired slot workspace should have been removed: %v", err)
 	}
-	if !strings.Contains(logBuf.String(), "outside slot uid range") {
-		t.Fatalf("expected warning log for out-of-range dir, got: %s", logBuf.String())
+	if err := os.Mkdir(outRangeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	srv.ops.FileUID = func(os.FileInfo) (int, bool) { return 1000, true }
+	requireErrorContains(t, srv.cleanStaleSessions(t.Context()), "UID 1000 below --uid-base 20000")
+	srv.ops.FileUID = func(os.FileInfo) (int, bool) { return 20004, true }
+	writeFixtureFile(t, outRangeDir, "fail-cleanup", "")
+	requireErrorContains(t, srv.cleanStaleSessions(t.Context()), "could not verify cleanup")
+}
+
+func TestUIDModeChecksSharedTemporaryDirectories(t *testing.T) {
+	cfg, ops := fakeCgroupServer(t)
+	tmp := t.TempDir()
+	if err := os.Chmod(tmp, os.ModeSticky|0o777); err != nil {
+		t.Fatal(err)
+	}
+	ops.StatSharedTemp = func(path string) (os.FileInfo, error) {
+		if path == "/tmp" {
+			return nil, os.ErrNotExist
+		}
+		return os.Stat(tmp)
+	}
+	_, err := NewServer(t.Context(), cfg, WithSysOps(ops))
+	requireErrorContains(t, err, "shared temporary path /dev/shm is writable by others")
+	if err := os.Chmod(tmp, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewServer(t.Context(), cfg, WithSysOps(ops)); err != nil {
+		t.Fatal(err)
+	}
+	ops.StatSharedTemp = func(string) (os.FileInfo, error) { return nil, errTestIO }
+	_, err = NewServer(t.Context(), cfg, WithSysOps(ops))
+	requireErrorContains(t, err, "stat shared temporary path /tmp")
+}
+
+func TestUIDCleanupWaitsForQueue(t *testing.T) {
+	cfg, ops := fakeCgroupServer(t)
+	cfg.Executable = "/bin/true"
+	cfg.ExecPrefixArgs = nil
+	s, err := NewServer(t.Context(), cfg, WithSysOps(ops))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace := t.TempDir()
+	s.cleanupQueue <- struct{}{}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- s.cleanWorkspace(ctx, workspace, cfg.UIDBase, cfg.UIDBase) }()
+	select {
+	case err := <-done:
+		t.Fatalf("cleanup bypassed a busy queue: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("queued helper returned %v", err)
+	}
+	<-s.cleanupQueue
+	writeFixtureFile(t, workspace, "keep", "")
+	requireErrorContains(t, s.cleanWorkspace(t.Context(), workspace, cfg.UIDBase, cfg.UIDBase), "directory not empty")
+	if err := os.Remove(filepath.Join(workspace, "keep")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.cleanWorkspace(t.Context(), workspace, cfg.UIDBase, cfg.UIDBase); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestChildReapGrace(t *testing.T) {
+	waited := make(chan error, 1)
+	requireErrorContains(t, waitForChildReap(waited, time.Millisecond), "timed out waiting to reap session child")
+	waited <- errTestIO // Child exit status is independent from reap verification.
+	if err := waitForChildReap(waited, time.Second); err != nil {
+		t.Fatal(err)
 	}
 }

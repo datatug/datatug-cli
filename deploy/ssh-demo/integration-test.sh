@@ -36,8 +36,11 @@ cleanup() {
     exit "$status"
 }
 
-cat > "$work_dir/compose.test.yaml" <<'YAML'
-services: {}
+cat > "$work_dir/compose.test.yaml" <<YAML
+services:
+  demo:
+    volumes:
+      - "$work_dir/ssh-slot-link-probe:/run/datatug-demo/ssh-slot-link-probe:ro"
 YAML
 # The edge serves CONNECT only on a unix socket in the proxy-socket volume.
 # A tiny Go client (golang image) speaks to it from a throwaway container.
@@ -98,7 +101,9 @@ print_host_key() {
         --state-dir /var/lib/datatug-demo/state
 }
 
-if ! "${compose[@]}" build edge || ! "${compose[@]}" up -d --wait --wait-timeout 180; then
+if ! docker build --target slot-link-probe --output "type=local,dest=$work_dir" \
+        -f "$deploy_dir/Dockerfile" "$deploy_dir/../.." ||
+    ! "${compose[@]}" build edge || ! "${compose[@]}" up -d --wait --wait-timeout 180; then
     printf 'FAIL build or start a healthy Compose project\n' >&2
     exit 1
 fi
@@ -271,14 +276,29 @@ check_connect_allowed() {
 # A slot uid must not reach the edge's socket directory at all.
 check_slot_uid_cannot_reach_proxy() {
     local out
-    if out=$("${compose[@]}" exec -T --user 20000:20000 demo /bin/sh -c 'ls /run/datatug-demo/proxy' 2>&1); then
+    local uid=${DEMO_UID_BASE:-20000}
+    if out=$("${compose[@]}" exec -T --user "$uid:$uid" demo /bin/sh -c 'ls /run/datatug-demo/proxy' 2>&1); then
         printf 'slot uid listed the proxy directory: %s\n' "$out" >&2
         return 1
     fi
     [[ $out == *"Permission denied"* ]] || { printf '%s\n' "$out" >&2; return 1; }
 }
 
-slots_dir='/run/datatug-demo/cgroup/docker-*.scope'
+slots_dir='/sys/fs/cgroup'
+last_slot=$(("${DEMO_MAX_SESSIONS:-6}" - 1))
+
+check_private_cgroup_and_ipc() {
+    "${compose[@]}" exec -T demo /bin/sh -ec '
+        grep -q " - cgroup2 .*nsdelegate" /proc/self/mountinfo
+        test -d /sys/fs/cgroup/supervisor
+        test ! -e /sys/fs/cgroup/../cgroup.controllers
+        ! grep -q " /dev/shm " /proc/self/mountinfo
+        limit=$(cat /sys/fs/cgroup/memory.max)
+        if (echo "$limit" > /sys/fs/cgroup/memory.max) 2>/dev/null; then
+            exit 1
+        fi
+    ' && "${compose[@]}" exec -T edge /bin/sh -c '! grep -q " /dev/shm " /proc/self/mountinfo'
+}
 
 check_slot_limits() {
     local out
@@ -289,18 +309,39 @@ check_slot_limits() {
         { printf '%s\n' "$out" >&2; return 1; }
 }
 
+check_cleanup_limits() {
+    "${compose[@]}" exec -T demo /bin/sh -ec '
+        cd /sys/fs/cgroup/cleanup
+        test "$(cat memory.max)" = 100663296
+        test "$(cat memory.swap.max)" = 0
+        test "$(cat memory.oom.group)" = 1
+        test "$(cat pids.max)" = 32
+    '
+}
+
 # The kernel, not a watchdog, stops a slot: a 700 MiB tmpfs write inside the
 # last slot is OOM-group-killed at its 544 MiB memory.max and the supervisor
 # stays healthy.
 check_slot_oom_contained() {
     local status=0 events
-    "${compose[@]}" exec -T demo /bin/sh -c "S=\$(ls -d $slots_dir); echo \$\$ > \$S/slot-5/cgroup.procs &&
+    "${compose[@]}" exec -T demo /bin/sh -c "echo \$\$ > $slots_dir/slot-$last_slot/cgroup.procs &&
         exec head -c 734003200 /dev/zero > /var/lib/datatug-demo/sessions/oom-probe" >/dev/null 2>&1 || status=$?
     "${compose[@]}" exec -T demo /bin/rm -f /var/lib/datatug-demo/sessions/oom-probe || true
-    events=$("${compose[@]}" exec -T demo /bin/sh -c "cat $slots_dir/slot-5/memory.events") || return 1
+    events=$("${compose[@]}" exec -T demo /bin/sh -c "cat $slots_dir/slot-$last_slot/memory.events") || return 1
     (( status == 137 )) || { printf 'probe exit %s, want 137 (killed)\n' "$status" >&2; return 1; }
     [[ $events =~ oom_group_kill\ [1-9] ]] || { printf '%s\n' "$events" >&2; return 1; }
     "${compose[@]}" exec -T demo /usr/local/bin/datatug demo ssh-health --addr 127.0.0.1:2222 --proxy-protocol >/dev/null
+}
+
+check_hard_links_denied() {
+    local uid=$(("${DEMO_UID_BASE:-20000}" + last_slot))
+    "${compose[@]}" exec -T demo /bin/sh -ec '
+        dir=/var/lib/datatug-demo/sessions/6bbbd4c7425cd06af440590be39f3608
+        mkdir -m 0700 "$dir"
+        trap '\''rmdir "$dir"'\'' EXIT
+        chown "$2:$2" "$dir"
+        GOMAXPROCS=2 /run/datatug-demo/ssh-slot-link-probe "$1" "$2" "$dir"
+    ' probe "$slots_dir/slot-$last_slot" "$uid"
 }
 
 # A live session's child is inside a slot as a slot uid; after the visitor
@@ -318,7 +359,8 @@ check_session_in_slot_and_drained() {
     wait "$client" 2>/dev/null || true
     local real eff saved fs
     read -r real eff saved fs <<< "$uid"
-    [[ $real =~ ^20[0-9]{3}$ && $eff == "$real" && $saved == "$real" && $fs == "$real" ]] ||
+    [[ $real =~ ^[0-9]+$ && $eff == "$real" && $saved == "$real" && $fs == "$real" ]] &&
+        (( real >= ${DEMO_UID_BASE:-20000} && real <= ${DEMO_UID_BASE:-20000} + last_slot )) ||
         { printf 'slot process uids: %s\n' "$uid" >&2; return 1; }
     sleep 6
     pids=$("${compose[@]}" exec -T demo /bin/sh -c "cat $slots_dir/slot-*/cgroup.procs") || return 1
@@ -335,8 +377,11 @@ check 'demo cannot reach host services through the bridge gateway' check_host_ga
 check 'edge returns HTTP 403 for a non-allow-listed CONNECT' check_connect_refused
 check 'edge tunnels an allow-listed CONNECT (github.com:443)' check_connect_allowed
 check 'slot uid cannot reach the edge proxy socket' check_slot_uid_cannot_reach_proxy
+check 'demo cgroup mount exposes its delegated scope and both services omit /dev/shm' check_private_cgroup_and_ipc
 check 'every slot has its memory, swap and pids limits' check_slot_limits
+check 'cleanup cgroup has independent memory, swap, OOM and PID limits' check_cleanup_limits
 check 'a session child runs in a slot as its slot uid, and the slot drains' check_session_in_slot_and_drained
+check 'slot entry denies link and linkat with EPERM' check_hard_links_denied
 check 'kernel OOM-kills a slot over its limit; supervisor stays healthy' check_slot_oom_contained
 
 (( failures == 0 ))

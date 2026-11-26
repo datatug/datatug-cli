@@ -228,7 +228,7 @@ func TestServer_PTYOwnershipFailurePreventsChildStart(t *testing.T) {
 		},
 		cgroups:            fs,
 		FilesystemCapacity: ampleSessionFilesystem,
-		CredentialFor:      func(int, int) *syscall.Credential { return nil },
+		StatSharedTemp:     noSharedTemp,
 	}))
 	sess, err := dialSSH(t, h.addr, "visitor").NewSession()
 	if err != nil {
@@ -273,6 +273,7 @@ func TestServer_StaleWorkspacesQuarantineSlots(t *testing.T) {
 	var logs syncBuffer
 	cfg.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
 	ops := SysOps{
+		StatSharedTemp: noSharedTemp,
 		FileUID: func(info os.FileInfo) (int, bool) {
 			switch info.Name() {
 			case "dir-left":
@@ -283,7 +284,6 @@ func TestServer_StaleWorkspacesQuarantineSlots(t *testing.T) {
 				return 0, true
 			}
 		},
-		CredentialFor: func(int, int) *syscall.Credential { return nil },
 	}
 	cfg.CgroupRoot, ops.cgroups = fakeCgroupMount(t)
 	ops.FilesystemCapacity = ampleSessionFilesystem

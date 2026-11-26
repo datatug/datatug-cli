@@ -4,9 +4,9 @@ Run the commands from the repository root on a Linux host with Docker Engine, Bu
 
 ## Host requirements
 
-Use rootful Docker Engine 28 or newer with the systemd cgroup driver, cgroup v2 mounted with `nsdelegate`, and a private demo cgroup namespace. The kernel must support `cgroup.kill` and the `oom_group_kill` memory event. The runtime must place exec and health-check processes in the container init's cgroup when the top-level scope cannot accept processes. runc 1.3.4 does this.
+Use rootful Docker Engine with support for `writable-cgroups=true` (verified on 29.1.3), cgroup v2 mounted with `nsdelegate`, and a private demo cgroup namespace. The kernel must support `cgroup.kill` and the `oom_group_kill` memory event. The runtime must place exec and health-check processes in the container init's cgroup when the top-level scope cannot accept processes. runc 1.3.4 does this.
 
-Docker creates `datatugdemo.slice` on first start. The slice belongs to this deployment. Keep other workloads out of it. Compose bind-mounts `/sys/fs/cgroup/datatugdemo.slice` at `/run/datatug-demo/cgroup` so the supervisor can create its session slots below its own scope.
+Docker mounts the demo's own scope read-write at `/sys/fs/cgroup` inside its private cgroup namespace. This mount is the default `--cgroup-root`. The supervisor creates its cgroups inside that scope. Deployment needs no custom host slice or host bind mount.
 
 ```bash
 docker info --format '{{.CgroupDriver}} cgroup v{{.CgroupVersion}}'
@@ -146,27 +146,27 @@ Set these in the environment or in the Compose environment file. Re-run `up -d -
 | `DEMO_HANDSHAKE_TIMEOUT` | `20s` | Maximum time for SSH handshake. |
 | `DEMO_UID_BASE` | `20000` | First uid and gid in the session slot range. |
 | `DEMO_SESSIONS_TMPFS` | `3591m` | Shared sessions tmpfs size. |
-| `DEMO_SESSIONS_TMPFS_INODES` | `6684672` | Shared sessions tmpfs inode count. |
+| `DEMO_SESSIONS_TMPFS_INODES` | `3342336` | Shared sessions tmpfs inode count. |
 | `DEMO_MAX_EGRESS_TUNNELS` | `64` | Global CONNECT tunnel cap at the relay and edge. |
-| `DEMO_MEM_LIMIT` | `3776m` | Demo memory cap, including tmpfs usage. |
+| `DEMO_MEM_LIMIT` | `3872m` | Demo memory cap, including tmpfs usage. |
 | `DEMO_CPUS` | `2` | Demo cgroup CPU quota in cores. |
 | `DEMO_PIDS_LIMIT` | `2048` | Demo cgroup limit for processes and threads. |
 
 ## Size and troubleshoot
 
-- **Capacity.** Each slot defaults to a combined 544 MiB cgroup cap for application memory and charged tmpfs and 256 PIDs (including threads). Budget all slot caps plus the 512 MiB supervisor reserve in `DEMO_MEM_LIMIT`. The child also has a 256 MiB Go heap target and an 8 GiB virtual address ceiling. Set the sessions tmpfs byte limit to the sum of the slot caps plus 10%, rounded up to a mountable size. Set the inode limit to at least one inode per 512 bytes of the sum of the slot caps. The supervisor checks both limits at startup.
+- **Capacity.** Each slot defaults to a combined 544 MiB cgroup cap for application memory and charged tmpfs and 256 PIDs, including threads. Budget all slot caps plus 96 MiB for cleanup and 512 MiB for the supervisor in `DEMO_MEM_LIMIT`. Budget 256 PIDs per slot plus 32 for cleanup and 256 for the supervisor in `DEMO_PIDS_LIMIT`. Size the sessions tmpfs to the sum of the slot memory caps plus 10%, rounded up to a mountable size. For each slot divide its memory cap by 1 KiB, round up, and add the results for the inode limit. The supervisor verifies these capacities at startup.
 - **Healthcheck fails.** Inspect `docker compose -f deploy/ssh-demo/compose.yaml ps` and both service logs. The edge health probe traverses the TCP forwarder, so startup or template failures in the supervisor can affect both probes. Probe the demo directly with `docker compose -f deploy/ssh-demo/compose.yaml exec -T demo /usr/local/bin/datatug demo ssh-health --addr 127.0.0.1:2222 --proxy-protocol`.
-- **“Demo is full.”** Check global and per-IP slots, including visitors behind the same NAT. Inspect session end events for `end_reason=full` and check for slots retained after cleanup errors. Measure memory, tmpfs, CPU and PID headroom before raising the caps.
+- **“Demo is full.”** Check global and per-IP slots, including visitors behind the same NAT. Inspect `end_reason=full` and `quarantined_slots`. Slots with residual memory at or above 16 MiB are checked every 30 seconds. A drain, reap or cleanup failure keeps its slot quarantined for the life of the supervisor.
 - **Template clone fails.** Check the HTTPS repo URL, ref and project manifest path. Ensure the edge can resolve the GitHub hosts and open TCP 443. Check the edge log's `host` and `result` for CONNECT denials, and confirm the edge has created `/run/datatug-demo/proxy/connect.sock` in the shared volume.
-- **UID isolation refuses to start.** The supervisor needs container uid 0, its four capabilities, and a root-owned sessions tmpfs with mode `0711`. Check the delegated cgroup mount and finite scope `memory.max`. Visit the startup logs for the operation that failed.
+- **UID isolation refuses to start.** Check container uid 0, the four capabilities, root-owned sessions tmpfs mode `0711`, the writable cgroup mount and finite scope `memory.max`. Check that `/tmp` and `/dev/shm` are absent or have the others-write bit clear, and that the CONNECT socket directory grants no permissions to others. The startup logs identify the failed check.
 - **Session logs.** Match the JSON `session start` and `session end` events by `session_id` and inspect `client_ip`, `ssh_user`, `pty_width`, `pty_height`, `duration_ms`, `end_reason`, and `exit_status`. Edge egress logs report the hostname and outcome.
 
 ## Isolation
 
 The supervisor runs as container root with `SETUID`, `SETGID`, `CHOWN` and `KILL`. It assigns each visitor a different uid and gid and a mode-`0700` workspace. Both services use read-only root filesystems and `no-new-privileges`. Visitors can read world-readable image files. Validate cgroup delegation and socket-volume ownership before adding Docker user namespace remapping.
 
-CPU fairness is enforced per container plus a per-child `RLIMIT_CPU`. Each session has its own memory and PID cgroup and individual rlimits. CPU, the kernel, and parts of the network stack remain shared. The sessions tmpfs is sized from the combined hard slot caps and the separate `/dev/shm` mount still has its own shared limit. Direct egress from the supervisor network is blocked and HTTPS egress uses the edge allow-list. DataTug forgets GitHub tokens at disconnect. Visitors can revoke their OAuth grant in GitHub Settings under Applications.
+CPU fairness is enforced per container plus a per-child `RLIMIT_CPU`. Each session has its own memory and PID cgroup and individual rlimits. The child blocks `link` and `linkat` with thread-group seccomp after dropping privileges. Cleanup helpers run one at a time under the slot credentials in a separate bounded cgroup. Both services use `ipc: none`; session temporary files use their private workspace. CPU, the kernel, and parts of the network stack remain shared. Direct egress from the supervisor network is blocked and HTTPS egress uses the edge allow-list. DataTug forgets GitHub tokens at disconnect. Visitors can revoke their OAuth grant in GitHub Settings under Applications.
 
 ## Integration check
 
-Verify SSH, the supervisor's Unix-socket egress, visitor UID denial at the socket directory, and per-slot memory, PID and cleanup behavior on the deployment host. The legacy `integration-test.sh` assumes the previous TCP proxy port and requires an update for the Unix-socket deployment.
+Run `deploy/ssh-demo/integration-test.sh` on the deployment host. It verifies SSH and Unix-socket egress, the private cgroup mount, IPC isolation, slot and cleanup limits, and slot OOM containment. It builds a separate probe that enters a real slot and checks that `link` and `linkat` return `EPERM`. The probe is mounted into the test container only.

@@ -35,6 +35,7 @@ func TestEnterSlotChecksEveryStep(t *testing.T) {
 		{name: "unexpected root check error", failAt: "verify setuid", want: "verify setuid(0) is denied"},
 		{name: "final cgroup unreadable", failAt: "final cgroup", want: "read /proc/self/cgroup"},
 		{name: "final cgroup mismatch", lastCgroup: "0::/slot-00\n", want: "does not report slot"},
+		{name: "filter fails", lastCgroup: validCgroup, failAt: "seccomp", want: "fixture"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -72,6 +73,7 @@ func TestEnterSlotChecksEveryStep(t *testing.T) {
 			}
 			cgroupReads := 0
 			enterSlotOps = slotEntryOps{
+				denyLinks: func(string, func(string) ([]byte, error)) error { return record("seccomp") },
 				write: func(path, value string) error {
 					if path != filepath.Join(slotDir, "cgroup.procs") || value != "0" {
 						t.Fatalf("unexpected migration: write %q to %s", value, path)
@@ -145,7 +147,7 @@ func TestEnterSlotChecksEveryStep(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := []string{"join", "initial cgroup", "groups", "gid", "uid", "threads", "101", "102", "verify setuid", "final cgroup"}
+			want := []string{"join", "initial cgroup", "groups", "gid", "uid", "threads", "101", "102", "verify setuid", "final cgroup", "seccomp"}
 			if !reflect.DeepEqual(calls, want) {
 				t.Fatalf("calls = %v, want %v", calls, want)
 			}

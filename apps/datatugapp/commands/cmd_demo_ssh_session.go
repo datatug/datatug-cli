@@ -77,6 +77,8 @@ var (
 	demoSSHRunWelcome       = dtdemo.RunWelcome
 	demoSSHRunWorkspaceLoop = runWorkspaceLoop
 	demoSSHCleanupLstat     = os.Lstat
+	// A directory read that fails mid-way; a healthy filesystem does not.
+	demoSSHCleanupReadDir = func(f *os.File, n int) ([]os.DirEntry, error) { return f.ReadDir(n) }
 	// Slot entry runs only as root in the container; tests stand in for it.
 	demoSSHEnterSlot     = sshdemo.EnterSlot
 	demoSSHChdir         = os.Chdir
@@ -134,6 +136,14 @@ func runDemoSSHSession(ctx context.Context, f demoSSHSessionFlags) error {
 		if err := demoSSHEnterSlot(f.slot); err != nil {
 			return fmt.Errorf("enter session slot: %w", err)
 		}
+	}
+	if f.cleanup != "" {
+		if err := demoSSHApplyRlimits(f.rlimits); err != nil {
+			return fmt.Errorf("apply cleanup resource limits: %w", err)
+		}
+		return runDemoSSHCleanup(f.cleanup)
+	}
+	if f.slotRequested {
 		// The supervisor cannot enter the slot user's mode-0700 workspace.
 		if err := demoSSHChdir(f.workspace); err != nil {
 			return fmt.Errorf("enter session workspace: %w", err)
@@ -143,9 +153,6 @@ func runDemoSSHSession(ctx context.Context, f demoSSHSessionFlags) error {
 		if err := errors.Join(err, ready.Close()); err != nil {
 			return fmt.Errorf("acknowledge session slot entry: %w", err)
 		}
-	}
-	if f.cleanup != "" {
-		return runDemoSSHCleanup(f.cleanup)
 	}
 	if f.prepareTemplate != "" {
 		return runDemoSSHPrepareTemplate(ctx, f.prepareTemplate, f.projectDir)
@@ -527,28 +534,44 @@ func runDemoSSHCleanup(dir string) error {
 }
 
 func removeDirContentsNoFollow(dir string) error {
-	_ = os.Chmod(dir, 0o700)
-	entries, err := os.ReadDir(dir)
+	return removeCleanupEntries(dir, 0)
+}
+
+func removeCleanupEntries(dir string, depth int) error {
+	const cleanupMaxDepth = 128
+	if depth >= cleanupMaxDepth {
+		return fmt.Errorf("cleanup exceeded maximum directory depth (%d) at %q", cleanupMaxDepth, dir)
+	}
+	file, pinned, err := sshdemo.OpenCleanupDirectory(dir)
 	if err != nil {
 		return fmt.Errorf("read dir %q: %w", dir, err)
 	}
-	for _, entry := range entries {
-		p := filepath.Join(dir, entry.Name())
-		fi, err := demoSSHCleanupLstat(p)
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return fmt.Errorf("lstat %q: %w", p, err)
-		}
-		if fi.IsDir() {
-			if err := removeDirContentsNoFollow(p); err != nil {
-				return err
+	defer func() { _ = file.Close() }()
+	for {
+		entries, err := demoSSHCleanupReadDir(file, 256)
+		for _, entry := range entries {
+			p := filepath.Join(pinned, entry.Name())
+			info, err := demoSSHCleanupLstat(p)
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				return fmt.Errorf("lstat %q: %w", p, err)
+			}
+			if info.IsDir() {
+				if err := removeCleanupEntries(p, depth+1); err != nil {
+					return err
+				}
+			}
+			if err := demoSSHCleanupRemove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("remove %q: %w", p, err)
 			}
 		}
-		if err := demoSSHCleanupRemove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("remove %q: %w", p, err)
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("read dir %q: %w", dir, err)
 		}
 	}
-	return nil
 }

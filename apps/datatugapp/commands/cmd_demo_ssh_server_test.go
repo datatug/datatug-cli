@@ -53,7 +53,10 @@ func TestDemoSSHServerCommand_Flags(t *testing.T) {
 		"--github-client-id", "cid-1",
 		"--save-branch", "custom-demo",
 		"--egress-proxy", "unix:///run/datatug-demo/proxy/connect.sock",
-		"--cgroup-root", "/run/datatug-demo/cgroup",
+		"--cgroup-root", "/run/test-scope",
+		"--cleanup-mem-limit", "80MiB",
+		"--cleanup-pids-limit", "24",
+		"--slot-reuse-memory-threshold", "12MiB",
 		"--max-relay-sockets-per-uid", "11",
 	})
 	if err := cmd.Execute(); err != nil {
@@ -70,7 +73,8 @@ func TestDemoSSHServerCommand_Flags(t *testing.T) {
 		gotCfg.UIDBase != 30000 || !gotCfg.AllowInsecureIsolation ||
 		gotCfg.GitHubClientID != "cid-1" || gotCfg.SaveBranch != "custom-demo" ||
 		gotCfg.EgressProxy != "unix:///run/datatug-demo/proxy/connect.sock" ||
-		gotCfg.CgroupRoot != "/run/datatug-demo/cgroup" || gotCfg.MaxRelaySocketsPerUID != 11 {
+		gotCfg.CgroupRoot != "/run/test-scope" || gotCfg.MaxRelaySocketsPerUID != 11 ||
+		gotCfg.CleanupMemLimit != 80<<20 || gotCfg.CleanupPIDsLimit != 24 || gotCfg.SlotReuseMemoryThreshold != 12<<20 {
 		t.Fatalf("unexpected parsed config: %+v", gotCfg)
 	}
 }
@@ -81,6 +85,8 @@ func TestDemoSSHServerCommand_RejectsInvalidQuotas(t *testing.T) {
 		{"--session-disk-quota", "0"},
 		{"--session-disk-quota", "0.1B"},
 		{"--session-mem-quota", "18446744073709551616"},
+		{"--cleanup-mem-limit", "0"},
+		{"--slot-reuse-memory-threshold", "invalid"},
 	} {
 		cmd := demoSSHServerCommand()
 		cmd.SetArgs(args)

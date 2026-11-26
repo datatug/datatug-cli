@@ -4,12 +4,47 @@ set -euo pipefail
 export LC_ALL=C TERM=xterm-256color
 deploy_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/dt-ssh.XXXXXXXX")
+# Until the full cleanup trap below is armed, remove only the work directory.
+trap 'rm -rf -- "$work_dir"' EXIT
 project="datatug-ssh-test-${work_dir##*.}"
 project=${project,,}
 export DEMO_IMAGE="$project:local"
 # The empty host port lets Docker allocate a free loopback port at bind time.
 export DEMO_SSH_PUBLISH=127.0.0.1:
-compose=(docker compose -p "$project" -f "$deploy_dir/compose.yaml" -f "$work_dir/compose.test.yaml")
+# compose.yaml pins the internal bridge to 172.31.250.0/24, which a deployed demo
+# on this host already holds. Run a copy on a free 172.31.N.0/24 instead; the
+# project directory stays deploy/ssh-demo, so relative build paths still resolve.
+network_ids=$(docker network ls -q)
+used_subnets=
+if [[ -n $network_ids ]]; then
+    # shellcheck disable=SC2086 # one argument per network ID
+    used_subnets=$(docker network inspect -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' $network_ids)
+fi
+# shellcheck disable=SC2086 # one argument per subnet
+test_net=$(python3 -I - $used_subnets <<'PY'
+import ipaddress
+import sys
+
+used = []
+for arg in sys.argv[1:]:
+    try:
+        net = ipaddress.ip_network(arg, strict=False)
+    except ValueError:
+        continue
+    if net.version == 4:
+        used.append(net)
+for n in range(200, 250):
+    if not any(ipaddress.ip_network(f"172.31.{n}.0/24").overlaps(u) for u in used):
+        print(f"172.31.{n}")
+        break
+PY
+)
+if [[ -z $test_net ]]; then
+    printf 'FAIL no free 172.31.N.0/24 for the test network\n' >&2
+    exit 1
+fi
+sed "s/172\.31\.250\./$test_net./g" "$deploy_dir/compose.yaml" > "$work_dir/compose.yaml"
+compose=(docker compose -p "$project" --project-directory "$deploy_dir" -f "$work_dir/compose.yaml" -f "$work_dir/compose.test.yaml")
 forward_pid=
 failures=0
 
@@ -123,7 +158,7 @@ ssh_target=visitor@127.0.0.1
 expected_key=$(print_host_key) || expected_key=
 expected_fingerprint=$(awk '/^SHA256:[[:alnum:]\/+]+$/ {print; exit}' <<< "$expected_key")
 exec_status=0
-timeout --kill-after=2s 15s "${ssh_client[@]}" -o StrictHostKeyChecking=accept-new -tt "$ssh_target" \
+timeout --kill-after=2s 15s "${ssh_client[@]}" -o StrictHostKeyChecking=accept-new -T "$ssh_target" \
     somecommand < /dev/null > "$work_dir/exec.log" 2>&1 || exec_status=$?
 
 check_initial_key() {
@@ -134,8 +169,11 @@ check_initial_key() {
         grep -Fq "Server host key: ssh-ed25519 $expected_fingerprint" "$work_dir/exec.log"
 }
 
+# check_pty [name [remote command...]]: with a command, the client sends exec
+# after pty-req, as Warp's SSH wrapper does; the server must run the demo.
 check_pty() {
-    local pty_status=0
+    local name=${1:-pty} pty_status=0
+    if (($#)); then shift; fi
     # OpenSSH reports a zero-size window with /dev/null as its stdin. Give this
     # probe a sized local PTY while keeping it independent of the caller's terminal.
     timeout --kill-after=2s 15s python3 -c '
@@ -154,19 +192,20 @@ try:
 finally:
     os.close(slave)
     os.close(master)
-' "${ssh_client[@]}" -o StrictHostKeyChecking=yes -tt "$ssh_target" \
-        < /dev/null > "$work_dir/pty.log" 2>&1 || pty_status=$?
+' "${ssh_client[@]}" -o StrictHostKeyChecking=yes -tt "$ssh_target" "$@" \
+        < /dev/null > "$work_dir/$name.log" 2>&1 || pty_status=$?
     if [[ $pty_status == 0 || $pty_status == 124 ]] &&
-        grep -Fq 'Welcome to the DataTug demo' "$work_dir/pty.log"; then
+        grep -Fq 'Welcome to the DataTug demo' "$work_dir/$name.log"; then
         return 0
     fi
-    cat "$work_dir/pty.log" >&2
+    cat "$work_dir/$name.log" >&2
     return 1
 }
 
-check_exec_refused() {
+check_exec_without_pty() {
     local logfile=$1 status=$2
-    if [[ $status == 255 ]] && grep -Fq 'exec request failed on channel' "$logfile"; then
+    if [[ $status == 1 ]] && grep -Fq 'This demo needs an interactive terminal' "$logfile" &&
+        ! grep -Fq 'exec request failed' "$logfile"; then
         return 0
     fi
     cat "$logfile" >&2
@@ -217,7 +256,7 @@ check_persistent_key() {
         [[ $restarted_key == "$expected_key" ]] || return 1
     timeout --kill-after=2s 15s "${ssh_client[@]}" -o StrictHostKeyChecking=yes -T "$ssh_target" somecommand \
         < /dev/null > "$work_dir/restart.log" 2>&1 || status=$?
-    check_exec_refused "$work_dir/restart.log" "$status" &&
+    check_exec_without_pty "$work_dir/restart.log" "$status" &&
         grep -Fq "Server host key: ssh-ed25519 $expected_fingerprint" "$work_dir/restart.log"
 }
 
@@ -503,7 +542,8 @@ PY
 
 check 'SSH banner and host key fingerprint' check_initial_key
 check 'PTY shows the DataTug welcome screen' check_pty
-check 'SSH exec request is refused' check_exec_refused "$work_dir/exec.log" "$exec_status"
+check 'exec with a PTY (as Warp sends) shows the DataTug welcome screen' check_pty pty-exec somecommand
+check 'exec without a PTY gets the no-terminal message' check_exec_without_pty "$work_dir/exec.log" "$exec_status"
 check 'SSH local forwarding channel is refused' check_forwarding_refused
 check 'host key survives demo restart' check_persistent_key
 check 'demo cannot dial 1.1.1.1:443 directly' check_direct_egress_blocked

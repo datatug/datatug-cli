@@ -77,7 +77,7 @@ The supervisor enforces:
 
 UID isolation requires a writable cgroup v2 mount rooted at the container's own scope. Before listening, the supervisor verifies `nsdelegate` on the backing mount and that a write of the scope’s current `memory.max` returns `EPERM`. It also verifies that the slot caps, 96 MiB cleanup cap and 512 MiB supervisor reserve fit the finite scope `memory.max`. When `pids.max` is finite, it must cover 256 PIDs per slot plus 32 for cleanup and 256 for the supervisor. The sessions tmpfs must hold the sum of the slot caps plus 10% in bytes and at least one inode per 512 bytes of each slot budget, rounded up per slot, plus five inodes per slot and one for the tmpfs root.
 
-Only `session` channels with `pty-req` and `shell` are served. `exec`, `subsystem` (sftp, scp), port forwarding, agent forwarding and X11 are refused. There is no shell.
+Only `session` channels with `pty-req` and `shell` are served. An `exec` request is handled as `shell` and its command is discarded, so clients that always send a command, such as Warp's SSH wrapper or a `RemoteCommand` setting, still get the demo. A legacy `scp` command is discarded the same way, so no file is transferred. `subsystem` requests (including sftp), port forwarding, agent forwarding and X11 are refused. There is no shell.
 
 When every slot is busy or pending reuse, an interactive visitor can join a FIFO queue (`--max-queue`, default 20). Release or successful cleanup assigns a usable slot to the oldest eligible waiter atomically; a waiter whose IP already holds its share of slots keeps its place and is passed over until one of them is released. The supervisor draws the visitor's position and estimated start every second and refreshes positions when someone leaves. Press `q`, Ctrl-C or Ctrl-D to leave. Disconnects and the queue deadline (`--max-queue-wait`, default 30 min) also remove the visitor. Set `--max-queue=0` to reject overflow immediately.
 
@@ -197,7 +197,7 @@ Connecting with a PTY shows DataTug's own workspace (title bar "DataTug ¦ Proje
 
 ### AC: no-shell-no-forwarding
 
-`exec`, `subsystem`, port forwarding and agent forwarding requests are refused. A session without a PTY gets a one-line explanation and is closed.
+An `exec` request runs the demo as `shell` would; its command is discarded and never logged. `subsystem`, port forwarding and agent forwarding requests are refused. A session without a PTY, including `exec` without one, gets a one-line explanation and is closed.
 
 ### AC: sessions-isolated
 

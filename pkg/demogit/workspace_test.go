@@ -181,6 +181,33 @@ func TestValidateWorkspaceCheckoutLimits(t *testing.T) {
 	}
 }
 
+func TestValidateWorkspaceDirectoryEntryLimit(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "datatug-project.json", "{}")
+	writeFile(t, root, ".git/info/config", "metadata")
+	must(t, os.MkdirAll(filepath.Join(root, "first", "child"), 0o700))
+	must(t, os.Mkdir(filepath.Join(root, "second"), 0o700))
+	limits := CloneLimits{MaxFiles: 1, MaxBytes: 2}
+	must(t, ValidateWorkspace(root, ".", limits)) // One file and three directories fit exactly.
+
+	must(t, os.Mkdir(filepath.Join(root, "third"), 0o700))
+	if err := ValidateWorkspace(root, ".", limits); !errors.Is(err, ErrUntrustedContent) || !strings.Contains(err.Error(), "tree entry limit") {
+		t.Fatalf("ValidateWorkspace() = %v, want tree entry limit", err)
+	}
+}
+
+func TestValidateWorkspaceDirectoryDepthLimit(t *testing.T) {
+	root := t.TempDir()
+	projectDir := filepath.FromSlash(strings.Repeat("d/", 63) + "d")
+	writeFile(t, root, filepath.Join(projectDir, "datatug-project.json"), "{}")
+	must(t, ValidateWorkspace(root, projectDir, CloneLimits{}))
+
+	must(t, os.Mkdir(filepath.Join(root, projectDir, "child"), 0o700))
+	if err := ValidateWorkspace(root, projectDir, CloneLimits{}); !errors.Is(err, ErrUntrustedContent) || !strings.Contains(err.Error(), "tree depth limit") {
+		t.Fatalf("ValidateWorkspace() = %v, want tree depth limit", err)
+	}
+}
+
 func TestChanges(t *testing.T) {
 	f := newGitFixture(t)
 	writeFile(t, f.path, "z-added.txt", "new")

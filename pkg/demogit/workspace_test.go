@@ -11,7 +11,98 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/filemode"
+	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/go-git/go-git/v5/storage/memory"
 )
+
+func TestValidateFetchedTreeRejectsUnsafeEntries(t *testing.T) {
+	store := memory.NewStorage()
+	treeHash := func(entry object.TreeEntry) plumbing.Hash {
+		t.Helper()
+		encoded := store.NewEncodedObject()
+		tree := object.Tree{Entries: []object.TreeEntry{entry}}
+		must(t, tree.Encode(encoded))
+		hash, err := store.SetEncodedObject(encoded)
+		must(t, err)
+		return hash
+	}
+	mixedCaseGitDir := treeHash(object.TreeEntry{Name: ".GiT", Mode: filemode.Dir})
+	for _, tc := range []struct {
+		name  string
+		entry object.TreeEntry
+		err   error
+		want  string
+	}{
+		{"escaping-path", object.TreeEntry{Name: "../outside", Mode: filemode.Regular}, ErrUntrustedContent, "invalid checkout path"},
+		{"nested-git", object.TreeEntry{Name: "src", Mode: filemode.Dir, Hash: mixedCaseGitDir}, ErrUntrustedContent, "invalid checkout path"},
+		{"gitlink", object.TreeEntry{Name: "submodule", Mode: filemode.Submodule}, ErrUntrustedContent, "submodules are not allowed"},
+		{"missing-blob", object.TreeEntry{Name: "missing-file", Mode: filemode.Regular}, plumbing.ErrObjectNotFound, "read size"},
+		{"missing-tree", object.TreeEntry{Name: "missing-tree", Mode: filemode.Dir}, plumbing.ErrObjectNotFound, "object not found"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			limits := defaultLimits(CloneLimits{})
+			err := validateTree(context.Background(), store, treeHash(tc.entry), "", &limits)
+			if !errors.Is(err, tc.err) || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("validateTree() = %v, want %q", err, tc.want)
+			}
+		})
+	}
+
+	for _, after := range []int{1, 2} {
+		ctx, cancel := context.WithCancel(context.Background())
+		checks := 0
+		hooked := hookContext{Context: ctx, onCheck: func() {
+			checks++
+			if checks == after {
+				cancel()
+			}
+		}}
+		limits := defaultLimits(CloneLimits{})
+		err := validateTree(hooked, store, mixedCaseGitDir, "", &limits)
+		cancel()
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("validateTree() after %d checks: %v", after, err)
+		}
+	}
+}
+
+func TestCloneWorktreeLimitsMetadataErrors(t *testing.T) {
+	root := t.TempDir()
+	limits := defaultLimits(CloneLimits{})
+	if _, err := cloneWorktreeLimits(context.Background(), root, limits); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing metadata directory = %v", err)
+	}
+	config := filepath.Join(root, ".git", "config")
+	writeFile(t, root, ".git/config", "[core]")
+	checks := 0
+	ctx := hookContext{Context: context.Background(), onCheck: func() {
+		checks++
+		if checks == 2 {
+			must(t, os.Remove(config))
+		}
+	}}
+	if _, err := cloneWorktreeLimits(ctx, root, limits); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("removed metadata file = %v", err)
+	}
+}
+
+func TestValidateWorkspaceCheckoutLimits(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "datatug-project.json", "{}")
+	writeFile(t, root, "other", "data")
+	for _, tc := range []struct {
+		limits CloneLimits
+		want   string
+	}{
+		{CloneLimits{MaxFiles: 1}, "file limit"},
+		{CloneLimits{MaxBytes: 2}, "size limit"},
+	} {
+		if err := ValidateWorkspace(root, ".", tc.limits); !errors.Is(err, ErrUntrustedContent) || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("ValidateWorkspace() = %v, want %q", err, tc.want)
+		}
+	}
+}
 
 func TestChanges(t *testing.T) {
 	f := newGitFixture(t)

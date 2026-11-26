@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -54,14 +57,26 @@ type (
 	}
 	welcomeAuthCanceledMsg struct{}
 	welcomeForkFoundMsg    struct {
-		fork demogit.Repo
-		err  error
+		attempt *welcomeAttempt
+		fork    demogit.Repo
+		err     error
 	}
 	welcomeOpenDoneMsg struct {
-		branch string
-		err    error
+		attempt *welcomeAttempt
+		branch  string
+		err     error
 	}
 )
+
+// Each attempt has a unique identity and holds its checkout until Update
+// accepts the result. The mutex lets cancellation join a running command,
+// and a command that starts after cancellation sees the canceled context.
+type welcomeAttempt struct {
+	ctx      context.Context
+	cancel   context.CancelFunc
+	mu       sync.Mutex
+	checkout string
+}
 
 var welcomeChoices = []struct{ key, title, detail string }{
 	{"1", "Explore the demo project", "Start immediately in a temporary workspace with local SQLite and inGitDB catalogs. No sign-in required."},
@@ -77,10 +92,12 @@ type WelcomeModel struct {
 	width      int
 	height     int
 	authScreen nav.Screen
+	attempt    *welcomeAttempt
 	fork       demogit.Repo
 	errMsg     string
 	noFork     bool
 	result     WelcomeResult
+	finished   bool
 }
 
 var _ tea.Model = WelcomeModel{}
@@ -103,6 +120,9 @@ func (m WelcomeModel) Init() tea.Cmd { return nil }
 
 // Update implements tea.Model.
 func (m WelcomeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.finished {
+		return m, nil
+	}
 	if sz, ok := msg.(tea.WindowSizeMsg); ok {
 		m.width, m.height = sz.Width, sz.Height
 		if m.step == welcomeStepAuth && m.authScreen != nil {
@@ -142,8 +162,7 @@ func (m WelcomeModel) updateChoose(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.index = 1
 		}
 	case "1":
-		m.result = WelcomeResult{Outcome: OutcomeExplore}
-		return m, tea.Quit
+		return m.finish(WelcomeResult{Outcome: OutcomeExplore})
 	case "2":
 		if !m.cfg.GitHubEnabled() {
 			return m, nil
@@ -152,21 +171,18 @@ func (m WelcomeModel) updateChoose(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.startOpenGitHub()
 	case "enter":
 		if m.index == 0 || !m.cfg.GitHubEnabled() {
-			m.result = WelcomeResult{Outcome: OutcomeExplore}
-			return m, tea.Quit
+			return m.finish(WelcomeResult{Outcome: OutcomeExplore})
 		}
 		return m.startOpenGitHub()
 	case "q", "ctrl+c":
-		m.result = WelcomeResult{Outcome: OutcomeQuit}
-		return m, tea.Quit
+		return m.finish(WelcomeResult{Outcome: OutcomeQuit})
 	}
 	return m, nil
 }
 
 func (m WelcomeModel) startOpenGitHub() (tea.Model, tea.Cmd) {
 	if m.cfg.Auth.SignedIn() {
-		m.step = welcomeStepFindingFork
-		return m, m.findForkCmd()
+		return m.startFindFork()
 	}
 	m.step = welcomeStepExplain
 	return m, nil
@@ -199,8 +215,7 @@ func (m WelcomeModel) updateExplain(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.step = welcomeStepChoose
 		return m, nil
 	case "ctrl+c":
-		m.result = WelcomeResult{Outcome: OutcomeQuit}
-		return m, tea.Quit
+		return m.finish(WelcomeResult{Outcome: OutcomeQuit})
 	}
 	return m, nil
 }
@@ -226,12 +241,10 @@ func (m WelcomeModel) updateAuth(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.cfg.Auth.Set(msg.token.AccessToken, "")
-		m.step = welcomeStepFindingFork
-		return m, m.findForkCmd()
+		return m.startFindFork()
 	case tea.KeyPressMsg:
 		if msg.String() == "ctrl+c" {
-			m.result = WelcomeResult{Outcome: OutcomeQuit}
-			return m, tea.Quit
+			return m.finish(WelcomeResult{Outcome: OutcomeQuit})
 		}
 	}
 	var cmd tea.Cmd
@@ -239,18 +252,50 @@ func (m WelcomeModel) updateAuth(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m WelcomeModel) findForkCmd() tea.Cmd {
+func (m WelcomeModel) startFindFork() (tea.Model, tea.Cmd) {
+	ctx, cancel := context.WithCancel(context.Background())
+	attempt := &welcomeAttempt{ctx: ctx, cancel: cancel}
 	client := m.cfg.gitClient()
-	return func() tea.Msg {
-		fork, err := client.FindFork(context.Background())
-		return welcomeForkFoundMsg{fork: fork, err: err}
+	m.attempt = attempt
+	m.step = welcomeStepFindingFork
+	return m, func() tea.Msg {
+		attempt.mu.Lock()
+		defer attempt.mu.Unlock()
+		if err := ctx.Err(); err != nil {
+			return welcomeForkFoundMsg{attempt: attempt, err: err}
+		}
+		fork, err := client.FindFork(ctx)
+		return welcomeForkFoundMsg{attempt: attempt, fork: fork, err: err}
 	}
+}
+
+func (m *WelcomeModel) cancelOpen() {
+	if m.attempt == nil {
+		return
+	}
+	attempt := m.attempt
+	m.attempt = nil
+	attempt.cancel()
+	attempt.mu.Lock()
+	defer attempt.mu.Unlock()
+	_ = os.RemoveAll(attempt.checkout)
+}
+
+func (m WelcomeModel) finish(result WelcomeResult) (tea.Model, tea.Cmd) {
+	m.cancelOpen()
+	m.result = result
+	m.finished = true
+	return m, tea.Quit
 }
 
 func (m WelcomeModel) updateFindingFork(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case welcomeForkFoundMsg:
+		if m.attempt == nil || msg.attempt != m.attempt {
+			return m, nil
+		}
 		if msg.err != nil {
+			m.cancelOpen()
 			if errors.Is(msg.err, demogit.ErrAuth) {
 				m.cfg.Auth.Clear()
 			}
@@ -263,32 +308,54 @@ func (m WelcomeModel) updateFindingFork(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.step = welcomeStepOpening
 		return m, m.openForkCmd(msg.fork)
 	case tea.KeyPressMsg:
-		if msg.String() == "esc" {
-			m.step = welcomeStepChoose
-			return m, nil
-		}
-		if msg.String() == "ctrl+c" {
-			m.result = WelcomeResult{Outcome: OutcomeQuit}
-			return m, tea.Quit
-		}
+		return m.interruptOpen(msg)
 	}
 	return m, nil
 }
 
 func (m WelcomeModel) openForkCmd(fork demogit.Repo) tea.Cmd {
 	client := m.cfg.gitClient()
-	destDir := m.cfg.RepoDir
-	projectDir := m.cfg.ProjectDir
+	attempt := m.attempt
 	return func() tea.Msg {
-		branch, err := client.Open(context.Background(), fork, destDir, projectDir)
-		return welcomeOpenDoneMsg{branch: branch, err: err}
+		attempt.mu.Lock()
+		defer attempt.mu.Unlock()
+		if err := attempt.ctx.Err(); err != nil {
+			return welcomeOpenDoneMsg{attempt: attempt, err: err}
+		}
+		checkout, err := os.MkdirTemp(filepath.Dir(m.cfg.RepoDir), ".datatug-welcome-")
+		if err != nil {
+			return welcomeOpenDoneMsg{attempt: attempt, err: err}
+		}
+		attempt.checkout = checkout
+		branch, err := client.Open(attempt.ctx, fork, checkout, m.cfg.ProjectDir)
+		return welcomeOpenDoneMsg{attempt: attempt, branch: branch, err: err}
 	}
+}
+
+func (m WelcomeModel) interruptOpen(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.cancelOpen()
+		m.step = welcomeStepChoose
+	case "1":
+		return m.finish(WelcomeResult{Outcome: OutcomeExplore})
+	case "ctrl+c":
+		return m.finish(WelcomeResult{Outcome: OutcomeQuit})
+	}
+	return m, nil
 }
 
 func (m WelcomeModel) updateOpening(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case welcomeOpenDoneMsg:
+		if m.attempt == nil || msg.attempt != m.attempt {
+			return m, nil
+		}
+		if msg.err == nil {
+			msg.err = demogit.InstallClone(m.attempt.ctx, m.attempt.checkout, m.cfg.RepoDir)
+		}
 		if msg.err != nil {
+			m.cancelOpen()
 			if errors.Is(msg.err, demogit.ErrAuth) {
 				m.cfg.Auth.Clear()
 			}
@@ -297,21 +364,13 @@ func (m WelcomeModel) updateOpening(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.step = welcomeStepError
 			return m, nil
 		}
-		m.result = WelcomeResult{
+		return m.finish(WelcomeResult{
 			Outcome: OutcomeOpenedFork,
 			Fork:    m.fork,
 			Branch:  msg.branch,
-		}
-		return m, tea.Quit
+		})
 	case tea.KeyPressMsg:
-		if msg.String() == "esc" {
-			m.step = welcomeStepChoose
-			return m, nil
-		}
-		if msg.String() == "ctrl+c" {
-			m.result = WelcomeResult{Outcome: OutcomeQuit}
-			return m, tea.Quit
-		}
+		return m.interruptOpen(msg)
 	}
 	return m, nil
 }
@@ -323,14 +382,12 @@ func (m WelcomeModel) updateError(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	switch k.String() {
 	case "enter", "1", "e":
-		m.result = WelcomeResult{Outcome: OutcomeExplore}
-		return m, tea.Quit
+		return m.finish(WelcomeResult{Outcome: OutcomeExplore})
 	case "esc", "b":
 		m.step = welcomeStepChoose
 		return m, nil
 	case "q", "ctrl+c":
-		m.result = WelcomeResult{Outcome: OutcomeQuit}
-		return m, tea.Quit
+		return m.finish(WelcomeResult{Outcome: OutcomeQuit})
 	}
 	return m, nil
 }
@@ -450,15 +507,14 @@ func (m WelcomeModel) renderBody() string {
 // runWelcomeProgram runs the welcome Bubble Tea program; replaced in tests.
 var runWelcomeProgram = func(m WelcomeModel, opts ...tea.ProgramOption) (WelcomeModel, error) {
 	final, err := tea.NewProgram(m, opts...).Run()
-	if err != nil {
-		return WelcomeModel{}, err
-	}
-	return final.(WelcomeModel), nil
+	welcome, _ := final.(WelcomeModel)
+	return welcome, err
 }
 
 // RunWelcome displays the demo welcome screen and returns the visitor's choice.
 func RunWelcome(cfg Config, opts ...tea.ProgramOption) (WelcomeResult, error) {
 	final, err := runWelcomeProgram(NewWelcomeModel(cfg), opts...)
+	final.cancelOpen()
 	if err != nil {
 		return WelcomeResult{}, err
 	}

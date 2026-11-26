@@ -3,6 +3,9 @@ package dtdemo
 import (
 	"context"
 	"errors"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -100,8 +103,10 @@ func TestWelcomeChooseRouting(t *testing.T) {
 
 func TestWelcomeOpenForkSuccess(t *testing.T) {
 	fake := &fakeGitClient{
-		findFork:   demogit.Repo{Owner: "alice", Name: "datatug-demo-project"},
-		openBranch: "datatug-demo",
+		findFork: demogit.Repo{Owner: "alice", Name: "datatug-demo-project"},
+		openFn: func(_ context.Context, dir string) (string, error) {
+			return "datatug-demo", os.WriteFile(filepath.Join(dir, "saved.sql"), []byte("select 1;"), 0o600)
+		},
 	}
 	var gotToken string
 	stub(t, &newGitClient, func(_ demogit.Config, token string) GitClient {
@@ -111,6 +116,7 @@ func TestWelcomeOpenForkSuccess(t *testing.T) {
 
 	auth := NewAuthState()
 	cfg := testConfig(auth, &oauth2.Token{AccessToken: "gho_secret_abc"}, nil)
+	cfg.RepoDir = filepath.Join(t.TempDir(), "repo")
 	var tm tea.Model = NewWelcomeModel(cfg)
 	tm, _ = feedModel(tm, tea.WindowSizeMsg{Width: 90, Height: 30})
 
@@ -137,8 +143,132 @@ func TestWelcomeOpenForkSuccess(t *testing.T) {
 	if gotToken != "gho_secret_abc" || auth.Token() != "gho_secret_abc" {
 		t.Fatalf("token not propagated to git client / auth state")
 	}
-	if fake.openDir != "/tmp/demo-repo" || fake.openProj != "demo-project-1" {
+	if fake.openDir == cfg.RepoDir || filepath.Dir(fake.openDir) != filepath.Dir(cfg.RepoDir) || fake.openProj != "demo-project-1" {
 		t.Fatalf("Open called with dir=%q proj=%q", fake.openDir, fake.openProj)
+	}
+	if got, err := os.ReadFile(filepath.Join(cfg.RepoDir, "saved.sql")); err != nil || string(got) != "select 1;" {
+		t.Fatalf("installed file = %q, %v", got, err)
+	}
+	// An input message can be queued ahead of the asynchronous Quit command.
+	tm, cmd := tm.Update(uitest.Key("1"))
+	if cmd != nil || tm.(WelcomeModel).Result() != res {
+		t.Fatal("Explore overrode an already published fork")
+	}
+}
+
+func welcomeWithFork(t *testing.T, fake *fakeGitClient) WelcomeModel {
+	t.Helper()
+	fake.findFork = demogit.Repo{Owner: "alice", Name: "renamed"}
+	stub(t, &newGitClient, func(demogit.Config, string) GitClient { return fake })
+	auth := NewAuthState()
+	auth.Set("test-token", "alice")
+	cfg := testConfig(auth, nil, nil)
+	cfg.RepoDir = filepath.Join(t.TempDir(), "repo")
+	return NewWelcomeModel(cfg)
+}
+
+func TestWelcomeCanceledOpenWaitsBeforeExplore(t *testing.T) {
+	for _, key := range []string{"esc", "1"} {
+		t.Run(key, func(t *testing.T) {
+			started, canceled, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			fake := &fakeGitClient{openFn: func(ctx context.Context, dir string) (string, error) {
+				close(started)
+				<-ctx.Done()
+				close(canceled)
+				<-release
+				return "late-branch", os.WriteFile(filepath.Join(dir, "fork-only"), []byte("old attempt"), 0o600)
+			}}
+			initial := welcomeWithFork(t, fake)
+			finding, find := initial.Update(uitest.Key("2"))
+			opening, open := finding.Update(find())
+			done := make(chan tea.Msg, 1)
+			go func() { done <- open() }()
+			<-started
+
+			type updateResult struct {
+				model tea.Model
+				cmd   tea.Cmd
+			}
+			interrupt := make(chan updateResult, 1)
+			go func() {
+				model, cmd := opening.Update(uitest.Key(key))
+				interrupt <- updateResult{model: model, cmd: cmd}
+			}()
+			<-canceled
+			select {
+			case <-interrupt:
+				close(release)
+				<-done
+				t.Fatal("welcome continued while the canceled clone was still running")
+			default:
+			}
+			close(release)
+			late := <-done
+			result := <-interrupt
+			if key == "esc" {
+				result.model, result.cmd = result.model.Update(uitest.Key("1"))
+			}
+			if !hasQuit(uitest.Msgs(result.cmd)) || result.model.(WelcomeModel).Result().Outcome != OutcomeExplore {
+				t.Fatalf("explore result = %+v", result.model.(WelcomeModel).Result())
+			}
+			result.model, _ = result.model.Update(late)
+			if result.model.(WelcomeModel).Result().Outcome != OutcomeExplore {
+				t.Fatal("late open result replaced Explore")
+			}
+			entries, err := os.ReadDir(filepath.Dir(initial.cfg.RepoDir))
+			if err != nil || len(entries) != 0 {
+				t.Fatalf("workspace after cancel = %v, %v", entries, err)
+			}
+		})
+	}
+}
+
+func TestWelcomeIgnoresStaleForkAttempts(t *testing.T) {
+	initial := welcomeWithFork(t, &fakeGitClient{openBranch: "demo"})
+	firstFind, lookup := initial.Update(uitest.Key("2"))
+	oldLookup := lookup()
+	choose, _ := firstFind.Update(uitest.Key("esc"))
+	secondFind, lookup := choose.Update(uitest.Key("2"))
+	next, cmd := secondFind.Update(oldLookup)
+	if cmd != nil || next.(WelcomeModel).step != welcomeStepFindingFork {
+		t.Fatal("stale fork lookup started an open")
+	}
+
+	firstOpen, open := secondFind.Update(lookup())
+	oldOpen := open() // Leave the successful result queued while Escape runs.
+	choose, _ = firstOpen.Update(uitest.Key("esc"))
+	thirdFind, lookup := choose.Update(uitest.Key("2"))
+	secondOpen, open := thirdFind.Update(lookup())
+	next, cmd = secondOpen.Update(oldOpen)
+	if cmd != nil || next.(WelcomeModel).step != welcomeStepOpening {
+		t.Fatal("stale open result affected the new attempt")
+	}
+	if _, err := os.Stat(initial.cfg.RepoDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale open result published repo: %v", err)
+	}
+
+	// Cancellation can also run before Bubble Tea starts a queued command.
+	choose, _ = secondOpen.Update(uitest.Key("esc"))
+	if msg := open().(welcomeOpenDoneMsg); !errors.Is(msg.err, context.Canceled) {
+		t.Fatalf("queued open = %v", msg.err)
+	}
+	lastFind, lookup := choose.Update(uitest.Key("2"))
+	_, _ = lastFind.Update(uitest.Key("esc"))
+	if msg := lookup().(welcomeForkFoundMsg); !errors.Is(msg.err, context.Canceled) {
+		t.Fatalf("queued lookup = %v", msg.err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(initial.cfg.RepoDir))
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("workspace after stale attempts = %v, %v", entries, err)
+	}
+}
+
+func TestWelcomeCannotStageFork(t *testing.T) {
+	m := welcomeWithFork(t, &fakeGitClient{})
+	m.cfg.RepoDir = filepath.Join(m.cfg.RepoDir, "missing", "repo")
+	result, _ := feedModel(m, uitest.Key("2"))
+	if result.(WelcomeModel).step != welcomeStepError {
+		t.Fatalf("opening with missing workspace parent = %s", welcomeView(result))
 	}
 }
 
@@ -343,5 +473,21 @@ func TestRunWelcome(t *testing.T) {
 	})
 	if _, err := RunWelcome(testConfig(NewAuthState(), nil, nil)); err == nil {
 		t.Fatal("expected error from RunWelcome")
+	}
+}
+
+func TestRunWelcomeProgramExplores(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+	res, err := RunWelcome(testConfig(NewAuthState(), nil, nil),
+		tea.WithContext(ctx), tea.WithInput(nil), tea.WithOutput(io.Discard), tea.WithoutRenderer(), tea.WithoutSignalHandler(),
+		tea.WithFilter(func(_ tea.Model, msg tea.Msg) tea.Msg {
+			if _, ok := msg.(tea.WindowSizeMsg); ok {
+				return uitest.Key("1")
+			}
+			return msg
+		}))
+	if err != nil || res.Outcome != OutcomeExplore {
+		t.Fatalf("welcome program = %+v, %v", res, err)
 	}
 }

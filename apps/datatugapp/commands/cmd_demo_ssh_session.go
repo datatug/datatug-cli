@@ -74,8 +74,13 @@ var (
 	demoSSHRunWelcome       = dtdemo.RunWelcome
 	demoSSHRunWorkspaceLoop = runWorkspaceLoop
 	demoSSHCleanupLstat     = os.Lstat
-	demoSSHGeteuid          = os.Geteuid
-	demoSSHFileOwnedByUID   = fileOwnedByUID
+	demoSSHCleanupRemove    = os.Remove
+	// Seams for I/O failures a test cannot provoke on a healthy filesystem.
+	demoSSHTemplateLstat  = os.Lstat
+	demoSSHTemplateChmod  = os.Chmod
+	demoSSHTemplateCopy   = io.Copy
+	demoSSHGeteuid        = os.Geteuid
+	demoSSHFileOwnedByUID = fileOwnedByUID
 )
 
 func demoSSHSessionCommand() *cobra.Command {
@@ -300,11 +305,10 @@ func resolveSafeProjectDir(repoDir, rel string) (string, error) {
 func isWithinDir(root, target string) bool {
 	cleanRoot := filepath.Clean(root)
 	cleanTarget := filepath.Clean(target)
-	rel, err := filepath.Rel(cleanRoot, cleanTarget)
-	if err != nil {
-		return false
+	if cleanRoot == string(filepath.Separator) {
+		return cleanTarget != cleanRoot && strings.HasPrefix(cleanTarget, cleanRoot)
 	}
-	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	return strings.HasPrefix(cleanTarget, cleanRoot+string(filepath.Separator))
 }
 
 // copyTemplateTree copies regular files and directories from srcRoot into dstRoot,
@@ -334,12 +338,10 @@ func copyTemplateDir(srcRoot, srcDir, dstRoot, dstDir string) error {
 	}
 	for _, entry := range entries {
 		name := entry.Name()
+		// ReadDir names never contain a separator, so dstPath stays in dstDir.
 		srcPath := filepath.Join(srcDir, name)
 		dstPath := filepath.Join(dstDir, name)
-		if !isWithinDir(dstRoot, dstPath) {
-			return fmt.Errorf("template entry %q escapes destination", name)
-		}
-		info, err := os.Lstat(srcPath)
+		info, err := demoSSHTemplateLstat(srcPath)
 		if err != nil {
 			return fmt.Errorf("lstat %q: %w", srcPath, err)
 		}
@@ -349,7 +351,7 @@ func copyTemplateDir(srcRoot, srcDir, dstRoot, dstDir string) error {
 			if err := os.MkdirAll(dstPath, 0o755); err != nil {
 				return fmt.Errorf("mkdir %q: %w", dstPath, err)
 			}
-			if err := os.Chmod(dstPath, 0o755); err != nil {
+			if err := demoSSHTemplateChmod(dstPath, 0o755); err != nil {
 				return fmt.Errorf("chmod dir %q: %w", dstPath, err)
 			}
 			if err := copyTemplateDir(srcRoot, srcPath, dstRoot, dstPath); err != nil {
@@ -382,11 +384,12 @@ func copyRegularFile(srcPath, dstPath string, perm fs.FileMode) error {
 	if err != nil {
 		return fmt.Errorf("create %q: %w", dstPath, err)
 	}
-	if _, err := io.Copy(out, in); err != nil {
+	if _, err := demoSSHTemplateCopy(out, in); err != nil {
 		_ = out.Close()
 		return fmt.Errorf("copy %q: %w", dstPath, err)
 	}
-	if err := out.Chmod(perm); err != nil {
+	// Exact modes regardless of the umask the child inherited.
+	if err := demoSSHTemplateChmod(dstPath, perm); err != nil {
 		_ = out.Close()
 		return fmt.Errorf("chmod %q: %w", dstPath, err)
 	}
@@ -514,7 +517,7 @@ func removeDirContentsNoFollow(dir string) error {
 				return err
 			}
 		}
-		if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := demoSSHCleanupRemove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("remove %q: %w", p, err)
 		}
 	}

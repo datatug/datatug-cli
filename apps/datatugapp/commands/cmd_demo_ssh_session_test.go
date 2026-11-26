@@ -5,6 +5,7 @@ package commands
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -762,5 +763,173 @@ func TestRaiseDemoSSHOOMScore(t *testing.T) {
 	got, _ := os.ReadFile(demoSSHOOMScoreAdjPath)
 	if string(got) != "900" {
 		t.Fatalf("oom_score_adj = %q, want 900", got)
+	}
+}
+
+func TestDemoSSHSessionIsWithinDir(t *testing.T) {
+	for _, tc := range []struct {
+		root, target string
+		want         bool
+	}{
+		{"/a/b", "/a/b/c", true},
+		{"/a/b", "/a/b", false},
+		{"/a/b", "/a/bc", false},
+		{"/a/b", "/a/b/../c", false},
+		{"/", "/x", true},
+		{"/", "/", false},
+	} {
+		if got := isWithinDir(tc.root, tc.target); got != tc.want {
+			t.Errorf("isWithinDir(%q, %q) = %v, want %v", tc.root, tc.target, got, tc.want)
+		}
+	}
+}
+
+func TestDemoSSHSessionCopyTemplateTreeErrors(t *testing.T) {
+	newSrc := func(t *testing.T) string {
+		src := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(src, "sub"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(src, "sub", "f.txt"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return src
+	}
+	fail := errors.New("injected")
+	t.Run("destination under a file", func(t *testing.T) {
+		blocker := filepath.Join(t.TempDir(), "file")
+		_ = os.WriteFile(blocker, nil, 0o644)
+		if err := copyTemplateTree(newSrc(t), filepath.Join(blocker, "repo")); err == nil || !strings.Contains(err.Error(), "create repo dir") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("unreadable source dir", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("root reads any directory")
+		}
+		src := newSrc(t)
+		_ = os.Chmod(filepath.Join(src, "sub"), 0o000)
+		t.Cleanup(func() { _ = os.Chmod(filepath.Join(src, "sub"), 0o755) })
+		if err := copyTemplateTree(src, filepath.Join(t.TempDir(), "repo")); err == nil || !strings.Contains(err.Error(), "read template dir") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("lstat failure", func(t *testing.T) {
+		stubSSHSession(t, &demoSSHTemplateLstat, func(string) (os.FileInfo, error) { return nil, fail })
+		if err := copyTemplateTree(newSrc(t), filepath.Join(t.TempDir(), "repo")); err == nil || !strings.Contains(err.Error(), "lstat") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("destination subdir is a file", func(t *testing.T) {
+		dst := filepath.Join(t.TempDir(), "repo")
+		_ = os.MkdirAll(dst, 0o755)
+		_ = os.WriteFile(filepath.Join(dst, "sub"), nil, 0o644)
+		if err := copyTemplateTree(newSrc(t), dst); err == nil || !strings.Contains(err.Error(), "mkdir") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("dir chmod failure", func(t *testing.T) {
+		stubSSHSession(t, &demoSSHTemplateChmod, func(string, os.FileMode) error { return fail })
+		if err := copyTemplateTree(newSrc(t), filepath.Join(t.TempDir(), "repo")); err == nil || !strings.Contains(err.Error(), "chmod dir") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("unreadable source file", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("root reads any file")
+		}
+		src := newSrc(t)
+		_ = os.Chmod(filepath.Join(src, "sub", "f.txt"), 0o000)
+		if err := copyTemplateTree(src, filepath.Join(t.TempDir(), "repo")); err == nil || !strings.Contains(err.Error(), "open") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("destination file is a directory", func(t *testing.T) {
+		dst := filepath.Join(t.TempDir(), "repo")
+		_ = os.MkdirAll(filepath.Join(dst, "sub", "f.txt"), 0o755)
+		if err := copyTemplateTree(newSrc(t), dst); err == nil || !strings.Contains(err.Error(), "create") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("copy failure", func(t *testing.T) {
+		stubSSHSession(t, &demoSSHTemplateCopy, func(io.Writer, io.Reader) (int64, error) { return 0, fail })
+		if err := copyTemplateTree(newSrc(t), filepath.Join(t.TempDir(), "repo")); err == nil || !strings.Contains(err.Error(), "copy") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("file chmod failure", func(t *testing.T) {
+		stubSSHSession(t, &demoSSHTemplateChmod, func(p string, m os.FileMode) error {
+			if strings.HasSuffix(p, "f.txt") {
+				return fail
+			}
+			return os.Chmod(p, m)
+		})
+		if err := copyTemplateTree(newSrc(t), filepath.Join(t.TempDir(), "repo")); err == nil || !strings.Contains(err.Error(), "chmod \"") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+}
+
+func TestDemoSSHSessionRemoveDirContentsErrors(t *testing.T) {
+	fail := errors.New("injected")
+	tree := func(t *testing.T) string {
+		dir := t.TempDir()
+		_ = os.MkdirAll(filepath.Join(dir, "sub"), 0o755)
+		_ = os.WriteFile(filepath.Join(dir, "sub", "f"), nil, 0o644)
+		return dir
+	}
+	t.Run("not a directory", func(t *testing.T) {
+		f := filepath.Join(t.TempDir(), "f")
+		_ = os.WriteFile(f, nil, 0o644)
+		if err := removeDirContentsNoFollow(f); err == nil || !strings.Contains(err.Error(), "read dir") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("entry vanished", func(t *testing.T) {
+		stubSSHSession(t, &demoSSHCleanupLstat, func(string) (os.FileInfo, error) { return nil, os.ErrNotExist })
+		if err := removeDirContentsNoFollow(tree(t)); err != nil {
+			t.Fatalf("vanished entries are skipped, got %v", err)
+		}
+	})
+	t.Run("lstat failure", func(t *testing.T) {
+		stubSSHSession(t, &demoSSHCleanupLstat, func(string) (os.FileInfo, error) { return nil, fail })
+		if err := removeDirContentsNoFollow(tree(t)); err == nil || !strings.Contains(err.Error(), "lstat") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("nested failure", func(t *testing.T) {
+		stubSSHSession(t, &demoSSHCleanupLstat, func(p string) (os.FileInfo, error) {
+			if strings.HasSuffix(p, string(filepath.Separator)+"f") {
+				return nil, fail
+			}
+			return os.Lstat(p)
+		})
+		if err := removeDirContentsNoFollow(tree(t)); err == nil || !strings.Contains(err.Error(), "lstat") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("remove failure", func(t *testing.T) {
+		stubSSHSession(t, &demoSSHCleanupRemove, func(string) error { return fail })
+		if err := removeDirContentsNoFollow(tree(t)); err == nil || !strings.Contains(err.Error(), "remove") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+}
+
+func TestDemoSSHSessionRegisterProjectSaveFailure(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes into read-only directories")
+	}
+	t.Cleanup(func() { dtconfig.SetConfigFilePath("") })
+	ws := t.TempDir()
+	home := filepath.Join(ws, "home")
+	// No settings file yet (read succeeds as empty), but home is read-only.
+	if err := os.MkdirAll(home, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(home, 0o755) })
+	err := registerDemoSSHProject(context.Background(), ws, filepath.Join(t.TempDir(), "demo-project-1"))
+	if err == nil || !strings.Contains(err.Error(), "save settings") {
+		t.Fatalf("err = %v, want save settings error", err)
 	}
 }

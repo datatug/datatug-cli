@@ -361,3 +361,34 @@ func mustReadFile(t *testing.T, path string) []byte {
 	}
 	return b
 }
+
+func TestDemoSSHSessionPrepareTemplate_CommitFailure(t *testing.T) {
+	// A project directory without a Git repository: nothing to scan, and the
+	// deterministic commit cannot be made.
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "demo-project-1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := runDemoSSHPrepareTemplate(context.Background(), dir, "demo-project-1")
+	if err == nil || !strings.Contains(err.Error(), "open template git repo") {
+		t.Fatalf("err = %v, want the commit step's error", err)
+	}
+}
+
+func TestExcludeDemoRuntimeFiles_WriteFailure(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes into read-only directories")
+	}
+	dir := t.TempDir()
+	info := filepath.Join(dir, ".git", "info")
+	if err := os.MkdirAll(info, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(info, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(info, 0o755) })
+	if err := excludeDemoRuntimeFiles(dir); err == nil || !strings.Contains(err.Error(), "write") {
+		t.Fatalf("err = %v, want write error", err)
+	}
+}

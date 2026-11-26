@@ -442,6 +442,14 @@ func listenEdgeProxy(addr string) (net.Listener, error) {
 	if !filepath.IsAbs(addr) {
 		return nil, errors.New("ssh-edge: --proxy-listen requires an absolute Unix socket path")
 	}
+	dir := filepath.Dir(addr)
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return nil, fmt.Errorf("ssh-edge: stat CONNECT socket directory %s: %w", dir, err)
+	}
+	if !info.IsDir() || info.Mode().Perm()&0o007 != 0 {
+		return nil, fmt.Errorf("ssh-edge: CONNECT socket parent %s must be a directory with no permissions for others", dir)
+	}
 	ln, err := net.Listen("unix", addr)
 	if errors.Is(err, syscall.EADDRINUSE) {
 		if err := removeStaleProxySocket(addr); err != nil {

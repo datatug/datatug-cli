@@ -6,57 +6,75 @@ import (
 	"bufio"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
-func TestSocketUIDTables(t *testing.T) {
-	root := t.TempDir()
-	v4Peer := netip.MustParseAddrPort("127.0.0.1:12345")
-	v4Relay := netip.MustParseAddrPort("127.0.0.1:23456")
-	v6Peer := netip.MustParseAddrPort("[::1]:12345")
-	v6Relay := netip.MustParseAddrPort("[::1]:23456")
-	row := func(peer, remote netip.AddrPort, v6 bool, uid, inode string) string {
-		return fmt.Sprintf("1: %s %s 01 0:0 0:0 0 %s 0 %s\n",
-			procSocketAddress(peer, v6), procSocketAddress(remote, v6), uid, inode)
+func TestUIDRelayBoundsUnidentifiedSockets(t *testing.T) {
+	ln := loopbackListener(t)
+	guard := newUIDRelayListener(ln, os.Getuid(), 1, 1)
+	started := make(chan struct{}, maxUnidentifiedRelaySockets)
+	unblock := make(chan struct{})
+	var release sync.Once
+	defer release.Do(func() { close(unblock) })
+	guard.lookup = func(net.Conn) (int, bool) {
+		started <- struct{}{}
+		<-unblock
+		return os.Getuid(), true
 	}
-	writeFixtureFile(t, root, "tcp", "header\n"+
-		row(v4Relay, v4Peer, false, "7", "44")+ // server half
-		row(v4Peer, v4Relay, false, "8", "0")+ // expired inode
-		row(v4Peer, v4Relay, false, "20000", "55"))
-	writeFixtureFile(t, root, "tcp6", row(v6Peer, v6Relay, true, "20001", "66")+
-		row(v4Peer, v4Relay, true, "20002", "77")+ // mapped IPv4 client
-		row(v6Relay, v6Peer, true, "bad-uid", "88"))
-	for _, tc := range []struct {
-		peer, relay netip.AddrPort
-		uid         int
-		ok          bool
-	}{
-		{v4Peer, v4Relay, 20000, true},
-		{v6Peer, v6Relay, 20001, true},
-		{v6Relay, v6Peer, 0, false},
-		{v4Peer, v6Relay, 0, false},
-	} {
-		uid, ok := socketUIDIn(root, tc.peer, tc.relay)
-		if uid != tc.uid || ok != tc.ok {
-			t.Errorf("%v -> %v owner = %d, %t", tc.peer, tc.relay, uid, ok)
+	done := make(chan error, 1)
+	go func() {
+		conn, err := guard.Accept()
+		if conn != nil {
+			_ = conn.Close()
+		}
+		done <- err
+	}()
+	defer func() { _ = guard.Close() }()
+	for range maxUnidentifiedRelaySockets {
+		conn := proxyDial(t, ln.Addr().String())
+		defer func() { _ = conn.Close() }()
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("lookup never started")
 		}
 	}
-	if err := os.Remove(filepath.Join(root, "tcp")); err != nil {
+	excess := proxyDial(t, ln.Addr().String())
+	defer func() { _ = excess.Close() }()
+	if _, err := excess.Read(make([]byte, 1)); !errors.Is(err, io.EOF) {
+		t.Fatalf("excess connection read = %v", err)
+	}
+	if err := guard.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if uid, ok := socketUIDIn(root, v4Peer, v4Relay); uid != 20002 || !ok {
-		t.Fatalf("mapped IPv4 owner = %d, %t", uid, ok)
+	if err := <-done; !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("Accept after Close = %v", err)
 	}
+	release.Do(func() { close(unblock) })
+	deadline := time.Now().Add(time.Second)
+	for len(guard.unidentified) != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("lookup reservations survived Close")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestUIDRelayReportsListenerErrors(t *testing.T) {
+	guard := newUIDRelayListener(errListener{err: errTestIO}, 0, 1, 1)
+	if conn, err := guard.Accept(); conn != nil || !errors.Is(err, errTestIO) {
+		t.Fatalf("Accept = %v, %v", conn, err)
+	}
+	_ = guard.Close()
 }
 
 func TestUIDRelayCapsPendingSockets(t *testing.T) {
@@ -133,7 +151,7 @@ func TestUIDRelayCapsPendingSockets(t *testing.T) {
 }
 
 func TestUIDRelayConnectsThroughUnixEdge(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "edge.sock")
+	path := filepath.Join(privateSocketDir(t), "edge.sock")
 	proxyLn, err := listenEdgeProxy(path)
 	if err != nil {
 		t.Fatal(err)
@@ -192,7 +210,7 @@ func TestUIDRelayConnectsThroughUnixEdge(t *testing.T) {
 }
 
 func TestEdgeUnixSocketLifecycle(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "proxy.sock")
+	path := filepath.Join(privateSocketDir(t), "proxy.sock")
 	socket := func() *net.UnixListener {
 		t.Helper()
 		ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
@@ -240,6 +258,9 @@ func TestEdgeUnixSocketLifecycle(t *testing.T) {
 	ln.SetUnlinkOnClose(false)
 	_ = ln.Close()
 	tooLong := filepath.Join(filepath.Dir(path), strings.Repeat("p", 108))
+	if _, err := listenEdgeProxy(tooLong); err == nil {
+		t.Fatal("edge bound an overlong socket path")
+	}
 	if err := os.Rename(path, tooLong); err != nil {
 		t.Fatal(err)
 	}
@@ -251,6 +272,35 @@ func TestEdgeUnixSocketLifecycle(t *testing.T) {
 	setProxySocketMode = func(string, os.FileMode) error { return errTestIO }
 	if _, err := listenEdgeProxy(path); !errors.Is(err, errTestIO) {
 		t.Fatalf("chmod error = %v", err)
+	}
+}
+
+func privateSocketDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestEdgeRejectsUnprotectedSocketDirectories(t *testing.T) {
+	root := t.TempDir()
+	public := filepath.Join(root, "public")
+	if err := os.Mkdir(public, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "symlink")
+	if err := os.Symlink(privateSocketDir(t), link); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{public, link} {
+		path := filepath.Join(dir, "proxy.sock")
+		_, err := listenEdgeProxy(path)
+		requireErrorContains(t, err, "must be a directory with no permissions for others")
+		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("edge created an unprotected socket: %v", err)
+		}
 	}
 }
 

@@ -25,6 +25,14 @@ type Slot struct {
 	ClientIP string
 }
 
+type slotQuarantine uint8
+
+const (
+	slotUsable slotQuarantine = iota
+	slotAwaitingMemory
+	slotQuarantined
+)
+
 // SlotManager tracks concurrent session slots and per-IP caps.
 type SlotManager struct {
 	mu          sync.Mutex
@@ -33,7 +41,7 @@ type SlotManager struct {
 	uidBase     int
 	isolation   string
 	inUse       []bool
-	quarantined []bool
+	quarantined []slotQuarantine
 	perIP       map[string]int
 	getUID      func() int
 	getGID      func() int
@@ -47,7 +55,7 @@ func NewSlotManager(maxSessions, maxPerIP, uidBase int, isolation string) *SlotM
 		uidBase:     uidBase,
 		isolation:   isolation,
 		inUse:       make([]bool, maxSessions),
-		quarantined: make([]bool, maxSessions),
+		quarantined: make([]slotQuarantine, maxSessions),
 		perIP:       make(map[string]int),
 		getUID:      os.Getuid,
 		getGID:      os.Getgid,
@@ -64,7 +72,7 @@ func (m *SlotManager) Acquire(clientIP string) (Slot, error) {
 	}
 	idx := -1
 	for i, used := range m.inUse {
-		if !used && !m.quarantined[i] {
+		if !used && m.quarantined[i] == slotUsable {
 			idx = i
 			break
 		}
@@ -115,9 +123,9 @@ func (m *SlotManager) InSlotRange(uid int) bool {
 func (m *SlotManager) quarantine(index int) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.quarantined[index] = true
+	m.quarantined[index] = slotQuarantined
 	for _, quarantined := range m.quarantined {
-		if !quarantined {
+		if quarantined != slotQuarantined {
 			return false
 		}
 	}
@@ -127,7 +135,35 @@ func (m *SlotManager) quarantine(index int) bool {
 func (m *SlotManager) isQuarantined(index int) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.quarantined[index]
+	return m.quarantined[index] != slotUsable
+}
+
+func (m *SlotManager) setMemoryQuarantine(index int, pending bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if pending {
+		m.quarantined[index] = slotAwaitingMemory
+	} else if m.quarantined[index] == slotAwaitingMemory {
+		m.quarantined[index] = slotUsable
+	}
+}
+
+func (m *SlotManager) awaitingMemory(index int) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.quarantined[index] == slotAwaitingMemory
+}
+
+func (m *SlotManager) quarantinedCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for _, state := range m.quarantined {
+		if state != slotUsable {
+			n++
+		}
+	}
+	return n
 }
 
 // ActiveCount returns the number of currently occupied slots.
@@ -149,10 +185,10 @@ type SysOps struct {
 	FilesystemCapacity func(string) (size, inodes uint64, err error)
 	cgroups            cgroupFS
 	Stat               func(string) (os.FileInfo, error) // Lstat semantics for session paths.
+	StatSharedTemp     func(string) (os.FileInfo, error) // Stat follows links to shared temporary directories.
 	Chown              func(string, int, int) error
 	Fchown             func(*os.File, int, int) error
 	Kill               func(int, syscall.Signal) error
-	CredentialFor      func(uid, gid int) *syscall.Credential
 	FileUID            func(os.FileInfo) (int, bool)
 }
 
@@ -162,10 +198,10 @@ func DefaultSysOps() SysOps {
 		FilesystemCapacity: filesystemCapacity,
 		cgroups:            defaultCgroupFS(),
 		Stat:               os.Lstat,
+		StatSharedTemp:     os.Stat,
 		Chown:              os.Chown,
 		Fchown:             (*os.File).Chown,
 		Kill:               syscall.Kill,
-		CredentialFor:      defaultCredentialFor,
 		FileUID:            defaultFileUID,
 	}
 }
@@ -181,6 +217,9 @@ func (o SysOps) withDefaults() SysOps {
 	if o.Stat == nil {
 		o.Stat = def.Stat
 	}
+	if o.StatSharedTemp == nil {
+		o.StatSharedTemp = def.StatSharedTemp
+	}
 	if o.Chown == nil {
 		o.Chown = def.Chown
 	}
@@ -190,21 +229,10 @@ func (o SysOps) withDefaults() SysOps {
 	if o.Kill == nil {
 		o.Kill = def.Kill
 	}
-	if o.CredentialFor == nil {
-		o.CredentialFor = def.CredentialFor
-	}
 	if o.FileUID == nil {
 		o.FileUID = def.FileUID
 	}
 	return o
-}
-
-func defaultCredentialFor(uid, gid int) *syscall.Credential {
-	return &syscall.Credential{
-		Uid:    uint32(uid),
-		Gid:    uint32(gid),
-		Groups: []uint32{},
-	}
 }
 
 func defaultFileUID(fi os.FileInfo) (int, bool) {
@@ -242,6 +270,22 @@ func checkSessionsDir(sessionsDir, isolation string, ops SysOps) error {
 		}
 		if perm := fi.Mode().Perm(); perm != 0o711 {
 			return fmt.Errorf("sshdemo: sessions-dir %s must have mode 0711, got %04o", sessionsDir, perm)
+		}
+	}
+	return nil
+}
+
+func checkSharedTempDirs(stat func(string) (os.FileInfo, error)) error {
+	for _, path := range []string{"/tmp", "/dev/shm"} {
+		info, err := stat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("sshdemo: stat shared temporary path %s: %w", path, err)
+		}
+		if info.Mode().Perm()&0o002 != 0 {
+			return fmt.Errorf("sshdemo: shared temporary path %s is writable by others in uid isolation mode", path)
 		}
 	}
 	return nil

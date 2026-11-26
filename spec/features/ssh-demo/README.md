@@ -38,12 +38,12 @@ Visitors can run arbitrary SQL. For example, SQLite `ATTACH DATABASE '<any path>
 
 - The supervisor allocates one of N slot uids (default base 20000, `--max-sessions` slots) to each session.
 - Each session gets `<sessions-dir>/<random-id>/`, mode 0700, owned by the slot uid, with `home/` (the child's `$HOME`) and `repo/` (the project copy).
-- The trusted child binary starts as root in `/supervisor`. As its first action, it writes `0` to its slot's `cgroup.procs`, verifies membership, clears supplementary groups, and drops to the slot uid and gid. It verifies the real, effective, and saved IDs on every thread, confirms it cannot regain uid 0, and rechecks cgroup membership. Its descendants inherit the slot.
+- The trusted child binary starts as root in `/supervisor`. As its first action, it writes `0` to its slot's `cgroup.procs`, verifies membership, clears supplementary groups, and drops to the slot uid and gid. It verifies the real, effective, and saved IDs on every thread, confirms it cannot regain uid 0, and rechecks cgroup membership. A thread-group seccomp filter denies hard-link creation with `EPERM` on x86-64 and ARM64. Its descendants inherit the slot and filter.
 - The template (canonical clone) is root-owned and world-readable, which is fine because it is public data. The host key is root-owned, mode 0600.
 - Self-entry allows Docker's stock seccomp profile. The trade-off is a brief window between fork and slot entry when the trusted child runs as root in `/supervisor`. The supervisor withholds PTY input until the child confirms the privilege drop and the supervisor sees its PID in the slot's `cgroup.procs`. It kills the child and ends the session if entry fails or takes longer than five seconds.
-- The supervisor writes `1` to `cgroup.kill` and waits for `populated 0` before running the workspace cleanup command as the slot uid and removing the directory. An unverified drain or cleanup quarantines the slot.
+- The supervisor writes `1` to `cgroup.kill`, waits for `populated 0` and reaps the child before cleaning the workspace. It serializes helpers in the dedicated `cleanup/` cgroup. Each helper assumes the slot uid, applies the session rlimits and deletes the directory contents in bounded batches. A drain, reap or cleanup failure quarantines the slot.
 
-The supervisor runs as container root with `CAP_SETUID`, `CAP_SETGID`, `CAP_CHOWN` and `CAP_KILL`, plus `no-new-privileges` and a read-only root filesystem. Visitor code runs as the unprivileged slot uid. The [deployment design](deployment.md#cgroup-delegation-and-lifecycle) describes the host cgroup requirements and bind mount.
+The supervisor runs as container root with `CAP_SETUID`, `CAP_SETGID`, `CAP_CHOWN` and `CAP_KILL`, plus `no-new-privileges` and a read-only root filesystem. Visitor code runs as the unprivileged slot uid. The [deployment design](deployment.md#cgroup-delegation-and-lifecycle) describes the private cgroup mount and host requirements.
 
 For local development, `--isolation=process` runs every child under the supervisor's own uid without requiring a cgroup mount. It requires a loopback listen address or an explicit `--allow-insecure-isolation` override. It logs a warning at start.
 
@@ -73,9 +73,9 @@ The supervisor enforces:
 - Each UID slot has a kernel-enforced `memory.max` equal to the sum of `--session-mem-quota` (384 MiB default) and `--session-disk-quota` (160 MiB default). This is a combined cap on memory charged to the slot, including native allocations and tmpfs pages, even for files that stay open after unlinking. The slot has zero swap, `memory.oom.group=1`, and `pids.max=256`.
 - The supervisor sends a notice on SSH stderr when `memory.current` approaches 90% of the slot cap. It reports an OOM termination when the slot's `memory.events` records a new `oom_group_kill`. The enforcement boundary is the slot's `memory.max`.
 - Each workspace has a private mode-`0700` `tmp/` directory used by `TMPDIR` and `SQLITE_TMPDIR`. The shared sessions tmpfs is sized above the sum of the slot memory caps.
-- Startup drains pre-existing slot cgroups even when they have no stale workspace. The supervisor refuses startup when no slot remains usable.
+- Startup drains pre-existing slot cgroups even when they have no stale workspace. A slot with a verified drain and cleanup remains unavailable while `memory.current` is at or above 16 MiB or unreadable. The supervisor checks pending slots every 30 seconds.
 
-UID isolation requires a usable cgroup v2 root and a finite container-scope memory limit. Before listening, the supervisor verifies that the total of the slot caps plus the 512 MiB supervisor and cleanup reserve fits the scope's `memory.max`. It also verifies that the sessions tmpfs has the sum of the slot caps plus 10% in byte capacity, and at least one inode per 512 bytes of the summed caps. Shared CPU, PID and network limits can still affect multiple sessions.
+UID isolation requires a writable cgroup v2 mount rooted at the container's own scope. Before listening, the supervisor verifies that the slot caps, 96 MiB cleanup cap and 512 MiB supervisor reserve fit the finite scope `memory.max`. When `pids.max` is finite, it must cover 256 PIDs per slot plus 32 for cleanup and 256 for the supervisor. The sessions tmpfs must hold the sum of the slot caps plus 10% in bytes and at least one inode per 1 KiB of each slot budget, rounded up per slot.
 
 Only `session` channels with `pty-req` and `shell` are served. `exec`, `subsystem` (sftp, scp), port forwarding, agent forwarding and X11 are refused. There is no shell.
 
@@ -85,7 +85,7 @@ The workspace can open arbitrary HTTP URLs and database hosts, so unrestricted e
 
 - `edge` (`datatug demo ssh-edge`) sits on the public bridge network and an internal network. It forwards public TCP 2222 to `demo:2222` with a PROXY protocol v2 header, so per-IP limits still see the client address. The supervisor requires explicit trusted peer CIDRs and accepts only a PROXY v2 LOCAL header from loopback health checks. Forwarding writes have a 5 s deadline. After either direction ends, the edge closes both sockets within 500 ms. It also serves an HTTP CONNECT proxy that allows only `host:443` for an allow-list (default `github.com`, `api.github.com`, `codeload.github.com`, `cloud.openvaultdb.com`).
 - The edge HTTP proxy listens on a Unix socket in a named volume. The edge owns the directory (UID 10001, GID 0, mode `0750`) and exposes a mode-`0666` socket. The supervisor accesses the directory as root, group 0. Slot UIDs cannot traverse it. The proxy caps accepted connections at 128 by default and bounds HTTP request reads and writes.
-- `demo` is on the isolated internal bridge. Children get `HTTPS_PROXY` and `HTTP_PROXY` pointing at an authenticated loopback CONNECT relay. The relay looks up the peer socket UID in `/proc/net/tcp` or `/proc/net/tcp6` before reading request headers. Each slot UID gets up to 16 sockets, including incomplete requests. The relay rejects other UIDs. It caps authenticated tunnels per session (default eight) and globally (default 64, matching the edge). Session exit revokes the token and closes its tunnels. The supervisor's startup template uses its own temporary relay.
+- `demo` is on the isolated internal bridge. Children get `HTTPS_PROXY` and `HTTP_PROXY` pointing at an authenticated loopback CONNECT relay. The relay identifies the peer UID via an exact TCP tuple lookup before reading request headers. It caps pending UID lookups at 64 and closes sockets if lookup fails or the cap is full. Each slot UID gets up to 16 sockets, including incomplete requests. The relay rejects other UIDs. It caps authenticated tunnels per session (default eight) and globally (default 64, matching the edge). Session exit revokes the token and closes its tunnels. The supervisor's startup template uses its own temporary relay.
 
 ### D5: demo project and template
 
@@ -161,7 +161,7 @@ In a demo session, the workspace notice line says the workspace is temporary and
   - host key and state: `--host-key` (default `<state>/ssh_host_ed25519_key`, generated once when absent, never replaced), `--state-dir`, `--sessions-dir`;
   - demo project: `--repo`, `--ref`, `--project-dir`;
   - session limits: `--max-sessions`, `--max-connections`, `--max-sessions-per-ip`, `--idle-timeout`, `--max-session-duration`, `--handshake-timeout`;
-  - isolation and cgroup limits: `--isolation=uid|process`, `--uid-base`, `--cgroup-root`, `--session-mem-quota`, `--session-disk-quota`, `--allow-insecure-isolation`;
+  - isolation and cgroup limits: `--isolation=uid|process`, `--uid-base`, `--cgroup-root` (default `/sys/fs/cgroup`), `--session-mem-quota`, `--session-disk-quota`, `--cleanup-mem-limit`, `--cleanup-pids-limit`, `--slot-reuse-memory-threshold`, `--allow-insecure-isolation`;
   - GitHub: `--github-client-id`, `--save-branch`;
   - egress: `--egress-proxy`, `--max-relay-sockets-per-uid`, `--max-session-tunnels`, `--max-egress-tunnels`.
 
@@ -177,9 +177,9 @@ On connect, the visitor sees the welcome screen within 2 s on a warm server. On 
 
 - closes the PTY;
 - drains the slot cgroup in UID mode or kills the process group in local process mode;
-- runs cleanup as the slot uid;
+- verifies child reap and queues cleanup under the slot uid in UID mode;
 - removes the session directory;
-- frees the slot after verified drain and cleanup, or quarantines it on failure.
+- makes the UID slot available once the verified drain, reap and cleanup have finished and residual memory is below the reuse threshold.
 
 It logs one structured line per session start and end, with session id, client IP, duration, end reason and exit status, and never a token.
 
@@ -203,7 +203,7 @@ Connections above `--max-connections` or `--max-sessions-per-ip`, and shells abo
 
 ### AC: cleanup-always
 
-After a normal exit, an abrupt client drop, a child panic, or a supervisor `SIGTERM`, the supervisor drains the session cgroup before cleaning the workspace. An unverified slot is quarantined before any reuse.
+After a normal exit, an abrupt client drop, a child panic, or a supervisor `SIGTERM`, the supervisor drains the session cgroup before cleaning the workspace. It quarantines any slot with a drain, reap or cleanup failure, and keeps a slot with residual memory unavailable until its charges fall below the reuse threshold.
 
 ### AC: device-flow-minimum-scope
 

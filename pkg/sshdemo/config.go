@@ -18,6 +18,7 @@ const (
 	DefaultListen             = ":2222"
 	DefaultStateDir           = "/var/lib/datatug-demo"
 	DefaultSessionsDir        = "/run/datatug-demo/sessions"
+	DefaultCgroupRoot         = "/sys/fs/cgroup"
 	DefaultRepo               = "https://github.com/datatug/datatug-demo-project"
 	DefaultProjectDir         = "demo-project-1"
 	DefaultMaxSessions        = 6
@@ -36,8 +37,11 @@ const (
 	IsolationUID     = "uid"
 	IsolationProcess = "process"
 
-	DefaultShutdownGrace  = 10 * time.Second
-	DefaultCleanupTimeout = 30 * time.Second
+	DefaultShutdownGrace            = 10 * time.Second
+	DefaultCleanupTimeout           = 30 * time.Second
+	DefaultCleanupMemLimit          = 96 << 20
+	DefaultCleanupPIDsLimit         = 32
+	DefaultSlotReuseMemoryThreshold = 16 << 20
 
 	// Child rlimit defaults (spec D3).
 	RlimitAS     = 8589934592 // 8 GiB of address space for the cgo binary (Go + DuckDB)
@@ -113,6 +117,10 @@ type Config struct {
 	MaxSessionTunnels      int
 	MaxEgressTunnels       int
 
+	CleanupMemLimit          uint64
+	CleanupPIDsLimit         int
+	SlotReuseMemoryThreshold uint64
+
 	// Optional overrides for logging, lifecycle tuning and tests.
 	Logger           *slog.Logger
 	Executable       string
@@ -129,6 +137,7 @@ func DefaultConfig() Config {
 		Listen:                DefaultListen,
 		StateDir:              DefaultStateDir,
 		SessionsDir:           DefaultSessionsDir,
+		CgroupRoot:            DefaultCgroupRoot,
 		Repo:                  DefaultRepo,
 		ProjectDir:            DefaultProjectDir,
 		MaxSessions:           DefaultMaxSessions,
@@ -149,6 +158,10 @@ func DefaultConfig() Config {
 		SaveBranch:            DefaultSaveBranch,
 		ShutdownGrace:         DefaultShutdownGrace,
 		CleanupTimeout:        DefaultCleanupTimeout,
+
+		CleanupMemLimit:          DefaultCleanupMemLimit,
+		CleanupPIDsLimit:         DefaultCleanupPIDsLimit,
+		SlotReuseMemoryThreshold: DefaultSlotReuseMemoryThreshold,
 	}
 }
 
@@ -162,6 +175,18 @@ func (c Config) WithDefaults() Config {
 	}
 	if c.SessionsDir == "" {
 		c.SessionsDir = DefaultSessionsDir
+	}
+	if c.CgroupRoot == "" {
+		c.CgroupRoot = DefaultCgroupRoot
+	}
+	if c.CleanupMemLimit == 0 {
+		c.CleanupMemLimit = DefaultCleanupMemLimit
+	}
+	if c.CleanupPIDsLimit == 0 {
+		c.CleanupPIDsLimit = DefaultCleanupPIDsLimit
+	}
+	if c.SlotReuseMemoryThreshold == 0 {
+		c.SlotReuseMemoryThreshold = DefaultSlotReuseMemoryThreshold
 	}
 	if c.HostKey == "" {
 		c.HostKey = filepath.Join(c.StateDir, "ssh_host_ed25519_key")
@@ -280,6 +305,12 @@ func (c Config) Validate() error {
 	}
 	switch c.Isolation {
 	case IsolationUID:
+		if !filepath.IsAbs(c.CgroupRoot) {
+			return errors.New("sshdemo: --cgroup-root must be absolute in uid isolation mode")
+		}
+		if c.CleanupPIDsLimit < 1 {
+			return errors.New("sshdemo: --cleanup-pids-limit must be positive")
+		}
 		return c.validateSlotUIDs(os.Getuid(), os.Geteuid())
 	case IsolationProcess:
 		if !isLoopbackListen(c.Listen) && !c.AllowInsecureIsolation {

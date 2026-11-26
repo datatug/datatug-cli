@@ -14,7 +14,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime/debug"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -81,6 +80,9 @@ type Server struct {
 	ops             SysOps
 	slots           *SlotManager
 	cgroups         []cgroup
+	slotReuseMu     sync.Mutex
+	cleanupGroup    cgroup
+	cleanupQueue    chan struct{}
 	hostSigner      gossh.Signer
 	executable      string
 	templateDir     string
@@ -131,6 +133,11 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 		return nil, err
 	}
 
+	if cfg.Isolation == IsolationUID {
+		if err := checkSharedTempDirs(s.ops.StatSharedTemp); err != nil {
+			return nil, err
+		}
+	}
 	if cfg.Isolation == IsolationProcess {
 		if err := s.checkFilesystemCapacity(0); err != nil {
 			return nil, err
@@ -160,6 +167,11 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 	}
 	if err := s.cleanStaleSessions(ctx); err != nil {
 		return nil, err
+	}
+	for i := range s.cgroups {
+		if !s.slots.isQuarantined(i) {
+			s.checkSlotReuse(i, false)
+		}
 	}
 
 	ready := false
@@ -300,6 +312,11 @@ func (s *Server) TemplateDir() string {
 
 // Serve accepts SSH connections on ln until Shutdown or Close is called.
 func (s *Server) Serve(ln net.Listener) error {
+	if s.cfg.Isolation == IsolationUID {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go s.recheckSlotMemory(ctx, 30*time.Second)
+	}
 	if s.cfg.ProxyProtocol {
 		ln = &proxyproto.Listener{Listener: ln, ConnPolicy: s.proxyPolicy, ReadHeaderTimeout: s.cfg.HandshakeTimeout}
 	}
@@ -371,6 +388,8 @@ func RunServer(ctx context.Context, cfg Config, opts ...ServerOption) error {
 		"addr", ln.Addr().String(),
 		"isolation", srv.cfg.Isolation,
 		"proxy_protocol", srv.cfg.ProxyProtocol,
+		"quarantined_slots", srv.slots.quarantinedCount(),
+		"max_sessions", srv.cfg.MaxSessions,
 	)
 
 	errCh := make(chan error, 1)
@@ -654,6 +673,8 @@ func (s *Server) handleSession(sess ssh.Session) {
 			"duration_ms", 0,
 			"end_reason", EndReasonFull,
 			"exit_status", 1,
+			"quarantined_slots", s.slots.quarantinedCount(),
+			"max_sessions", s.cfg.MaxSessions,
 		)
 		_, _ = io.WriteString(sess, demoFullMessage)
 		_ = sess.Exit(1)
@@ -721,23 +742,16 @@ func (s *Server) handleSession(sess ssh.Session) {
 			_ = s.ops.Kill(-pgid, syscall.SIGKILL)
 		}
 		if waitCh != nil && !reaped {
-			select {
-			case waitErr := <-waitCh:
-				_ = waitErr // The child was reaped. The exit path already chose the result.
-			case <-time.After(maxSessionTerminationGrace):
-			}
+			cleanupErr = errors.Join(cleanupErr, waitForChildReap(waitCh, maxSessionTerminationGrace))
 		}
 
 		if cleanupErr == nil {
-			cleanCtx, cancel := context.WithTimeout(context.Background(), s.cfg.CleanupTimeout)
-			cleaned := runCleanupCommand(cleanCtx, s.executable, s.cfg.ExecPrefixArgs, dir, slot.UID, slot.GID, s.cfg.Isolation, s.ops, s.logger)
-			cancel()
-			if !cleaned {
-				cleanupErr = fmt.Errorf("could not verify cleanup of workspace %s", dir)
-			}
+			cleanupErr = s.cleanWorkspace(context.Background(), dir, slot.UID, slot.GID)
 		}
 		if cleanupErr != nil {
 			s.quarantineSlot(slot.Index, cleanupErr)
+		} else if group != nil {
+			s.checkSlotReuse(slot.Index, false)
 		}
 		s.slots.Release(slot)
 
@@ -921,8 +935,7 @@ func (s *Server) startSessionChild(meta *sessionMeta, slot Slot, group *cgroup, 
 		defer func() { _ = write.Close() }()
 		ready = read
 		cmd.ExtraFiles = []*os.File{write}
-		cmd.Args = append(cmd.Args, "--slot-cgroup", group.path,
-			"--slot-uid", strconv.Itoa(slot.UID), "--slot-gid", strconv.Itoa(slot.GID))
+		cmd.Args = appendSlotEntryArgs(cmd.Args, group.path, slot.UID, slot.GID)
 	}
 
 	if err := pty.Start(cmd, ssh.WithJobControl()); err != nil {

@@ -1,10 +1,22 @@
 # syntax=docker/dockerfile:1
 
 # renovate: pin digest
-FROM golang:1.27.3-trixie AS build
+FROM golang:1.27.3-trixie AS source
 
 WORKDIR /src
 COPY . .
+
+# BuildKit only builds this stage when the integration test requests it.
+FROM source AS slot-link-probe-build
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -tags sshdemoprobe -trimpath -buildvcs=false \
+    -o /out/ssh-slot-link-probe ./deploy/ssh-demo/slot-link-probe
+
+FROM scratch AS slot-link-probe
+COPY --from=slot-link-probe-build /out/ssh-slot-link-probe /
+
+FROM source AS build
 ARG VERSION=dev
 ARG REVISION=unknown
 ARG BUILD_DATE

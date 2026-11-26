@@ -6,11 +6,16 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
+	"strconv"
+	"strings"
 
 	"golang.org/x/sys/unix"
 )
 
-const supervisorReserve = 512 << 20
+const (
+	supervisorReserve    = 512 << 20
+	supervisorPIDReserve = 256
+)
 
 var statSessionsFS = unix.Statfs
 
@@ -49,7 +54,8 @@ func (s *Server) checkFilesystemCapacity(slotMemory uint64) error {
 		return fmt.Errorf("sshdemo: sessions filesystem capacity (%d bytes) does not fit %d bytes of slot budgets plus %d bytes of headroom",
 			size, total, headroom)
 	}
-	requiredInodes := (total + 511) / 512
+	const bytesPerInode = 1024
+	requiredInodes := ((slotMemory + bytesPerInode - 1) / bytesPerInode) * slots
 	if inodes < requiredInodes {
 		return fmt.Errorf("sshdemo: sessions filesystem inode capacity (%d inodes) is below %d inodes required for slot budgets", inodes, requiredInodes)
 	}
@@ -62,10 +68,32 @@ func checkMemoryCapacity(cfg Config, scope cgroup) (uint64, error) {
 		return 0, fmt.Errorf("sshdemo: require finite scope memory.max: %w", err)
 	}
 	slots := uint64(cfg.MaxSessions)
-	perSlot := (max(limit, supervisorReserve) - supervisorReserve) / slots
+	available := max(limit, supervisorReserve) - supervisorReserve
+	perSlot := (available - min(available, cfg.CleanupMemLimit)) / slots
 	if cfg.SessionDiskQuota > perSlot || cfg.SessionMemQuota > perSlot-cfg.SessionDiskQuota {
-		return 0, fmt.Errorf("sshdemo: %d sessions with %d bytes of memory and %d bytes of tmpfs each plus the %d-byte reserve exceed the cgroup memory limit (%d bytes)",
-			slots, cfg.SessionMemQuota, cfg.SessionDiskQuota, supervisorReserve, limit)
+		return 0, fmt.Errorf("sshdemo: %d sessions with %d bytes of memory and %d bytes of tmpfs each, a %d-byte supervisor reserve and a %d-byte cleanup limit exceed the cgroup memory limit (%d bytes)",
+			slots, cfg.SessionMemQuota, cfg.SessionDiskQuota, supervisorReserve, cfg.CleanupMemLimit, limit)
 	}
 	return cfg.SessionMemQuota + cfg.SessionDiskQuota, nil
+}
+
+func checkPIDCapacity(cfg Config, scope cgroup) error {
+	raw, err := scope.read("pids.max")
+	if err != nil {
+		return fmt.Errorf("sshdemo: read scope pids.max: %w", err)
+	}
+	value := strings.TrimSpace(string(raw))
+	if value == "max" {
+		return nil
+	}
+	limit, err := strconv.ParseUint(value, 10, 64)
+	if err != nil {
+		return fmt.Errorf("sshdemo: invalid scope pids.max: %w", err)
+	}
+	reserve := uint64(cfg.CleanupPIDsLimit) + supervisorPIDReserve
+	if limit < reserve || uint64(cfg.MaxSessions) > (limit-reserve)/RlimitNProc {
+		return fmt.Errorf("sshdemo: scope pids.max (%d) cannot fit %d slots of %d PIDs plus %d cleanup and %d supervisor PIDs",
+			limit, cfg.MaxSessions, RlimitNProc, cfg.CleanupPIDsLimit, supervisorPIDReserve)
+	}
+	return nil
 }

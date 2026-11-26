@@ -53,11 +53,25 @@ func TestHelperProcess(t *testing.T) {
 		return
 	}
 	args := os.Args[idx+1:]
+	flagVal := func(name string) string {
+		for i := 0; i < len(args)-1; i++ {
+			if args[i] == name {
+				return args[i+1]
+			}
+		}
+		return ""
+	}
 
 	// Cleanup mode: `demo ssh-session --cleanup <dir>`
 	for i := 0; i < len(args)-1; i++ {
 		if args[i] == "--cleanup" {
 			dir := args[i+1]
+			if group := flagVal("--slot-cgroup"); group != "" {
+				data, err := json.Marshal(helperReport{Args: args, Env: os.Environ()})
+				if err != nil || os.WriteFile(filepath.Join(group, "cleanup-seen.json"), data, 0o600) != nil {
+					os.Exit(1)
+				}
+			}
 			if _, err := os.Stat(filepath.Join(dir, "fail-cleanup")); err == nil {
 				os.Exit(1)
 			}
@@ -73,14 +87,6 @@ func TestHelperProcess(t *testing.T) {
 	}
 
 	// Normal session child mode.
-	flagVal := func(name string) string {
-		for i := 0; i < len(args)-1; i++ {
-			if args[i] == name {
-				return args[i+1]
-			}
-		}
-		return ""
-	}
 	workspace := flagVal("--workspace")
 	saveBranch := flagVal("--save-branch")
 	sessionID := flagVal("--session-id")
@@ -970,10 +976,10 @@ func TestServer_UIDModeFullSessionAndErrorPaths(t *testing.T) {
 	_ = os.Chmod(sessDir, 0o711)
 
 	var chowned []string
-	var credUIDs []int
 	var slaveChowned bool
 	ops := DefaultSysOps()
 	ops.FileUID = func(os.FileInfo) (int, bool) { return 0, true }
+	ops.StatSharedTemp = noSharedTemp
 	ops.Chown = func(p string, uid, gid int) error {
 		chowned = append(chowned, p)
 		return nil
@@ -981,10 +987,6 @@ func TestServer_UIDModeFullSessionAndErrorPaths(t *testing.T) {
 	ops.Fchown = func(slave *os.File, uid, gid int) error {
 		info, err := slave.Stat()
 		slaveChowned = err == nil && info.Mode()&os.ModeCharDevice != 0 && uid == 21000 && gid == 21000
-		return nil
-	}
-	ops.CredentialFor = func(uid, gid int) *syscall.Credential {
-		credUIDs = append(credUIDs, uid)
 		return nil
 	}
 	root, cgfs := fakeCgroupMount(t)
@@ -1020,11 +1022,15 @@ func TestServer_UIDModeFullSessionAndErrorPaths(t *testing.T) {
 	}
 	_ = sess.Close()
 	waitNoSessionDirs(t, sessDir, 3*time.Second)
-	if len(credUIDs) != 1 || credUIDs[0] != 21000 {
-		t.Fatalf("expected CredentialFor(21000) for cleanup only, got %v", credUIDs)
+	cleanupArgs, err := os.ReadFile(filepath.Join(root, "cleanup", "cleanup-seen.json"))
+	cleanupGroup, _ := json.Marshal(filepath.Join(root, "cleanup"))
+	if err != nil || !strings.Contains(string(cleanupArgs), `"--slot-cgroup",`+string(cleanupGroup)) ||
+		!strings.Contains(string(cleanupArgs), `"--slot-uid","21000","--slot-gid","21000"`) ||
+		!strings.Contains(string(cleanupArgs), `"GOMEMLIMIT=32MiB"`) {
+		t.Fatalf("cleanup arguments and env = %s, %v", cleanupArgs, err)
 	}
 	for _, pair := range []string{
-		`"--slot-cgroup","` + filepath.Join(root, fakeScopeName, "slot-0") + `"`,
+		`"--slot-cgroup","` + filepath.Join(root, "slot-0") + `"`,
 		`"--slot-uid","21000","--slot-gid","21000"`,
 	} {
 		if !strings.Contains(string(b), pair) {

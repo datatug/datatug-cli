@@ -405,7 +405,7 @@ func TestEdge_CONNECTProxyAllowListAndPrivateIPRefusal(t *testing.T) {
 	// 8. RunEdge starts and shuts down cleanly on cancel, and rejects bad listen addresses.
 	runCtx, runCancel := context.WithCancel(context.Background())
 	runDone := make(chan error, 1)
-	proxySocket := filepath.Join(t.TempDir(), "proxy.sock")
+	proxySocket := filepath.Join(privateSocketDir(t), "proxy.sock")
 	go func() {
 		runDone <- RunEdge(runCtx, EdgeConfig{
 			Listen:      "127.0.0.1:0",

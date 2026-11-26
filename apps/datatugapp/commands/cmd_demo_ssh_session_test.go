@@ -5,6 +5,7 @@ package commands
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -624,7 +625,7 @@ func TestDemoSSHSessionCleanupMode(t *testing.T) {
 		}
 	})
 
-	t.Run("removes contents without following symlinks and handles chmod 0500 dirs", func(t *testing.T) {
+	t.Run("streams batches without following symlinks and opens locked dirs", func(t *testing.T) {
 		root := t.TempDir()
 		outside := filepath.Join(root, "outside")
 		if err := os.MkdirAll(outside, 0o700); err != nil {
@@ -643,16 +644,22 @@ func TestDemoSSHSessionCleanupMode(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(sub, "a.txt"), []byte("hi"), 0o600); err != nil {
 			t.Fatal(err)
 		}
+		for i := range 600 {
+			if err := os.WriteFile(filepath.Join(sub, fmt.Sprintf("file-%03d", i)), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
 		// Symlink pointing outside target MUST NOT delete outside/keep.txt!
 		if err := os.Symlink(outside, filepath.Join(target, "escape-link")); err != nil {
 			t.Fatal(err)
 		}
 		// Lock subdir to test chmod recovery during cleanup.
-		if err := os.Chmod(sub, 0o500); err != nil {
+		if err := os.Chmod(sub, 0o000); err != nil {
 			t.Fatal(err)
 		}
 
 		cmd := demoSSHSessionCommand()
+		stubSSHSession(t, &demoSSHApplyRlimits, func(demoSSHRlimits) error { return nil })
 		cmd.SetArgs([]string{"--cleanup", target})
 		if err := cmd.Execute(); err != nil {
 			t.Fatalf("cleanup Execute: %v", err)
@@ -670,6 +677,20 @@ func TestDemoSSHSessionCleanupMode(t *testing.T) {
 		data, err := os.ReadFile(outsideFile)
 		if err != nil || string(data) != "precious" {
 			t.Fatalf("outside file was touched: err=%v data=%q", err, string(data))
+		}
+	})
+
+	t.Run("bounded nesting", func(t *testing.T) {
+		target := filepath.Join(t.TempDir(), validHex)
+		path := target
+		for range 128 {
+			path = filepath.Join(path, "d")
+		}
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := runDemoSSHCleanup(target); err == nil || !strings.Contains(err.Error(), "maximum directory depth") {
+			t.Fatalf("cleanup depth limit: %v", err)
 		}
 	})
 }
@@ -937,19 +958,12 @@ func TestDemoSSHSessionRegisterProjectSaveFailure(t *testing.T) {
 }
 
 // The slot is entered first, then the workspace, then the supervisor is told.
-// Cleanup mode ends the run right after, so no workspace is started.
 func TestDemoSSHSessionEntersSlotBeforeAnythingElse(t *testing.T) {
-	hex := strings.Repeat("ab", 16)
 	newFlags := func(t *testing.T) demoSSHSessionFlags {
-		target := filepath.Join(t.TempDir(), hex)
-		if err := os.MkdirAll(target, 0o700); err != nil {
-			t.Fatal(err)
-		}
 		return demoSSHSessionFlags{
 			slotRequested: true,
 			slot:          sshdemo.SlotEntry{CgroupDir: "/cg/slot-0", UID: 20000, GID: 20000},
 			workspace:     t.TempDir(),
-			cleanup:       target,
 		}
 	}
 	injected := errors.New("injected")
@@ -977,12 +991,13 @@ func TestDemoSSHSessionEntersSlotBeforeAnythingElse(t *testing.T) {
 			return nil
 		})
 		stubSSHSession(t, &demoSSHChdir, func(string) error { order = append(order, "chdir"); return nil })
+		stubSSHSession(t, &demoSSHApplyRlimits, func(demoSSHRlimits) error { order = append(order, "limits"); return injected })
 		r := readyPipe(t)
-		if err := runDemoSSHSession(context.Background(), newFlags(t)); err != nil {
+		if err := runDemoSSHSession(context.Background(), newFlags(t)); !errors.Is(err, injected) {
 			t.Fatal(err)
 		}
 		ack, _ := io.ReadAll(r)
-		if strings.Join(order, ",") != "slot:/cg/slot-0,chdir" || string(ack) != "1" {
+		if strings.Join(order, ",") != "slot:/cg/slot-0,chdir,limits" || string(ack) != "1" {
 			t.Fatalf("order = %v, ack = %q", order, ack)
 		}
 	})
@@ -1013,4 +1028,39 @@ func TestDemoSSHSessionEntersSlotBeforeAnythingElse(t *testing.T) {
 			t.Fatalf("err = %v", err)
 		}
 	})
+	t.Run("cleanup enters bounded cgroup and applies rlimits without a PTY", func(t *testing.T) {
+		var order []string
+		stubSSHSession(t, &demoSSHEnterSlot, func(e sshdemo.SlotEntry) error {
+			order = append(order, "slot:"+e.CgroupDir)
+			return nil
+		})
+		stubSSHSession(t, &demoSSHApplyRlimits, func(demoSSHRlimits) error {
+			order = append(order, "limits")
+			return injected
+		})
+		stubSSHSession(t, &demoSSHChdir, func(string) error {
+			t.Fatal("cleanup must not enter a PTY workspace")
+			return nil
+		})
+		err := runDemoSSHSession(context.Background(), demoSSHSessionFlags{
+			slotRequested: true,
+			slot:          sshdemo.SlotEntry{CgroupDir: "/cg/cleanup", UID: 20000, GID: 20000},
+			cleanup:       "/unused",
+		})
+		if !errors.Is(err, injected) || strings.Join(order, ",") != "slot:/cg/cleanup,limits" {
+			t.Fatalf("cleanup order = %v, err = %v", order, err)
+		}
+	})
+}
+
+func TestDemoSSHSessionCleanupReadDirFailure(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "f"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	injected := errors.New("injected")
+	stubSSHSession(t, &demoSSHCleanupReadDir, func(*os.File, int) ([]os.DirEntry, error) { return nil, injected })
+	if err := removeDirContentsNoFollow(dir); !errors.Is(err, injected) || !strings.Contains(err.Error(), "read dir") {
+		t.Fatalf("err = %v", err)
+	}
 }

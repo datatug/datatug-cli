@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ type slotEntryOps struct {
 	setgroups func([]int) error
 	setgid    func(int) error
 	setuid    func(int) error
+	denyLinks func(string, func(string) ([]byte, error)) error
 }
 
 var enterSlotOps = slotEntryOps{
@@ -30,6 +32,7 @@ var enterSlotOps = slotEntryOps{
 	setgroups: syscall.Setgroups,
 	setgid:    syscall.Setgid,
 	setuid:    syscall.Setuid,
+	denyLinks: denyHardLinks,
 }
 
 // EnterSlot migrates the calling process to its slot and permanently drops
@@ -62,7 +65,10 @@ func EnterSlot(entry SlotEntry) error {
 	if err := ops.setuid(0); !errors.Is(err, syscall.EPERM) {
 		return fmt.Errorf("verify setuid(0) is denied: got %v, want EPERM", err)
 	}
-	return verifySlotMembership(entry.CgroupDir, ops)
+	if err := verifySlotMembership(entry.CgroupDir, ops); err != nil {
+		return err
+	}
+	return ops.denyLinks(runtime.GOARCH, ops.read)
 }
 
 func verifySlotMembership(dir string, ops slotEntryOps) error {

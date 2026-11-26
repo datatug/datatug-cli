@@ -20,6 +20,7 @@ x-ssh-demo: &ssh-demo
 services:
   edge:
     <<: *ssh-demo
+    ipc: none
     build:
       context: ../..
       dockerfile: deploy/ssh-demo/Dockerfile
@@ -59,7 +60,10 @@ services:
     user: "0:0"
     cap_add: [SETUID, SETGID, CHOWN, KILL]
     cgroup: private
-    cgroup_parent: datatugdemo.slice
+    ipc: none
+    security_opt:
+      - "no-new-privileges:true"
+      - "writable-cgroups=true"
     depends_on:
       - edge
     command:
@@ -72,8 +76,6 @@ services:
       - 172.31.250.2/32
       - --egress-proxy
       - unix:///run/datatug-demo/proxy/connect.sock
-      - --cgroup-root
-      - /run/datatug-demo/cgroup
       - --max-egress-tunnels
       - "${DEMO_MAX_EGRESS_TUNNELS:-64}"
       - --state-dir
@@ -107,20 +109,17 @@ services:
     volumes:
       - state:/var/lib/datatug-demo/state
       - proxy-socket:/run/datatug-demo/proxy:ro
-      - type: bind
-        source: /sys/fs/cgroup/datatugdemo.slice
-        target: /run/datatug-demo/cgroup
-        bind: { create_host_path: true }
     tmpfs:
-      # Six slots × 544 MiB plus 10% rounded up, and one inode per 512 bytes.
+      # Six slots × 544 MiB plus 10% rounded up, and one inode per 1 KiB.
       # Scale both ceilings with DEMO_MAX_SESSIONS.
-      - /var/lib/datatug-demo/sessions:rw,nosuid,nodev,size=${DEMO_SESSIONS_TMPFS:-3591m},nr_inodes=${DEMO_SESSIONS_TMPFS_INODES:-6684672},mode=0711,uid=0,gid=0
+      - /var/lib/datatug-demo/sessions:rw,nosuid,nodev,size=${DEMO_SESSIONS_TMPFS:-3591m},nr_inodes=${DEMO_SESSIONS_TMPFS_INODES:-3342336},mode=0711,uid=0,gid=0
       # Root-only: session uids get a private TMPDIR inside their workspace,
       # so nothing a visitor writes outlives the session.
       - /tmp:rw,nosuid,nodev,noexec,size=64m,mode=0755,uid=0,gid=0
-    # 6 × 544 MiB slot memory.max + 512 MiB supervisor reserve.
-    mem_limit: ${DEMO_MEM_LIMIT:-3776m}
+    # 6 × 544 MiB slot memory.max + 96 MiB cleanup + 512 MiB supervisor reserve.
+    mem_limit: ${DEMO_MEM_LIMIT:-3872m}
     cpus: "${DEMO_CPUS:-2}"
+    # Minimum: DEMO_MAX_SESSIONS × 256 slot PIDs + 32 cleanup + 256 supervisor.
     pids_limit: "${DEMO_PIDS_LIMIT:-2048}"
     # The demo listener expects a PROXY v2 header (from the edge); the probe sends LOCAL.
     healthcheck:

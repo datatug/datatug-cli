@@ -30,7 +30,7 @@ var (
 func demoSSHServerCommand() *cobra.Command {
 	cfg := sshdemo.DefaultConfig()
 	var printHostKey bool
-	var memQuota, diskQuota string
+	var memQuota, diskQuota, cleanupMemLimit, slotReuseMemoryThreshold string
 
 	cmd := &cobra.Command{
 		Use:   "ssh-server",
@@ -45,6 +45,8 @@ func demoSSHServerCommand() *cobra.Command {
 			}{
 				{"session-mem-quota", memQuota, &cfg.SessionMemQuota},
 				{"session-disk-quota", diskQuota, &cfg.SessionDiskQuota},
+				{"cleanup-mem-limit", cleanupMemLimit, &cfg.CleanupMemLimit},
+				{"slot-reuse-memory-threshold", slotReuseMemoryThreshold, &cfg.SlotReuseMemoryThreshold},
 			} {
 				size, ok := parseSSHSessionQuota(quota.value)
 				if !ok {
@@ -79,7 +81,10 @@ func demoSSHServerCommand() *cobra.Command {
 	f.StringVar(&memQuota, "session-mem-quota", strconv.FormatUint(cfg.SessionMemQuota, 10), "Memory contribution to the per-slot cgroup cap (e.g. 384MiB)")
 	f.StringVar(&diskQuota, "session-disk-quota", strconv.FormatUint(cfg.SessionDiskQuota, 10), "Tmpfs contribution to the per-slot cgroup cap (e.g. 160MiB)")
 	f.StringVar(&cfg.Isolation, "isolation", cfg.Isolation, "Session isolation mode: uid or process")
-	f.StringVar(&cfg.CgroupRoot, "cgroup-root", cfg.CgroupRoot, "Mounted cgroup v2 slice containing the supervisor scope (required for uid isolation)")
+	f.StringVar(&cfg.CgroupRoot, "cgroup-root", cfg.CgroupRoot, "Writable cgroup v2 mount rooted at the container scope (uid isolation)")
+	f.StringVar(&cleanupMemLimit, "cleanup-mem-limit", strconv.FormatUint(cfg.CleanupMemLimit, 10), "Memory cap for the cleanup cgroup (e.g. 96MiB)")
+	f.IntVar(&cfg.CleanupPIDsLimit, "cleanup-pids-limit", cfg.CleanupPIDsLimit, "PID and thread cap for the cleanup cgroup")
+	f.StringVar(&slotReuseMemoryThreshold, "slot-reuse-memory-threshold", strconv.FormatUint(cfg.SlotReuseMemoryThreshold, 10), "Slot memory.current must fall below this size before reuse (e.g. 16MiB)")
 	f.IntVar(&cfg.UIDBase, "uid-base", cfg.UIDBase, "Base Unix UID for slot allocation in uid isolation mode")
 	f.BoolVar(&cfg.AllowInsecureIsolation, "allow-insecure-isolation", cfg.AllowInsecureIsolation, "Allow --isolation=process on non-loopback listen addresses")
 	f.StringVar(&cfg.GitHubClientID, "github-client-id", cfg.GitHubClientID, "GitHub OAuth App client ID for device flow")

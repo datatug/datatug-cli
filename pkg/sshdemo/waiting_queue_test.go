@@ -589,3 +589,45 @@ func TestQueueFullRemovesTheArrival(t *testing.T) {
 		t.Fatalf("rejected arrival left %d waiting entries", len(slots.waiting))
 	}
 }
+
+func TestSlotChargeLastsUntilTheSlotIsUsable(t *testing.T) {
+	slots := NewSlotManager(3, 1, DefaultUIDBase, IsolationProcess)
+	first, err := slots.Acquire("203.0.113.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	slots.setSlotState(first.Index, slotUsable) // a state change while in use keeps the charge
+	if _, err := slots.Acquire("203.0.113.1"); !errors.Is(err, ErrPerIPLimit) {
+		t.Fatalf("second slot while the first is in use = %v, want ErrPerIPLimit", err)
+	}
+	slots.setSlotState(first.Index, slotAwaitingCleanup)
+	slots.Release(first)
+	if _, err := slots.Acquire("203.0.113.1"); !errors.Is(err, ErrPerIPLimit) {
+		t.Fatalf("slot while the first still awaits cleanup = %v, want ErrPerIPLimit", err)
+	}
+	// The queue shows no estimate to a visitor their own cleanup is holding back.
+	cfg := DefaultConfig()
+	_, entry, err := slots.admitOrQueue("203.0.113.1", cfg, time.Now())
+	if err != nil || entry == nil {
+		t.Fatalf("admitOrQueue = %v, %v; want queued", entry, err)
+	}
+	if position, estimate := slots.queueEstimate(entry, time.Now()); position != 1 || !estimate.IsZero() {
+		t.Fatalf("estimate for a capped visitor = %d, %v; want 1 and unknown", position, estimate)
+	}
+	slots.setSlotState(first.Index, slotUsable) // cleanup finished: the charge goes and the waiter is admitted
+	select {
+	case <-entry.done:
+	default:
+		t.Fatal("waiter not admitted once its earlier slot became usable")
+	}
+	if entry.admission.at.IsZero() {
+		t.Fatalf("waiter left without admission: %q", entry.leaveReason)
+	}
+	// A quarantined slot keeps its charge.
+	slots.setSlotState(entry.admission.slot.Index, slotAwaitingCleanup)
+	slots.quarantine(entry.admission.slot.Index)
+	slots.Release(entry.admission.slot)
+	if _, err := slots.Acquire("203.0.113.1"); !errors.Is(err, ErrPerIPLimit) {
+		t.Fatalf("slot after quarantine = %v, want ErrPerIPLimit", err)
+	}
+}

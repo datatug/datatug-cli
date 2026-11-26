@@ -150,6 +150,11 @@ func (m *SlotManager) queueEstimate(entry *queueEntry, now time.Time) (int, time
 	if index < 0 {
 		return 0, time.Time{}
 	}
+	if m.perIP[entry.clientIP] >= m.maxPerIP {
+		// This visitor's own earlier sessions hold their share of slots until
+		// cleanup ends; no free slot can admit them before that.
+		return index + 1, time.Time{}
+	}
 	releases := make([]time.Time, 0, len(m.active))
 	for i, state := range m.quarantined {
 		switch state {

@@ -52,6 +52,7 @@ type SlotManager struct {
 	active      []*slotReservation
 	quarantined []slotQuarantine
 	perIP       map[string]int
+	charged     []string // IP charged for each slot until it is usable again
 	waiting     []*queueEntry
 	queueClosed bool
 	getUID      func() int
@@ -67,6 +68,7 @@ func NewSlotManager(maxSessions, maxPerIP, uidBase int, isolation string) *SlotM
 		isolation:   isolation,
 		active:      make([]*slotReservation, maxSessions),
 		quarantined: make([]slotQuarantine, maxSessions),
+		charged:     make([]string, maxSessions),
 		perIP:       make(map[string]int),
 		getUID:      os.Getuid,
 		getGID:      os.Getgid,
@@ -99,6 +101,7 @@ func (m *SlotManager) reserveSlot(clientIP string, deadline time.Time) (Slot, er
 	}
 	reservation := &slotReservation{deadline: deadline}
 	m.active[idx] = reservation
+	m.charged[idx] = clientIP
 	m.perIP[clientIP]++
 
 	uid, gid := m.getUID(), m.getGID()
@@ -116,7 +119,9 @@ func (m *SlotManager) reserveSlot(clientIP string, deadline time.Time) (Slot, er
 }
 
 // Release frees a previously acquired slot. A stale reservation cannot free
-// the slot after it has been handed to another visitor.
+// the slot after it has been handed to another visitor. The client IP stays
+// charged for the slot until it is usable again: a slot awaiting cleanup or
+// memory release, or quarantined, still counts against its last visitor.
 func (m *SlotManager) Release(slot Slot) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -125,12 +130,24 @@ func (m *SlotManager) Release(slot Slot) {
 		return
 	}
 	m.active[slot.Index] = nil
-	if count := m.perIP[slot.ClientIP]; count <= 1 {
-		delete(m.perIP, slot.ClientIP)
-	} else {
-		m.perIP[slot.ClientIP] = count - 1
+	if m.quarantined[slot.Index] == slotUsable {
+		m.uncharge(slot.Index)
 	}
 	m.admitWaiting(time.Now())
+}
+
+// uncharge runs with mu held.
+func (m *SlotManager) uncharge(index int) {
+	ip := m.charged[index]
+	if ip == "" {
+		return
+	}
+	m.charged[index] = ""
+	if count := m.perIP[ip]; count <= 1 {
+		delete(m.perIP, ip)
+	} else {
+		m.perIP[ip] = count - 1
+	}
 }
 
 // InSlotRange reports whether uid falls within [uidBase, uidBase+maxSessions).
@@ -163,6 +180,9 @@ func (m *SlotManager) setSlotState(index int, state slotQuarantine) {
 	defer m.mu.Unlock()
 	m.quarantined[index] = state
 	if state == slotUsable {
+		if m.active[index] == nil {
+			m.uncharge(index)
+		}
 		m.admitWaiting(time.Now())
 	}
 }
@@ -386,5 +406,6 @@ func containerAddresses(list func() ([]net.Addr, error)) (map[netip.Addr]bool, e
 
 func fromContainer(own map[netip.Addr]bool, ip string) bool {
 	addr, err := netip.ParseAddr(ip)
-	return err == nil && own[addr.Unmap()]
+	// Accepted IPv6 link-local peers carry a zone; interface addresses do not.
+	return err == nil && own[addr.WithZone("").Unmap()]
 }

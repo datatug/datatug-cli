@@ -360,6 +360,7 @@ func TestContainerAddresses(t *testing.T) {
 		return []net.Addr{
 			&net.IPNet{IP: net.ParseIP("127.0.0.1"), Mask: net.CIDRMask(8, 32)},
 			&net.IPNet{IP: net.ParseIP("172.31.250.3"), Mask: net.CIDRMask(24, 32)},
+			&net.IPNet{IP: net.ParseIP("fe80::1"), Mask: net.CIDRMask(64, 128)},
 			&net.UnixAddr{Name: "not-an-ip", Net: "unix"},
 		}, nil
 	})
@@ -369,6 +370,7 @@ func TestContainerAddresses(t *testing.T) {
 	for ip, want := range map[string]bool{
 		"127.0.0.1": true, "172.31.250.3": true, "::ffff:172.31.250.3": true,
 		"172.31.250.2": false, "203.0.113.9": false, "unknown": false,
+		"fe80::1%eth0": true,
 	} {
 		if got := fromContainer(own, ip); got != want {
 			t.Errorf("fromContainer(%q) = %v, want %v", ip, got, want)

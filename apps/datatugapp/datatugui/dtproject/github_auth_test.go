@@ -161,3 +161,85 @@ func TestDeviceAuthWidgetPlumbing(t *testing.T) {
 		t.Fatalf("view = %q", got)
 	}
 }
+
+func TestNewGitHubDeviceAuth_CustomScopeAndCallbacks(t *testing.T) {
+	type customDone struct {
+		tok *oauth2.Token
+		err error
+	}
+	type customCancel struct{}
+
+	var gotClientID, gotScope, gotSecret string
+	stub(t, &requestDeviceCodeWithScope, func(_ context.Context, clientID, scope string) (*ghauth.DeviceCodeResponse, error) {
+		gotClientID, gotScope = clientID, scope
+		return testDeviceCode, nil
+	})
+	stub(t, &pollForToken, func(_ context.Context, _, secret, _ string, _ int, onAttempt func(int)) (*oauth2.Token, error) {
+		gotSecret = secret
+		onAttempt(1)
+		return &oauth2.Token{AccessToken: "scoped-tok"}, nil
+	})
+	var savedToken *oauth2.Token
+	stub(t, &saveToken, func(tok *oauth2.Token) error { savedToken = tok; return nil })
+	t.Setenv("GITHUB_OAUTH_SECRET", "must-not-be-used")
+
+	s := mount(NewGitHubDeviceAuth(GitHubAuthOptions{
+		ClientID:    "custom-client",
+		Scope:       "public_repo",
+		Explanation: "Only public_repo is requested.",
+		NoSecret:    true,
+		OnDone:      func(tok *oauth2.Token, err error) tea.Msg { return customDone{tok: tok, err: err} },
+		OnCancel:    func() tea.Msg { return customCancel{} },
+	}), 70, 18, true)
+
+	if got := view(s); !contains(got, "Only public_repo is requested.") {
+		t.Fatalf("explanation missing from view: %q", got)
+	}
+	_, msgs := feed(s, s.Init()())
+	done := only[customDone](t, msgs)
+	if done.err != nil || done.tok == nil || done.tok.AccessToken != "scoped-tok" {
+		t.Fatalf("done = %+v", done)
+	}
+	if gotClientID != "custom-client" || gotScope != "public_repo" || gotSecret != "" {
+		t.Fatalf("clientID=%q scope=%q secret=%q", gotClientID, gotScope, gotSecret)
+	}
+	if savedToken == nil || savedToken.AccessToken != "scoped-tok" {
+		t.Fatalf("savedToken = %+v", savedToken)
+	}
+
+	// Custom cancel callback + explicit override seams.
+	s2 := mount(NewGitHubDeviceAuth(GitHubAuthOptions{
+		Scope:    "public_repo",
+		NoSecret: true,
+		OnCancel: func() tea.Msg { return customCancel{} },
+		OnDone:   func(tok *oauth2.Token, err error) tea.Msg { return customDone{tok: tok, err: err} },
+		RequestDeviceCode: func(context.Context, string, string) (*ghauth.DeviceCodeResponse, error) {
+			return testDeviceCode, nil
+		},
+		PollForToken: func(ctx context.Context, _, _, _ string, _ int, _ func(int)) (*oauth2.Token, error) {
+			return &oauth2.Token{AccessToken: "override-tok"}, nil
+		},
+		SaveToken: func(*oauth2.Token) error { return nil },
+	}), 70, 18, true)
+	_, msgs = step(s2, widgets.CancelMsg{})
+	only[customCancel](t, msgs)
+
+	// Exercise explicit overrides end-to-end as well.
+	s3 := mount(NewGitHubDeviceAuth(GitHubAuthOptions{
+		Scope:    "public_repo",
+		NoSecret: true,
+		OnDone:   func(tok *oauth2.Token, err error) tea.Msg { return customDone{tok: tok, err: err} },
+		RequestDeviceCode: func(context.Context, string, string) (*ghauth.DeviceCodeResponse, error) {
+			return testDeviceCode, nil
+		},
+		PollForToken: func(context.Context, string, string, string, int, func(int)) (*oauth2.Token, error) {
+			return &oauth2.Token{AccessToken: "override-tok"}, nil
+		},
+		SaveToken: func(*oauth2.Token) error { return nil },
+	}), 70, 18, true)
+	_, msgs = feed(s3, s3.Init()())
+	done3 := only[customDone](t, msgs)
+	if done3.err != nil || done3.tok == nil || done3.tok.AccessToken != "override-tok" {
+		t.Fatalf("done3 = %+v", done3)
+	}
+}

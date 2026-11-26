@@ -318,3 +318,46 @@ func TestDemoSSHSessionPrepareTemplate_EdgeCasesAndErrors(t *testing.T) {
 		}
 	})
 }
+
+func TestExcludeDemoRuntimeFiles(t *testing.T) {
+	dir := t.TempDir()
+	if err := excludeDemoRuntimeFiles(dir); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	path := filepath.Join(dir, ".git", "info", "exclude")
+	if err := os.WriteFile(path, append(mustReadFile(t, path), []byte("custom")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := excludeDemoRuntimeFiles(dir); err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	got := string(mustReadFile(t, path))
+	want := ".datatug-environments.lock\n.datatug-environments-owner.json\ncustom\n"
+	if got != want {
+		t.Fatalf("exclude = %q, want %q", got, want)
+	}
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if os.Getuid() != 0 {
+		if err := excludeDemoRuntimeFiles(dir); err == nil {
+			t.Fatal("unreadable exclude file: want error")
+		}
+	}
+	blocked := t.TempDir()
+	if err := os.WriteFile(filepath.Join(blocked, ".git"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := excludeDemoRuntimeFiles(blocked); err == nil {
+		t.Fatal(".git is a file: want error")
+	}
+}
+
+func mustReadFile(t *testing.T, path string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}

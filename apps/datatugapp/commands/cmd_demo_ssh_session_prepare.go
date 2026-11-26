@@ -88,7 +88,41 @@ func runDemoSSHPrepareTemplate(ctx context.Context, templateDir, projectDirRel s
 		_ = os.Remove(filepath.Join(projectPath, name))
 	}
 
-	return commitPreparedTemplate(cleanTemplate)
+	if err := commitPreparedTemplate(cleanTemplate); err != nil {
+		return err
+	}
+	return excludeDemoRuntimeFiles(cleanTemplate)
+}
+
+// demoRuntimeExcludes are files the workspace itself writes into a project
+// while it runs; they are never a visitor's change, so they are excluded in
+// the template's own .git/info/exclude (local, never committed or pushed),
+// which go-git's status and staging honour.
+var demoRuntimeExcludes = []string{".datatug-environments.lock", ".datatug-environments-owner.json"}
+
+func excludeDemoRuntimeFiles(templateDir string) error {
+	infoDir := filepath.Join(templateDir, ".git", "info")
+	if err := os.MkdirAll(infoDir, 0o755); err != nil {
+		return fmt.Errorf("create %s: %w", infoDir, err)
+	}
+	path := filepath.Join(infoDir, "exclude")
+	existing, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	text := string(existing)
+	if text != "" && !strings.HasSuffix(text, "\n") {
+		text += "\n"
+	}
+	for _, pattern := range demoRuntimeExcludes {
+		if !strings.Contains("\n"+text, "\n"+pattern+"\n") {
+			text += pattern + "\n"
+		}
+	}
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
 }
 
 func resolveProjectLocalSQLitePath(projectPath, catalogPath string) (string, bool) {

@@ -1,3 +1,5 @@
+//go:build linux
+
 package sshdemo
 
 import (
@@ -23,87 +25,6 @@ var proxyV2Signature = [12]byte{
 }
 
 var cgnatPrefix = netip.MustParsePrefix("100.64.0.0/10")
-
-// EdgeConfig configures `datatug demo ssh-edge` (spec D4).
-type EdgeConfig struct {
-	Listen          string
-	Upstream        string
-	ProxyListen     string
-	Allow           []string
-	MaxConns        int
-	MaxConnsPerIP   int
-	MaxTunnels      int
-	MaxTunnelsPerIP int
-	IdleTimeout     time.Duration
-	DialTimeout     time.Duration
-
-	Logger       *slog.Logger
-	LookupIPAddr func(ctx context.Context, host string) ([]net.IPAddr, error)
-	DialContext  func(ctx context.Context, network, addr string) (net.Conn, error)
-}
-
-// DefaultEdgeConfig returns an EdgeConfig populated with specification defaults.
-func DefaultEdgeConfig() EdgeConfig {
-	allow := make([]string, len(DefaultEdgeAllow))
-	copy(allow, DefaultEdgeAllow)
-	return EdgeConfig{
-		Listen:          DefaultEdgeListen,
-		Upstream:        DefaultEdgeUpstream,
-		ProxyListen:     DefaultEdgeProxyListen,
-		Allow:           allow,
-		MaxConns:        DefaultEdgeMaxConns,
-		MaxConnsPerIP:   DefaultEdgeMaxConnsPerIP,
-		MaxTunnels:      DefaultEdgeMaxTunnels,
-		MaxTunnelsPerIP: DefaultEdgeMaxTunnelsPerIP,
-		IdleTimeout:     DefaultEdgeIdleTimeout,
-		DialTimeout:     10 * time.Second,
-	}
-}
-
-// WithDefaults returns a copy of c with zero-valued fields replaced by defaults.
-func (c EdgeConfig) WithDefaults() EdgeConfig {
-	if c.Listen == "" {
-		c.Listen = DefaultEdgeListen
-	}
-	if c.Upstream == "" {
-		c.Upstream = DefaultEdgeUpstream
-	}
-	if c.ProxyListen == "" {
-		c.ProxyListen = DefaultEdgeProxyListen
-	}
-	if c.Allow == nil {
-		c.Allow = append([]string(nil), DefaultEdgeAllow...)
-	}
-	if c.MaxConns <= 0 {
-		c.MaxConns = DefaultEdgeMaxConns
-	}
-	if c.MaxConnsPerIP <= 0 {
-		c.MaxConnsPerIP = DefaultEdgeMaxConnsPerIP
-	}
-	if c.MaxTunnels <= 0 {
-		c.MaxTunnels = DefaultEdgeMaxTunnels
-	}
-	if c.MaxTunnelsPerIP <= 0 {
-		c.MaxTunnelsPerIP = DefaultEdgeMaxTunnelsPerIP
-	}
-	if c.IdleTimeout <= 0 {
-		c.IdleTimeout = DefaultEdgeIdleTimeout
-	}
-	if c.DialTimeout <= 0 {
-		c.DialTimeout = 10 * time.Second
-	}
-	if c.Logger == nil {
-		c.Logger = slog.New(slog.NewJSONHandler(os.Stderr, nil))
-	}
-	if c.LookupIPAddr == nil {
-		c.LookupIPAddr = net.DefaultResolver.LookupIPAddr
-	}
-	if c.DialContext == nil {
-		d := &net.Dialer{Timeout: c.DialTimeout}
-		c.DialContext = d.DialContext
-	}
-	return c
-}
 
 // EncodeProxyV2 builds a PROXY protocol v2 binary header carrying src and dst
 // TCP addresses. If either address is not a TCP address, it encodes a valid
@@ -190,14 +111,25 @@ func newConnectionLimit(maxTotal, maxPerIP int) connectionLimit {
 }
 
 func (l *connectionLimit) acquire(ip string) bool {
+	return l.reserve(ip) == nil
+}
+
+func (l *connectionLimit) reserve(ip string) error {
+	return l.reserveForIP(ip, l.maxPerIP)
+}
+
+func (l *connectionLimit) reserveForIP(ip string, maxPerIP int) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.total >= l.maxTotal || l.perIP[ip] >= l.maxPerIP {
-		return false
+	if l.perIP[ip] >= maxPerIP {
+		return ErrPerIPLimit
+	}
+	if l.total >= l.maxTotal {
+		return ErrGlobalLimit
 	}
 	l.total++
 	l.perIP[ip]++
-	return true
+	return nil
 }
 
 func (l *connectionLimit) release(ip string) {
@@ -294,36 +226,46 @@ func (e *Edge) handleProxy(w http.ResponseWriter, r *http.Request) {
 	logResult := func(result string) {
 		e.logger.Info("egress proxy request", "host", logHost, "result", result)
 	}
-	if r.Method != http.MethodConnect {
+	if r.Method != http.MethodConnect || r.ContentLength != 0 || len(r.TransferEncoding) != 0 {
 		logResult("denied-method")
-		http.Error(w, "method not allowed", http.StatusForbidden)
+		rejectProxy(w, r, "method not allowed", http.StatusForbidden)
 		return
 	}
 
 	host, port, err := net.SplitHostPort(r.Host)
 	if err != nil || port != "443" {
 		logResult("denied-port")
-		http.Error(w, "forbidden", http.StatusForbidden)
+		rejectProxy(w, r, "forbidden", http.StatusForbidden)
 		return
 	}
 
 	if host == "" || strings.HasSuffix(host, ".") || net.ParseIP(host) != nil {
 		logResult("denied-host")
-		http.Error(w, "forbidden", http.StatusForbidden)
+		rejectProxy(w, r, "forbidden", http.StatusForbidden)
 		return
 	}
 
 	lowerHost := strings.ToLower(host)
 	if _, ok := e.allowSet[lowerHost]; !ok {
 		logResult("denied-host")
-		http.Error(w, "forbidden", http.StatusForbidden)
+		rejectProxy(w, r, "forbidden", http.StatusForbidden)
 		return
 	}
 
 	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
-	if !e.tunnelLimit.acquire(ip) {
+	maxPerIP := e.tunnelLimit.maxPerIP
+	if net.ParseIP(ip).Equal(net.ParseIP(e.cfg.ProxyAuthIP)) && e.cfg.ProxyAuthIP != "" {
+		auth, err := os.ReadFile(e.cfg.ProxyAuthFile)
+		if err != nil || len(auth) == 0 || !sameProxyAuth(r.Header.Get("Proxy-Authorization"), string(auth)) {
+			logResult("denied-auth")
+			requireProxyAuth(w, r)
+			return
+		}
+		maxPerIP = e.tunnelLimit.maxTotal
+	}
+	if e.tunnelLimit.reserveForIP(ip, maxPerIP) != nil {
 		logResult("tunnel-limit")
-		http.Error(w, "proxy busy", http.StatusServiceUnavailable)
+		rejectProxy(w, r, "proxy busy", http.StatusServiceUnavailable)
 		return
 	}
 	defer e.tunnelLimit.release(ip)
@@ -333,13 +275,13 @@ func (e *Edge) handleProxy(w http.ResponseWriter, r *http.Request) {
 	cancelResolve()
 	if err != nil || len(ips) == 0 {
 		logResult("resolve-failed")
-		http.Error(w, "bad gateway", http.StatusBadGateway)
+		rejectProxy(w, r, "bad gateway", http.StatusBadGateway)
 		return
 	}
 	for _, ipAddr := range ips {
 		if isForbiddenEgressIP(ipAddr.IP) {
 			logResult("denied-private-ip")
-			http.Error(w, "forbidden", http.StatusForbidden)
+			rejectProxy(w, r, "forbidden", http.StatusForbidden)
 			return
 		}
 	}
@@ -356,40 +298,13 @@ func (e *Edge) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		logResult("dial-failed")
-		http.Error(w, "bad gateway", http.StatusBadGateway)
+		rejectProxy(w, r, "bad gateway", http.StatusBadGateway)
 		return
 	}
 	defer func() { _ = upConn.Close() }()
 
-	hj, ok := w.(http.Hijacker)
-	if !ok {
-		http.Error(w, "hijacking not supported", http.StatusInternalServerError)
-		return
-	}
-	clientConn, bufRW, err := hj.Hijack()
-	if err != nil {
-		return
-	}
-	defer func() { _ = clientConn.Close() }()
-
-	wrappedClient := newIdleConn(clientConn, e.cfg.IdleTimeout)
-	wrappedUp := newIdleConn(upConn, e.cfg.IdleTimeout)
-	if _, err := io.WriteString(wrappedClient, "HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
-		return
-	}
 	logResult("allowed")
-
-	// Flush any bytes already buffered by net/http's bufio.Reader.
-	if bufRW != nil && bufRW.Reader.Buffered() > 0 {
-		buffered := make([]byte, bufRW.Reader.Buffered())
-		if n, rErr := bufRW.Reader.Read(buffered); n > 0 && rErr == nil {
-			if _, wErr := wrappedUp.Write(buffered[:n]); wErr != nil {
-				return
-			}
-		}
-	}
-
-	spliceConns(r.Context(), wrappedClient, wrappedUp, 0)
+	establishTunnel(r.Context(), w, r, upConn, http.NoBody, e.cfg.IdleTimeout)
 }
 
 func hostOnly(hostPort string) string {
@@ -407,9 +322,6 @@ func isForbiddenEgressIP(ip net.IP) bool {
 		return true
 	}
 	addr = addr.Unmap()
-	if !addr.IsValid() {
-		return true
-	}
 	return addr.IsLoopback() ||
 		addr.IsPrivate() ||
 		addr.IsLinkLocalUnicast() ||
@@ -519,6 +431,10 @@ func spliceConns(ctx context.Context, a, b net.Conn, writeTimeout time.Duration)
 // Run starts both the TCP forwarder and the HTTP CONNECT proxy and blocks until
 // ctx is canceled or either server returns a fatal error.
 func (e *Edge) Run(ctx context.Context) error {
+	if (e.cfg.ProxyAuthIP == "") != (e.cfg.ProxyAuthFile == "") ||
+		(e.cfg.ProxyAuthIP != "" && net.ParseIP(e.cfg.ProxyAuthIP) == nil) {
+		return errors.New("ssh-edge: --proxy-auth-ip must be an IP address paired with --proxy-auth-file")
+	}
 	fwdLn, err := net.Listen("tcp", e.cfg.Listen)
 	if err != nil {
 		return fmt.Errorf("ssh-edge: listen %s: %w", e.cfg.Listen, err)
@@ -537,19 +453,14 @@ func (e *Edge) Serve(ctx context.Context, fwdLn, proxyLn net.Listener) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	httpSrv := &http.Server{
-		Handler:           e.ProxyHandler(),
-		ReadHeaderTimeout: 10 * time.Second,
-		MaxHeaderBytes:    8 << 10,
-		BaseContext:       func(net.Listener) context.Context { return runCtx },
-	}
+	httpSrv := newProxyServer(runCtx, e.ProxyHandler())
 
 	errCh := make(chan error, 2)
 	go func() {
 		errCh <- e.ServeForwarder(runCtx, fwdLn)
 	}()
 	go func() {
-		err := httpSrv.Serve(proxyLn)
+		err := httpSrv.Serve(capListener(proxyLn, e.cfg.MaxProxyConns))
 		if errors.Is(err, http.ErrServerClosed) {
 			err = nil
 		}

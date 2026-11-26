@@ -50,7 +50,7 @@ Without root (local development), `--isolation=process` runs every child under t
 
 The child sets its own rlimits as its first action, before reading any visitor input. Limits can only be lowered:
 
-- `RLIMIT_AS` (default 8 GiB of address space. The cgo binary maps about 2 GiB of address space at start, so a lower value crashes it. The child sets `GOMEMLIMIT=768MiB` as a soft Go heap limit and `oom_score_adj` to 900 so the kernel prefers killing a session before the supervisor.)
+- `RLIMIT_AS` (default 8 GiB of address space. The cgo binary maps about 2 GiB of address space at start, so a lower value crashes it. The child sets `GOMEMLIMIT=256MiB` as a soft Go heap limit and `oom_score_adj` to 900 so the kernel prefers killing a session before the supervisor.)
 - `RLIMIT_CPU` (default 900 s)
 - `RLIMIT_FSIZE` (64 MiB)
 - `RLIMIT_NOFILE` (512)
@@ -61,17 +61,19 @@ The container adds a memory and CPU cap. The sessions directory is a size-capped
 
 The supervisor enforces:
 
-- The global session cap defaults to 16.
-- The per-IP cap (`--max-sessions-per-ip`, default 3) counts all authenticated connections, including those that have yet to open a session channel.
+- The global shell cap (`--max-sessions`) defaults to six.
+- The global connection cap (`--max-connections`, default twice the shell cap) and per-IP cap (`--max-sessions-per-ip`, default two) apply at authentication, before SSH channels and PTYs can be opened. Starting a shell uses a separate shell slot without adding another connection reservation.
 - The SSH handshake timeout defaults to 20 s.
 - Each SSH connection can open one session channel. The supervisor closes the connection if the child has yet to start when `--shell-start-timeout` elapses after authentication (default 30 s).
 - Each session channel accepts up to eight environment requests, with values up to 256 bytes. PTY requests can carry a terminal name up to 64 bytes and terminal modes up to 1 KiB.
 - The idle timeout defaults to 15 min without client input.
 - The maximum session duration defaults to 60 min, with a warning a minute before.
 - The supervisor clamps `pty-req` and every later `window-change` above 500×200.
-- The supervisor checks session quotas every 2 s. The memory quota (`--session-mem-quota`, default 1 GiB) sums resident memory across the slot UID's processes or the child's process group in process mode. The disk quota (`--session-disk-quota`, default 256 MiB) counts allocated workspace blocks without following symlinks. A session that exceeds either quota gets a message and is cleaned up.
+- The supervisor checks session quotas every second. The memory quota (`--session-mem-quota`, default 384 MiB) sums resident memory across the slot UID's processes or the child's process group in process mode. The disk quota (`--session-disk-quota`, default 160 MiB) counts allocated workspace blocks without following symlinks. A session that exceeds either quota gets a message and is cleaned up.
 - Each workspace has a private slot-owned `tmp/` directory with mode 0700 that counts toward the disk quota. `TMPDIR` and `SQLITE_TMPDIR` point there.
-- Unverified startup cleanup of a stale workspace or its UID's processes quarantines the affected slot until the supervisor exits. Startup fails when no slot remains usable.
+- Startup checks every slot UID for surviving processes, including UIDs with no stale workspace. Unverified workspace or process cleanup quarantines the affected slot until the supervisor exits. Startup fails when no slot remains usable.
+
+Before listening, the supervisor requires the sessions filesystem to hold the combined disk quotas. It also requires the combined memory and tmpfs quotas plus 512 MiB of supervisor and cleanup reserve to fit under cgroup v2 `memory.max`. An absent or unlimited memory cap produces a warning and skips the memory check. These sampled quotas leave residual risk from native allocations between samples and disk usage that directory traversal misses, including open unlinked files. A session can still trigger a container OOM. Its `oom_score_adj` of 900 biases the kernel toward killing session processes and gives the supervisor a better chance of surviving.
 
 Only `session` channels with `pty-req` and `shell` are served. `exec`, `subsystem` (sftp, scp), port forwarding, agent forwarding and X11 are refused. There is no shell.
 
@@ -79,8 +81,9 @@ Only `session` channels with `pty-req` and `shell` are served. `exec`, `subsyste
 
 The workspace can open arbitrary HTTP URLs and database hosts, so unrestricted egress would let visitors reach services on the host's bridge gateway. Deployment uses two containers from the same image:
 
-- `edge` (`datatug demo ssh-edge`) sits on the public bridge network and an internal network. It forwards public TCP 2222 to `demo:2222` with a PROXY protocol v2 header, so per-IP limits still see the client address. Forwarding writes have a 5 s deadline. After either direction ends, the edge closes both sockets within 500 ms. It also serves an HTTP CONNECT proxy that allows only `host:443` for an allow-list (default `github.com`, `api.github.com`, `codeload.github.com`, `cloud.openvaultdb.com`).
-- `demo` (`datatug demo ssh-server`) is only on the internal network (`internal: true`, no route out). Children get `HTTPS_PROXY`/`HTTP_PROXY` pointing at `edge`. A raw TCP dial (for example a PostgreSQL connection the visitor types) has no route and fails.
+- `edge` (`datatug demo ssh-edge`) sits on the public bridge network and an internal network. It forwards public TCP 2222 to `demo:2222` with a PROXY protocol v2 header, so per-IP limits still see the client address. The supervisor requires explicit trusted peer CIDRs and accepts only a PROXY v2 LOCAL header from loopback health checks. Forwarding writes have a 5 s deadline. After either direction ends, the edge closes both sockets within 500 ms. It also serves an HTTP CONNECT proxy that allows only `host:443` for an allow-list (default `github.com`, `api.github.com`, `codeload.github.com`, `cloud.openvaultdb.com`).
+- The edge HTTP proxy accepts at most 128 concurrent connections by default, bounds request reads and writes, and closes rejected requests without draining their bodies. Its per-IP CONNECT cap defaults to the global CONNECT cap.
+- `demo` (`datatug demo ssh-server`) is only on the internal network (`internal: true`, no route out). Children get `HTTPS_PROXY`/`HTTP_PROXY` pointing at a loopback CONNECT relay with a session ID and random token. The relay caps tunnels per session (default eight) and across sessions (default 64, matching the edge). Session exit revokes the token and closes its tunnels. The edge requires a separate supervisor credential for connections from the demo container. Direct TCP to internet services has no route.
 
 This needs no host root and no host firewall changes.
 
@@ -154,13 +157,13 @@ In a demo session, the workspace notice line says the workspace is temporary and
 ### Commands
 
 - `datatug demo ssh-server`: the supervisor. Flags:
-  - listening: `--listen` (default `:2222`), `--proxy-protocol`;
+  - listening: `--listen` (default `:2222`), `--proxy-protocol`, `--proxy-protocol-trust`;
   - host key and state: `--host-key` (default `<state>/ssh_host_ed25519_key`, generated once when absent, never replaced), `--state-dir`, `--sessions-dir`;
   - demo project: `--repo`, `--ref`, `--project-dir`;
-  - session limits: `--max-sessions`, `--max-sessions-per-ip`, `--idle-timeout`, `--max-session-duration`, `--handshake-timeout`;
+  - session limits: `--max-sessions`, `--max-connections`, `--max-sessions-per-ip`, `--idle-timeout`, `--max-session-duration`, `--handshake-timeout`;
   - isolation: `--isolation=uid|process`, `--uid-base`, `--allow-insecure-isolation`;
   - GitHub: `--github-client-id`, `--save-branch`;
-  - egress: `--egress-proxy`.
+  - egress: `--egress-proxy`, `--egress-proxy-auth-file`, `--max-session-tunnels`, `--max-egress-tunnels`.
 
   `SIGTERM` stops accepting connections, tells each session it is ending, waits up to 10 s, then kills and cleans up every session.
 - `datatug demo ssh-server --print-host-key`: prints the public host key and its SHA256 fingerprint, then exits.
@@ -196,7 +199,7 @@ Two concurrent sessions edit their workspaces independently. One session's SQLit
 
 ### AC: limits-enforced
 
-Connections beyond `--max-sessions` or `--max-sessions-per-ip` get a short "demo is full" message and are closed. Idle and maximum-duration timeouts end the session and clean it up. A stalled handshake is dropped after `--handshake-timeout`. The child runs with the D3 rlimits.
+Connections above `--max-connections` or `--max-sessions-per-ip`, and shells above `--max-sessions`, get a short "demo is full" message and are closed. Idle and maximum-duration timeouts end the session and clean it up. A stalled handshake is dropped after `--handshake-timeout`. The child runs with the D3 rlimits.
 
 ### AC: cleanup-always
 

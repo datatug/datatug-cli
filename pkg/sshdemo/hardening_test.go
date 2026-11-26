@@ -1,3 +1,5 @@
+//go:build linux
+
 package sshdemo
 
 import (
@@ -145,6 +147,7 @@ func TestServer_ShellStartDeadline(t *testing.T) {
 func TestServer_AuthenticatedConnectionCapUsesProxyIP(t *testing.T) {
 	h := startTestServerWithPeer(t, net.ParseIP("192.0.2.8"), func(c *Config) {
 		c.ProxyProtocol = true
+		c.ProxyProtocolTrust = []string{"192.0.2.8/32"}
 		c.MaxSessionsPerIP = 1
 	})
 	newTransport := func(ip string) net.Conn {
@@ -293,8 +296,8 @@ func TestServer_StaleWorkspacesQuarantineSlots(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(dir, "procs-left")); !os.IsNotExist(err) {
 		t.Fatalf("expected only processes left for that slot, got %v", err)
 	}
-	if got := strings.Count(logs.String(), `"level":"ERROR","msg":"quarantining uid`); got != 2 {
-		t.Fatalf("expected two quarantine errors, got %d in %s", got, logs.String())
+	if got := strings.Count(logs.String(), `"level":"ERROR","msg":"quarantining uid`); got != 3 {
+		t.Fatalf("expected three quarantine diagnostics, got %d in %s", got, logs.String())
 	}
 	for range 2 {
 		slot, err := srv.slots.Acquire("ip")

@@ -1,3 +1,5 @@
+//go:build linux
+
 package sshdemo
 
 import (
@@ -16,8 +18,8 @@ import (
 )
 
 func TestEdgeTunnelLimits(t *testing.T) {
-	for _, cfg := range []EdgeConfig{DefaultEdgeConfig(), (EdgeConfig{}).WithDefaults()} {
-		if cfg.MaxTunnels != 64 || cfg.MaxTunnelsPerIP != 16 {
+	for _, cfg := range []EdgeConfig{DefaultEdgeConfig().WithDefaults(), (EdgeConfig{}).WithDefaults()} {
+		if cfg.MaxTunnels != 64 || cfg.MaxTunnelsPerIP != 64 {
 			t.Fatalf("tunnel defaults are %d global, %d per IP", cfg.MaxTunnels, cfg.MaxTunnelsPerIP)
 		}
 	}
@@ -200,7 +202,7 @@ func TestEdgeConnectDialFallbackAndIdle(t *testing.T) {
 }
 
 func TestEdgeLoopbackHealthBypassesPublicLimit(t *testing.T) {
-	supervisor := startTestServer(t, func(c *Config) { c.ProxyProtocol = true })
+	supervisor := startTestServer(t, func(c *Config) { c.ProxyProtocol = true; c.ProxyProtocolTrust = []string{"192.0.2.8/32"} })
 	edge := NewEdge(EdgeConfig{Upstream: supervisor.addr, MaxConns: 1, MaxConnsPerIP: 1})
 	if !edge.forwardLimit.acquire("192.0.2.1") {
 		t.Fatal("could not reserve the public pool")

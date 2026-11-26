@@ -37,11 +37,22 @@ services:
       - demo:2222
       - --proxy-listen
       - ":3128"
+      - --proxy-auth-ip
+      - 172.31.250.3
+      - --proxy-auth-file
+      - /var/lib/datatug-demo/proxy-auth/credential
+      - --max-tunnels
+      - "${DEMO_MAX_EGRESS_TUNNELS:-64}"
       - --allow
       - github.com,api.github.com,codeload.github.com,cloud.openvaultdb.com
     ports:
       - "${DEMO_SSH_PUBLISH:-2222}:2222"
-    networks: [public, internal]
+    volumes:
+      - proxy-auth:/var/lib/datatug-demo/proxy-auth:ro
+    networks:
+      public:
+      internal:
+        ipv4_address: 172.31.250.2
     mem_limit: 256m
     pids_limit: 256
     cpus: 0.5
@@ -59,8 +70,14 @@ services:
       - --listen
       - ":2222"
       - --proxy-protocol
+      - --proxy-protocol-trust
+      - 172.31.250.2/32
       - --egress-proxy
       - http://edge:3128
+      - --egress-proxy-auth-file
+      - /var/lib/datatug-demo/proxy-auth/credential
+      - --max-egress-tunnels
+      - "${DEMO_MAX_EGRESS_TUNNELS:-64}"
       - --state-dir
       - /var/lib/datatug-demo/state
       - --sessions-dir
@@ -72,9 +89,9 @@ services:
       - --project-dir
       - ${DEMO_PROJECT_DIR:-demo-project-1}
       - --max-sessions
-      - "${DEMO_MAX_SESSIONS:-16}"
+      - "${DEMO_MAX_SESSIONS:-6}"
       - --max-sessions-per-ip
-      - "${DEMO_MAX_SESSIONS_PER_IP:-3}"
+      - "${DEMO_MAX_SESSIONS_PER_IP:-2}"
       - --idle-timeout
       - "${DEMO_IDLE_TIMEOUT:-15m}"
       - --max-session-duration
@@ -89,16 +106,16 @@ services:
       - "${DEMO_GITHUB_CLIENT_ID:-}"
       - --save-branch
       - ${DEMO_SAVE_BRANCH:-datatug-demo}
-    environment:
-      HTTPS_PROXY: http://edge:3128
     volumes:
       - state:/var/lib/datatug-demo/state
+      - proxy-auth:/var/lib/datatug-demo/proxy-auth
     tmpfs:
-      - /var/lib/datatug-demo/sessions:rw,nosuid,nodev,size=${DEMO_SESSIONS_TMPFS:-2g},mode=0711,uid=0,gid=0
+      - /var/lib/datatug-demo/sessions:rw,nosuid,nodev,size=${DEMO_SESSIONS_TMPFS:-1g},mode=0711,uid=0,gid=0
       # Root-only: session uids get a private TMPDIR inside their workspace,
       # so nothing a visitor writes outlives the session.
       - /tmp:rw,nosuid,nodev,noexec,size=64m,mode=0755,uid=0,gid=0
-    mem_limit: ${DEMO_MEM_LIMIT:-3g}
+    # 6 × (384 MiB RSS + 160 MiB tmpfs) + 512 MiB reserve.
+    mem_limit: ${DEMO_MEM_LIMIT:-3776m}
     cpus: "${DEMO_CPUS:-2}"
     pids_limit: "${DEMO_PIDS_LIMIT:-2048}"
     # The demo listener expects a PROXY v2 header (from the edge); the probe sends LOCAL.
@@ -110,7 +127,9 @@ services:
       retries: 5
     init: true
     stop_grace_period: 20s
-    networks: [internal]
+    networks:
+      internal:
+        ipv4_address: 172.31.250.3
 
 networks:
   public:
@@ -118,6 +137,9 @@ networks:
   internal:
     driver: bridge
     internal: true
+    ipam:
+      config:
+        - subnet: 172.31.250.0/24
     # internal: true only removes the route out. Without an isolated gateway
     # the host keeps an address on this bridge and every host service that
     # listens on 0.0.0.0 (admin sshd included) is reachable from the demo.
@@ -128,3 +150,4 @@ networks:
 
 volumes:
   state:
+  proxy-auth:

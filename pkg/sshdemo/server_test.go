@@ -1,15 +1,19 @@
+//go:build linux
+
 package sshdemo
 
 import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -408,6 +412,16 @@ func TestServer_PTYContractEnvTermClampingAndCanary(t *testing.T) {
 	if _, leaked := envMap["EVIL_VAR"]; leaked {
 		t.Fatal("disallowed SSH env var leaked to child!")
 	}
+	proxyURL := envMap["HTTPS_PROXY"]
+	proxy, err := url.Parse(proxyURL)
+	if err != nil || proxy.Scheme != "http" || proxy.Hostname() != "127.0.0.1" ||
+		proxy.Port() == "" || proxy.User.Username() != gotFlags["--session-id"] {
+		t.Fatal("child proxy URL must identify the session and point to the loopback relay")
+	}
+	password, _ := proxy.User.Password()
+	if token, err := base64.RawURLEncoding.DecodeString(password); err != nil || len(token) != 32 {
+		t.Fatal("invalid child proxy token")
+	}
 	wantEnv := map[string]string{
 		"HOME":              filepath.Join(gotFlags["--workspace"], "home"),
 		"TMPDIR":            filepath.Join(gotFlags["--workspace"], "tmp"),
@@ -418,11 +432,11 @@ func TestServer_PTYContractEnvTermClampingAndCanary(t *testing.T) {
 		"PATH":              "/usr/local/bin:/usr/bin:/bin",
 		"DATATUG_TELEMETRY": "0",
 		"DO_NOT_TRACK":      "1",
-		"GOMEMLIMIT":        "768MiB",
-		"HTTPS_PROXY":       "http://edge:3128",
-		"HTTP_PROXY":        "http://edge:3128",
-		"https_proxy":       "http://edge:3128",
-		"http_proxy":        "http://edge:3128",
+		"GOMEMLIMIT":        "256MiB",
+		"HTTPS_PROXY":       proxyURL,
+		"HTTP_PROXY":        proxyURL,
+		"https_proxy":       proxyURL,
+		"http_proxy":        proxyURL,
 		"NO_PROXY":          "",
 	}
 	if len(envMap) != len(wantEnv) {

@@ -38,6 +38,7 @@ func TestDemoSSHServerCommand_Flags(t *testing.T) {
 		"--ref", "main",
 		"--project-dir", "proj",
 		"--max-sessions", "8",
+		"--max-connections", "14",
 		"--max-sessions-per-ip", "2",
 		"--idle-timeout", "5m",
 		"--max-session-duration", "30m",
@@ -59,7 +60,7 @@ func TestDemoSSHServerCommand_Flags(t *testing.T) {
 		strings.Join(gotCfg.ProxyProtocolTrust, ",") != "192.0.2.0/24,2001:db8::/64" ||
 		gotCfg.StateDir != "/tmp/state" || gotCfg.SessionsDir != "/tmp/sess" ||
 		gotCfg.Repo != "https://example.com/repo.git" || gotCfg.Ref != "main" ||
-		gotCfg.ProjectDir != "proj" || gotCfg.MaxSessions != 8 || gotCfg.MaxSessionsPerIP != 2 ||
+		gotCfg.ProjectDir != "proj" || gotCfg.MaxSessions != 8 || gotCfg.MaxConnections != 14 || gotCfg.MaxSessionsPerIP != 2 ||
 		gotCfg.IdleTimeout != 5*time.Minute || gotCfg.MaxSessionDuration != 30*time.Minute ||
 		gotCfg.HandshakeTimeout != 10*time.Second || gotCfg.Isolation != "process" ||
 		gotCfg.ShellStartTimeout != 3*time.Second || gotCfg.SessionMemQuota != 1536<<20 || gotCfg.SessionDiskQuota != 128<<20 ||

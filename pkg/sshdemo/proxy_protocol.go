@@ -1,3 +1,5 @@
+//go:build linux
+
 package sshdemo
 
 import (
@@ -25,7 +27,7 @@ func proxyConnectionPolicy(cidrs []string) (proxyproto.ConnPolicyFunc, error) {
 			return proxyproto.REQUIRE, proxyproto.ErrInvalidUpstream
 		}
 		ip := peer.AddrPort().Addr().Unmap()
-		if ip.IsLoopback() || len(trusted) == 0 {
+		if ip.IsLoopback() {
 			return proxyproto.REQUIRE, nil
 		}
 		for _, prefix := range trusted {

@@ -1,3 +1,5 @@
+//go:build linux
+
 package sshdemo
 
 import (
@@ -22,6 +24,12 @@ import (
 )
 
 var installGitProxyOnce sync.Once
+
+var (
+	removeTemplateDir    = os.RemoveAll
+	renameTemplateDir    = os.Rename
+	readDemoFixtureFiles = demofixtures.Files
+)
 
 // ensureGitHTTPProxy registers go-git HTTP/HTTPS clients whose transport
 // honours HTTPS_PROXY / HTTP_PROXY via http.ProxyFromEnvironment.
@@ -108,13 +116,13 @@ func PrepareTemplate(ctx context.Context, cfg TemplateConfig) (string, error) {
 	finalDir := filepath.Join(cfg.StateDir, "template")
 	oldDir := filepath.Join(cfg.StateDir, "template.old")
 
-	if err := os.RemoveAll(tmpDir); err != nil {
+	if err := removeTemplateDir(tmpDir); err != nil {
 		return "", fmt.Errorf("sshdemo: clean stale template.tmp: %w", err)
 	}
 	cleanupTmp := true
 	defer func() {
 		if cleanupTmp {
-			_ = os.RemoveAll(tmpDir)
+			_ = removeTemplateDir(tmpDir)
 		}
 	}()
 
@@ -222,7 +230,7 @@ func isHTTPURL(u string) bool {
 var loadChinookFixtureBytes = defaultLoadChinookFixtureBytes
 
 func defaultLoadChinookFixtureBytes() ([]byte, error) {
-	files, err := demofixtures.Files()
+	files, err := readDemoFixtureFiles()
 	if err != nil {
 		return nil, fmt.Errorf("sshdemo: load demofixtures: %w", err)
 	}
@@ -264,7 +272,7 @@ func chmodWorldReadable(root string) error {
 
 func replaceDirAtomic(tmpDir, finalDir, oldDir string) error {
 	if _, err := os.Stat(finalDir); os.IsNotExist(err) {
-		if err := os.Rename(tmpDir, finalDir); err != nil {
+		if err := renameTemplateDir(tmpDir, finalDir); err != nil {
 			return fmt.Errorf("sshdemo: install template %s: %w", finalDir, err)
 		}
 		return nil
@@ -272,16 +280,16 @@ func replaceDirAtomic(tmpDir, finalDir, oldDir string) error {
 		return fmt.Errorf("sshdemo: stat existing template %s: %w", finalDir, err)
 	}
 
-	if err := os.RemoveAll(oldDir); err != nil {
+	if err := removeTemplateDir(oldDir); err != nil {
 		return fmt.Errorf("sshdemo: clean stale template.old: %w", err)
 	}
-	if err := os.Rename(finalDir, oldDir); err != nil {
+	if err := renameTemplateDir(finalDir, oldDir); err != nil {
 		return fmt.Errorf("sshdemo: stage old template: %w", err)
 	}
-	if err := os.Rename(tmpDir, finalDir); err != nil {
-		_ = os.Rename(oldDir, finalDir)
+	if err := renameTemplateDir(tmpDir, finalDir); err != nil {
+		_ = renameTemplateDir(oldDir, finalDir)
 		return fmt.Errorf("sshdemo: replace template %s: %w", finalDir, err)
 	}
-	_ = os.RemoveAll(oldDir)
+	_ = removeTemplateDir(oldDir)
 	return nil
 }

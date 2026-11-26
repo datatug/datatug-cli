@@ -1,3 +1,5 @@
+//go:build linux
+
 package sshdemo
 
 import (
@@ -120,6 +122,7 @@ func TestEdge_TCPForwarderProxyV2EndToEndAndCaps(t *testing.T) {
 	// Start sshdemo.Server with ProxyProtocol enabled, then put Edge in front of it!
 	srvHarness := startTestServerWithPeer(t, net.ParseIP("192.0.2.8"), func(c *Config) {
 		c.ProxyProtocol = true
+		c.ProxyProtocolTrust = []string{"192.0.2.8/32", "203.0.113.7/32"}
 		c.SaveBranch = "exit-now"
 	})
 
@@ -420,7 +423,7 @@ func TestEdge_CONNECTProxyAllowListAndPrivateIPRefusal(t *testing.T) {
 }
 
 func TestCheckHealthProxyLocal(t *testing.T) {
-	h := startTestServer(t, func(cfg *Config) { cfg.ProxyProtocol = true })
+	h := startTestServer(t, func(cfg *Config) { cfg.ProxyProtocol = true; cfg.ProxyProtocolTrust = []string{"192.0.2.8/32"} })
 	// A plain probe never sees a banner: the server waits for the PROXY header.
 	if err := CheckHealth(context.Background(), h.addr, 300*time.Millisecond); err == nil {
 		t.Fatal("plain CheckHealth against a --proxy-protocol server: want timeout error")
@@ -433,6 +436,7 @@ func TestCheckHealthProxyLocal(t *testing.T) {
 func TestEdge_UpstreamHalfCloseReleasesForwardingSlot(t *testing.T) {
 	h := startTestServer(t, func(cfg *Config) {
 		cfg.ProxyProtocol = true
+		cfg.ProxyProtocolTrust = []string{"192.0.2.8/32"}
 		cfg.HandshakeTimeout = 500 * time.Millisecond
 	})
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

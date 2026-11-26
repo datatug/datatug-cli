@@ -40,12 +40,15 @@ ssh -p 2222 178.104.41.143
 
 When the founder adds DNS, set `demo.datatug.app` to a DNS-only (grey-cloud) A record for `178.104.41.143`. Add AAAA `2a01:4f8:1c1b:e43f::1` only after publishing and verifying IPv6 access. The hostname will then use the same host key and server configuration via `ssh -p 2222 demo.datatug.app`. This deployment requires zero Caddy changes or web redirects.
 
-Print the public key and SHA256 fingerprint from the deployment volume.
+Print the public key and SHA256 fingerprint from the deployment volume. While the stack runs:
 
 ```bash
-docker compose -f deploy/ssh-demo/compose.yaml run --rm --no-deps -T demo \
-  demo ssh-server --print-host-key --state-dir /var/lib/datatug-demo/state
+docker compose -f deploy/ssh-demo/compose.yaml exec -T demo \
+  /usr/local/bin/datatug demo ssh-server --print-host-key --state-dir /var/lib/datatug-demo/state
 ```
+
+With the stack stopped, `run --rm --no-deps -T demo demo ssh-server --print-host-key --state-dir /var/lib/datatug-demo/state`
+does the same. (`run` fails while the demo runs: the demo has a fixed address on the internal network.)
 
 Publish the fingerprint on `datatug.app` so visitors can compare it with the ED25519 fingerprint in their first SSH prompt before accepting the key. Once DNS exists, consider an SSHFP record on a DNSSEC-signed zone. To generate the SHA256 record, put the first line of the output in `demo-host-ed25519.pub`:
 

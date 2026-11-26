@@ -68,8 +68,10 @@ port_for() {
     fi
 }
 
+# exec, not run: the demo has a fixed address, so a second demo container
+# cannot join the internal network while the first one runs.
 print_host_key() {
-    "${compose[@]}" run --rm --no-deps -T demo demo ssh-server --print-host-key \
+    "${compose[@]}" exec -T demo /usr/local/bin/datatug demo ssh-server --print-host-key \
         --state-dir /var/lib/datatug-demo/state
 }
 

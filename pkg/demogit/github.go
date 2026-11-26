@@ -89,8 +89,8 @@ func (c *Client) getUser(ctx context.Context, api *github.Client) (*github.User,
 	return user, nil
 }
 
-// FindFork returns the visitor's fork of the canonical repository, or
-// ErrNoFork. It does not create one.
+// FindFork returns the visitor's fork of the canonical repository, ErrNoFork
+// after a complete search, or ErrForkSearchIncomplete if the search hits its cap.
 func (c *Client) FindFork(ctx context.Context) (Repo, error) {
 	api, err := c.apiClient()
 	if err != nil {
@@ -112,7 +112,7 @@ func (c *Client) findFork(ctx context.Context, api *github.Client, login string)
 	opts := github.RepositoryListByAuthenticatedUserOptions{
 		Type: "owner", ListOptions: github.ListOptions{Page: 1, PerPage: 100},
 	}
-	for range 10 {
+	for range 50 {
 		repos, resp, err := api.Repositories.ListByAuthenticatedUser(ctx, &opts)
 		if err != nil {
 			return Repo{}, c.apiError("list GitHub repositories", resp, err)
@@ -128,11 +128,24 @@ func (c *Client) findFork(ctx context.Context, api *github.Client, login string)
 			}
 		}
 		if resp.NextPage == 0 {
-			break
+			return Repo{}, ErrNoFork
 		}
 		opts.Page = resp.NextPage
 	}
-	return Repo{}, ErrNoFork
+	return Repo{}, fmt.Errorf("list GitHub repositories: %w", ErrForkSearchIncomplete)
+}
+
+// Repository details can follow a GitHub rename or transfer. Operations on
+// a previously discovered fork require the response to still name that fork.
+func (c *Client) validateFork(ctx context.Context, api *github.Client, fork Repo, login string) error {
+	verified, err := c.lookupFork(ctx, api, fork)
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(verified.Owner, login) || !strings.EqualFold(verified.Name, fork.Name) {
+		return fmt.Errorf("revalidate GitHub fork: %w", ErrNoFork)
+	}
+	return nil
 }
 
 func (c *Client) lookupFork(ctx context.Context, api *github.Client, candidate Repo) (Repo, error) {

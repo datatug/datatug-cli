@@ -47,6 +47,8 @@ func reply(method, path string, status int, body string) apiReply {
 
 func userReply() apiReply { return reply("GET", "/user", 200, userJSON) }
 
+func forkReply() apiReply { return reply("GET", forkPath, 200, forkJSON) }
+
 func ownedReposReply(page, status int, body string) apiReply {
 	r := reply("GET", "/user/repos", status, body)
 	r.query = fmt.Sprintf("page=%d&per_page=100&type=owner", page)
@@ -233,18 +235,38 @@ func TestFindForkRenamed(t *testing.T) {
 
 func TestFindForkDiscoveryLimitsAndErrors(t *testing.T) {
 	missing := reply("GET", forkPath, 404, "{}")
-	t.Run("at most ten pages", func(t *testing.T) {
-		replies := []apiReply{userReply(), missing}
-		for page := 1; page <= 10; page++ {
-			r := ownedReposReply(page, 200, "[]")
-			r.headers = map[string]string{"Link": fmt.Sprintf(`</user/repos?page=%d>; rel="next"`, page+1)}
-			replies = append(replies, r)
-		}
-		c := testAPI(t, Config{}, replies...)
-		if _, err := c.FindFork(context.Background()); !errors.Is(err, ErrNoFork) {
-			t.Fatalf("FindFork() = %v", err)
-		}
-	})
+	for _, tc := range []struct {
+		name string
+		more bool
+		want error
+	}{
+		{"last page exhausted", false, ErrNoFork},
+		{"search cap reached", true, ErrForkSearchIncomplete},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			replies := []apiReply{userReply(), missing}
+			for page := 1; page <= 50; page++ {
+				r := ownedReposReply(page, 200, "[]")
+				if page < 50 || tc.more {
+					r.headers = map[string]string{"Link": fmt.Sprintf(`</user/repos?page=%d>; rel="next"`, page+1)}
+				}
+				replies = append(replies, r)
+			}
+			c := testAPI(t, Config{}, replies...)
+			var err error
+			if tc.more {
+				_, _, err = c.EnsureFork(context.Background())
+				if errors.Is(err, ErrNoFork) {
+					t.Fatalf("incomplete search reported no fork: %v", err)
+				}
+			} else {
+				_, err = c.FindFork(context.Background())
+			}
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("fork search = %v, want %v", err, tc.want)
+			}
+		})
+	}
 	t.Run("list forbidden", func(t *testing.T) {
 		c := testAPI(t, Config{}, userReply(), missing, ownedReposReply(1, 403, "{}"))
 		if _, err := c.FindFork(context.Background()); !errors.Is(err, ErrAuth) {
@@ -259,6 +281,42 @@ func TestFindForkDiscoveryLimitsAndErrors(t *testing.T) {
 			t.Fatalf("FindFork() = %v", err)
 		}
 	})
+}
+
+func TestFindForkAfterTenPages(t *testing.T) {
+	replies := []apiReply{userReply(), reply("GET", forkPath, 404, "{}")}
+	for page := 1; page <= 10; page++ {
+		r := ownedReposReply(page, 200, "[]")
+		r.headers = map[string]string{"Link": fmt.Sprintf(`</user/repos?page=%d>; rel="next"`, page+1)}
+		replies = append(replies, r)
+	}
+	const renamed = `{"full_name":"alice/renamed","owner":{"login":"alice"},"fork":true,"source":{"full_name":"team/demo"}}`
+	replies = append(replies, ownedReposReply(11, 200, "["+renamed+"]"), reply("GET", "/repos/alice/renamed", 200, renamed))
+	c := testAPI(t, Config{}, replies...)
+	if fork, err := c.FindFork(context.Background()); err != nil || fork != (Repo{"alice", "renamed"}) {
+		t.Fatalf("FindFork() = %+v, %v", fork, err)
+	}
+}
+
+func TestFindForkPaginationHonorsContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	page := ownedReposReply(1, 200, "[]")
+	page.headers = map[string]string{"Link": `</user/repos?page=2>; rel="next"`}
+	c := testAPI(t, Config{}, userReply(), reply("GET", forkPath, 404, "{}"), page)
+	transport := c.cfg.HTTPClient.Transport
+	secondPage := false
+	c.cfg.HTTPClient.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path == "/user/repos" && req.URL.Query().Get("page") == "2" {
+			secondPage = true
+			cancel()
+			return nil, req.Context().Err()
+		}
+		return transport.RoundTrip(req)
+	})
+	if _, err := c.FindFork(ctx); !errors.Is(err, context.Canceled) || !secondPage {
+		t.Fatalf("FindFork() = %v, reached second page = %v", err, secondPage)
+	}
 }
 
 func TestEnsureFork(t *testing.T) {

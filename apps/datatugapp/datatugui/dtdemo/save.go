@@ -77,20 +77,21 @@ type (
 )
 
 type saveScreen struct {
-	cfg          Config
-	w, h         int
-	focused      bool
-	step         saveStep
-	projectFiles []demogit.Change
-	dbFiles      []demogit.Change
-	changesErr   string
-	authScreen   nav.Screen
-	fork         demogit.Repo
-	targetBranch string
-	altBranch    string
-	result       demogit.SaveResult
-	errMsg       string
-	canReauth    bool
+	cfg           Config
+	w, h          int
+	focused       bool
+	step          saveStep
+	projectFiles  []demogit.Change
+	dbFiles       []demogit.Change
+	changesErr    string
+	authScreen    nav.Screen
+	fork          demogit.Repo
+	recheckedFork bool
+	targetBranch  string
+	altBranch     string
+	result        demogit.SaveResult
+	errMsg        string
+	canReauth     bool
 }
 
 var (
@@ -276,6 +277,7 @@ func (s saveScreen) updateOverview(msg tea.Msg) (nav.Screen, tea.Cmd) {
 			return s, nil
 		}
 		s.targetBranch = s.cfg.SaveBranch
+		s.recheckedFork = false
 		if !s.cfg.Auth.SignedIn() {
 			s.step = saveStepExplain
 			return s, nil
@@ -404,6 +406,12 @@ func (s saveScreen) updateCreatingFork(msg tea.Msg) (nav.Screen, tea.Cmd) {
 
 func (s saveScreen) updateSaving(msg tea.Msg) (nav.Screen, tea.Cmd) {
 	if res, ok := msg.(saveDoneMsg); ok {
+		if errors.Is(res.err, demogit.ErrNoFork) && !s.recheckedFork {
+			s.recheckedFork = true
+			s.fork = demogit.Repo{}
+			s.step = saveStepCheckingFork
+			return s, s.checkForkCmd()
+		}
 		if errors.Is(res.err, demogit.ErrDiverged) {
 			branch := s.cfg.gitClient().NewBranchName()
 			if branch == "" {

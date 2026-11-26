@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -171,11 +172,38 @@ func cloneWorktreeLimits(ctx context.Context, root string, limits CloneLimits) (
 	return limits, err
 }
 
+const maxCheckoutDepth = 64
+
+func checkoutEntryLimit(maxFiles int) int {
+	return min(maxFiles, math.MaxInt/4) * 4
+}
+
 // validateTree walks every path, so two entries pointing at the same object
 // each count against the checkout budget.
-func validateTree(ctx context.Context, store storer.EncodedObjectStorer, hash plumbing.Hash, prefix string, remaining *CloneLimits) error {
+func validateTree(ctx context.Context, store storer.EncodedObjectStorer, hash plumbing.Hash, limits CloneLimits) error {
+	remaining := treeBudget{CloneLimits: limits, entries: checkoutEntryLimit(limits.MaxFiles)}
+	return remaining.walk(ctx, store, hash, "", 0)
+}
+
+type treeBudget struct {
+	CloneLimits
+	entries int
+}
+
+func (remaining *treeBudget) walk(ctx context.Context, store storer.EncodedObjectStorer, hash plumbing.Hash, prefix string, depth int) error {
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if depth > maxCheckoutDepth {
+		return untrusted(prefix, "tree depth limit exceeded (%d levels)", maxCheckoutDepth)
+	}
+	const maxTreeBytes = 1 << 20
+	size, err := store.EncodedObjectSize(hash)
+	if err != nil {
+		return fmt.Errorf("read tree size at %q: %w", prefix, err)
+	}
+	if size < 0 || size > maxTreeBytes {
+		return untrusted(prefix, "tree object size limit exceeded (%d bytes)", maxTreeBytes)
 	}
 	tree, err := object.GetTree(store, hash)
 	if err != nil {
@@ -190,8 +218,12 @@ func validateTree(ctx context.Context, store storer.EncodedObjectStorer, hash pl
 			return untrusted(entry.Name, "invalid checkout path")
 		}
 		path := filepath.Join(prefix, entry.Name)
+		remaining.entries--
+		if remaining.entries < 0 {
+			return untrusted(path, "tree entry limit exceeded")
+		}
 		if entry.Mode == filemode.Dir {
-			if err := validateTree(ctx, store, entry.Hash, path, remaining); err != nil {
+			if err := remaining.walk(ctx, store, entry.Hash, path, depth+1); err != nil {
 				return err
 			}
 			continue
@@ -239,6 +271,7 @@ func validateWorkspace(ctx context.Context, root, projectDir string, limits Clon
 	}
 	defer dir.Close()
 
+	entries := checkoutEntryLimit(limits.MaxFiles)
 	var files int
 	var bytes int64
 	err = fs.WalkDir(dir.FS(), ".", func(path string, entry fs.DirEntry, walkErr error) error {
@@ -248,10 +281,22 @@ func validateWorkspace(ctx context.Context, root, projectDir string, limits Clon
 		if walkErr != nil {
 			return untrusted(path, "%v", walkErr)
 		}
-		if entry.IsDir() {
+		isDir := entry.IsDir()
+		gitMetadata := strings.HasPrefix(path, git.GitDirName+"/") || (isDir && path == git.GitDirName)
+		if path != "." && !gitMetadata {
+			entries--
+			if entries < 0 {
+				return untrusted(path, "tree entry limit exceeded")
+			}
+			// WalkDir paths use slashes and the root is depth zero.
+			if isDir && strings.Count(path, "/") >= maxCheckoutDepth {
+				return untrusted(path, "tree depth limit exceeded (%d levels)", maxCheckoutDepth)
+			}
+		}
+		if isDir {
 			return nil
 		}
-		info, err := entry.Info()
+		info, err := dir.Lstat(path)
 		if err != nil {
 			return untrusted(path, "%v", err)
 		}
@@ -260,7 +305,7 @@ func validateWorkspace(ctx context.Context, root, projectDir string, limits Clon
 				return untrusted(path, "%v", err)
 			}
 		}
-		if strings.HasPrefix(path, git.GitDirName+"/") {
+		if gitMetadata {
 			return nil // Git metadata is not part of the checked-out tree.
 		}
 		files++

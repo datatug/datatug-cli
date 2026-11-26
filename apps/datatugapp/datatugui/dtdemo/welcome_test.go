@@ -357,7 +357,7 @@ func TestWelcomeOpenForkFailuresAndCancel(t *testing.T) {
 		auth.Set("bad-tok", "alice")
 
 		var tm tea.Model = NewWelcomeModel(testConfig(auth, nil, nil))
-		tm, _ = feedModel(tm, uitest.Key("2"))
+		_, _ = feedModel(tm, uitest.Key("2"))
 		if auth.SignedIn() {
 			t.Fatal("ErrAuth during FindFork should clear auth state")
 		}
@@ -419,7 +419,7 @@ func TestWelcomeOpenForkFailuresAndCancel(t *testing.T) {
 		var tmAuthQuit tea.Model = NewWelcomeModel(cfg)
 		tmAuthQuit, _ = feedModel(tmAuthQuit, uitest.Key("2"))
 		tmAuthQuit, _ = tmAuthQuit.Update(uitest.Key("enter"))
-		tmAuthQuit, msgs = feedModel(tmAuthQuit, uitest.Key("ctrl+c"))
+		_, msgs = feedModel(tmAuthQuit, uitest.Key("ctrl+c"))
 		if !hasQuit(msgs) {
 			t.Fatal("ctrl+c in auth must quit")
 		}

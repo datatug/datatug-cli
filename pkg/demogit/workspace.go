@@ -138,7 +138,7 @@ func matchesEntry(wt *git.Worktree, path string, entry *object.TreeEntry) (bool,
 		if err != nil {
 			return false, err
 		}
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 		if _, err := io.Copy(hash, file); err != nil {
 			return false, err
 		}
@@ -269,7 +269,7 @@ func validateWorkspace(ctx context.Context, root, projectDir string, limits Clon
 	if err != nil {
 		return untrusted(".", "%v", err)
 	}
-	defer dir.Close()
+	defer func() { _ = dir.Close() }()
 
 	entries := checkoutEntryLimit(limits.MaxFiles)
 	var files int

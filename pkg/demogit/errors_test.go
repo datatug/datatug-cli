@@ -251,7 +251,7 @@ func TestValidateLinkReadError(t *testing.T) {
 	must(t, os.Symlink("other", filepath.Join(root, "link")))
 	dir, err := os.OpenRoot(root)
 	must(t, err)
-	defer dir.Close()
+	defer func() { _ = dir.Close() }()
 	if err := validateLink(failingRoot{dir}, "link"); !errors.Is(err, errFixtureIO) {
 		t.Fatalf("validateLink() = %v", err)
 	}

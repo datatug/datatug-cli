@@ -368,10 +368,10 @@ func TestSaveHTTPPushAuth(t *testing.T) {
 			srv := testHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
 				case "/user":
-					fmt.Fprint(w, userJSON)
+					_, _ = fmt.Fprint(w, userJSON)
 					return
 				case forkPath:
-					fmt.Fprint(w, forkJSON)
+					_, _ = fmt.Fprint(w, forkJSON)
 					return
 				}
 				user, pass, ok := r.BasicAuth()
@@ -412,9 +412,9 @@ func TestSaveRejectsPushRedirect(t *testing.T) {
 	srv := testHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/user":
-			fmt.Fprint(w, userJSON)
+			_, _ = fmt.Fprint(w, userJSON)
 		case forkPath:
-			fmt.Fprint(w, forkJSON)
+			_, _ = fmt.Fprint(w, forkJSON)
 		case "/alice/demo.git/info/refs":
 			service := r.URL.Query().Get("service")
 			w.Header().Set("Content-Type", "application/x-"+service+"-advertisement")
@@ -752,7 +752,7 @@ func TestCheckoutFilesystemCancellation(t *testing.T) {
 	}
 	file, err := fs.OpenFile("open", os.O_CREATE|os.O_WRONLY, 0o600)
 	must(t, err)
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	cancel()
 	if _, err := fs.OpenFile("new", os.O_CREATE|os.O_WRONLY, 0o600); !errors.Is(err, context.Canceled) {
 		t.Fatalf("open after cancel: %v", err)
@@ -874,10 +874,10 @@ func TestOpenHTTPRedirectsAndErrors(t *testing.T) {
 			srv := testHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.EscapedPath() {
 				case "/user":
-					fmt.Fprint(w, userJSON)
+					_, _ = fmt.Fprint(w, userJSON)
 					return
 				case forkPath:
-					fmt.Fprint(w, forkJSON)
+					_, _ = fmt.Fprint(w, forkJSON)
 					return
 				case "/ALICE/DEMO/info/refs":
 					if tc.name != "same-repo" {

@@ -89,7 +89,7 @@ func testAPI(t *testing.T, cfg Config, replies ...apiReply) *Client {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(want.status)
-		fmt.Fprint(w, want.body)
+		_, _ = fmt.Fprint(w, want.body)
 	}))
 	t.Cleanup(func() {
 		mu.Lock()
@@ -473,12 +473,12 @@ func (l *pipeListener) dial(ctx context.Context, _, _ string) (net.Conn, error) 
 	case l.pending <- server:
 		return caller, nil
 	case <-ctx.Done():
-		caller.Close()
-		server.Close()
+		_ = caller.Close()
+		_ = server.Close()
 		return nil, ctx.Err()
 	case <-l.closed:
-		caller.Close()
-		server.Close()
+		_ = caller.Close()
+		_ = server.Close()
 		return nil, net.ErrClosed
 	}
 }

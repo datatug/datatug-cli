@@ -468,9 +468,7 @@ func (m WelcomeModel) renderBody() string {
 
 	case welcomeStepExplain:
 		lines = append(lines, "", titleStyle.Render("Sign in to GitHub"), "")
-		for _, l := range strings.Split(ansi.Wrap(ScopeExplanation(m.cfg.Canonical), inner, " "), "\n") {
-			lines = append(lines, l)
-		}
+		lines = append(lines, strings.Split(ansi.Wrap(ScopeExplanation(m.cfg.Canonical), inner, " "), "\n")...)
 		lines = append(lines, "",
 			theme.WorkspaceKeyHint("Enter")+" continue to GitHub sign-in   "+
 				theme.WorkspaceKeyHint("Esc")+" back to welcome",

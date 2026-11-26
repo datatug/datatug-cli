@@ -100,7 +100,7 @@ var (
 	// ErrForkSearchIncomplete indicates more GitHub repository pages remain to be searched.
 	ErrForkSearchIncomplete = errors.New("fork search stopped after 50 pages")
 	// ErrGitRedirect indicates a Git HTTP redirect outside the validated repository path or origin.
-	ErrGitRedirect = errors.New("Git redirect changes repository path or origin")
+	ErrGitRedirect = errors.New("git redirect changes repository path or origin")
 	// ErrUntrustedContent: the demo could not safely open the workspace.
 	ErrUntrustedContent = errors.New("the repository cannot be opened in the demo")
 )

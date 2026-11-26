@@ -9,11 +9,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtdemo"
+	"github.com/datatug/datatug-cli/pkg/sshdemo"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/spf13/cobra"
 	"golang.org/x/sys/unix"
@@ -932,4 +934,83 @@ func TestDemoSSHSessionRegisterProjectSaveFailure(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "save settings") {
 		t.Fatalf("err = %v, want save settings error", err)
 	}
+}
+
+// The slot is entered first, then the workspace, then the supervisor is told.
+// Cleanup mode ends the run right after, so no workspace is started.
+func TestDemoSSHSessionEntersSlotBeforeAnythingElse(t *testing.T) {
+	hex := strings.Repeat("ab", 16)
+	newFlags := func(t *testing.T) demoSSHSessionFlags {
+		target := filepath.Join(t.TempDir(), hex)
+		if err := os.MkdirAll(target, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		return demoSSHSessionFlags{
+			slotRequested: true,
+			slot:          sshdemo.SlotEntry{CgroupDir: "/cg/slot-0", UID: 20000, GID: 20000},
+			workspace:     t.TempDir(),
+			cleanup:       target,
+		}
+	}
+	injected := errors.New("injected")
+	// readyPipe points the ready descriptor at a duplicate of a pipe's write
+	// end, which the session closes; the test keeps and closes its own end.
+	readyPipe := func(t *testing.T) *os.File {
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		fd, err := syscall.Dup(int(w.Fd()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = w.Close()
+		t.Cleanup(func() { _ = r.Close() })
+		stubSSHSession(t, &demoSSHSlotReadyFD, uintptr(fd))
+		return r
+	}
+
+	t.Run("enters, changes directory, acknowledges", func(t *testing.T) {
+		var order []string
+		stubSSHSession(t, &demoSSHEnterSlot, func(e sshdemo.SlotEntry) error {
+			order = append(order, "slot:"+e.CgroupDir)
+			return nil
+		})
+		stubSSHSession(t, &demoSSHChdir, func(string) error { order = append(order, "chdir"); return nil })
+		r := readyPipe(t)
+		if err := runDemoSSHSession(context.Background(), newFlags(t)); err != nil {
+			t.Fatal(err)
+		}
+		ack, _ := io.ReadAll(r)
+		if strings.Join(order, ",") != "slot:/cg/slot-0,chdir" || string(ack) != "1" {
+			t.Fatalf("order = %v, ack = %q", order, ack)
+		}
+	})
+	t.Run("slot entry failure stops the session", func(t *testing.T) {
+		stubSSHSession(t, &demoSSHEnterSlot, func(sshdemo.SlotEntry) error { return injected })
+		if err := runDemoSSHSession(context.Background(), newFlags(t)); !errors.Is(err, injected) || !strings.Contains(err.Error(), "enter session slot") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("workspace failure stops the session", func(t *testing.T) {
+		stubSSHSession(t, &demoSSHEnterSlot, func(sshdemo.SlotEntry) error { return nil })
+		stubSSHSession(t, &demoSSHChdir, func(string) error { return injected })
+		if err := runDemoSSHSession(context.Background(), newFlags(t)); !errors.Is(err, injected) || !strings.Contains(err.Error(), "enter session workspace") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("acknowledgement failure stops the session", func(t *testing.T) {
+		stubSSHSession(t, &demoSSHEnterSlot, func(sshdemo.SlotEntry) error { return nil })
+		stubSSHSession(t, &demoSSHChdir, func(string) error { return nil })
+		// A read-only descriptor: the acknowledgement write fails.
+		r := readyPipe(t)
+		fd, err := syscall.Dup(int(r.Fd()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		stubSSHSession(t, &demoSSHSlotReadyFD, uintptr(fd))
+		if err := runDemoSSHSession(context.Background(), newFlags(t)); err == nil || !strings.Contains(err.Error(), "acknowledge session slot entry") {
+			t.Fatalf("err = %v", err)
+		}
+	})
 }

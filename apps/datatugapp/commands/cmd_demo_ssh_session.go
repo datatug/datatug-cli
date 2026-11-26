@@ -77,7 +77,11 @@ var (
 	demoSSHRunWelcome       = dtdemo.RunWelcome
 	demoSSHRunWorkspaceLoop = runWorkspaceLoop
 	demoSSHCleanupLstat     = os.Lstat
-	demoSSHCleanupRemove    = os.Remove
+	// Slot entry runs only as root in the container; tests stand in for it.
+	demoSSHEnterSlot     = sshdemo.EnterSlot
+	demoSSHChdir         = os.Chdir
+	demoSSHSlotReadyFD   = uintptr(sshdemo.SlotReadyFD)
+	demoSSHCleanupRemove = os.Remove
 	// Seams for I/O failures a test cannot provoke on a healthy filesystem.
 	demoSSHTemplateLstat  = os.Lstat
 	demoSSHTemplateChmod  = os.Chmod
@@ -127,14 +131,14 @@ func demoSSHSessionCommand() *cobra.Command {
 
 func runDemoSSHSession(ctx context.Context, f demoSSHSessionFlags) error {
 	if f.slotRequested {
-		if err := sshdemo.EnterSlot(f.slot); err != nil {
+		if err := demoSSHEnterSlot(f.slot); err != nil {
 			return fmt.Errorf("enter session slot: %w", err)
 		}
 		// The supervisor cannot enter the slot user's mode-0700 workspace.
-		if err := os.Chdir(f.workspace); err != nil {
+		if err := demoSSHChdir(f.workspace); err != nil {
 			return fmt.Errorf("enter session workspace: %w", err)
 		}
-		ready := os.NewFile(sshdemo.SlotReadyFD, "slot-ready")
+		ready := os.NewFile(demoSSHSlotReadyFD, "slot-ready")
 		_, err := ready.WriteString("1")
 		if err := errors.Join(err, ready.Close()); err != nil {
 			return fmt.Errorf("acknowledge session slot entry: %w", err)

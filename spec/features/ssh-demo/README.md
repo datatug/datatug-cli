@@ -50,11 +50,11 @@ Without root (local development), `--isolation=process` runs every child under t
 
 The child sets its own rlimits as its first action, before reading any visitor input. Limits can only be lowered:
 
-- `RLIMIT_AS` (default 2 GiB)
+- `RLIMIT_AS` (default 8 GiB: address space, not memory. The cgo binary maps about 2 GiB of address space at start, so a lower value crashes it. Real memory is bounded by `GOMEMLIMIT=768MiB` in the child's environment and by the container memory cap. The child sets its `oom_score_adj` to 900, so the kernel kills a session before the supervisor.)
 - `RLIMIT_CPU` (default 900 s)
 - `RLIMIT_FSIZE` (64 MiB)
 - `RLIMIT_NOFILE` (512)
-- `RLIMIT_NPROC` (per uid, 64)
+- `RLIMIT_NPROC` (per uid, 256: Linux counts threads, and a Go process with cgo uses dozens)
 - `RLIMIT_CORE` 0
 
 The container adds a memory and CPU cap. The sessions directory is a size-capped tmpfs, which bounds disk use for all sessions together.
@@ -66,7 +66,7 @@ The supervisor enforces:
 - SSH handshake timeout (default 20 s);
 - idle timeout (no input, default 15 min);
 - maximum session duration (default 60 min, with a warning a minute before);
-- a PTY size cap: requests above 500×200 are clamped at allocation. Later window-change requests are bounded by the child's `RLIMIT_AS`.
+- a PTY size cap: `pty-req` and every later `window-change` above 500×200 are clamped.
 
 Only `session` channels with `pty-req` and `shell` are served. `exec`, `subsystem` (sftp, scp), port forwarding, agent forwarding and X11 are refused. There is no shell.
 

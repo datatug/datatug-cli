@@ -70,6 +70,29 @@ func TestSlotFilterArchitectures(t *testing.T) {
 	for _, nr := range []uint32{194, 196, 195, 197, 190, 193, 191, 192, 186, 189, 188, 187, 180} {
 		cases = append(cases, slotFilterCase{"arm64", unix.AUDIT_ARCH_AARCH64, nr, 0, denied})
 	}
+	cases = append(cases, slotFilterCase{"amd64", unix.AUDIT_ARCH_X86_64, 50, 0, denied},
+		slotFilterCase{"amd64", unix.AUDIT_ARCH_X86_64, 50 | 1<<30, 0, denied},
+		slotFilterCase{"arm64", unix.AUDIT_ARCH_AARCH64, 201, 0, denied})
+	const einval = unix.SECCOMP_RET_ERRNO | uint32(unix.EINVAL)
+	for _, nr := range []uint32{40, 275, 276, 278, 532} {
+		cases = append(cases, slotFilterCase{"amd64", unix.AUDIT_ARCH_X86_64, nr, 0, einval},
+			slotFilterCase{"amd64", unix.AUDIT_ARCH_X86_64, nr | 1<<30, 0, einval})
+	}
+	for _, nr := range []uint32{71, 76, 77, 75} {
+		cases = append(cases, slotFilterCase{"arm64", unix.AUDIT_ARCH_AARCH64, nr, 0, einval})
+	}
+	const threadFlags = unix.CLONE_VM | unix.CLONE_FS | unix.CLONE_FILES | unix.CLONE_SIGHAND | unix.CLONE_SYSVSEM | unix.CLONE_THREAD
+	for _, c := range []struct {
+		goarch string
+		arch   uint32
+		nr     uint32
+	}{{"amd64", unix.AUDIT_ARCH_X86_64, 56}, {"amd64", unix.AUDIT_ARCH_X86_64, 56 | 1<<30}, {"arm64", unix.AUDIT_ARCH_AARCH64, 220}} {
+		cases = append(cases,
+			slotFilterCase{c.goarch, c.arch, c.nr, threadFlags, unix.SECCOMP_RET_ALLOW},
+			slotFilterCase{c.goarch, c.arch, c.nr, uint32(unix.SIGCHLD), unix.SECCOMP_RET_ALLOW},
+			slotFilterCase{c.goarch, c.arch, c.nr, unix.CLONE_PARENT | uint32(unix.SIGCHLD), denied},
+			slotFilterCase{c.goarch, c.arch, c.nr, unix.CLONE_PARENT | threadFlags, denied})
+	}
 	for _, tc := range cases {
 		filter, err := slotFilter(tc.goarch)
 		if err != nil {
@@ -199,9 +222,33 @@ func TestSlotFilterKernel(t *testing.T) {
 			t.Fatalf("syscall %d = %v, want EPERM", nr, errno)
 		}
 	}
+	// CLONE_PARENT|CLONE_THREAD without CLONE_SIGHAND is invalid, so a broken
+	// filter yields EINVAL from the kernel instead of creating a process.
+	if _, _, errno := unix.RawSyscall(unix.SYS_CLONE, unix.CLONE_PARENT|unix.CLONE_THREAD, 0, 0); errno != unix.EPERM {
+		t.Fatalf("clone(CLONE_PARENT) = %v, want EPERM", errno)
+	}
+	var pipe [2]int
+	if err := unix.Pipe2(pipe[:], unix.O_CLOEXEC|unix.O_NONBLOCK); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = unix.Close(pipe[0]); _ = unix.Close(pipe[1]) }()
+	src, err := os.Open(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = src.Close() }()
+	if _, err := unix.Sendfile(pipe[1], int(src.Fd()), nil, 4); !errors.Is(err, unix.EINVAL) {
+		t.Fatalf("sendfile to a pipe = %v, want EINVAL", err)
+	}
+	if _, err := unix.Vmsplice(pipe[1], []unix.Iovec{{Base: &[]byte("x")[0], Len: 1}}, 0); !errors.Is(err, unix.EINVAL) {
+		t.Fatalf("vmsplice = %v, want EINVAL", err)
+	}
 	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_STREAM, 0)
 	if err != nil {
 		t.Fatalf("socket(AF_INET) = %v", err)
+	}
+	if err := unix.Listen(fd, 1); !errors.Is(err, unix.EPERM) {
+		t.Fatalf("listen = %v, want EPERM", err)
 	}
 	_ = unix.Close(fd)
 

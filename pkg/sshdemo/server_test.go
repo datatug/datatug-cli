@@ -989,18 +989,12 @@ func TestServer_UIDModeFullSessionAndErrorPaths(t *testing.T) {
 	_ = os.Chmod(sessDir, 0o711)
 
 	var chowned []string
-	var slaveChowned bool
 	ops := DefaultSysOps()
 	ops.FileUID = func(os.FileInfo) (int, bool) { return 0, true }
 	ops.FileGID = fakeSlotGID(21000)
 	ops.StatSharedTemp = noSharedTemp
 	ops.Chown = func(p string, uid, gid int) error {
 		chowned = append(chowned, p)
-		return nil
-	}
-	ops.Fchown = func(slave *os.File, uid, gid int) error {
-		info, err := slave.Stat()
-		slaveChowned = err == nil && info.Mode()&os.ModeCharDevice != 0 && uid == 21000 && gid == 21000
 		return nil
 	}
 	root, cgfs := fakeCgroupMount(t)
@@ -1051,8 +1045,8 @@ func TestServer_UIDModeFullSessionAndErrorPaths(t *testing.T) {
 			t.Fatalf("expected child flags %s in %s", pair, b)
 		}
 	}
-	if len(chowned) != h.srv.cfg.MaxSessions+4 || !slaveChowned {
-		t.Fatalf("expected slot parent chowns, four workspace chowns, and a slave descriptor chown, got %v / %v", chowned, slaveChowned)
+	if len(chowned) != h.srv.cfg.MaxSessions+4 {
+		t.Fatalf("expected slot parent chowns and four workspace chowns, got %v", chowned)
 	}
 
 	// 2. Malformed pty-req and window-change payloads are refused.

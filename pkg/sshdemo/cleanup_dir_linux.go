@@ -1,6 +1,7 @@
 package sshdemo
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -93,7 +94,6 @@ func walkCleanup(root *cleanupFrame, rootPathLen, budget int, progress func()) e
 	// Every descent adds at least two bytes. Keep lengths for evicted frames.
 	var pathLengths [cleanupPathBudget/2 + 1]int
 	pathLengths[0] = rootPathLen
-	var hoistSequence uint64
 	rootFD := int(root.file.Fd())
 	current := root
 	for depth := 0; ; {
@@ -140,7 +140,7 @@ func walkCleanup(root *cleanupFrame, rootPathLen, budget int, progress func()) e
 				return fmt.Errorf("prepare cleanup directory %q: %w", name, err)
 			}
 			pin.close()
-			if err := hoistCleanupDirectory(fd, name, rootFD, budget-rootPathLen, &hoistSequence, progress); err != nil {
+			if err := hoistCleanupDirectory(fd, name, rootFD, budget-rootPathLen, progress); err != nil {
 				return err
 			}
 			continue
@@ -156,10 +156,10 @@ func walkCleanup(root *cleanupFrame, rootPathLen, budget int, progress func()) e
 	}
 }
 
-func hoistCleanupDirectory(fd int, name string, rootFD, rootSpace int, sequence *uint64, progress func()) error {
+func hoistCleanupDirectory(fd int, name string, rootFD, rootSpace int, progress func()) error {
 	for {
-		(*sequence)++
-		target := ".cleanup-" + strconv.FormatUint(*sequence, 10)
+		// Unpredictable names: a visitor cannot pre-create the targets.
+		target := ".cleanup-" + rand.Text()
 		// The root rescan must be able to descend into the new name.
 		if len(target)+1 > rootSpace {
 			return fmt.Errorf("hoist cleanup directory %q: workspace path leaves no room within the cleanup path budget", name)

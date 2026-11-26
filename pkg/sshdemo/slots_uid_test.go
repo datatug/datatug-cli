@@ -5,6 +5,7 @@ package sshdemo
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -203,7 +204,7 @@ func TestUIDModeChecksSharedTemporaryDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 	ops.StatSharedTemp = func(path string) (os.FileInfo, error) {
-		if path == "/tmp" {
+		if path != "/dev/shm" {
 			return nil, os.ErrNotExist
 		}
 		return os.Stat(tmp)
@@ -270,4 +271,79 @@ func fakeSlotGID(base int) func(os.FileInfo) (int, bool) {
 		index, err := strconv.Atoi(strings.TrimPrefix(fi.Name(), "slot-"))
 		return base + index, err == nil
 	}
+}
+
+type fakeModeInfo struct {
+	os.FileInfo
+	mode os.FileMode
+}
+
+func (f fakeModeInfo) Mode() os.FileMode { return f.mode }
+
+func TestLockSharedDevices(t *testing.T) {
+	modes := map[string]os.FileMode{"/dev/pts/ptmx": os.ModeCharDevice | 0o666, "/dev/mqueue": os.ModeDir | os.ModeSticky | 0o777}
+	stat := func(path string) (os.FileInfo, error) {
+		mode, ok := modes[path]
+		if !ok {
+			return nil, os.ErrNotExist
+		}
+		return fakeModeInfo{mode: mode}, nil
+	}
+	var chmods []string
+	chmod := func(path string, mode os.FileMode) error {
+		chmods = append(chmods, fmt.Sprintf("%s %04o", path, mode))
+		modes[path] = modes[path]&os.ModeType | mode
+		return nil
+	}
+	if err := lockSharedDevices(stat, chmod); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"/dev/pts/ptmx 0600", "/dev/mqueue 0755"}; fmt.Sprint(chmods) != fmt.Sprint(want) {
+		t.Fatalf("chmods = %v, want %v", chmods, want)
+	}
+	chmods = nil
+	if err := lockSharedDevices(stat, chmod); err != nil || len(chmods) != 0 {
+		t.Fatalf("already locked: err = %v, chmods = %v", err, chmods)
+	}
+
+	open := func(path string) (os.FileInfo, error) {
+		if path == "/dev/pts/ptmx" {
+			return fakeModeInfo{mode: os.ModeCharDevice | 0o666}, nil
+		}
+		return nil, os.ErrNotExist
+	}
+	for _, tc := range []struct {
+		name  string
+		stat  func(string) (os.FileInfo, error)
+		chmod func(string, os.FileMode) error
+		want  string
+	}{
+		{"stat", func(string) (os.FileInfo, error) { return nil, errTestIO }, chmod, "stat shared device /dev/pts/ptmx"},
+		{"chmod", open, func(string, os.FileMode) error { return errTestIO }, "restrict shared device /dev/pts/ptmx"},
+		{"still open", open, func(string, os.FileMode) error { return nil }, "still accessible to other uids"},
+		{"restat", func() func(string) (os.FileInfo, error) {
+			calls := 0
+			return func(path string) (os.FileInfo, error) {
+				calls++
+				if calls > 1 {
+					return nil, errTestIO
+				}
+				return open(path)
+			}
+		}(), func(string, os.FileMode) error { return nil }, "stat shared device /dev/pts/ptmx"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := lockSharedDevices(tc.stat, tc.chmod); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+
+	t.Run("server refuses to start", func(t *testing.T) {
+		cfg, ops := fakeCgroupServer(t)
+		ops.StatSharedTemp = open
+		ops.ChmodShared = func(string, os.FileMode) error { return errTestIO }
+		_, err := NewServer(t.Context(), cfg, WithSysOps(ops))
+		requireErrorContains(t, err, "restrict shared device /dev/pts/ptmx")
+	})
 }

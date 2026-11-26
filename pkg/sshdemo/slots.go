@@ -183,8 +183,8 @@ type SysOps struct {
 	cgroups            cgroupFS
 	Stat               func(string) (os.FileInfo, error) // Lstat semantics for session paths.
 	StatSharedTemp     func(string) (os.FileInfo, error) // Stat follows links to shared temporary directories.
+	ChmodShared        func(string, os.FileMode) error   // Chmod locks shared device entry points to root.
 	Chown              func(string, int, int) error
-	Fchown             func(*os.File, int, int) error
 	Kill               func(int, syscall.Signal) error
 	FileUID            func(os.FileInfo) (int, bool)
 	FileGID            func(os.FileInfo) (int, bool)
@@ -197,8 +197,8 @@ func DefaultSysOps() SysOps {
 		cgroups:            defaultCgroupFS(),
 		Stat:               os.Lstat,
 		StatSharedTemp:     os.Stat,
+		ChmodShared:        os.Chmod,
 		Chown:              os.Chown,
-		Fchown:             (*os.File).Chown,
 		Kill:               syscall.Kill,
 		FileUID:            defaultFileUID,
 		FileGID:            defaultFileGID,
@@ -219,11 +219,11 @@ func (o SysOps) withDefaults() SysOps {
 	if o.StatSharedTemp == nil {
 		o.StatSharedTemp = def.StatSharedTemp
 	}
+	if o.ChmodShared == nil {
+		o.ChmodShared = def.ChmodShared
+	}
 	if o.Chown == nil {
 		o.Chown = def.Chown
-	}
-	if o.Fchown == nil {
-		o.Fchown = def.Fchown
 	}
 	if o.Kill == nil {
 		o.Kill = def.Kill
@@ -296,6 +296,42 @@ func checkSharedTempDirs(stat func(string) (os.FileInfo, error)) error {
 		}
 		if info.Mode().Perm()&0o002 != 0 {
 			return fmt.Errorf("sshdemo: shared temporary path %s is writable by others in uid isolation mode", path)
+		}
+	}
+	return nil
+}
+
+// lockSharedDevices makes the container-wide entry points for new pseudo
+// terminals and POSIX message queues root-only. Slot uids could otherwise
+// create kernel objects that outlive their session or that another slot keeps
+// open; the supervisor still allocates each session's terminal as root.
+func lockSharedDevices(stat func(string) (os.FileInfo, error), chmod func(string, os.FileMode) error) error {
+	for _, d := range []struct {
+		path      string
+		mode      os.FileMode
+		forbidden os.FileMode
+	}{
+		{"/dev/pts/ptmx", 0o600, 0o066},
+		{"/dev/mqueue", 0o755, 0o022},
+	} {
+		info, err := stat(d.path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("sshdemo: stat shared device %s: %w", d.path, err)
+		}
+		if info.Mode().Perm()&d.forbidden == 0 {
+			continue
+		}
+		if err := chmod(d.path, d.mode); err != nil {
+			return fmt.Errorf("sshdemo: restrict shared device %s: %w", d.path, err)
+		}
+		if info, err = stat(d.path); err != nil {
+			return fmt.Errorf("sshdemo: stat shared device %s: %w", d.path, err)
+		}
+		if perm := info.Mode().Perm(); perm&d.forbidden != 0 {
+			return fmt.Errorf("sshdemo: shared device %s is still accessible to other uids (mode %04o)", d.path, perm)
 		}
 	}
 	return nil

@@ -139,6 +139,9 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 		if err := checkSharedTempDirs(s.ops.StatSharedTemp); err != nil {
 			return nil, err
 		}
+		if err := lockSharedDevices(s.ops.StatSharedTemp, s.ops.ChmodShared); err != nil {
+			return nil, err
+		}
 	}
 	if cfg.Isolation == IsolationProcess {
 		if err := s.checkFilesystemCapacity(0); err != nil {
@@ -946,9 +949,8 @@ func (s *Server) startSessionChild(meta *sessionMeta, slot Slot, group *cgroup, 
 	defer meta.ptyMu.Unlock()
 	var ready *os.File
 	if group != nil {
-		if err := s.ops.Fchown(pty.Slave, slot.UID, slot.GID); err != nil {
-			return nil, fmt.Errorf("chown pty slave descriptor: %w", err)
-		}
+		// The slave stays root:tty 0620. The child uses the inherited
+		// descriptor; a visitor-owned slave could be opened up to another slot.
 		read, write, err := slotReadyPipe()
 		if err != nil {
 			return nil, fmt.Errorf("create slot entry acknowledgement pipe: %w", err)

@@ -9,10 +9,7 @@ import (
 	"errors"
 	"io"
 	"net"
-	"os"
-	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -203,50 +200,6 @@ func TestServer_AuthenticatedConnectionCapUsesProxyIP(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-}
-
-func TestServer_PTYOwnershipFailurePreventsChildStart(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.Chmod(dir, 0o711); err != nil {
-		t.Fatal(err)
-	}
-	root, fs := fakeCgroupMount(t)
-	h := startTestServer(t, func(c *Config) {
-		c.Isolation = IsolationUID
-		c.CgroupRoot = root
-		c.SessionsDir = dir
-	}, WithSysOps(SysOps{
-		FileUID: func(os.FileInfo) (int, bool) { return 0, true },
-		FileGID: fakeSlotGID(DefaultUIDBase),
-		Chown:   func(string, int, int) error { return nil },
-		Fchown: func(slave *os.File, uid, gid int) error {
-			if _, err := slave.Stat(); err != nil {
-				return err
-			}
-			return syscall.EPERM
-		},
-		cgroups:            fs,
-		FilesystemCapacity: ampleSessionFilesystem,
-		StatSharedTemp:     noSharedTemp,
-	}))
-	sess, err := dialSSH(t, h.addr, "visitor").NewSession()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := sess.RequestPty("xterm", 24, 80, nil); err != nil {
-		t.Fatal(err)
-	}
-	var out bytes.Buffer
-	sess.Stdout = &out
-	if err := sess.Shell(); err != nil {
-		t.Fatal(err)
-	}
-	var exitErr *gossh.ExitError
-	if err := sess.Wait(); !errors.As(err, &exitErr) || exitErr.ExitStatus() != 1 || out.Len() != 0 {
-		t.Fatalf("session returned %v and %q, want exit 1 with no child output", err, out.String())
-	}
-	waitNoSessionDirs(t, filepath.Join(dir, "slot-0"), time.Second)
-	waitLogContains(t, h.logs, "chown pty slave descriptor", time.Second)
 }
 
 func TestWriteQuotaNotice_ClosesBlockedTransport(t *testing.T) {

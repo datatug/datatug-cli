@@ -288,7 +288,13 @@ func (s *Server) checkSlotReuse(index int, retry bool) {
 		}
 		current, err = group.counter("memory.current")
 	}
+	// A drained slot has no live tasks, but zombies still hold PID charges
+	// until they are reaped; a slot is reusable only with none left.
+	var tasks uint64
 	if err == nil && current < threshold {
+		tasks, err = group.counter("pids.current")
+	}
+	if err == nil && current < threshold && tasks == 0 {
 		s.slots.setSlotState(index, slotUsable)
 		if pending {
 			s.logger.Info("session slot available again", "slot_index", index, "memory_current", current,
@@ -299,7 +305,7 @@ func (s *Server) checkSlotReuse(index int, retry bool) {
 	if !pending {
 		s.slots.setSlotState(index, slotAwaitingMemory)
 		s.logger.Warn("quarantining session slot pending memory release", "slot_index", index,
-			"memory_current", current, "threshold", threshold, "err", err,
+			"memory_current", current, "pids_current", tasks, "threshold", threshold, "err", err,
 			"quarantined_slots", s.slots.quarantinedCount(), "max_sessions", s.cfg.MaxSessions)
 	}
 }

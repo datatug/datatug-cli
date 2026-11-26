@@ -35,6 +35,7 @@ var fakeSlotFiles = map[string]string{
 	"memory.swap.max":  "max",
 	"memory.oom.group": "0",
 	"pids.max":         "max",
+	"pids.current":     "0",
 }
 
 func writeFixtureFile(t *testing.T, dir, file, data string) {
@@ -117,7 +118,6 @@ func fakeCgroupServer(t *testing.T) (Config, SysOps) {
 		FileUID:            func(os.FileInfo) (int, bool) { return 0, true },
 		FileGID:            fakeSlotGID(cfg.UIDBase),
 		Chown:              func(string, int, int) error { return nil },
-		Fchown:             func(*os.File, int, int) error { return nil },
 	}
 	cfg.CgroupRoot, ops.cgroups = fakeCgroupMount(t)
 	return cfg, ops
@@ -840,14 +840,17 @@ func TestSlotReuseReclaimsBeforeDeciding(t *testing.T) {
 		writeErr        error
 		retry, warned   bool
 		want            slotQuarantine
+		tasks           string
 	}{
-		{"reclaimed", "0", nil, false, false, slotUsable},
-		{"partial reclaim", "0", unix.EAGAIN, false, false, slotUsable},
-		{"retained charges", high, unix.EAGAIN, false, false, slotAwaitingMemory},
-		{"periodic reclaim", "0", nil, true, false, slotUsable},
-		{"reclaim error with retained charges", high, unix.EIO, true, true, slotAwaitingMemory},
-		{"reclaim error with released charges", "0", unix.EIO, true, true, slotUsable},
-		{"unreadable after reclaim", "bad", nil, false, false, slotAwaitingMemory},
+		{"reclaimed", "0", nil, false, false, slotUsable, "0"},
+		{"partial reclaim", "0", unix.EAGAIN, false, false, slotUsable, "0"},
+		{"retained charges", high, unix.EAGAIN, false, false, slotAwaitingMemory, "0"},
+		{"periodic reclaim", "0", nil, true, false, slotUsable, "0"},
+		{"reclaim error with retained charges", high, unix.EIO, true, true, slotAwaitingMemory, "0"},
+		{"reclaim error with released charges", "0", unix.EIO, true, true, slotUsable, "0"},
+		{"unreadable after reclaim", "bad", nil, false, false, slotAwaitingMemory, "0"},
+		{"zombies remain", "0", nil, false, false, slotAwaitingMemory, "3"},
+		{"unreadable task count", "0", nil, false, false, slotAwaitingMemory, "bad"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, ops := fakeCgroupServer(t)
@@ -860,6 +863,9 @@ func TestSlotReuseReclaimsBeforeDeciding(t *testing.T) {
 
 			reads, writes := 0, 0
 			s.cgroups[0].fs.read = func(path string) ([]byte, error) {
+				if filepath.Base(path) == "pids.current" {
+					return []byte(tc.tasks), nil
+				}
 				if filepath.Base(path) != "memory.current" {
 					t.Fatalf("unexpected read from %s", path)
 				}

@@ -36,6 +36,7 @@ type saveStep int
 
 const (
 	saveStepLoadingChanges saveStep = iota
+	saveStepDisabled
 	saveStepOverview
 	saveStepExplain
 	saveStepAuth
@@ -102,17 +103,26 @@ var (
 // NewSaveScreen constructs the Save-to-GitHub workspace screen.
 func NewSaveScreen(cfg Config) nav.Screen {
 	cfg = cfg.normalized()
+	step := saveStepLoadingChanges
+	if !cfg.GitHubEnabled() {
+		step = saveStepDisabled
+	}
 	return saveScreen{
 		cfg:          cfg,
 		w:            80,
 		h:            24,
-		step:         saveStepLoadingChanges,
+		step:         step,
 		targetBranch: cfg.SaveBranch,
 	}
 }
 
 // Init implements nav.Screen.
-func (s saveScreen) Init() tea.Cmd { return s.loadChangesCmd() }
+func (s saveScreen) Init() tea.Cmd {
+	if s.step == saveStepDisabled {
+		return nil
+	}
+	return s.loadChangesCmd()
+}
 
 // Title implements nav.Titled.
 func (s saveScreen) Title() string { return ModuleText }
@@ -203,6 +213,8 @@ func (s saveScreen) Update(msg tea.Msg) (nav.Screen, tea.Cmd) {
 	}
 
 	switch s.step {
+	case saveStepDisabled:
+		return s, nil
 	case saveStepLoadingChanges:
 		return s.updateLoadingChanges(msg)
 	case saveStepOverview:
@@ -480,6 +492,12 @@ func (s saveScreen) View() string {
 
 	var lines []string
 	switch s.step {
+	case saveStepDisabled:
+		lines = append(lines, titleStyle.Render(ModuleText), "")
+		for _, l := range strings.Split(ansi.Wrap(SaveNotConfiguredNotice, inner, " "), "\n") {
+			lines = append(lines, mutedStyle.Render(l))
+		}
+
 	case saveStepLoadingChanges:
 		lines = append(lines, titleStyle.Render(ModuleText), "", "Checking workspace changes...")
 

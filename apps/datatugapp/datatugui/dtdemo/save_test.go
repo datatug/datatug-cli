@@ -41,6 +41,28 @@ func TestSaveModuleMetadataAndPlumbing(t *testing.T) {
 }
 
 func TestSaveScreenOverviewAndNothingToSave(t *testing.T) {
+	t.Run("github disabled shows not-configured notice without loading changes", func(t *testing.T) {
+		stub(t, &listChanges, func(string) ([]demogit.Change, error) {
+			t.Fatal("listChanges must not be called when GitHub is disabled")
+			return nil, nil
+		})
+		cfg := testConfig(NewAuthState(), nil, nil)
+		cfg.Canonical = demogit.Repo{}
+		s := mountSave(cfg)
+		if cmd := s.Init(); cmd != nil {
+			t.Fatal("Init must return nil when GitHub is disabled")
+		}
+		v := saveView(s)
+		if !strings.Contains(v, "Saving to GitHub is not configured on this demo server") {
+			t.Fatalf("expected not-configured notice:\n%s", v)
+		}
+		// Key presses are ignored cleanly.
+		s, msgs := feedScreen(s, uitest.Key("enter"), uitest.Key("r"))
+		if len(msgs) != 0 || !strings.Contains(saveView(s), "Saving to GitHub is not configured on this demo server") {
+			t.Fatalf("unexpected state after keys: msgs=%v view=%s", msgs, saveView(s))
+		}
+	})
+
 	t.Run("nothing to save", func(t *testing.T) {
 		stub(t, &listChanges, func(string) ([]demogit.Change, error) { return nil, nil })
 		s := mountSave(testConfig(NewAuthState(), nil, nil))

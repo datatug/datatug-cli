@@ -122,14 +122,19 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 	s.executable = execPath
 
 	if !cfg.SkipTemplate {
-		tmplDir, err := PrepareTemplate(ctx, TemplateConfig{
+		tmplCfg := TemplateConfig{
 			StateDir:     cfg.StateDir,
 			Repo:         cfg.Repo,
 			Ref:          cfg.Ref,
 			ProjectDir:   cfg.ProjectDir,
 			EgressProxy:  cfg.EgressProxy,
 			ChinookBytes: s.chinookBytes,
-		})
+		}
+		if len(s.chinookBytes) == 0 {
+			tmplCfg.Executable = s.executable
+			tmplCfg.ExecPrefixArgs = s.cfg.ExecPrefixArgs
+		}
+		tmplDir, err := PrepareTemplate(ctx, tmplCfg)
 		if err != nil {
 			return nil, err
 		}

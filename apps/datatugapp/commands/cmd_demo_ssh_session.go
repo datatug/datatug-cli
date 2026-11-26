@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -32,6 +33,8 @@ const (
 	demoSSHDefaultProjectDir = "demo-project-1"
 	demoSSHProjectID         = "demo"
 	demoSSHDefaultEnv        = "local"
+	demoSSHStartDB           = "chinook"
+	demoSSHStartTable        = "Invoice"
 	demoSSHPreferredDB       = "orders"
 
 	demoSSHDefaultRLimitAS     uint64 = 8589934592 // 8 GiB (address space; see pkg/sshdemo RlimitAS)
@@ -50,16 +53,17 @@ type demoSSHRlimits struct {
 }
 
 type demoSSHSessionFlags struct {
-	workspace      string
-	template       string
-	projectDir     string
-	repo           string
-	githubClientID string
-	saveBranch     string
-	sessionID      string
-	deadline       string
-	rlimits        demoSSHRlimits
-	cleanup        string
+	workspace       string
+	template        string
+	projectDir      string
+	repo            string
+	githubClientID  string
+	saveBranch      string
+	sessionID       string
+	deadline        string
+	rlimits         demoSSHRlimits
+	cleanup         string
+	prepareTemplate string
 }
 
 // Seams for unit tests in cmd_demo_ssh_session_test.go.
@@ -101,12 +105,16 @@ func demoSSHSessionCommand() *cobra.Command {
 	flags.Uint64Var(&f.rlimits.NoFile, "rlimit-nofile", demoSSHDefaultRLimitNoFile, "RLIMIT_NOFILE cap")
 	flags.Uint64Var(&f.rlimits.NProc, "rlimit-nproc", demoSSHDefaultRLimitNProc, "RLIMIT_NPROC cap")
 	flags.StringVar(&f.cleanup, "cleanup", "", "Remove contents of the specified session directory and exit")
+	flags.StringVar(&f.prepareTemplate, "prepare-template", "", "Prepare a freshly cloned template directory and exit")
 	return cmd
 }
 
 func runDemoSSHSession(ctx context.Context, f demoSSHSessionFlags) error {
 	if f.cleanup != "" {
 		return runDemoSSHCleanup(f.cleanup)
+	}
+	if f.prepareTemplate != "" {
+		return runDemoSSHPrepareTemplate(ctx, f.prepareTemplate, f.projectDir)
 	}
 
 	// FIRST action, before reading input or touching files: apply rlimits (fail closed).
@@ -127,12 +135,10 @@ func runDemoSSHSession(ctx context.Context, f demoSSHSessionFlags) error {
 	if strings.TrimSpace(f.template) == "" {
 		return errors.New("--template is required")
 	}
-	canonical, err := parseCanonicalRepo(f.repo)
-	if err != nil {
-		return fmt.Errorf("invalid --repo: %w", err)
-	}
+	canonical, githubEnabled := parseGitHubRepo(f.repo)
 	var deadline time.Time
 	if strings.TrimSpace(f.deadline) != "" {
+		var err error
 		deadline, err = time.Parse(time.RFC3339, strings.TrimSpace(f.deadline))
 		if err != nil {
 			return fmt.Errorf("invalid --deadline: %w", err)
@@ -172,6 +178,10 @@ func runDemoSSHSession(ctx context.Context, f demoSSHSessionFlags) error {
 		// demogit.Client.Open already populated repoDir.
 	}
 
+	if err := seedDemoSSHChinookLocal(workspaceDir, projectPath); err != nil {
+		return fmt.Errorf("seed chinook-local database: %w", err)
+	}
+
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -179,55 +189,90 @@ func runDemoSSHSession(ctx context.Context, f demoSSHSessionFlags) error {
 		return fmt.Errorf("register demo project: %w", err)
 	}
 
-	database := resolveDemoSSHDatabase(ctx, projectPath, demoSSHDefaultEnv)
+	database, openAtStart := resolveDemoSSHStartTarget(ctx, projectPath, demoSSHDefaultEnv)
 	modules := append(uiModules(), dtdemo.SaveModule(demoCfg))
 	uiOpts := datatugui.Options{Start: datatugui.ScreenProjects}
-	chatCmd, chatOpts := buildDemoSSHWorkspaceOptions(modules, uiOpts, database, demoSSHNotice(deadline))
+	chatCmd, chatOpts := buildDemoSSHWorkspaceOptions(modules, uiOpts, database, openAtStart, demoSSHNotice(deadline, githubEnabled))
 	return demoSSHRunWorkspaceLoop(chatCmd, chatOpts)
 }
 
-func buildDemoSSHWorkspaceOptions(modules []datatugui.Module, uiOpts datatugui.Options, database, notice string) (*cobra.Command, chatOptions) {
+func buildDemoSSHWorkspaceOptions(modules []datatugui.Module, uiOpts datatugui.Options, database, openAtStart, notice string) (*cobra.Command, chatOptions) {
 	chatCmd, opts := workspaceOptions(modules, uiOpts, []tea.ProgramOption(nil))
 	opts.project = demoSSHProjectID
 	opts.env = demoSSHDefaultEnv
 	opts.database = database
+	opts.openAtStart = openAtStart
 	opts.roles = []string{"admin"}
 	opts.notice = notice
 	return chatCmd, opts
 }
 
-func demoSSHNotice(deadline time.Time) string {
+func demoSSHNotice(deadline time.Time, githubEnabled bool) string {
+	base := "Temporary demo workspace: changes disappear when you disconnect"
 	if !deadline.IsZero() {
-		return fmt.Sprintf(
-			"Temporary demo workspace: changes disappear when you disconnect (session ends %s). To keep them: Save to GitHub in the module menu.",
-			deadline.UTC().Format("15:04 UTC"),
-		)
+		base += fmt.Sprintf(" (session ends %s)", deadline.UTC().Format("15:04 UTC"))
 	}
-	return "Temporary demo workspace: changes disappear when you disconnect. To keep them: Save to GitHub in the module menu."
+	if githubEnabled {
+		return base + ". To keep them: Save to GitHub in the module menu."
+	}
+	return base + "."
 }
 
-func parseCanonicalRepo(raw string) (demogit.Repo, error) {
+// parseGitHubRepo parses raw as a GitHub owner/name repository. Non-GitHub
+// repositories (such as local paths, file:// URLs, or other hosts) return
+// (demogit.Repo{}, false) so the session disables GitHub features cleanly.
+func parseGitHubRepo(raw string) (demogit.Repo, bool) {
 	s := strings.TrimSpace(raw)
 	if s == "" {
-		return demogit.Repo{}, errors.New("repository URL is empty")
+		return demogit.Repo{}, false
 	}
 	s = strings.TrimSuffix(s, "/")
 	s = strings.TrimSuffix(s, ".git")
 	if strings.Contains(s, "://") {
 		u, err := url.Parse(s)
 		if err != nil {
-			return demogit.Repo{}, err
+			return demogit.Repo{}, false
+		}
+		scheme := strings.ToLower(u.Scheme)
+		if (scheme != "http" && scheme != "https") || !strings.EqualFold(u.Hostname(), "github.com") {
+			return demogit.Repo{}, false
 		}
 		s = strings.Trim(u.Path, "/")
 	} else {
+		if strings.HasPrefix(s, "/") || strings.HasPrefix(s, ".") || strings.HasPrefix(s, "~") {
+			return demogit.Repo{}, false
+		}
 		s = strings.TrimPrefix(s, "github.com/")
 		s = strings.Trim(s, "/")
 	}
 	parts := strings.Split(s, "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return demogit.Repo{}, fmt.Errorf("expected owner/name repository, got %q", raw)
+	if len(parts) != 2 || !isGitHubSlug(parts[0]) || !isGitHubSlug(parts[1]) {
+		return demogit.Repo{}, false
 	}
-	return demogit.Repo{Owner: parts[0], Name: parts[1]}, nil
+	return demogit.Repo{Owner: parts[0], Name: parts[1]}, true
+}
+
+func isGitHubSlug(s string) bool {
+	return s != "" && s != "." && s != ".." && !strings.ContainsAny(s, " \t\r\n")
+}
+
+func seedDemoSSHChinookLocal(workspaceDir, projectPath string) error {
+	src := filepath.Join(projectPath, ".demo-data", "chinook.sqlite")
+	info, err := os.Stat(src)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("stat %q: %w", src, err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil
+	}
+	dst := filepath.Join(workspaceDir, "home", "datatug", "dbs", "chinook-local.sqlite")
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return fmt.Errorf("create chinook-local dir: %w", err)
+	}
+	return copyRegularFile(src, dst, 0o644)
 }
 
 func resolveSafeProjectDir(repoDir, rel string) (string, error) {
@@ -301,7 +346,11 @@ func copyTemplateDir(srcRoot, srcDir, dstRoot, dstDir string) error {
 				return err
 			}
 		case mode.IsRegular():
-			if err := copyRegularFile(srcPath, dstPath); err != nil {
+			perm := fs.FileMode(0o644)
+			if mode.Perm()&0o111 != 0 {
+				perm = 0o755
+			}
+			if err := copyRegularFile(srcPath, dstPath, perm); err != nil {
 				return err
 			}
 		default:
@@ -312,14 +361,14 @@ func copyTemplateDir(srcRoot, srcDir, dstRoot, dstDir string) error {
 	return nil
 }
 
-func copyRegularFile(srcPath, dstPath string) error {
+func copyRegularFile(srcPath, dstPath string, perm fs.FileMode) error {
 	in, err := os.Open(srcPath)
 	if err != nil {
 		return fmt.Errorf("open %q: %w", srcPath, err)
 	}
 	defer func() { _ = in.Close() }()
 
-	out, err := os.OpenFile(dstPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	out, err := os.OpenFile(dstPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
 	if err != nil {
 		return fmt.Errorf("create %q: %w", dstPath, err)
 	}
@@ -327,7 +376,7 @@ func copyRegularFile(srcPath, dstPath string) error {
 		_ = out.Close()
 		return fmt.Errorf("copy %q: %w", dstPath, err)
 	}
-	if err := out.Chmod(0o644); err != nil {
+	if err := out.Chmod(perm); err != nil {
 		_ = out.Close()
 		return fmt.Errorf("chmod %q: %w", dstPath, err)
 	}
@@ -370,27 +419,28 @@ func registerDemoSSHProject(ctx context.Context, workspaceDir, projectPath strin
 	return nil
 }
 
-func resolveDemoSSHDatabase(ctx context.Context, projectPath, env string) string {
+func resolveDemoSSHStartTarget(ctx context.Context, projectPath, env string) (database, openAtStart string) {
 	store := filestore.NewProjectStore(demoSSHProjectID, projectPath)
 	dbs, err := store.LoadEnvDbCatalogs(ctx, env)
 	if err != nil || len(dbs) == 0 {
-		return demoSSHPreferredDB
+		return demoSSHPreferredDB, ""
 	}
+	hasOrders := false
 	ids := make([]string, 0, len(dbs))
 	for _, db := range dbs {
-		if db == nil || db.ID == "" {
-			continue
+		if db.ID == demoSSHStartDB {
+			return demoSSHStartDB, demoSSHStartTable
 		}
 		if db.ID == demoSSHPreferredDB {
-			return demoSSHPreferredDB
+			hasOrders = true
 		}
 		ids = append(ids, db.ID)
 	}
-	if len(ids) == 0 {
-		return demoSSHPreferredDB
+	if hasOrders {
+		return demoSSHPreferredDB, ""
 	}
 	sort.Strings(ids)
-	return ids[0]
+	return ids[0], ""
 }
 
 // isHex32 reports whether s is exactly 32 lowercase hexadecimal characters.

@@ -1,12 +1,14 @@
 package sshdemo
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -36,23 +38,55 @@ func ensureGitHTTPProxy() {
 // TemplateConfig controls how PrepareTemplate clones and prepares the read-only
 // demo project template.
 type TemplateConfig struct {
-	StateDir    string
-	Repo        string
-	Ref         string
-	ProjectDir  string
-	EgressProxy string
+	StateDir       string
+	Repo           string
+	Ref            string
+	ProjectDir     string
+	EgressProxy    string
+	Executable     string
+	ExecPrefixArgs []string
+
+	// PrepareFunc optionally overrides invoking Executable with
+	// `demo ssh-session --prepare-template` (seam for tests).
+	PrepareFunc func(ctx context.Context, templateDir, projectDir string) error
 
 	// ChinookBytes optionally overrides the embedded Chinook SQLite fixture
 	// (useful in tests to keep test I/O tiny).
 	ChinookBytes []byte
 }
 
+// BuildPrepareTemplateArgs constructs the exact argument list for
+// `demo ssh-session --prepare-template <dir> --project-dir <rel>`.
+func BuildPrepareTemplateArgs(templateDir, projectDir string) []string {
+	return []string{"demo", "ssh-session", "--prepare-template", templateDir, "--project-dir", projectDir}
+}
+
+func buildPrepareTemplateEnv(homeDir, egressProxy string) []string {
+	env := []string{
+		"HOME=" + homeDir,
+		"LANG=C.UTF-8",
+		"PATH=/usr/local/bin:/usr/bin:/bin",
+		"DATATUG_TELEMETRY=0",
+		"DO_NOT_TRACK=1",
+	}
+	if egressProxy != "" {
+		env = append(env,
+			"HTTPS_PROXY="+egressProxy,
+			"HTTP_PROXY="+egressProxy,
+			"https_proxy="+egressProxy,
+			"http_proxy="+egressProxy,
+		)
+	}
+	return append(env, "NO_PROXY=")
+}
+
 // PrepareTemplate clones cfg.Repo at cfg.Ref (default branch when empty) with
 // go-git (depth 1, no submodules) into <state-dir>/template.tmp, verifies
 // <project-dir>/datatug-project.json exists, writes the bundled Chinook SQLite
-// fixture to <project-dir>/.demo-data/chinook.sqlite when absent, makes the
-// tree world-readable (dirs 0755, files 0644), and atomically replaces
-// <state-dir>/template only after the new tree is complete.
+// fixture to <project-dir>/.demo-data/chinook.sqlite when absent, runs template
+// preparation (scanning local catalogs and committing prepared metadata),
+// ensures the tree is world-readable without removing any existing mode bits,
+// and atomically replaces <state-dir>/template only after the new tree is complete.
 func PrepareTemplate(ctx context.Context, cfg TemplateConfig) (string, error) {
 	if cfg.StateDir == "" {
 		return "", errors.New("sshdemo: state-dir must not be empty")
@@ -135,6 +169,16 @@ func PrepareTemplate(ctx context.Context, cfg TemplateConfig) (string, error) {
 		return "", fmt.Errorf("sshdemo: stat chinook fixture path: %w", err)
 	}
 
+	if cfg.PrepareFunc != nil {
+		if err := cfg.PrepareFunc(ctx, tmpDir, cfg.ProjectDir); err != nil {
+			return "", fmt.Errorf("sshdemo: prepare template: %w", err)
+		}
+	} else if cfg.Executable != "" {
+		if err := runPrepareTemplateCommand(ctx, cfg.Executable, cfg.ExecPrefixArgs, cfg.StateDir, tmpDir, cfg.ProjectDir, cfg.EgressProxy); err != nil {
+			return "", err
+		}
+	}
+
 	if err := chmodWorldReadable(tmpDir); err != nil {
 		return "", fmt.Errorf("sshdemo: chmod template world-readable: %w", err)
 	}
@@ -144,6 +188,28 @@ func PrepareTemplate(ctx context.Context, cfg TemplateConfig) (string, error) {
 	}
 	cleanupTmp = false
 	return finalDir, nil
+}
+
+func runPrepareTemplateCommand(ctx context.Context, execPath string, execPrefix []string, stateDir, templateDir, projectDir, egressProxy string) error {
+	homeDir := filepath.Join(stateDir, "template.home")
+	_ = os.RemoveAll(homeDir)
+	if err := os.MkdirAll(homeDir, 0o700); err != nil {
+		return fmt.Errorf("sshdemo: create template home dir: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(homeDir) }()
+
+	args := append(append([]string(nil), execPrefix...), BuildPrepareTemplateArgs(templateDir, projectDir)...)
+	cmd := exec.CommandContext(ctx, execPath, args...)
+	cmd.Env = buildPrepareTemplateEnv(homeDir, egressProxy)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return fmt.Errorf("sshdemo: prepare template: %w: %s", err, msg)
+		}
+		return fmt.Errorf("sshdemo: prepare template: %w", err)
+	}
+	return nil
 }
 
 func isHTTPURL(u string) bool {
@@ -168,6 +234,10 @@ func defaultLoadChinookFixtureBytes() ([]byte, error) {
 	return nil, errors.New("sshdemo: embedded chinook fixture not found in demofixtures")
 }
 
+var templateDirEntryInfo = func(d fs.DirEntry) (fs.FileInfo, error) {
+	return d.Info()
+}
+
 func chmodWorldReadable(root string) error {
 	return filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -176,10 +246,19 @@ func chmodWorldReadable(root string) error {
 		if d.Type()&fs.ModeSymlink != 0 {
 			return nil
 		}
-		if d.IsDir() {
-			return os.Chmod(p, 0o755)
+		info, err := templateDirEntryInfo(d)
+		if err != nil {
+			return err
 		}
-		return os.Chmod(p, 0o644)
+		perm := info.Mode().Perm()
+		want := perm | 0o004
+		if d.IsDir() || perm&0o100 != 0 {
+			want |= 0o001
+		}
+		if want == perm {
+			return nil
+		}
+		return os.Chmod(p, want)
 	})
 }
 

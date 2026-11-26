@@ -138,15 +138,20 @@ func (m WelcomeModel) updateChoose(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "up", "k":
 		m.index = 0
 	case "down", "j", "tab":
-		m.index = 1
+		if m.cfg.GitHubEnabled() {
+			m.index = 1
+		}
 	case "1":
 		m.result = WelcomeResult{Outcome: OutcomeExplore}
 		return m, tea.Quit
 	case "2":
+		if !m.cfg.GitHubEnabled() {
+			return m, nil
+		}
 		m.index = 1
 		return m.startOpenGitHub()
 	case "enter":
-		if m.index == 0 {
+		if m.index == 0 || !m.cfg.GitHubEnabled() {
 			m.result = WelcomeResult{Outcome: OutcomeExplore}
 			return m, tea.Quit
 		}
@@ -363,7 +368,11 @@ func (m WelcomeModel) renderBody() string {
 			lines = append(lines, mutedStyle.Render(l))
 		}
 		lines = append(lines, "")
-		for i, c := range welcomeChoices {
+		choices := welcomeChoices
+		if !m.cfg.GitHubEnabled() {
+			choices = welcomeChoices[:1]
+		}
+		for i, c := range choices {
 			marker, style := "  ", lipgloss.NewStyle().Bold(true)
 			if i == m.index {
 				marker, style = "▸ ", chosenStyle
@@ -374,12 +383,20 @@ func (m WelcomeModel) renderBody() string {
 			}
 			lines = append(lines, "")
 		}
-		lines = append(lines,
-			theme.WorkspaceKeyHint("↑↓")+" choose   "+
+		if m.cfg.GitHubEnabled() {
+			lines = append(lines,
+				theme.WorkspaceKeyHint("↑↓")+" choose   "+
+					theme.WorkspaceKeyHint("Enter")+" select   "+
+					theme.WorkspaceKeyHint("1/2")+" pick   "+
+					theme.WorkspaceKeyHint("q")+" quit",
+			)
+		} else {
+			lines = append(lines,
 				theme.WorkspaceKeyHint("Enter")+" select   "+
-				theme.WorkspaceKeyHint("1/2")+" pick   "+
-				theme.WorkspaceKeyHint("q")+" quit",
-		)
+					theme.WorkspaceKeyHint("1")+" pick   "+
+					theme.WorkspaceKeyHint("q")+" quit",
+			)
+		}
 
 	case welcomeStepExplain:
 		lines = append(lines, "", titleStyle.Render("Sign in to GitHub"), "")

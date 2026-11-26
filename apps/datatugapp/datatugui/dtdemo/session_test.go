@@ -150,8 +150,11 @@ func TestAuthStateAndConfig(t *testing.T) {
 
 	// Default Config normalization & default newGitClient seam.
 	cfg := (Config{Canonical: demogit.Repo{Owner: "datatug", Name: "datatug-demo-project"}}).normalized()
-	if cfg.Auth == nil || cfg.SaveBranch != DefaultSaveBranch || cfg.GitHubClientID == "" {
+	if cfg.Auth == nil || cfg.SaveBranch != DefaultSaveBranch || cfg.GitHubClientID == "" || !cfg.GitHubEnabled() {
 		t.Fatalf("unexpected normalized config: %+v", cfg)
+	}
+	if (Config{}).GitHubEnabled() || (Config{Canonical: demogit.Repo{Owner: "datatug"}}).GitHubEnabled() {
+		t.Fatal("empty or partial canonical repo must not enable GitHub")
 	}
 	if c := cfg.gitClient(); c == nil {
 		t.Fatal("default gitClient returned nil")

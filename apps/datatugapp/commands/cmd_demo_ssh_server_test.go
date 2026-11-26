@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -204,5 +205,21 @@ func TestDemoSSHEdgeCommand_Flags(t *testing.T) {
 		gotCfg.MaxConns != 64 || gotCfg.MaxConnsPerIP != 4 || gotCfg.MaxTunnels != 10 || gotCfg.MaxTunnelsPerIP != 3 ||
 		gotCfg.IdleTimeout != 2*time.Minute {
 		t.Fatalf("unexpected edge config: %+v", gotCfg)
+	}
+}
+
+// The default server seam is the real sshdemo.RunServer: an invalid
+// configuration fails before anything is bound.
+func TestDemoSSHServerDefaultSeamRejectsInvalidConfig(t *testing.T) {
+	prev := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	err := sshDemoRunServer(context.Background(), sshdemo.Config{
+		Listen:        "127.0.0.1:0",
+		StateDir:      t.TempDir(),
+		SessionsDir:   t.TempDir(),
+		ProxyProtocol: true, // without a trust list: refused at start
+	})
+	if err == nil {
+		t.Fatal("RunServer accepted --proxy-protocol without --proxy-protocol-trust")
 	}
 }

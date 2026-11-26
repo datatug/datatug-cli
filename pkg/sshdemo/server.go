@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"runtime/debug"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -32,6 +33,9 @@ const (
 	EndReasonFull        = "full"
 	EndReasonShutdown    = "shutdown"
 	EndReasonChildCrash  = "child-crash"
+	EndReasonMemQuota    = "memory-quota"
+	EndReasonDiskQuota   = "disk-quota"
+	EndReasonQuotaCheck  = "quota-check-failed"
 )
 
 // ServerOption customizes Server construction (primarily for tests).
@@ -61,19 +65,21 @@ func WithPanicHookForTest(fn func()) ServerOption {
 
 // Server is the Wish-backed SSH demo supervisor.
 type Server struct {
-	cfg           Config
-	logger        *slog.Logger
-	ops           SysOps
-	slots         *SlotManager
-	hostSigner    gossh.Signer
-	executable    string
-	templateDir   string
-	chinookBytes  []byte
-	sshServer     *ssh.Server
-	shutdownOnce  sync.Once
-	shutdownCh    chan struct{}
-	sessionWg     sync.WaitGroup
-	testPanicHook func()
+	cfg             Config
+	logger          *slog.Logger
+	ops             SysOps
+	slots           *SlotManager
+	hostSigner      gossh.Signer
+	executable      string
+	templateDir     string
+	chinookBytes    []byte
+	sshServer       *ssh.Server
+	shutdownOnce    sync.Once
+	shutdownCh      chan struct{}
+	sessionWg       sync.WaitGroup
+	testPanicHook   func()
+	connectionMu    sync.Mutex
+	connectionsByIP map[string]int
 }
 
 // NewServer prepares the host key, sessions directory, template clone, and Wish
@@ -85,11 +91,12 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 	}
 
 	s := &Server{
-		cfg:        cfg,
-		logger:     cfg.Logger,
-		ops:        DefaultSysOps(),
-		slots:      NewSlotManager(cfg.MaxSessions, cfg.MaxSessionsPerIP, cfg.UIDBase, cfg.Isolation),
-		shutdownCh: make(chan struct{}),
+		cfg:             cfg,
+		logger:          cfg.Logger,
+		ops:             DefaultSysOps(),
+		slots:           NewSlotManager(cfg.MaxSessions, cfg.MaxSessionsPerIP, cfg.UIDBase, cfg.Isolation),
+		shutdownCh:      make(chan struct{}),
+		connectionsByIP: make(map[string]int),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -141,7 +148,9 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 		s.templateDir = tmplDir
 	}
 
-	s.cleanStaleSessions(ctx)
+	if err := s.cleanStaleSessions(ctx); err != nil {
+		return nil, err
+	}
 
 	wishOpts := []ssh.Option{
 		wish.WithAddress(cfg.Listen),
@@ -165,11 +174,23 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 	origPtyHandler := sshSrv.PtyHandler
 	sshSrv.PtyHandler = func(ctx ssh.Context, sess ssh.Session, pty ssh.Pty) (func() error, error) {
 		pty.Window = ClampWindow(pty.Window)
-		return origPtyHandler(ctx, sess, pty)
+		closePTY, err := origPtyHandler(ctx, sess, pty)
+		meta := ctx.(*sessionContext).meta
+		return func() error {
+			meta.ptyMu.Lock()
+			defer meta.ptyMu.Unlock()
+			return closePTY()
+		}, err
 	}
 
-	// Anonymous access: PasswordHandler, PublicKeyHandler, and
-	// KeyboardInteractiveHandler remain nil -> charm.land/ssh sets NoClientAuth=true.
+	// Anonymous access still runs admission before any channel can be accepted.
+	sshSrv.ConnCallback = func(ctx ssh.Context, conn net.Conn) net.Conn {
+		ctx.SetValue(connectionStateKey{}, &connectionState{
+			conn: conn, shellStarted: make(chan struct{}),
+		})
+		return conn
+	}
+	sshSrv.ServerConfigCallback = s.connectionConfig
 	sshSrv.Version = "datatug-demo"
 	sshSrv.HandshakeTimeout = cfg.HandshakeTimeout
 	if cfg.IdleTimeout > 0 {
@@ -297,11 +318,64 @@ func RunServer(ctx context.Context, cfg Config, opts ...ServerOption) error {
 	}
 }
 
-type sessionMetaKey struct{}
+type connectionStateKey struct{}
+
+type connectionState struct {
+	conn         net.Conn
+	sessionUsed  atomic.Bool
+	shellStarted chan struct{}
+}
+
+func (s *Server) connectionConfig(ctx ssh.Context) *gossh.ServerConfig {
+	state := ctx.Value(connectionStateKey{}).(*connectionState)
+	return &gossh.ServerConfig{
+		NoClientAuth: true,
+		NoClientAuthCallback: func(conn gossh.ConnMetadata) (*gossh.Permissions, error) {
+			ip := clientIPFromAddr(conn.RemoteAddr())
+			s.connectionMu.Lock()
+			if s.connectionsByIP[ip] >= s.cfg.MaxSessionsPerIP {
+				s.connectionMu.Unlock()
+				return nil, &gossh.BannerError{Err: ErrPerIPLimit, Message: demoFullMessage}
+			}
+			s.connectionsByIP[ip]++
+			s.connectionMu.Unlock()
+
+			go s.watchConnection(ctx, state, ip, time.NewTimer(s.cfg.ShellStartTimeout))
+			return nil, nil
+		},
+	}
+}
+
+func (s *Server) watchConnection(ctx context.Context, state *connectionState, ip string, timer *time.Timer) {
+	defer func() {
+		s.connectionMu.Lock()
+		s.connectionsByIP[ip]--
+		if s.connectionsByIP[ip] == 0 {
+			delete(s.connectionsByIP, ip)
+		}
+		s.connectionMu.Unlock()
+	}()
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return
+	case <-state.shellStarted:
+		timer.Stop()
+	case <-timer.C:
+		_ = state.conn.Close()
+	}
+	<-ctx.Done()
+}
 
 type sessionMeta struct {
 	activityCh chan struct{}
 	chanDone   chan struct{}
+	ptyMu      sync.Mutex
+}
+
+type sessionContext struct {
+	ssh.Context
+	meta *sessionMeta
 }
 
 // sessionChannelHandler wraps incoming "session" channels so we can:
@@ -311,16 +385,21 @@ type sessionMeta struct {
 //  3. Observe client input reads (for input-based idle timeout) and channel
 //     close (for client-drop detection).
 func (s *Server) sessionChannelHandler(srv *ssh.Server, conn *gossh.ServerConn, newChan gossh.NewChannel, ctx ssh.Context) {
+	state := ctx.Value(connectionStateKey{}).(*connectionState)
+	if !state.sessionUsed.CompareAndSwap(false, true) {
+		_ = newChan.Reject(gossh.Prohibited, "only one session channel is allowed per connection")
+		return
+	}
+
 	meta := &sessionMeta{
 		activityCh: make(chan struct{}, 1),
 		chanDone:   make(chan struct{}),
 	}
-	ctx.SetValue(sessionMetaKey{}, meta)
 	wrapped := &filteringNewChannel{
 		NewChannel: newChan,
 		meta:       meta,
 	}
-	ssh.DefaultSessionHandler(srv, conn, wrapped, ctx)
+	ssh.DefaultSessionHandler(srv, conn, wrapped, &sessionContext{Context: ctx, meta: meta})
 }
 
 type filteringNewChannel struct {
@@ -337,8 +416,9 @@ func (f *filteringNewChannel) Accept() (gossh.Channel, <-chan *gossh.Request, er
 	go func() {
 		defer close(filteredReqs)
 		defer close(f.meta.chanDone)
+		filter := sessionRequestFilter{}
 		for req := range rawReqs {
-			filteredReqs <- filterSessionRequest(req)
+			filteredReqs <- filter.filterSessionRequest(req)
 		}
 	}()
 	return &activityChannel{Channel: ch, activityCh: f.meta.activityCh}, filteredReqs, nil
@@ -368,11 +448,22 @@ func (a *activityChannel) Read(p []byte) (int, error) {
 // exec as accepted.
 const refusedRequestType = "refused@demo.datatug.app"
 
+const (
+	maxEnvRequests = 8
+	maxEnvValue    = 256
+	maxPTYTerm     = 64
+	maxPTYModes    = 1024
+)
+
+type sessionRequestFilter struct {
+	envCount int
+}
+
 // filterSessionRequest clamps pty-req and window-change sizes, keeps shell and
 // allowed env requests, and turns everything else (exec, subsystem, agent and
 // X11 forwarding, signals, malformed or disallowed requests) into a request the
 // session handler refuses.
-func filterSessionRequest(req *gossh.Request) *gossh.Request {
+func (f *sessionRequestFilter) filterSessionRequest(req *gossh.Request) *gossh.Request {
 	switch req.Type {
 	case "pty-req":
 		if clamped, ok := clampPtyReqPayload(req.Payload); ok {
@@ -388,7 +479,9 @@ func filterSessionRequest(req *gossh.Request) *gossh.Request {
 		return req
 	case "env":
 		var kv struct{ Key, Value string }
-		if err := gossh.Unmarshal(req.Payload, &kv); err == nil && isAllowedEnvKey(kv.Key) {
+		if f.envCount < maxEnvRequests && len(req.Payload) <= 8+len("COLORTERM")+maxEnvValue &&
+			gossh.Unmarshal(req.Payload, &kv) == nil && isAllowedEnvKey(kv.Key) && len(kv.Value) <= maxEnvValue {
+			f.envCount++
 			return req
 		}
 	}
@@ -406,12 +499,18 @@ func clampPtyReqPayload(payload []byte) ([]byte, bool) {
 		return nil, false
 	}
 	termLen := binary.BigEndian.Uint32(payload[:4])
-	if uint64(4)+uint64(termLen)+16 > uint64(len(payload)) {
+	if termLen > maxPTYTerm {
+		return nil, false
+	}
+	off := 4 + int(termLen)
+	// Four window dimensions, followed by the SSH string for terminal modes.
+	modesOffset := off + 16
+	if len(payload) < modesOffset+4 || len(payload)-(modesOffset+4) > maxPTYModes ||
+		int(binary.BigEndian.Uint32(payload[modesOffset:modesOffset+4])) != len(payload)-(modesOffset+4) {
 		return nil, false
 	}
 	out := make([]byte, len(payload))
 	copy(out, payload)
-	off := 4 + int(termLen)
 	w := ClampWindow(ssh.Window{
 		Width:  int(binary.BigEndian.Uint32(out[off : off+4])),
 		Height: int(binary.BigEndian.Uint32(out[off+4 : off+8])),
@@ -453,6 +552,9 @@ func (s *Server) handleSession(sess ssh.Session) {
 
 	clientIP := clientIPFromAddr(sess.RemoteAddr())
 	sshUser := sess.User()
+	ctx := sess.Context().(*sessionContext)
+	meta := ctx.meta
+	connection := ctx.Value(connectionStateKey{}).(*connectionState)
 
 	pty, _, hasPty := sess.Pty()
 	if !hasPty {
@@ -577,14 +679,6 @@ func (s *Server) handleSession(sess ssh.Session) {
 		s.testPanicHook()
 	}
 
-	if s.cfg.Isolation == IsolationUID && pty.Slave != nil {
-		if name := pty.Name(); name != "" {
-			if err := s.ops.Chown(name, slot.UID, slot.GID); err != nil {
-				s.logger.Warn("chown pty slave failed", "session_id", sessionID, "pty", name, "err", err)
-			}
-		}
-	}
-
 	deadline := startTime.Add(s.cfg.MaxSessionDuration)
 	term, colorTerm := extractClientTermAndColorTerm(pty.Term, sess.Environ())
 	childArgs := append(append([]string(nil), s.cfg.ExecPrefixArgs...), BuildChildArgs(s.cfg, dir, s.templateDir, sessionID, deadline)...)
@@ -597,28 +691,19 @@ func (s *Server) handleSession(sess ssh.Session) {
 		}
 	}
 
-	if err := pty.Start(cmd, ssh.WithJobControl()); err != nil {
+	if err := s.startSessionChild(meta, slot, &pty, cmd); err != nil {
 		s.logger.Error("start session child failed", "session_id", sessionID, "err", err)
 		endReason = EndReasonChildCrash
 		exitStatus = 1
 		return
 	}
-	if pty.Slave != nil {
-		_ = pty.Slave.Close()
-	}
 	pgid = cmd.Process.Pid
+	close(connection.shellStarted)
 
 	waitCh = make(chan error, 1)
 	go func() {
 		waitCh <- cmd.Wait()
 	}()
-
-	var activityCh <-chan struct{}
-	var chanDone <-chan struct{}
-	if meta, ok := sess.Context().Value(sessionMetaKey{}).(*sessionMeta); ok && meta != nil {
-		activityCh = meta.activityCh
-		chanDone = meta.chanDone
-	}
 
 	var idleTimer *time.Timer
 	var idleC <-chan time.Time
@@ -635,6 +720,8 @@ func (s *Server) handleSession(sess ssh.Session) {
 		defer maxTimer.Stop()
 		maxC = maxTimer.C
 	}
+	watchdog := time.NewTicker(s.cfg.WatchdogInterval)
+	defer watchdog.Stop()
 
 	for {
 		select {
@@ -649,7 +736,7 @@ func (s *Server) handleSession(sess ssh.Session) {
 			drainPTYMaster(pty.Master, 150*time.Millisecond)
 			return
 
-		case <-activityCh:
+		case <-meta.activityCh:
 			if idleTimer != nil {
 				if !idleTimer.Stop() {
 					select {
@@ -660,7 +747,7 @@ func (s *Server) handleSession(sess ssh.Session) {
 				idleTimer.Reset(s.cfg.IdleTimeout)
 			}
 
-		case <-chanDone:
+		case <-meta.chanDone:
 			endReason = EndReasonClientDrop
 			exitStatus = -1
 			return
@@ -680,6 +767,14 @@ func (s *Server) handleSession(sess ssh.Session) {
 			exitStatus = -1
 			return
 
+		case <-watchdog.C:
+			reason, message := s.checkSessionQuota(sessionID, dir, slot, pgid, "/proc")
+			if reason != "" {
+				endReason = reason
+				writeQuotaNotice(sess, connection.conn, message)
+				return
+			}
+
 		case <-s.shutdownCh:
 			endReason = EndReasonShutdown
 			exitStatus = -1
@@ -697,4 +792,21 @@ func (s *Server) handleSession(sess ssh.Session) {
 			return
 		}
 	}
+}
+
+// The request loop may close the PTY on disconnect. Serialize its closer with
+// ownership transfer and fork so the slave cannot be closed during startup.
+func (s *Server) startSessionChild(meta *sessionMeta, slot Slot, pty *ssh.Pty, cmd *exec.Cmd) error {
+	meta.ptyMu.Lock()
+	defer meta.ptyMu.Unlock()
+	if s.cfg.Isolation == IsolationUID {
+		if err := s.ops.Fchown(pty.Slave, slot.UID, slot.GID); err != nil {
+			return fmt.Errorf("chown pty slave descriptor: %w", err)
+		}
+	}
+	if err := pty.Start(cmd, ssh.WithJobControl()); err != nil {
+		return err
+	}
+	_ = pty.Slave.Close()
+	return nil
 }

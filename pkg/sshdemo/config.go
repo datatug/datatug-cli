@@ -23,6 +23,10 @@ const (
 	DefaultIdleTimeout        = 15 * time.Minute
 	DefaultMaxSessionDuration = 60 * time.Minute
 	DefaultHandshakeTimeout   = 20 * time.Second
+	DefaultShellStartTimeout  = 30 * time.Second
+	DefaultSessionMemQuota    = 1 << 30
+	DefaultSessionDiskQuota   = 256 << 20
+	DefaultWatchdogInterval   = 2 * time.Second
 	DefaultUIDBase            = 20000
 	DefaultGitHubClientID     = "Ov23liAIKfguW2oYiore"
 	DefaultSaveBranch         = "datatug-demo"
@@ -85,6 +89,9 @@ type Config struct {
 	IdleTimeout            time.Duration
 	MaxSessionDuration     time.Duration
 	HandshakeTimeout       time.Duration
+	ShellStartTimeout      time.Duration
+	SessionMemQuota        uint64
+	SessionDiskQuota       uint64
 	Isolation              string
 	UIDBase                int
 	AllowInsecureIsolation bool
@@ -93,12 +100,13 @@ type Config struct {
 	EgressProxy            string
 
 	// Optional overrides for logging, lifecycle tuning and tests.
-	Logger         *slog.Logger
-	Executable     string
-	ExecPrefixArgs []string
-	ShutdownGrace  time.Duration
-	CleanupTimeout time.Duration
-	SkipTemplate   bool
+	Logger           *slog.Logger
+	Executable       string
+	ExecPrefixArgs   []string
+	ShutdownGrace    time.Duration
+	CleanupTimeout   time.Duration
+	WatchdogInterval time.Duration
+	SkipTemplate     bool
 }
 
 // DefaultConfig returns a Config populated with the specification defaults.
@@ -114,6 +122,10 @@ func DefaultConfig() Config {
 		IdleTimeout:        DefaultIdleTimeout,
 		MaxSessionDuration: DefaultMaxSessionDuration,
 		HandshakeTimeout:   DefaultHandshakeTimeout,
+		ShellStartTimeout:  DefaultShellStartTimeout,
+		SessionMemQuota:    DefaultSessionMemQuota,
+		SessionDiskQuota:   DefaultSessionDiskQuota,
+		WatchdogInterval:   DefaultWatchdogInterval,
 		Isolation:          IsolationUID,
 		UIDBase:            DefaultUIDBase,
 		GitHubClientID:     DefaultGitHubClientID,
@@ -157,6 +169,18 @@ func (c Config) WithDefaults() Config {
 	}
 	if c.HandshakeTimeout == 0 {
 		c.HandshakeTimeout = DefaultHandshakeTimeout
+	}
+	if c.ShellStartTimeout == 0 {
+		c.ShellStartTimeout = DefaultShellStartTimeout
+	}
+	if c.SessionMemQuota == 0 {
+		c.SessionMemQuota = DefaultSessionMemQuota
+	}
+	if c.SessionDiskQuota == 0 {
+		c.SessionDiskQuota = DefaultSessionDiskQuota
+	}
+	if c.WatchdogInterval == 0 {
+		c.WatchdogInterval = DefaultWatchdogInterval
 	}
 	if c.Isolation == "" {
 		c.Isolation = IsolationUID
@@ -203,6 +227,12 @@ func (c Config) Validate() error {
 	}
 	if c.HandshakeTimeout < 0 {
 		return fmt.Errorf("sshdemo: handshake-timeout must be >= 0, got %s", c.HandshakeTimeout)
+	}
+	if c.ShellStartTimeout <= 0 {
+		return fmt.Errorf("sshdemo: shell-start-timeout must be positive, got %s", c.ShellStartTimeout)
+	}
+	if c.WatchdogInterval <= 0 {
+		return fmt.Errorf("sshdemo: watchdog interval must be positive, got %s", c.WatchdogInterval)
 	}
 	if err := validateRelProjectDir(c.ProjectDir); err != nil {
 		return err

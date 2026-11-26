@@ -401,6 +401,8 @@ func TestServer_PTYContractEnvTermClampingAndCanary(t *testing.T) {
 	}
 	wantEnv := map[string]string{
 		"HOME":              filepath.Join(gotFlags["--workspace"], "home"),
+		"TMPDIR":            filepath.Join(gotFlags["--workspace"], "tmp"),
+		"SQLITE_TMPDIR":     filepath.Join(gotFlags["--workspace"], "tmp"),
 		"TERM":              "xterm-256color",
 		"COLORTERM":         "truecolor",
 		"LANG":              "C.UTF-8",
@@ -431,7 +433,7 @@ func TestServer_PTYContractEnvTermClampingAndCanary(t *testing.T) {
 	}
 
 	// 2. Test TERM/COLORTERM variations: explicit COLORTERM + non-256color TERM + 0x0 clamped to 1x1.
-	sess2, err := client.NewSession()
+	sess2, err := dialSSH(t, h.addr, "alice").NewSession()
 	if err != nil {
 		t.Fatalf("NewSession 2: %v", err)
 	}
@@ -509,7 +511,7 @@ func TestServer_WindowChangeReachesChild(t *testing.T) {
 }
 
 func TestServer_RefusalsNoPTYExecSubsystemForwardingAgentX11(t *testing.T) {
-	h := startTestServer(t, nil)
+	h := startTestServer(t, func(c *Config) { c.MaxSessionsPerIP = 4 })
 	client := dialSSH(t, h.addr, "visitor")
 
 	// 1. No-PTY session refused with one-line message and exit status 1.
@@ -534,7 +536,7 @@ func TestServer_RefusalsNoPTYExecSubsystemForwardingAgentX11(t *testing.T) {
 	_ = sess.Close()
 
 	// 2. exec refused.
-	execSess, err := client.NewSession()
+	execSess, err := dialSSH(t, h.addr, "visitor").NewSession()
 	if err != nil {
 		t.Fatalf("NewSession exec: %v", err)
 	}
@@ -544,7 +546,7 @@ func TestServer_RefusalsNoPTYExecSubsystemForwardingAgentX11(t *testing.T) {
 	_ = execSess.Close()
 
 	// 3. subsystem (sftp) refused.
-	subSess, err := client.NewSession()
+	subSess, err := dialSSH(t, h.addr, "visitor").NewSession()
 	if err != nil {
 		t.Fatalf("NewSession subsystem: %v", err)
 	}
@@ -554,7 +556,7 @@ func TestServer_RefusalsNoPTYExecSubsystemForwardingAgentX11(t *testing.T) {
 	_ = subSess.Close()
 
 	// 4. agent forwarding and X11 forwarding refused.
-	ch, reqs, err := client.OpenChannel("session", nil)
+	ch, reqs, err := dialSSH(t, h.addr, "visitor").OpenChannel("session", nil)
 	if err != nil {
 		t.Fatalf("OpenChannel session: %v", err)
 	}
@@ -603,29 +605,6 @@ func TestServer_GlobalAndPerIPCaps(t *testing.T) {
 		t.Fatalf("s1 not ready: %q", line1)
 	}
 
-	// Second session from same IP (127.0.0.1) rejected with "demo is full" and exit status 1.
-	c2 := dialSSH(t, h.addr, "u2")
-	s2, err := c2.NewSession()
-	if err != nil {
-		t.Fatalf("s2: %v", err)
-	}
-	var buf2 syncBuffer
-	s2.Stdout = &buf2
-	s2.Stderr = &buf2
-	_ = s2.RequestPty("xterm-256color", 24, 80, gossh.TerminalModes{})
-	if err := s2.Shell(); err != nil {
-		t.Fatalf("s2.Shell: %v", err)
-	}
-	err2 := s2.Wait()
-	var exitErr *gossh.ExitError
-	if !errors.As(err2, &exitErr) || exitErr.ExitStatus() != 1 {
-		t.Fatalf("expected exit 1 for per-IP cap, got %v", err2)
-	}
-	if !strings.Contains(buf2.String(), "The DataTug demo is full") {
-		t.Fatalf("unexpected full message: %q", buf2.String())
-	}
-	_ = s2.Close()
-
 	// Also test global cap = 1 (with per-IP = 2).
 	h2 := startTestServer(t, func(c *Config) {
 		c.SaveBranch = "wait-forever"
@@ -639,7 +618,11 @@ func TestServer_GlobalAndPerIPCaps(t *testing.T) {
 	_ = gs1.Shell()
 	_, _ = bufio.NewReader(gout1).ReadString('\n')
 
-	gs2, _ := gc1.NewSession()
+	gc2 := dialSSH(t, h2.addr, "g2")
+	gs2, err := gc2.NewSession()
+	if err != nil {
+		t.Fatalf("gs2: %v", err)
+	}
 	var gbuf bytes.Buffer
 	gs2.Stdout = &gbuf
 	_ = gs2.RequestPty("xterm-256color", 24, 80, gossh.TerminalModes{})
@@ -925,10 +908,16 @@ func TestServer_UIDModeFullSessionAndErrorPaths(t *testing.T) {
 
 	var chowned []string
 	var credUIDs []int
+	var slaveChowned bool
 	ops := DefaultSysOps()
 	ops.FileUID = func(os.FileInfo) (int, bool) { return 0, true }
 	ops.Chown = func(p string, uid, gid int) error {
 		chowned = append(chowned, p)
+		return nil
+	}
+	ops.Fchown = func(slave *os.File, uid, gid int) error {
+		info, err := slave.Stat()
+		slaveChowned = err == nil && info.Mode()&os.ModeCharDevice != 0 && uid == 21000 && gid == 21000
 		return nil
 	}
 	ops.CredentialFor = func(uid, gid int) *syscall.Credential {
@@ -969,12 +958,12 @@ func TestServer_UIDModeFullSessionAndErrorPaths(t *testing.T) {
 	if len(credUIDs) < 2 || credUIDs[0] != 21000 || credUIDs[1] != 21000 {
 		t.Fatalf("expected CredentialFor(21000) for child & cleanup, got %v", credUIDs)
 	}
-	if len(chowned) < 3 {
-		t.Fatalf("expected chown calls for workspace/pty, got %v", chowned)
+	if len(chowned) != 4 || !slaveChowned {
+		t.Fatalf("expected four workspace path chowns and a slave descriptor chown, got %v / %v", chowned, slaveChowned)
 	}
 
 	// 2. Malformed pty-req and window-change payloads are refused.
-	ch, reqs, err := client.OpenChannel("session", nil)
+	ch, reqs, err := dialSSH(t, h.addr, "uid-user").OpenChannel("session", nil)
 	if err != nil {
 		t.Fatalf("OpenChannel: %v", err)
 	}

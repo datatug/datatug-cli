@@ -50,7 +50,7 @@ Without root (local development), `--isolation=process` runs every child under t
 
 The child sets its own rlimits as its first action, before reading any visitor input. Limits can only be lowered:
 
-- `RLIMIT_AS` (default 8 GiB: address space, not memory. The cgo binary maps about 2 GiB of address space at start, so a lower value crashes it. Real memory is bounded by `GOMEMLIMIT=768MiB` in the child's environment and by the container memory cap. The child sets its `oom_score_adj` to 900, so the kernel kills a session before the supervisor.)
+- `RLIMIT_AS` (default 8 GiB of address space. The cgo binary maps about 2 GiB of address space at start, so a lower value crashes it. The child sets `GOMEMLIMIT=768MiB` as a soft Go heap limit and `oom_score_adj` to 900 so the kernel prefers killing a session before the supervisor.)
 - `RLIMIT_CPU` (default 900 s)
 - `RLIMIT_FSIZE` (64 MiB)
 - `RLIMIT_NOFILE` (512)
@@ -61,12 +61,17 @@ The container adds a memory and CPU cap. The sessions directory is a size-capped
 
 The supervisor enforces:
 
-- maximum concurrent sessions (default 16);
-- maximum sessions per client IP (default 3);
-- SSH handshake timeout (default 20 s);
-- idle timeout (no input, default 15 min);
-- maximum session duration (default 60 min, with a warning a minute before);
-- a PTY size cap: `pty-req` and every later `window-change` above 500×200 are clamped.
+- The global session cap defaults to 16.
+- The per-IP cap (`--max-sessions-per-ip`, default 3) counts all authenticated connections, including those that have yet to open a session channel.
+- The SSH handshake timeout defaults to 20 s.
+- Each SSH connection can open one session channel. The supervisor closes the connection if the child has yet to start when `--shell-start-timeout` elapses after authentication (default 30 s).
+- Each session channel accepts up to eight environment requests, with values up to 256 bytes. PTY requests can carry a terminal name up to 64 bytes and terminal modes up to 1 KiB.
+- The idle timeout defaults to 15 min without client input.
+- The maximum session duration defaults to 60 min, with a warning a minute before.
+- The supervisor clamps `pty-req` and every later `window-change` above 500×200.
+- The supervisor checks session quotas every 2 s. The memory quota (`--session-mem-quota`, default 1 GiB) sums resident memory across the slot UID's processes or the child's process group in process mode. The disk quota (`--session-disk-quota`, default 256 MiB) counts allocated workspace blocks without following symlinks. A session that exceeds either quota gets a message and is cleaned up.
+- Each workspace has a private slot-owned `tmp/` directory with mode 0700 that counts toward the disk quota. `TMPDIR` and `SQLITE_TMPDIR` point there.
+- Unverified startup cleanup of a stale workspace or its UID's processes quarantines the affected slot until the supervisor exits. Startup fails when no slot remains usable.
 
 Only `session` channels with `pty-req` and `shell` are served. `exec`, `subsystem` (sftp, scp), port forwarding, agent forwarding and X11 are refused. There is no shell.
 
@@ -74,7 +79,7 @@ Only `session` channels with `pty-req` and `shell` are served. `exec`, `subsyste
 
 The workspace can open arbitrary HTTP URLs and database hosts, so unrestricted egress would let visitors reach services on the host's bridge gateway. Deployment uses two containers from the same image:
 
-- `edge` (`datatug demo ssh-edge`) sits on the public bridge network and an internal network. It forwards public TCP 2222 to `demo:2222` with a PROXY protocol v2 header, so per-IP limits still see the client address. It also serves an HTTP CONNECT proxy that allows only `host:443` for an allow-list (default `github.com`, `api.github.com`, `codeload.github.com`, `cloud.openvaultdb.com`).
+- `edge` (`datatug demo ssh-edge`) sits on the public bridge network and an internal network. It forwards public TCP 2222 to `demo:2222` with a PROXY protocol v2 header, so per-IP limits still see the client address. Forwarding writes have a 5 s deadline. After either direction ends, the edge closes both sockets within 500 ms. It also serves an HTTP CONNECT proxy that allows only `host:443` for an allow-list (default `github.com`, `api.github.com`, `codeload.github.com`, `cloud.openvaultdb.com`).
 - `demo` (`datatug demo ssh-server`) is only on the internal network (`internal: true`, no route out). Children get `HTTPS_PROXY`/`HTTP_PROXY` pointing at `edge`. A raw TCP dial (for example a PostgreSQL connection the visitor types) has no route and fails.
 
 This needs no host root and no host firewall changes.

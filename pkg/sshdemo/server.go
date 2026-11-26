@@ -262,11 +262,13 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 	sshSrv.ConnCallback = func(ctx ssh.Context, conn net.Conn) net.Conn {
 		// The listener checks the real peer first. Install the loopback
 		// validator before Wish starts reading the header.
+		healthOnly := false
 		if proxied, ok := conn.(*proxyproto.Conn); ok && proxied.Raw().RemoteAddr().(*net.TCPAddr).IP.IsLoopback() {
 			proxied.Validate = requireLocalProxyHeader
+			healthOnly = true
 		}
 		ctx.SetValue(connectionStateKey{}, &connectionState{
-			conn: conn, shellStarted: make(chan struct{}),
+			conn: conn, shellStarted: make(chan struct{}), healthOnly: healthOnly,
 			queued: make(chan struct{}), admitted: make(chan struct{}),
 		})
 		return conn
@@ -438,17 +440,26 @@ type connectionStateKey struct{}
 
 type connectionState struct {
 	conn         net.Conn
+	healthOnly   bool
 	sessionUsed  atomic.Bool
 	shellStarted chan struct{}
 	queued       chan struct{}
 	admitted     chan struct{}
 }
 
+var errLoopbackHealthOnly = errors.New("sshdemo: loopback connections are for health checks only")
+
 func (s *Server) connectionConfig(ctx ssh.Context) *gossh.ServerConfig {
 	state := ctx.Value(connectionStateKey{}).(*connectionState)
 	return &gossh.ServerConfig{
 		NoClientAuth: true,
 		NoClientAuthCallback: func(conn gossh.ConnMetadata) (*gossh.Permissions, error) {
+			// Behind the edge, loopback is the in-container health check, which
+			// only reads the banner. Session processes share this network
+			// namespace and must not open demo sessions or queue places.
+			if state.healthOnly {
+				return nil, errLoopbackHealthOnly
+			}
 			ip := clientIPFromAddr(conn.RemoteAddr())
 			if err := s.connectionLimit.reserve(ip); err != nil {
 				return nil, &gossh.BannerError{Err: err, Message: demoFullMessage}

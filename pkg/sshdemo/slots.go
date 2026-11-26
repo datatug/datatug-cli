@@ -331,6 +331,9 @@ func lockSharedDevices(stat func(string) (os.FileInfo, error), chmod func(string
 		forbidden os.FileMode
 	}{
 		{"/dev/pts/ptmx", 0o600, 0o066},
+		// Docker links /dev/ptmx to /dev/pts/ptmx; other runtimes may give it
+		// its own node.
+		{"/dev/ptmx", 0o600, 0o066},
 		{"/dev/mqueue", 0o755, 0o022},
 	} {
 		info, err := stat(d.path)

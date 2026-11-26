@@ -73,6 +73,10 @@ func TestSlotFilterArchitectures(t *testing.T) {
 	cases = append(cases, slotFilterCase{"amd64", unix.AUDIT_ARCH_X86_64, 50, 0, denied},
 		slotFilterCase{"amd64", unix.AUDIT_ARCH_X86_64, 50 | 1<<30, 0, denied},
 		slotFilterCase{"arm64", unix.AUDIT_ARCH_AARCH64, 201, 0, denied})
+	const enosys = unix.SECCOMP_RET_ERRNO | uint32(unix.ENOSYS)
+	cases = append(cases, slotFilterCase{"amd64", unix.AUDIT_ARCH_X86_64, 435, 0, enosys},
+		slotFilterCase{"amd64", unix.AUDIT_ARCH_X86_64, 435 | 1<<30, 0, enosys},
+		slotFilterCase{"arm64", unix.AUDIT_ARCH_AARCH64, 435, 0, enosys})
 	cases = append(cases, slotFilterCase{"amd64", unix.AUDIT_ARCH_X86_64, 49, 0, denied},
 		slotFilterCase{"amd64", unix.AUDIT_ARCH_X86_64, 49 | 1<<30, 0, denied},
 		slotFilterCase{"arm64", unix.AUDIT_ARCH_AARCH64, 200, 0, denied})
@@ -295,6 +299,9 @@ func TestSlotFilterKernel(t *testing.T) {
 	}
 	if err := unix.Listen(fd, 1); !errors.Is(err, unix.EPERM) {
 		t.Fatalf("listen = %v, want EPERM", err)
+	}
+	if _, _, errno := unix.RawSyscall(435, 0, 0, 0); errno != unix.ENOSYS {
+		t.Fatalf("clone3 = %v, want ENOSYS", errno)
 	}
 	if err := unix.Bind(fd, &unix.SockaddrInet4{Addr: [4]byte{127, 0, 0, 1}}); !errors.Is(err, unix.EPERM) {
 		t.Fatalf("bind = %v, want EPERM", err)

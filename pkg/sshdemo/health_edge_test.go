@@ -442,6 +442,28 @@ func TestCheckHealthProxyLocal(t *testing.T) {
 	}
 }
 
+func TestServer_LoopbackLocalHeaderCannotAuthenticate(t *testing.T) {
+	h := startTestServer(t, func(cfg *Config) { cfg.ProxyProtocol = true; cfg.ProxyProtocolTrust = []string{"192.0.2.8/32"} })
+	conn, err := net.DialTimeout("tcp", h.addr, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	if err := conn.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Write(EncodeProxyV2(nil, nil)); err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, err = gossh.NewClientConn(conn, h.addr, &gossh.ClientConfig{
+		User: "visitor", HostKeyCallback: gossh.InsecureIgnoreHostKey(),
+	})
+	if err == nil {
+		t.Fatal("a loopback LOCAL connection authenticated; want it refused")
+	}
+	waitForNoConnectionReservations(t, h.srv)
+}
+
 func TestEdge_UpstreamHalfCloseReleasesForwardingSlot(t *testing.T) {
 	h := startTestServer(t, func(cfg *Config) {
 		cfg.ProxyProtocol = true

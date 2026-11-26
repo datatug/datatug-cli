@@ -281,7 +281,7 @@ type fakeModeInfo struct {
 func (f fakeModeInfo) Mode() os.FileMode { return f.mode }
 
 func TestLockSharedDevices(t *testing.T) {
-	modes := map[string]os.FileMode{"/dev/pts/ptmx": os.ModeCharDevice | 0o666, "/dev/mqueue": os.ModeDir | os.ModeSticky | 0o777}
+	modes := map[string]os.FileMode{"/dev/pts/ptmx": os.ModeCharDevice | 0o666, "/dev/ptmx": os.ModeCharDevice | 0o666, "/dev/mqueue": os.ModeDir | os.ModeSticky | 0o777}
 	stat := func(path string) (os.FileInfo, error) {
 		mode, ok := modes[path]
 		if !ok {
@@ -298,7 +298,7 @@ func TestLockSharedDevices(t *testing.T) {
 	if err := lockSharedDevices(stat, chmod); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"/dev/pts/ptmx 0600", "/dev/mqueue 0755"}; fmt.Sprint(chmods) != fmt.Sprint(want) {
+	if want := []string{"/dev/pts/ptmx 0600", "/dev/ptmx 0600", "/dev/mqueue 0755"}; fmt.Sprint(chmods) != fmt.Sprint(want) {
 		t.Fatalf("chmods = %v, want %v", chmods, want)
 	}
 	chmods = nil

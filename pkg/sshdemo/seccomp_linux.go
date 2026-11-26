@@ -125,10 +125,16 @@ func slotFilter(goarch string) ([]unix.SockFilter, error) {
 			unix.SockFilter{Code: unix.BPF_RET | unix.BPF_K, K: eperm},
 			unix.SockFilter{Code: unix.BPF_RET | unix.BPF_K, K: unix.SECCOMP_RET_ALLOW})
 	}
+	// clone3 passes its flags in memory, out of the filter's reach. Docker's
+	// profile already answers ENOSYS; this keeps that true under any profile.
+	// Callers fall back to clone, whose flags are checked below.
+	const enosys = unix.SECCOMP_RET_ERRNO | uint32(unix.ENOSYS)
+	filter = append(filter,
+		unix.SockFilter{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jf: 1, K: 435},
+		unix.SockFilter{Code: unix.BPF_RET | unix.BPF_K, K: enosys})
 	// CLONE_PARENT makes the new process the supervisor's child: it would
-	// never be reaped and would keep its PID charged to the slot. Docker's
-	// profile already answers clone3 with ENOSYS. Flags are argument 0 on
-	// both ABIs.
+	// never be reaped and would keep its PID charged to the slot. Flags are
+	// argument 0 on both ABIs.
 	filter = append(filter,
 		unix.SockFilter{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jf: 4, K: clone},
 		unix.SockFilter{Code: unix.BPF_LD | unix.BPF_W | unix.BPF_ABS, K: 16}, // seccomp_data.args[0], low word

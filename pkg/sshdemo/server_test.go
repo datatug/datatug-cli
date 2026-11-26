@@ -691,6 +691,7 @@ func TestServer_GlobalAndPerIPCaps(t *testing.T) {
 	h2 := startTestServer(t, func(c *Config) {
 		c.SaveBranch = "wait-forever"
 		c.MaxSessions = 1
+		c.MaxQueue = 0
 		c.MaxSessionsPerIP = 2
 	})
 	gc1 := dialSSH(t, h2.addr, "g1")

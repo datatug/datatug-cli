@@ -81,6 +81,8 @@ type Server struct {
 	slots           *SlotManager
 	cgroups         []cgroup
 	slotReuseMu     sync.Mutex
+	queueWritesMu   sync.Mutex
+	queueWrites     map[net.Conn]time.Time
 	cleanupGroup    cgroup
 	cleanupQueue    chan struct{}
 	cleanupMu       sync.Mutex
@@ -119,6 +121,7 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 		shutdownCh:      make(chan struct{}),
 		proxyPolicy:     proxyPolicy,
 		connectionLimit: newConnectionLimit(cfg.MaxConnections, cfg.MaxSessionsPerIP),
+		queueWrites:     make(map[net.Conn]time.Time),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -245,6 +248,9 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 		pty.Window = ClampWindow(pty.Window)
 		closePTY, err := origPtyHandler(ctx, sess, pty)
 		meta := ctx.(*sessionContext).meta
+		if err == nil {
+			meta.pty, _, _ = sess.Pty()
+		}
 		return func() error {
 			meta.ptyMu.Lock()
 			defer meta.ptyMu.Unlock()
@@ -261,6 +267,7 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 		}
 		ctx.SetValue(connectionStateKey{}, &connectionState{
 			conn: conn, shellStarted: make(chan struct{}),
+			queued: make(chan struct{}), admitted: make(chan struct{}),
 		})
 		return conn
 	}
@@ -269,12 +276,18 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 	sshSrv.HandshakeTimeout = cfg.HandshakeTimeout
 	if cfg.IdleTimeout > 0 {
 		// Safety net for connections that never open a session channel; active
-		// sessions enforce exact input-based idle timeout first.
+		// sessions and queued visitors enforce their own deadlines first.
 		sshSrv.IdleTimeout = cfg.IdleTimeout + safetyMargin(cfg.IdleTimeout)
+		if cfg.MaxQueue > 0 {
+			sshSrv.IdleTimeout = max(sshSrv.IdleTimeout, cfg.MaxQueueWait+safetyMargin(cfg.MaxQueueWait))
+		}
 	}
 	if cfg.MaxSessionDuration > 0 {
 		sshSrv.MaxTimeout = cfg.HandshakeTimeout + cfg.ShellStartTimeout +
 			cfg.MaxSessionDuration + max(cfg.ShutdownGrace, maxSessionTerminationGrace) + safetyMargin(cfg.MaxSessionDuration)
+		if cfg.MaxQueue > 0 {
+			sshSrv.MaxTimeout += cfg.MaxQueueWait + cfg.ShellStartTimeout
+		}
 	}
 
 	// Serve ONLY session channels; refuse forwarding, subsystems, exec, and global requests.
@@ -322,6 +335,11 @@ func (s *Server) Serve(ln net.Listener) error {
 	defer cancel()
 	go s.recheckSlots(ctx, cleanupRetryInterval)
 	go s.recheckCleanup(ctx, cleanupRetryInterval)
+	if s.cfg.MaxQueue > 0 {
+		ticker := time.NewTicker(queueRefreshInterval)
+		defer ticker.Stop()
+		go s.tickQueue(ctx, ticker.C)
+	}
 	if s.cfg.ProxyProtocol {
 		ln = &proxyproto.Listener{Listener: ln, ConnPolicy: s.proxyPolicy, ReadHeaderTimeout: s.cfg.HandshakeTimeout}
 	}
@@ -337,7 +355,10 @@ func (s *Server) Serve(ln net.Listener) error {
 // and waits for all session cleanups to finish.
 func (s *Server) Shutdown(ctx context.Context) error {
 	defer s.closeRelay()
-	s.shutdownOnce.Do(func() { close(s.shutdownCh) })
+	s.shutdownOnce.Do(func() {
+		s.slots.stopQueue()
+		close(s.shutdownCh)
+	})
 
 	// Stop accepting new connections without immediately tearing down sockets so
 	// sessions get their grace period and can finish cleanup cleanly.
@@ -419,6 +440,8 @@ type connectionState struct {
 	conn         net.Conn
 	sessionUsed  atomic.Bool
 	shellStarted chan struct{}
+	queued       chan struct{}
+	admitted     chan struct{}
 }
 
 func (s *Server) connectionConfig(ctx ssh.Context) *gossh.ServerConfig {
@@ -440,21 +463,39 @@ func (s *Server) connectionConfig(ctx ssh.Context) *gossh.ServerConfig {
 func (s *Server) watchConnection(ctx context.Context, state *connectionState, ip string, timer *time.Timer) {
 	defer s.connectionLimit.release(ip)
 	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return
-	case <-state.shellStarted:
-		timer.Stop()
-	case <-timer.C:
-		_ = state.conn.Close()
+	queued := state.queued
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-state.shellStarted:
+			timer.Stop()
+			<-ctx.Done()
+			return
+		case <-queued:
+			timer.Stop()
+			select {
+			case <-ctx.Done():
+				return
+			case <-state.admitted:
+				queued = nil
+				timer.Reset(s.cfg.ShellStartTimeout)
+			}
+		case <-timer.C:
+			_ = state.conn.Close()
+			<-ctx.Done()
+			return
+		}
 	}
-	<-ctx.Done()
 }
 
 type sessionMeta struct {
 	activityCh chan struct{}
 	chanDone   chan struct{}
 	ptyMu      sync.Mutex
+	pty        ssh.Pty
+	admission  slotAdmission
+	sessionID  string
 }
 
 type sessionContext struct {
@@ -482,15 +523,21 @@ func (s *Server) sessionChannelHandler(srv *ssh.Server, conn *gossh.ServerConn, 
 	wrapped := &filteringNewChannel{
 		NewChannel: newChan,
 		meta:       meta,
-		inputReady: state.shellStarted,
+		server:     s,
+		state:      state,
+		clientIP:   clientIPFromAddr(conn.RemoteAddr()),
+		sshUser:    safeLogValue(conn.User()),
 	}
 	ssh.DefaultSessionHandler(srv, conn, wrapped, &sessionContext{Context: ctx, meta: meta})
 }
 
 type filteringNewChannel struct {
 	gossh.NewChannel
-	meta       *sessionMeta
-	inputReady <-chan struct{}
+	meta     *sessionMeta
+	server   *Server
+	state    *connectionState
+	clientIP string
+	sshUser  string
 }
 
 func (f *filteringNewChannel) Accept() (gossh.Channel, <-chan *gossh.Request, error) {
@@ -499,17 +546,11 @@ func (f *filteringNewChannel) Accept() (gossh.Channel, <-chan *gossh.Request, er
 		return nil, nil, err
 	}
 	filteredReqs := make(chan *gossh.Request)
-	go func() {
-		defer close(filteredReqs)
-		defer close(f.meta.chanDone)
-		filter := sessionRequestFilter{}
-		for req := range rawReqs {
-			filteredReqs <- filter.filterSessionRequest(req)
-		}
-	}()
-	return &activityChannel{
-		Channel: ch, activityCh: f.meta.activityCh, inputReady: f.inputReady, done: f.meta.chanDone,
-	}, filteredReqs, nil
+	wrapped := &activityChannel{
+		Channel: ch, activityCh: f.meta.activityCh, inputReady: f.state.shellStarted, done: f.meta.chanDone,
+	}
+	go f.forwardRequests(wrapped, rawReqs, filteredReqs)
+	return wrapped, filteredReqs, nil
 }
 
 type activityChannel struct {
@@ -517,9 +558,13 @@ type activityChannel struct {
 	activityCh chan struct{}
 	inputReady <-chan struct{}
 	done       <-chan struct{}
+	queued     bool // the queue's reader continues copying input after handoff
 }
 
 func (a *activityChannel) Read(p []byte) (int, error) {
+	if a.queued {
+		return 0, io.EOF
+	}
 	// charm.land/ssh begins copying to the PTY before it invokes handleSession.
 	select {
 	case <-a.inputReady:
@@ -528,20 +573,20 @@ func (a *activityChannel) Read(p []byte) (int, error) {
 	}
 	n, err := a.Channel.Read(p)
 	if n > 0 {
-		select {
-		case a.activityCh <- struct{}{}:
-		default:
-		}
+		a.signalActivity()
 	}
 	return n, err
 }
 
-// refusedRequestType replaces the type of a request the demo refuses. The
-// request is still forwarded, so the session handler (whose default case
-// replies false) answers it in sequence: SSH clients match channel-request
-// replies to requests in order, and an out-of-band reply that overtakes the
-// reply to an earlier pty-req makes OpenSSH report the PTY as refused and the
-// exec as accepted.
+func (a *activityChannel) signalActivity() {
+	select {
+	case a.activityCh <- struct{}{}:
+	default:
+	}
+}
+
+// refusedRequestType marks rejected requests for the default case of the
+// current request loop. SSH clients match channel-request replies in order.
 const refusedRequestType = "refused@demo.datatug.app"
 
 const (
@@ -605,6 +650,15 @@ func clampPtyReqPayload(payload []byte) ([]byte, bool) {
 		int(binary.BigEndian.Uint32(payload[modesOffset:modesOffset+4])) != len(payload)-(modesOffset+4) {
 		return nil, false
 	}
+	// Match Wish's mode parser before acknowledging the deferred PTY request.
+	for modes := payload[modesOffset+4:]; len(modes) != 0; modes = modes[5:] {
+		if modes[0] == 0 || modes[0] > 160 {
+			break
+		}
+		if len(modes) < 5 {
+			return nil, false
+		}
+	}
 	out := make([]byte, len(payload))
 	copy(out, payload)
 	w := ClampWindow(ssh.Window{
@@ -656,8 +710,13 @@ func (s *Server) handleSession(sess ssh.Session) {
 	// status so watchConnection releases admission even if the peer stays open.
 	defer func() { _ = connection.conn.Close() }()
 
-	pty, _, hasPty := sess.Pty()
-	if !hasPty {
+	pty := meta.pty
+	admission := meta.admission
+	slot := admission.slot
+	if pty.Master == nil {
+		if !admission.at.IsZero() {
+			s.slots.Release(slot)
+		}
 		s.logger.Info("session rejected: no pty",
 			"client_ip", logIP,
 			"ssh_user", sshUser,
@@ -666,33 +725,7 @@ func (s *Server) handleSession(sess ssh.Session) {
 		_ = sess.Exit(1)
 		return
 	}
-
-	slot, err := s.slots.Acquire(clientIP)
-	if err != nil {
-		s.logger.Info("session end",
-			"session_id", "",
-			"client_ip", logIP,
-			"ssh_user", sshUser,
-			"pty_width", pty.Window.Width,
-			"pty_height", pty.Window.Height,
-			"duration_ms", 0,
-			"end_reason", EndReasonFull,
-			"exit_status", 1,
-			"quarantined_slots", s.slots.quarantinedCount(),
-			"max_sessions", s.cfg.MaxSessions,
-		)
-		_, _ = io.WriteString(sess, demoFullMessage)
-		_ = sess.Exit(1)
-		return
-	}
-
-	sessionID, err := generateSessionID()
-	if err != nil {
-		s.slots.Release(slot)
-		s.logger.Error("generate session id failed", "err", err)
-		_ = sess.Exit(1)
-		return
-	}
+	sessionID := meta.sessionID
 
 	dir, homeDir, _, err := createSessionWorkspace(s.cfg.SessionsDir, sessionID, slot, s.cfg.Isolation, s.ops)
 	if err != nil {
@@ -702,7 +735,7 @@ func (s *Server) handleSession(sess ssh.Session) {
 		return
 	}
 
-	startTime := time.Now()
+	startTime := admission.at
 	endReason := EndReasonChildCrash
 	exitStatus := -1
 	pgid := 0
@@ -732,6 +765,8 @@ func (s *Server) handleSession(sess ssh.Session) {
 				"stack", string(debug.Stack()),
 			)
 		}
+
+		s.slots.setSlotState(slot.Index, slotAwaitingCleanup)
 
 		// 1. Close PTY.
 		_ = pty.Close()
@@ -793,7 +828,7 @@ func (s *Server) handleSession(sess ssh.Session) {
 		s.testPanicHook()
 	}
 
-	deadline := startTime.Add(s.cfg.MaxSessionDuration)
+	deadline := admission.deadline
 	term, colorTerm := extractClientTermAndColorTerm(pty.Term, sess.Environ())
 	childArgs := append(append([]string(nil), s.cfg.ExecPrefixArgs...), BuildChildArgs(s.cfg, dir, s.templateDir, sessionID, deadline)...)
 	cmd := exec.Command(s.executable, childArgs...)

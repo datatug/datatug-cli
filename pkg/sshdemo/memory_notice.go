@@ -9,6 +9,7 @@ import (
 )
 
 const (
+	transportWriteGrace  = 250 * time.Millisecond
 	memoryPressureNotice = "This session is nearing its memory/storage allowance.\r\n"
 	oomGroupNotice       = "This session ended because it hit its memory/storage allowance.\r\n"
 )
@@ -28,13 +29,17 @@ func (g cgroup) oomGroupKilledSince(before uint64) bool {
 }
 
 func writeQuotaNotice(w io.Writer, conn net.Conn, message string) {
+	withTransportDeadline(conn, func() { _, _ = io.WriteString(w, message) })
+}
+
+func withTransportDeadline(conn net.Conn, write func()) {
 	// SSH channel flow control can block writes even when TCP is writable.
 	done := make(chan struct{})
 	go func() {
-		_, _ = io.WriteString(w, message)
+		write()
 		close(done)
 	}()
-	timer := time.NewTimer(250 * time.Millisecond)
+	timer := time.NewTimer(transportWriteGrace)
 	defer timer.Stop()
 	select {
 	case <-done:

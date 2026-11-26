@@ -39,6 +39,9 @@ func demoSSHServerCommand() *cobra.Command {
 			if printHostKey {
 				return sshDemoPrintHostKey(cfg.ResolvedHostKey(), cmd.OutOrStdout())
 			}
+			if cfg.MaxQueueWait <= 0 {
+				return fmt.Errorf("--max-queue-wait must be positive, got %s", cfg.MaxQueueWait)
+			}
 			for _, quota := range []struct {
 				flag, value string
 				target      *uint64
@@ -72,7 +75,9 @@ func demoSSHServerCommand() *cobra.Command {
 	f.StringVar(&cfg.Ref, "ref", cfg.Ref, "Git branch or ref of the demo repository (empty = default branch)")
 	f.StringVar(&cfg.ProjectDir, "project-dir", cfg.ProjectDir, "Project sub-directory inside the demo repository")
 	f.IntVar(&cfg.MaxSessions, "max-sessions", cfg.MaxSessions, "Maximum concurrent SSH sessions")
-	f.IntVar(&cfg.MaxConnections, "max-connections", cfg.MaxConnections, "Maximum concurrent authenticated SSH connections (default twice max-sessions)")
+	f.IntVar(&cfg.MaxQueue, "max-queue", cfg.MaxQueue, "Maximum visitors waiting for a session (zero disables the queue)")
+	f.DurationVar(&cfg.MaxQueueWait, "max-queue-wait", cfg.MaxQueueWait, "Maximum time a visitor can wait for a session")
+	f.IntVar(&cfg.MaxConnections, "max-connections", cfg.MaxConnections, "Maximum authenticated SSH connections (default max-sessions + max-queue, at least twice max-sessions)")
 	f.IntVar(&cfg.MaxSessionsPerIP, "max-sessions-per-ip", cfg.MaxSessionsPerIP, "Maximum concurrent authenticated SSH connections per client IP")
 	f.DurationVar(&cfg.IdleTimeout, "idle-timeout", cfg.IdleTimeout, "Idle timeout with no client input")
 	f.DurationVar(&cfg.MaxSessionDuration, "max-session-duration", cfg.MaxSessionDuration, "Maximum lifetime of a single session")

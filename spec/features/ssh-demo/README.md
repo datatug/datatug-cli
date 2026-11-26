@@ -63,12 +63,12 @@ The container adds a memory and CPU cap. The sessions tmpfs caps both disk bytes
 The supervisor enforces:
 
 - The global shell cap (`--max-sessions`) defaults to six.
-- The global connection cap (`--max-connections`, default twice the shell cap) and per-IP cap (`--max-sessions-per-ip`, default two) apply at authentication, before SSH channels and PTYs can be opened. Starting a shell uses a separate shell slot. The supervisor closes the SSH transport after reporting the session exit, releasing its authenticated connection reservation.
+- The global connection cap (`--max-connections`) defaults to the shell cap plus the queue capacity, with a floor of twice the shell cap. The per-IP cap (`--max-sessions-per-ip`) defaults to two. Both apply at authentication and count active, waiting and pre-shell connections. A shell uses a separate slot after admission. The supervisor closes the SSH transport at exit and releases the connection reservation.
 - The SSH handshake timeout defaults to 20 s.
-- Each SSH connection can open one session channel. The supervisor closes the connection if the child has yet to start when `--shell-start-timeout` elapses after authentication (default 30 s).
+- Each SSH connection can open one session channel. The supervisor allows 30 s from authentication to child startup (`--shell-start-timeout`). Entering the queue suspends that deadline and admission starts a fresh startup deadline.
 - Each session channel accepts up to eight environment requests, with values up to 256 bytes. PTY requests can carry a terminal name up to 64 bytes and terminal modes up to 1 KiB.
 - The idle timeout defaults to 15 min without client input.
-- The maximum session duration defaults to 60 min, with a warning a minute before.
+- The maximum session duration starts at admission and defaults to 60 min, with a warning a minute before.
 - The supervisor clamps `pty-req` and every later `window-change` above 500×200.
 - Each UID slot has a kernel-enforced `memory.max` equal to the sum of `--session-mem-quota` (384 MiB default) and `--session-disk-quota` (160 MiB default). This is a combined cap on memory charged to the slot, including native allocations and tmpfs pages, even for files that stay open after unlinking. The slot has zero swap, `memory.oom.group=1`, and `pids.max=256`.
 - The supervisor sends a notice on SSH stderr when `memory.current` approaches 90% of the slot cap. It reports an OOM termination when the slot's `memory.events` records a new `oom_group_kill`. The enforcement boundary is the slot's `memory.max`.
@@ -78,6 +78,12 @@ The supervisor enforces:
 UID isolation requires a writable cgroup v2 mount rooted at the container's own scope. Before listening, the supervisor verifies `nsdelegate` on the backing mount and that a write of the scope’s current `memory.max` returns `EPERM`. It also verifies that the slot caps, 96 MiB cleanup cap and 512 MiB supervisor reserve fit the finite scope `memory.max`. When `pids.max` is finite, it must cover 256 PIDs per slot plus 32 for cleanup and 256 for the supervisor. The sessions tmpfs must hold the sum of the slot caps plus 10% in bytes and at least one inode per 512 bytes of each slot budget, rounded up per slot, plus five inodes per slot and one for the tmpfs root.
 
 Only `session` channels with `pty-req` and `shell` are served. `exec`, `subsystem` (sftp, scp), port forwarding, agent forwarding and X11 are refused. There is no shell.
+
+When every slot is busy or pending reuse, an interactive visitor can join a FIFO queue (`--max-queue`, default 20). Release or successful cleanup assigns a usable slot to the head of the queue atomically. The supervisor draws the visitor's position and estimated start every second and refreshes positions when someone leaves. Press `q`, Ctrl-C or Ctrl-D to leave. Disconnects and the queue deadline (`--max-queue-wait`, default 30 min) also remove the visitor. Set `--max-queue=0` to reject overflow immediately.
+
+While waiting, each visitor occupies one SSH connection and one channel. The queue adds one input goroutine with a 256-byte read buffer, one screen goroutine and one maximum-wait timer. The existing request loop holds the bounded PTY request and processes window changes. One shared one-second ticker refreshes screens and closes transports whose writes stall. PTY allocation, workspace creation, slot assignment, child startup and relay registration wait until admission.
+
+The estimate sorts the active deadlines and treats each slot awaiting cleanup or memory release as available in 30 s. Quarantined slots are excluded. Each group of positions equal to the number of upcoming releases uses the same sorted times, offset by one full session duration for each earlier group. The screen shows an unknown estimate if there are no upcoming releases. Early departures and cleanup progress can change the estimate.
 
 ### D4: network egress through an allow-listing proxy
 
@@ -160,7 +166,7 @@ In a demo session, the workspace notice line says the workspace is temporary and
   - listening: `--listen` (default `:2222`), `--proxy-protocol`, `--proxy-protocol-trust`;
   - host key and state: `--host-key` (default `<state>/ssh_host_ed25519_key`, generated once when absent, never replaced), `--state-dir`, `--sessions-dir`;
   - demo project: `--repo`, `--ref`, `--project-dir`;
-  - session limits: `--max-sessions`, `--max-connections`, `--max-sessions-per-ip`, `--idle-timeout`, `--max-session-duration`, `--handshake-timeout`;
+  - session limits: `--max-sessions`, `--max-queue`, `--max-queue-wait`, `--max-connections`, `--max-sessions-per-ip`, `--idle-timeout`, `--max-session-duration`, `--handshake-timeout`;
   - isolation and cgroup limits: `--isolation=uid|process`, `--uid-base`, `--cgroup-root` (default `/sys/fs/cgroup`), `--session-mem-quota`, `--session-disk-quota`, `--cleanup-mem-limit`, `--cleanup-pids-limit`, `--slot-reuse-memory-threshold`, `--allow-insecure-isolation`;
   - GitHub: `--github-client-id`, `--save-branch`;
   - egress: `--egress-proxy`, `--max-relay-sockets-per-uid`, `--max-session-tunnels`, `--max-egress-tunnels`.
@@ -173,7 +179,7 @@ In a demo session, the workspace notice line says the workspace is temporary and
 
 ### Session lifecycle
 
-On connect, the visitor sees the welcome screen within 2 s on a warm server. On disconnect, network loss, idle timeout, maximum duration, a child crash or server shutdown, the supervisor:
+After admission, the visitor sees the welcome screen within 2 s on a warm server. On disconnect, network loss, idle timeout, maximum duration, a child crash or server shutdown, the supervisor:
 
 - closes the PTY;
 - drains the slot cgroup in UID mode or kills the process group in local process mode;
@@ -199,7 +205,7 @@ Two concurrent sessions edit their workspaces independently. One session's SQLit
 
 ### AC: limits-enforced
 
-Connections above `--max-connections` or `--max-sessions-per-ip`, and shells above `--max-sessions`, get a short "demo is full" message and are closed. Idle and maximum-duration timeouts end the session and clean it up. A stalled handshake is dropped after `--handshake-timeout`. The child runs with the D3 rlimits and, in UID mode, the slot cgroup limits.
+Connections above `--max-connections` or `--max-sessions-per-ip`, and interactive arrivals when the waiting queue is full or disabled, get a short "demo is full" message and are closed. Queued visitors see their position and estimated start until admission or departure. Idle and maximum-duration timeouts end the session and clean it up. A stalled handshake is dropped after `--handshake-timeout`. The child runs with the D3 rlimits and, in UID mode, the slot cgroup limits.
 
 ### AC: cleanup-always
 

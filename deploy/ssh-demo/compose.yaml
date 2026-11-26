@@ -90,6 +90,10 @@ services:
       - ${DEMO_PROJECT_DIR:-demo-project-1}
       - --max-sessions
       - "${DEMO_MAX_SESSIONS:-6}"
+      - --max-queue
+      - "${DEMO_MAX_QUEUE:-20}"
+      - --max-queue-wait
+      - "${DEMO_MAX_QUEUE_WAIT:-30m}"
       - --max-sessions-per-ip
       - "${DEMO_MAX_SESSIONS_PER_IP:-2}"
       - --idle-timeout

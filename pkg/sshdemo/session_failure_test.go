@@ -189,16 +189,14 @@ type contextOnlySession struct {
 	ssh.Session
 	ctx  *sessionContext
 	done chan error
-	pty  ssh.Pty
 }
 
-func (s contextOnlySession) Context() ssh.Context                    { return s.ctx }
-func (s contextOnlySession) Pty() (ssh.Pty, <-chan ssh.Window, bool) { return s.pty, nil, true }
-func (s contextOnlySession) RemoteAddr() net.Addr                    { return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)} }
-func (s contextOnlySession) User() string                            { return "visitor" }
-func (s contextOnlySession) Environ() []string                       { return nil }
-func (s contextOnlySession) Exit(code int) error                     { s.done <- fmt.Errorf("exit %d", code); return nil }
-func (s contextOnlySession) Write(data []byte) (int, error)          { return len(data), nil }
+func (s contextOnlySession) Context() ssh.Context           { return s.ctx }
+func (s contextOnlySession) RemoteAddr() net.Addr           { return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)} }
+func (s contextOnlySession) User() string                   { return "visitor" }
+func (s contextOnlySession) Environ() []string              { return nil }
+func (s contextOnlySession) Exit(code int) error            { s.done <- fmt.Errorf("exit %d", code); return nil }
+func (s contextOnlySession) Write(data []byte) (int, error) { return len(data), nil }
 
 type isolatedSSHContext struct {
 	ssh.Context
@@ -252,14 +250,18 @@ func TestSessionTransportClosureEndsRunningChild(t *testing.T) {
 			server, client := net.Pipe()
 			defer func() { _ = client.Close() }()
 			conn := &connectionState{conn: server, shellStarted: make(chan struct{})}
-			meta := &sessionMeta{activityCh: make(chan struct{}), chanDone: make(chan struct{})}
+			admission, _, err := h.srv.slots.admitOrQueue("127.0.0.1", h.srv.cfg, time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			meta := &sessionMeta{activityCh: make(chan struct{}), chanDone: make(chan struct{}),
+				pty: testPTY(t), admission: admission, sessionID: "test-session"}
 			sess := contextOnlySession{
 				ctx: &sessionContext{
 					Context: isolatedSSHContext{ctx: ctx, connection: conn},
 					meta:    meta,
 				},
 				done: make(chan error, 1),
-				pty:  testPTY(t),
 			}
 			go h.srv.handleSession(sess)
 			select {

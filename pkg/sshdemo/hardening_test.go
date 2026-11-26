@@ -237,7 +237,9 @@ func TestServer_ReleasesConnectionAdmissionAfterSession(t *testing.T) {
 				c.MaxConnections = 1
 				c.MaxSessionsPerIP = 1
 				c.MaxSessionDuration = time.Hour
-				c.IdleTimeout = 100 * time.Millisecond
+				if tc.branch == "wait-forever" {
+					c.IdleTimeout = 100 * time.Millisecond
+				}
 				c.SaveBranch = tc.branch
 			})
 			client := dialSSH(t, h.addr, "visitor")
@@ -256,7 +258,7 @@ func TestServer_ReleasesConnectionAdmissionAfterSession(t *testing.T) {
 			err = sess.Wait()
 			if tc.wantExit == 0 {
 				if err != nil {
-					t.Fatal(err)
+					t.Fatalf("wait = %v, want normal exit\n%s", err, h.logs.String())
 				}
 			} else {
 				var exitErr *gossh.ExitError

@@ -2,7 +2,13 @@ package dtproject
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"os/exec"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -75,6 +81,70 @@ func TestDeviceAuthTellsTheScreenBelow(t *testing.T) {
 	if h.Model().Depth() != 1 || !received[githubAuthenticated](root) {
 		t.Fatalf("depth %d, received %v", h.Model().Depth(), *root.msgs)
 	}
+}
+
+type deviceCodeTransport struct {
+	http.RoundTripper
+	target *url.URL
+}
+
+func (tr deviceCodeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = req.Clone(req.Context())
+	req.URL.Scheme, req.URL.Host = tr.target.Scheme, tr.target.Host
+	return tr.RoundTripper.RoundTrip(req)
+}
+
+func TestNewDeviceAuthHonorsProcessScopeLimit(t *testing.T) {
+	const isolated = "DATATUG_TEST_DEVICE_SCOPE_PROCESS"
+	if os.Getenv(isolated) == "" {
+		// The limit applies for the life of the process.
+		cmd := exec.Command(os.Args[0], "-test.run=^TestNewDeviceAuthHonorsProcessScopeLimit$")
+		cmd.Env = append(os.Environ(), isolated+"=1")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("isolated device flow: %v\n%s", err, out)
+		}
+		return
+	}
+
+	scopes := make(chan string, 2)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/login/device/code" {
+			t.Errorf("device request = %s %s", r.Method, r.URL.Path)
+		}
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode device request: %v", err)
+		}
+		scopes <- body["scope"]
+		_ = json.NewEncoder(w).Encode(testDeviceCode)
+	}))
+	defer srv.Close()
+	target, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stub[http.RoundTripper](t, &http.DefaultTransport, deviceCodeTransport{srv.Client().Transport, target})
+	stub(t, &pollForToken, func(context.Context, string, string, string, int, func(int)) (*oauth2.Token, error) {
+		return nil, errors.New("stop after requesting code")
+	})
+	checkScope := func(want string) {
+		t.Helper()
+		s := newDeviceAuth()
+		msg := s.Init()()
+		if _, ok := msg.(deviceCodeIssued); !ok {
+			t.Fatalf("device flow = %#v", msg)
+		}
+		if got := <-scopes; got != want {
+			t.Errorf("device code requested %q, want %q", got, want)
+		}
+		_, cmd := s.Update(msg)
+		if msg := cmd(); msg == nil {
+			t.Fatal("device flow returned no completion")
+		}
+	}
+	checkScope("repo")
+	ghauth.LimitScope("public_repo")
+	checkScope("public_repo")
 }
 
 func TestDeviceAuthFailures(t *testing.T) {

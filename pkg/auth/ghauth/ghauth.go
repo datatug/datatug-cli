@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/zalando/go-keyring"
@@ -178,8 +179,19 @@ func postJSON(ctx context.Context, url string, data interface{}, target interfac
 	return nil
 }
 
+var scopeLimit atomic.Pointer[string]
+
+// LimitScope fixes the scope of all subsequent device-code requests in this
+// process. The first call wins.
+func LimitScope(scope string) {
+	scopeLimit.CompareAndSwap(nil, &scope)
+}
+
 // RequestDeviceCodeWithScope requests a device code from GitHub for the given OAuth scope.
 func RequestDeviceCodeWithScope(ctx context.Context, clientID, scope string) (*DeviceCodeResponse, error) {
+	if limit := scopeLimit.Load(); limit != nil {
+		scope = *limit
+	}
 	data := map[string]string{
 		"client_id": clientID,
 		"scope":     scope,

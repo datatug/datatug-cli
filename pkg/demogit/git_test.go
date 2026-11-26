@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-git/go-billy/v5/memfs"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -470,6 +471,97 @@ func TestOpenRefusesUntrustedContent(t *testing.T) {
 	}
 }
 
+func TestOpenCanceledDuringFetch(t *testing.T) {
+	for _, branch := range []string{"main", "fallback"} {
+		t.Run(branch, func(t *testing.T) {
+			f := newGitFixture(t)
+			f.cfg.Branch = branch
+			root := t.TempDir()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			opens := 0
+			installFileTransport(t, uploadHookTransport{Transport: client.Protocols["file"], onOpen: func() {
+				opens++
+				if branch == "main" || opens == 2 {
+					cancel()
+				}
+			}})
+			_, err := New(f.cfg, testToken).Open(ctx, aliceFork, filepath.Join(root, "repo"), project)
+			if !errors.Is(err, context.Canceled) || !errors.Is(err, ErrUntrustedContent) {
+				t.Fatalf("Open() = %v", err)
+			}
+			entries, err := os.ReadDir(root)
+			must(t, err)
+			if len(entries) != 0 {
+				t.Fatalf("canceled checkout remained: %v", entries)
+			}
+		})
+	}
+}
+
+func TestOpenCanceledDuringAndAfterCheckout(t *testing.T) {
+	for _, tc := range []struct {
+		name, path string
+		afterWrite bool
+	}{
+		{"during", ".git/index", false},
+		{"after", project + "/datatug-project.json", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newGitFixture(t)
+			f.cfg.Branch = "main"
+			root := t.TempDir()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			hooked := hookContext{Context: ctx, onCheck: func() {
+				paths, err := filepath.Glob(filepath.Join(root, ".datatug-demo-*", tc.path))
+				must(t, err)
+				if len(paths) == 1 {
+					info, err := os.Stat(paths[0])
+					must(t, err)
+					if !tc.afterWrite || info.Size() > 0 {
+						cancel()
+					}
+				}
+			}}
+			_, err := New(f.cfg, testToken).Open(hooked, aliceFork, filepath.Join(root, "repo"), project)
+			if !errors.Is(err, context.Canceled) || !errors.Is(err, ErrUntrustedContent) {
+				t.Fatalf("Open() = %v", err)
+			}
+			if inCheckout := strings.Contains(err.Error(), "check out cloned workspace"); inCheckout == tc.afterWrite {
+				t.Fatalf("Open() returned from wrong phase: %v", err)
+			}
+			entries, err := os.ReadDir(root)
+			must(t, err)
+			if len(entries) != 0 {
+				t.Fatalf("canceled checkout remained: %v", entries)
+			}
+		})
+	}
+}
+
+func TestCheckoutFilesystemCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	fs := checkoutFilesystem{Filesystem: memfs.New(), ctx: ctx}
+	if _, err := fs.OpenFile("missing", os.O_RDONLY, 0); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("open missing file: %v", err)
+	}
+	file, err := fs.OpenFile("open", os.O_CREATE|os.O_WRONLY, 0o600)
+	must(t, err)
+	defer file.Close()
+	cancel()
+	if _, err := fs.OpenFile("new", os.O_CREATE|os.O_WRONLY, 0o600); !errors.Is(err, context.Canceled) {
+		t.Fatalf("open after cancel: %v", err)
+	}
+	if _, err := file.Write([]byte("data")); !errors.Is(err, context.Canceled) {
+		t.Fatalf("write after cancel: %v", err)
+	}
+	if err := fs.Symlink("open", "link"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("symlink after cancel: %v", err)
+	}
+}
+
 func TestSaveRefusals(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -683,7 +775,7 @@ func TestOpenDestinationErrors(t *testing.T) {
 	if _, err := c.Open(ctx, aliceFork, "unused", project); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Open() = %v", err)
 	}
-	if err := installClone(ctx, "unused", "unused"); !errors.Is(err, context.Canceled) {
+	if err := InstallClone(ctx, "unused", "unused"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("installClone() = %v", err)
 	}
 	root := t.TempDir()

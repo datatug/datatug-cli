@@ -96,31 +96,43 @@ type hookContext struct {
 
 func (c hookContext) Err() error { c.onCheck(); return c.Context.Err() }
 
-func TestOpenLosesHeadDuringValidation(t *testing.T) {
-	f := newGitFixture(t)
-	pushToFixture(t, f.local, f.url, f.base, demoRef)
-	parent := t.TempDir()
-	removed := false
-	ctx := hookContext{Context: context.Background(), onCheck: func() {
-		if removed {
-			return
-		}
-		projects, err := filepath.Glob(filepath.Join(parent, ".datatug-demo-*", project, "datatug-project.json"))
-		must(t, err)
-		if len(projects) == 1 {
-			checkout := filepath.Dir(filepath.Dir(projects[0]))
-			must(t, os.Remove(filepath.Join(checkout, ".git", filepath.FromSlash(demoRef.String()))))
-			removed = true
-		}
-	}}
-	c := New(f.cfg, testToken)
-	if _, err := c.Open(ctx, aliceFork, filepath.Join(parent, "repo"), project); err == nil || !strings.Contains(err.Error(), "read cloned branch") {
-		t.Fatalf("Open() = %v", err)
-	}
-	entries, err := os.ReadDir(parent)
-	must(t, err)
-	if len(entries) != 0 {
-		t.Fatalf("partial clone remains: %v", entries)
+func TestOpenLosesHeadBeforeCheckout(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(string) error
+		want string
+	}{
+		{"missing ref", os.Remove, "read cloned branch"},
+		{"missing commit", func(ref string) error {
+			return os.WriteFile(ref, []byte(strings.Repeat("1", 40)+"\n"), 0o600)
+		}, "read cloned commit"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newGitFixture(t)
+			pushToFixture(t, f.local, f.url, f.base, demoRef)
+			parent := t.TempDir()
+			edited := false
+			ctx := hookContext{Context: context.Background(), onCheck: func() {
+				if edited {
+					return
+				}
+				refs, err := filepath.Glob(filepath.Join(parent, ".datatug-demo-*", ".git", filepath.FromSlash(demoRef.String())))
+				must(t, err)
+				if len(refs) == 1 {
+					must(t, tc.edit(refs[0]))
+					edited = true
+				}
+			}}
+			c := New(f.cfg, testToken)
+			if _, err := c.Open(ctx, aliceFork, filepath.Join(parent, "repo"), project); !errors.Is(err, ErrUntrustedContent) || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Open() = %v", err)
+			}
+			entries, err := os.ReadDir(parent)
+			must(t, err)
+			if len(entries) != 0 {
+				t.Fatalf("partial clone remains: %v", entries)
+			}
+		})
 	}
 }
 

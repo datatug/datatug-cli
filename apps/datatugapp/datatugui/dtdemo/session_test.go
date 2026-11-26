@@ -39,6 +39,7 @@ type fakeGitClient struct {
 	savedOpts  []demogit.SaveOptions
 	openBranch string
 	openErr    error
+	openFn     func(context.Context, string) (string, error)
 	openDir    string
 	openProj   string
 	newBranch  string
@@ -65,9 +66,12 @@ func (f *fakeGitClient) Save(_ context.Context, repoDir string, fork demogit.Rep
 	return f.saveRes, f.saveErr
 }
 
-func (f *fakeGitClient) Open(_ context.Context, _ demogit.Repo, destDir, projectDir string) (string, error) {
+func (f *fakeGitClient) Open(ctx context.Context, _ demogit.Repo, destDir, projectDir string) (string, error) {
 	f.openDir = destDir
 	f.openProj = projectDir
+	if f.openFn != nil {
+		return f.openFn(ctx, destDir)
+	}
 	return f.openBranch, f.openErr
 }
 

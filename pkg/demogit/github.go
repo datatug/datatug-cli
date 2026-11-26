@@ -104,23 +104,59 @@ func (c *Client) FindFork(ctx context.Context) (Repo, error) {
 }
 
 func (c *Client) findFork(ctx context.Context, api *github.Client, login string) (Repo, error) {
-	candidate := Repo{Owner: login, Name: c.cfg.Canonical.Name}
+	fork, err := c.lookupFork(ctx, api, Repo{Owner: login, Name: c.cfg.Canonical.Name})
+	if err != nil || fork != (Repo{}) {
+		return fork, err
+	}
+
+	opts := github.RepositoryListByAuthenticatedUserOptions{
+		Type: "owner", ListOptions: github.ListOptions{Page: 1, PerPage: 100},
+	}
+	for range 10 {
+		repos, resp, err := api.Repositories.ListByAuthenticatedUser(ctx, &opts)
+		if err != nil {
+			return Repo{}, c.apiError("list GitHub repositories", resp, err)
+		}
+		for _, repo := range repos {
+			candidate, ok := ownedFork(repo, login)
+			if !ok {
+				continue
+			}
+			fork, err := c.lookupFork(ctx, api, candidate)
+			if err != nil || fork != (Repo{}) {
+				return fork, err
+			}
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return Repo{}, ErrNoFork
+}
+
+func (c *Client) lookupFork(ctx context.Context, api *github.Client, candidate Repo) (Repo, error) {
 	repo, resp, err := api.Repositories.Get(ctx, candidate.Owner, candidate.Name)
 	if err != nil {
 		if statusIs(resp, http.StatusNotFound) {
-			return Repo{}, ErrNoFork
+			return Repo{}, nil
 		}
 		return Repo{}, c.apiError("find GitHub fork", resp, err)
 	}
 	canonical := c.cfg.Canonical.FullName()
-	if !repo.GetFork() || !(strings.EqualFold(repo.GetParent().GetFullName(), canonical) ||
+	fork, ok := ownedFork(repo, candidate.Owner)
+	if ok && (strings.EqualFold(repo.GetParent().GetFullName(), canonical) ||
 		strings.EqualFold(repo.GetSource().GetFullName(), canonical)) {
-		return Repo{}, ErrNoFork
-	}
-	if fork, ok := repoFromResponse(repo); ok {
 		return fork, nil
 	}
-	return candidate, nil
+	return Repo{}, nil
+}
+
+func ownedFork(repo *github.Repository, login string) (Repo, bool) {
+	fork, ok := repoFromResponse(repo)
+	owner := repo.GetOwner().GetLogin()
+	return fork, ok && repo.GetFork() && strings.EqualFold(fork.Owner, login) &&
+		(owner == "" || strings.EqualFold(owner, login))
 }
 
 // EnsureFork returns the visitor's fork, creating it when there is none and

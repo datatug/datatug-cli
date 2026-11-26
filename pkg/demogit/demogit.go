@@ -27,7 +27,7 @@ func (r Repo) FullName() string { return r.Owner + "/" + r.Name }
 
 // CloneLimits bound what Open accepts from an untrusted fork.
 type CloneLimits struct {
-	// MaxBytes is the largest total size of the checked-out files (default 200 MiB).
+	// MaxBytes is the total checkout byte budget, including Git metadata (default 200 MiB).
 	MaxBytes int64
 	// MaxFiles is the largest number of checked-out files (default 20 000).
 	MaxFiles int
@@ -97,8 +97,7 @@ var (
 	ErrForkNotReady = errors.New("GitHub has not finished creating the fork")
 	// ErrNoFork: the visitor has no fork of the canonical repository.
 	ErrNoFork = errors.New("no fork of the demo repository found")
-	// ErrUntrustedContent: Open refused the fork's content (escaping symlink,
-	// too large, too many files, no DataTug project).
+	// ErrUntrustedContent: the demo could not safely open the workspace.
 	ErrUntrustedContent = errors.New("the repository cannot be opened in the demo")
 )
 

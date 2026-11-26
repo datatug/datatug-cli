@@ -15,6 +15,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/go-git/go-git/v5/plumbing/storer"
 )
 
 func defaultLimits(limits CloneLimits) CloneLimits {
@@ -142,6 +143,76 @@ func matchesEntry(wt *git.Worktree, path string, entry *object.TreeEntry) (bool,
 		}
 	}
 	return hash.Sum() == entry.Hash, nil
+}
+
+// cloneWorktreeLimits deducts the on-disk Git metadata from the byte budget.
+func cloneWorktreeLimits(ctx context.Context, root string, limits CloneLimits) (CloneLimits, error) {
+	maxBytes := limits.MaxBytes
+	err := filepath.WalkDir(filepath.Join(root, git.GitDirName), func(path string, entry fs.DirEntry, walkErr error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if info.Size() > limits.MaxBytes {
+			return untrusted(git.GitDirName, "size limit exceeded (%d bytes)", maxBytes)
+		}
+		limits.MaxBytes -= info.Size()
+		return nil
+	})
+	return limits, err
+}
+
+// validateTree walks every path, so two entries pointing at the same object
+// each count against the checkout budget.
+func validateTree(ctx context.Context, store storer.EncodedObjectStorer, hash plumbing.Hash, prefix string, remaining *CloneLimits) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	tree, err := object.GetTree(store, hash)
+	if err != nil {
+		return err
+	}
+	for _, entry := range tree.Entries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if !filepath.IsLocal(entry.Name) || filepath.Base(entry.Name) != entry.Name ||
+			entry.Name == "." || strings.EqualFold(entry.Name, git.GitDirName) {
+			return untrusted(entry.Name, "invalid checkout path")
+		}
+		path := filepath.Join(prefix, entry.Name)
+		if entry.Mode == filemode.Dir {
+			if err := validateTree(ctx, store, entry.Hash, path, remaining); err != nil {
+				return err
+			}
+			continue
+		}
+		remaining.MaxFiles--
+		if remaining.MaxFiles < 0 {
+			return untrusted(path, "file limit exceeded")
+		}
+		if entry.Mode == filemode.Submodule {
+			return untrusted(path, "submodules are not allowed")
+		}
+		size, err := store.EncodedObjectSize(entry.Hash)
+		if err != nil {
+			return fmt.Errorf("read size of %q: %w", path, err)
+		}
+		if size < 0 || size > remaining.MaxBytes {
+			return untrusted(path, "size limit exceeded")
+		}
+		remaining.MaxBytes -= size
+	}
+	return ctx.Err()
 }
 
 // ValidateWorkspace rejects a checked-out tree that DataTug must not open: a

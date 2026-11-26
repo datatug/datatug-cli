@@ -261,6 +261,10 @@ func TestPostJSON_SendError(t *testing.T) {
 
 func TestRequestDeviceCode_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["scope"] != "repo" {
+			t.Errorf("default device request = %v, %v", body, err)
+		}
 		resp := DeviceCodeResponse{
 			DeviceCode:      "dc",
 			UserCode:        "UC-1234",
@@ -589,6 +593,32 @@ func TestRequestDeviceCodeWithScope_PublicRepo(t *testing.T) {
 	}
 	if gotBody["client_id"] != "demo-client" || gotBody["scope"] != "public_repo" {
 		t.Fatalf("unexpected request body: %+v", gotBody)
+	}
+}
+
+func TestLimitScopeAppliesToEveryDeviceCodeRequest(t *testing.T) {
+	previous := scopeLimit.Load()
+	t.Cleanup(func() { scopeLimit.Store(previous) })
+	LimitScope("public_repo")
+	LimitScope("repo")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["scope"] != "public_repo" {
+			t.Errorf("limited device request = %v, %v", body, err)
+		}
+		_ = json.NewEncoder(w).Encode(DeviceCodeResponse{DeviceCode: "limited"})
+	}))
+	t.Cleanup(srv.Close)
+	withDeviceCodeURL(t, srv.URL)
+
+	ctx := context.Background()
+	if _, err := RequestDeviceCode(ctx, "default"); err != nil {
+		t.Fatal(err)
+	}
+	for _, scope := range []string{"", "repo", "repo user", "public_repo"} {
+		if _, err := RequestDeviceCodeWithScope(ctx, "explicit", scope); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

@@ -128,6 +128,7 @@ func runDemoSSHSession(ctx context.Context, f demoSSHSessionFlags) error {
 
 	// Keep GitHub tokens strictly in process memory; never touch the OS keyring.
 	demoSSHUseMemoryStore()
+	ghauth.LimitScope(dtdemo.GitHubScope)
 
 	if strings.TrimSpace(f.workspace) == "" {
 		return errors.New("--workspace is required")

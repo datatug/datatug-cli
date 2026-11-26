@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/go-git/go-billy/v5"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -259,9 +260,14 @@ func pushDiverged(err error) bool {
 }
 
 // Open clones the saved branch of fork (Config.Branch, else the fork's default
-// branch) into destDir, which must not exist or be empty, and validates it
-// with ValidateWorkspace. It returns the branch it checked out.
+// branch) into an absent or empty destDir. It validates the tree before
+// checkout and the workspace before publishing. Errors wrap ErrUntrustedContent.
 func (c *Client) Open(ctx context.Context, fork Repo, destDir, projectDir string) (branch string, err error) {
+	defer func() {
+		if err != nil && !errors.Is(err, ErrUntrustedContent) {
+			err = fmt.Errorf("%w: %w", ErrUntrustedContent, err)
+		}
+	}()
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -287,29 +293,59 @@ func (c *Client) Open(ctx context.Context, fork Repo, destDir, projectDir string
 	opts := &git.CloneOptions{
 		URL: c.gitURL(fork), Auth: c.gitAuth(), ReferenceName: plumbing.NewBranchReferenceName(c.cfg.Branch),
 		SingleBranch: true, Depth: c.cfg.Limits.Depth, Tags: git.NoTags, RecurseSubmodules: git.NoRecurseSubmodules,
+		NoCheckout: true,
 	}
 	repo, err := git.PlainCloneContext(ctx, checkout, false, opts)
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
 	if errors.Is(err, git.NoMatchingRefSpecError{}) || errors.Is(err, plumbing.ErrReferenceNotFound) {
 		opts.ReferenceName = plumbing.HEAD
 		repo, err = git.PlainCloneContext(ctx, checkout, false, opts)
 	}
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
 	if err != nil {
 		return "", c.gitError("clone workspace from fork", err)
 	}
-	if err := validateWorkspace(ctx, checkout, projectDir, c.cfg.Limits); err != nil {
+	limits, err := cloneWorktreeLimits(ctx, checkout, c.cfg.Limits)
+	if err != nil {
 		return "", err
 	}
 	head, err := repo.Head()
 	if err != nil {
 		return "", c.operationError("read cloned branch", err)
 	}
-	if err := installClone(ctx, checkout, destDir); err != nil {
+	commit, err := repo.CommitObject(head.Hash())
+	if err != nil {
+		return "", c.operationError("read cloned commit", err)
+	}
+	if err := validateTree(ctx, repo.Storer, commit.TreeHash, "", &limits); err != nil {
+		return "", c.operationError("validate cloned tree", err)
+	}
+	worktree, _ := repo.Worktree() // The clone is non-bare.
+	worktree.Filesystem = checkoutFilesystem{Filesystem: worktree.Filesystem, ctx: ctx}
+	if err := worktree.Reset(&git.ResetOptions{Commit: head.Hash(), Mode: git.HardReset}); err != nil {
+		return "", c.operationError("check out cloned workspace", err)
+	}
+	// Checkout writes an index. Count the final metadata size as well.
+	limits, err = cloneWorktreeLimits(ctx, checkout, c.cfg.Limits)
+	if err != nil {
+		return "", err
+	}
+	if err := validateWorkspace(ctx, checkout, projectDir, limits); err != nil {
+		return "", err
+	}
+	if err := InstallClone(ctx, checkout, destDir); err != nil {
 		return "", fmt.Errorf("install cloned workspace: %w", err)
 	}
 	return head.Name().Short(), nil
 }
 
-func installClone(ctx context.Context, checkout, destDir string) error {
+// InstallClone publishes a validated checkout by moving it into an absent or
+// empty destination directory on the same filesystem.
+func InstallClone(ctx context.Context, checkout, destDir string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -319,6 +355,43 @@ func installClone(ctx context.Context, checkout, destDir string) error {
 		return err
 	}
 	return os.Rename(checkout, destDir)
+}
+
+// go-git does not take a context during checkout. Check it at the worktree
+// write boundary and between chunks while copying a file.
+type checkoutFilesystem struct {
+	billy.Filesystem
+	ctx context.Context
+}
+
+func (fs checkoutFilesystem) OpenFile(path string, flag int, mode os.FileMode) (billy.File, error) {
+	if err := fs.ctx.Err(); err != nil {
+		return nil, err
+	}
+	f, err := fs.Filesystem.OpenFile(path, flag, mode)
+	if err != nil {
+		return nil, err
+	}
+	return checkoutFile{File: f, ctx: fs.ctx}, nil
+}
+
+func (fs checkoutFilesystem) Symlink(target, path string) error {
+	if err := fs.ctx.Err(); err != nil {
+		return err
+	}
+	return fs.Filesystem.Symlink(target, path)
+}
+
+type checkoutFile struct {
+	billy.File
+	ctx context.Context
+}
+
+func (f checkoutFile) Write(p []byte) (int, error) {
+	if err := f.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return f.File.Write(p)
 }
 
 func checkDestination(destDir string) error {

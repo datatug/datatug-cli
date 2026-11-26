@@ -83,6 +83,8 @@ type Server struct {
 	slotReuseMu     sync.Mutex
 	cleanupGroup    cgroup
 	cleanupQueue    chan struct{}
+	cleanupMu       sync.Mutex
+	pendingCleanup  map[int]*cleanupJob
 	hostSigner      gossh.Signer
 	executable      string
 	templateDir     string
@@ -165,6 +167,7 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 			return nil, err
 		}
 	}
+	s.cleanupQueue = make(chan struct{}, 1)
 	if err := s.cleanStaleSessions(ctx); err != nil {
 		return nil, err
 	}
@@ -312,11 +315,10 @@ func (s *Server) TemplateDir() string {
 
 // Serve accepts SSH connections on ln until Shutdown or Close is called.
 func (s *Server) Serve(ln net.Listener) error {
-	if s.cfg.Isolation == IsolationUID {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		go s.recheckSlotMemory(ctx, 30*time.Second)
-	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go s.recheckSlots(ctx, cleanupRetryInterval)
+	go s.recheckCleanup(ctx, cleanupRetryInterval)
 	if s.cfg.ProxyProtocol {
 		ln = &proxyproto.Listener{Listener: ln, ConnPolicy: s.proxyPolicy, ReadHeaderTimeout: s.cfg.HandshakeTimeout}
 	}
@@ -704,6 +706,7 @@ func (s *Server) handleSession(sess ssh.Session) {
 	var waitCh chan error
 	reaped := false
 	var group *cgroup
+	var slotEntryErr error
 	var oomAtStart uint64
 	var oomBaselineAvailable bool
 
@@ -745,13 +748,14 @@ func (s *Server) handleSession(sess ssh.Session) {
 			cleanupErr = errors.Join(cleanupErr, waitForChildReap(waitCh, maxSessionTerminationGrace))
 		}
 
-		if cleanupErr == nil {
-			cleanupErr = s.cleanWorkspace(context.Background(), dir, slot.UID, slot.GID)
-		}
-		if cleanupErr != nil {
-			s.quarantineSlot(slot.Index, cleanupErr)
-		} else if group != nil {
-			s.checkSlotReuse(slot.Index, false)
+		switch {
+		case cleanupErr != nil:
+			s.quarantineSlot(slot.Index, errors.Join(cleanupErr, slotEntryErr))
+		case slotEntryErr != nil:
+			_, err := s.cleanWorkspace(context.Background(), dir, slot.UID, slot.GID)
+			s.quarantineSlot(slot.Index, errors.Join(slotEntryErr, err))
+		default:
+			s.runCleanupJob(context.Background(), &cleanupJob{dirs: []string{dir}, slot: slot})
 		}
 		s.slots.Release(slot)
 
@@ -817,7 +821,12 @@ func (s *Server) handleSession(sess ssh.Session) {
 		if err := group.waitForSlotEntry(sess.Context(), ready, pgid); err != nil {
 			// The child may still be in the supervisor cgroup.
 			_ = cmd.Process.Kill()
-			s.logger.Error("verify session child slot entry failed", "session_id", sessionID, "err", err)
+			if slotEntryAbandoned(sess.Context(), meta.chanDone) {
+				endReason = EndReasonClientDrop
+			} else {
+				slotEntryErr = err
+				s.logger.Error("verify session child slot entry failed", "session_id", sessionID, "err", err)
+			}
 			exitStatus = 1
 			return
 		}
@@ -915,6 +924,18 @@ func (s *Server) handleSession(sess ssh.Session) {
 			terminate(s.cfg.ShutdownGrace)
 			return
 		}
+	}
+}
+
+// The channel close can close the PTY before the child reports slot entry.
+func slotEntryAbandoned(ctx context.Context, channelDone <-chan struct{}) bool {
+	select {
+	case <-ctx.Done():
+		return true
+	case <-channelDone:
+		return true
+	default:
+		return false
 	}
 }
 

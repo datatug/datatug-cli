@@ -3,7 +3,6 @@
 package sshdemo
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -163,6 +162,9 @@ func generateSessionID() (string, error) {
 var setWorkspaceMode = os.Chmod
 
 func createSessionWorkspace(sessionsDir, sessionID string, slot Slot, isolation string, ops SysOps) (string, string, string, error) {
+	if isolation == IsolationUID {
+		sessionsDir = filepath.Join(sessionsDir, slotName(slot.Index))
+	}
 	dir := filepath.Join(sessionsDir, sessionID)
 	homeDir := filepath.Join(dir, "home")
 	repoDir := filepath.Join(dir, "repo")
@@ -205,84 +207,8 @@ func createSessionWorkspace(sessionsDir, sessionID string, slot Slot, isolation 
 	return dir, homeDir, repoDir, nil
 }
 
-// cleanWorkspace queues UID-mode cleanup in the calling session goroutine
-// while its slot is still reserved. Callers must drain the slot first.
-func (s *Server) cleanWorkspace(ctx context.Context, dir string, uid, gid int) error {
-	args := append(append([]string(nil), s.cfg.ExecPrefixArgs...), BuildCleanupArgs(dir)...)
-	if s.cfg.Isolation == IsolationUID {
-		select {
-		case s.cleanupQueue <- struct{}{}:
-			defer func() { <-s.cleanupQueue }()
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-		args = appendSlotEntryArgs(args, s.cleanupGroup.path, uid, gid)
-	}
-	cleanCtx, cancel := context.WithTimeout(ctx, s.cfg.CleanupTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(cleanCtx, s.executable, args...)
-	cmd.Env = buildCleanupEnv(filepath.Join(dir, "home"))
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("could not verify cleanup of workspace %s: helper failed: %w", dir, err)
-	}
-	if err := os.Remove(dir); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("could not verify cleanup of workspace %s: %w", dir, err)
-	}
-	return nil
-}
-
 func appendSlotEntryArgs(args []string, path string, uid, gid int) []string {
 	return append(args, "--slot-cgroup", path, "--slot-uid", strconv.Itoa(uid), "--slot-gid", strconv.Itoa(gid))
-}
-
-// cleanStaleSessions reclaims workspaces only after prepareCgroups has drained
-// their slot cgroups or quarantined them.
-func (s *Server) cleanStaleSessions(ctx context.Context) error {
-	entries, err := os.ReadDir(s.cfg.SessionsDir)
-	if err != nil {
-		return fmt.Errorf("sshdemo: read sessions-dir for stale cleanup: %w", err)
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		dir := filepath.Join(s.cfg.SessionsDir, entry.Name())
-		uid, gid := os.Getuid(), os.Getgid()
-		if s.cfg.Isolation == IsolationUID {
-			fi, statErr := s.ops.Stat(dir)
-			if statErr != nil {
-				return fmt.Errorf("sshdemo: stat stale session dir %s: %w", dir, statErr)
-			}
-			if !fi.IsDir() {
-				continue
-			}
-			ownerUID, ok := s.ops.FileUID(fi)
-			if !ok {
-				return fmt.Errorf("sshdemo: cannot determine owner of stale session dir %s", dir)
-			}
-			if ownerUID < s.cfg.UIDBase {
-				return fmt.Errorf("sshdemo: stale session directory %s belongs to UID %d below --uid-base %d", dir, ownerUID, s.cfg.UIDBase)
-			}
-			if s.slots.InSlotRange(ownerUID) && s.slots.isQuarantined(ownerUID-s.cfg.UIDBase) {
-				continue
-			}
-			uid = ownerUID
-			gid = ownerUID
-		}
-
-		err := s.cleanWorkspace(ctx, dir, uid, gid)
-		if err == nil {
-			s.logger.Info("cleaned stale session dir", "dir", dir, "uid", uid)
-			continue
-		}
-		if s.cfg.Isolation == IsolationProcess || !s.slots.InSlotRange(uid) {
-			return err
-		}
-		if s.quarantineSlot(uid-s.cfg.UIDBase, err) {
-			return errors.New("sshdemo: all session slots quarantined after stale cleanup")
-		}
-	}
-	return nil
 }
 
 var ptySyscallConn = (*os.File).SyscallConn

@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"os"
 	"time"
 )
 
@@ -19,5 +18,5 @@ func CheckHealthProxyLocal(context.Context, string, time.Duration) error { retur
 func PrintHostKey(string, io.Writer) error                               { return errLinuxOnly }
 func EnterSlot(SlotEntry) error                                          { return errLinuxOnly }
 
-// OpenCleanupDirectory is used only by the Linux SSH demo.
-func OpenCleanupDirectory(string) (*os.File, string, error) { return nil, "", errLinuxOnly }
+// CleanWorkspaceContents is used only by the Linux SSH demo.
+func CleanWorkspaceContents(string, func()) error { return errLinuxOnly }

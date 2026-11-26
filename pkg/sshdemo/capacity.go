@@ -54,10 +54,13 @@ func (s *Server) checkFilesystemCapacity(slotMemory uint64) error {
 		return fmt.Errorf("sshdemo: sessions filesystem capacity (%d bytes) does not fit %d bytes of slot budgets plus %d bytes of headroom",
 			size, total, headroom)
 	}
-	const bytesPerInode = 1024
-	requiredInodes := ((slotMemory + bytesPerInode - 1) / bytesPerInode) * slots
+	const bytesPerInode = 512
+	// Reserve the tmpfs root plus each slot parent, workspace, and its
+	// initial home, repo and tmp directories created by the supervisor.
+	const supervisorInodesPerSlot = 5
+	requiredInodes := ((slotMemory+bytesPerInode-1)/bytesPerInode+supervisorInodesPerSlot)*slots + 1
 	if inodes < requiredInodes {
-		return fmt.Errorf("sshdemo: sessions filesystem inode capacity (%d inodes) is below %d inodes required for slot budgets", inodes, requiredInodes)
+		return fmt.Errorf("sshdemo: sessions filesystem inode capacity (%d inodes) is below %d inodes required for slot budgets and supervisor directories", inodes, requiredInodes)
 	}
 	return nil
 }

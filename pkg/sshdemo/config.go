@@ -38,7 +38,7 @@ const (
 	IsolationProcess = "process"
 
 	DefaultShutdownGrace            = 10 * time.Second
-	DefaultCleanupTimeout           = 30 * time.Second
+	DefaultCleanupTimeout           = 120 * time.Second
 	DefaultCleanupMemLimit          = 96 << 20
 	DefaultCleanupPIDsLimit         = 32
 	DefaultSlotReuseMemoryThreshold = 16 << 20
@@ -323,8 +323,7 @@ func (c Config) Validate() error {
 }
 
 func (c Config) validateSlotUIDs(realUID, effectiveUID int) error {
-	maxUID := min(uint64(math.MaxUint32-1), uint64(math.MaxInt))
-	if c.UIDBase < 1 || uint64(c.UIDBase)+uint64(c.MaxSessions)-1 > maxUID {
+	if c.UIDBase < 1 || uint64(c.UIDBase)+uint64(c.MaxSessions)-1 > maxSlotUID {
 		return fmt.Errorf("sshdemo: invalid slot UID range (uid-base %d, max-sessions %d)", c.UIDBase, c.MaxSessions)
 	}
 	if uidInRange(realUID, c.UIDBase, c.MaxSessions) || uidInRange(effectiveUID, c.UIDBase, c.MaxSessions) {
@@ -361,6 +360,8 @@ func isLoopbackListen(addr string) bool {
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
 }
+
+const maxSlotUID = min(uint64(math.MaxUint32-1), uint64(math.MaxInt))
 
 func uidInRange(uid, base, count int) bool {
 	return uid >= base && uid-base < count

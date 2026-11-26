@@ -24,18 +24,20 @@ const (
 )
 
 type cgroupFS struct {
-	verify func(string) error
-	read   func(string) ([]byte, error)
-	write  func(string, string) error
-	mkdir  func(string, os.FileMode) error
+	verify  func(string) error
+	mountID func(string) (uint64, error)
+	read    func(string) ([]byte, error)
+	write   func(string, string) error
+	mkdir   func(string, os.FileMode) error
 }
 
 func defaultCgroupFS() cgroupFS {
 	return cgroupFS{
-		verify: verifyCgroupFS,
-		read:   os.ReadFile,
-		write:  writeCgroupFile,
-		mkdir:  os.Mkdir,
+		verify:  verifyCgroupFS,
+		mountID: func(path string) (uint64, error) { return mountIDAt(unix.AT_FDCWD, path, 0) },
+		read:    os.ReadFile,
+		write:   writeCgroupFile,
+		mkdir:   os.Mkdir,
 	}
 }
 
@@ -175,7 +177,7 @@ func (g cgroup) drain(ctx context.Context, timeout time.Duration) error {
 	}
 }
 
-func slotCgroupName(index int) string {
+func slotName(index int) string {
 	return "slot-" + strconv.Itoa(index)
 }
 
@@ -186,6 +188,9 @@ func (s *Server) prepareCgroups(ctx context.Context) error {
 	}
 	budget, err := checkMemoryCapacity(s.cfg, scope)
 	if err != nil {
+		return err
+	}
+	if err := scope.verifyNamespaceBoundary(); err != nil {
 		return err
 	}
 	if err := checkPIDCapacity(s.cfg, scope); err != nil {
@@ -207,7 +212,7 @@ func (s *Server) prepareCgroups(ctx context.Context) error {
 	for _, entry := range entries {
 		if entry.IsDir() && entry.Name() != "supervisor" && entry.Name() != "cleanup" {
 			index, err := strconv.Atoi(strings.TrimPrefix(entry.Name(), "slot-"))
-			if err == nil && index >= 0 && index < s.cfg.MaxSessions && entry.Name() == slotCgroupName(index) {
+			if err == nil && index >= 0 && index < s.cfg.MaxSessions && entry.Name() == slotName(index) {
 				continue
 			}
 			if err := scope.child(entry.Name()).drain(ctx, cgroupDrainTimeout); err != nil {
@@ -218,7 +223,7 @@ func (s *Server) prepareCgroups(ctx context.Context) error {
 
 	s.cgroups = make([]cgroup, s.cfg.MaxSessions)
 	for index := range s.cgroups {
-		group := scope.child(slotCgroupName(index))
+		group := scope.child(slotName(index))
 		s.cgroups[index] = group
 		existed, err := group.ensureDir()
 		if err != nil {
@@ -249,7 +254,6 @@ func (s *Server) prepareCgroups(ctx context.Context) error {
 	if err := s.cleanupGroup.configureLimits(s.cfg.CleanupMemLimit, s.cfg.CleanupPIDsLimit); err != nil {
 		return fmt.Errorf("sshdemo: configure cleanup cgroup: %w", err)
 	}
-	s.cleanupQueue = make(chan struct{}, 1)
 	return nil
 }
 
@@ -273,25 +277,34 @@ func (s *Server) checkSlotReuse(index int, retry bool) {
 	if retry && !pending {
 		return
 	}
-	current, err := s.cgroups[index].counter("memory.current")
+	group := s.cgroups[index]
+	current, err := group.counter("memory.current")
 	threshold := s.cfg.SlotReuseMemoryThreshold
+	if err == nil && current >= threshold {
+		// Reclaim can return EAGAIN after dropping part of the requested
+		// amount. The current counter decides whether the slot is usable.
+		if err := group.write("memory.reclaim", strconv.FormatUint(current, 10)); err != nil && !errors.Is(err, unix.EAGAIN) {
+			s.logger.Warn("reclaim residual session slot memory", "slot_index", index, "err", err)
+		}
+		current, err = group.counter("memory.current")
+	}
 	if err == nil && current < threshold {
+		s.slots.setSlotState(index, slotUsable)
 		if pending {
-			s.slots.setMemoryQuarantine(index, false)
 			s.logger.Info("session slot available again", "slot_index", index, "memory_current", current,
 				"quarantined_slots", s.slots.quarantinedCount(), "max_sessions", s.cfg.MaxSessions)
 		}
 		return
 	}
 	if !pending {
-		s.slots.setMemoryQuarantine(index, true)
+		s.slots.setSlotState(index, slotAwaitingMemory)
 		s.logger.Warn("quarantining session slot pending memory release", "slot_index", index,
 			"memory_current", current, "threshold", threshold, "err", err,
 			"quarantined_slots", s.slots.quarantinedCount(), "max_sessions", s.cfg.MaxSessions)
 	}
 }
 
-func (s *Server) recheckSlotMemory(ctx context.Context, interval time.Duration) {
+func (s *Server) recheckSlots(ctx context.Context, interval time.Duration) {
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
 	for {

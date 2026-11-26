@@ -30,6 +30,7 @@ var fakeSlotFiles = map[string]string{
 	"cgroup.procs":     "",
 	"memory.max":       "max",
 	"memory.current":   "0",
+	"memory.reclaim":   "",
 	"memory.events":    "oom 0\noom_kill 0\noom_group_kill 0\n",
 	"memory.swap.max":  "max",
 	"memory.oom.group": "0",
@@ -66,6 +67,19 @@ func fakeCgroupMount(t *testing.T) (string, cgroupFS) {
 	writeFixtureFile(t, scope, "pids.max", "max\n")
 	fs := defaultCgroupFS()
 	fs.verify = func(string) error { return nil }
+	fs.mountID = func(string) (uint64, error) { return 42, nil }
+	fs.read = func(path string) ([]byte, error) {
+		if path == "/proc/self/mountinfo" {
+			return []byte("42 1 0:2 / /sys/fs/cgroup rw - cgroup2 cgroup2 rw,nsdelegate\n"), nil
+		}
+		return os.ReadFile(path)
+	}
+	fs.write = func(path, value string) error {
+		if path == filepath.Join(root, "memory.max") {
+			return unix.EPERM
+		}
+		return writeCgroupFile(path, value)
+	}
 	fs.mkdir = func(path string, perm os.FileMode) error {
 		if err := os.Mkdir(path, perm); err != nil {
 			return err
@@ -101,6 +115,7 @@ func fakeCgroupServer(t *testing.T) (Config, SysOps) {
 		FilesystemCapacity: ampleSessionFilesystem,
 		StatSharedTemp:     noSharedTemp,
 		FileUID:            func(os.FileInfo) (int, bool) { return 0, true },
+		FileGID:            fakeSlotGID(cfg.UIDBase),
 		Chown:              func(string, int, int) error { return nil },
 		Fchown:             func(*os.File, int, int) error { return nil },
 	}
@@ -186,7 +201,7 @@ func TestCgroupPIDCapacityFailsClosed(t *testing.T) {
 func TestUIDStartupChecksSharedTmpfsCapacity(t *testing.T) {
 	const total = uint64(2 * (DefaultSessionMemQuota + DefaultSessionDiskQuota))
 	const roundedSize = total + (total+9)/10
-	const requiredInodes = total / 1024
+	const requiredInodes = total/512 + 2*5 + 1
 	for _, tc := range []struct {
 		name         string
 		size, inodes uint64
@@ -196,6 +211,7 @@ func TestUIDStartupChecksSharedTmpfsCapacity(t *testing.T) {
 		{"below combined caps", total - 1, requiredInodes, "filesystem capacity"},
 		{"missing ten percent headroom", roundedSize - 1, requiredInodes, "headroom"},
 		{"one inode short", roundedSize, requiredInodes - 1, "inode capacity"},
+		{"previous sizing", roundedSize, total / 1024, "inode capacity"},
 		{"zero reported inodes", roundedSize, 0, "inode capacity"},
 		{"changed concurrency", roundedSize, requiredInodes, "filesystem capacity"},
 	} {
@@ -429,7 +445,7 @@ func TestSlotReuseWaitsForResidualMemory(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		s.recheckSlotMemory(ctx, time.Millisecond)
+		s.recheckSlots(ctx, time.Millisecond)
 	}()
 	defer func() { cancel(); <-done }()
 	writeFixtureFile(t, existing, "new.current", strconv.FormatUint(cfg.SlotReuseMemoryThreshold-1, 10))
@@ -552,8 +568,58 @@ func TestSessionSlotEntryFailureWithholdsPTYInput(t *testing.T) {
 				t.Fatalf("session wait = %v", err)
 			}
 			waitLogContains(t, h.logs, tc.log, time.Second)
-			waitNoSessionDirs(t, cfg.SessionsDir, time.Second)
+			if !h.srv.slots.isQuarantined(0) {
+				t.Fatal("slot with failed entry was returned to the pool")
+			}
+			waitNoSessionDirs(t, filepath.Join(cfg.SessionsDir, "slot-0"), time.Second)
 		})
+	}
+}
+
+func TestSlotEntryAbandonedOnChannelOrConnectionClose(t *testing.T) {
+	open := make(chan struct{})
+	closed := make(chan struct{})
+	close(closed)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if !slotEntryAbandoned(ctx, open) || !slotEntryAbandoned(t.Context(), closed) ||
+		slotEntryAbandoned(t.Context(), open) {
+		t.Fatal("slot entry must distinguish a disconnect from an entry failure")
+	}
+}
+
+func TestSessionDisconnectDuringSlotEntryReusesSlot(t *testing.T) {
+	cfg, ops := fakeCgroupServer(t)
+	h := startTestServer(t, func(c *Config) {
+		c.Isolation, c.CgroupRoot, c.SessionsDir = cfg.Isolation, cfg.CgroupRoot, cfg.SessionsDir
+		c.MaxSessions = 1
+		c.SaveBranch = "slot-entry-timeout"
+	}, WithSysOps(ops))
+
+	client := dialSSH(t, h.addr, "visitor")
+	sess, err := client.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.RequestPty("xterm", 24, 80, nil); err != nil {
+		t.Fatal(err)
+	}
+	out, err := sess.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Shell(); err != nil {
+		t.Fatal(err)
+	}
+	if line, err := bufio.NewReader(out).ReadString('\n'); err != nil || !strings.HasPrefix(line, "PID:") {
+		t.Fatalf("child startup: %q, %v", line, err)
+	}
+	if err := client.Close(); err != nil {
+		t.Fatal(err)
+	}
+	waitLogContains(t, h.logs, `"end_reason":"client-drop"`, time.Second)
+	if _, err := h.srv.slots.Acquire("next visitor"); err != nil {
+		t.Fatalf("slot remained unavailable after a disconnect: %v", err)
 	}
 }
 
@@ -647,7 +713,7 @@ func TestSessionCgroupMemoryNotices(t *testing.T) {
 	}
 	writeFixtureFile(t, slot.path, "memory.events", "oom_group_kill 1\n")
 	// The fixture has no real OOM killer; end the helper as the kernel would.
-	if err := syscall.Kill(helperPIDFromWorkspace(t, cfg.SessionsDir), syscall.SIGKILL); err != nil {
+	if err := syscall.Kill(helperPIDFromWorkspace(t, filepath.Join(cfg.SessionsDir, "slot-0")), syscall.SIGKILL); err != nil {
 		t.Fatal(err)
 	}
 	var exitErr *gossh.ExitError
@@ -662,7 +728,7 @@ func TestSessionCgroupMemoryNotices(t *testing.T) {
 		t.Fatal("slot with retained memory was returned to the pool")
 	}
 	waitForNoConnectionReservations(t, h.srv)
-	waitNoSessionDirs(t, cfg.SessionsDir, time.Second)
+	waitNoSessionDirs(t, filepath.Join(cfg.SessionsDir, "slot-0"), time.Second)
 }
 
 func helperPIDFromWorkspace(t *testing.T, root string) int {
@@ -727,7 +793,7 @@ func TestSessionCgroupDrainFailureQuarantines(t *testing.T) {
 	if _, err := h.srv.slots.Acquire("visitor"); !errors.Is(err, ErrGlobalLimit) {
 		t.Fatalf("allocation after an unverified drain: %v", err)
 	}
-	entries, err := os.ReadDir(cfg.SessionsDir)
+	entries, err := os.ReadDir(filepath.Join(cfg.SessionsDir, "slot-0"))
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("workspace must remain untouched after failed drain: %v, %v", entries, err)
 	}
@@ -764,5 +830,62 @@ func TestSessionCgroupGracefulShutdownWithMissingNoticeCounter(t *testing.T) {
 	waitLogContains(t, h.logs, "read slot OOM counter failed", time.Second)
 	h.stop()
 	waitLogContains(t, h.logs, `"end_reason":"shutdown","exit_status":0`, time.Second)
-	waitNoSessionDirs(t, cfg.SessionsDir, time.Second)
+	waitNoSessionDirs(t, filepath.Join(cfg.SessionsDir, "slot-0"), time.Second)
+}
+
+func TestSlotReuseReclaimsBeforeDeciding(t *testing.T) {
+	const high = "16777216"
+	for _, tc := range []struct {
+		name, remaining string
+		writeErr        error
+		retry, warned   bool
+		want            slotQuarantine
+	}{
+		{"reclaimed", "0", nil, false, false, slotUsable},
+		{"partial reclaim", "0", unix.EAGAIN, false, false, slotUsable},
+		{"retained charges", high, unix.EAGAIN, false, false, slotAwaitingMemory},
+		{"periodic reclaim", "0", nil, true, false, slotUsable},
+		{"reclaim error with retained charges", high, unix.EIO, true, true, slotAwaitingMemory},
+		{"reclaim error with released charges", "0", unix.EIO, true, true, slotUsable},
+		{"unreadable after reclaim", "bad", nil, false, false, slotAwaitingMemory},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, ops := fakeCgroupServer(t)
+			var logs syncBuffer
+			cfg.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
+			s, err := NewServer(t.Context(), cfg, WithSysOps(ops))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			reads, writes := 0, 0
+			s.cgroups[0].fs.read = func(path string) ([]byte, error) {
+				if filepath.Base(path) != "memory.current" {
+					t.Fatalf("unexpected read from %s", path)
+				}
+				reads++
+				if reads == 1 {
+					return []byte(high), nil
+				}
+				return []byte(tc.remaining), nil
+			}
+			s.cgroups[0].fs.write = func(path, value string) error {
+				if filepath.Base(path) != "memory.reclaim" || reads != 1 || value != high {
+					t.Fatalf("unexpected reclaim: write %s %s after %d reads", path, value, reads)
+				}
+				writes++
+				return tc.writeErr
+			}
+			if tc.retry {
+				s.slots.setSlotState(0, slotAwaitingMemory)
+			}
+			s.checkSlotReuse(0, tc.retry)
+			if reads != 2 || writes != 1 || s.slots.quarantined[0] != tc.want {
+				t.Fatalf("reads = %d, writes = %d, slot state = %v, want %v", reads, writes, s.slots.quarantined[0], tc.want)
+			}
+			if warned := strings.Contains(logs.String(), "reclaim residual session slot memory"); warned != tc.warned {
+				t.Fatalf("reclaim warning = %v, want %v: %s", warned, tc.warned, logs.String())
+			}
+		})
+	}
 }

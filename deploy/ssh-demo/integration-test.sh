@@ -309,6 +309,19 @@ check_slot_limits() {
         { printf '%s\n' "$out" >&2; return 1; }
 }
 
+check_sessions_inode_budget() {
+    "${compose[@]}" exec -T demo /bin/sh -ec '
+        required=1
+        for slot in /sys/fs/cgroup/slot-*; do
+            cap=$(cat "$slot/memory.max")
+            required=$((required + (cap + 511) / 512 + 5))
+            test -e "$slot/memory.reclaim"
+        done
+        inodes=$(stat -f -c %c /var/lib/datatug-demo/sessions)
+        test "$inodes" -ge "$required"
+    '
+}
+
 check_cleanup_limits() {
     "${compose[@]}" exec -T demo /bin/sh -ec '
         cd /sys/fs/cgroup/cleanup
@@ -333,16 +346,70 @@ check_slot_oom_contained() {
     "${compose[@]}" exec -T demo /usr/local/bin/datatug demo ssh-health --addr 127.0.0.1:2222 --proxy-protocol >/dev/null
 }
 
-check_hard_links_denied() {
-    local uid=$(("${DEMO_UID_BASE:-20000}" + last_slot))
+check_slot_isolation() {
+    local uid=${DEMO_UID_BASE:-20000}
     "${compose[@]}" exec -T demo /bin/sh -ec '
-        dir=/var/lib/datatug-demo/sessions/6bbbd4c7425cd06af440590be39f3608
+        base=/var/lib/datatug-demo/sessions
+        dir=$base/slot-0/6bbbd4c7425cd06af440590be39f3608
+        other=$base/slot-1/6bbbd4c7425cd06af440590be39f3608
+        trap "rmdir $dir $other" EXIT
         mkdir -m 0700 "$dir"
-        trap '\''rmdir "$dir"'\'' EXIT
         chown "$2:$2" "$dir"
-        GOMAXPROCS=2 /run/datatug-demo/ssh-slot-link-probe "$1" "$2" "$dir"
-    ' probe "$slots_dir/slot-$last_slot" "$uid"
+        mkdir -m 0777 "$other"
+        chown "$(($2 + 1)):$(($2 + 1))" "$other"
+        test "$(stat -c "%u:%g:%a" "$base/slot-0")" = "0:$2:710"
+        test "$(stat -c "%u:%g:%a" "$base/slot-1")" = "0:$(($2 + 1)):710"
+        GOMAXPROCS=2 /run/datatug-demo/ssh-slot-link-probe isolation "$1" "$2" "$dir" "$other"
+    ' probe "$slots_dir/slot-0" "$uid"
 }
+
+# Build both trees under a live session's credentials and cgroup. Closing
+# that SSH connection exercises the production cleanup and slot reuse path.
+check_deep_session_cleanup() (
+    local uid=${DEMO_UID_BASE:-20000} client= workspace= result deadline
+    local parent=/var/lib/datatug-demo/sessions/slot-0
+    local fifo="$work_dir/deep-input"
+    mkfifo "$fifo" || return 1
+    exec {hold}<>"$fifo"
+    trap 'if [[ -n $client ]]; then kill "$client" 2>/dev/null || true; wait "$client" 2>/dev/null || true; fi' EXIT
+    timeout 90s "${ssh_client[@]}" -o StrictHostKeyChecking=yes -tt "$ssh_target" \
+        <&"$hold" >"$work_dir/deep-ssh.log" 2>&1 &
+    client=$!
+    deadline=$((SECONDS + 20))
+    while [[ -z $workspace && $SECONDS -lt $deadline ]]; do
+        workspace=$("${compose[@]}" exec -T demo /bin/sh -c '
+            if [ -n "$(cat "$1/cgroup.procs")" ]; then
+                set -- "$2"/*
+                if [ "$#" -eq 1 ] && [ -d "$1" ]; then printf "%s" "$1"; fi
+            fi
+        ' probe "$slots_dir/slot-0" "$parent") || return 1
+        [[ -n $workspace ]] || sleep 1
+    done
+    [[ -n $workspace ]] || { cat "$work_dir/deep-ssh.log" >&2; return 1; }
+    result=$("${compose[@]}" exec -T -e GOMAXPROCS=2 demo /run/datatug-demo/ssh-slot-link-probe \
+        deep "$slots_dir/slot-0" "$uid" "$workspace") || return 1
+    [[ $result == 'created 10000 short-name levels and 40 long-name levels' ]] || return 1
+    kill "$client" 2>/dev/null || return 1
+    wait "$client" 2>/dev/null || true
+    client=
+    deadline=$((SECONDS + 165))
+    while ! "${compose[@]}" exec -T demo /usr/bin/test ! -e "$workspace"; do
+        (( SECONDS < deadline )) || return 1
+        sleep 1
+    done
+
+    timeout 20s "${ssh_client[@]}" -o StrictHostKeyChecking=yes -tt "$ssh_target" \
+        <&"$hold" >"$work_dir/reused-ssh.log" 2>&1 &
+    client=$!
+    deadline=$((SECONDS + 15))
+    while (( SECONDS < deadline )); do
+        result=$("${compose[@]}" exec -T demo /bin/cat "$slots_dir/slot-0/cgroup.procs") || return 1
+        [[ -z $result ]] || return 0
+        sleep 1
+    done
+    cat "$work_dir/reused-ssh.log" >&2
+    return 1
+)
 
 # A live session's child is inside a slot as a slot uid; after the visitor
 # leaves, the slot drains to empty.
@@ -379,9 +446,11 @@ check 'edge tunnels an allow-listed CONNECT (github.com:443)' check_connect_allo
 check 'slot uid cannot reach the edge proxy socket' check_slot_uid_cannot_reach_proxy
 check 'demo cgroup mount exposes its delegated scope and both services omit /dev/shm' check_private_cgroup_and_ipc
 check 'every slot has its memory, swap and pids limits' check_slot_limits
+check 'sessions tmpfs has the required inode budget and slots expose memory.reclaim' check_sessions_inode_budget
 check 'cleanup cgroup has independent memory, swap, OOM and PID limits' check_cleanup_limits
 check 'a session child runs in a slot as its slot uid, and the slot drains' check_session_in_slot_and_drained
-check 'slot entry denies link and linkat with EPERM' check_hard_links_denied
+check 'slot 0 denies link, linkat, AF_UNIX sockets and access to slot 1' check_slot_isolation
+check 'cleanup removes the 10000-level and 40-level long-name trees and slot 0 serves another visitor' check_deep_session_cleanup
 check 'kernel OOM-kills a slot over its limit; supervisor stays healthy' check_slot_oom_contained
 
 (( failures == 0 ))

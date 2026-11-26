@@ -30,6 +30,7 @@ type slotQuarantine uint8
 const (
 	slotUsable slotQuarantine = iota
 	slotAwaitingMemory
+	slotAwaitingCleanup
 	slotQuarantined
 )
 
@@ -138,14 +139,10 @@ func (m *SlotManager) isQuarantined(index int) bool {
 	return m.quarantined[index] != slotUsable
 }
 
-func (m *SlotManager) setMemoryQuarantine(index int, pending bool) {
+func (m *SlotManager) setSlotState(index int, state slotQuarantine) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if pending {
-		m.quarantined[index] = slotAwaitingMemory
-	} else if m.quarantined[index] == slotAwaitingMemory {
-		m.quarantined[index] = slotUsable
-	}
+	m.quarantined[index] = state
 }
 
 func (m *SlotManager) awaitingMemory(index int) bool {
@@ -190,6 +187,7 @@ type SysOps struct {
 	Fchown             func(*os.File, int, int) error
 	Kill               func(int, syscall.Signal) error
 	FileUID            func(os.FileInfo) (int, bool)
+	FileGID            func(os.FileInfo) (int, bool)
 }
 
 // DefaultSysOps returns production OS operations backed by Linux syscalls and cgroupfs.
@@ -203,6 +201,7 @@ func DefaultSysOps() SysOps {
 		Fchown:             (*os.File).Chown,
 		Kill:               syscall.Kill,
 		FileUID:            defaultFileUID,
+		FileGID:            defaultFileGID,
 	}
 }
 
@@ -232,6 +231,9 @@ func (o SysOps) withDefaults() SysOps {
 	if o.FileUID == nil {
 		o.FileUID = def.FileUID
 	}
+	if o.FileGID == nil {
+		o.FileGID = def.FileGID
+	}
 	return o
 }
 
@@ -244,6 +246,14 @@ func defaultFileUID(fi os.FileInfo) (int, bool) {
 		return 0, false
 	}
 	return int(st.Uid), true
+}
+
+func defaultFileGID(fi os.FileInfo) (int, bool) {
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return 0, false
+	}
+	return int(st.Gid), true
 }
 
 // checkSessionsDir verifies that sessionsDir satisfies isolation requirements:

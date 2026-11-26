@@ -3,13 +3,12 @@
 package sshdemo
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -167,6 +166,9 @@ func TestUIDModeSeams_WorkspaceOwnershipAndStaleCleanup(t *testing.T) {
 		return nil
 	}
 	slot := Slot{Index: 3, UID: 20003, GID: 20003}
+	if err := os.Mkdir(filepath.Join(sessDir, "slot-3"), 0o710); err != nil {
+		t.Fatal(err)
+	}
 	dir, homeDir, repoDir, err := createSessionWorkspace(sessDir, "abcd1234", slot, IsolationUID, ops)
 	if err != nil {
 		t.Fatalf("createSessionWorkspace: %v", err)
@@ -188,65 +190,10 @@ func TestUIDModeSeams_WorkspaceOwnershipAndStaleCleanup(t *testing.T) {
 	if _, _, _, err := createSessionWorkspace(sessDir, "failws", slot, IsolationUID, failOps); err == nil {
 		t.Fatal("expected chown error")
 	}
-	if _, err := os.Stat(filepath.Join(sessDir, "failws")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(sessDir, "slot-3", "failws")); !os.IsNotExist(err) {
 		t.Fatal("failed workspace should have been removed")
 	}
 
-	// Stale cleanup includes retired slots and refuses owners below UIDBase.
-	staleRoot := t.TempDir()
-	inRangeDir := filepath.Join(staleRoot, "stale-in-range")
-	outRangeDir := filepath.Join(staleRoot, "stale-out-of-range")
-	_ = os.MkdirAll(filepath.Join(inRangeDir, "home"), 0o700)
-	_ = os.WriteFile(filepath.Join(inRangeDir, "home", "tmp.txt"), []byte("x"), 0o600)
-	_ = os.MkdirAll(outRangeDir, 0o700)
-	_ = os.WriteFile(filepath.Join(outRangeDir, "keep.txt"), []byte("keep"), 0o600)
-
-	var logBuf bytes.Buffer
-	staleOps := DefaultSysOps()
-	staleOps.FileUID = func(fi os.FileInfo) (int, bool) {
-		if fi.Name() == "stale-in-range" {
-			return 20001, true
-		}
-		return 20004, true // retired slot above the active range
-	}
-	srv := &Server{
-		cfg: Config{
-			SessionsDir:    staleRoot,
-			Isolation:      IsolationUID,
-			UIDBase:        20000,
-			MaxSessions:    4,
-			CleanupTimeout: 10 * time.Second,
-			ExecPrefixArgs: []string{"-test.run=^TestHelperProcess$", "--"},
-		},
-		executable:   os.Args[0],
-		logger:       slog.New(slog.NewJSONHandler(&logBuf, nil)),
-		ops:          staleOps,
-		slots:        NewSlotManager(4, 2, 20000, IsolationUID),
-		cleanupGroup: cgroup{path: t.TempDir()},
-		cleanupQueue: make(chan struct{}, 1),
-	}
-	if err := srv.cleanStaleSessions(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-
-	raw, err := os.ReadFile(filepath.Join(srv.cleanupGroup.path, "cleanup-seen.json"))
-	if err != nil || !strings.Contains(string(raw), `"--slot-uid","20004","--slot-gid","20004"`) {
-		t.Fatalf("cleanup helper args = %q, %v", raw, err)
-	}
-	if _, err := os.Stat(inRangeDir); !os.IsNotExist(err) {
-		t.Fatalf("in-range stale dir should have been removed: %v", err)
-	}
-	if _, err := os.Stat(outRangeDir); !os.IsNotExist(err) {
-		t.Fatalf("retired slot workspace should have been removed: %v", err)
-	}
-	if err := os.Mkdir(outRangeDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	srv.ops.FileUID = func(os.FileInfo) (int, bool) { return 1000, true }
-	requireErrorContains(t, srv.cleanStaleSessions(t.Context()), "UID 1000 below --uid-base 20000")
-	srv.ops.FileUID = func(os.FileInfo) (int, bool) { return 20004, true }
-	writeFixtureFile(t, outRangeDir, "fail-cleanup", "")
-	requireErrorContains(t, srv.cleanStaleSessions(t.Context()), "could not verify cleanup")
 }
 
 func TestUIDModeChecksSharedTemporaryDirectories(t *testing.T) {
@@ -287,7 +234,7 @@ func TestUIDCleanupWaitsForQueue(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- s.cleanWorkspace(ctx, workspace, cfg.UIDBase, cfg.UIDBase) }()
+	go func() { _, err := s.cleanWorkspace(ctx, workspace, cfg.UIDBase, cfg.UIDBase); done <- err }()
 	select {
 	case err := <-done:
 		t.Fatalf("cleanup bypassed a busy queue: %v", err)
@@ -299,11 +246,12 @@ func TestUIDCleanupWaitsForQueue(t *testing.T) {
 	}
 	<-s.cleanupQueue
 	writeFixtureFile(t, workspace, "keep", "")
-	requireErrorContains(t, s.cleanWorkspace(t.Context(), workspace, cfg.UIDBase, cfg.UIDBase), "directory not empty")
+	_, err = s.cleanWorkspace(t.Context(), workspace, cfg.UIDBase, cfg.UIDBase)
+	requireErrorContains(t, err, "directory not empty")
 	if err := os.Remove(filepath.Join(workspace, "keep")); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.cleanWorkspace(t.Context(), workspace, cfg.UIDBase, cfg.UIDBase); err != nil {
+	if _, err := s.cleanWorkspace(t.Context(), workspace, cfg.UIDBase, cfg.UIDBase); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -314,5 +262,12 @@ func TestChildReapGrace(t *testing.T) {
 	waited <- errTestIO // Child exit status is independent from reap verification.
 	if err := waitForChildReap(waited, time.Second); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func fakeSlotGID(base int) func(os.FileInfo) (int, bool) {
+	return func(fi os.FileInfo) (int, bool) {
+		index, err := strconv.Atoi(strings.TrimPrefix(fi.Name(), "slot-"))
+		return base + index, err == nil
 	}
 }

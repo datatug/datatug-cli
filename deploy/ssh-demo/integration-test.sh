@@ -202,6 +202,28 @@ check_direct_egress_blocked() {
     return 1
 }
 
+# The host's address on the internal bridge would expose every host service
+# that listens on all interfaces (admin sshd first). With the isolated gateway
+# mode the bridge has no host address, so the TCP connect itself must fail.
+check_host_gateway_unreachable() {
+    local logfile="$work_dir/gateway.log" network gateway
+    network=$("${compose[@]}" ps -q demo | xargs docker inspect \
+        -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}') || return 1
+    gateway=$(docker network inspect "$network" -f '{{range .IPAM.Config}}{{.Gateway}}{{end}}') || return 1
+    [[ -n $gateway ]] || return 1
+    if ip -4 addr show | grep -Fq "inet $gateway/"; then
+        printf 'host still has %s on the internal bridge\n' "$gateway" >&2
+        return 1
+    fi
+    if ! "${compose[@]}" exec -T demo /usr/local/bin/datatug demo ssh-health \
+        --addr "$gateway:22" --timeout 5s > "$logfile" 2>&1 &&
+        grep -Fq "ssh-health: connect $gateway:22:" "$logfile"; then
+        return 0
+    fi
+    cat "$logfile" >&2
+    return 1
+}
+
 check_connect_refused() {
     local response
     response=$(timeout --kill-after=2s 8s bash -e -c '
@@ -219,6 +241,7 @@ check 'SSH exec request is refused' check_exec_refused "$work_dir/exec.log" "$ex
 check 'SSH local forwarding channel is refused' check_forwarding_refused
 check 'host key survives demo restart' check_persistent_key
 check 'demo cannot dial 1.1.1.1:443 directly' check_direct_egress_blocked
+check 'demo cannot reach host services through the bridge gateway' check_host_gateway_unreachable
 check 'edge returns HTTP 403 for a non-allow-listed CONNECT' check_connect_refused
 
 (( failures == 0 ))

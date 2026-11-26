@@ -18,7 +18,7 @@ edge :3128 <--------- HTTP CONNECT from demo and sessions ---------+
 
 The edge joins the public and internal bridges. It forwards SSH with a PROXY v2 header so that the supervisor can enforce per-client-IP quotas. Its CONNECT proxy allows TCP 443 for exactly `github.com`, `api.github.com`, `codeload.github.com` and `cloud.openvaultdb.com`. The proxy rejects IP literals and unsafe resolved addresses. Only SSH is published on the host.
 
-The supervisor and session children attach only to the internal bridge. HTTPS clients use the edge proxy and the supervisor passes proxy settings in each child's clean environment. Keeping public ingress and egress on the edge gives the supervisor's network namespace no direct route to the internet. Both services use the same image and run different DataTug subcommands.
+The supervisor and session children attach only to the internal bridge. HTTPS clients use the edge proxy and the supervisor passes proxy settings in each child's clean environment. Keeping public ingress and egress on the edge gives the supervisor's network namespace no direct route to the internet. `internal: true` alone is not enough: the host keeps an address on the bridge, and every host service that listens on all interfaces (admin sshd included) would be reachable from the demo. The internal bridge therefore uses Docker's isolated gateway mode (Engine 28+), so the host has no address on it; the integration test checks that the gateway address does not answer. Both services use the same image and run different DataTug subcommands.
 
 ## Process isolation
 
@@ -37,7 +37,7 @@ The base image's setuid and setgid bits are stripped. A session runs with an unp
 
 - The `state` volume at `/var/lib/datatug-demo/state` holds the mode-`0600` Ed25519 host key and the public project template. It survives restarts and container replacement. The supervisor shallow-clones the canonical project on each start, installs the bundled fixture when needed, invokes `datatug demo ssh-session --prepare-template`, then replaces the template after preparation succeeds.
 - The root-owned, mode-`0711` sessions tmpfs at `/var/lib/datatug-demo/sessions` holds per-visitor homes and clones. It defaults to 2 GiB across all sessions. The supervisor releases a slot after cleanup, and stopping the container also discards the tmpfs.
-- A separate 64 MiB tmpfs supplies `/tmp`. Build credentials are mounted as a BuildKit secret and have no runtime mount.
+- A separate 64 MiB tmpfs supplies `/tmp`. It is root-only (mode 0755), so nothing a visitor writes outlives the session: each session has a private `TMPDIR` inside its workspace. The build needs no credential.
 
 ## Resource budgets and lifecycle
 

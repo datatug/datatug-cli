@@ -94,7 +94,9 @@ services:
       - state:/var/lib/datatug-demo/state
     tmpfs:
       - /var/lib/datatug-demo/sessions:rw,nosuid,nodev,size=${DEMO_SESSIONS_TMPFS:-2g},mode=0711,uid=0,gid=0
-      - /tmp:rw,nosuid,nodev,size=64m,mode=1777
+      # Root-only: session uids get a private TMPDIR inside their workspace,
+      # so nothing a visitor writes outlives the session.
+      - /tmp:rw,nosuid,nodev,noexec,size=64m,mode=0755,uid=0,gid=0
     mem_limit: ${DEMO_MEM_LIMIT:-3g}
     cpus: "${DEMO_CPUS:-2}"
     pids_limit: "${DEMO_PIDS_LIMIT:-2048}"
@@ -115,6 +117,13 @@ networks:
   internal:
     driver: bridge
     internal: true
+    # internal: true only removes the route out. Without an isolated gateway
+    # the host keeps an address on this bridge and every host service that
+    # listens on 0.0.0.0 (admin sshd included) is reachable from the demo.
+    # Isolated mode (Docker Engine 28+) gives the bridge no host address.
+    driver_opts:
+      com.docker.network.bridge.gateway_mode_ipv4: isolated
+      com.docker.network.bridge.gateway_mode_ipv6: isolated
 
 volumes:
   state:

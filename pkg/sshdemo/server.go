@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -81,6 +82,7 @@ type Server struct {
 	slots           *SlotManager
 	cgroups         []cgroup
 	slotReuseMu     sync.Mutex
+	containerAddrs  map[netip.Addr]bool // UID mode: the container's own addresses
 	queueWritesMu   sync.Mutex
 	queueWrites     map[net.Conn]time.Time
 	cleanupGroup    cgroup
@@ -145,6 +147,11 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 		if err := lockSharedDevices(s.ops.StatSharedTemp, s.ops.ChmodShared); err != nil {
 			return nil, err
 		}
+		own, err := containerAddresses(s.ops.InterfaceAddrs)
+		if err != nil {
+			return nil, err
+		}
+		s.containerAddrs = own
 	}
 	if cfg.Isolation == IsolationProcess {
 		if err := s.checkFilesystemCapacity(0); err != nil {
@@ -268,7 +275,7 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 			healthOnly = true
 		}
 		ctx.SetValue(connectionStateKey{}, &connectionState{
-			conn: conn, shellStarted: make(chan struct{}), released: make(chan struct{}), healthOnly: healthOnly,
+			conn: conn, shellStarted: make(chan struct{}), healthOnly: healthOnly,
 			queued: make(chan struct{}), admitted: make(chan struct{}),
 		})
 		return conn
@@ -443,12 +450,11 @@ type connectionState struct {
 	healthOnly   bool
 	sessionUsed  atomic.Bool
 	shellStarted chan struct{}
-	released     chan struct{} // closed when handleSession has released its slot
 	queued       chan struct{}
 	admitted     chan struct{}
 }
 
-var errLoopbackHealthOnly = errors.New("sshdemo: loopback connections are for health checks only")
+var errLoopbackHealthOnly = errors.New("sshdemo: connections from inside the demo container cannot open sessions")
 
 func (s *Server) connectionConfig(ctx ssh.Context) *gossh.ServerConfig {
 	state := ctx.Value(connectionStateKey{}).(*connectionState)
@@ -458,10 +464,10 @@ func (s *Server) connectionConfig(ctx ssh.Context) *gossh.ServerConfig {
 			// Behind the edge, loopback is the in-container health check, which
 			// only reads the banner. Session processes share this network
 			// namespace and must not open demo sessions or queue places.
-			if state.healthOnly {
+			ip := clientIPFromAddr(conn.RemoteAddr())
+			if state.healthOnly || fromContainer(s.containerAddrs, ip) {
 				return nil, errLoopbackHealthOnly
 			}
-			ip := clientIPFromAddr(conn.RemoteAddr())
 			if err := s.connectionLimit.reserve(ip); err != nil {
 				return nil, &gossh.BannerError{Err: err, Message: demoFullMessage}
 			}
@@ -483,10 +489,6 @@ func (s *Server) watchConnection(ctx context.Context, state *connectionState, ip
 		case <-state.shellStarted:
 			timer.Stop()
 			<-ctx.Done()
-			// Keep the client's per-IP place until drain and cleanup have
-			// released its slot, so disconnecting early cannot take more slots
-			// out of service than the per-IP limit allows.
-			<-state.released
 			return
 		case <-queued:
 			timer.Stop()
@@ -722,8 +724,6 @@ func (s *Server) handleSession(sess ssh.Session) {
 	ctx := sess.Context().(*sessionContext)
 	meta := ctx.meta
 	connection := ctx.Value(connectionStateKey{}).(*connectionState)
-	// Registered first, so it runs last: after the slot has been released.
-	defer close(connection.released)
 	// This connection serves one session. Close it after sending the exit
 	// status so watchConnection releases admission even if the peer stays open.
 	defer func() { _ = connection.conn.Close() }()

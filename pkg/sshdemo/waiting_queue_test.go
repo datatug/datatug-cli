@@ -507,7 +507,7 @@ func TestQueueInputStopsDuringAndAfterHandoff(t *testing.T) {
 	for _, started := range []bool{false, true} {
 		t.Run(fmt.Sprint(started), func(t *testing.T) {
 			meta := &sessionMeta{chanDone: make(chan struct{}), pty: testPTY(t)}
-			state := &connectionState{shellStarted: make(chan struct{}), released: make(chan struct{})}
+			state := &connectionState{shellStarted: make(chan struct{})}
 			if started {
 				close(state.shellStarted)
 				_ = meta.pty.Master.Close()
@@ -550,4 +550,42 @@ func TestServerQueueFullAndRepeatedShell(t *testing.T) {
 		t.Fatalf("repeated shell request returned %t, %v", ok, err)
 	}
 	newQueueVisitor(t, dialSSH(t, h.addr, "full"), 80).see(t, "The DataTug demo is full")
+}
+
+func TestQueuePassesOverWaitersAtTheirSlotLimit(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.MaxSessions = 2
+	now := time.Now()
+	slots := NewSlotManager(2, 1, DefaultUIDBase, IsolationProcess)
+	first, _ := queueRequest(t, slots, cfg, "203.0.113.1", now)
+	// The same IP already holds its one slot, so it waits although slot 1 is free.
+	if admission, entry := queueRequest(t, slots, cfg, "203.0.113.1", now); entry == nil || !admission.at.IsZero() {
+		t.Fatalf("second session from one IP: admission %+v, entry %v; want it queued", admission, entry)
+	}
+	// A new IP behind it is the oldest eligible visitor and takes slot 1 now.
+	if admission, entry := queueRequest(t, slots, cfg, "203.0.113.2", now); entry != nil || admission.slot.Index != 1 {
+		t.Fatalf("eligible arrival: admission %+v, entry %v; want slot 1", admission, entry)
+	}
+	_, third := queueRequest(t, slots, cfg, "203.0.113.3", now)
+	if third == nil {
+		t.Fatal("third IP should wait: no slot is free")
+	}
+	// Releasing the first IP's slot admits its waiting session, ahead of the third IP.
+	slots.Release(first.slot)
+	if got := len(slots.waiting); got != 1 || slots.waiting[0] != third {
+		t.Fatalf("waiting after release = %d entries, want only the third IP", got)
+	}
+}
+
+func TestQueueFullRemovesTheArrival(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.MaxSessions, cfg.MaxQueue = 1, 0
+	slots := NewSlotManager(1, 2, DefaultUIDBase, IsolationProcess)
+	queueRequest(t, slots, cfg, "203.0.113.1", time.Now())
+	if _, _, err := slots.admitOrQueue("203.0.113.2", cfg, time.Now()); err != ErrGlobalLimit {
+		t.Fatalf("arrival with the queue disabled = %v, want ErrGlobalLimit", err)
+	}
+	if len(slots.waiting) != 0 {
+		t.Fatalf("rejected arrival left %d waiting entries", len(slots.waiting))
+	}
 }

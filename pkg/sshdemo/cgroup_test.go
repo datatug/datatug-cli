@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"math"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -104,6 +105,9 @@ func ampleSessionFilesystem(string) (uint64, uint64, error) {
 
 func noSharedTemp(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
 
+// Test clients dial over loopback, which is one of the container's addresses.
+func noContainerAddresses() ([]net.Addr, error) { return nil, nil }
+
 func fakeCgroupServer(t *testing.T) (Config, SysOps) {
 	t.Helper()
 	cfg := failureTestConfig(t)
@@ -115,6 +119,7 @@ func fakeCgroupServer(t *testing.T) (Config, SysOps) {
 	ops := SysOps{
 		FilesystemCapacity: ampleSessionFilesystem,
 		StatSharedTemp:     noSharedTemp,
+		InterfaceAddrs:     noContainerAddresses,
 		FileUID:            func(os.FileInfo) (int, bool) { return 0, true },
 		FileGID:            fakeSlotGID(cfg.UIDBase),
 		Chown:              func(string, int, int) error { return nil },

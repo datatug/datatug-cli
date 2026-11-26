@@ -994,6 +994,7 @@ func TestServer_UIDModeFullSessionAndErrorPaths(t *testing.T) {
 	ops.FileUID = func(os.FileInfo) (int, bool) { return 0, true }
 	ops.FileGID = fakeSlotGID(21000)
 	ops.StatSharedTemp = noSharedTemp
+	ops.InterfaceAddrs = noContainerAddresses
 	ops.Chown = func(p string, uid, gid int) error {
 		chowned = append(chowned, p)
 		return nil

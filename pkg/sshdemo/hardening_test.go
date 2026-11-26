@@ -5,7 +5,6 @@ package sshdemo
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -290,34 +289,5 @@ func waitForNoConnectionReservations(t *testing.T, srv *Server) {
 			t.Fatalf("finished session still holds %d connections across %d IPs", total, ips)
 		}
 		time.Sleep(time.Millisecond)
-	}
-}
-
-func TestWatchConnectionHoldsPerIPPlaceUntilSlotRelease(t *testing.T) {
-	srv := &Server{connectionLimit: newConnectionLimit(4, 1)}
-	if err := srv.connectionLimit.reserve("198.51.100.4"); err != nil {
-		t.Fatal(err)
-	}
-	state := &connectionState{shellStarted: make(chan struct{}), released: make(chan struct{})}
-	close(state.shellStarted)
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		srv.watchConnection(ctx, state, "198.51.100.4", time.NewTimer(time.Hour))
-		close(done)
-	}()
-	cancel() // the visitor disconnects while drain and cleanup still run
-	select {
-	case <-done:
-		t.Fatal("per-IP place released before the session released its slot")
-	case <-time.After(100 * time.Millisecond):
-	}
-	if err := srv.connectionLimit.reserve("198.51.100.4"); !errors.Is(err, ErrPerIPLimit) {
-		t.Fatalf("reconnect during cleanup = %v, want ErrPerIPLimit", err)
-	}
-	close(state.released)
-	<-done
-	if err := srv.connectionLimit.reserve("198.51.100.4"); err != nil {
-		t.Fatalf("reconnect after slot release = %v", err)
 	}
 }

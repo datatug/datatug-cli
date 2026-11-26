@@ -4,6 +4,7 @@ package sshdemo
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -52,20 +53,22 @@ func (m *SlotManager) admitOrQueue(ip string, cfg Config, now time.Time) (slotAd
 	if m.queueClosed {
 		return slotAdmission{}, nil, ErrGlobalLimit
 	}
-	if len(m.waiting) == 0 {
-		admission, err := m.admit(ip, cfg.MaxSessionDuration, now)
-		if err == nil {
-			return admission, nil, nil
-		}
-	}
-	if len(m.waiting) >= cfg.MaxQueue {
-		return slotAdmission{}, nil, ErrGlobalLimit
-	}
+	// Join at the back, then admit in order: the arrival gets a free slot
+	// now only if nobody eligible is waiting ahead of it.
 	entry := &queueEntry{
 		clientIP: ip, joined: now, expires: now.Add(cfg.MaxQueueWait), duration: cfg.MaxSessionDuration,
 		position: len(m.waiting) + 1, done: make(chan struct{}), refresh: make(chan struct{}, 1),
 	}
 	m.waiting = append(m.waiting, entry)
+	m.admitWaiting(now)
+	if !entry.admission.at.IsZero() {
+		return entry.admission, nil, nil
+	}
+	if len(m.waiting) > cfg.MaxQueue {
+		// The entry is still last: admitWaiting only removes entries.
+		m.waiting = m.waiting[:len(m.waiting)-1]
+		return slotAdmission{}, nil, ErrGlobalLimit
+	}
 	return slotAdmission{}, entry, nil
 }
 
@@ -76,23 +79,28 @@ func (m *SlotManager) admit(ip string, duration time.Duration, now time.Time) (s
 }
 
 // admitWaiting runs under the slot lock, including when Release frees a slot
-// or a cleanup or memory recheck makes it usable. The reservation belongs to
-// the oldest live waiter before any new arrival can inspect the free slots.
+// or a cleanup or memory recheck makes it usable. Free slots go to the oldest
+// live waiters first; a waiter whose IP already holds its share of slots keeps
+// its place and is passed over until one of them is released.
 func (m *SlotManager) admitWaiting(now time.Time) {
 	changed := false
-	for len(m.waiting) != 0 {
-		head := m.waiting[0]
-		if !now.Before(head.expires) {
-			head.leaveReason = queueTimedOut
+	for i := 0; i < len(m.waiting); {
+		waiter := m.waiting[i]
+		if !now.Before(waiter.expires) {
+			waiter.leaveReason = queueTimedOut
 		} else {
-			admission, err := m.admit(head.clientIP, head.duration, now)
+			admission, err := m.admit(waiter.clientIP, waiter.duration, now)
+			if errors.Is(err, ErrPerIPLimit) {
+				i++
+				continue
+			}
 			if err != nil {
 				break
 			}
-			head.admission = admission
+			waiter.admission = admission
 		}
-		m.waiting = slices.Delete(m.waiting, 0, 1)
-		close(head.done)
+		m.waiting = slices.Delete(m.waiting, i, i+1)
+		close(waiter.done)
 		changed = true
 	}
 	if changed {

@@ -5,6 +5,8 @@ package sshdemo
 import (
 	"errors"
 	"fmt"
+	"net"
+	"net/netip"
 	"os"
 	"sync"
 	"syscall"
@@ -75,14 +77,12 @@ func NewSlotManager(maxSessions, maxPerIP, uidBase int, isolation string) *SlotM
 func (m *SlotManager) Acquire(clientIP string) (Slot, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.perIP[clientIP] >= m.maxPerIP {
-		return Slot{}, ErrPerIPLimit
-	}
 	return m.reserveSlot(clientIP, time.Time{})
 }
 
-// reserveSlot runs with mu held. The SSH server applies its per-IP limit
-// at authentication, where it can count both active and waiting transports.
+// reserveSlot runs with mu held. Besides the connection limit applied at
+// authentication, a client IP holds at most maxPerIP slots until each is
+// released after drain and cleanup, however its connections come and go.
 func (m *SlotManager) reserveSlot(clientIP string, deadline time.Time) (Slot, error) {
 	idx := -1
 	for i, used := range m.active {
@@ -93,6 +93,9 @@ func (m *SlotManager) reserveSlot(clientIP string, deadline time.Time) (Slot, er
 	}
 	if idx < 0 {
 		return Slot{}, ErrGlobalLimit
+	}
+	if m.perIP[clientIP] >= m.maxPerIP {
+		return Slot{}, ErrPerIPLimit
 	}
 	reservation := &slotReservation{deadline: deadline}
 	m.active[idx] = reservation
@@ -203,6 +206,7 @@ type SysOps struct {
 	Stat               func(string) (os.FileInfo, error) // Lstat semantics for session paths.
 	StatSharedTemp     func(string) (os.FileInfo, error) // Stat follows links to shared temporary directories.
 	ChmodShared        func(string, os.FileMode) error   // Chmod locks shared device entry points to root.
+	InterfaceAddrs     func() ([]net.Addr, error)        // The container's own addresses, refused as SSH clients.
 	Chown              func(string, int, int) error
 	Kill               func(int, syscall.Signal) error
 	FileUID            func(os.FileInfo) (int, bool)
@@ -217,6 +221,7 @@ func DefaultSysOps() SysOps {
 		Stat:               os.Lstat,
 		StatSharedTemp:     os.Stat,
 		ChmodShared:        os.Chmod,
+		InterfaceAddrs:     net.InterfaceAddrs,
 		Chown:              os.Chown,
 		Kill:               syscall.Kill,
 		FileUID:            defaultFileUID,
@@ -240,6 +245,9 @@ func (o SysOps) withDefaults() SysOps {
 	}
 	if o.ChmodShared == nil {
 		o.ChmodShared = def.ChmodShared
+	}
+	if o.InterfaceAddrs == nil {
+		o.InterfaceAddrs = def.InterfaceAddrs
 	}
 	if o.Chown == nil {
 		o.Chown = def.Chown
@@ -357,4 +365,26 @@ func lockSharedDevices(stat func(string) (os.FileInfo, error), chmod func(string
 		}
 	}
 	return nil
+}
+
+// containerAddresses lists the addresses session processes can connect from.
+// In UID mode a connection from any of them, directly or relayed by the edge
+// with one of them as its source, is a session trying to open another.
+func containerAddresses(list func() ([]net.Addr, error)) (map[netip.Addr]bool, error) {
+	addrs, err := list()
+	if err != nil {
+		return nil, fmt.Errorf("sshdemo: list container addresses: %w", err)
+	}
+	own := make(map[netip.Addr]bool, len(addrs))
+	for _, a := range addrs {
+		if prefix, err := netip.ParsePrefix(a.String()); err == nil {
+			own[prefix.Addr().Unmap()] = true
+		}
+	}
+	return own, nil
+}
+
+func fromContainer(own map[netip.Addr]bool, ip string) bool {
+	addr, err := netip.ParseAddr(ip)
+	return err == nil && own[addr.Unmap()]
 }

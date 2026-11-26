@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	gossh "golang.org/x/crypto/ssh"
 )
 
 func TestSlotManager_LimitsAndIsolation(t *testing.T) {
@@ -346,4 +349,55 @@ func TestLockSharedDevices(t *testing.T) {
 		_, err := NewServer(t.Context(), cfg, WithSysOps(ops))
 		requireErrorContains(t, err, "restrict shared device /dev/pts/ptmx")
 	})
+}
+
+func TestContainerAddresses(t *testing.T) {
+	if _, err := containerAddresses(func() ([]net.Addr, error) { return nil, errTestIO }); err == nil ||
+		!strings.Contains(err.Error(), "list container addresses") {
+		t.Fatalf("list error = %v", err)
+	}
+	own, err := containerAddresses(func() ([]net.Addr, error) {
+		return []net.Addr{
+			&net.IPNet{IP: net.ParseIP("127.0.0.1"), Mask: net.CIDRMask(8, 32)},
+			&net.IPNet{IP: net.ParseIP("172.31.250.3"), Mask: net.CIDRMask(24, 32)},
+			&net.UnixAddr{Name: "not-an-ip", Net: "unix"},
+		}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for ip, want := range map[string]bool{
+		"127.0.0.1": true, "172.31.250.3": true, "::ffff:172.31.250.3": true,
+		"172.31.250.2": false, "203.0.113.9": false, "unknown": false,
+	} {
+		if got := fromContainer(own, ip); got != want {
+			t.Errorf("fromContainer(%q) = %v, want %v", ip, got, want)
+		}
+	}
+}
+
+func TestUIDServerRefusesSessionsFromTheContainer(t *testing.T) {
+	cfg, ops := fakeCgroupServer(t)
+	ops.InterfaceAddrs = func() ([]net.Addr, error) { return nil, errTestIO }
+	if _, err := NewServer(t.Context(), cfg, WithSysOps(ops)); err == nil || !strings.Contains(err.Error(), "list container addresses") {
+		t.Fatalf("NewServer with unreadable addresses = %v", err)
+	}
+	ops.InterfaceAddrs = func() ([]net.Addr, error) {
+		return []net.Addr{&net.IPNet{IP: net.ParseIP("127.0.0.1"), Mask: net.CIDRMask(8, 32)}}, nil
+	}
+	h := startTestServer(t, func(c *Config) {
+		c.Isolation, c.CgroupRoot, c.SessionsDir = cfg.Isolation, cfg.CgroupRoot, cfg.SessionsDir
+	}, WithSysOps(ops))
+	conn, err := net.DialTimeout("tcp", h.addr, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+	if _, _, _, err := gossh.NewClientConn(conn, h.addr, &gossh.ClientConfig{
+		User: "slot", HostKeyCallback: gossh.InsecureIgnoreHostKey(),
+	}); err == nil {
+		t.Fatal("a connection from the container's own address authenticated")
+	}
+	waitForNoConnectionReservations(t, h.srv)
 }

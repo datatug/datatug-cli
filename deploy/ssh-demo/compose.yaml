@@ -43,6 +43,7 @@ services:
       - "${DEMO_SSH_PUBLISH:-2222}:2222"
     networks: [public, internal]
     mem_limit: 256m
+    pids_limit: 256
     cpus: 0.5
 
   demo:

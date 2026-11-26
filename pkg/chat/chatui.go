@@ -69,7 +69,10 @@ type ChatUI struct {
 	// decision does, and warnings about its configuration). They are shown as
 	// system lines at the top of the transcript, are never stored as messages and
 	// never reach the model.
-	sessionNotices []string
+	sessionNotices     []string
+	sessionWarningAt   time.Time
+	sessionWarningText string
+	sessionWarning     string
 
 	// lastGridEntryID is the transcript entry ID of the most recently
 	// appended grid/join block — Ctrl+G's target (checklist #45).
@@ -127,9 +130,10 @@ type ChatUI struct {
 	// fails -- e.g. no GUI browser available over SSH. Overridable in
 	// tests (see chatui_bridge_test.go); nil is treated the same as an
 	// always-failing opener.
-	openBrowser  func(string) error
-	bridgeEvents <-chan struct{}
-	bridgeStop   func()
+	openBrowser           func(string) error
+	browserDisabledNotice string
+	bridgeEvents          <-chan struct{}
+	bridgeStop            func()
 
 	// pendingTurns holds the structured Turn a StartStream call produced,
 	// keyed by stream ID, from the moment the streaming goroutine finishes
@@ -258,7 +262,7 @@ func NewChatUI(ctx context.Context, conversation Conversation, modelName string)
 		chatshell.WithWorkspaceChatTabClose(u.closeChatTabAt),
 		chatshell.WithHintsProvider(u.statusHints),
 		chatshell.WithStatusBarVisibility(func() bool {
-			return !u.toolbarHidden || u.webLinkVisible || u.workspaceFeedback != "" || (u.shell != nil && u.shell.Busy())
+			return !u.toolbarHidden || u.sessionWarning != "" || u.webLinkVisible || u.workspaceFeedback != "" || (u.shell != nil && u.shell.Busy())
 		}),
 		chatshell.WithSidePanel(u.workspace),
 		chatshell.WithWorkspace(u.explorer),
@@ -295,6 +299,16 @@ func NewSessionChatUI(ctx context.Context, sessions *SessionChat, modelName stri
 func (u *ChatUI) SetSessionNotices(lines []string) {
 	u.sessionNotices = append([]string(nil), lines...)
 	u.loadSession(u.snapshot)
+}
+
+// SetSessionWarning schedules a notice in the workspace's status line.
+func (u *ChatUI) SetSessionWarning(at time.Time, text string) {
+	u.sessionWarningAt, u.sessionWarningText = at, text
+}
+
+// DisableBrowserHandoff sets the feedback shown when the user asks for a browser.
+func (u *ChatUI) DisableBrowserHandoff(notice string) {
+	u.browserDisabledNotice = notice
 }
 
 // SetHostedPlanLookup makes /plan fetch current server usage for a hosted
@@ -387,6 +401,13 @@ func (u *ChatUI) Run(options ...tea.ProgramOption) error {
 		return fmt.Errorf("chat UI requires a conversation")
 	}
 	program := tea.NewProgram(u.shell, options...)
+	if !u.sessionWarningAt.IsZero() {
+		text := u.sessionWarningText
+		timer := time.AfterFunc(time.Until(u.sessionWarningAt), func() {
+			program.Send(sessionWarningMsg(text))
+		})
+		defer timer.Stop()
+	}
 	if u.bridgeEvents != nil {
 		go func(events <-chan struct{}) {
 			for range events {
@@ -763,9 +784,14 @@ func (u *ChatUI) chatWidth() int {
 
 // --- chatshell.MsgHandler ---------------------------------------------
 
+type sessionWarningMsg string
+
 // OnMsg satisfies chatshell.MsgHandler.
 func (u *ChatUI) OnMsg(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
+	case sessionWarningMsg:
+		u.sessionWarning = string(msg)
+		return nil
 	case OverlayMsg:
 		return u.overlayMsg(msg)
 	case resultColumnsLoadedMsg:
@@ -1769,6 +1795,12 @@ func autoHint(s string) (theme.Hint, bool) {
 // branch used to hand-wrap itself), so statusHints never touches colour or
 // wrapping.
 func (u *ChatUI) statusHints(width int) (hints []theme.Hint, segments []string) {
+	if u.browserDisabledNotice != "" && u.workspaceFeedback == u.browserDisabledNotice {
+		return nil, []string{u.browserDisabledNotice}
+	}
+	if u.sessionWarning != "" {
+		return nil, []string{u.sessionWarning}
+	}
 	if u.webLinkVisible {
 		// Keep both a clickable target and a terminal-copyable URL. This
 		// fallback must survive compact layout and a terminal without OSC 8.

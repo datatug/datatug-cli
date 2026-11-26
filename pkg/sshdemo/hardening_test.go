@@ -143,7 +143,7 @@ func TestServer_ShellStartDeadline(t *testing.T) {
 }
 
 func TestServer_AuthenticatedConnectionCapUsesProxyIP(t *testing.T) {
-	h := startTestServer(t, func(c *Config) {
+	h := startTestServerWithPeer(t, net.ParseIP("192.0.2.8"), func(c *Config) {
 		c.ProxyProtocol = true
 		c.MaxSessionsPerIP = 1
 	})

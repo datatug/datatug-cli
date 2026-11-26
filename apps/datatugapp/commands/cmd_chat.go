@@ -496,12 +496,14 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	if err := setSavedQueryService(ui, chatSavedQueries{projectDir: projectDir, store: projectStore, executor: executor, env: options.env, projectID: projectCatalog.ID, session: session, warn: cmd.ErrOrStderr()}); err != nil {
 		return "", Exit(fmt.Sprintf("list saved project queries: %v", err), exitCodeUsage)
 	}
-	bridge, err := startBrowserBridge(sessions)
-	if err != nil {
-		return "", Exit(fmt.Sprintf("start browser chat: %v", err), exitCodeUsage)
+	if options.workspace == nil || !options.workspace.options.DisableBrowser {
+		bridge, err := startBrowserBridge(sessions)
+		if err != nil {
+			return "", Exit(fmt.Sprintf("start browser chat: %v", err), exitCodeUsage)
+		}
+		defer func() { _ = bridge.Close() }()
+		ui.SetBrowserURL(bridge.URL)
 	}
-	defer func() { _ = bridge.Close() }()
-	ui.SetBrowserURL(bridge.URL)
 	// Opening a stored result is not a choice of project, environment or
 	// database for the next chat, so it leaves the saved choices as they were.
 	if options.result == nil {

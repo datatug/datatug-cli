@@ -32,6 +32,23 @@ var testProjects = []*dtconfig.ProjectRef{
 	{ID: "short", Url: "github.com/lonely"},
 }
 
+func newProjects() projects { return Module().Root().Content.(projects) }
+
+func TestDemoProjectsOnlyOffersLocalBrowsing(t *testing.T) {
+	stubProjects(t, []*dtconfig.ProjectRef{testProjects[0]})
+	stub(t, &newProjectStore, func(string, string) datatugStore {
+		return &fakeStore{title: "Local project opened"}
+	})
+	stub(t, &bumpRecentProject, func(string) {})
+	h := navtest.New(t, DemoModule().Root())
+	h.RequireContains("Local projects").RequireContains("Zeta project")
+	for _, removed := range []string{"Demo Project 1", "Create new local project", "Add DataTug project to existing GitHub Repo", "Add GitHub repo with DataTug project"} {
+		h.RequireNotContains(removed)
+	}
+	h.Press("enter")
+	h.RequireContains("Local project opened")
+}
+
 func TestProjectsListsProjectsByGroup(t *testing.T) {
 	stubProjects(t, testProjects, "alpha", "missing")
 	h := navtest.New(t, nav.Page{Title: "T", Content: newProjects()})

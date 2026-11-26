@@ -57,12 +57,14 @@ const (
 	DefaultHealthTimeout = 5 * time.Second
 
 	// Edge forwarder and proxy defaults.
-	DefaultEdgeListen        = ":2222"
-	DefaultEdgeUpstream      = "demo:2222"
-	DefaultEdgeProxyListen   = ":3128"
-	DefaultEdgeMaxConns      = 256
-	DefaultEdgeMaxConnsPerIP = 8
-	DefaultEdgeIdleTimeout   = 5 * time.Minute
+	DefaultEdgeListen          = ":2222"
+	DefaultEdgeUpstream        = "demo:2222"
+	DefaultEdgeProxyListen     = ":3128"
+	DefaultEdgeMaxConns        = 256
+	DefaultEdgeMaxConnsPerIP   = 8
+	DefaultEdgeMaxTunnels      = 64
+	DefaultEdgeMaxTunnelsPerIP = 16
+	DefaultEdgeIdleTimeout     = 5 * time.Minute
 )
 
 // DefaultEdgeAllow is the default allow-list of hosts reachable via the edge
@@ -78,6 +80,7 @@ var DefaultEdgeAllow = []string{
 type Config struct {
 	Listen                 string
 	ProxyProtocol          bool
+	ProxyProtocolTrust     []string
 	HostKey                string
 	StateDir               string
 	SessionsDir            string

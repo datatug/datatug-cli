@@ -21,6 +21,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/dal-go/dalgo/dal"
+	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/chat"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
@@ -882,6 +883,25 @@ func TestRunChatProjectStartBrowserBridgeErrorReported(t *testing.T) {
 	options := chatOptions{project: dir, env: "local", model: defaultChatModel, thinking: "low"}
 	if _, err := runChatProject(cmd, options); err == nil || !strings.Contains(err.Error(), "injected StartBrowserBridge failure") {
 		t.Fatalf("runChatProject error = %v, want the injected StartBrowserBridge error", err)
+	}
+}
+
+func TestRunChatProjectDemoSkipsBrowserBridge(t *testing.T) {
+	restore := startBrowserBridge
+	t.Cleanup(func() { startBrowserBridge = restore })
+	startBrowserBridge = func(*chat.SessionChat) (*chat.BrowserBridge, error) {
+		t.Fatal("SSH demo started a browser bridge")
+		return nil, nil
+	}
+	var ran bool
+	t.Cleanup(chat.SetRunTeaProgramForTest(func(*tea.Program) (tea.Model, error) {
+		ran = true
+		return nil, nil
+	}))
+	cmd, options := buildDemoSSHWorkspaceOptions(nil, datatugui.Options{}, "", "", "")
+	options.project = writeChatRunProjectFixture(t)
+	if _, err := runChatProject(cmd, options); err != nil || !ran {
+		t.Fatalf("demo workspace ran = %t, error = %v", ran, err)
 	}
 }
 

@@ -191,13 +191,22 @@ func runDemoSSHSession(ctx context.Context, f demoSSHSessionFlags) error {
 	}
 
 	database, openAtStart := resolveDemoSSHStartTarget(ctx, projectPath, demoSSHDefaultEnv)
-	modules := append(uiModules(), dtdemo.SaveModule(demoCfg))
+	modules := uiModules()
+	for i, module := range modules {
+		if module.ID == datatugui.ScreenProjects {
+			modules[i] = dtproject.DemoModule()
+			break
+		}
+	}
+	modules = append(modules, dtdemo.SaveModule(demoCfg))
 	uiOpts := datatugui.Options{Start: datatugui.ScreenProjects}
 	chatCmd, chatOpts := buildDemoSSHWorkspaceOptions(modules, uiOpts, database, openAtStart, demoSSHNotice(deadline, githubEnabled))
+	chatOpts.workspace.sessionWarningAt = dtdemo.SessionWarningAt(deadline)
 	return demoSSHRunWorkspaceLoop(chatCmd, chatOpts)
 }
 
 func buildDemoSSHWorkspaceOptions(modules []datatugui.Module, uiOpts datatugui.Options, database, openAtStart, notice string) (*cobra.Command, chatOptions) {
+	uiOpts.DisableBrowser = true
 	chatCmd, opts := workspaceOptions(modules, uiOpts, []tea.ProgramOption(nil))
 	opts.project = demoSSHProjectID
 	opts.env = demoSSHDefaultEnv

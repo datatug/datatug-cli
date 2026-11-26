@@ -182,6 +182,11 @@ type testServerHarness struct {
 
 func startTestServer(t *testing.T, mutate func(*Config), opts ...ServerOption) *testServerHarness {
 	t.Helper()
+	return startTestServerWithPeer(t, nil, mutate, opts...)
+}
+
+func startTestServerWithPeer(t *testing.T, peer net.IP, mutate func(*Config), opts ...ServerOption) *testServerHarness {
+	t.Helper()
 	stateDir := t.TempDir()
 	sessionsDir := filepath.Join(t.TempDir(), "sessions")
 	logs := &syncBuffer{}
@@ -206,9 +211,13 @@ func startTestServer(t *testing.T, mutate func(*Config), opts ...ServerOption) *
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
-	ln, err := net.Listen("tcp", cfg.Listen)
+	var ln net.Listener
+	ln, err = net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		t.Fatalf("net.Listen: %v", err)
+	}
+	if peer != nil {
+		ln = peerListener{Listener: ln, ip: peer}
 	}
 	serveDone := make(chan error, 1)
 	go func() {

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -98,7 +99,10 @@ type WelcomeModel struct {
 	noFork     bool
 	result     WelcomeResult
 	finished   bool
+	expiring   bool
 }
+
+type welcomeSessionWarningMsg struct{}
 
 var _ tea.Model = WelcomeModel{}
 
@@ -121,6 +125,10 @@ func (m WelcomeModel) Init() tea.Cmd { return nil }
 // Update implements tea.Model.
 func (m WelcomeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.finished {
+		return m, nil
+	}
+	if _, ok := msg.(welcomeSessionWarningMsg); ok {
+		m.expiring = true
 		return m, nil
 	}
 	if sz, ok := msg.(tea.WindowSizeMsg); ok {
@@ -204,7 +212,7 @@ func (m WelcomeModel) updateExplain(msg tea.Msg) (tea.Model, tea.Cmd) {
 			OnCancel:          func() tea.Msg { return welcomeAuthCanceledMsg{} },
 			RequestDeviceCode: m.cfg.RequestDeviceCode,
 			PollForToken:      m.cfg.PollForToken,
-			SaveToken:         m.cfg.SaveToken,
+			SaveToken:         discardDeviceToken,
 		})
 		auth, _ = auth.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
 		auth, _ = auth.Update(nav.ScreenFocusMsg{Focused: true})
@@ -400,6 +408,9 @@ func (m WelcomeModel) View() tea.View {
 	} else {
 		body = m.renderBody()
 	}
+	if m.expiring {
+		body = ansi.Truncate(SessionWarning, max(1, m.width), "…") + "\n" + body
+	}
 	v := tea.NewView(body)
 	v.AltScreen = true
 	return v
@@ -506,7 +517,12 @@ func (m WelcomeModel) renderBody() string {
 
 // runWelcomeProgram runs the welcome Bubble Tea program; replaced in tests.
 var runWelcomeProgram = func(m WelcomeModel, opts ...tea.ProgramOption) (WelcomeModel, error) {
-	final, err := tea.NewProgram(m, opts...).Run()
+	program := tea.NewProgram(m, opts...)
+	if at := SessionWarningAt(m.cfg.Deadline); !at.IsZero() {
+		timer := time.AfterFunc(time.Until(at), func() { program.Send(welcomeSessionWarningMsg{}) })
+		defer timer.Stop()
+	}
+	final, err := program.Run()
 	welcome, _ := final.(WelcomeModel)
 	return welcome, err
 }

@@ -275,6 +275,18 @@ func TestWelcomeCannotStageFork(t *testing.T) {
 }
 
 func TestWelcomeOpenForkFailuresAndCancel(t *testing.T) {
+	t.Run("incomplete fork search", func(t *testing.T) {
+		fake := &fakeGitClient{findErr: errors.Join(errors.New("find fork"), demogit.ErrForkSearchIncomplete)}
+		stub(t, &newGitClient, func(demogit.Config, string) GitClient { return fake })
+		auth := NewAuthState()
+		auth.Set("tok", "alice")
+		m, _ := feedModel(NewWelcomeModel(testConfig(auth, nil, nil)), uitest.Key("2"))
+		v := welcomeView(m)
+		if !strings.Contains(v, "Could not search all your repositories for the fork") || m.(WelcomeModel).noFork {
+			t.Fatalf("expected incomplete search message:\n%s", v)
+		}
+	})
+
 	t.Run("no fork offers explore", func(t *testing.T) {
 		fake := &fakeGitClient{findErr: demogit.ErrNoFork}
 		stub(t, &newGitClient, func(demogit.Config, string) GitClient { return fake })

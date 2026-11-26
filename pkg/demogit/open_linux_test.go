@@ -39,7 +39,7 @@ func TestOpenRejectsRepeatedBlobBeforeCheckout(t *testing.T) {
 	}})
 
 	f.cfg.Limits = CloneLimits{MaxBytes: 128 << 10}
-	_, err = New(f.cfg, testToken).Open(context.Background(), aliceFork, filepath.Join(root, "repo"), project)
+	_, err = testAPI(t, f.cfg, userReply(), forkReply()).Open(context.Background(), aliceFork, filepath.Join(root, "repo"), project)
 	if !errors.Is(err, ErrUntrustedContent) || !strings.Contains(err.Error(), "sample-") || !strings.Contains(err.Error(), "size limit") {
 		t.Fatalf("Open() = %v, want checkout byte limit for a sample path", err)
 	}

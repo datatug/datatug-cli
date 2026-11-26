@@ -398,3 +398,57 @@ func TestSaveFlowAuthRateLimitAndOtherErrors(t *testing.T) {
 		}
 	})
 }
+
+func TestSaveRetryRediscoversInvalidatedFork(t *testing.T) {
+	stub(t, &listChanges, func(string) ([]demogit.Change, error) {
+		return []demogit.Change{{Path: "project/query.sql", Kind: "modified"}}, nil
+	})
+	for _, rediscovery := range []error{demogit.ErrNoFork, demogit.ErrForkSearchIncomplete, nil} {
+		name := "still invalid"
+		if rediscovery != nil {
+			name = rediscovery.Error()
+		}
+		t.Run(name, func(t *testing.T) {
+			fake := &fakeGitClient{findFork: demogit.Repo{Owner: "alice", Name: "demo"}, newBranch: "alternate"}
+			fake.saveFn = func(_ string, _ demogit.Repo, opts demogit.SaveOptions) (demogit.SaveResult, error) {
+				if opts.Branch == "datatug-demo" {
+					return demogit.SaveResult{}, demogit.ErrDiverged
+				}
+				fake.findErr = rediscovery
+				return demogit.SaveResult{}, errors.Join(demogit.ErrNoFork, demogit.ErrGitRedirect)
+			}
+			stub(t, &newGitClient, func(demogit.Config, string) GitClient { return fake })
+			auth := NewAuthState()
+			auth.Set("tok", "alice")
+			s := mountSave(testConfig(auth, nil, nil))
+			s, _ = feedScreen(s, s.Init()(), uitest.Key("enter"))
+			if s.(saveScreen).step != saveStepDiverged {
+				t.Fatalf("expected alternate branch prompt:\n%s", saveView(s))
+			}
+			s, msgs := feedScreen(s, uitest.Key("y"))
+			searched := false
+			for _, msg := range msgs {
+				if _, ok := msg.(forkCheckedMsg); ok {
+					searched = true
+				}
+			}
+			if !searched {
+				t.Fatal("alternate branch refusal did not restart fork discovery")
+			}
+			switch rediscovery {
+			case demogit.ErrNoFork:
+				if s.(saveScreen).step != saveStepConfirmFork {
+					t.Fatalf("expected fork creation prompt:\n%s", saveView(s))
+				}
+			case demogit.ErrForkSearchIncomplete:
+				if !strings.Contains(saveView(s), "Could not search all your repositories for the fork") {
+					t.Fatalf("expected incomplete search message:\n%s", saveView(s))
+				}
+			default:
+				if s.(saveScreen).step != saveStepError {
+					t.Fatalf("persistent invalidation did not stop retrying:\n%s", saveView(s))
+				}
+			}
+		})
+	}
+}

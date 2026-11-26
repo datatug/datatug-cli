@@ -42,7 +42,7 @@ func TestValidateFetchedTreeRejectsUnsafeEntries(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			limits := defaultLimits(CloneLimits{})
-			err := validateTree(context.Background(), store, treeHash(tc.entry), "", &limits)
+			err := validateTree(context.Background(), store, treeHash(tc.entry), limits)
 			if !errors.Is(err, tc.err) || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("validateTree() = %v, want %q", err, tc.want)
 			}
@@ -59,7 +59,7 @@ func TestValidateFetchedTreeRejectsUnsafeEntries(t *testing.T) {
 			}
 		}}
 		limits := defaultLimits(CloneLimits{})
-		err := validateTree(hooked, store, mixedCaseGitDir, "", &limits)
+		err := validateTree(hooked, store, mixedCaseGitDir, limits)
 		cancel()
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("validateTree() after %d checks: %v", after, err)
@@ -75,6 +75,9 @@ func TestCloneWorktreeLimitsMetadataErrors(t *testing.T) {
 	}
 	config := filepath.Join(root, ".git", "config")
 	writeFile(t, root, ".git/config", "[core]")
+	if _, err := cloneWorktreeLimits(context.Background(), root, CloneLimits{MaxBytes: 1}); !errors.Is(err, ErrUntrustedContent) {
+		t.Fatalf("metadata over limit = %v", err)
+	}
 	checks := 0
 	ctx := hookContext{Context: context.Background(), onCheck: func() {
 		checks++
@@ -84,6 +87,80 @@ func TestCloneWorktreeLimitsMetadataErrors(t *testing.T) {
 	}}
 	if _, err := cloneWorktreeLimits(ctx, root, limits); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("removed metadata file = %v", err)
+	}
+}
+
+func TestValidateFetchedTreeBudgets(t *testing.T) {
+	store := memory.NewStorage()
+	treeHash := func(entries ...object.TreeEntry) plumbing.Hash {
+		t.Helper()
+		encoded := store.NewEncodedObject()
+		tree := object.Tree{Entries: entries}
+		must(t, tree.Encode(encoded))
+		hash, err := store.SetEncodedObject(encoded)
+		must(t, err)
+		return hash
+	}
+	empty := treeHash()
+	entry := func(name string, subtree plumbing.Hash) object.TreeEntry {
+		return object.TreeEntry{Name: name, Mode: filemode.Dir, Hash: subtree}
+	}
+	split := empty
+	for range 12 {
+		split = treeHash(entry("left", split), entry("right", split))
+	}
+	deep := empty
+	for range 65 {
+		deep = treeHash(entry("child", deep))
+	}
+	oversized := store.NewEncodedObject()
+	oversized.SetType(plumbing.TreeObject)
+	oversized.SetSize((1 << 20) + 1)
+	writer, err := oversized.Writer()
+	must(t, err)
+	_, err = writer.Write(make([]byte, oversized.Size()))
+	must(t, err)
+	must(t, writer.Close())
+	oversizedHash, err := store.SetEncodedObject(oversized)
+	must(t, err)
+	for _, tc := range []struct {
+		name   string
+		hash   plumbing.Hash
+		limits CloneLimits
+		want   string
+	}{
+		{"shared empty subtrees", split, CloneLimits{MaxFiles: 16}, "tree entry limit"},
+		{"deep empty subtree", deep, CloneLimits{}, "tree depth limit"},
+		{"oversized tree before decoding", oversizedHash, CloneLimits{}, "tree object size limit"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			limits := defaultLimits(tc.limits)
+			if err := validateTree(context.Background(), store, tc.hash, limits); !errors.Is(err, ErrUntrustedContent) || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("validateTree() = %v, want %q", err, tc.want)
+			}
+		})
+	}
+	limits := defaultLimits(CloneLimits{})
+	fault := faultStorage{Storer: store, badObject: empty}
+	if err := validateTree(context.Background(), fault, empty, limits); !errors.Is(err, errFixtureIO) {
+		t.Fatalf("validateTree() on unreadable tree = %v", err)
+	}
+}
+
+func TestValidateWorkspaceEntryDisappears(t *testing.T) {
+	root := t.TempDir()
+	const projectFile = "datatug-project.json"
+	writeFile(t, root, projectFile, "{}")
+	checks := 0
+	ctx := hookContext{Context: context.Background(), onCheck: func() {
+		checks++
+		if checks == 2 {
+			must(t, os.Remove(filepath.Join(root, projectFile)))
+		}
+	}}
+	err := validateWorkspace(ctx, root, ".", defaultLimits(CloneLimits{}))
+	if !errors.Is(err, ErrUntrustedContent) || !strings.Contains(err.Error(), projectFile) || strings.Contains(err.Error(), "cannot read project file") {
+		t.Fatalf("validateWorkspace() = %v, want entry lstat error", err)
 	}
 }
 
@@ -142,7 +219,7 @@ func TestChangesStagedAndUnstaged(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Changes() = %v, want %v", got, want)
 	}
-	c := testAPI(t, f.cfg, userReply())
+	c := testAPI(t, f.cfg, userReply(), forkReply(), forkReply())
 	result, err := c.Save(context.Background(), f.path, aliceFork, SaveOptions{})
 	must(t, err)
 	assertRef(t, f.remote, demoRef, f.localHeadForTest(t))

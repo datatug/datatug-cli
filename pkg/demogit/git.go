@@ -6,19 +6,23 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"syscall"
 
 	"github.com/go-git/go-billy/v5"
+	"github.com/go-git/go-billy/v5/osfs"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/cache"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/client"
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/storage"
+	"github.com/go-git/go-git/v5/storage/filesystem"
 	"github.com/go-git/go-git/v5/storage/memory"
 )
 
@@ -41,7 +45,9 @@ type gitHTTPAuth struct {
 
 func (t gitHTTPTransport) sessionTransport(auth transport.AuthMethod) (transport.Transport, transport.AuthMethod) {
 	if auth, ok := auth.(*gitHTTPAuth); ok {
-		return githttp.NewClient(auth.client), auth.BasicAuth
+		return githttp.NewClientWithOptions(auth.client, &githttp.ClientOptions{
+			RedirectPolicy: githttp.FollowRedirects,
+		}), auth.BasicAuth
 	}
 	return t.Transport, auth
 }
@@ -58,14 +64,16 @@ func (t gitHTTPTransport) NewReceivePackSession(ep *transport.Endpoint, auth tra
 
 func (c *Client) gitAuth() transport.AuthMethod {
 	basic := &githttp.BasicAuth{Username: gitAuthUser, Password: c.token}
-	if !strings.HasPrefix(c.cfg.GitBaseURL, "http://") && !strings.HasPrefix(c.cfg.GitBaseURL, "https://") {
+	base := strings.ToLower(c.cfg.GitBaseURL)
+	if !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
 		return basic
 	}
 	client := *c.cfg.HTTPClient
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		origin := via[0].URL
-		if req.URL.Scheme != origin.Scheme || !strings.EqualFold(req.URL.Host, origin.Host) {
-			return errors.New("Git redirect changes origin")
+		if req.URL.Scheme != origin.Scheme || !strings.EqualFold(req.URL.Host, origin.Host) || req.URL.User != nil ||
+			!sameGitRequestPath(origin.EscapedPath(), req.URL.EscapedPath()) {
+			return ErrGitRedirect
 		}
 		if check := c.cfg.HTTPClient.CheckRedirect; check != nil {
 			return check(req, via)
@@ -75,13 +83,42 @@ func (c *Client) gitAuth() transport.AuthMethod {
 	return &gitHTTPAuth{BasicAuth: basic, client: &client}
 }
 
+func sameGitRequestPath(from, to string) bool {
+	service := "/" + path.Base(from)
+	if strings.HasSuffix(from, "/info/refs") {
+		service = "/info/refs"
+	}
+	from = strings.TrimSuffix(from, service)
+	to, ok := strings.CutSuffix(to, service)
+	if !ok {
+		return false
+	}
+	fromParent, fromRepo := path.Split(from)
+	toParent, toRepo := path.Split(to)
+	fromBase, fromOwner := path.Split(strings.TrimSuffix(fromParent, "/"))
+	toBase, toOwner := path.Split(strings.TrimSuffix(toParent, "/"))
+	return fromBase == toBase && strings.EqualFold(fromOwner, toOwner) &&
+		strings.TrimSuffix(strings.ToLower(fromRepo), ".git") == strings.TrimSuffix(strings.ToLower(toRepo), ".git")
+}
+
 func (c *Client) gitURL(fork Repo) string { return c.cfg.GitBaseURL + fork.FullName() + ".git" }
 
 func (c *Client) gitError(operation string, err error) error {
+	if isGitRedirect(err) {
+		return fmt.Errorf("%s: %w: %w", operation, ErrNoFork, ErrGitRedirect)
+	}
 	if isGitAuthError(err) {
 		return fmt.Errorf("%s: %w", operation, ErrAuth)
 	}
 	return c.operationError(operation, err)
+}
+
+func isGitRedirect(err error) bool {
+	// go-git's HTTP POST wrapper exposes its cause as a field.
+	if wrapped, ok := errors.AsType[*plumbing.UnexpectedError](err); ok {
+		err = wrapped.Err
+	}
+	return errors.Is(err, ErrGitRedirect)
 }
 
 func isGitAuthError(err error) bool {
@@ -157,6 +194,9 @@ func (c *Client) Save(ctx context.Context, repoDir string, fork Repo, opts SaveO
 	remoteConfig := &config.RemoteConfig{Name: "demo-save", URLs: []string{c.gitURL(fork)}}
 	auth := c.gitAuth()
 	remote := git.NewRemote(memory.NewStorage(), remoteConfig)
+	if err := c.validateFork(ctx, api, fork, login); err != nil {
+		return SaveResult{}, err
+	}
 	refs, err := remote.ListContext(ctx, &git.ListOptions{Auth: auth})
 	if err != nil && !errors.Is(err, transport.ErrEmptyRemoteRepository) {
 		return SaveResult{}, c.gitError("list Git refs on fork", err)
@@ -174,6 +214,9 @@ func (c *Client) Save(ctx context.Context, repoDir string, fork Repo, opts SaveO
 		return SaveResult{}, c.operationError("commit workspace changes", err)
 	}
 	remote = git.NewRemote(repo.Storer, remoteConfig)
+	if err := c.validateFork(ctx, api, fork, login); err != nil {
+		return SaveResult{}, err
+	}
 	err = remote.PushContext(ctx, &git.PushOptions{
 		RemoteName:        remoteConfig.Name,
 		RefSpecs:          []config.RefSpec{config.RefSpec(sha.String() + ":" + ref.String())},
@@ -181,7 +224,7 @@ func (c *Client) Save(ctx context.Context, repoDir string, fork Repo, opts SaveO
 		RequireRemoteRefs: required,
 	})
 	if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
-		if !isGitAuthError(err) && pushDiverged(err) {
+		if !isGitAuthError(err) && !isGitRedirect(err) && pushDiverged(err) {
 			return SaveResult{}, ErrDiverged
 		}
 		return SaveResult{}, c.gitError("push workspace to fork", err)
@@ -290,18 +333,42 @@ func (c *Client) Open(ctx context.Context, fork Repo, destDir, projectDir string
 			err = errors.Join(err, os.RemoveAll(checkout))
 		}
 	}()
+	api, err := c.apiClient()
+	if err != nil {
+		return "", err
+	}
+	user, err := c.getUser(ctx, api)
+	if err != nil {
+		return "", err
+	}
 	opts := &git.CloneOptions{
 		URL: c.gitURL(fork), Auth: c.gitAuth(), ReferenceName: plumbing.NewBranchReferenceName(c.cfg.Branch),
 		SingleBranch: true, Depth: c.cfg.Limits.Depth, Tags: git.NoTags, RecurseSubmodules: git.NoRecurseSubmodules,
 		NoCheckout: true,
 	}
-	repo, err := git.PlainCloneContext(ctx, checkout, false, opts)
+	metadata := filepath.Join(checkout, git.GitDirName)
+	clone := func() (*git.Repository, error) {
+		if err := c.validateFork(ctx, api, fork, user.GetLogin()); err != nil {
+			return nil, err
+		}
+		fs := cloneMetadataFS{Filesystem: osfs.New(metadata), maxBytes: c.cfg.Limits.MaxBytes}
+		store := filesystem.NewStorage(&fs, cache.NewObjectLRUDefault())
+		repo, err := git.CloneContext(ctx, store, osfs.New(checkout), opts)
+		if err != nil {
+			fs.closeFiles()
+		}
+		return repo, err
+	}
+	repo, err := clone()
 	if ctx.Err() != nil {
 		return "", ctx.Err()
 	}
 	if errors.Is(err, git.NoMatchingRefSpecError{}) || errors.Is(err, plumbing.ErrReferenceNotFound) {
+		if err := os.RemoveAll(metadata); err != nil {
+			return "", fmt.Errorf("reset metadata before cloning the default branch: %w", err)
+		}
 		opts.ReferenceName = plumbing.HEAD
-		repo, err = git.PlainCloneContext(ctx, checkout, false, opts)
+		repo, err = clone()
 	}
 	if ctx.Err() != nil {
 		return "", ctx.Err()
@@ -321,7 +388,7 @@ func (c *Client) Open(ctx context.Context, fork Repo, destDir, projectDir string
 	if err != nil {
 		return "", c.operationError("read cloned commit", err)
 	}
-	if err := validateTree(ctx, repo.Storer, commit.TreeHash, "", &limits); err != nil {
+	if err := validateTree(ctx, repo.Storer, commit.TreeHash, limits); err != nil {
 		return "", c.operationError("validate cloned tree", err)
 	}
 	worktree, _ := repo.Worktree() // The clone is non-bare.

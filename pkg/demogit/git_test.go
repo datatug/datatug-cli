@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/go-git/go-billy/v5/memfs"
@@ -57,7 +59,8 @@ func installFileTransport(t *testing.T, replacement transport.Transport) {
 // for the shallow fetches against these bare repositories.
 type shallowFixtureTransport struct {
 	transport.Transport
-	repo *git.Repository
+	repo     *git.Repository
+	wrapPack func(*bytes.Buffer) io.Reader
 }
 
 func (t shallowFixtureTransport) NewUploadPackSession(ep *transport.Endpoint, auth transport.AuthMethod) (transport.UploadPackSession, error) {
@@ -65,12 +68,13 @@ func (t shallowFixtureTransport) NewUploadPackSession(ep *transport.Endpoint, au
 	if err != nil {
 		return nil, err
 	}
-	return shallowFixtureSession{session, t.repo}, nil
+	return shallowFixtureSession{session, t.repo, t.wrapPack}, nil
 }
 
 type shallowFixtureSession struct {
 	transport.UploadPackSession
-	repo *git.Repository
+	repo     *git.Repository
+	wrapPack func(*bytes.Buffer) io.Reader
 }
 
 func (s shallowFixtureSession) UploadPack(ctx context.Context, req *packp.UploadPackRequest) (*packp.UploadPackResponse, error) {
@@ -92,7 +96,11 @@ func (s shallowFixtureSession) UploadPack(ctx context.Context, req *packp.Upload
 	if _, err := packfile.NewEncoder(&pack, s.repo.Storer, false).Encode(append(objects, tip.Hash), 0); err != nil {
 		return nil, err
 	}
-	response := packp.NewUploadPackResponseWithPackfile(req, io.NopCloser(&pack))
+	var reader io.Reader = &pack
+	if s.wrapPack != nil {
+		reader = s.wrapPack(&pack)
+	}
+	response := packp.NewUploadPackResponseWithPackfile(req, io.NopCloser(reader))
 	if len(tip.ParentHashes) > 0 {
 		response.Shallows = []plumbing.Hash{tip.Hash}
 	}
@@ -166,7 +174,7 @@ func assertRef(t *testing.T, repo *git.Repository, ref plumbing.ReferenceName, w
 
 func TestSaveNewBranch(t *testing.T) {
 	f := newGitFixture(t)
-	c := testAPI(t, f.cfg, userReply())
+	c := testAPI(t, f.cfg, userReply(), forkReply(), forkReply())
 	writeFile(t, f.path, "new.txt", "hello")
 	writeFile(t, f.path, "modify.txt", "after")
 	writeFile(t, f.path, "ignored.txt", "do not commit")
@@ -227,7 +235,7 @@ func TestSaveFastForward(t *testing.T) {
 				base = commitAll(t, f.local, "ahead of the fork")
 			}
 			writeFile(t, f.path, "new.txt", "more changes")
-			c := testAPI(t, f.cfg, userReply())
+			c := testAPI(t, f.cfg, userReply(), forkReply(), forkReply())
 			result, err := c.Save(context.Background(), f.path, aliceFork, SaveOptions{Message: "custom"})
 			must(t, err)
 			sha := plumbing.NewHash(result.CommitSHA)
@@ -251,7 +259,7 @@ func TestSaveDivergedThenNewBranch(t *testing.T) {
 	tip := commitAll(t, other, "other visit")
 	pushToFixture(t, other, f.url, tip, demoRef)
 	writeFile(t, f.path, "new.txt", "my edit")
-	c := testAPI(t, f.cfg, userReply(), userReply())
+	c := testAPI(t, f.cfg, userReply(), forkReply(), userReply(), forkReply(), forkReply())
 	if _, err := c.Save(ctx, f.path, aliceFork, SaveOptions{}); !errors.Is(err, ErrDiverged) {
 		t.Fatalf("save diverged branch: %v", err)
 	}
@@ -280,7 +288,7 @@ func TestSavePushRace(t *testing.T) {
 	installFileTransport(t, raceTransport{Transport: server.DefaultServer, beforePush: func() error {
 		return f.remote.Storer.SetReference(plumbing.NewHashReference(demoRef, tip))
 	}})
-	c := testAPI(t, f.cfg, userReply(), userReply())
+	c := testAPI(t, f.cfg, userReply(), forkReply(), forkReply(), userReply(), forkReply(), forkReply())
 	if _, err := c.Save(context.Background(), f.path, aliceFork, SaveOptions{}); !errors.Is(err, ErrDiverged) {
 		t.Fatalf("racing save error = %v", err)
 	}
@@ -288,6 +296,47 @@ func TestSavePushRace(t *testing.T) {
 	assertRef(t, f.remote, demoRef, tip)
 	_, err = c.Save(context.Background(), f.path, aliceFork, SaveOptions{Branch: c.NewBranchName()})
 	must(t, err)
+}
+
+func TestSaveRevalidatesForkBeforePushAndRetry(t *testing.T) {
+	transferred := reply("GET", forkPath, 200, `{"full_name":"org/demo","owner":{"login":"org"},"fork":true,"parent":{"full_name":"team/demo"}}`)
+	for _, retry := range []bool{false, true} {
+		t.Run(fmt.Sprintf("retry=%v", retry), func(t *testing.T) {
+			f := newGitFixture(t)
+			replies := []apiReply{userReply(), forkReply(), transferred}
+			if retry {
+				other, err := git.PlainClone(filepath.Join(t.TempDir(), "other"), false, &git.CloneOptions{URL: f.url})
+				must(t, err)
+				wt, err := other.Worktree()
+				must(t, err)
+				file, err := wt.Filesystem.Create("other.txt")
+				must(t, err)
+				must(t, file.Close())
+				pushToFixture(t, other, f.url, commitAll(t, other, "other visit"), demoRef)
+				replies = []apiReply{userReply(), forkReply(), userReply(), transferred}
+			}
+			writeFile(t, f.path, "edit.txt", "visitor edit")
+			c := testAPI(t, f.cfg, replies...)
+			uploads := 0
+			installFileTransport(t, uploadHookTransport{Transport: client.Protocols["file"], onOpen: func() { uploads++ }})
+			branch := c.NewBranchName()
+			if retry {
+				if _, err := c.Save(context.Background(), f.path, aliceFork, SaveOptions{}); !errors.Is(err, ErrDiverged) {
+					t.Fatalf("initial save = %v, want ErrDiverged", err)
+				}
+			}
+			if _, err := c.Save(context.Background(), f.path, aliceFork, SaveOptions{Branch: branch}); !errors.Is(err, ErrNoFork) {
+				t.Fatalf("save after transfer = %v, want ErrNoFork", err)
+			}
+			if uploads != 1 {
+				t.Fatalf("opened %d Git upload sessions, want 1", uploads)
+			}
+			assertRef(t, f.local, plumbing.HEAD, f.base)
+			if _, err := f.remote.Reference(plumbing.NewBranchReferenceName(branch), false); !errors.Is(err, plumbing.ErrReferenceNotFound) {
+				t.Fatalf("alternate branch after transfer = %v, want no branch", err)
+			}
+		})
+	}
 }
 
 type raceTransport struct {
@@ -317,8 +366,12 @@ func TestSaveHTTPPushAuth(t *testing.T) {
 			f := newGitFixture(t)
 			writeFile(t, f.path, "new.txt", "my edit")
 			srv := testHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/user" {
+				switch r.URL.Path {
+				case "/user":
 					fmt.Fprint(w, userJSON)
+					return
+				case forkPath:
+					fmt.Fprint(w, forkJSON)
 					return
 				}
 				user, pass, ok := r.BasicAuth()
@@ -328,7 +381,7 @@ func TestSaveHTTPPushAuth(t *testing.T) {
 				switch r.URL.Query().Get("service") {
 				case "git-upload-pack":
 					w.Header().Set("Content-Type", "application/x-git-upload-pack-advertisement")
-					if err := advertiseGitRefs(w, f.base); err != nil {
+					if err := advertiseGitRefs(w, f.base, "git-upload-pack"); err != nil {
 						t.Errorf("advertise Git refs: %v", err)
 					}
 				case "git-receive-pack":
@@ -352,9 +405,41 @@ func TestSaveHTTPPushAuth(t *testing.T) {
 	}
 }
 
-func advertiseGitRefs(w io.Writer, base plumbing.Hash) error {
+func TestSaveRejectsPushRedirect(t *testing.T) {
+	f := newGitFixture(t)
+	writeFile(t, f.path, "edit.txt", "visitor edit")
+	var posted atomic.Bool
+	srv := testHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/user":
+			fmt.Fprint(w, userJSON)
+		case forkPath:
+			fmt.Fprint(w, forkJSON)
+		case "/alice/demo.git/info/refs":
+			service := r.URL.Query().Get("service")
+			w.Header().Set("Content-Type", "application/x-"+service+"-advertisement")
+			if err := advertiseGitRefs(w, f.base, service); err != nil {
+				t.Errorf("advertise Git refs: %v", err)
+			}
+		case "/alice/demo.git/git-receive-pack":
+			posted.Store(r.Method == http.MethodPost)
+			http.Redirect(w, r, "/org/demo.git/git-receive-pack", http.StatusTemporaryRedirect)
+		default:
+			t.Errorf("unexpected request to %s", r.URL.Path)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	c := New(Config{Canonical: canonical, APIBaseURL: srv.URL, GitBaseURL: srv.URL, HTTPClient: srv.Client()}, testToken)
+	_, err := c.Save(context.Background(), f.path, aliceFork, SaveOptions{})
+	if !errors.Is(err, ErrGitRedirect) || !errors.Is(err, ErrNoFork) || !posted.Load() {
+		t.Fatalf("Save() = %v, posted = %v, want push rejected with ErrGitRedirect and ErrNoFork", err, posted.Load())
+	}
+	assertRef(t, f.local, plumbing.HEAD, f.base)
+}
+
+func advertiseGitRefs(w io.Writer, base plumbing.Hash, service string) error {
 	enc := pktline.NewEncoder(w)
-	if err := enc.EncodeString("# service=git-upload-pack\n"); err != nil {
+	if err := enc.EncodeString("# service=" + service + "\n"); err != nil {
 		return err
 	}
 	if err := enc.Flush(); err != nil {
@@ -373,7 +458,7 @@ func TestOpen(t *testing.T) {
 	t.Run("saved-branch", func(t *testing.T) {
 		f := newGitFixture(t)
 		writeFile(t, f.path, project+"/saved.sql", "select 1;")
-		c := testAPI(t, f.cfg, userReply())
+		c := testAPI(t, f.cfg, userReply(), forkReply(), forkReply(), userReply(), forkReply())
 		result, err := c.Save(context.Background(), f.path, aliceFork, SaveOptions{})
 		must(t, err)
 		path := filepath.Join(t.TempDir(), "reopened")
@@ -400,14 +485,14 @@ func TestOpen(t *testing.T) {
 			t.Fatalf("depth-one reopen included base commit: %v", err)
 		}
 		writeFile(t, path, "next.txt", "another visit")
-		next := testAPI(t, f.cfg, userReply())
+		next := testAPI(t, f.cfg, userReply(), forkReply(), forkReply())
 		resaved, err := next.Save(context.Background(), path, aliceFork, SaveOptions{})
 		must(t, err)
 		assertRef(t, f.remote, demoRef, plumbing.NewHash(resaved.CommitSHA))
 	})
 	t.Run("fallback-default-branch", func(t *testing.T) {
 		f := newGitFixture(t)
-		c := New(f.cfg, testToken)
+		c := testAPI(t, f.cfg, userReply(), forkReply(), forkReply())
 		path := t.TempDir()
 		if branch, err := c.Open(context.Background(), aliceFork, path, project); err != nil || branch != mainRef.Short() {
 			t.Fatalf("open default branch = %q, %v", branch, err)
@@ -451,7 +536,7 @@ func TestOpenRefusesUntrustedContent(t *testing.T) {
 			}
 			pushToFixture(t, f.local, f.url, sha, demoRef)
 			f.cfg.Limits = tc.limits
-			c := New(f.cfg, testToken)
+			c := testAPI(t, f.cfg, userReply(), forkReply())
 			path := t.TempDir()
 			if !tc.existing {
 				path = filepath.Join(path, "reopened")
@@ -471,6 +556,120 @@ func TestOpenRefusesUntrustedContent(t *testing.T) {
 	}
 }
 
+func TestOpenRevalidatesForkBeforeClone(t *testing.T) {
+	t.Run("invalid API configuration", func(t *testing.T) {
+		c := testAPI(t, Config{})
+		c.cfg.APIBaseURL = "%"
+		if _, err := c.Open(context.Background(), aliceFork, filepath.Join(t.TempDir(), "open"), project); err == nil || !strings.Contains(err.Error(), "configure GitHub API") {
+			t.Fatalf("Open() = %v, want API configuration error", err)
+		}
+	})
+	for _, tc := range []struct {
+		name    string
+		replies []apiReply
+		want    error
+	}{
+		{"user denied", []apiReply{reply("GET", "/user", 401, "{}")}, ErrAuth},
+		{"deleted", []apiReply{userReply(), reply("GET", forkPath, 404, "{}")}, ErrNoFork},
+		{"renamed", []apiReply{userReply(), reply("GET", forkPath, 200, `{"full_name":"alice/renamed","owner":{"login":"alice"},"fork":true,"parent":{"full_name":"team/demo"}}`)}, ErrNoFork},
+		{"detached", []apiReply{userReply(), reply("GET", forkPath, 200, `{"full_name":"alice/demo","owner":{"login":"alice"},"fork":false}`)}, ErrNoFork},
+		{"api unavailable", []apiReply{userReply(), reply("GET", forkPath, 403, "{}")}, ErrAuth},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newGitFixture(t)
+			installFileTransport(t, uploadHookTransport{Transport: client.Protocols["file"], onOpen: func() {
+				t.Error("opened a Git upload session after failed revalidation")
+			}})
+			c := testAPI(t, f.cfg, tc.replies...)
+			root := t.TempDir()
+			if _, err := c.Open(context.Background(), aliceFork, filepath.Join(root, "open"), project); !errors.Is(err, tc.want) {
+				t.Fatalf("Open() = %v, want %v", err, tc.want)
+			}
+			entries, err := os.ReadDir(root)
+			must(t, err)
+			if len(entries) != 0 {
+				t.Fatalf("failed clone left files: %v", entries)
+			}
+		})
+	}
+	t.Run("before default branch fallback", func(t *testing.T) {
+		f := newGitFixture(t)
+		c := testAPI(t, f.cfg, userReply(), forkReply(), reply("GET", forkPath, 404, "{}"))
+		uploads := 0
+		installFileTransport(t, uploadHookTransport{Transport: client.Protocols["file"], onOpen: func() { uploads++ }})
+		if _, err := c.Open(context.Background(), aliceFork, filepath.Join(t.TempDir(), "open"), project); !errors.Is(err, ErrNoFork) || uploads != 1 {
+			t.Fatalf("fallback Open() = %v, Git sessions = %d, want ErrNoFork after one session", err, uploads)
+		}
+	})
+}
+
+func TestOpenCannotResetMetadataForFallback(t *testing.T) {
+	requireNonroot(t)
+	f := newGitFixture(t)
+	root := t.TempDir()
+	var metadata string
+	t.Cleanup(func() { must(t, os.Chmod(metadata, 0o700)) })
+	installFileTransport(t, uploadHookTransport{Transport: client.Protocols["file"], onOpen: func() {
+		metadataDirs, err := filepath.Glob(filepath.Join(root, ".datatug-demo-*", ".git"))
+		must(t, err)
+		if len(metadataDirs) != 1 {
+			t.Fatalf("clone metadata = %v", metadataDirs)
+		}
+		metadata = metadataDirs[0]
+		must(t, os.Chmod(metadata, 0o500))
+	}})
+	c := testAPI(t, f.cfg, userReply(), forkReply())
+	if _, err := c.Open(context.Background(), aliceFork, filepath.Join(root, "open"), project); !errors.Is(err, os.ErrPermission) || !strings.Contains(err.Error(), "reset metadata") {
+		t.Fatalf("Open() = %v, want permission error resetting clone metadata", err)
+	}
+}
+
+type countingPackReader struct {
+	io.Reader
+	bytesRead int
+}
+
+func (r *countingPackReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	r.bytesRead += n
+	return n, err
+}
+
+func TestOpenStopsOversizedPackDuringFetch(t *testing.T) {
+	f := newGitFixture(t)
+	data := make([]byte, 512<<10)
+	_, err := rand.New(rand.NewSource(1)).Read(data)
+	must(t, err)
+	must(t, os.WriteFile(filepath.Join(f.path, "sample.bin"), data, 0o600))
+	pushToFixture(t, f.local, f.url, commitAll(t, f.local, "incompressible sample"), demoRef)
+
+	var reader *countingPackReader
+	var packSize int
+	installFileTransport(t, shallowFixtureTransport{Transport: server.DefaultServer, repo: f.remote, wrapPack: func(pack *bytes.Buffer) io.Reader {
+		packSize = pack.Len()
+		reader = &countingPackReader{Reader: pack}
+		return reader
+	}})
+	f.cfg.Limits.MaxBytes = 64 << 10
+	c := testAPI(t, f.cfg, userReply(), forkReply())
+	root := t.TempDir()
+	_, err = c.Open(context.Background(), aliceFork, filepath.Join(root, "reopened"), project)
+	if !errors.Is(err, ErrUntrustedContent) || !strings.Contains(err.Error(), "while writing clone metadata") {
+		t.Fatalf("Open() = %v, want clone metadata budget error", err)
+	}
+	if reader == nil {
+		t.Fatal("no pack reader was created")
+	}
+	if reader.bytesRead == 0 || reader.bytesRead >= packSize/2 {
+		t.Fatalf("pack transfer read %d of %d bytes, want an early abort", reader.bytesRead, packSize)
+	}
+	entries, err := os.ReadDir(root)
+	must(t, err)
+	if len(entries) != 0 {
+		t.Fatalf("partial clone remains: %v", entries)
+	}
+}
+
 func TestOpenCanceledDuringFetch(t *testing.T) {
 	for _, branch := range []string{"main", "fallback"} {
 		t.Run(branch, func(t *testing.T) {
@@ -486,7 +685,11 @@ func TestOpenCanceledDuringFetch(t *testing.T) {
 					cancel()
 				}
 			}})
-			_, err := New(f.cfg, testToken).Open(ctx, aliceFork, filepath.Join(root, "repo"), project)
+			replies := []apiReply{userReply(), forkReply()}
+			if branch == "fallback" {
+				replies = append(replies, forkReply())
+			}
+			_, err := testAPI(t, f.cfg, replies...).Open(ctx, aliceFork, filepath.Join(root, "repo"), project)
 			if !errors.Is(err, context.Canceled) || !errors.Is(err, ErrUntrustedContent) {
 				t.Fatalf("Open() = %v", err)
 			}
@@ -524,7 +727,7 @@ func TestOpenCanceledDuringAndAfterCheckout(t *testing.T) {
 					}
 				}
 			}}
-			_, err := New(f.cfg, testToken).Open(hooked, aliceFork, filepath.Join(root, "repo"), project)
+			_, err := testAPI(t, f.cfg, userReply(), forkReply()).Open(hooked, aliceFork, filepath.Join(root, "repo"), project)
 			if !errors.Is(err, context.Canceled) || !errors.Is(err, ErrUntrustedContent) {
 				t.Fatalf("Open() = %v", err)
 			}
@@ -613,8 +816,8 @@ func TestSaveRefusals(t *testing.T) {
 		{"invalid-api", func(c *Client) { c.cfg.APIBaseURL = "%" }, nil, "", "configure GitHub API"},
 		{"user-denied", nil, []apiReply{reply("GET", "/user", 401, `{}`)}, "", ErrAuth.Error()},
 		{"missing-id", nil, []apiReply{reply("GET", "/user", 200, `{"login":"alice"}`)}, "", "no account ID"},
-		{"default-branch", nil, []apiReply{userReply()}, "main", "fork's default branch"},
-		{"remote-unavailable", func(c *Client) { c.cfg.GitBaseURL += "missing/" }, []apiReply{userReply()}, "", "list Git refs on fork"},
+		{"default-branch", nil, []apiReply{userReply(), forkReply()}, "main", "fork's default branch"},
+		{"remote-unavailable", func(c *Client) { c.cfg.GitBaseURL += "missing/" }, []apiReply{userReply(), forkReply()}, "", "list Git refs on fork"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newGitFixture(t)
@@ -640,7 +843,7 @@ func TestSaveDivergedWithKnownRemoteCommit(t *testing.T) {
 	must(t, err)
 	must(t, wt.Reset(&git.ResetOptions{Commit: f.base, Mode: git.HardReset}))
 	writeFile(t, f.path, "edit.txt", "my edit")
-	c := testAPI(t, f.cfg, userReply())
+	c := testAPI(t, f.cfg, userReply(), forkReply())
 	if _, err := c.Save(context.Background(), f.path, aliceFork, SaveOptions{}); !errors.Is(err, ErrDiverged) {
 		t.Fatalf("Save() = %v", err)
 	}
@@ -657,20 +860,36 @@ func TestOpenHTTPRedirectsAndErrors(t *testing.T) {
 		message string
 	}{
 		{"auth", 403, "", nil, ErrAuth, "clone workspace"},
-		{"cross-origin", 301, "http://elsewhere.invalid/repo/info/refs", nil, nil, "changes origin"},
-		{"same-origin", 301, "/moved.git/info/refs", nil, nil, "status code: 500"},
-		{"configured-redirect-policy", 301, "/moved.git/info/refs", func(*http.Request, []*http.Request) error {
+		{"cross-origin", 301, "http://elsewhere.invalid/alice/demo.git/info/refs", nil, ErrGitRedirect, "changes repository path or origin"},
+		{"different-owner", 301, "/org/demo.git/info/refs", nil, ErrGitRedirect, "changes repository path or origin"},
+		{"different-repo", 301, "/alice/moved.git/info/refs", nil, ErrGitRedirect, "changes repository path or origin"},
+		{"different-service", 301, "/alice/demo.git/git-upload-pack", nil, ErrGitRedirect, "changes repository path or origin"},
+		{"encoded-separator", 301, "/alice%2Fdemo.git/info/refs", nil, ErrGitRedirect, "changes repository path or origin"},
+		{"same-repo", 301, "/ALICE/DEMO/info/refs", nil, nil, "status code: 500"},
+		{"configured-redirect-policy", 301, "/ALICE/DEMO/info/refs", func(*http.Request, []*http.Request) error {
 			return errors.New("configured client refused the redirect")
 		}, nil, "configured client refused"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := testHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/moved.git/info/refs" && tc.name == "same-origin" {
+				switch r.URL.EscapedPath() {
+				case "/user":
+					fmt.Fprint(w, userJSON)
+					return
+				case forkPath:
+					fmt.Fprint(w, forkJSON)
+					return
+				case "/ALICE/DEMO/info/refs":
+					if tc.name != "same-repo" {
+						t.Errorf("unexpected redirected request to %s", r.URL.Path)
+					}
 					http.Error(w, testToken, 500)
 					return
 				}
-				if r.URL.Path != "/alice/demo.git/info/refs" || r.Host != "127.0.0.1" {
+				if r.URL.EscapedPath() != "/alice/demo.git/info/refs" || r.Host != "127.0.0.1" {
 					t.Errorf("unexpected request to %s%s", r.Host, r.URL.Path)
+					w.WriteHeader(500)
+					return
 				}
 				if tc.to != "" {
 					http.Redirect(w, r, tc.to, tc.status)
@@ -679,12 +898,15 @@ func TestOpenHTTPRedirectsAndErrors(t *testing.T) {
 				http.Error(w, testToken, tc.status)
 			}))
 			srv.Client().CheckRedirect = tc.check
-			c := New(Config{GitBaseURL: srv.URL, HTTPClient: srv.Client()}, testToken)
+			c := New(Config{Canonical: canonical, APIBaseURL: srv.URL, GitBaseURL: srv.URL, HTTPClient: srv.Client()}, testToken)
 			parent := t.TempDir()
 			path := filepath.Join(parent, "repo")
 			_, err := c.Open(context.Background(), aliceFork, path, project)
 			if err == nil || (tc.wantErr != nil && !errors.Is(err, tc.wantErr)) || !strings.Contains(err.Error(), tc.message) {
 				t.Fatalf("Open() = %v, want %q", err, tc.message)
+			}
+			if tc.wantErr == ErrGitRedirect && !errors.Is(err, ErrNoFork) {
+				t.Fatalf("Open() = %v, want ErrNoFork as well", err)
 			}
 			assertNoToken(t, err.Error())
 			entries, err := os.ReadDir(parent)
@@ -718,7 +940,7 @@ func TestSaveAfterPreflightErrors(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		installFileTransport(t, uploadHookTransport{Transport: client.Protocols["file"], onOpen: cancel})
-		c := testAPI(t, f.cfg, userReply())
+		c := testAPI(t, f.cfg, userReply(), forkReply())
 		if _, err := c.Save(ctx, f.path, aliceFork, SaveOptions{}); !errors.Is(err, context.Canceled) {
 			t.Fatalf("Save() = %v", err)
 		}
@@ -730,7 +952,7 @@ func TestSaveAfterPreflightErrors(t *testing.T) {
 		installFileTransport(t, uploadHookTransport{Transport: client.Protocols["file"], onOpen: func() {
 			must(t, os.Remove(filepath.Join(f.path, "new")))
 		}})
-		c := testAPI(t, f.cfg, userReply())
+		c := testAPI(t, f.cfg, userReply(), forkReply())
 		if _, err := c.Save(context.Background(), f.path, aliceFork, SaveOptions{}); !errors.Is(err, ErrNothingToSave) {
 			t.Fatalf("Save() = %v", err)
 		}
@@ -742,7 +964,7 @@ func TestSaveAfterPreflightErrors(t *testing.T) {
 			must(t, os.Remove(filepath.Join(f.path, ".git", "index")))
 			must(t, os.Mkdir(filepath.Join(f.path, ".git", "index"), 0o700))
 		}})
-		c := testAPI(t, f.cfg, userReply())
+		c := testAPI(t, f.cfg, userReply(), forkReply())
 		if _, err := c.Save(context.Background(), f.path, aliceFork, SaveOptions{}); err == nil || !strings.Contains(err.Error(), "commit workspace changes") {
 			t.Fatalf("Save() = %v", err)
 		}
@@ -758,7 +980,7 @@ func TestSaveAfterPreflightErrors(t *testing.T) {
 		installFileTransport(t, raceTransport{Transport: client.Protocols["file"], beforePush: func() error {
 			return f.local.Storer.SetReference(plumbing.NewHashReference(mainRef, peer))
 		}})
-		c := testAPI(t, f.cfg, userReply())
+		c := testAPI(t, f.cfg, userReply(), forkReply(), forkReply())
 		result, err := c.Save(context.Background(), f.path, aliceFork, SaveOptions{})
 		if err == nil || !strings.Contains(err.Error(), "updating local HEAD failed") || result.CommitSHA == "" {
 			t.Fatalf("Save() = %+v, %v", result, err)
@@ -816,7 +1038,7 @@ func TestOpenDestinationErrors(t *testing.T) {
 		installFileTransport(t, uploadHookTransport{Transport: client.Protocols["file"], onOpen: func() {
 			writeFile(t, path, "keep", "created during the clone")
 		}})
-		c := New(f.cfg, testToken)
+		c := testAPI(t, f.cfg, userReply(), forkReply())
 		if _, err := c.Open(context.Background(), aliceFork, path, project); err == nil || !strings.Contains(err.Error(), "install cloned workspace") {
 			t.Fatalf("Open() = %v", err)
 		}

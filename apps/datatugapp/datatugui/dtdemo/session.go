@@ -201,6 +201,8 @@ func FormatErrorFor(err error, canonical demogit.Repo) string {
 		return "GitHub refused your sign-in (the token was revoked or expired). Sign in again to continue."
 	case errors.Is(err, demogit.ErrNoFork):
 		return fmt.Sprintf("No fork of %s was found in your GitHub account.", canonical.FullName())
+	case errors.Is(err, demogit.ErrForkSearchIncomplete):
+		return "Could not search all your repositories for the fork"
 	case errors.Is(err, demogit.ErrForkNotReady):
 		return "GitHub has not finished creating your fork yet. Wait a moment and try again."
 	case errors.Is(err, demogit.ErrUntrustedContent):

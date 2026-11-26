@@ -102,6 +102,9 @@ func TestOpenLosesHeadBeforeCheckout(t *testing.T) {
 		edit func(string) error
 		want string
 	}{
+		{"missing metadata", func(ref string) error {
+			return os.RemoveAll(filepath.Dir(filepath.Dir(filepath.Dir(ref))))
+		}, "no such file or directory"},
 		{"missing ref", os.Remove, "read cloned branch"},
 		{"missing commit", func(ref string) error {
 			return os.WriteFile(ref, []byte(strings.Repeat("1", 40)+"\n"), 0o600)
@@ -123,7 +126,7 @@ func TestOpenLosesHeadBeforeCheckout(t *testing.T) {
 					edited = true
 				}
 			}}
-			c := New(f.cfg, testToken)
+			c := testAPI(t, f.cfg, userReply(), forkReply())
 			if _, err := c.Open(ctx, aliceFork, filepath.Join(parent, "repo"), project); !errors.Is(err, ErrUntrustedContent) || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("Open() = %v", err)
 			}

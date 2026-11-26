@@ -59,6 +59,7 @@ func slotFilter(goarch string) ([]unix.SockFilter, error) {
 	var blocked []uint32
 	var pageRefs []uint32
 	var socket, socketpair, clone uint32
+	var setsockopt []uint32
 	switch goarch {
 	case "amd64":
 		arch = unix.AUDIT_ARCH_X86_64
@@ -66,19 +67,22 @@ func slotFilter(goarch string) ([]unix.SockFilter, error) {
 		// System V IPC and POSIX message queues outlive their creator in the
 		// container's shared IPC namespace and stay charged to the slot.
 		blocked = append(blocked, 29, 30, 31, 67, 64, 65, 66, 220, 68, 69, 70, 71, 240)
-		// listen: a listener in one slot that never reads keeps data another
-		// slot sent charged to that slot after it has ended.
-		blocked = append(blocked, 50)
+		// listen and bind: a socket in one slot that never reads keeps data
+		// another slot sent charged to that slot after it has ended. Without
+		// bind, two slots cannot agree on ports for a TCP simultaneous open.
+		blocked = append(blocked, 50, 49)
 		// sendfile, splice, tee, vmsplice and x32's own vmsplice number.
 		pageRefs = []uint32{40, 275, 276, 278, 532}
 		socket, socketpair, clone = 41, 53, 56
+		setsockopt = []uint32{54, 541} // x32 has its own setsockopt number
 	case "arm64":
 		arch = unix.AUDIT_ARCH_AARCH64
 		blocked = []uint32{37} // linkat (the ABI has no link syscall)
 		blocked = append(blocked, 194, 196, 195, 197, 190, 193, 191, 192, 186, 189, 188, 187, 180)
-		blocked = append(blocked, 201)      // listen
+		blocked = append(blocked, 201, 200) // listen, bind
 		pageRefs = []uint32{71, 76, 77, 75} // sendfile, splice, tee, vmsplice
 		socket, socketpair, clone = 198, 199, 220
+		setsockopt = []uint32{208}
 	default:
 		return nil, fmt.Errorf("slot seccomp filter does not support %s", goarch)
 	}
@@ -108,6 +112,18 @@ func slotFilter(goarch string) ([]unix.SockFilter, error) {
 		filter = append(filter,
 			unix.SockFilter{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jf: 1, K: nr},
 			unix.SockFilter{Code: unix.BPF_RET | unix.BPF_K, K: einval})
+	}
+	// IP_LOCAL_PORT_RANGE would let a socket choose its own port at connect
+	// time, which is bind by another name.
+	for _, nr := range setsockopt {
+		filter = append(filter,
+			unix.SockFilter{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jf: 6, K: nr},
+			unix.SockFilter{Code: unix.BPF_LD | unix.BPF_W | unix.BPF_ABS, K: 24}, // seccomp_data.args[1] (level), low word
+			unix.SockFilter{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jf: 3, K: unix.SOL_IP},
+			unix.SockFilter{Code: unix.BPF_LD | unix.BPF_W | unix.BPF_ABS, K: 32}, // seccomp_data.args[2] (optname), low word
+			unix.SockFilter{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jf: 1, K: unix.IP_LOCAL_PORT_RANGE},
+			unix.SockFilter{Code: unix.BPF_RET | unix.BPF_K, K: eperm},
+			unix.SockFilter{Code: unix.BPF_RET | unix.BPF_K, K: unix.SECCOMP_RET_ALLOW})
 	}
 	// CLONE_PARENT makes the new process the supervisor's child: it would
 	// never be reaped and would keep its PID charged to the slot. Docker's

@@ -153,7 +153,7 @@ func TestQueueScreen(t *testing.T) {
 				}
 			}
 			flat := strings.ReplaceAll(screen, "\r\n", " ")
-			for _, want := range []string{"all 6 sessions", tc.ahead, "in 12:41 (by 14:07 UTC) at the latest", "Press q to leave the queue."} {
+			for _, want := range []string{"all 6 sessions", tc.ahead, "in about 12:41 (around 14:07 UTC).", "Press q to leave the queue."} {
 				if !strings.Contains(flat, want) {
 					t.Fatalf("screen missing %q: %q", want, screen)
 				}
@@ -163,7 +163,7 @@ func TestQueueScreen(t *testing.T) {
 	if screen := queueScreen(1, 1, 80, now, time.Time{}); !strings.Contains(screen, "the only session") || !strings.Contains(screen, "Estimated start: unknown") {
 		t.Fatal(screen)
 	}
-	if screen := queueScreen(1, 1, 80, now, now); !strings.Contains(screen, "in 00:00") {
+	if screen := queueScreen(1, 1, 80, now, now); !strings.Contains(screen, "any moment now") {
 		t.Fatal(screen)
 	}
 	if got := queueTimeoutMessage(30 * time.Minute); strings.TrimSpace(got) != "Sorry, no session became free within 30 minutes. Please try again later." {

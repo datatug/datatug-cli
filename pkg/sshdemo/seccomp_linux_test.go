@@ -73,6 +73,9 @@ func TestSlotFilterArchitectures(t *testing.T) {
 	cases = append(cases, slotFilterCase{"amd64", unix.AUDIT_ARCH_X86_64, 50, 0, denied},
 		slotFilterCase{"amd64", unix.AUDIT_ARCH_X86_64, 50 | 1<<30, 0, denied},
 		slotFilterCase{"arm64", unix.AUDIT_ARCH_AARCH64, 201, 0, denied})
+	cases = append(cases, slotFilterCase{"amd64", unix.AUDIT_ARCH_X86_64, 49, 0, denied},
+		slotFilterCase{"amd64", unix.AUDIT_ARCH_X86_64, 49 | 1<<30, 0, denied},
+		slotFilterCase{"arm64", unix.AUDIT_ARCH_AARCH64, 200, 0, denied})
 	const einval = unix.SECCOMP_RET_ERRNO | uint32(unix.EINVAL)
 	for _, nr := range []uint32{40, 275, 276, 278, 532} {
 		cases = append(cases, slotFilterCase{"amd64", unix.AUDIT_ARCH_X86_64, nr, 0, einval},
@@ -118,6 +121,49 @@ func TestSlotFilterArchitectures(t *testing.T) {
 		got, err := vm.Run(data[:])
 		if err != nil || uint32(got) != tc.want {
 			t.Fatalf("%s syscall %d audit arch %x arg0 %d = %x, %v; want %x", tc.goarch, tc.number, tc.arch, tc.arg0, got, err, tc.want)
+		}
+	}
+}
+
+func TestSlotFilterSetsockoptPortRange(t *testing.T) {
+	const denied = unix.SECCOMP_RET_ERRNO | uint32(unix.EPERM)
+	for _, tc := range []struct {
+		goarch        string
+		arch, number  uint32
+		level, option uint32
+		want          uint32
+	}{
+		{"amd64", unix.AUDIT_ARCH_X86_64, 54, unix.SOL_IP, unix.IP_LOCAL_PORT_RANGE, denied},
+		{"amd64", unix.AUDIT_ARCH_X86_64, 541 | 1<<30, unix.SOL_IP, unix.IP_LOCAL_PORT_RANGE, denied},
+		{"arm64", unix.AUDIT_ARCH_AARCH64, 208, unix.SOL_IP, unix.IP_LOCAL_PORT_RANGE, denied},
+		{"amd64", unix.AUDIT_ARCH_X86_64, 54, unix.SOL_IP, unix.IP_TOS, unix.SECCOMP_RET_ALLOW},
+		{"amd64", unix.AUDIT_ARCH_X86_64, 54, unix.SOL_SOCKET, unix.IP_LOCAL_PORT_RANGE, unix.SECCOMP_RET_ALLOW},
+		{"arm64", unix.AUDIT_ARCH_AARCH64, 208, unix.SOL_TCP, unix.TCP_NODELAY, unix.SECCOMP_RET_ALLOW},
+	} {
+		filter, err := slotFilter(tc.goarch)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw := make([]bpf.RawInstruction, len(filter))
+		for i, ins := range filter {
+			raw[i] = bpf.RawInstruction{Op: ins.Code, Jt: ins.Jt, Jf: ins.Jf, K: ins.K}
+		}
+		ins, ok := bpf.Disassemble(raw)
+		if !ok {
+			t.Fatal("filter contains unknown instructions")
+		}
+		vm, err := bpf.NewVM(ins)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var data [64]byte
+		binary.BigEndian.PutUint32(data[:4], tc.number)
+		binary.BigEndian.PutUint32(data[4:], tc.arch)
+		binary.BigEndian.PutUint32(data[24:], tc.level)
+		binary.BigEndian.PutUint32(data[32:], tc.option)
+		got, err := vm.Run(data[:])
+		if err != nil || uint32(got) != tc.want {
+			t.Fatalf("%s setsockopt %d level %d option %d = %x, %v; want %x", tc.goarch, tc.number, tc.level, tc.option, got, err, tc.want)
 		}
 	}
 }
@@ -249,6 +295,15 @@ func TestSlotFilterKernel(t *testing.T) {
 	}
 	if err := unix.Listen(fd, 1); !errors.Is(err, unix.EPERM) {
 		t.Fatalf("listen = %v, want EPERM", err)
+	}
+	if err := unix.Bind(fd, &unix.SockaddrInet4{Addr: [4]byte{127, 0, 0, 1}}); !errors.Is(err, unix.EPERM) {
+		t.Fatalf("bind = %v, want EPERM", err)
+	}
+	if err := unix.SetsockoptInt(fd, unix.SOL_IP, unix.IP_LOCAL_PORT_RANGE, 40000|40000<<16); !errors.Is(err, unix.EPERM) {
+		t.Fatalf("setsockopt(IP_LOCAL_PORT_RANGE) = %v, want EPERM", err)
+	}
+	if err := unix.SetsockoptInt(fd, unix.SOL_TCP, unix.TCP_NODELAY, 1); err != nil {
+		t.Fatalf("setsockopt(TCP_NODELAY) = %v, want success", err)
 	}
 	_ = unix.Close(fd)
 

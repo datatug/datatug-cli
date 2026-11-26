@@ -178,12 +178,14 @@ func queueScreen(sessions, position, width int, now, estimate time.Time) string 
 	}
 	estimatedStart := "Estimated start: unknown"
 	if !estimate.IsZero() {
-		seconds := int64(0)
+		// An estimate, not a promise: cleanup and memory release can take
+		// longer than their retry interval, and sessions can end early.
+		estimatedStart = "Estimated start: any moment now."
 		if remaining := estimate.Sub(now); remaining > 0 {
-			seconds = int64((remaining-1)/time.Second) + 1
+			seconds := int64((remaining-1)/time.Second) + 1
+			estimatedStart = fmt.Sprintf("Estimated start: in about %02d:%02d (around %s UTC).",
+				seconds/60, seconds%60, estimate.UTC().Format("15:04"))
 		}
-		estimatedStart = fmt.Sprintf("Estimated start: in %02d:%02d (by %s UTC) at the latest.",
-			seconds/60, seconds%60, estimate.UTC().Format("15:04"))
 	}
 	var screen strings.Builder
 	screen.WriteString(clearQueueScreen)

@@ -5,11 +5,9 @@ package sshdemo
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/binary"
 	"errors"
 	"io"
-	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -219,6 +217,7 @@ func TestServer_PTYOwnershipFailurePreventsChildStart(t *testing.T) {
 		c.SessionsDir = dir
 	}, WithSysOps(SysOps{
 		FileUID: func(os.FileInfo) (int, bool) { return 0, true },
+		FileGID: fakeSlotGID(DefaultUIDBase),
 		Chown:   func(string, int, int) error { return nil },
 		Fchown: func(slave *os.File, uid, gid int) error {
 			if _, err := slave.Stat(); err != nil {
@@ -246,139 +245,8 @@ func TestServer_PTYOwnershipFailurePreventsChildStart(t *testing.T) {
 	if err := sess.Wait(); !errors.As(err, &exitErr) || exitErr.ExitStatus() != 1 || out.Len() != 0 {
 		t.Fatalf("session returned %v and %q, want exit 1 with no child output", err, out.String())
 	}
-	waitNoSessionDirs(t, dir, time.Second)
+	waitNoSessionDirs(t, filepath.Join(dir, "slot-0"), time.Second)
 	waitLogContains(t, h.logs, "chown pty slave descriptor", time.Second)
-}
-
-func TestServer_StaleWorkspacesQuarantineSlots(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.Chmod(dir, 0o711); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"dir-left", "procs-left"} {
-		if err := os.Mkdir(filepath.Join(dir, name), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(dir, "dir-left", "fail-cleanup"), nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfg := DefaultConfig()
-	cfg.StateDir = t.TempDir()
-	cfg.SessionsDir = dir
-	cfg.SkipTemplate = true
-	cfg.Executable = os.Args[0]
-	cfg.ExecPrefixArgs = []string{"-test.run=^TestHelperProcess$", "--"}
-	cfg.MaxSessions = 3
-	var logs syncBuffer
-	cfg.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
-	ops := SysOps{
-		StatSharedTemp: noSharedTemp,
-		FileUID: func(info os.FileInfo) (int, bool) {
-			switch info.Name() {
-			case "dir-left":
-				return cfg.UIDBase, true
-			case "procs-left":
-				return cfg.UIDBase + 1, true
-			default:
-				return 0, true
-			}
-		},
-	}
-	cfg.CgroupRoot, ops.cgroups = fakeCgroupMount(t)
-	ops.FilesystemCapacity = ampleSessionFilesystem
-	addFakeSlot(t, cfg.CgroupRoot, "slot-1")
-	write := ops.cgroups.write
-	ops.cgroups.write = func(path, value string) error {
-		if strings.HasSuffix(path, "slot-1/cgroup.kill") {
-			return syscall.EPERM
-		}
-		return write(path, value)
-	}
-	srv, err := NewServer(context.Background(), cfg, WithSysOps(ops))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Lstat(filepath.Join(dir, "procs-left")); err != nil {
-		t.Fatalf("workspace for undrained slot was altered: %v", err)
-	}
-	if got := strings.Count(logs.String(), `"level":"ERROR","msg":"quarantining session slot`); got != 2 {
-		t.Fatalf("expected two quarantine diagnostics, got %d in %s", got, logs.String())
-	}
-	for range 2 {
-		slot, err := srv.slots.Acquire("ip")
-		if err != nil || slot.UID != cfg.UIDBase+2 {
-			t.Fatalf("Acquire = %+v, %v, want only the third uid", slot, err)
-		}
-		if _, err := srv.slots.Acquire("ip"); !errors.Is(err, ErrGlobalLimit) {
-			t.Fatalf("Acquire with only usable slot in use = %v", err)
-		}
-		srv.slots.Release(slot)
-	}
-	cfg.CgroupRoot, ops.cgroups = fakeCgroupMount(t)
-	cfg.MaxSessions = 1
-	if _, err := NewServer(context.Background(), cfg, WithSysOps(ops)); err == nil || !strings.Contains(err.Error(), "all session slots quarantined") {
-		t.Fatalf("starting with all slots quarantined = %v", err)
-	}
-	cfg.Isolation = IsolationProcess
-	cfg.Listen = "127.0.0.1:0"
-	if _, err := NewServer(context.Background(), cfg, WithSysOps(ops)); err == nil || !strings.Contains(err.Error(), "could not verify cleanup") {
-		t.Fatalf("starting with unverified cleanup for shared uid = %v", err)
-	}
-}
-
-func TestStaleCleanupFailsWhenWorkspaceOwnerCannotBeVerified(t *testing.T) {
-	dir := t.TempDir()
-	stale := filepath.Join(dir, "stale")
-	for _, ops := range []SysOps{
-		{Stat: func(string) (os.FileInfo, error) { return nil, syscall.EIO }},
-		{FileUID: func(os.FileInfo) (int, bool) { return 0, false }},
-	} {
-		srv := &Server{cfg: Config{SessionsDir: stale, Isolation: IsolationUID}, ops: ops.withDefaults()}
-		if err := srv.cleanStaleSessions(context.Background()); err == nil {
-			t.Fatal("expected an error if the sessions directory cannot be read")
-		}
-		if err := os.Mkdir(stale, 0o700); err != nil {
-			t.Fatal(err)
-		}
-		srv.cfg.SessionsDir = dir
-		if err := srv.cleanStaleSessions(context.Background()); err == nil {
-			t.Fatal("expected an error if the workspace owner cannot be verified")
-		}
-		if err := os.Remove(stale); err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
-func TestStaleCleanupSkipsDirectoryReplacedBySymlink(t *testing.T) {
-	dir, target := t.TempDir(), t.TempDir()
-	stale := filepath.Join(dir, "stale")
-	if err := os.Mkdir(stale, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	ops := DefaultSysOps()
-	stat := ops.Stat
-	ops.Stat = func(path string) (os.FileInfo, error) {
-		if path != stale {
-			t.Fatalf("unexpected stale path %q", path)
-		}
-		if err := os.Remove(path); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Symlink(target, path); err != nil {
-			t.Fatal(err)
-		}
-		return stat(path)
-	}
-	ops.FileUID = func(os.FileInfo) (int, bool) {
-		t.Fatal("attempted cleanup of a symlink")
-		return 0, false
-	}
-	srv := &Server{cfg: Config{SessionsDir: dir, Isolation: IsolationUID}, ops: ops}
-	if err := srv.cleanStaleSessions(t.Context()); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func TestWriteQuotaNotice_ClosesBlockedTransport(t *testing.T) {

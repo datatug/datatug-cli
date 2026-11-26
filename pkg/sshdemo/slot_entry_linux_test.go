@@ -73,7 +73,7 @@ func TestEnterSlotChecksEveryStep(t *testing.T) {
 			}
 			cgroupReads := 0
 			enterSlotOps = slotEntryOps{
-				denyLinks: func(string, func(string) ([]byte, error)) error { return record("seccomp") },
+				installFilter: func(string, func(string) ([]byte, error)) error { return record("seccomp") },
 				write: func(path, value string) error {
 					if path != filepath.Join(slotDir, "cgroup.procs") || value != "0" {
 						t.Fatalf("unexpected migration: write %q to %s", value, path)

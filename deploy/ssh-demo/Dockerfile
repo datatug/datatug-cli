@@ -21,10 +21,11 @@ ARG VERSION=dev
 ARG REVISION=unknown
 ARG BUILD_DATE
 ENV CGO_ENABLED=1
-# All dependencies are public modules: the build needs no credential.
+# Keep DNS and account lookup independent of libc NSS socket services.
+# CGO remains enabled for the embedded DuckDB engine.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    go build -trimpath -buildvcs=false \
+    go build -tags netgo,osusergo -trimpath -buildvcs=false \
     -ldflags "-s -w -X github.com/strongo/buildinfo.version=${VERSION} -X github.com/strongo/buildinfo.commit=${REVISION} -X github.com/strongo/buildinfo.date=${BUILD_DATE}" \
     -o /out/datatug .
 

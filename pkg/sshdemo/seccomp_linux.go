@@ -21,8 +21,8 @@ func setSeccompFilter(program *unix.SockFprog) (uintptr, syscall.Errno) {
 	return tid, errno
 }
 
-func denyHardLinks(goarch string, read func(string) ([]byte, error)) error {
-	filter, err := hardLinkFilter(goarch)
+func installSlotFilter(goarch string, read func(string) ([]byte, error)) error {
+	filter, err := slotFilter(goarch)
 	if err != nil {
 		return err
 	}
@@ -36,10 +36,10 @@ func denyHardLinks(goarch string, read func(string) ([]byte, error)) error {
 	program := unix.SockFprog{Len: uint16(len(filter)), Filter: &filter[0]}
 	tid, errno := seccompSetFilter(&program)
 	if errno != 0 {
-		return fmt.Errorf("install hard-link seccomp filter: %w", errno)
+		return fmt.Errorf("install slot seccomp filter: %w", errno)
 	}
 	if tid != 0 {
-		return fmt.Errorf("synchronize hard-link seccomp filter: thread %d rejected TSYNC", tid)
+		return fmt.Errorf("synchronize slot seccomp filter: thread %d rejected TSYNC", tid)
 	}
 	const statusPath = "/proc/self/status"
 	status, err := read(statusPath)
@@ -54,18 +54,21 @@ func denyHardLinks(goarch string, read func(string) ([]byte, error)) error {
 	return fmt.Errorf("%s does not report seccomp filter mode", statusPath)
 }
 
-func hardLinkFilter(goarch string) ([]unix.SockFilter, error) {
+func slotFilter(goarch string) ([]unix.SockFilter, error) {
 	var arch uint32
 	var blocked []uint32
+	var socket, socketpair uint32
 	switch goarch {
 	case "amd64":
 		arch = unix.AUDIT_ARCH_X86_64
 		blocked = []uint32{86, 265} // link, linkat
+		socket, socketpair = 41, 53
 	case "arm64":
 		arch = unix.AUDIT_ARCH_AARCH64
 		blocked = []uint32{37} // linkat (the ABI has no link syscall)
+		socket, socketpair = 198, 199
 	default:
-		return nil, fmt.Errorf("hard-link seccomp filter does not support %s", goarch)
+		return nil, fmt.Errorf("slot seccomp filter does not support %s", goarch)
 	}
 	filter := []unix.SockFilter{
 		{Code: unix.BPF_LD | unix.BPF_W | unix.BPF_ABS, K: 4}, // seccomp_data.arch
@@ -77,10 +80,20 @@ func hardLinkFilter(goarch string) ([]unix.SockFilter, error) {
 		// x32 uses the same audit arch and ORs this bit into syscall numbers.
 		filter = append(filter, unix.SockFilter{Code: unix.BPF_ALU | unix.BPF_AND | unix.BPF_K, K: ^uint32(1 << 30)})
 	}
+	// io_uring_setup, io_uring_enter and io_uring_register share syscall numbers.
+	blocked = append(blocked, 425, 426, 427)
+	const eperm = unix.SECCOMP_RET_ERRNO | uint32(unix.EPERM)
 	for _, nr := range blocked {
 		filter = append(filter,
 			unix.SockFilter{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jf: 1, K: nr},
-			unix.SockFilter{Code: unix.BPF_RET | unix.BPF_K, K: unix.SECCOMP_RET_ERRNO | uint32(unix.EPERM)})
+			unix.SockFilter{Code: unix.BPF_RET | unix.BPF_K, K: eperm})
 	}
-	return append(filter, unix.SockFilter{Code: unix.BPF_RET | unix.BPF_K, K: unix.SECCOMP_RET_ALLOW}), nil
+	return append(filter,
+		unix.SockFilter{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jt: 1, K: socket},
+		unix.SockFilter{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jf: 3, K: socketpair},
+		unix.SockFilter{Code: unix.BPF_LD | unix.BPF_W | unix.BPF_ABS, K: 16}, // seccomp_data.args[0], low word
+		unix.SockFilter{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jf: 1, K: unix.AF_UNIX},
+		unix.SockFilter{Code: unix.BPF_RET | unix.BPF_K, K: eperm},
+		unix.SockFilter{Code: unix.BPF_RET | unix.BPF_K, K: unix.SECCOMP_RET_ALLOW},
+	), nil
 }

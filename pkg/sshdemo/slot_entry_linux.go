@@ -14,13 +14,13 @@ import (
 )
 
 type slotEntryOps struct {
-	write     func(string, string) error
-	read      func(string) ([]byte, error)
-	readDir   func(string) ([]os.DirEntry, error)
-	setgroups func([]int) error
-	setgid    func(int) error
-	setuid    func(int) error
-	denyLinks func(string, func(string) ([]byte, error)) error
+	write         func(string, string) error
+	read          func(string) ([]byte, error)
+	readDir       func(string) ([]os.DirEntry, error)
+	setgroups     func([]int) error
+	setgid        func(int) error
+	setuid        func(int) error
+	installFilter func(string, func(string) ([]byte, error)) error
 }
 
 var enterSlotOps = slotEntryOps{
@@ -29,10 +29,10 @@ var enterSlotOps = slotEntryOps{
 	readDir: os.ReadDir,
 	// syscall uses the Go runtime's all-thread syscalls or libc's setxid
 	// wrappers, depending on whether the binary links cgo.
-	setgroups: syscall.Setgroups,
-	setgid:    syscall.Setgid,
-	setuid:    syscall.Setuid,
-	denyLinks: denyHardLinks,
+	setgroups:     syscall.Setgroups,
+	setgid:        syscall.Setgid,
+	setuid:        syscall.Setuid,
+	installFilter: installSlotFilter,
 }
 
 // EnterSlot migrates the calling process to its slot and permanently drops
@@ -68,7 +68,7 @@ func EnterSlot(entry SlotEntry) error {
 	if err := verifySlotMembership(entry.CgroupDir, ops); err != nil {
 		return err
 	}
-	return ops.denyLinks(runtime.GOARCH, ops.read)
+	return ops.installFilter(runtime.GOARCH, ops.read)
 }
 
 func verifySlotMembership(dir string, ops slotEntryOps) error {

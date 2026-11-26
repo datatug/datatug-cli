@@ -110,9 +110,10 @@ services:
       - state:/var/lib/datatug-demo/state
       - proxy-socket:/run/datatug-demo/proxy:ro
     tmpfs:
-      # Six slots × 544 MiB plus 10% rounded up, and one inode per 1 KiB.
+      # Six slots × 544 MiB plus 10% rounded up. Inode budget is one
+      # inode per 512 bytes of slot memory plus 31 supervisor-owned directories.
       # Scale both ceilings with DEMO_MAX_SESSIONS.
-      - /var/lib/datatug-demo/sessions:rw,nosuid,nodev,size=${DEMO_SESSIONS_TMPFS:-3591m},nr_inodes=${DEMO_SESSIONS_TMPFS_INODES:-3342336},mode=0711,uid=0,gid=0
+      - /var/lib/datatug-demo/sessions:rw,nosuid,nodev,size=${DEMO_SESSIONS_TMPFS:-3591m},nr_inodes=${DEMO_SESSIONS_TMPFS_INODES:-6684703},mode=0711,uid=0,gid=0
       # Root-only: session uids get a private TMPDIR inside their workspace,
       # so nothing a visitor writes outlives the session.
       - /tmp:rw,nosuid,nodev,noexec,size=64m,mode=0755,uid=0,gid=0

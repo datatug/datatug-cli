@@ -569,14 +569,14 @@ func TestDemoSSHSessionCleanupMode(t *testing.T) {
 	validHex := "0123456789abcdef0123456789abcdef"
 
 	t.Run("rejects relative path", func(t *testing.T) {
-		if err := runDemoSSHCleanup("relative/" + validHex); err == nil || !strings.Contains(err.Error(), "absolute") {
+		if err := runDemoSSHCleanup("relative/"+validHex, func() {}); err == nil || !strings.Contains(err.Error(), "absolute") {
 			t.Fatalf("expected relative path error, got %v", err)
 		}
 	})
 
 	t.Run("rejects bad base names", func(t *testing.T) {
 		for _, bad := range []string{"/tmp/short", "/tmp/0123456789ABCDEF0123456789ABCDEF", "/tmp/0123456789abcdef0123456789abcdeg"} {
-			if err := runDemoSSHCleanup(bad); err == nil || !strings.Contains(err.Error(), "32 lowercase hex") {
+			if err := runDemoSSHCleanup(bad, func() {}); err == nil || !strings.Contains(err.Error(), "32 lowercase hex") {
 				t.Fatalf("expected hex error for %q, got %v", bad, err)
 			}
 		}
@@ -584,13 +584,13 @@ func TestDemoSSHSessionCleanupMode(t *testing.T) {
 
 	t.Run("missing dir succeeds idempotently and lstat error fails", func(t *testing.T) {
 		missing := filepath.Join(t.TempDir(), validHex)
-		if err := runDemoSSHCleanup(missing); err != nil {
+		if err := runDemoSSHCleanup(missing, func() {}); err != nil {
 			t.Fatalf("missing dir should succeed: %v", err)
 		}
 		stubSSHSession(t, &demoSSHCleanupLstat, func(string) (os.FileInfo, error) {
 			return nil, errors.New("eacces")
 		})
-		if err := runDemoSSHCleanup(missing); err == nil || !strings.Contains(err.Error(), "eacces") {
+		if err := runDemoSSHCleanup(missing, func() {}); err == nil || !strings.Contains(err.Error(), "eacces") {
 			t.Fatalf("expected lstat error, got %v", err)
 		}
 	})
@@ -609,7 +609,7 @@ func TestDemoSSHSessionCleanupMode(t *testing.T) {
 		if err := os.Symlink(realDir, link); err != nil {
 			t.Fatal(err)
 		}
-		if err := runDemoSSHCleanup(link); err == nil || !strings.Contains(err.Error(), "not a directory") {
+		if err := runDemoSSHCleanup(link, func() {}); err == nil || !strings.Contains(err.Error(), "not a directory") {
 			t.Fatalf("expected non-dir error for symlink, got %v", err)
 		}
 	})
@@ -620,7 +620,7 @@ func TestDemoSSHSessionCleanupMode(t *testing.T) {
 			t.Fatal(err)
 		}
 		stubSSHSession(t, &demoSSHGeteuid, func() int { return os.Geteuid() + 999 })
-		if err := runDemoSSHCleanup(target); err == nil || !strings.Contains(err.Error(), "not owned") {
+		if err := runDemoSSHCleanup(target, func() {}); err == nil || !strings.Contains(err.Error(), "not owned") {
 			t.Fatalf("expected ownership error, got %v", err)
 		}
 	})
@@ -680,19 +680,23 @@ func TestDemoSSHSessionCleanupMode(t *testing.T) {
 		}
 	})
 
-	t.Run("bounded nesting", func(t *testing.T) {
+	t.Run("removes deeply nested Git metadata", func(t *testing.T) {
 		target := filepath.Join(t.TempDir(), validHex)
-		path := target
-		for range 128 {
-			path = filepath.Join(path, "d")
-		}
-		if err := os.MkdirAll(path, 0o700); err != nil {
+		refDir := filepath.Join(target, "repo", ".git", "refs", "heads", strings.Repeat("d/", 126))
+		if err := os.MkdirAll(refDir, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := runDemoSSHCleanup(target); err == nil || !strings.Contains(err.Error(), "maximum directory depth") {
-			t.Fatalf("cleanup depth limit: %v", err)
+		if err := os.WriteFile(filepath.Join(refDir, "branch"), []byte("fixture"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := runDemoSSHCleanup(target, func() {}); err != nil {
+			t.Fatal(err)
+		}
+		if entries, err := os.ReadDir(target); err != nil || len(entries) != 0 {
+			t.Fatalf("cleanup left %d entries: %v", len(entries), err)
 		}
 	})
+
 }
 
 func TestDemoSSHSessionParseGitHubRepoNoticeAndSeeding(t *testing.T) {
@@ -893,52 +897,6 @@ func TestDemoSSHSessionCopyTemplateTreeErrors(t *testing.T) {
 	})
 }
 
-func TestDemoSSHSessionRemoveDirContentsErrors(t *testing.T) {
-	fail := errors.New("injected")
-	tree := func(t *testing.T) string {
-		dir := t.TempDir()
-		_ = os.MkdirAll(filepath.Join(dir, "sub"), 0o755)
-		_ = os.WriteFile(filepath.Join(dir, "sub", "f"), nil, 0o644)
-		return dir
-	}
-	t.Run("not a directory", func(t *testing.T) {
-		f := filepath.Join(t.TempDir(), "f")
-		_ = os.WriteFile(f, nil, 0o644)
-		if err := removeDirContentsNoFollow(f); err == nil || !strings.Contains(err.Error(), "read dir") {
-			t.Fatalf("err = %v", err)
-		}
-	})
-	t.Run("entry vanished", func(t *testing.T) {
-		stubSSHSession(t, &demoSSHCleanupLstat, func(string) (os.FileInfo, error) { return nil, os.ErrNotExist })
-		if err := removeDirContentsNoFollow(tree(t)); err != nil {
-			t.Fatalf("vanished entries are skipped, got %v", err)
-		}
-	})
-	t.Run("lstat failure", func(t *testing.T) {
-		stubSSHSession(t, &demoSSHCleanupLstat, func(string) (os.FileInfo, error) { return nil, fail })
-		if err := removeDirContentsNoFollow(tree(t)); err == nil || !strings.Contains(err.Error(), "lstat") {
-			t.Fatalf("err = %v", err)
-		}
-	})
-	t.Run("nested failure", func(t *testing.T) {
-		stubSSHSession(t, &demoSSHCleanupLstat, func(p string) (os.FileInfo, error) {
-			if strings.HasSuffix(p, string(filepath.Separator)+"f") {
-				return nil, fail
-			}
-			return os.Lstat(p)
-		})
-		if err := removeDirContentsNoFollow(tree(t)); err == nil || !strings.Contains(err.Error(), "lstat") {
-			t.Fatalf("err = %v", err)
-		}
-	})
-	t.Run("remove failure", func(t *testing.T) {
-		stubSSHSession(t, &demoSSHCleanupRemove, func(string) error { return fail })
-		if err := removeDirContentsNoFollow(tree(t)); err == nil || !strings.Contains(err.Error(), "remove") {
-			t.Fatalf("err = %v", err)
-		}
-	})
-}
-
 func TestDemoSSHSessionRegisterProjectSaveFailure(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root writes into read-only directories")
@@ -1053,14 +1011,27 @@ func TestDemoSSHSessionEntersSlotBeforeAnythingElse(t *testing.T) {
 	})
 }
 
-func TestDemoSSHSessionCleanupReadDirFailure(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "f"), nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	injected := errors.New("injected")
-	stubSSHSession(t, &demoSSHCleanupReadDir, func(*os.File, int) ([]os.DirEntry, error) { return nil, injected })
-	if err := removeDirContentsNoFollow(dir); !errors.Is(err, injected) || !strings.Contains(err.Error(), "read dir") {
-		t.Fatalf("err = %v", err)
-	}
+func TestDemoSSHSessionCleanupReportsInvariants(t *testing.T) {
+	t.Run("slot entry failure", func(t *testing.T) {
+		injected := errors.New("injected")
+		stubSSHSession(t, &demoSSHEnterSlot, func(sshdemo.SlotEntry) error { return injected })
+		var err error
+		out := captureStdout(t, func() {
+			err = runDemoSSHSession(context.Background(), demoSSHSessionFlags{slotRequested: true, cleanup: "/x"})
+		})
+		if !errors.Is(err, injected) || out != sshdemo.CleanupInvariant {
+			t.Fatalf("err = %v, out = %q", err, out)
+		}
+	})
+	t.Run("boundary violation", func(t *testing.T) {
+		stubSSHSession(t, &demoSSHApplyRlimits, func(demoSSHRlimits) error { return nil })
+		stubSSHSession(t, &demoSSHRunCleanup, func(string, func()) error { return sshdemo.ErrCleanupBoundary })
+		var err error
+		out := captureStdout(t, func() {
+			err = runDemoSSHSession(context.Background(), demoSSHSessionFlags{cleanup: "/x"})
+		})
+		if !errors.Is(err, sshdemo.ErrCleanupBoundary) || out != sshdemo.CleanupInvariant {
+			t.Fatalf("err = %v, out = %q", err, out)
+		}
+	})
 }

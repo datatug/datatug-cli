@@ -75,6 +75,19 @@ func TestHelperProcess(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(dir, "fail-cleanup")); err == nil {
 				os.Exit(1)
 			}
+			if _, err := os.Stat(filepath.Join(dir, "cleanup-invariant")); err == nil {
+				_, _ = io.WriteString(os.Stdout, CleanupInvariant)
+				os.Exit(1)
+			}
+			if err := os.Remove(filepath.Join(dir, "cleanup-timeout")); err == nil {
+				_, _ = io.WriteString(os.Stdout, CleanupProgress)
+				time.Sleep(time.Minute)
+			}
+			if err := os.Remove(filepath.Join(dir, "cleanup-oom")); err == nil {
+				_, _ = io.WriteString(os.Stdout, CleanupProgress)
+				_ = syscall.Kill(os.Getpid(), syscall.SIGKILL)
+				os.Exit(2)
+			}
 			entries, err := os.ReadDir(dir)
 			if err != nil {
 				os.Exit(1)
@@ -979,6 +992,7 @@ func TestServer_UIDModeFullSessionAndErrorPaths(t *testing.T) {
 	var slaveChowned bool
 	ops := DefaultSysOps()
 	ops.FileUID = func(os.FileInfo) (int, bool) { return 0, true }
+	ops.FileGID = fakeSlotGID(21000)
 	ops.StatSharedTemp = noSharedTemp
 	ops.Chown = func(p string, uid, gid int) error {
 		chowned = append(chowned, p)
@@ -1021,7 +1035,7 @@ func TestServer_UIDModeFullSessionAndErrorPaths(t *testing.T) {
 		t.Fatalf("uid-mode session failed: err=%v out=%q", err, string(b))
 	}
 	_ = sess.Close()
-	waitNoSessionDirs(t, sessDir, 3*time.Second)
+	waitNoSessionDirs(t, filepath.Join(sessDir, "slot-0"), 3*time.Second)
 	cleanupArgs, err := os.ReadFile(filepath.Join(root, "cleanup", "cleanup-seen.json"))
 	cleanupGroup, _ := json.Marshal(filepath.Join(root, "cleanup"))
 	if err != nil || !strings.Contains(string(cleanupArgs), `"--slot-cgroup",`+string(cleanupGroup)) ||
@@ -1037,8 +1051,8 @@ func TestServer_UIDModeFullSessionAndErrorPaths(t *testing.T) {
 			t.Fatalf("expected child flags %s in %s", pair, b)
 		}
 	}
-	if len(chowned) != 4 || !slaveChowned {
-		t.Fatalf("expected four workspace path chowns and a slave descriptor chown, got %v / %v", chowned, slaveChowned)
+	if len(chowned) != h.srv.cfg.MaxSessions+4 || !slaveChowned {
+		t.Fatalf("expected slot parent chowns, four workspace chowns, and a slave descriptor chown, got %v / %v", chowned, slaveChowned)
 	}
 
 	// 2. Malformed pty-req and window-change payloads are refused.
@@ -1079,7 +1093,15 @@ func TestServer_UIDModeFullSessionAndErrorPaths(t *testing.T) {
 	_ = bs.RequestPty("xterm-256color", 24, 80, gossh.TerminalModes{})
 	_ = bs.Shell()
 	_ = bs.Wait()
-	// The cleanup executable was unavailable, so quarantine the slot.
+	// The cleanup executable was unavailable. The slot stays reserved
+	// for cleanup and is quarantined after three runs without progress.
+	waitLogContains(t, hBadExec.logs, "session workspace awaiting cleanup", 3*time.Second)
+	for range 2 {
+		hBadExec.srv.cleanupMu.Lock()
+		hBadExec.srv.pendingCleanup[0].retryAfter = time.Now()
+		hBadExec.srv.cleanupMu.Unlock()
+		hBadExec.srv.retryCleanupJobs(t.Context())
+	}
 	waitLogContains(t, hBadExec.logs, "quarantining session slot", 3*time.Second)
 	if !hBadExec.srv.slots.isQuarantined(0) {
 		t.Fatal("unverified cleanup did not quarantine slot")

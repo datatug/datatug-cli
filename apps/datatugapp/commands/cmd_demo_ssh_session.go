@@ -77,13 +77,11 @@ var (
 	demoSSHRunWelcome       = dtdemo.RunWelcome
 	demoSSHRunWorkspaceLoop = runWorkspaceLoop
 	demoSSHCleanupLstat     = os.Lstat
-	// A directory read that fails mid-way; a healthy filesystem does not.
-	demoSSHCleanupReadDir = func(f *os.File, n int) ([]os.DirEntry, error) { return f.ReadDir(n) }
 	// Slot entry runs only as root in the container; tests stand in for it.
-	demoSSHEnterSlot     = sshdemo.EnterSlot
-	demoSSHChdir         = os.Chdir
-	demoSSHSlotReadyFD   = uintptr(sshdemo.SlotReadyFD)
-	demoSSHCleanupRemove = os.Remove
+	demoSSHEnterSlot   = sshdemo.EnterSlot
+	demoSSHRunCleanup  = runDemoSSHCleanup
+	demoSSHChdir       = os.Chdir
+	demoSSHSlotReadyFD = uintptr(sshdemo.SlotReadyFD)
 	// Seams for I/O failures a test cannot provoke on a healthy filesystem.
 	demoSSHTemplateLstat  = os.Lstat
 	demoSSHTemplateChmod  = os.Chmod
@@ -134,6 +132,9 @@ func demoSSHSessionCommand() *cobra.Command {
 func runDemoSSHSession(ctx context.Context, f demoSSHSessionFlags) error {
 	if f.slotRequested {
 		if err := demoSSHEnterSlot(f.slot); err != nil {
+			if f.cleanup != "" {
+				_, _ = io.WriteString(os.Stdout, sshdemo.CleanupInvariant)
+			}
 			return fmt.Errorf("enter session slot: %w", err)
 		}
 	}
@@ -141,7 +142,17 @@ func runDemoSSHSession(ctx context.Context, f demoSSHSessionFlags) error {
 		if err := demoSSHApplyRlimits(f.rlimits); err != nil {
 			return fmt.Errorf("apply cleanup resource limits: %w", err)
 		}
-		return runDemoSSHCleanup(f.cleanup)
+		var reported bool
+		err := demoSSHRunCleanup(f.cleanup, func() {
+			if !reported {
+				_, _ = io.WriteString(os.Stdout, sshdemo.CleanupProgress)
+				reported = true
+			}
+		})
+		if errors.Is(err, sshdemo.ErrCleanupBoundary) {
+			_, _ = io.WriteString(os.Stdout, sshdemo.CleanupInvariant)
+		}
+		return err
 	}
 	if f.slotRequested {
 		// The supervisor cannot enter the slot user's mode-0700 workspace.
@@ -509,7 +520,7 @@ func isHex32(s string) bool {
 // runDemoSSHCleanup removes all contents of dir without following symlinks.
 // It refuses unless dir is absolute, its base name is 32 lowercase hex chars,
 // and it is owned by the current uid. Missing dir succeeds idempotently.
-func runDemoSSHCleanup(dir string) error {
+func runDemoSSHCleanup(dir string, progress func()) error {
 	if !filepath.IsAbs(dir) {
 		return fmt.Errorf("cleanup path must be absolute: %q", dir)
 	}
@@ -530,48 +541,5 @@ func runDemoSSHCleanup(dir string) error {
 	if !demoSSHFileOwnedByUID(info, demoSSHGeteuid()) {
 		return fmt.Errorf("cleanup path %q is not owned by current uid", cleaned)
 	}
-	return removeDirContentsNoFollow(cleaned)
-}
-
-func removeDirContentsNoFollow(dir string) error {
-	return removeCleanupEntries(dir, 0)
-}
-
-func removeCleanupEntries(dir string, depth int) error {
-	const cleanupMaxDepth = 128
-	if depth >= cleanupMaxDepth {
-		return fmt.Errorf("cleanup exceeded maximum directory depth (%d) at %q", cleanupMaxDepth, dir)
-	}
-	file, pinned, err := sshdemo.OpenCleanupDirectory(dir)
-	if err != nil {
-		return fmt.Errorf("read dir %q: %w", dir, err)
-	}
-	defer func() { _ = file.Close() }()
-	for {
-		entries, err := demoSSHCleanupReadDir(file, 256)
-		for _, entry := range entries {
-			p := filepath.Join(pinned, entry.Name())
-			info, err := demoSSHCleanupLstat(p)
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			if err != nil {
-				return fmt.Errorf("lstat %q: %w", p, err)
-			}
-			if info.IsDir() {
-				if err := removeCleanupEntries(p, depth+1); err != nil {
-					return err
-				}
-			}
-			if err := demoSSHCleanupRemove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return fmt.Errorf("remove %q: %w", p, err)
-			}
-		}
-		if errors.Is(err, io.EOF) {
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("read dir %q: %w", dir, err)
-		}
-	}
+	return sshdemo.CleanWorkspaceContents(cleaned, progress)
 }

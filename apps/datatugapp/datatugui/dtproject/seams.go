@@ -33,11 +33,12 @@ var (
 	tick                 = tea.Tick
 	now                  = time.Now
 
-	getToken          = ghauth.GetToken
-	saveToken         = ghauth.SaveToken
-	deleteToken       = ghauth.DeleteToken
-	requestDeviceCode = ghauth.RequestDeviceCode
-	pollForToken      = ghauth.PollForToken
+	getToken                   = ghauth.GetToken
+	saveToken                  = ghauth.SaveToken
+	deleteToken                = ghauth.DeleteToken
+	requestDeviceCode          = ghauth.RequestDeviceCode
+	requestDeviceCodeWithScope = ghauth.RequestDeviceCodeWithScope
+	pollForToken               = ghauth.PollForToken
 )
 
 // settingsOrNone reads the settings of this machine. A first run has no

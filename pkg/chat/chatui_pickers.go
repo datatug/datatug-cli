@@ -15,6 +15,11 @@ import (
 func (u *ChatUI) globalKeys(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	u.workspaceInteraction++
 	u.workspaceFeedback = ""
+	if u.browserDisabledNotice != "" &&
+		(msg.String() == "f5" || msg.String() == "ctrl+w" && u.shell.WorkspaceFocus() == "explorer") {
+		u.workspaceFeedback = u.browserDisabledNotice
+		return nil, true
+	}
 	if cmd, handled := u.sessionPrefixKey(msg); handled {
 		return cmd, true
 	}

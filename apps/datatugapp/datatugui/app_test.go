@@ -298,6 +298,17 @@ func TestAppOpenWebUIWithCtrlW(t *testing.T) {
 	}
 }
 
+func TestAppDemoCtrlWShowsNotice(t *testing.T) {
+	fakeSeams(t)
+	restore := openURL
+	t.Cleanup(func() { openURL = restore })
+	openURL = func(string) error { t.Fatal("SSH demo opened a browser"); return nil }
+
+	d := newDriver(t, testModules(), Options{Start: ScreenProjects, DisableBrowser: true})
+	d.press("ctrl+w")
+	d.requireContains(BrowserUnavailable)
+}
+
 func TestAppRecoversFromAPanicInUpdate(t *testing.T) {
 	fakeSeams(t)
 	boom := Module{ID: "boom", Text: "Boom", Root: func() nav.Page { panic("kaboom") }}

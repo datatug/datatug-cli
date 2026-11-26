@@ -1,0 +1,63 @@
+# SSH demo deployment design
+
+The [feature specification](README.md) defines the SSH and session behavior. The [operator runbook](../../../deploy/ssh-demo/README.md) covers building, routing, key management and troubleshooting.
+
+## Topology
+
+```text
+SSH visitor
+    |
+Host TCP 2222 (published to edge)
+    |
+    v
+edge :2222 ---- SSH + PROXY v2 over internal bridge ----> demo :2222
+edge CONNECT socket <-------- Unix socket -------- supervisor relay
+    |                                                     ^
+    |                                                             |
+    +--> Internet :443 via public bridge                   Same-binary PTY children
+```
+
+The edge joins the public and internal bridges. It forwards SSH with a PROXY v2 header so that the supervisor can enforce per-client-IP quotas. Its CONNECT proxy allows TCP 443 for exactly `github.com`, `api.github.com`, `codeload.github.com` and `cloud.openvaultdb.com`. The proxy rejects IP literals and unsafe resolved addresses. Only SSH is published on the host.
+
+The supervisor and session children attach only to the internal bridge. The supervisor trusts PROXY headers from `172.31.250.2/32` (edge). The demo service uses `172.31.250.3`. Child HTTPS clients use an authenticated loopback CONNECT relay. Before HTTP reads, the relay resolves the client socket's UID through an exact TCP tuple request to Linux `NETLINK_SOCK_DIAG`. It caps unidentified sockets and concurrent lookups at 64 and closes connections on lookup error or overflow. It admits up to 16 sockets per slot UID, including incomplete requests. Each session also gets up to eight concurrent CONNECT tunnels. The template uses a temporary supervisor-only relay.
+
+The relay reaches edge CONNECT over `/run/datatug-demo/proxy/connect.sock` in a named volume. The edge owns the directory as UID 10001 and GID 0 with mode `0750`. Before binding the socket, the edge verifies the parent is a real directory with no permissions for others. The socket has mode `0666`, and directory traversal restricts access to the edge and the supervisor. The supervisor mounts the volume read-only. The internal bridge uses Docker's isolated gateway mode so the bridge gives the host no address and the demo has no direct internet route. Both services use the same image and run different DataTug subcommands.
+
+## Process isolation
+
+Both services drop all capabilities and enable `no-new-privileges` and a read-only root filesystem. The edge runs as uid/gid 10001 with zero capabilities. The supervisor starts as container root to implement D2 and receives four capabilities.
+
+| Capability | Use |
+| --- | --- |
+| `SETUID` | Start each session and its cleanup process under the allocated slot uid. |
+| `SETGID` | Assign the slot gid and clear supplementary groups. |
+| `CHOWN` | Assign the workspace and PTY slave to the slot identity. |
+| `KILL` | Signal the session leader for graceful termination before draining its cgroup. |
+
+The base image's setuid and setgid bits are stripped. A session runs with an unprivileged uid and gid in its own mode-`0700` directory. The Linux uid boundary protects other sessions and the host key. World-readable image files and the public template are visible to sessions.
+
+## Storage and startup
+
+- The `state` volume at `/var/lib/datatug-demo/state` holds the mode-`0600` Ed25519 host key and the public project template. It survives restarts and container replacement. The supervisor shallow-clones the canonical project on each start, installs the bundled fixture when needed, invokes `datatug demo ssh-session --prepare-template`, then replaces the template after preparation succeeds.
+- The root-owned, mode-`0711` sessions tmpfs at `/var/lib/datatug-demo/sessions` holds per-visitor homes and clones under `slot-N/`. The supervisor creates and verifies each parent as root-owned, with the slot GID and exact mode `0710`. It defaults to 3,591 MiB and 6,684,703 inodes. Size it at the sum of the slot `memory.max` values plus 10%, rounded up. For the inode limit divide each slot cap by 512 bytes, round up, and add five for the supervisor-created directories. Sum the results and add one for the tmpfs root. Scale both limits with `DEMO_MAX_SESSIONS`. Stopping the container discards the tmpfs.
+- A separate 64 MiB tmpfs supplies `/tmp` with mode `0755`. Both services set `ipc: none` to omit the Docker `/dev/shm` mount. UID-mode startup rejects either path when it is writable by others. Sessions use a private `TMPDIR` inside their workspace.
+
+## Cgroup delegation and lifecycle
+
+The host needs Docker Engine with `writable-cgroups=true` support and cgroup v2 with `nsdelegate`. It also needs Linux support for `cgroup.kill`, `memory.reclaim`, and the `oom_group_kill` memory event. The demo uses Docker's stock seccomp profile. The runtime must place exec and health-check processes in the container init's cgroup. runc 1.3.4 does this. See the [operator runbook](../../../deploy/ssh-demo/README.md#host-requirements) for setup.
+
+The demo's private cgroup namespace and writable `/sys/fs/cgroup` mount expose only its own Docker scope. Docker supplies the scope and mount without custom host setup. Startup checks the backing mount for the `nsdelegate` super option and requires `EPERM` when writing the scope’s current `memory.max` value back. The supervisor moves scope processes into `supervisor/`, enables the memory and PID controllers, and configures one `slot-N/` leaf per slot and one `cleanup/` leaf. The trusted child starts as root in `supervisor/`, enters its slot, drops to the slot uid and gid, and installs a thread-group seccomp filter before handling visitor input. The filter denies `link`, `linkat`, AF_UNIX `socket` and `socketpair`, `io_uring_setup`, `io_uring_enter` and `io_uring_register`, System V shared memory, semaphores and message queues, `mq_open`, `listen`, `bind`, `setsockopt(SOL_IP, IP_LOCAL_PORT_RANGE)` (which picks a socket's port at connect time), and `clone` with `CLONE_PARENT`; `clone3` returns `ENOSYS` so callers fall back to `clone`. The supervisor refuses SSH authentication from the container's own addresses, including loopback and connections the edge relays with one of them as the source: session processes share the network namespace and could otherwise open further sessions or queue places. The health check only reads the banner. `sendfile`, `splice`, `tee` and `vmsplice` return `EINVAL`, so Go falls back to a plain copy. These are the ways a session could leave kernel objects behind that stay charged to its slot, or keep another slot's memory charged: pipes holding page cache, a listener that never reads, a process parented to the supervisor that is never reaped. At startup the supervisor makes `/dev/pts/ptmx` (and `/dev/ptmx` when it is its own node) mode 0600 and `/dev/mqueue` mode 0755, so only root can create terminals and message queues; session terminals stay `root:tty 0620` and the child uses the descriptor it inherits. A slot is reused only when `pids.current` is 0. The TUI's local server (F8) cannot run in the SSH demo, because sessions cannot listen. Without `bind`, two colluding slots can no longer agree on ports for a TCP simultaneous open; what remains is guessing each other's random ephemeral ports, and any such hold ends with the holding session (at most `--max-session-duration`). `ipc: none` removes `/dev/shm` but not System V IPC, whose objects outlive their creator and would stay charged to the slot. Its descendants inherit the slot and filter. The supervisor gives the child five seconds to complete entry and verifies the child's PID in the slot before forwarding input.
+
+At startup and session exit the supervisor writes `cgroup.kill` and verifies `populated 0` before workspace cleanup. On restart it drains retired slot cgroups and queues stale workspaces under their original UIDs. The supervisor can start serving while those cleanups are pending. Startup requires the slot-parent layout and verifies that stale workspaces are owned by the parent’s assigned slot UID. Cleanup re-execs the trusted binary, enters the `cleanup/` cgroup and assumes the slot UID and GID before walking the workspace. It applies session rlimits, uses a 32 MiB Go heap target, and deletes in bounded batches using directory descriptors and single entry names. It keeps at most 64 descriptors open, checks directory identities as it traverses, and removes symlinks without following them. Docker's `docker-default` AppArmor profile resolves the full path of every file operation it checks into an 8 KiB buffer and refuses operations past it, even descriptor-relative ones. A visitor can still build deeper trees by renaming short chains into each other. So cleanup never descends past a 2 KiB path: it renames a directory that would cross that budget to the workspace root under an unpredictable `.cleanup-<random>` name and removes it from there. Before moving a directory it restores owner permissions on it, since moving a directory to a new parent needs write permission on the directory itself. Deletions and hoists count as progress; a hoist moves a directory to depth 1 in a drained, finite tree, so hoisting cannot go on forever. Only one helper runs at a time, with a 120-second budget per run. Pending workspaces hold their slots out of the allocator and retries keep deletions from earlier runs.
+
+After a verified drain, child reap and cleanup, the supervisor releases the reservation for reuse only when `memory.current` is below 16 MiB. At or above the threshold the supervisor writes the current byte count to `memory.reclaim` to drop reclaimable cache, then decides from a fresh `memory.current` reading. The supervisor checks pending memory charges and retries pending cleanup every 30 seconds. Capacity logs count pending and quarantined slots. It quarantines a slot until supervisor restart after a slot-entry, drain, reap or cleanup-boundary failure, or three consecutive cleanup runs without progress. Keeping slot cgroups in place preserves the accounting for retained charges.
+
+## Resource budgets
+
+The supervisor defaults to six shells, 20 waiting visitors, 26 concurrent authenticated SSH connections, two connections per client IP, a 20-second handshake timeout, a 30-minute queue deadline, a 15-minute session idle timeout and a 60-minute deadline from session admission. The connection caps include queued visitors. A queue entry retains the SSH transport and channel, a PTY request bounded to 1,112 bytes, one input goroutine with a 256-byte buffer, one screen goroutine and one wait timer. The existing request loop processes window changes. A shared one-second ticker wakes all screens and closes stalled transports on the first tick after their write deadline. A waiting visitor needs no allocated PTY, workspace, slot, child or relay registration. Estimates use active session deadlines, 30 s for pending cleanup or memory release and one full session duration for every queue cycle. Permanently quarantined slots contribute no estimated capacity.
+
+Each session gets a hard 544 MiB combined memory and tmpfs cap (`memory.max`), zero swap and 256 processes or threads. It also sets rlimits for address space, CPU time, file size, descriptors, per-UID process count and core dumps. The Go heap target is 256 MiB and the address-space ceiling is 8 GiB. The supervisor sends a notice near the hard cap and a termination message when the kernel records an OOM group kill.
+
+Compose defaults to a 3,872 MiB scope limit, 3,591 MiB sessions tmpfs, two CPUs and 2,048 PIDs. Startup requires a finite scope memory limit covering all slot caps plus a 96 MiB cleanup limit and a 512 MiB supervisor reserve. A finite `pids.max` must cover 256 PIDs per slot plus 32 for cleanup and 256 for the supervisor. The cleanup cgroup also has zero swap and group OOM kill enabled. Startup checks the sessions filesystem's block and inode totals with `statfs`. The edge gets 256 MiB and half a CPU. A container init reaps orphans and Compose allows 20 seconds to stop. Both services use restart policies, SSH banner health checks and rotated JSON logs.
+
+The sessions tmpfs sizing accounts for per-slot page and inode metadata charges. CPU capacity, loopback accept and lookup work, global PID capacity, proxy capacity, and the kernel remain shared. The supervisor, template preparation, and container-level infrastructure consume the reserve and can still encounter an outer OOM if their usage exceeds it.

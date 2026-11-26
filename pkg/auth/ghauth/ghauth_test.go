@@ -261,6 +261,10 @@ func TestPostJSON_SendError(t *testing.T) {
 
 func TestRequestDeviceCode_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["scope"] != "repo" {
+			t.Errorf("default device request = %v, %v", body, err)
+		}
 		resp := DeviceCodeResponse{
 			DeviceCode:      "dc",
 			UserCode:        "UC-1234",
@@ -562,3 +566,118 @@ func TestRealTicker_Methods(t *testing.T) {
 
 // Ensure unused import of fmt is used.
 var _ = fmt.Sprintf
+
+func TestRequestDeviceCodeWithScope_PublicRepo(t *testing.T) {
+	var gotBody map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(DeviceCodeResponse{
+			DeviceCode:      "dc-pub",
+			UserCode:        "PUB-1234",
+			VerificationURI: "https://github.com/login/device",
+			ExpiresIn:       900,
+			Interval:        5,
+		})
+	}))
+	defer srv.Close()
+	withDeviceCodeURL(t, srv.URL)
+
+	got, err := RequestDeviceCodeWithScope(context.Background(), "demo-client", "public_repo")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.DeviceCode != "dc-pub" || got.UserCode != "PUB-1234" {
+		t.Fatalf("unexpected response: %+v", got)
+	}
+	if gotBody["client_id"] != "demo-client" || gotBody["scope"] != "public_repo" {
+		t.Fatalf("unexpected request body: %+v", gotBody)
+	}
+}
+
+func TestLimitScopeAppliesToEveryDeviceCodeRequest(t *testing.T) {
+	previous := scopeLimit.Load()
+	t.Cleanup(func() { scopeLimit.Store(previous) })
+	LimitScope("public_repo")
+	LimitScope("repo")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["scope"] != "public_repo" {
+			t.Errorf("limited device request = %v, %v", body, err)
+		}
+		_ = json.NewEncoder(w).Encode(DeviceCodeResponse{DeviceCode: "limited"})
+	}))
+	t.Cleanup(srv.Close)
+	withDeviceCodeURL(t, srv.URL)
+
+	ctx := context.Background()
+	if _, err := RequestDeviceCode(ctx, "default"); err != nil {
+		t.Fatal(err)
+	}
+	for _, scope := range []string{"", "repo", "repo user", "public_repo"} {
+		if _, err := RequestDeviceCodeWithScope(ctx, "explicit", scope); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestMemoryStore_SaveGetDelete_NeverCallsKeyring(t *testing.T) {
+	origSet, origGet, origDel := keyringSet, keyringGet, keyringDelete
+	t.Cleanup(func() {
+		keyringSet, keyringGet, keyringDelete = origSet, origGet, origDel
+		tokenStoreMu.Lock()
+		useMemoryStore = false
+		memoryToken = nil
+		tokenStoreMu.Unlock()
+	})
+
+	keyringSet = func(string, string, string) error {
+		t.Fatal("keyringSet must not be called when memory store is active")
+		return nil
+	}
+	keyringGet = func(string, string) (string, error) {
+		t.Fatal("keyringGet must not be called when memory store is active")
+		return "", nil
+	}
+	keyringDelete = func(string, string) error {
+		t.Fatal("keyringDelete must not be called when memory store is active")
+		return nil
+	}
+
+	UseMemoryStore()
+	UseMemoryStore() // idempotent
+
+	if _, err := GetToken(); !errors.Is(err, ErrNoToken) {
+		t.Fatalf("expected ErrNoToken before save, got %v", err)
+	}
+	if err := SaveToken(&oauth2.Token{AccessToken: "mem-tok-1", TokenType: "bearer"}); err != nil {
+		t.Fatalf("SaveToken first: %v", err)
+	}
+	got, err := GetToken()
+	if err != nil {
+		t.Fatalf("GetToken first: %v", err)
+	}
+	if got.AccessToken != "mem-tok-1" {
+		t.Fatalf("expected mem-tok-1, got %q", got.AccessToken)
+	}
+
+	// Overwrite exercises zeroing the previous token buffer.
+	if err := SaveToken(&oauth2.Token{AccessToken: "mem-tok-2"}); err != nil {
+		t.Fatalf("SaveToken second: %v", err)
+	}
+	got, err = GetToken()
+	if err != nil {
+		t.Fatalf("GetToken second: %v", err)
+	}
+	if got.AccessToken != "mem-tok-2" {
+		t.Fatalf("expected mem-tok-2, got %q", got.AccessToken)
+	}
+
+	if err := DeleteToken(); err != nil {
+		t.Fatalf("DeleteToken: %v", err)
+	}
+	if _, err := GetToken(); !errors.Is(err, ErrNoToken) {
+		t.Fatalf("expected ErrNoToken after delete, got %v", err)
+	}
+}

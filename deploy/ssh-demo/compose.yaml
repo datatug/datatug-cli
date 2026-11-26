@@ -1,0 +1,161 @@
+x-ssh-demo: &ssh-demo
+  image: ${DEMO_IMAGE:-datatug-ssh-demo:local}
+  pull_policy: never
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  read_only: true
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD", "/usr/local/bin/datatug", "demo", "ssh-health", "--addr", "127.0.0.1:2222"]
+    interval: 5s
+    timeout: 6s
+    start_period: 90s
+    retries: 5
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  edge:
+    <<: *ssh-demo
+    ipc: none
+    build:
+      context: ../..
+      dockerfile: deploy/ssh-demo/Dockerfile
+      args:
+        VERSION: ${DEMO_BUILD_VERSION:-dev}
+        REVISION: ${DEMO_BUILD_REVISION:-unknown}
+        BUILD_DATE: ${DEMO_BUILD_DATE:-}
+    user: "10001:10001"
+    command:
+      - demo
+      - ssh-edge
+      - --listen
+      - ":2222"
+      - --upstream
+      - demo:2222
+      - --proxy-listen
+      - /run/datatug-demo/proxy/connect.sock
+      - --max-tunnels
+      - "${DEMO_MAX_EGRESS_TUNNELS:-64}"
+      - --allow
+      - github.com,api.github.com,codeload.github.com,cloud.openvaultdb.com
+    ports:
+      - "${DEMO_SSH_PUBLISH:-2222}:2222"
+    volumes:
+      - proxy-socket:/run/datatug-demo/proxy
+    networks:
+      public:
+      internal:
+        ipv4_address: 172.31.250.2
+    mem_limit: 256m
+    pids_limit: 256
+    cpus: 0.5
+
+  demo:
+    <<: *ssh-demo
+    # D2 requires container root to assign each visitor a separate Linux uid and gid.
+    user: "0:0"
+    cap_add: [SETUID, SETGID, CHOWN, KILL]
+    cgroup: private
+    ipc: none
+    security_opt:
+      - "no-new-privileges:true"
+      - "writable-cgroups=true"
+    depends_on:
+      - edge
+    command:
+      - demo
+      - ssh-server
+      - --listen
+      - ":2222"
+      - --proxy-protocol
+      - --proxy-protocol-trust
+      - 172.31.250.2/32
+      - --egress-proxy
+      - unix:///run/datatug-demo/proxy/connect.sock
+      - --max-egress-tunnels
+      - "${DEMO_MAX_EGRESS_TUNNELS:-64}"
+      - --state-dir
+      - /var/lib/datatug-demo/state
+      - --sessions-dir
+      - /var/lib/datatug-demo/sessions
+      - --repo
+      - ${DEMO_REPO:-https://github.com/datatug/datatug-demo-project}
+      - --ref
+      - "${DEMO_REF:-}"
+      - --project-dir
+      - ${DEMO_PROJECT_DIR:-demo-project-1}
+      - --max-sessions
+      - "${DEMO_MAX_SESSIONS:-6}"
+      - --max-queue
+      - "${DEMO_MAX_QUEUE:-20}"
+      - --max-queue-wait
+      - "${DEMO_MAX_QUEUE_WAIT:-30m}"
+      - --max-sessions-per-ip
+      - "${DEMO_MAX_SESSIONS_PER_IP:-2}"
+      - --idle-timeout
+      - "${DEMO_IDLE_TIMEOUT:-15m}"
+      - --max-session-duration
+      - "${DEMO_MAX_SESSION_DURATION:-60m}"
+      - --handshake-timeout
+      - "${DEMO_HANDSHAKE_TIMEOUT:-20s}"
+      - --isolation
+      - uid
+      - --uid-base
+      - "${DEMO_UID_BASE:-20000}"
+      - --github-client-id
+      - "${DEMO_GITHUB_CLIENT_ID:-}"
+      - --save-branch
+      - ${DEMO_SAVE_BRANCH:-datatug-demo}
+    volumes:
+      - state:/var/lib/datatug-demo/state
+      - proxy-socket:/run/datatug-demo/proxy:ro
+    tmpfs:
+      # Six slots × 544 MiB plus 10% rounded up. Inode budget is one
+      # inode per 512 bytes of slot memory plus 31 supervisor-owned directories.
+      # Scale both ceilings with DEMO_MAX_SESSIONS.
+      - /var/lib/datatug-demo/sessions:rw,nosuid,nodev,size=${DEMO_SESSIONS_TMPFS:-3591m},nr_inodes=${DEMO_SESSIONS_TMPFS_INODES:-6684703},mode=0711,uid=0,gid=0
+      # Root-only: session uids get a private TMPDIR inside their workspace,
+      # so nothing a visitor writes outlives the session.
+      - /tmp:rw,nosuid,nodev,noexec,size=64m,mode=0755,uid=0,gid=0
+    # 6 × 544 MiB slot memory.max + 96 MiB cleanup + 512 MiB supervisor reserve.
+    mem_limit: ${DEMO_MEM_LIMIT:-3872m}
+    cpus: "${DEMO_CPUS:-2}"
+    # Minimum: DEMO_MAX_SESSIONS × 256 slot PIDs + 32 cleanup + 256 supervisor.
+    pids_limit: "${DEMO_PIDS_LIMIT:-2048}"
+    # The demo listener expects a PROXY v2 header (from the edge); the probe sends LOCAL.
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/datatug", "demo", "ssh-health", "--addr", "127.0.0.1:2222", "--proxy-protocol"]
+      interval: 5s
+      timeout: 6s
+      start_period: 90s
+      retries: 5
+    init: true
+    stop_grace_period: 20s
+    networks:
+      internal:
+        ipv4_address: 172.31.250.3
+
+networks:
+  public:
+    driver: bridge
+  internal:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.31.250.0/24
+    # internal: true only removes the route out. Without an isolated gateway
+    # the host keeps an address on this bridge and every host service that
+    # listens on 0.0.0.0 (admin sshd included) is reachable from the demo.
+    # Isolated mode (Docker Engine 28+) gives the bridge no host address.
+    driver_opts:
+      com.docker.network.bridge.gateway_mode_ipv4: isolated
+      com.docker.network.bridge.gateway_mode_ipv6: isolated
+
+volumes:
+  state:
+  proxy-socket:

@@ -5,10 +5,12 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
+	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtdemo"
 	"github.com/datatug/datatug-cli/pkg/chat"
 	"github.com/spf13/cobra"
 	"github.com/strongo/aichat/tui/chatshell"
@@ -16,9 +18,10 @@ import (
 )
 
 type workspaceStart struct {
-	modules        []datatugui.Module
-	options        datatugui.Options
-	programOptions []tea.ProgramOption
+	modules          []datatugui.Module
+	options          datatugui.Options
+	programOptions   []tea.ProgramOption
+	sessionWarningAt time.Time
 }
 
 // runUnifiedApp is the default and `ui` entry to the same chat workspace.
@@ -188,6 +191,10 @@ type explorePane struct {
 }
 
 func mountExplore(ui *chat.ChatUI, start workspaceStart) *explorePane {
+	if start.options.DisableBrowser {
+		ui.DisableBrowserHandoff(datatugui.BrowserUnavailable)
+	}
+	ui.SetSessionWarning(start.sessionWarningAt, dtdemo.SessionWarning)
 	state := &exploreWorkspace{app: datatugui.New(start.modules, start.options, nav.WithoutLogin()), modules: start.modules}
 	pane := &explorePane{workspace: state}
 	for i, module := range start.modules {

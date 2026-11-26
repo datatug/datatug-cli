@@ -307,6 +307,41 @@ func TestCleanupHoistsPastPathBudget(t *testing.T) {
 			t.Fatalf("hoist targets = %q", targets)
 		}
 	})
+	t.Run("read-only directory at the boundary is hoisted", func(t *testing.T) {
+		for _, mode := range []os.FileMode{0o500, 0o000} {
+			root := t.TempDir()
+			locked := filepath.Join(root, "a", "bbbbbbbbbbbbbbbb")
+			if err := os.MkdirAll(filepath.Join(locked, "c"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(locked, mode); err != nil {
+				t.Fatal(err)
+			}
+			if err := cleanWorkspaceContents(root, len(root)+13, func() {}); err != nil {
+				t.Fatalf("mode %o: %v", mode, err)
+			}
+			if entries, err := os.ReadDir(root); err != nil || len(entries) != 0 {
+				t.Fatalf("mode %o: cleanup left %d entries: %v", mode, len(entries), err)
+			}
+		}
+	})
+	t.Run("preparing the hoisted directory fails", func(t *testing.T) {
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, "a", "bbbbbbbbbbbbbbbb", "c"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		open := cleanupOpenat
+		t.Cleanup(func() { cleanupOpenat = open })
+		cleanupOpenat = func(fd int, entry string, flags int, mode uint32) (int, error) {
+			if entry == "bbbbbbbbbbbbbbbb" {
+				return -1, errTestIO
+			}
+			return open(fd, entry, flags, mode)
+		}
+		if err := cleanWorkspaceContents(root, len(root)+13, func() {}); !errors.Is(err, errTestIO) || !strings.Contains(err.Error(), "prepare cleanup directory") {
+			t.Fatalf("cleanup = %v, want %v", err, errTestIO)
+		}
+	})
 	t.Run("rename failure", func(t *testing.T) {
 		root := t.TempDir()
 		if err := os.MkdirAll(filepath.Join(root, "a", "bbbbbbbbbbbbbbbb", "c"), 0o700); err != nil {

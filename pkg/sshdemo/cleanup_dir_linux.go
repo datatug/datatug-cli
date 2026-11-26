@@ -129,14 +129,22 @@ func walkCleanup(root *cleanupFrame, rootPathLen, budget int, progress func()) e
 			continue
 		}
 		nextPathLen := pathLengths[depth] + len(name) + 1
+		next := &frames[depth%len(frames)]
+		next.close()
 		if nextPathLen > budget {
+			// Moving a directory to a new parent needs write permission on
+			// the directory itself: check its identity and restore owner
+			// permissions the way a descent does, then move it.
+			pin, err := openCleanupFrame(fd, name, &root.id, false)
+			if err != nil {
+				return fmt.Errorf("prepare cleanup directory %q: %w", name, err)
+			}
+			pin.close()
 			if err := hoistCleanupDirectory(fd, name, rootFD, budget-rootPathLen, &hoistSequence); err != nil {
 				return err
 			}
 			continue
 		}
-		next := &frames[depth%len(frames)]
-		next.close()
 		*next, err = openCleanupFrame(fd, name, &root.id, false)
 		if err != nil {
 			return fmt.Errorf("open cleanup directory %q: %w", name, err)

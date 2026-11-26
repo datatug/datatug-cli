@@ -68,6 +68,9 @@ func checkIsolation(workspace, otherWorkspace string) error {
 	if _, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM, 0); !errors.Is(err, unix.EPERM) {
 		return fmt.Errorf("socketpair(AF_UNIX) returned %v, expected EPERM", err)
 	}
+	if _, err := unix.SysvShmGet(unix.IPC_PRIVATE, 1<<20, unix.IPC_CREAT|0o600); !errors.Is(err, unix.EPERM) {
+		return fmt.Errorf("shmget returned %v, expected EPERM", err)
+	}
 	if _, err := os.ReadDir(filepath.Dir(otherWorkspace)); !errors.Is(err, os.ErrPermission) {
 		return fmt.Errorf("list other slot parent: %v, expected permission error", err)
 	}
@@ -90,6 +93,9 @@ func buildDeepWorkspace(workspace string) error {
 	}
 	if err := buildDeepChain(root, strings.Repeat("l", 255), 10); err != nil {
 		return fmt.Errorf("long-name tree: %w", err)
+	}
+	if err := buildReadOnlyBoundary(root); err != nil {
+		return fmt.Errorf("read-only boundary tree: %w", err)
 	}
 	fmt.Println("created 10000 short-name levels and 40 long-name levels")
 	return nil
@@ -141,4 +147,20 @@ func makeProbeDirectory(parent int, name string) (int, error) {
 		return -1, err
 	}
 	return unix.Openat(parent, name, probeDirFlags, 0)
+}
+
+// Eight 255-byte levels put the last directory just past cleanup's 2 KiB path
+// budget; making it read-only and non-empty means cleanup must restore its
+// permissions before it can move it.
+func buildReadOnlyBoundary(root int) error {
+	name := strings.Repeat("r", 255)
+	bottom, err := buildChainSegment(root, name, name, 8)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = unix.Close(bottom) }()
+	if err := unix.Mkdirat(bottom, "c", 0o700); err != nil {
+		return err
+	}
+	return unix.Fchmod(bottom, 0o500)
 }

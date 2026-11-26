@@ -14,15 +14,17 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+type slotFilterCase struct {
+	goarch string
+	arch   uint32
+	number uint32
+	arg0   uint32
+	want   uint32
+}
+
 func TestSlotFilterArchitectures(t *testing.T) {
 	const denied = unix.SECCOMP_RET_ERRNO | uint32(unix.EPERM)
-	for _, tc := range []struct {
-		goarch string
-		arch   uint32
-		number uint32
-		arg0   uint32
-		want   uint32
-	}{
+	cases := []slotFilterCase{
 		{"amd64", unix.AUDIT_ARCH_X86_64, 86, 0, denied},
 		{"amd64", unix.AUDIT_ARCH_X86_64, 265, 0, denied},
 		{"amd64", unix.AUDIT_ARCH_X86_64, 86 | 1<<30, 0, denied},
@@ -59,7 +61,16 @@ func TestSlotFilterArchitectures(t *testing.T) {
 		{"arm64", unix.AUDIT_ARCH_AARCH64, 425, 0, denied},
 		{"arm64", unix.AUDIT_ARCH_AARCH64, 426, 0, denied},
 		{"arm64", unix.AUDIT_ARCH_AARCH64, 427, 0, denied},
-	} {
+	}
+	// System V IPC (shm, sem, msg) and mq_open, by architecture.
+	for _, nr := range []uint32{29, 30, 31, 67, 64, 65, 66, 220, 68, 69, 70, 71, 240} {
+		cases = append(cases, slotFilterCase{"amd64", unix.AUDIT_ARCH_X86_64, nr, 0, denied},
+			slotFilterCase{"amd64", unix.AUDIT_ARCH_X86_64, nr | 1<<30, 0, denied})
+	}
+	for _, nr := range []uint32{194, 196, 195, 197, 190, 193, 191, 192, 186, 189, 188, 187, 180} {
+		cases = append(cases, slotFilterCase{"arm64", unix.AUDIT_ARCH_AARCH64, nr, 0, denied})
+	}
+	for _, tc := range cases {
 		filter, err := slotFilter(tc.goarch)
 		if err != nil {
 			t.Fatal(err)
@@ -179,6 +190,14 @@ func TestSlotFilterKernel(t *testing.T) {
 	}
 	if _, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM, 0); !errors.Is(err, unix.EPERM) {
 		t.Fatalf("socketpair(AF_UNIX) = %v, want EPERM", err)
+	}
+	if _, err := unix.SysvShmGet(unix.IPC_PRIVATE, 1<<20, unix.IPC_CREAT|0o600); !errors.Is(err, unix.EPERM) {
+		t.Fatalf("shmget = %v, want EPERM", err)
+	}
+	for _, nr := range []uintptr{unix.SYS_SEMGET, unix.SYS_MSGGET} {
+		if _, _, errno := unix.Syscall(nr, unix.IPC_PRIVATE, 1, unix.IPC_CREAT|0o600); errno != unix.EPERM {
+			t.Fatalf("syscall %d = %v, want EPERM", nr, errno)
+		}
 	}
 	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_STREAM, 0)
 	if err != nil {

@@ -62,10 +62,14 @@ func slotFilter(goarch string) ([]unix.SockFilter, error) {
 	case "amd64":
 		arch = unix.AUDIT_ARCH_X86_64
 		blocked = []uint32{86, 265} // link, linkat
+		// System V IPC and POSIX message queues outlive their creator in the
+		// container's shared IPC namespace and stay charged to the slot.
+		blocked = append(blocked, 29, 30, 31, 67, 64, 65, 66, 220, 68, 69, 70, 71, 240)
 		socket, socketpair = 41, 53
 	case "arm64":
 		arch = unix.AUDIT_ARCH_AARCH64
 		blocked = []uint32{37} // linkat (the ABI has no link syscall)
+		blocked = append(blocked, 194, 196, 195, 197, 190, 193, 191, 192, 186, 189, 188, 187, 180)
 		socket, socketpair = 198, 199
 	default:
 		return nil, fmt.Errorf("slot seccomp filter does not support %s", goarch)

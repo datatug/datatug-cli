@@ -449,8 +449,8 @@ check 'every slot has its memory, swap and pids limits' check_slot_limits
 check 'sessions tmpfs has the required inode budget and slots expose memory.reclaim' check_sessions_inode_budget
 check 'cleanup cgroup has independent memory, swap, OOM and PID limits' check_cleanup_limits
 check 'a session child runs in a slot as its slot uid, and the slot drains' check_session_in_slot_and_drained
-check 'slot 0 denies link, linkat, AF_UNIX sockets and access to slot 1' check_slot_isolation
-check 'cleanup removes the 10000-level and 40-level long-name trees and slot 0 serves another visitor' check_deep_session_cleanup
+check 'slot 0 denies link, linkat, AF_UNIX sockets, System V IPC and access to slot 1' check_slot_isolation
+check 'cleanup removes the 10000-level, long-name and read-only boundary trees and slot 0 serves another visitor' check_deep_session_cleanup
 check 'kernel OOM-kills a slot over its limit; supervisor stays healthy' check_slot_oom_contained
 
 (( failures == 0 ))

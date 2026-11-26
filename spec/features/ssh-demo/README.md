@@ -38,9 +38,9 @@ Visitors can run arbitrary SQL. For example, SQLite `ATTACH DATABASE '<any path>
 
 - The supervisor allocates one of N slot uids (default base 20000, `--max-sessions` slots) to each session.
 - Each session gets `<sessions-dir>/<random-id>/`, mode 0700, owned by the slot uid, with `home/` (the child's `$HOME`) and `repo/` (the project copy).
-- The child runs with `SysProcAttr.Credential` set to the slot uid/gid and no supplementary groups.
+- The trusted child binary starts as root in `/supervisor`. As its first action, it writes `0` to its slot's `cgroup.procs`, verifies membership, clears supplementary groups, and drops to the slot uid and gid. It verifies the real, effective, and saved IDs on every thread, confirms it cannot regain uid 0, and rechecks cgroup membership. Its descendants inherit the slot.
 - The template (canonical clone) is root-owned and world-readable, which is fine because it is public data. The host key is root-owned, mode 0600.
-- The supervisor starts each child directly in its slot cgroup using `clone3(CLONE_INTO_CGROUP)` via `SysProcAttr.UseCgroupFD`. Its descendants stay in the slot.
+- Self-entry allows Docker's stock seccomp profile. The trade-off is a brief window between fork and slot entry when the trusted child runs as root in `/supervisor`. The supervisor withholds PTY input until the child confirms the privilege drop and the supervisor sees its PID in the slot's `cgroup.procs`. It kills the child and ends the session if entry fails or takes longer than five seconds.
 - The supervisor writes `1` to `cgroup.kill` and waits for `populated 0` before running the workspace cleanup command as the slot uid and removing the directory. An unverified drain or cleanup quarantines the slot.
 
 The supervisor runs as container root with `CAP_SETUID`, `CAP_SETGID`, `CAP_CHOWN` and `CAP_KILL`, plus `no-new-privileges` and a read-only root filesystem. Visitor code runs as the unprivileged slot uid. The [deployment design](deployment.md#cgroup-delegation-and-lifecycle) describes the host cgroup requirements and bind mount.
@@ -49,7 +49,7 @@ For local development, `--isolation=process` runs every child under the supervis
 
 ### D3: resource limits
 
-The child sets its own rlimits as its first action, before reading any visitor input. Limits can only be lowered:
+The child sets its own rlimits after any required slot entry and before reading visitor input. Limits can only be lowered:
 
 - `RLIMIT_AS` (default 8 GiB of address space. The cgo binary maps about 2 GiB of address space at start, so a lower value crashes it. The child sets `GOMEMLIMIT=256MiB` as a soft Go heap limit and `oom_score_adj` to 900 so the kernel prefers killing a session before the supervisor.)
 - `RLIMIT_CPU` (default 900 s)

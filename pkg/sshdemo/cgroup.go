@@ -6,8 +6,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -18,14 +18,16 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const cgroupDrainTimeout = 5 * time.Second
+const (
+	cgroupDrainTimeout = 5 * time.Second
+	slotEntryTimeout   = 5 * time.Second
+)
 
 type cgroupFS struct {
 	verify func(string) error
 	read   func(string) ([]byte, error)
 	write  func(string, string) error
 	mkdir  func(string, os.FileMode) error
-	probe  func(context.Context, *syscall.SysProcAttr) error
 }
 
 func defaultCgroupFS() cgroupFS {
@@ -34,7 +36,6 @@ func defaultCgroupFS() cgroupFS {
 		read:   os.ReadFile,
 		write:  writeCgroupFile,
 		mkdir:  os.Mkdir,
-		probe:  probeCgroupSpawn,
 	}
 }
 
@@ -58,12 +59,6 @@ func writeCgroupFile(path, value string) error {
 	}
 	_, err = file.WriteString(value)
 	return errors.Join(err, file.Close())
-}
-
-func probeCgroupSpawn(ctx context.Context, attrs *syscall.SysProcAttr) error {
-	cmd := exec.CommandContext(ctx, "/bin/true")
-	cmd.SysProcAttr = attrs
-	return cmd.Run()
 }
 
 type cgroup struct {
@@ -280,31 +275,38 @@ func (s *Server) quarantineSlot(index int, err error) bool {
 	return s.slots.quarantine(index)
 }
 
-func (g cgroup) withSpawnAttrs(credential *syscall.Credential, start func(*syscall.SysProcAttr) error) error {
-	fd, err := os.Open(g.path)
-	if err != nil {
-		return fmt.Errorf("open slot cgroup: %w", err)
+var slotReadyPipe = os.Pipe
+
+// waitForSlotEntry keeps the PTY input gate closed until the child reports its
+// privilege drop and cgroupfs independently confirms its PID.
+func (g cgroup) waitForSlotEntry(ctx context.Context, ready *os.File, pid int) error {
+	defer func() { _ = ready.Close() }()
+	ctx, cancel := context.WithTimeout(ctx, slotEntryTimeout)
+	defer cancel()
+
+	verified := make(chan error, 1)
+	go func() {
+		verified <- g.verifyChildSlotEntry(ready, pid)
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-verified:
+		return errors.Join(err, ctx.Err())
 	}
-	defer func() { _ = fd.Close() }()
-	return start(&syscall.SysProcAttr{
-		Credential: credential, UseCgroupFD: true, CgroupFD: int(fd.Fd()),
-	})
 }
 
-func (s *Server) probeSlotSpawn(ctx context.Context) error {
-	for index, group := range s.cgroups {
-		if s.slots.isQuarantined(index) {
-			continue
-		}
-		uid := s.cfg.UIDBase + index
-		probeCtx, cancel := context.WithTimeout(ctx, cgroupDrainTimeout)
-		defer cancel()
-		if err := group.withSpawnAttrs(s.ops.CredentialFor(uid, uid), func(attrs *syscall.SysProcAttr) error {
-			return group.fs.probe(probeCtx, attrs)
-		}); err != nil {
-			return fmt.Errorf("sshdemo: clone3 into session cgroup (check kernel and seccomp): %w", err)
-		}
-		break
+func (g cgroup) verifyChildSlotEntry(ready *os.File, pid int) error {
+	var b [1]byte
+	if _, err := io.ReadFull(ready, b[:]); err != nil {
+		return fmt.Errorf("read slot entry acknowledgement: %w", err)
+	}
+	raw, err := g.read("cgroup.procs")
+	if err != nil {
+		return fmt.Errorf("read slot cgroup.procs: %w", err)
+	}
+	if !slices.Contains(strings.Fields(string(raw)), strconv.Itoa(pid)) {
+		return fmt.Errorf("PID %d is absent from slot %s", pid, g.path)
 	}
 	return nil
 }

@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -83,6 +84,14 @@ func TestHelperProcess(t *testing.T) {
 	workspace := flagVal("--workspace")
 	saveBranch := flagVal("--save-branch")
 	sessionID := flagVal("--session-id")
+	slotDir := flagVal("--slot-cgroup")
+	if slotDir != "" {
+		// The fixture emulates the trusted child. It runs without root or a
+		// writable cgroup mount, so it records its PID instead of migrating.
+		if err := os.Chdir(workspace); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	ws, _ := unix.IoctlGetWinsize(int(os.Stdout.Fd()), unix.TIOCGWINSZ)
 	cwd, _ := os.Getwd()
@@ -98,6 +107,27 @@ func TestHelperProcess(t *testing.T) {
 	repJSON, _ := json.Marshal(rep)
 	if workspace != "" {
 		_ = os.WriteFile(filepath.Join(workspace, "seen.json"), repJSON, 0o600)
+	}
+	if slotDir != "" {
+		if saveBranch == "slot-entry-timeout" {
+			signal.Ignore(syscall.SIGHUP)
+			fmt.Printf("PID:%d\n", rep.PID)
+			time.Sleep(30 * time.Second)
+			os.Exit(2)
+		}
+		if saveBranch == "slot-entry-error" {
+			os.Exit(7)
+		}
+		pid := strconv.Itoa(rep.PID)
+		if saveBranch == "slot-entry-wrong-pid" {
+			pid += "0"
+		}
+		writeFixtureFile(t, slotDir, "cgroup.procs", pid+"\n")
+		ready := os.NewFile(SlotReadyFD, "slot-ready")
+		_, err := ready.WriteString("1")
+		if err := errors.Join(err, ready.Close()); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	switch saveBranch {
@@ -960,8 +990,6 @@ func TestServer_UIDModeFullSessionAndErrorPaths(t *testing.T) {
 	root, cgfs := fakeCgroupMount(t)
 	ops.cgroups = cgfs
 	ops.FilesystemCapacity = ampleSessionFilesystem
-	restoreSpawn := emulateSlotSpawn(t)
-
 	h := startTestServer(t, func(c *Config) {
 		c.Isolation = IsolationUID
 		c.UIDBase = 21000
@@ -992,14 +1020,20 @@ func TestServer_UIDModeFullSessionAndErrorPaths(t *testing.T) {
 	}
 	_ = sess.Close()
 	waitNoSessionDirs(t, sessDir, 3*time.Second)
-	if len(credUIDs) != 3 || credUIDs[0] != 21000 || credUIDs[1] != 21000 || credUIDs[2] != 21000 {
-		t.Fatalf("expected CredentialFor(21000) for probe, child, and cleanup, got %v", credUIDs)
+	if len(credUIDs) != 1 || credUIDs[0] != 21000 {
+		t.Fatalf("expected CredentialFor(21000) for cleanup only, got %v", credUIDs)
+	}
+	for _, pair := range []string{
+		`"--slot-cgroup","` + filepath.Join(root, fakeScopeName, "slot-0") + `"`,
+		`"--slot-uid","21000","--slot-gid","21000"`,
+	} {
+		if !strings.Contains(string(b), pair) {
+			t.Fatalf("expected child flags %s in %s", pair, b)
+		}
 	}
 	if len(chowned) != 4 || !slaveChowned {
 		t.Fatalf("expected four workspace path chowns and a slave descriptor chown, got %v / %v", chowned, slaveChowned)
 	}
-
-	restoreSpawn()
 
 	// 2. Malformed pty-req and window-change payloads are refused.
 	ch, reqs, err := dialSSH(t, h.addr, "uid-user").OpenChannel("session", nil)

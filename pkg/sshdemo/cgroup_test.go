@@ -12,7 +12,6 @@ import (
 	"io"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -20,7 +19,6 @@ import (
 	"testing"
 	"time"
 
-	"charm.land/ssh"
 	gossh "golang.org/x/crypto/ssh"
 	"golang.org/x/sys/unix"
 )
@@ -30,6 +28,7 @@ const fakeScopeName = "docker-fixture.scope"
 var fakeSlotFiles = map[string]string{
 	"cgroup.kill":      "0",
 	"cgroup.events":    "frozen 0\npopulated 0\n",
+	"cgroup.procs":     "",
 	"memory.max":       "max",
 	"memory.current":   "0",
 	"memory.events":    "oom 0\noom_kill 0\noom_group_kill 0\n",
@@ -84,33 +83,7 @@ func fakeCgroupMount(t *testing.T) (string, cgroupFS) {
 		}
 		return nil
 	}
-	fs.probe = func(_ context.Context, attrs *syscall.SysProcAttr) error {
-		if !attrs.UseCgroupFD || attrs.CgroupFD <= 0 {
-			t.Errorf("missing cgroup attributes: %+v", attrs)
-		}
-		return nil
-	}
 	return root, fs
-}
-
-func emulateSlotSpawn(t *testing.T) func() {
-	t.Helper()
-	original := startPTYChild
-	restore := func() { startPTYChild = original }
-	t.Cleanup(restore)
-	startPTYChild = func(pty *ssh.Pty, cmd *exec.Cmd, opts ...ssh.PtyStartOption) error {
-		attr := cmd.SysProcAttr
-		if !attr.UseCgroupFD || attr.CgroupFD <= 0 {
-			t.Error("PTY fork was not given a slot file descriptor")
-		}
-		link, err := os.Readlink(fmt.Sprintf("/proc/self/fd/%d", attr.CgroupFD))
-		if err != nil || filepath.Base(link) != "slot-0" {
-			t.Errorf("PTY cgroup FD resolves to %q, %v", link, err)
-		}
-		attr.UseCgroupFD = false // Ordinary filesystem fixture, so let the helper run without clone3.
-		return original(pty, cmd, opts...)
-	}
-	return restore
 }
 
 func ampleSessionFilesystem(string) (uint64, uint64, error) {
@@ -371,9 +344,6 @@ func TestCgroupStartupErrors(t *testing.T) {
 				return read(path)
 			}
 		}},
-		{"clone3 blocked", "clone3 into session cgroup", func(_ *testing.T, _ *Config, f *cgroupFS) {
-			f.probe = func(context.Context, *syscall.SysProcAttr) error { return syscall.ENOSYS }
-		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, ops := fakeCgroupServer(t)
@@ -429,17 +399,117 @@ func TestCgroupDrainAndMemoryCounters(t *testing.T) {
 	if g.oomGroupKilledSince(2) || !g.oomGroupKilledSince(1) {
 		t.Fatal("OOM reported without counter delta")
 	}
-	if err := g.child("missing").withSpawnAttrs(nil, nil); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("open returned %v", err)
+}
+
+func TestSessionSlotEntryFailureWithholdsPTYInput(t *testing.T) {
+	for _, tc := range []struct {
+		branch, log string
+	}{
+		{"slot-entry-timeout", "context deadline exceeded"},
+		{"slot-entry-error", "read slot entry acknowledgement: EOF"},
+		{"slot-entry-wrong-pid", "is absent from slot"},
+	} {
+		t.Run(tc.branch, func(t *testing.T) {
+			cfg, ops := fakeCgroupServer(t)
+			h := startTestServer(t, func(c *Config) {
+				c.Isolation, c.CgroupRoot, c.SessionsDir = cfg.Isolation, cfg.CgroupRoot, cfg.SessionsDir
+				c.SaveBranch = tc.branch
+			}, WithSysOps(ops))
+
+			sess, err := dialSSH(t, h.addr, "visitor").NewSession()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = sess.Close() }()
+			if err := sess.RequestPty("xterm", 24, 80, gossh.TerminalModes{gossh.ECHO: 1}); err != nil {
+				t.Fatal(err)
+			}
+			out, err := sess.StdoutPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			in, err := sess.StdinPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := sess.Shell(); err != nil {
+				t.Fatal(err)
+			}
+			reader := bufio.NewReader(out)
+			if tc.branch == "slot-entry-timeout" {
+				line, err := reader.ReadString('\n')
+				if err != nil || !strings.HasPrefix(line, "PID:") {
+					t.Fatalf("child PID report = %q, %v", line, err)
+				}
+				pid, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "PID:")))
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+						t.Errorf("timed-out child PID %d was not reaped: %v", pid, err)
+					}
+				})
+				if _, err := io.WriteString(in, "gated visitor input\n"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			raw, err := io.ReadAll(reader)
+			if err != nil || strings.Contains(string(raw), "gated visitor input") {
+				t.Fatalf("unexpected PTY output = %q, %v", raw, err)
+			}
+			var exitErr *gossh.ExitError
+			if err := sess.Wait(); !errors.As(err, &exitErr) || exitErr.ExitStatus() != 1 {
+				t.Fatalf("session wait = %v", err)
+			}
+			waitLogContains(t, h.logs, tc.log, time.Second)
+			waitNoSessionDirs(t, cfg.SessionsDir, time.Second)
+		})
 	}
-	if err := probeCgroupSpawn(t.Context(), nil); err != nil {
-		t.Fatal(err)
+}
+
+func TestSessionSlotEntryPipeAndSpawnFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name, log string
+		setup     func(*testing.T, *Config)
+	}{
+		{"pipe", "create slot entry acknowledgement pipe", func(t *testing.T, _ *Config) {
+			original := slotReadyPipe
+			t.Cleanup(func() { slotReadyPipe = original })
+			slotReadyPipe = func() (*os.File, *os.File, error) { return nil, nil, errTestIO }
+		}},
+		{"spawn", "no such file or directory", func(t *testing.T, cfg *Config) {
+			cfg.Executable = filepath.Join(t.TempDir(), "missing-executable")
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, ops := fakeCgroupServer(t)
+			h := startTestServer(t, func(c *Config) {
+				c.Isolation, c.CgroupRoot, c.SessionsDir = cfg.Isolation, cfg.CgroupRoot, cfg.SessionsDir
+				tc.setup(t, c)
+			}, WithSysOps(ops))
+			sess, err := dialSSH(t, h.addr, "visitor").NewSession()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = sess.Close() }()
+			if err := sess.RequestPty("xterm", 24, 80, nil); err != nil {
+				t.Fatal(err)
+			}
+			if err := sess.Shell(); err != nil {
+				t.Fatal(err)
+			}
+			var exitErr *gossh.ExitError
+			if err := sess.Wait(); !errors.As(err, &exitErr) || exitErr.ExitStatus() != 1 {
+				t.Fatalf("session wait = %v", err)
+			}
+			waitLogContains(t, h.logs, tc.log, time.Second)
+		})
 	}
 }
 
 func TestSessionCgroupMemoryNotices(t *testing.T) {
 	cfg, ops := fakeCgroupServer(t)
-	emulateSlotSpawn(t)
 	var stderr syncBuffer
 	h := startTestServer(t, func(c *Config) {
 		c.Isolation, c.CgroupRoot, c.SessionsDir = cfg.Isolation, cfg.CgroupRoot, cfg.SessionsDir
@@ -522,7 +592,6 @@ func helperPIDFromWorkspace(t *testing.T, root string) int {
 
 func TestSessionCgroupDrainFailureQuarantines(t *testing.T) {
 	cfg, ops := fakeCgroupServer(t)
-	emulateSlotSpawn(t)
 	h := startTestServer(t, func(c *Config) {
 		c.Isolation, c.CgroupRoot, c.SessionsDir = cfg.Isolation, cfg.CgroupRoot, cfg.SessionsDir
 		c.MaxSessions = 1
@@ -574,7 +643,6 @@ func TestSessionCgroupDrainFailureQuarantines(t *testing.T) {
 
 func TestSessionCgroupGracefulShutdownWithMissingNoticeCounter(t *testing.T) {
 	cfg, ops := fakeCgroupServer(t)
-	emulateSlotSpawn(t)
 	h := startTestServer(t, func(c *Config) {
 		c.Isolation, c.CgroupRoot, c.SessionsDir = cfg.Isolation, cfg.CgroupRoot, cfg.SessionsDir
 		c.SaveBranch = "graceful-shutdown"

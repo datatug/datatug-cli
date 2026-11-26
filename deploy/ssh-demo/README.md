@@ -4,7 +4,7 @@ Run the commands from the repository root on a Linux host with Docker Engine, Bu
 
 ## Host requirements
 
-Use rootful Docker Engine 28 or newer with the systemd cgroup driver, cgroup v2 mounted with `nsdelegate`, and a private demo cgroup namespace. The kernel must support `clone3(CLONE_INTO_CGROUP)`, `cgroup.kill` and the `oom_group_kill` memory event. Use a runtime that places exec and health-check processes in the container init's cgroup if the top-level scope cannot accept processes.
+Use rootful Docker Engine 28 or newer with the systemd cgroup driver, cgroup v2 mounted with `nsdelegate`, and a private demo cgroup namespace. The kernel must support `cgroup.kill` and the `oom_group_kill` memory event. The runtime must place exec and health-check processes in the container init's cgroup when the top-level scope cannot accept processes. runc 1.3.4 does this.
 
 Docker creates `datatugdemo.slice` on first start. The slice belongs to this deployment. Keep other workloads out of it. Compose bind-mounts `/sys/fs/cgroup/datatugdemo.slice` at `/run/datatug-demo/cgroup` so the supervisor can create its session slots below its own scope.
 
@@ -13,22 +13,7 @@ docker info --format '{{.CgroupDriver}} cgroup v{{.CgroupVersion}}'
 findmnt -no FSTYPE,OPTIONS /sys/fs/cgroup
 ```
 
-The stock Docker seccomp profile blocks `clone3` for this capability set. Install a demo profile based on the default profile shipped by the host's Docker Engine. Permit Go's 88-byte `clone3` argument structure and retain `ENOSYS` for other sizes so callers can fall back. Keep the other syscall rules from the base profile. Seccomp can check the structure size and cannot inspect the flags behind the pointer. Enforce a host policy that denies unprivileged user namespace creation for the demo, such as `kernel.unprivileged_userns_clone=0` on hosts that provide that sysctl. See the [Docker seccomp documentation](https://docs.docker.com/engine/security/seccomp/) and the [Moby 28.5.2 default profile](https://github.com/moby/moby/blob/v28.5.2/vendor/github.com/moby/profiles/seccomp/default.json) for an example input.
-
-With the matching base profile saved as `docker-default-seccomp.json`, generate and install the demo profile on the machine running Compose.
-
-```bash
-jq '.syscalls |= (
-  map(.names -= ["clone3"]) | map(select(.names | length > 0))
-  + [{"names":["clone3"],"action":"SCMP_ACT_ALLOW",
-      "args":[{"index":1,"value":88,"op":"SCMP_CMP_EQ"}]},
-     {"names":["clone3"],"action":"SCMP_ACT_ERRNO","errnoRet":38,
-      "args":[{"index":1,"value":88,"op":"SCMP_CMP_NE"}]}]
-)' docker-default-seccomp.json > datatug-demo-seccomp.json &&
-sudo install -o root -g root -m 0644 datatug-demo-seccomp.json /etc/docker/datatug-demo-seccomp.json
-```
-
-The supervisor probes atomic placement before serving. Keep the default AppArmor confinement and the capabilities specified by Compose.
+Keep Docker's stock seccomp profile, the default AppArmor confinement, and the capabilities specified by Compose.
 
 ## Build, start, and stop
 
@@ -163,7 +148,6 @@ Set these in the environment or in the Compose environment file. Re-run `up -d -
 | `DEMO_SESSIONS_TMPFS` | `3591m` | Shared sessions tmpfs size. |
 | `DEMO_SESSIONS_TMPFS_INODES` | `6684672` | Shared sessions tmpfs inode count. |
 | `DEMO_MAX_EGRESS_TUNNELS` | `64` | Global CONNECT tunnel cap at the relay and edge. |
-| `DEMO_SECCOMP_PROFILE` | `/etc/docker/datatug-demo-seccomp.json` | Demo seccomp profile on the machine running Compose. |
 | `DEMO_MEM_LIMIT` | `3776m` | Demo memory cap, including tmpfs usage. |
 | `DEMO_CPUS` | `2` | Demo cgroup CPU quota in cores. |
 | `DEMO_PIDS_LIMIT` | `2048` | Demo cgroup limit for processes and threads. |
@@ -174,7 +158,7 @@ Set these in the environment or in the Compose environment file. Re-run `up -d -
 - **Healthcheck fails.** Inspect `docker compose -f deploy/ssh-demo/compose.yaml ps` and both service logs. The edge health probe traverses the TCP forwarder, so startup or template failures in the supervisor can affect both probes. Probe the demo directly with `docker compose -f deploy/ssh-demo/compose.yaml exec -T demo /usr/local/bin/datatug demo ssh-health --addr 127.0.0.1:2222 --proxy-protocol`.
 - **“Demo is full.”** Check global and per-IP slots, including visitors behind the same NAT. Inspect session end events for `end_reason=full` and check for slots retained after cleanup errors. Measure memory, tmpfs, CPU and PID headroom before raising the caps.
 - **Template clone fails.** Check the HTTPS repo URL, ref and project manifest path. Ensure the edge can resolve the GitHub hosts and open TCP 443. Check the edge log's `host` and `result` for CONNECT denials, and confirm the edge has created `/run/datatug-demo/proxy/connect.sock` in the shared volume.
-- **UID isolation refuses to start.** The supervisor needs container uid 0, its four capabilities, and a root-owned sessions tmpfs with mode `0711`. Check the delegated cgroup mount, finite scope `memory.max`, and the seccomp profile. Visit the startup logs for the operation that failed.
+- **UID isolation refuses to start.** The supervisor needs container uid 0, its four capabilities, and a root-owned sessions tmpfs with mode `0711`. Check the delegated cgroup mount and finite scope `memory.max`. Visit the startup logs for the operation that failed.
 - **Session logs.** Match the JSON `session start` and `session end` events by `session_id` and inspect `client_ip`, `ssh_user`, `pty_width`, `pty_height`, `duration_ms`, `end_reason`, and `exit_status`. Edge egress logs report the hostname and outcome.
 
 ## Isolation

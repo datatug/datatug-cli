@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime/debug"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -161,11 +162,6 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 		return nil, err
 	}
 
-	if cfg.Isolation == IsolationUID {
-		if err := s.probeSlotSpawn(ctx); err != nil {
-			return nil, err
-		}
-	}
 	ready := false
 	defer func() {
 		if !ready {
@@ -462,13 +458,15 @@ func (s *Server) sessionChannelHandler(srv *ssh.Server, conn *gossh.ServerConn, 
 	wrapped := &filteringNewChannel{
 		NewChannel: newChan,
 		meta:       meta,
+		inputReady: state.shellStarted,
 	}
 	ssh.DefaultSessionHandler(srv, conn, wrapped, &sessionContext{Context: ctx, meta: meta})
 }
 
 type filteringNewChannel struct {
 	gossh.NewChannel
-	meta *sessionMeta
+	meta       *sessionMeta
+	inputReady <-chan struct{}
 }
 
 func (f *filteringNewChannel) Accept() (gossh.Channel, <-chan *gossh.Request, error) {
@@ -485,15 +483,25 @@ func (f *filteringNewChannel) Accept() (gossh.Channel, <-chan *gossh.Request, er
 			filteredReqs <- filter.filterSessionRequest(req)
 		}
 	}()
-	return &activityChannel{Channel: ch, activityCh: f.meta.activityCh}, filteredReqs, nil
+	return &activityChannel{
+		Channel: ch, activityCh: f.meta.activityCh, inputReady: f.inputReady, done: f.meta.chanDone,
+	}, filteredReqs, nil
 }
 
 type activityChannel struct {
 	gossh.Channel
 	activityCh chan struct{}
+	inputReady <-chan struct{}
+	done       <-chan struct{}
 }
 
 func (a *activityChannel) Read(p []byte) (int, error) {
+	// charm.land/ssh begins copying to the PTY before it invokes handleSession.
+	select {
+	case <-a.inputReady:
+	case <-a.done:
+		return 0, io.EOF
+	}
 	n, err := a.Channel.Read(p)
 	if n > 0 {
 		select {
@@ -768,7 +776,9 @@ func (s *Server) handleSession(sess ssh.Session) {
 	term, colorTerm := extractClientTermAndColorTerm(pty.Term, sess.Environ())
 	childArgs := append(append([]string(nil), s.cfg.ExecPrefixArgs...), BuildChildArgs(s.cfg, dir, s.templateDir, sessionID, deadline)...)
 	cmd := exec.Command(s.executable, childArgs...)
-	cmd.Dir = dir
+	if group == nil {
+		cmd.Dir = dir
+	}
 	var egressProxy string
 	if s.relay != nil {
 		var revoke func()
@@ -776,19 +786,29 @@ func (s *Server) handleSession(sess ssh.Session) {
 		defer revoke()
 	}
 	cmd.Env = BuildChildEnv(homeDir, term, colorTerm, egressProxy)
-	if err := s.startSessionChild(meta, slot, &pty, cmd); err != nil {
+	ready, err := s.startSessionChild(meta, slot, group, &pty, cmd)
+	if err != nil {
 		s.logger.Error("start session child failed", "session_id", sessionID, "err", err)
 		endReason = EndReasonChildCrash
 		exitStatus = 1
 		return
 	}
 	pgid = cmd.Process.Pid
-	close(connection.shellStarted)
 
 	waitCh = make(chan error, 1)
 	go func() {
 		waitCh <- cmd.Wait()
 	}()
+	if group != nil {
+		if err := group.waitForSlotEntry(sess.Context(), ready, pgid); err != nil {
+			// The child may still be in the supervisor cgroup.
+			_ = cmd.Process.Kill()
+			s.logger.Error("verify session child slot entry failed", "session_id", sessionID, "err", err)
+			exitStatus = 1
+			return
+		}
+	}
+	close(connection.shellStarted)
 
 	var idleTimer *time.Timer
 	var idleC <-chan time.Time
@@ -886,26 +906,31 @@ func (s *Server) handleSession(sess ssh.Session) {
 
 // The request loop may close the PTY on disconnect. Serialize its closer with
 // ownership transfer and fork so the slave cannot be closed during startup.
-func (s *Server) startSessionChild(meta *sessionMeta, slot Slot, pty *ssh.Pty, cmd *exec.Cmd) error {
+func (s *Server) startSessionChild(meta *sessionMeta, slot Slot, group *cgroup, pty *ssh.Pty, cmd *exec.Cmd) (*os.File, error) {
 	meta.ptyMu.Lock()
 	defer meta.ptyMu.Unlock()
-	start := func() error {
-		if err := startPTYChild(pty, cmd, ssh.WithJobControl()); err != nil {
-			return err
+	var ready *os.File
+	if group != nil {
+		if err := s.ops.Fchown(pty.Slave, slot.UID, slot.GID); err != nil {
+			return nil, fmt.Errorf("chown pty slave descriptor: %w", err)
 		}
-		_ = pty.Slave.Close()
-		return nil
+		read, write, err := slotReadyPipe()
+		if err != nil {
+			return nil, fmt.Errorf("create slot entry acknowledgement pipe: %w", err)
+		}
+		defer func() { _ = write.Close() }()
+		ready = read
+		cmd.ExtraFiles = []*os.File{write}
+		cmd.Args = append(cmd.Args, "--slot-cgroup", group.path,
+			"--slot-uid", strconv.Itoa(slot.UID), "--slot-gid", strconv.Itoa(slot.GID))
 	}
-	if s.cfg.Isolation == IsolationProcess {
-		return start()
-	}
-	if err := s.ops.Fchown(pty.Slave, slot.UID, slot.GID); err != nil {
-		return fmt.Errorf("chown pty slave descriptor: %w", err)
-	}
-	return s.cgroups[slot.Index].withSpawnAttrs(s.ops.CredentialFor(slot.UID, slot.GID), func(attrs *syscall.SysProcAttr) error {
-		cmd.SysProcAttr = attrs
-		return start()
-	})
-}
 
-var startPTYChild = (*ssh.Pty).Start
+	if err := pty.Start(cmd, ssh.WithJobControl()); err != nil {
+		if ready != nil {
+			_ = ready.Close()
+		}
+		return nil, err
+	}
+	_ = pty.Slave.Close()
+	return ready, nil
+}

@@ -60,10 +60,6 @@ services:
     cap_add: [SETUID, SETGID, CHOWN, KILL]
     cgroup: private
     cgroup_parent: datatugdemo.slice
-    security_opt:
-      - "no-new-privileges:true"
-      # The stock Docker profile returns ENOSYS for clone3 without SYS_ADMIN.
-      - "seccomp=${DEMO_SECCOMP_PROFILE:-/etc/docker/datatug-demo-seccomp.json}"
     depends_on:
       - edge
     command:

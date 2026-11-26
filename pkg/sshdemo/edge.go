@@ -249,7 +249,7 @@ func (e *Edge) forwardConn(ctx context.Context, clientConn net.Conn) {
 	}
 	_ = upConn.SetWriteDeadline(time.Time{})
 
-	spliceConns(ctx, clientConn, upConn)
+	spliceConns(ctx, clientConn, upConn, 5*time.Second)
 }
 
 // ProxyHandler returns the http.Handler implementing the allow-listing CONNECT proxy.
@@ -343,7 +343,7 @@ func (e *Edge) handleProxy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	spliceConns(r.Context(), wrappedClient, wrappedUp)
+	spliceConns(r.Context(), wrappedClient, wrappedUp, 0)
 }
 
 func hostOnly(hostPort string) string {
@@ -422,31 +422,52 @@ func closeWrite(c net.Conn) {
 	}
 }
 
-func spliceConns(ctx context.Context, a, b net.Conn) {
-	done := make(chan struct{})
-	go func() {
-		select {
-		case <-ctx.Done():
-			_ = a.Close()
-			_ = b.Close()
-		case <-done:
-		}
-	}()
+type connDeadlineWriter struct {
+	conn    net.Conn
+	timeout time.Duration
+}
 
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		_, _ = io.Copy(b, a)
-		closeWrite(b)
-	}()
-	go func() {
-		defer wg.Done()
-		_, _ = io.Copy(a, b)
-		closeWrite(a)
-	}()
-	wg.Wait()
-	close(done)
+func (w connDeadlineWriter) Write(p []byte) (int, error) {
+	if err := w.conn.SetWriteDeadline(time.Now().Add(w.timeout)); err != nil {
+		return 0, err
+	}
+	return w.conn.Write(p)
+}
+
+func spliceConns(ctx context.Context, a, b net.Conn, writeTimeout time.Duration) {
+	done := make(chan struct{}, 2)
+	copyDirection := func(dst, src net.Conn) {
+		var output io.Writer = dst
+		if writeTimeout > 0 {
+			output = connDeadlineWriter{conn: dst, timeout: writeTimeout}
+		}
+		_, _ = io.Copy(output, src)
+		closeWrite(dst)
+		done <- struct{}{}
+	}
+	go copyDirection(a, b)
+	go copyDirection(b, a)
+
+	remaining := 2
+	select {
+	case <-ctx.Done():
+	case <-done:
+		remaining--
+		// Allow a short half-close drain, then force both copy loops to return.
+		drain := time.NewTimer(500 * time.Millisecond)
+		defer drain.Stop()
+		select {
+		case <-done:
+			remaining--
+		case <-drain.C:
+		case <-ctx.Done():
+		}
+	}
+	_ = a.Close()
+	_ = b.Close()
+	for range remaining {
+		<-done
+	}
 }
 
 // Run starts both the TCP forwarder and the HTTP CONNECT proxy and blocks until

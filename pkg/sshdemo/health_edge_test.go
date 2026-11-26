@@ -429,3 +429,81 @@ func TestCheckHealthProxyLocal(t *testing.T) {
 		t.Fatalf("CheckHealthProxyLocal: %v", err)
 	}
 }
+
+func TestEdge_UpstreamHalfCloseReleasesForwardingSlot(t *testing.T) {
+	h := startTestServer(t, func(cfg *Config) {
+		cfg.ProxyProtocol = true
+		cfg.HandshakeTimeout = 500 * time.Millisecond
+	})
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	edge := NewEdge(EdgeConfig{
+		Upstream: h.addr, MaxConns: 1, MaxConnsPerIP: 1,
+		Logger: slog.New(slog.NewJSONHandler(io.Discard, nil)),
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- edge.ServeForwarder(ctx, ln) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	})
+	client, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	if err := client.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	reader := bufio.NewReader(client)
+	if banner, err := reader.ReadString('\n'); err != nil || !strings.HasPrefix(banner, "SSH-2.0-") {
+		t.Fatalf("forwarded banner: %q, %v", banner, err)
+	}
+	// Leave the client's write half open after the supervisor times out.
+	if _, err := reader.ReadByte(); !errors.Is(err, io.EOF) {
+		t.Fatalf("waiting for upstream EOF: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if err := CheckHealth(ctx, ln.Addr().String(), time.Second); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("half-open client kept the only forwarding slot")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestEdge_ForwardingWriteDeadlineReleasesBlockedCopy(t *testing.T) {
+	client, edgeClient := net.Pipe()
+	upstream, edgeUpstream := net.Pipe()
+	defer client.Close()
+	defer upstream.Close()
+	defer edgeClient.Close()
+	defer edgeUpstream.Close()
+
+	done := make(chan struct{})
+	go func() {
+		spliceConns(context.Background(), edgeClient, edgeUpstream, 30*time.Millisecond)
+		close(done)
+	}()
+	if _, err := upstream.Write([]byte("the client never reads this")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("forwarding goroutine still holds a slot")
+	}
+
+	writer := connDeadlineWriter{conn: edgeClient, timeout: time.Second}
+	if _, err := writer.Write([]byte("closed")); err == nil {
+		t.Fatal("expected a write deadline error on the closed connection")
+	}
+}

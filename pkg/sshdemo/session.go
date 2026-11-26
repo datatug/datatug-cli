@@ -63,6 +63,7 @@ func BuildCleanupArgs(workspace string) []string {
 // BuildChildEnv returns a clean, minimal environment for the session child.
 // It never inherits the supervisor's environment.
 func BuildChildEnv(homeDir, term, colorTerm, egressProxy string) []string {
+	tempDir := filepath.Join(filepath.Dir(homeDir), "tmp")
 	term = sanitizeEnvValue(term)
 	if term == "" {
 		term = "xterm-256color"
@@ -75,6 +76,8 @@ func BuildChildEnv(homeDir, term, colorTerm, egressProxy string) []string {
 	env := []string{
 		"HOME=" + homeDir,
 		"TERM=" + term,
+		"TMPDIR=" + tempDir,
+		"SQLITE_TMPDIR=" + tempDir,
 	}
 	if colorTerm != "" {
 		env = append(env, "COLORTERM="+colorTerm)
@@ -156,6 +159,7 @@ func createSessionWorkspace(sessionsDir, sessionID string, slot Slot, isolation 
 	dir := filepath.Join(sessionsDir, sessionID)
 	homeDir := filepath.Join(dir, "home")
 	repoDir := filepath.Join(dir, "repo")
+	tempDir := filepath.Join(dir, "tmp")
 
 	cleanupOnErr := true
 	defer func() {
@@ -164,7 +168,7 @@ func createSessionWorkspace(sessionsDir, sessionID string, slot Slot, isolation 
 		}
 	}()
 
-	for _, p := range []string{dir, homeDir, repoDir} {
+	for _, p := range []string{dir, homeDir, repoDir, tempDir} {
 		if err := os.Mkdir(p, 0o700); err != nil {
 			return "", "", "", fmt.Errorf("sshdemo: mkdir %s: %w", p, err)
 		}
@@ -176,7 +180,7 @@ func createSessionWorkspace(sessionsDir, sessionID string, slot Slot, isolation 
 	// CAP_DAC_OVERRIDE, so once dir is the slot uid's (0700) it can no longer
 	// create or chown anything inside it.
 	if isolation == IsolationUID {
-		for _, p := range []string{homeDir, repoDir, dir} {
+		for _, p := range []string{homeDir, repoDir, tempDir, dir} {
 			if err := ops.Chown(p, slot.UID, slot.GID); err != nil {
 				return "", "", "", fmt.Errorf("sshdemo: chown %s to %d:%d: %w", p, slot.UID, slot.GID, err)
 			}
@@ -250,7 +254,7 @@ func runCleanupCommand(
 		)
 	}
 
-	_, statErr := os.Stat(dir)
+	_, statErr := os.Lstat(dir)
 	dirGone := os.IsNotExist(statErr)
 
 	procsGone := true
@@ -266,14 +270,12 @@ func runCleanupCommand(
 // cleanStaleSessions cleans any leftover directories under cfg.SessionsDir from
 // a previous crash. In uid mode, only directories owned by a UID within the
 // configured slot range are cleaned; others are logged and left untouched.
-func (s *Server) cleanStaleSessions(ctx context.Context) {
+func (s *Server) cleanStaleSessions(ctx context.Context) error {
 	entries, err := os.ReadDir(s.cfg.SessionsDir)
 	if err != nil {
-		if !os.IsNotExist(err) {
-			s.logger.Warn("read sessions-dir for stale cleanup failed", "dir", s.cfg.SessionsDir, "err", err)
-		}
-		return
+		return fmt.Errorf("sshdemo: read sessions-dir for stale cleanup: %w", err)
 	}
+	allQuarantined := false
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -283,11 +285,13 @@ func (s *Server) cleanStaleSessions(ctx context.Context) {
 		if s.cfg.Isolation == IsolationUID {
 			fi, statErr := s.ops.Stat(dir)
 			if statErr != nil {
-				s.logger.Warn("stat stale session dir failed", "dir", dir, "err", statErr)
-				continue
+				return fmt.Errorf("sshdemo: stat stale session dir %s: %w", dir, statErr)
 			}
 			ownerUID, ok := s.ops.FileUID(fi)
-			if !ok || !s.slots.InSlotRange(ownerUID) {
+			if !ok {
+				return fmt.Errorf("sshdemo: cannot determine owner of stale session dir %s", dir)
+			}
+			if !s.slots.InSlotRange(ownerUID) {
 				s.logger.Warn("ignoring stale session dir outside slot uid range",
 					"dir", dir,
 					"owner_uid", ownerUID,
@@ -296,14 +300,25 @@ func (s *Server) cleanStaleSessions(ctx context.Context) {
 			}
 			uid = ownerUID
 			gid = ownerUID
-			_ = killAndDrainUIDProcs(uid, s.ops)
 		}
 
 		cleanCtx, cancel := context.WithTimeout(ctx, s.cfg.CleanupTimeout)
 		ok := runCleanupCommand(cleanCtx, s.executable, s.cfg.ExecPrefixArgs, dir, uid, gid, s.cfg.Isolation, s.ops, s.logger)
 		cancel()
-		s.logger.Info("cleaned stale session dir", "dir", dir, "uid", uid, "ok", ok)
+		if ok {
+			s.logger.Info("cleaned stale session dir", "dir", dir, "uid", uid)
+			continue
+		}
+		s.logger.Error("quarantining uid after unverified stale session cleanup", "dir", dir, "uid", uid)
+		if s.cfg.Isolation == IsolationProcess {
+			return fmt.Errorf("sshdemo: could not verify cleanup of workspace %s for shared uid %d", dir, uid)
+		}
+		allQuarantined = s.slots.quarantineUID(uid)
 	}
+	if allQuarantined {
+		return errors.New("sshdemo: all session slots quarantined after stale cleanup")
+	}
+	return nil
 }
 
 // drainPTYMaster waits briefly for the kernel PTY master buffer to drain after

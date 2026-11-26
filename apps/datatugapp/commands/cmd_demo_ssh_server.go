@@ -8,8 +8,12 @@ package commands
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"math/big"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/datatug/datatug-cli/pkg/sshdemo"
@@ -31,6 +35,7 @@ var (
 func demoSSHServerCommand() *cobra.Command {
 	cfg := sshdemo.DefaultConfig()
 	var printHostKey bool
+	var memQuota, diskQuota string
 
 	cmd := &cobra.Command{
 		Use:   "ssh-server",
@@ -38,6 +43,19 @@ func demoSSHServerCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if printHostKey {
 				return sshDemoPrintHostKey(cfg.ResolvedHostKey(), cmd.OutOrStdout())
+			}
+			for _, quota := range []struct {
+				flag, value string
+				target      *uint64
+			}{
+				{"session-mem-quota", memQuota, &cfg.SessionMemQuota},
+				{"session-disk-quota", diskQuota, &cfg.SessionDiskQuota},
+			} {
+				size, ok := parseSSHSessionQuota(quota.value)
+				if !ok {
+					return fmt.Errorf("--%s requires a positive byte size, got %q", quota.flag, quota.value)
+				}
+				*quota.target = size
 			}
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGTERM, syscall.SIGINT)
 			defer stop()
@@ -56,10 +74,13 @@ func demoSSHServerCommand() *cobra.Command {
 	f.StringVar(&cfg.Ref, "ref", cfg.Ref, "Git branch or ref of the demo repository (empty = default branch)")
 	f.StringVar(&cfg.ProjectDir, "project-dir", cfg.ProjectDir, "Project sub-directory inside the demo repository")
 	f.IntVar(&cfg.MaxSessions, "max-sessions", cfg.MaxSessions, "Maximum concurrent SSH sessions")
-	f.IntVar(&cfg.MaxSessionsPerIP, "max-sessions-per-ip", cfg.MaxSessionsPerIP, "Maximum concurrent SSH sessions per client IP")
+	f.IntVar(&cfg.MaxSessionsPerIP, "max-sessions-per-ip", cfg.MaxSessionsPerIP, "Maximum concurrent authenticated SSH connections per client IP")
 	f.DurationVar(&cfg.IdleTimeout, "idle-timeout", cfg.IdleTimeout, "Idle timeout with no client input")
 	f.DurationVar(&cfg.MaxSessionDuration, "max-session-duration", cfg.MaxSessionDuration, "Maximum lifetime of a single session")
 	f.DurationVar(&cfg.HandshakeTimeout, "handshake-timeout", cfg.HandshakeTimeout, "Maximum duration allowed for SSH handshake")
+	f.DurationVar(&cfg.ShellStartTimeout, "shell-start-timeout", cfg.ShellStartTimeout, "Maximum time from SSH authentication to child startup")
+	f.StringVar(&memQuota, "session-mem-quota", strconv.FormatUint(cfg.SessionMemQuota, 10), "Per-session resident memory quota (e.g. 1GiB)")
+	f.StringVar(&diskQuota, "session-disk-quota", strconv.FormatUint(cfg.SessionDiskQuota, 10), "Per-session workspace disk quota (e.g. 256MiB)")
 	f.StringVar(&cfg.Isolation, "isolation", cfg.Isolation, "Session isolation mode: uid or process")
 	f.IntVar(&cfg.UIDBase, "uid-base", cfg.UIDBase, "Base Unix UID for slot allocation in uid isolation mode")
 	f.BoolVar(&cfg.AllowInsecureIsolation, "allow-insecure-isolation", cfg.AllowInsecureIsolation, "Allow --isolation=process on non-loopback listen addresses")
@@ -67,6 +88,30 @@ func demoSSHServerCommand() *cobra.Command {
 	f.StringVar(&cfg.SaveBranch, "save-branch", cfg.SaveBranch, "Branch name used when saving visitor changes to their fork")
 	f.StringVar(&cfg.EgressProxy, "egress-proxy", cfg.EgressProxy, "HTTP/HTTPS egress proxy URL passed to session children")
 	return cmd
+}
+
+func parseSSHSessionQuota(value string) (uint64, bool) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	unitStart := strings.IndexFunc(value, func(r rune) bool {
+		return (r < '0' || r > '9') && r != '.'
+	})
+	if unitStart < 0 {
+		unitStart = len(value)
+	}
+	multiplier := map[string]uint64{
+		"": 1, "b": 1,
+		"kb": 1_000, "mb": 1_000_000, "gb": 1_000_000_000, "tb": 1_000_000_000_000,
+		"kib": 1 << 10, "mib": 1 << 20, "gib": 1 << 30, "tib": 1 << 40,
+	}[strings.TrimSpace(value[unitStart:])]
+	number, ok := new(big.Rat).SetString(value[:unitStart])
+	if !ok || multiplier == 0 {
+		return 0, false
+	}
+	bytes := number.Mul(number, new(big.Rat).SetUint64(multiplier))
+	if bytes.Sign() <= 0 || !bytes.IsInt() || !bytes.Num().IsUint64() {
+		return 0, false
+	}
+	return bytes.Num().Uint64(), true
 }
 
 func demoSSHHealthCommand() *cobra.Command {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,6 +41,9 @@ func TestDemoSSHServerCommand_Flags(t *testing.T) {
 		"--idle-timeout", "5m",
 		"--max-session-duration", "30m",
 		"--handshake-timeout", "10s",
+		"--shell-start-timeout", "3s",
+		"--session-mem-quota", "1.5GiB",
+		"--session-disk-quota", "128MiB",
 		"--isolation", "process",
 		"--uid-base", "30000",
 		"--allow-insecure-isolation",
@@ -56,10 +60,39 @@ func TestDemoSSHServerCommand_Flags(t *testing.T) {
 		gotCfg.ProjectDir != "proj" || gotCfg.MaxSessions != 8 || gotCfg.MaxSessionsPerIP != 2 ||
 		gotCfg.IdleTimeout != 5*time.Minute || gotCfg.MaxSessionDuration != 30*time.Minute ||
 		gotCfg.HandshakeTimeout != 10*time.Second || gotCfg.Isolation != "process" ||
+		gotCfg.ShellStartTimeout != 3*time.Second || gotCfg.SessionMemQuota != 1536<<20 || gotCfg.SessionDiskQuota != 128<<20 ||
 		gotCfg.UIDBase != 30000 || !gotCfg.AllowInsecureIsolation ||
 		gotCfg.GitHubClientID != "cid-1" || gotCfg.SaveBranch != "custom-demo" ||
 		gotCfg.EgressProxy != "http://edge:3128" {
 		t.Fatalf("unexpected parsed config: %+v", gotCfg)
+	}
+}
+
+func TestDemoSSHServerCommand_RejectsInvalidQuotas(t *testing.T) {
+	for _, args := range [][]string{
+		{"--session-mem-quota", "invalid"},
+		{"--session-disk-quota", "0"},
+		{"--session-disk-quota", "0.1B"},
+		{"--session-mem-quota", "18446744073709551616"},
+	} {
+		cmd := demoSSHServerCommand()
+		cmd.SetArgs(args)
+		cmd.SetErr(io.Discard)
+		cmd.SetOut(io.Discard)
+		if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), args[0]) {
+			t.Errorf("%v returned %v, want a quota flag error", args, err)
+		}
+	}
+}
+
+func TestDemoSSHServerCommand_QuotaUnits(t *testing.T) {
+	for input, want := range map[string]uint64{
+		"4096": 4096, "4096 B": 4096, "4 KiB": 4096,
+		"1GiB": 1 << 30, "2.5MB": 2_500_000,
+	} {
+		if got, ok := parseSSHSessionQuota(input); !ok || got != want {
+			t.Errorf("parseSSHSessionQuota(%q) = %d, %v, want %d", input, got, ok, want)
+		}
 	}
 }
 

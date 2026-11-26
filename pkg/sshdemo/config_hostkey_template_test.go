@@ -24,6 +24,12 @@ func TestConfig_DefaultsAndValidate(t *testing.T) {
 	if cfg.Listen != DefaultListen || cfg.MaxSessions != DefaultMaxSessions || cfg.Isolation != IsolationUID {
 		t.Fatalf("unexpected DefaultConfig: %+v", cfg)
 	}
+	for _, c := range []Config{cfg, (Config{}).WithDefaults()} {
+		if c.ShellStartTimeout != 30*time.Second || c.WatchdogInterval != 2*time.Second ||
+			c.SessionMemQuota != 1<<30 || c.SessionDiskQuota != 256<<20 {
+			t.Fatalf("unexpected pre-shell and quota defaults: %+v", c)
+		}
+	}
 	if got := (Config{StateDir: "/tmp/s"}).ResolvedHostKey(); got != "/tmp/s/ssh_host_ed25519_key" {
 		t.Fatalf("ResolvedHostKey = %q", got)
 	}
@@ -41,6 +47,8 @@ func TestConfig_DefaultsAndValidate(t *testing.T) {
 		{"neg-idle", func(c *Config) { c.IdleTimeout = -time.Second }, "idle-timeout"},
 		{"neg-max-dur", func(c *Config) { c.MaxSessionDuration = -time.Second }, "max-session-duration"},
 		{"neg-handshake", func(c *Config) { c.HandshakeTimeout = -time.Second }, "handshake-timeout"},
+		{"neg-shell-start", func(c *Config) { c.ShellStartTimeout = -time.Second }, "shell-start-timeout"},
+		{"neg-watchdog", func(c *Config) { c.WatchdogInterval = -time.Second }, "watchdog interval"},
 		{"empty-project-dir", func(c *Config) { c.ProjectDir = "" }, "project-dir"},
 		{"abs-project-dir", func(c *Config) { c.ProjectDir = "/etc" }, "must be relative"},
 		{"escape-project-dir", func(c *Config) { c.ProjectDir = "../escape" }, "escapes template"},

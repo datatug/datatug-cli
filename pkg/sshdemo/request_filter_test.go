@@ -44,7 +44,8 @@ func TestFilterSessionRequest(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := filterSessionRequest(&gossh.Request{Type: tc.typ, Payload: tc.payload})
+			var filter sessionRequestFilter
+			got := filter.filterSessionRequest(&gossh.Request{Type: tc.typ, Payload: tc.payload})
 			if got.Type != tc.wantType {
 				t.Fatalf("type = %q, want %q", got.Type, tc.wantType)
 			}
@@ -53,7 +54,8 @@ func TestFilterSessionRequest(t *testing.T) {
 			}
 		})
 	}
-	clamped := filterSessionRequest(&gossh.Request{Type: "pty-req", Payload: ptyReqPayload("xterm", 9999, 9999)})
+	var filter sessionRequestFilter
+	clamped := filter.filterSessionRequest(&gossh.Request{Type: "pty-req", Payload: ptyReqPayload("xterm", 9999, 9999)})
 	off := 4 + len("xterm")
 	if w, h := binary.BigEndian.Uint32(clamped.Payload[off:]), binary.BigEndian.Uint32(clamped.Payload[off+4:]); w != MaxPTYWidth || h != MaxPTYHeight {
 		t.Fatalf("pty-req clamped to %dx%d, want %dx%d", w, h, MaxPTYWidth, MaxPTYHeight)

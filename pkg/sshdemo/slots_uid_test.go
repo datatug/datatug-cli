@@ -183,7 +183,7 @@ func TestUIDModeSeams_WorkspaceCredentialKillAndStaleCleanup(t *testing.T) {
 		}
 	}
 
-	// 2. createSessionWorkspace in uid mode calls chown on dir, home, repo.
+	// 2. createSessionWorkspace in uid mode calls chown on dir, home, repo and tmp.
 	sessDir := t.TempDir()
 	var chowned []string
 	ops := DefaultSysOps()
@@ -200,10 +200,10 @@ func TestUIDModeSeams_WorkspaceCredentialKillAndStaleCleanup(t *testing.T) {
 		t.Fatalf("createSessionWorkspace: %v", err)
 	}
 	// Innermost first: without CAP_DAC_OVERRIDE nothing can be done inside dir once it is the slot uid's.
-	if !slices.Equal(chowned, []string{"home", "repo", "abcd1234"}) {
-		t.Fatalf("chowned = %v, want [home repo abcd1234]", chowned)
+	if !slices.Equal(chowned, []string{"home", "repo", "tmp", "abcd1234"}) {
+		t.Fatalf("chowned = %v, want [home repo tmp abcd1234]", chowned)
 	}
-	for _, p := range []string{dir, homeDir, repoDir} {
+	for _, p := range []string{dir, homeDir, repoDir, filepath.Join(dir, "tmp")} {
 		fi, err := os.Stat(p)
 		if err != nil || fi.Mode().Perm() != 0o700 {
 			t.Fatalf("workspace %s perm = %v / %v, want 0700", p, fi, err)
@@ -292,7 +292,9 @@ func TestUIDModeSeams_WorkspaceCredentialKillAndStaleCleanup(t *testing.T) {
 		ops:        staleOps,
 		slots:      NewSlotManager(4, 2, 20000, IsolationUID),
 	}
-	srv.cleanStaleSessions(context.Background())
+	if err := srv.cleanStaleSessions(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 
 	if !slices.Equal(credRequested, []int{20001}) {
 		t.Fatalf("CredentialFor called with %v, want [20001]", credRequested)

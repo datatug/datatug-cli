@@ -34,6 +34,7 @@ type SlotManager struct {
 	uidBase     int
 	isolation   string
 	inUse       []bool
+	quarantined []bool
 	perIP       map[string]int
 	getUID      func() int
 	getGID      func() int
@@ -47,6 +48,7 @@ func NewSlotManager(maxSessions, maxPerIP, uidBase int, isolation string) *SlotM
 		uidBase:     uidBase,
 		isolation:   isolation,
 		inUse:       make([]bool, maxSessions),
+		quarantined: make([]bool, maxSessions),
 		perIP:       make(map[string]int),
 		getUID:      os.Getuid,
 		getGID:      os.Getgid,
@@ -63,7 +65,7 @@ func (m *SlotManager) Acquire(clientIP string) (Slot, error) {
 	}
 	idx := -1
 	for i, used := range m.inUse {
-		if !used {
+		if !used && !m.quarantined[i] {
 			idx = i
 			break
 		}
@@ -109,6 +111,20 @@ func (m *SlotManager) InSlotRange(uid int) bool {
 	return uid >= m.uidBase && uid < m.uidBase+m.maxSessions
 }
 
+// quarantineUID permanently removes a slot from the allocator. It returns
+// true when no UID slot remains usable.
+func (m *SlotManager) quarantineUID(uid int) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.quarantined[uid-m.uidBase] = true
+	for _, quarantined := range m.quarantined {
+		if !quarantined {
+			return false
+		}
+	}
+	return true
+}
+
 // ActiveCount returns the number of currently occupied slots.
 func (m *SlotManager) ActiveCount() int {
 	m.mu.Lock()
@@ -127,6 +143,7 @@ func (m *SlotManager) ActiveCount() int {
 type SysOps struct {
 	Stat          func(string) (os.FileInfo, error)
 	Chown         func(string, int, int) error
+	Fchown        func(*os.File, int, int) error
 	Kill          func(int, syscall.Signal) error
 	ListUIDProcs  func(uid int) ([]int, error)
 	CredentialFor func(uid, gid int) *syscall.Credential
@@ -138,6 +155,7 @@ func DefaultSysOps() SysOps {
 	return SysOps{
 		Stat:          os.Stat,
 		Chown:         os.Chown,
+		Fchown:        (*os.File).Chown,
 		Kill:          syscall.Kill,
 		ListUIDProcs:  func(uid int) ([]int, error) { return listUIDProcsIn("/proc", uid) },
 		CredentialFor: defaultCredentialFor,
@@ -152,6 +170,9 @@ func (o SysOps) withDefaults() SysOps {
 	}
 	if o.Chown == nil {
 		o.Chown = def.Chown
+	}
+	if o.Fchown == nil {
+		o.Fchown = def.Fchown
 	}
 	if o.Kill == nil {
 		o.Kill = def.Kill
@@ -190,28 +211,44 @@ func defaultFileUID(fi os.FileInfo) (int, bool) {
 // listUIDProcsIn scans procDir (normally "/proc") for every numeric PID whose
 // status file's Uid line includes targetUID in any of real/effective/saved/fs UID.
 func listUIDProcsIn(procDir string, targetUID int) ([]int, error) {
+	pids, err := listProcPIDs(procDir)
+	if err != nil {
+		return nil, err
+	}
+	var owned []int
+	for _, pid := range pids {
+		data, err := os.ReadFile(filepath.Join(procDir, strconv.Itoa(pid), "status"))
+		if err != nil {
+			if procGone(err) {
+				continue
+			}
+			return nil, err
+		}
+		if statusMatchesUID(string(data), targetUID) {
+			owned = append(owned, pid)
+		}
+	}
+	return owned, nil
+}
+
+func listProcPIDs(procDir string) ([]int, error) {
 	entries, err := os.ReadDir(procDir)
 	if err != nil {
 		return nil, fmt.Errorf("sshdemo: read %s: %w", procDir, err)
 	}
 	var pids []int
 	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		pid, err := strconv.Atoi(entry.Name())
-		if err != nil || pid <= 0 {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(procDir, entry.Name(), "status"))
-		if err != nil {
-			continue
-		}
-		if statusMatchesUID(string(data), targetUID) {
-			pids = append(pids, pid)
+		if entry.IsDir() {
+			if pid, err := strconv.Atoi(entry.Name()); err == nil && pid > 0 {
+				pids = append(pids, pid)
+			}
 		}
 	}
 	return pids, nil
+}
+
+func procGone(err error) bool {
+	return errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH)
 }
 
 func statusMatchesUID(statusText string, targetUID int) bool {

@@ -199,8 +199,9 @@ func TestUIDModeSeams_WorkspaceCredentialKillAndStaleCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("createSessionWorkspace: %v", err)
 	}
-	if !slices.Equal(chowned, []string{"abcd1234", "home", "repo"}) {
-		t.Fatalf("chowned = %v, want [abcd1234 home repo]", chowned)
+	// Innermost first: without CAP_DAC_OVERRIDE nothing can be done inside dir once it is the slot uid's.
+	if !slices.Equal(chowned, []string{"home", "repo", "abcd1234"}) {
+		t.Fatalf("chowned = %v, want [home repo abcd1234]", chowned)
 	}
 	for _, p := range []string{dir, homeDir, repoDir} {
 		fi, err := os.Stat(p)

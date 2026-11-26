@@ -171,7 +171,12 @@ func createSessionWorkspace(sessionsDir, sessionID string, slot Slot, isolation 
 		if err := os.Chmod(p, 0o700); err != nil {
 			return "", "", "", fmt.Errorf("sshdemo: chmod %s: %w", p, err)
 		}
-		if isolation == IsolationUID {
+	}
+	// Ownership goes to the slot uid innermost first: the supervisor has no
+	// CAP_DAC_OVERRIDE, so once dir is the slot uid's (0700) it can no longer
+	// create or chown anything inside it.
+	if isolation == IsolationUID {
+		for _, p := range []string{homeDir, repoDir, dir} {
 			if err := ops.Chown(p, slot.UID, slot.GID); err != nil {
 				return "", "", "", fmt.Errorf("sshdemo: chown %s to %d:%d: %w", p, slot.UID, slot.GID, err)
 			}

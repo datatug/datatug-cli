@@ -363,7 +363,7 @@ check_slot_isolation() {
     ' probe "$slots_dir/slot-0" "$uid"
 }
 
-# Build the fixture under a live session's credentials and cgroup. Closing
+# Build both trees under a live session's credentials and cgroup. Closing
 # that SSH connection exercises the production cleanup and slot reuse path.
 check_deep_session_cleanup() (
     local uid=${DEMO_UID_BASE:-20000} client= workspace= result deadline
@@ -388,7 +388,7 @@ check_deep_session_cleanup() (
     [[ -n $workspace ]] || { cat "$work_dir/deep-ssh.log" >&2; return 1; }
     result=$("${compose[@]}" exec -T -e GOMAXPROCS=2 demo /run/datatug-demo/ssh-slot-link-probe \
         deep "$slots_dir/slot-0" "$uid" "$workspace") || return 1
-    [[ $result == 'created 10000 directories' ]] || return 1
+    [[ $result == 'created 10000 short-name levels and 40 long-name levels' ]] || return 1
     kill "$client" 2>/dev/null || return 1
     wait "$client" 2>/dev/null || true
     client=
@@ -450,7 +450,7 @@ check 'sessions tmpfs has the required inode budget and slots expose memory.recl
 check 'cleanup cgroup has independent memory, swap, OOM and PID limits' check_cleanup_limits
 check 'a session child runs in a slot as its slot uid, and the slot drains' check_session_in_slot_and_drained
 check 'slot 0 denies link, linkat, AF_UNIX sockets and access to slot 1' check_slot_isolation
-check 'cleanup removes a 10000-deep session tree and slot 0 serves another visitor' check_deep_session_cleanup
+check 'cleanup removes the 10000-level and 40-level long-name trees and slot 0 serves another visitor' check_deep_session_cleanup
 check 'kernel OOM-kills a slot over its limit; supervisor stays healthy' check_slot_oom_contained
 
 (( failures == 0 ))

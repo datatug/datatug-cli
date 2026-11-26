@@ -10,7 +10,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const cleanupWindowSize = 63 // Leave one descriptor for pinning or reopening a directory.
+const (
+	// AppArmor checks full paths even for descriptor-relative operations.
+	cleanupPathBudget = 2048
+	cleanupWindowSize = 62 // Leave descriptors for the root and a temporary pin.
+)
 
 var (
 	cleanupOpenat = unix.Openat
@@ -18,6 +22,7 @@ var (
 	cleanupChmod  = os.Chmod
 	cleanupFchmod = unix.Fchmod
 	cleanupUnlink = unix.Unlinkat
+	cleanupRename = unix.Renameat2
 	cleanupRead   = (*os.File).Readdirnames
 	cleanupSeek   = (*os.File).Seek
 )
@@ -63,12 +68,10 @@ func (f *cleanupFrame) readBatch() error {
 // CleanWorkspaceContents empties a drained workspace using only directory
 // descriptors and single entry names. The caller removes the workspace itself.
 func CleanWorkspaceContents(path string, progress func()) error {
-	var frames [cleanupWindowSize]cleanupFrame
-	defer func() {
-		for i := range frames {
-			frames[i].close()
-		}
-	}()
+	return cleanWorkspaceContents(path, cleanupPathBudget, progress)
+}
+
+func cleanWorkspaceContents(path string, budget int, progress func()) error {
 	root, err := openCleanupFrame(unix.AT_FDCWD, path, nil, false)
 	if errors.Is(err, unix.ENOENT) {
 		return nil
@@ -76,23 +79,38 @@ func CleanWorkspaceContents(path string, progress func()) error {
 	if err != nil {
 		return fmt.Errorf("open cleanup workspace: %w", err)
 	}
-	frames[0] = root
-	return walkCleanup(&frames, root.id, progress)
+	defer root.close()
+	return walkCleanup(&root, len(path), budget, progress)
 }
 
-func walkCleanup(frames *[cleanupWindowSize]cleanupFrame, root cleanupIdentity, progress func()) error {
+func walkCleanup(root *cleanupFrame, rootPathLen, budget int, progress func()) error {
+	var frames [cleanupWindowSize]cleanupFrame
+	defer func() {
+		for i := range frames {
+			frames[i].close()
+		}
+	}()
+	// Every descent adds at least two bytes. Keep lengths for evicted frames.
+	var pathLengths [cleanupPathBudget/2 + 1]int
+	pathLengths[0] = rootPathLen
+	var hoistSequence uint64
+	rootFD := int(root.file.Fd())
+	current := root
 	for depth := 0; ; {
-		current := &frames[depth%len(frames)]
 		if len(current.batch) == 0 {
 			err := current.readBatch()
 			if errors.Is(err, io.EOF) {
 				if depth == 0 {
 					return nil
 				}
-				parent := &frames[(depth-1)%len(frames)]
-				if err := ascendCleanup(current, parent, root, depth, progress); err != nil {
+				parent := root
+				if depth > 1 {
+					parent = &frames[(depth-2)%len(frames)]
+				}
+				if err := ascendCleanup(current, parent, root.id, depth, progress); err != nil {
 					return err
 				}
+				current = parent
 				depth--
 				continue
 			}
@@ -102,20 +120,51 @@ func walkCleanup(frames *[cleanupWindowSize]cleanupFrame, root cleanupIdentity, 
 		}
 		name := current.batch[0]
 		current.batch = current.batch[1:]
-		descend, err := unlinkCleanupEntry(int(current.file.Fd()), name, progress)
+		fd := int(current.file.Fd())
+		descend, err := unlinkCleanupEntry(fd, name, progress)
 		if err != nil {
 			return err
 		}
-		if descend {
-			depth++
-			next := &frames[depth%len(frames)]
-			next.close()
-			*next, err = openCleanupFrame(int(current.file.Fd()), name, &root, false)
-			if err != nil {
-				return fmt.Errorf("open cleanup directory %q: %w", name, err)
-			}
-			next.name = name
+		if !descend {
+			continue
 		}
+		nextPathLen := pathLengths[depth] + len(name) + 1
+		if nextPathLen > budget {
+			if err := hoistCleanupDirectory(fd, name, rootFD, budget-rootPathLen, &hoistSequence); err != nil {
+				return err
+			}
+			continue
+		}
+		next := &frames[depth%len(frames)]
+		next.close()
+		*next, err = openCleanupFrame(fd, name, &root.id, false)
+		if err != nil {
+			return fmt.Errorf("open cleanup directory %q: %w", name, err)
+		}
+		next.name = name
+		current = next
+		depth++
+		pathLengths[depth] = nextPathLen
+	}
+}
+
+func hoistCleanupDirectory(fd int, name string, rootFD, rootSpace int, sequence *uint64) error {
+	for {
+		(*sequence)++
+		target := ".cleanup-" + strconv.FormatUint(*sequence, 10)
+		// The root rescan must be able to descend into the new name.
+		if len(target)+1 > rootSpace {
+			return fmt.Errorf("hoist cleanup directory %q: workspace path leaves no room within the cleanup path budget", name)
+		}
+		err := cleanupRename(fd, name, rootFD, target, unix.RENAME_NOREPLACE)
+		if errors.Is(err, unix.EEXIST) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("hoist cleanup directory %q: %w", name, err)
+		}
+		// Only deletions count as progress for retries.
+		return nil
 	}
 }
 
@@ -147,7 +196,7 @@ func cleanupUnlinkResult(name string, err error, progress func()) error {
 func ascendCleanup(current, parent *cleanupFrame, root cleanupIdentity, depth int, progress func()) error {
 	if parent.file == nil {
 		var err error
-		*parent, err = openCleanupFrame(int(current.file.Fd()), "..", &root, depth == 1)
+		*parent, err = openCleanupFrame(int(current.file.Fd()), "..", &root, false)
 		if err != nil {
 			return fmt.Errorf("reopen cleanup parent: %w", err)
 		}

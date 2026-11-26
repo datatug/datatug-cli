@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/sshdemo"
 	"golang.org/x/sys/unix"
@@ -76,24 +77,68 @@ func checkIsolation(workspace, otherWorkspace string) error {
 	return nil
 }
 
+const probeDirFlags = unix.O_RDONLY | unix.O_DIRECTORY | unix.O_NOFOLLOW | unix.O_CLOEXEC
+
 func buildDeepWorkspace(workspace string) error {
-	const flags = unix.O_RDONLY | unix.O_DIRECTORY | unix.O_NOFOLLOW | unix.O_CLOEXEC
-	fd, err := unix.Open(workspace, flags, 0)
+	root, err := unix.Open(workspace, probeDirFlags, 0)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = unix.Close(fd) }()
-	for level := range 10_000 {
-		if err := unix.Mkdirat(fd, "d", 0o700); err != nil {
-			return fmt.Errorf("mkdir at level %d: %w", level+1, err)
-		}
-		next, err := unix.Openat(fd, "d", flags, 0)
+	defer func() { _ = unix.Close(root) }()
+	if err := buildDeepChain(root, "d", 2_500); err != nil {
+		return fmt.Errorf("short-name tree: %w", err)
+	}
+	if err := buildDeepChain(root, strings.Repeat("l", 255), 10); err != nil {
+		return fmt.Errorf("long-name tree: %w", err)
+	}
+	fmt.Println("created 10000 short-name levels and 40 long-name levels")
+	return nil
+}
+
+// Build four reachable segments, putting the existing tree under each new
+// segment by rename so every operation fits AppArmor's path buffer.
+func buildDeepChain(root int, name string, segmentDepth int) error {
+	const segment = "probe-segment"
+	bottom, err := buildChainSegment(root, name, name, segmentDepth)
+	if err != nil {
+		return err
+	}
+	_ = unix.Close(bottom)
+	for range 3 {
+		bottom, err := buildChainSegment(root, segment, name, segmentDepth)
 		if err != nil {
 			return err
 		}
-		_ = unix.Close(fd)
-		fd = next
+		err = unix.Renameat(root, name, bottom, name)
+		_ = unix.Close(bottom)
+		if err != nil {
+			return fmt.Errorf("nest chain segment: %w", err)
+		}
+		if err := unix.Renameat(root, segment, root, name); err != nil {
+			return fmt.Errorf("rename chain root: %w", err)
+		}
 	}
-	fmt.Println("created 10000 directories")
 	return nil
+}
+
+func buildChainSegment(root int, top, name string, depth int) (int, error) {
+	fd, entry := root, top
+	for level := range depth {
+		next, err := makeProbeDirectory(fd, entry)
+		if fd != root {
+			_ = unix.Close(fd)
+		}
+		if err != nil {
+			return -1, fmt.Errorf("create segment level %d: %w", level+1, err)
+		}
+		fd, entry = next, name
+	}
+	return fd, nil
+}
+
+func makeProbeDirectory(parent int, name string) (int, error) {
+	if err := unix.Mkdirat(parent, name, 0o700); err != nil {
+		return -1, err
+	}
+	return unix.Openat(parent, name, probeDirFlags, 0)
 }

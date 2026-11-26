@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -150,7 +151,7 @@ func TestCleanupIOFailures(t *testing.T) {
 				cleanupChmod, cleanupFchmod, cleanupRead, cleanupSeek, cleanupUnlink = chmod, fchmod, read, seek, unlink
 			})
 			root := t.TempDir()
-			buildCleanupTree(t, root, cleanupWindowSize+1, 1)
+			buildCleanupTree(t, root, cleanupWindowSize+2, 1)
 			want := errTestIO
 			switch name {
 			case "open", "pin", "reopen pinned", "descend", "climb":
@@ -253,4 +254,79 @@ func TestCleanupIOFailures(t *testing.T) {
 	if err := CleanWorkspaceContents(filepath.Join(t.TempDir(), "absent"), func() {}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestCleanupHoistsPastPathBudget(t *testing.T) {
+	t.Run("deep chains and long names are hoisted and removed", func(t *testing.T) {
+		root := t.TempDir()
+		built := buildCleanupTree(t, root, 300, 1)
+		long := filepath.Join(root, "x"+strings.Repeat("l", 200))
+		if err := os.MkdirAll(filepath.Join(long, strings.Repeat("m", 200), strings.Repeat("n", 200)), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		var renames int
+		rename := cleanupRename
+		t.Cleanup(func() { cleanupRename = rename })
+		cleanupRename = func(oldfd int, oldname string, newfd int, newname string, flags uint) error {
+			renames++
+			return rename(oldfd, oldname, newfd, newname, flags)
+		}
+		deletions := 0
+		if err := cleanWorkspaceContents(root, len(root)+128, func() { deletions++ }); err != nil {
+			t.Fatal(err)
+		}
+		if want := built*2 + 3; deletions != want {
+			t.Fatalf("deleted %d entries, want %d", deletions, want)
+		}
+		if renames == 0 {
+			t.Fatal("expected cleanup to hoist directories past the budget")
+		}
+		if entries, err := os.ReadDir(root); err != nil || len(entries) != 0 {
+			t.Fatalf("cleanup left %d entries: %v", len(entries), err)
+		}
+	})
+	t.Run("name collision takes the next name", func(t *testing.T) {
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, "a", "bbbbbbbbbbbbbbbb", "c"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		var targets []string
+		rename := cleanupRename
+		t.Cleanup(func() { cleanupRename = rename })
+		cleanupRename = func(oldfd int, oldname string, newfd int, newname string, flags uint) error {
+			targets = append(targets, newname)
+			if len(targets) == 1 {
+				return unix.EEXIST
+			}
+			return rename(oldfd, oldname, newfd, newname, flags)
+		}
+		if err := cleanWorkspaceContents(root, len(root)+13, func() {}); err != nil {
+			t.Fatal(err)
+		}
+		if len(targets) < 2 || targets[0] == targets[1] {
+			t.Fatalf("hoist targets = %q", targets)
+		}
+	})
+	t.Run("rename failure", func(t *testing.T) {
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, "a", "bbbbbbbbbbbbbbbb", "c"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		rename := cleanupRename
+		t.Cleanup(func() { cleanupRename = rename })
+		cleanupRename = func(int, string, int, string, uint) error { return errTestIO }
+		if err := cleanWorkspaceContents(root, len(root)+13, func() {}); !errors.Is(err, errTestIO) {
+			t.Fatalf("cleanup = %v, want %v", err, errTestIO)
+		}
+	})
+	t.Run("workspace path leaves no room", func(t *testing.T) {
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, "a", "b", "c"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		err := cleanWorkspaceContents(root, len(root)+3, func() {})
+		if err == nil || !strings.Contains(err.Error(), "leaves no room") {
+			t.Fatalf("cleanup = %v", err)
+		}
+	})
 }

@@ -63,7 +63,7 @@ The container adds a memory and CPU cap. The sessions tmpfs caps both disk bytes
 The supervisor enforces:
 
 - The global shell cap (`--max-sessions`) defaults to six.
-- The global connection cap (`--max-connections`) defaults to the shell cap plus the queue capacity, with a floor of twice the shell cap. The per-IP cap (`--max-sessions-per-ip`) defaults to two. Both apply at authentication and count active, waiting and pre-shell connections. A shell uses a separate slot after admission. The supervisor closes the SSH transport at exit and releases the connection reservation.
+- The global connection cap (`--max-connections`) defaults to the shell cap plus the queue capacity, with a floor of twice the shell cap. The per-IP cap (`--max-sessions-per-ip`) defaults to two. Both apply at authentication and count active, waiting and pre-shell connections. A shell uses a separate slot after admission. The supervisor closes the SSH transport at exit and releases the connection reservation once drain and cleanup have released the session's slot, so a visitor who disconnects early cannot reconnect into further slots while theirs is still being cleaned.
 - The SSH handshake timeout defaults to 20 s.
 - Each SSH connection can open one session channel. The supervisor allows 30 s from authentication to child startup (`--shell-start-timeout`). Entering the queue suspends that deadline and admission starts a fresh startup deadline.
 - Each session channel accepts up to eight environment requests, with values up to 256 bytes. PTY requests can carry a terminal name up to 64 bytes and terminal modes up to 1 KiB.

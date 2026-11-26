@@ -507,7 +507,7 @@ func TestQueueInputStopsDuringAndAfterHandoff(t *testing.T) {
 	for _, started := range []bool{false, true} {
 		t.Run(fmt.Sprint(started), func(t *testing.T) {
 			meta := &sessionMeta{chanDone: make(chan struct{}), pty: testPTY(t)}
-			state := &connectionState{shellStarted: make(chan struct{})}
+			state := &connectionState{shellStarted: make(chan struct{}), released: make(chan struct{})}
 			if started {
 				close(state.shellStarted)
 				_ = meta.pty.Master.Close()

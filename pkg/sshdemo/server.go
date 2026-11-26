@@ -268,7 +268,7 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 			healthOnly = true
 		}
 		ctx.SetValue(connectionStateKey{}, &connectionState{
-			conn: conn, shellStarted: make(chan struct{}), healthOnly: healthOnly,
+			conn: conn, shellStarted: make(chan struct{}), released: make(chan struct{}), healthOnly: healthOnly,
 			queued: make(chan struct{}), admitted: make(chan struct{}),
 		})
 		return conn
@@ -443,6 +443,7 @@ type connectionState struct {
 	healthOnly   bool
 	sessionUsed  atomic.Bool
 	shellStarted chan struct{}
+	released     chan struct{} // closed when handleSession has released its slot
 	queued       chan struct{}
 	admitted     chan struct{}
 }
@@ -482,6 +483,10 @@ func (s *Server) watchConnection(ctx context.Context, state *connectionState, ip
 		case <-state.shellStarted:
 			timer.Stop()
 			<-ctx.Done()
+			// Keep the client's per-IP place until drain and cleanup have
+			// released its slot, so disconnecting early cannot take more slots
+			// out of service than the per-IP limit allows.
+			<-state.released
 			return
 		case <-queued:
 			timer.Stop()
@@ -717,6 +722,8 @@ func (s *Server) handleSession(sess ssh.Session) {
 	ctx := sess.Context().(*sessionContext)
 	meta := ctx.meta
 	connection := ctx.Value(connectionStateKey{}).(*connectionState)
+	// Registered first, so it runs last: after the slot has been released.
+	defer close(connection.released)
 	// This connection serves one session. Close it after sending the exit
 	// status so watchConnection releases admission even if the peer stays open.
 	defer func() { _ = connection.conn.Close() }()

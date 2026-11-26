@@ -249,7 +249,7 @@ func TestSessionTransportClosureEndsRunningChild(t *testing.T) {
 			defer cancel()
 			server, client := net.Pipe()
 			defer func() { _ = client.Close() }()
-			conn := &connectionState{conn: server, shellStarted: make(chan struct{})}
+			conn := &connectionState{conn: server, shellStarted: make(chan struct{}), released: make(chan struct{})}
 			admission, _, err := h.srv.slots.admitOrQueue("127.0.0.1", h.srv.cfg, time.Now())
 			if err != nil {
 				t.Fatal(err)

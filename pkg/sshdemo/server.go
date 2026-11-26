@@ -338,36 +338,7 @@ func (f *filteringNewChannel) Accept() (gossh.Channel, <-chan *gossh.Request, er
 		defer close(filteredReqs)
 		defer close(f.meta.chanDone)
 		for req := range rawReqs {
-			switch req.Type {
-			case "pty-req":
-				clamped, ok := clampPtyReqPayload(req.Payload)
-				if !ok {
-					_ = req.Reply(false, nil)
-					continue
-				}
-				req.Payload = clamped
-				filteredReqs <- req
-			case "window-change":
-				clamped, ok := clampWindowPayload(req.Payload)
-				if !ok {
-					_ = req.Reply(false, nil)
-					continue
-				}
-				req.Payload = clamped
-				filteredReqs <- req
-			case "shell":
-				filteredReqs <- req
-			case "env":
-				var kv struct{ Key, Value string }
-				if err := gossh.Unmarshal(req.Payload, &kv); err != nil || !isAllowedEnvKey(kv.Key) {
-					_ = req.Reply(false, nil)
-					continue
-				}
-				filteredReqs <- req
-			default:
-				// Refuses exec, subsystem, auth-agent-req@openssh.com, x11-req, etc.
-				_ = req.Reply(false, nil)
-			}
+			filteredReqs <- filterSessionRequest(req)
 		}
 	}()
 	return &activityChannel{Channel: ch, activityCh: f.meta.activityCh}, filteredReqs, nil
@@ -387,6 +358,43 @@ func (a *activityChannel) Read(p []byte) (int, error) {
 		}
 	}
 	return n, err
+}
+
+// refusedRequestType replaces the type of a request the demo refuses. The
+// request is still forwarded, so the session handler (whose default case
+// replies false) answers it in sequence: SSH clients match channel-request
+// replies to requests in order, and an out-of-band reply that overtakes the
+// reply to an earlier pty-req makes OpenSSH report the PTY as refused and the
+// exec as accepted.
+const refusedRequestType = "refused@demo.datatug.app"
+
+// filterSessionRequest clamps pty-req and window-change sizes, keeps shell and
+// allowed env requests, and turns everything else (exec, subsystem, agent and
+// X11 forwarding, signals, malformed or disallowed requests) into a request the
+// session handler refuses.
+func filterSessionRequest(req *gossh.Request) *gossh.Request {
+	switch req.Type {
+	case "pty-req":
+		if clamped, ok := clampPtyReqPayload(req.Payload); ok {
+			req.Payload = clamped
+			return req
+		}
+	case "window-change":
+		if clamped, ok := clampWindowPayload(req.Payload); ok {
+			req.Payload = clamped
+			return req
+		}
+	case "shell":
+		return req
+	case "env":
+		var kv struct{ Key, Value string }
+		if err := gossh.Unmarshal(req.Payload, &kv); err == nil && isAllowedEnvKey(kv.Key) {
+			return req
+		}
+	}
+	req.Type = refusedRequestType
+	req.Payload = nil
+	return req
 }
 
 func isAllowedEnvKey(k string) bool {

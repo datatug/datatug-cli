@@ -170,6 +170,28 @@ func TestCheckSessionsDir_UIDModeSeams(t *testing.T) {
 	}
 }
 
+func TestServerRejectsSymlinkSessionsDir(t *testing.T) {
+	target := t.TempDir()
+	if err := os.Chmod(target, 0o711); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "sessions")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	for _, isolation := range []string{IsolationUID, IsolationProcess} {
+		t.Run(isolation, func(t *testing.T) {
+			cfg := failureTestConfig(t)
+			cfg.Isolation = isolation
+			cfg.SessionsDir = link + "/"
+			ops := DefaultSysOps()
+			ops.FileUID = func(os.FileInfo) (int, bool) { return 0, true }
+			_, err := NewServer(t.Context(), cfg, WithSysOps(ops))
+			requireErrorContains(t, err, "not a directory")
+		})
+	}
+}
+
 func TestUIDModeSeams_WorkspaceCredentialKillAndStaleCleanup(t *testing.T) {
 	// 1. CredentialFor sets uid/gid and empty supplementary groups.
 	cred := defaultCredentialFor(20007, 20007)

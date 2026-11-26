@@ -110,7 +110,8 @@ services:
       - state:/var/lib/datatug-demo/state
       - proxy-auth:/var/lib/datatug-demo/proxy-auth
     tmpfs:
-      - /var/lib/datatug-demo/sessions:rw,nosuid,nodev,size=${DEMO_SESSIONS_TMPFS:-1g},mode=0711,uid=0,gid=0
+      # 6 sessions × 50,000 entries plus 10% headroom. Scale with DEMO_MAX_SESSIONS.
+      - /var/lib/datatug-demo/sessions:rw,nosuid,nodev,size=${DEMO_SESSIONS_TMPFS:-1g},nr_inodes=${DEMO_SESSIONS_TMPFS_INODES:-330000},mode=0711,uid=0,gid=0
       # Root-only: session uids get a private TMPDIR inside their workspace,
       # so nothing a visitor writes outlives the session.
       - /tmp:rw,nosuid,nodev,noexec,size=64m,mode=0755,uid=0,gid=0

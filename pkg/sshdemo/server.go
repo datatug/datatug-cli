@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
@@ -98,6 +99,7 @@ type Server struct {
 // SSH server according to cfg.
 func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, error) {
 	cfg = cfg.WithDefaults()
+	cfg.SessionsDir = filepath.Clean(cfg.SessionsDir)
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -830,7 +832,8 @@ func (s *Server) handleSession(sess ssh.Session) {
 			reason, message := s.checkSessionQuota(sessionID, dir, slot, pgid, "/proc")
 			if reason != "" {
 				endReason = reason
-				writeQuotaNotice(sess, connection.conn, message)
+				// The PTY pump writes stdout concurrently. Use SSH extended data.
+				writeQuotaNotice(sess.Stderr(), connection.conn, message)
 				return
 			}
 

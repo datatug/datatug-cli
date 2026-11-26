@@ -157,7 +157,10 @@ func TestStaleCleanupSkipsFilesAndRequiresDirectory(t *testing.T) {
 	}
 	cfg.SessionsDir = p
 	_, err = NewServer(t.Context(), cfg)
-	requireErrorContains(t, err, "create sessions-dir")
+	requireErrorContains(t, err, "not a directory")
+	ops := DefaultSysOps()
+	ops.Stat = func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
+	requireErrorContains(t, checkSessionsDir(p, IsolationProcess, ops), "create sessions-dir")
 }
 
 func TestPTYDrainPendingAndUnavailableFD(t *testing.T) {

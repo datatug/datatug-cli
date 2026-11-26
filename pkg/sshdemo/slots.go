@@ -145,7 +145,7 @@ func (m *SlotManager) ActiveCount() int {
 type SysOps struct {
 	FilesystemSize func(string) (uint64, error)
 	ReadMemoryMax  func() ([]byte, error)
-	Stat           func(string) (os.FileInfo, error)
+	Stat           func(string) (os.FileInfo, error) // Lstat semantics for session paths.
 	Chown          func(string, int, int) error
 	Fchown         func(*os.File, int, int) error
 	Kill           func(int, syscall.Signal) error
@@ -159,7 +159,7 @@ func DefaultSysOps() SysOps {
 	return SysOps{
 		FilesystemSize: filesystemSize,
 		ReadMemoryMax:  func() ([]byte, error) { return os.ReadFile(containerMemoryMax) },
-		Stat:           os.Stat,
+		Stat:           os.Lstat,
 		Chown:          os.Chown,
 		Fchown:         (*os.File).Chown,
 		Kill:           syscall.Kill,
@@ -284,14 +284,20 @@ func statusMatchesUID(statusText string, targetUID int) bool {
 // in uid mode it must already exist, be a directory owned by uid 0, and have
 // exact mode 0711; in process mode it is created with mode 0700 if absent.
 func checkSessionsDir(sessionsDir, isolation string, ops SysOps) error {
+	fi, err := ops.Stat(sessionsDir)
+	if isolation == IsolationProcess && errors.Is(err, os.ErrNotExist) {
+		if err := os.MkdirAll(sessionsDir, 0o700); err != nil {
+			return fmt.Errorf("sshdemo: create sessions-dir %s: %w", sessionsDir, err)
+		}
+		fi, err = ops.Stat(sessionsDir)
+	}
+	if err != nil {
+		return fmt.Errorf("sshdemo: stat sessions-dir %s: %w", sessionsDir, err)
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("sshdemo: sessions-dir %s is not a directory", sessionsDir)
+	}
 	if isolation == IsolationUID {
-		fi, err := ops.Stat(sessionsDir)
-		if err != nil {
-			return fmt.Errorf("sshdemo: stat sessions-dir %s: %w", sessionsDir, err)
-		}
-		if !fi.IsDir() {
-			return fmt.Errorf("sshdemo: sessions-dir %s is not a directory", sessionsDir)
-		}
 		uid, ok := ops.FileUID(fi)
 		if !ok || uid != 0 {
 			return fmt.Errorf("sshdemo: sessions-dir %s must be owned by root (uid 0), got uid %d", sessionsDir, uid)
@@ -299,10 +305,6 @@ func checkSessionsDir(sessionsDir, isolation string, ops SysOps) error {
 		if perm := fi.Mode().Perm(); perm != 0o711 {
 			return fmt.Errorf("sshdemo: sessions-dir %s must have mode 0711, got %04o", sessionsDir, perm)
 		}
-		return nil
-	}
-	if err := os.MkdirAll(sessionsDir, 0o700); err != nil {
-		return fmt.Errorf("sshdemo: create sessions-dir %s: %w", sessionsDir, err)
 	}
 	return nil
 }

@@ -135,6 +135,14 @@ func TestHelperProcess(t *testing.T) {
 			fmt.Println("tick")
 		}
 
+	case "quota-stream":
+		chunk := bytes.Repeat([]byte("x"), 4096)
+		for {
+			if _, err := os.Stdout.Write(chunk); err != nil {
+				os.Exit(1)
+			}
+		}
+
 	case "graceful-shutdown":
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGTERM)

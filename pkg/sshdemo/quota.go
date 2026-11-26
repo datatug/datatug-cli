@@ -37,6 +37,10 @@ func (s *Server) checkSessionQuota(sessionID, dir string, slot Slot, pgid int, p
 	}
 
 	disk, err := workspaceUsage(dir, s.cfg.SessionDiskQuota, slot.UID, unix.SetfsuidRetUid)
+	if errors.Is(err, errWorkspaceScanLimit) {
+		s.logger.Warn("session exceeded resource quota", "session_id", sessionID, "resource", "disk", "err", err)
+		return EndReasonDiskQuota, quotaExceededNotice("disk")
+	}
 	if err != nil {
 		return s.quotaCheckFailed(sessionID, "disk", err)
 	}
@@ -49,7 +53,11 @@ func (s *Server) checkSessionQuota(sessionID, dir string, slot Slot, pgid int, p
 func (s *Server) quotaExceeded(sessionID, resource, reason string, used, limit uint64) (string, string) {
 	s.logger.Warn("session exceeded resource quota",
 		"session_id", sessionID, "resource", resource, "used_bytes", used, "quota_bytes", limit)
-	return reason, fmt.Sprintf("This session used more than its share of %s and was ended.\r\n", resource)
+	return reason, quotaExceededNotice(resource)
+}
+
+func quotaExceededNotice(resource string) string {
+	return fmt.Sprintf("This session used more than its share of %s and was ended.\r\n", resource)
 }
 
 func (s *Server) quotaCheckFailed(sessionID, resource string, err error) (string, string) {
@@ -163,38 +171,44 @@ func workspaceUsage(dir string, quota uint64, uid int, setFSUID func(int) (int, 
 	return measurement.bytes, measurement.err
 }
 
-const workspaceDirFlags = unix.O_RDONLY | unix.O_DIRECTORY | unix.O_NOFOLLOW | unix.O_CLOEXEC
+const (
+	workspaceDirFlags      = unix.O_RDONLY | unix.O_DIRECTORY | unix.O_NOFOLLOW | unix.O_CLOEXEC
+	workspaceMinEntryBytes = 1 << 10
+	workspaceMaxEntries    = 50_000
+	workspaceMaxDepth      = 64
+)
 
-func allocatedWorkspaceBytes(dir string, quota uint64) (uint64, error) {
-	return openWorkspaceDir(unix.AT_FDCWD, dir, quota)
+var errWorkspaceScanLimit = errors.New("workspace scan limit exceeded")
+
+type workspaceScan struct {
+	entries int
+	openat  func(int, string, int, uint32) (int, error)
 }
 
-func openWorkspaceDir(parentFD int, name string, quota uint64) (uint64, error) {
-	fd, err := unix.Openat(parentFD, name, workspaceDirFlags, 0)
+func allocatedWorkspaceBytes(dir string, quota uint64) (uint64, error) {
+	fd, err := unix.Openat(unix.AT_FDCWD, dir, workspaceDirFlags, 0)
 	if err != nil {
 		return 0, err
 	}
-	return countWorkspaceDir(os.NewFile(uintptr(fd), name), quota)
+	scan := workspaceScan{openat: unix.Openat}
+	return scan.countWorkspaceDir(os.NewFile(uintptr(fd), dir), quota, 0)
 }
 
-func countWorkspaceDir(dir *os.File, quota uint64) (uint64, error) {
+func (scan *workspaceScan) countWorkspaceDir(dir *os.File, quota uint64, depth int) (uint64, error) {
 	defer dir.Close()
 	fd := int(dir.Fd())
 	var stat unix.Stat_t
 	if err := unix.Fstat(fd, &stat); err != nil {
 		return 0, err
 	}
-	total := uint64(stat.Blocks) * 512
+	total := scan.chargeEntry(&stat)
 	for total <= quota {
 		names, err := dir.Readdirnames(64)
 		if err != nil && err != io.EOF {
 			return 0, err
 		}
 		for _, name := range names {
-			used, err := workspaceEntryBytes(fd, name, quota-total)
-			if errors.Is(err, unix.ENOENT) {
-				continue
-			}
+			used, err := scan.workspaceEntryBytes(fd, name, quota-total, depth)
 			if err != nil {
 				return 0, err
 			}
@@ -210,15 +224,40 @@ func countWorkspaceDir(dir *os.File, quota uint64) (uint64, error) {
 	return total, nil
 }
 
-func workspaceEntryBytes(fd int, name string, quota uint64) (uint64, error) {
+func (scan *workspaceScan) workspaceEntryBytes(fd int, name string, quota uint64, parentDepth int) (uint64, error) {
 	// lstat relative to the open directory. Neither this lookup nor
 	// opening a subdirectory can follow a link, even during renames.
 	var stat unix.Stat_t
 	if err := unix.Fstatat(fd, name, &stat, unix.AT_SYMLINK_NOFOLLOW); err != nil {
-		return 0, err
+		return 0, workspaceChildLookupError(err)
+	}
+	if scan.entries == workspaceMaxEntries {
+		return 0, fmt.Errorf("%w: more than %d entries", errWorkspaceScanLimit, workspaceMaxEntries)
 	}
 	if stat.Mode&unix.S_IFMT != unix.S_IFDIR {
-		return uint64(stat.Blocks) * 512, nil
+		return scan.chargeEntry(&stat), nil
 	}
-	return openWorkspaceDir(fd, name, quota)
+	if parentDepth == workspaceMaxDepth {
+		return 0, fmt.Errorf("%w: directory depth exceeds %d", errWorkspaceScanLimit, workspaceMaxDepth)
+	}
+	childFD, err := scan.openat(fd, name, workspaceDirFlags, 0)
+	if err != nil {
+		return 0, workspaceChildLookupError(err)
+	}
+	return scan.countWorkspaceDir(os.NewFile(uintptr(childFD), name), quota, parentDepth+1)
+}
+
+func (scan *workspaceScan) chargeEntry(stat *unix.Stat_t) uint64 {
+	scan.entries++
+	return max(uint64(stat.Blocks)*512, workspaceMinEntryBytes)
+}
+
+func workspaceChildLookupError(err error) error {
+	switch err {
+	case unix.ENOENT, unix.ENOTDIR, unix.ELOOP:
+		// A child may have disappeared or changed type since it was listed.
+		return nil
+	default:
+		return err
+	}
 }

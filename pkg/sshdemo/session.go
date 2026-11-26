@@ -309,6 +309,9 @@ func (s *Server) cleanStaleSessions(ctx context.Context) error {
 			if statErr != nil {
 				return fmt.Errorf("sshdemo: stat stale session dir %s: %w", dir, statErr)
 			}
+			if !fi.IsDir() {
+				continue
+			}
 			ownerUID, ok := s.ops.FileUID(fi)
 			if !ok {
 				return fmt.Errorf("sshdemo: cannot determine owner of stale session dir %s", dir)

@@ -344,6 +344,36 @@ func TestStaleCleanupFailsWhenWorkspaceOwnerCannotBeVerified(t *testing.T) {
 	}
 }
 
+func TestStaleCleanupSkipsDirectoryReplacedBySymlink(t *testing.T) {
+	dir, target := t.TempDir(), t.TempDir()
+	stale := filepath.Join(dir, "stale")
+	if err := os.Mkdir(stale, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ops := DefaultSysOps()
+	stat := ops.Stat
+	ops.Stat = func(path string) (os.FileInfo, error) {
+		if path != stale {
+			t.Fatalf("unexpected stale path %q", path)
+		}
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, path); err != nil {
+			t.Fatal(err)
+		}
+		return stat(path)
+	}
+	ops.FileUID = func(os.FileInfo) (int, bool) {
+		t.Fatal("attempted cleanup of a symlink")
+		return 0, false
+	}
+	srv := &Server{cfg: Config{SessionsDir: dir, Isolation: IsolationUID}, ops: ops}
+	if err := srv.cleanStaleSessions(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestServer_WatchdogEndsOverQuotaSession(t *testing.T) {
 	for _, resource := range []string{"memory", "disk"} {
 		t.Run(resource, func(t *testing.T) {
@@ -363,8 +393,8 @@ func TestServer_WatchdogEndsOverQuotaSession(t *testing.T) {
 			if err := sess.RequestPty("xterm", 24, 80, nil); err != nil {
 				t.Fatal(err)
 			}
-			var out bytes.Buffer
-			sess.Stdout = &out
+			var stdout, stderr bytes.Buffer
+			sess.Stdout, sess.Stderr = &stdout, &stderr
 			if err := sess.Shell(); err != nil {
 				t.Fatal(err)
 			}
@@ -379,8 +409,8 @@ func TestServer_WatchdogEndsOverQuotaSession(t *testing.T) {
 				t.Fatal("watchdog did not end the session")
 			}
 			notice := fmt.Sprintf("This session used more than its share of %s and was ended.", resource)
-			if strings.Count(out.String(), notice) != 1 {
-				t.Fatalf("want one quota notice, got %q", out.String())
+			if strings.Count(stderr.String(), notice) != 1 || strings.Contains(stdout.String(), notice) {
+				t.Fatalf("want one quota notice on stderr, got stderr %q, stdout %q", stderr.String(), stdout.String())
 			}
 			waitNoSessionDirs(t, h.sessionsDir, time.Second)
 			log := waitLogContains(t, h.logs, `"end_reason":"`+resource+`-quota"`, time.Second)
@@ -390,6 +420,65 @@ func TestServer_WatchdogEndsOverQuotaSession(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestServer_WatchdogQuotaNoticeWhilePTYStreams(t *testing.T) {
+	h := startTestServer(t, func(c *Config) {
+		c.SaveBranch = "quota-stream"
+		c.WatchdogInterval = 20 * time.Millisecond
+		c.SessionDiskQuota = 1 << 20
+	})
+	sess, err := dialSSH(t, h.addr, "visitor").NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	if err := sess.RequestPty("xterm", 24, 80, nil); err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := sess.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	sess.Stderr = &stderr
+	if err := sess.Shell(); err != nil {
+		t.Fatal(err)
+	}
+	streaming := make(chan error, 1)
+	go func() {
+		_, err := io.CopyN(io.Discard, stdout, 64<<10)
+		streaming <- err
+		_, _ = io.Copy(io.Discard, stdout)
+	}()
+	select {
+	case err := <-streaming:
+		if err != nil {
+			t.Fatalf("PTY output stopped before quota trigger: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("PTY output did not start")
+	}
+	entries, err := os.ReadDir(h.sessionsDir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("expected one active workspace, got %v, %v", entries, err)
+	}
+	if err := os.WriteFile(filepath.Join(h.sessionsDir, entries[0].Name(), "over-quota"), make([]byte, 2<<20), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- sess.Wait() }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("quota termination returned success")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("watchdog did not end the streaming session")
+	}
+	if got := stderr.String(); got != "This session used more than its share of disk and was ended.\r\n" {
+		t.Fatalf("quota notice on stderr = %q", got)
 	}
 }
 

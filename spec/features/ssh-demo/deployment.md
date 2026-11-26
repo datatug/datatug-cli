@@ -36,7 +36,7 @@ The base image's setuid and setgid bits are stripped. A session runs with an unp
 ## Storage and startup
 
 - The `state` volume at `/var/lib/datatug-demo/state` holds the mode-`0600` Ed25519 host key and the public project template. It survives restarts and container replacement. The supervisor shallow-clones the canonical project on each start, installs the bundled fixture when needed, invokes `datatug demo ssh-session --prepare-template`, then replaces the template after preparation succeeds.
-- The root-owned, mode-`0711` sessions tmpfs at `/var/lib/datatug-demo/sessions` holds per-visitor homes and clones. It defaults to 1 GiB across all sessions. The supervisor releases a slot after cleanup, and stopping the container also discards the tmpfs.
+- The root-owned, mode-`0711` sessions tmpfs at `/var/lib/datatug-demo/sessions` holds per-visitor homes and clones. It defaults to 1 GiB and 330,000 inodes across all sessions, sized for six sessions at 50,000 workspace entries each plus 10% headroom. When changing `DEMO_MAX_SESSIONS`, set `DEMO_SESSIONS_TMPFS_INODES` to the new session count multiplied by 55,000. The supervisor releases a slot after cleanup, and stopping the container also discards the tmpfs.
 - A separate 64 MiB tmpfs supplies `/tmp`. It is root-only (mode 0755), so nothing a visitor writes outlives the session: each session has a private `TMPDIR` inside its workspace. The build needs no credential.
 
 ## Resource budgets and lifecycle

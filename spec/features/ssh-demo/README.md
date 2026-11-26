@@ -57,7 +57,7 @@ The child sets its own rlimits as its first action, before reading any visitor i
 - `RLIMIT_NPROC` (per uid, 256: Linux counts threads, and a Go process with cgo uses dozens)
 - `RLIMIT_CORE` 0
 
-The container adds a memory and CPU cap. The sessions directory is a size-capped tmpfs, which bounds disk use for all sessions together.
+The container adds a memory and CPU cap. The sessions tmpfs caps both disk bytes and inodes across all sessions.
 
 The supervisor enforces:
 
@@ -69,7 +69,7 @@ The supervisor enforces:
 - The idle timeout defaults to 15 min without client input.
 - The maximum session duration defaults to 60 min, with a warning a minute before.
 - The supervisor clamps `pty-req` and every later `window-change` above 500×200.
-- The supervisor checks session quotas every second. The memory quota (`--session-mem-quota`, default 384 MiB) sums resident memory across the slot UID's processes or the child's process group in process mode. The disk quota (`--session-disk-quota`, default 160 MiB) counts allocated workspace blocks without following symlinks. A session that exceeds either quota gets a message and is cleaned up.
+- The supervisor checks session quotas every second. The memory quota (`--session-mem-quota`, default 384 MiB) sums resident memory across the slot UID's processes or the child's process group in process mode. The disk quota (`--session-disk-quota`, default 160 MiB) charges each workspace entry the greater of its allocated block bytes and 1 KiB, including empty files, directories and the workspace root. The scan follows no symlinks, allows up to 50,000 entries per session and up to 64 levels of subdirectories below the workspace root. Exceeding any of these limits ends the session with a message and triggers cleanup.
 - Each workspace has a private slot-owned `tmp/` directory with mode 0700 that counts toward the disk quota. `TMPDIR` and `SQLITE_TMPDIR` point there.
 - Startup checks every slot UID for surviving processes, including UIDs with no stale workspace. Unverified workspace or process cleanup quarantines the affected slot until the supervisor exits. Startup fails when no slot remains usable.
 

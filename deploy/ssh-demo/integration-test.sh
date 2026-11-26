@@ -9,7 +9,24 @@ project=${project,,}
 export DEMO_IMAGE="$project:local"
 # The empty host port lets Docker allocate a free loopback port at bind time.
 export DEMO_SSH_PUBLISH=127.0.0.1:
-compose=(docker compose -p "$project" -f "$deploy_dir/compose.yaml" -f "$work_dir/compose.test.yaml")
+# compose.yaml pins the internal bridge to 172.31.250.0/24, which a deployed demo
+# on this host already holds. Run a copy on a free 172.31.N.0/24 instead; the
+# project directory stays deploy/ssh-demo, so relative build paths still resolve.
+used_subnets=$(docker network inspect -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' $(docker network ls -q))
+test_net=
+for n in $(seq 200 249); do
+    if [[ " $used_subnets " != *" 172.31.$n."* && " $used_subnets " != *" 172.31.0.0/16 "* ]]; then
+        test_net=172.31.$n
+        break
+    fi
+done
+if [[ -z $test_net ]]; then
+    printf 'FAIL no free 172.31.N.0/24 for the test network\n' >&2
+    rm -rf -- "$work_dir"
+    exit 1
+fi
+sed "s/172\.31\.250\./$test_net./g" "$deploy_dir/compose.yaml" > "$work_dir/compose.yaml"
+compose=(docker compose -p "$project" --project-directory "$deploy_dir" -f "$work_dir/compose.yaml" -f "$work_dir/compose.test.yaml")
 forward_pid=
 failures=0
 

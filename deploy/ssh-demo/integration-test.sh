@@ -4,6 +4,8 @@ set -euo pipefail
 export LC_ALL=C TERM=xterm-256color
 deploy_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/dt-ssh.XXXXXXXX")
+# Until the full cleanup trap below is armed, remove only the work directory.
+trap 'rm -rf -- "$work_dir"' EXIT
 project="datatug-ssh-test-${work_dir##*.}"
 project=${project,,}
 export DEMO_IMAGE="$project:local"
@@ -12,17 +14,33 @@ export DEMO_SSH_PUBLISH=127.0.0.1:
 # compose.yaml pins the internal bridge to 172.31.250.0/24, which a deployed demo
 # on this host already holds. Run a copy on a free 172.31.N.0/24 instead; the
 # project directory stays deploy/ssh-demo, so relative build paths still resolve.
-used_subnets=$(docker network inspect -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' $(docker network ls -q))
-test_net=
-for n in $(seq 200 249); do
-    if [[ " $used_subnets " != *" 172.31.$n."* && " $used_subnets " != *" 172.31.0.0/16 "* ]]; then
-        test_net=172.31.$n
+network_ids=$(docker network ls -q)
+used_subnets=
+if [[ -n $network_ids ]]; then
+    # shellcheck disable=SC2086 # one argument per network ID
+    used_subnets=$(docker network inspect -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' $network_ids)
+fi
+# shellcheck disable=SC2086 # one argument per subnet
+test_net=$(python3 -I - $used_subnets <<'PY'
+import ipaddress
+import sys
+
+used = []
+for arg in sys.argv[1:]:
+    try:
+        net = ipaddress.ip_network(arg, strict=False)
+    except ValueError:
+        continue
+    if net.version == 4:
+        used.append(net)
+for n in range(200, 250):
+    if not any(ipaddress.ip_network(f"172.31.{n}.0/24").overlaps(u) for u in used):
+        print(f"172.31.{n}")
         break
-    fi
-done
+PY
+)
 if [[ -z $test_net ]]; then
     printf 'FAIL no free 172.31.N.0/24 for the test network\n' >&2
-    rm -rf -- "$work_dir"
     exit 1
 fi
 sed "s/172\.31\.250\./$test_net./g" "$deploy_dir/compose.yaml" > "$work_dir/compose.yaml"

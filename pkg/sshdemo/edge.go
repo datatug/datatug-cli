@@ -14,8 +14,10 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -253,17 +255,7 @@ func (e *Edge) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
-	maxPerIP := e.tunnelLimit.maxPerIP
-	if net.ParseIP(ip).Equal(net.ParseIP(e.cfg.ProxyAuthIP)) && e.cfg.ProxyAuthIP != "" {
-		auth, err := os.ReadFile(e.cfg.ProxyAuthFile)
-		if err != nil || len(auth) == 0 || !sameProxyAuth(r.Header.Get("Proxy-Authorization"), string(auth)) {
-			logResult("denied-auth")
-			requireProxyAuth(w, r)
-			return
-		}
-		maxPerIP = e.tunnelLimit.maxTotal
-	}
-	if e.tunnelLimit.reserveForIP(ip, maxPerIP) != nil {
+	if !e.tunnelLimit.acquire(ip) {
 		logResult("tunnel-limit")
 		rejectProxy(w, r, "proxy busy", http.StatusServiceUnavailable)
 		return
@@ -431,20 +423,59 @@ func spliceConns(ctx context.Context, a, b net.Conn, writeTimeout time.Duration)
 // Run starts both the TCP forwarder and the HTTP CONNECT proxy and blocks until
 // ctx is canceled or either server returns a fatal error.
 func (e *Edge) Run(ctx context.Context) error {
-	if (e.cfg.ProxyAuthIP == "") != (e.cfg.ProxyAuthFile == "") ||
-		(e.cfg.ProxyAuthIP != "" && net.ParseIP(e.cfg.ProxyAuthIP) == nil) {
-		return errors.New("ssh-edge: --proxy-auth-ip must be an IP address paired with --proxy-auth-file")
-	}
 	fwdLn, err := net.Listen("tcp", e.cfg.Listen)
 	if err != nil {
 		return fmt.Errorf("ssh-edge: listen %s: %w", e.cfg.Listen, err)
 	}
-	proxyLn, err := net.Listen("tcp", e.cfg.ProxyListen)
+	proxyLn, err := listenEdgeProxy(e.cfg.ProxyListen)
 	if err != nil {
 		_ = fwdLn.Close()
 		return fmt.Errorf("ssh-edge: listen proxy %s: %w", e.cfg.ProxyListen, err)
 	}
 	return e.Serve(ctx, fwdLn, proxyLn)
+}
+
+var setProxySocketMode = os.Chmod
+
+// Use filesystem permissions to gate access to the deployment's Unix socket.
+func listenEdgeProxy(addr string) (net.Listener, error) {
+	if !filepath.IsAbs(addr) {
+		return nil, errors.New("ssh-edge: --proxy-listen requires an absolute Unix socket path")
+	}
+	ln, err := net.Listen("unix", addr)
+	if errors.Is(err, syscall.EADDRINUSE) {
+		if err := removeStaleProxySocket(addr); err != nil {
+			return nil, err
+		}
+		ln, err = net.Listen("unix", addr)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := setProxySocketMode(addr, 0o666); err != nil {
+		_ = ln.Close()
+		return nil, err
+	}
+	return ln, nil
+}
+
+func removeStaleProxySocket(path string) error {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if fi.Mode()&os.ModeSocket == 0 {
+		return fmt.Errorf("proxy socket path %s is occupied", path)
+	}
+	conn, err := net.DialTimeout("unix", path, time.Second)
+	if err == nil {
+		_ = conn.Close()
+		return fmt.Errorf("proxy socket %s already serves traffic", path)
+	}
+	if !errors.Is(err, syscall.ECONNREFUSED) {
+		return err
+	}
+	return os.Remove(path)
 }
 
 // Serve runs the TCP forwarder on fwdLn and the HTTP CONNECT proxy on proxyLn

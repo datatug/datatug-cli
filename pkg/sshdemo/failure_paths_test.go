@@ -37,7 +37,7 @@ func requireErrorContains(t *testing.T, err error, want string) {
 }
 
 func TestStatSessionsFilesystem(t *testing.T) {
-	if _, err := filesystemSize(filepath.Join(t.TempDir(), "missing")); !errors.Is(err, os.ErrNotExist) {
+	if _, _, err := filesystemCapacity(filepath.Join(t.TempDir(), "missing")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("statfs error = %v", err)
 	}
 	original := statSessionsFS
@@ -45,10 +45,11 @@ func TestStatSessionsFilesystem(t *testing.T) {
 	statSessionsFS = func(_ string, stats *unix.Statfs_t) error {
 		stats.Blocks = ^uint64(0)
 		stats.Bsize = 2
+		stats.Files = 12
 		return nil
 	}
-	if size, err := filesystemSize("fixture"); err != nil || size != ^uint64(0) {
-		t.Fatalf("overflow size = %d, error = %v", size, err)
+	if size, inodes, err := filesystemCapacity("fixture"); err != nil || size != ^uint64(0) || inodes != 12 {
+		t.Fatalf("overflow size = %d, inodes = %d, error = %v", size, inodes, err)
 	}
 }
 
@@ -58,8 +59,9 @@ func TestConfigRejectsInvalidAdmissionAndCredentialRanges(t *testing.T) {
 		want string
 	}{
 		{func(c *Config) { c.MaxConnections = -1 }, "max-connections"},
+		{func(c *Config) { c.MaxRelaySocketsPerUID = -1 }, "max-relay-sockets-per-uid"},
 		{func(c *Config) { c.MaxSessionTunnels = -1 }, "tunnel limits"},
-		{func(c *Config) { c.EgressProxyAuthFile = "/unused"; c.UIDBase = edgeProxyGroup }, "proxy credential group"},
+		{func(c *Config) { c.EgressProxy = "unix:///socket"; c.UIDBase = edgeUID }, "edge socket owner"},
 	} {
 		cfg := DefaultConfig().WithDefaults()
 		tc.edit(&cfg)
@@ -203,7 +205,6 @@ func TestEdgeForwarderAndHijackFailures(t *testing.T) {
 	if err := NewEdge(EdgeConfig{}).ServeForwarder(active, errListener{err: net.ErrClosed}); err != nil {
 		t.Fatalf("externally closed forwarder listener returned %v", err)
 	}
-	requireErrorContains(t, RunEdge(t.Context(), EdgeConfig{ProxyAuthIP: "invalid", ProxyAuthFile: "/unused"}), "must be an IP address")
 
 	for _, tc := range []struct {
 		name string
@@ -247,68 +248,25 @@ func failureTestConfig(t *testing.T) Config {
 	return cfg
 }
 
-func TestRelayStartupAndSecretFileFailures(t *testing.T) {
+func TestRelayStartupFailures(t *testing.T) {
 	cfg := failureTestConfig(t)
-	cfg.EgressProxy = "socks5://edge.invalid"
+	for _, address := range []string{"http://bad%url", "socks5://edge.invalid", "unix://remote/socket", "unix:relative", "unix:///socket?query=1", "unix:///socket#fragment"} {
+		cfg.EgressProxy = address
+		_, err := NewServer(t.Context(), cfg)
+		requireErrorContains(t, err, "requires a unix, HTTP or HTTPS")
+	}
+
+	cfg.SkipTemplate = false
 	_, err := NewServer(t.Context(), cfg)
-	requireErrorContains(t, err, "valid HTTP or HTTPS")
+	requireErrorContains(t, err, "requires a unix, HTTP or HTTPS")
+	cfg.SkipTemplate = true
 
 	cfg.EgressProxy = "http://edge.invalid"
-	cfg.EgressProxyAuthFile = filepath.Join(t.TempDir(), "missing", "auth")
+	original := listenTCP
+	t.Cleanup(func() { listenTCP = original })
+	listenTCP = func(string, string) (net.Listener, error) { return nil, errTestIO }
 	_, err = NewServer(t.Context(), cfg)
-	requireErrorContains(t, err, "publish edge proxy credential")
-
-	path := filepath.Join(t.TempDir(), "auth")
-	noopChown := func(string, int, int) error { return nil }
-	// A read-only mount or a failed chown must never publish the credential.
-	if err := writeProxyAuthFile(path, "fixture", func(string, int, int) error { return errTestIO }); !errors.Is(err, errTestIO) {
-		t.Fatalf("chown failure = %v", err)
-	}
-	if err := writeProxyAuthFile(path, "fixture", func(name string, _, _ int) error { return os.Remove(name) }); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("chmod failure = %v", err)
-	}
-	t.Run("write", func(t *testing.T) {
-		original := createProxyAuthTemp
-		t.Cleanup(func() { createProxyAuthTemp = original })
-		createProxyAuthTemp = func(dir, pattern string) (*os.File, error) {
-			f, err := os.CreateTemp(dir, pattern)
-			if err == nil {
-				_ = f.Close()
-			}
-			return f, err
-		}
-		if err := writeProxyAuthFile(path, "fixture", noopChown); !errors.Is(err, os.ErrClosed) {
-			t.Fatalf("write failure = %v", err)
-		}
-	})
-	t.Run("successful rotation", func(t *testing.T) {
-		cfg.EgressProxyAuthFile = path
-		want := ""
-		for range 2 {
-			relay, err := startSessionRelay(cfg, SysOps{Chown: noopChown})
-			if err != nil {
-				t.Fatal(err)
-			}
-			(&Server{relay: relay}).closeRelay()
-			content, err := os.ReadFile(path)
-			if err != nil || string(content) != relay.upAuth || string(content) == want {
-				t.Fatal("credential failed to rotate")
-			}
-			stat, err := os.Stat(path)
-			if err != nil || stat.Mode().Perm() != 0o640 {
-				t.Fatalf("credential permissions = %v, error = %v", stat, err)
-			}
-			want = string(content)
-		}
-	})
-	t.Run("listen", func(t *testing.T) {
-		original := listenTCP
-		t.Cleanup(func() { listenTCP = original })
-		listenTCP = func(string, string) (net.Listener, error) { return nil, errTestIO }
-		cfg.EgressProxyAuthFile = ""
-		_, err := NewServer(t.Context(), cfg)
-		requireErrorContains(t, err, "listen on loopback")
-	})
+	requireErrorContains(t, err, "listen on loopback")
 }
 
 func TestRelayRejectsNonConnectAndHandlesUpstreamFailures(t *testing.T) {
@@ -317,7 +275,7 @@ func TestRelayRejectsNonConnectAndHandlesUpstreamFailures(t *testing.T) {
 		w.WriteHeader(http.StatusForbidden)
 	}))
 	cfg.EgressProxy = up.URL
-	relay, err := startSessionRelay(cfg, DefaultSysOps())
+	relay, err := startSessionRelay(cfg, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,7 +340,7 @@ func TestRevocationClosesPendingUpstreamHandshake(t *testing.T) {
 	}()
 	cfg := failureTestConfig(t)
 	cfg.EgressProxy = "http://" + edge.Addr().String()
-	relay, err := startSessionRelay(cfg, DefaultSysOps())
+	relay, err := startSessionRelay(cfg, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

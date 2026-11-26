@@ -38,17 +38,18 @@ Visitors can run arbitrary SQL. For example, SQLite `ATTACH DATABASE '<any path>
 
 - The supervisor allocates one of N slot uids (default base 20000, `--max-sessions` slots) to each session.
 - Each session gets `<sessions-dir>/<random-id>/`, mode 0700, owned by the slot uid, with `home/` (the child's `$HOME`) and `repo/` (the project copy).
-- The child runs with `SysProcAttr.Credential` set to the slot uid/gid and no supplementary groups.
+- The trusted child binary starts as root in `/supervisor`. As its first action, it writes `0` to its slot's `cgroup.procs`, verifies membership, clears supplementary groups, and drops to the slot uid and gid. It verifies the real, effective, and saved IDs on every thread, confirms it cannot regain uid 0, and rechecks cgroup membership. Its descendants inherit the slot.
 - The template (canonical clone) is root-owned and world-readable, which is fine because it is public data. The host key is root-owned, mode 0600.
-- Cleanup runs as the slot uid (`datatug demo ssh-session --cleanup <dir>`) and empties the directory. The supervisor kills the session's process group (`kill(-pgid, SIGKILL)`), then removes the empty directory. A slot uid is reused only after its directory is gone and no process of that uid remains.
+- Self-entry allows Docker's stock seccomp profile. The trade-off is a brief window between fork and slot entry when the trusted child runs as root in `/supervisor`. The supervisor withholds PTY input until the child confirms the privilege drop and the supervisor sees its PID in the slot's `cgroup.procs`. It kills the child and ends the session if entry fails or takes longer than five seconds.
+- The supervisor writes `1` to `cgroup.kill` and waits for `populated 0` before running the workspace cleanup command as the slot uid and removing the directory. An unverified drain or cleanup quarantines the slot.
 
-The supervisor therefore runs as container root with only `CAP_SETUID`, `CAP_SETGID`, `CAP_CHOWN` and `CAP_KILL`, plus `no-new-privileges` and a read-only root filesystem. Visitor code never runs as root. This deliberately departs from "run as non-root". A non-root supervisor cannot give sessions separate uids: Docker does not grant ambient capabilities to a non-root user, and `no-new-privileges` ignores file capabilities. Per-session uids are a stronger boundary than one shared non-root uid. Operators who can should also enable Docker `userns-remap`, so container root is not host root.
+The supervisor runs as container root with `CAP_SETUID`, `CAP_SETGID`, `CAP_CHOWN` and `CAP_KILL`, plus `no-new-privileges` and a read-only root filesystem. Visitor code runs as the unprivileged slot uid. The [deployment design](deployment.md#cgroup-delegation-and-lifecycle) describes the host cgroup requirements and bind mount.
 
-Without root (local development), `--isolation=process` runs every child under the supervisor's own uid. It is refused unless the listen address is loopback or `--allow-insecure-isolation` is passed. It logs a warning at start.
+For local development, `--isolation=process` runs every child under the supervisor's own uid without requiring a cgroup mount. It requires a loopback listen address or an explicit `--allow-insecure-isolation` override. It logs a warning at start.
 
 ### D3: resource limits
 
-The child sets its own rlimits as its first action, before reading any visitor input. Limits can only be lowered:
+The child sets its own rlimits after any required slot entry and before reading visitor input. Limits can only be lowered:
 
 - `RLIMIT_AS` (default 8 GiB of address space. The cgo binary maps about 2 GiB of address space at start, so a lower value crashes it. The child sets `GOMEMLIMIT=256MiB` as a soft Go heap limit and `oom_score_adj` to 900 so the kernel prefers killing a session before the supervisor.)
 - `RLIMIT_CPU` (default 900 s)
@@ -62,18 +63,19 @@ The container adds a memory and CPU cap. The sessions tmpfs caps both disk bytes
 The supervisor enforces:
 
 - The global shell cap (`--max-sessions`) defaults to six.
-- The global connection cap (`--max-connections`, default twice the shell cap) and per-IP cap (`--max-sessions-per-ip`, default two) apply at authentication, before SSH channels and PTYs can be opened. Starting a shell uses a separate shell slot without adding another connection reservation.
+- The global connection cap (`--max-connections`, default twice the shell cap) and per-IP cap (`--max-sessions-per-ip`, default two) apply at authentication, before SSH channels and PTYs can be opened. Starting a shell uses a separate shell slot. The supervisor closes the SSH transport after reporting the session exit, releasing its authenticated connection reservation.
 - The SSH handshake timeout defaults to 20 s.
 - Each SSH connection can open one session channel. The supervisor closes the connection if the child has yet to start when `--shell-start-timeout` elapses after authentication (default 30 s).
 - Each session channel accepts up to eight environment requests, with values up to 256 bytes. PTY requests can carry a terminal name up to 64 bytes and terminal modes up to 1 KiB.
 - The idle timeout defaults to 15 min without client input.
 - The maximum session duration defaults to 60 min, with a warning a minute before.
 - The supervisor clamps `pty-req` and every later `window-change` above 500×200.
-- The supervisor checks session quotas every second. The memory quota (`--session-mem-quota`, default 384 MiB) sums resident memory across the slot UID's processes or the child's process group in process mode. The disk quota (`--session-disk-quota`, default 160 MiB) charges each workspace entry the greater of its allocated block bytes and 1 KiB, including empty files, directories and the workspace root. The scan follows no symlinks, allows up to 50,000 entries per session and up to 64 levels of subdirectories below the workspace root. Exceeding any of these limits ends the session with a message and triggers cleanup.
-- Each workspace has a private slot-owned `tmp/` directory with mode 0700 that counts toward the disk quota. `TMPDIR` and `SQLITE_TMPDIR` point there.
-- Startup checks every slot UID for surviving processes, including UIDs with no stale workspace. Unverified workspace or process cleanup quarantines the affected slot until the supervisor exits. Startup fails when no slot remains usable.
+- Each UID slot has a kernel-enforced `memory.max` equal to the sum of `--session-mem-quota` (384 MiB default) and `--session-disk-quota` (160 MiB default). This is a combined cap on memory charged to the slot, including native allocations and tmpfs pages, even for files that stay open after unlinking. The slot has zero swap, `memory.oom.group=1`, and `pids.max=256`.
+- The supervisor sends a notice on SSH stderr when `memory.current` approaches 90% of the slot cap. It reports an OOM termination when the slot's `memory.events` records a new `oom_group_kill`. The enforcement boundary is the slot's `memory.max`.
+- Each workspace has a private mode-`0700` `tmp/` directory used by `TMPDIR` and `SQLITE_TMPDIR`. The shared sessions tmpfs is sized above the sum of the slot memory caps.
+- Startup drains pre-existing slot cgroups even when they have no stale workspace. The supervisor refuses startup when no slot remains usable.
 
-Before listening, the supervisor requires the sessions filesystem to hold the combined disk quotas. It also requires the combined memory and tmpfs quotas plus 512 MiB of supervisor and cleanup reserve to fit under cgroup v2 `memory.max`. An absent or unlimited memory cap produces a warning and skips the memory check. These sampled quotas leave residual risk from native allocations between samples and disk usage that directory traversal misses, including open unlinked files. A session can still trigger a container OOM. Its `oom_score_adj` of 900 biases the kernel toward killing session processes and gives the supervisor a better chance of surviving.
+UID isolation requires a usable cgroup v2 root and a finite container-scope memory limit. Before listening, the supervisor verifies that the total of the slot caps plus the 512 MiB supervisor and cleanup reserve fits the scope's `memory.max`. It also verifies that the sessions tmpfs has the sum of the slot caps plus 10% in byte capacity, and at least one inode per 512 bytes of the summed caps. Shared CPU, PID and network limits can still affect multiple sessions.
 
 Only `session` channels with `pty-req` and `shell` are served. `exec`, `subsystem` (sftp, scp), port forwarding, agent forwarding and X11 are refused. There is no shell.
 
@@ -82,14 +84,12 @@ Only `session` channels with `pty-req` and `shell` are served. `exec`, `subsyste
 The workspace can open arbitrary HTTP URLs and database hosts, so unrestricted egress would let visitors reach services on the host's bridge gateway. Deployment uses two containers from the same image:
 
 - `edge` (`datatug demo ssh-edge`) sits on the public bridge network and an internal network. It forwards public TCP 2222 to `demo:2222` with a PROXY protocol v2 header, so per-IP limits still see the client address. The supervisor requires explicit trusted peer CIDRs and accepts only a PROXY v2 LOCAL header from loopback health checks. Forwarding writes have a 5 s deadline. After either direction ends, the edge closes both sockets within 500 ms. It also serves an HTTP CONNECT proxy that allows only `host:443` for an allow-list (default `github.com`, `api.github.com`, `codeload.github.com`, `cloud.openvaultdb.com`).
-- The edge HTTP proxy accepts at most 128 concurrent connections by default, bounds request reads and writes, and closes rejected requests without draining their bodies. Its per-IP CONNECT cap defaults to the global CONNECT cap.
-- `demo` (`datatug demo ssh-server`) is only on the internal network (`internal: true`, no route out). Children get `HTTPS_PROXY`/`HTTP_PROXY` pointing at a loopback CONNECT relay with a session ID and random token. The relay caps tunnels per session (default eight) and across sessions (default 64, matching the edge). Session exit revokes the token and closes its tunnels. The edge requires a separate supervisor credential for connections from the demo container. Direct TCP to internet services has no route.
-
-This needs no host root and no host firewall changes.
+- The edge HTTP proxy listens on a Unix socket in a named volume. The edge owns the directory (UID 10001, GID 0, mode `0750`) and exposes a mode-`0666` socket. The supervisor accesses the directory as root, group 0. Slot UIDs cannot traverse it. The proxy caps accepted connections at 128 by default and bounds HTTP request reads and writes.
+- `demo` is on the isolated internal bridge. Children get `HTTPS_PROXY` and `HTTP_PROXY` pointing at an authenticated loopback CONNECT relay. The relay looks up the peer socket UID in `/proc/net/tcp` or `/proc/net/tcp6` before reading request headers. Each slot UID gets up to 16 sockets, including incomplete requests. The relay rejects other UIDs. It caps authenticated tunnels per session (default eight) and globally (default 64, matching the edge). Session exit revokes the token and closes its tunnels. The supervisor's startup template uses its own temporary relay.
 
 ### D5: demo project and template
 
-The canonical project is a GitHub repository given by `--repo` (default `https://github.com/datatug/datatug-demo-project`), project sub-directory `--project-dir` (default `demo-project-1`), and branch `--ref` (default the repository's default branch). At start the supervisor clones it with go-git into `<state>/template` (pure Go, so no hooks or filters run). It then writes the bundled Chinook SQLite to the project's `.demo-data/chinook.sqlite` when absent. Each session's child copies the template, `.git` included, into its own `repo/`.
+The canonical project is a GitHub repository given by `--repo` (default `https://github.com/datatug/datatug-demo-project`), project sub-directory `--project-dir` (default `demo-project-1`), and branch `--ref` (default the repository's default branch). At start the supervisor clones it with go-git into `<state>/template` (pure Go, so no hooks or filters run). It then writes the bundled Chinook SQLite to the project's `.demo-data/chinook.sqlite` when absent. Each session's child copies the template, `.git` included, into its own `repo/`. Visitor fork opens run inside the session child. Packfile decoding, including delta expansion before checkout, is charged to that slot's `memory.max`.
 
 The demo shows what DataTug already supports with no remote credentials:
 
@@ -161,9 +161,9 @@ In a demo session, the workspace notice line says the workspace is temporary and
   - host key and state: `--host-key` (default `<state>/ssh_host_ed25519_key`, generated once when absent, never replaced), `--state-dir`, `--sessions-dir`;
   - demo project: `--repo`, `--ref`, `--project-dir`;
   - session limits: `--max-sessions`, `--max-connections`, `--max-sessions-per-ip`, `--idle-timeout`, `--max-session-duration`, `--handshake-timeout`;
-  - isolation: `--isolation=uid|process`, `--uid-base`, `--allow-insecure-isolation`;
+  - isolation and cgroup limits: `--isolation=uid|process`, `--uid-base`, `--cgroup-root`, `--session-mem-quota`, `--session-disk-quota`, `--allow-insecure-isolation`;
   - GitHub: `--github-client-id`, `--save-branch`;
-  - egress: `--egress-proxy`, `--egress-proxy-auth-file`, `--max-session-tunnels`, `--max-egress-tunnels`.
+  - egress: `--egress-proxy`, `--max-relay-sockets-per-uid`, `--max-session-tunnels`, `--max-egress-tunnels`.
 
   `SIGTERM` stops accepting connections, tells each session it is ending, waits up to 10 s, then kills and cleans up every session.
 - `datatug demo ssh-server --print-host-key`: prints the public host key and its SHA256 fingerprint, then exits.
@@ -176,10 +176,10 @@ In a demo session, the workspace notice line says the workspace is temporary and
 On connect, the visitor sees the welcome screen within 2 s on a warm server. On disconnect, network loss, idle timeout, maximum duration, a child crash or server shutdown, the supervisor:
 
 - closes the PTY;
-- kills the process group;
+- drains the slot cgroup in UID mode or kills the process group in local process mode;
 - runs cleanup as the slot uid;
 - removes the session directory;
-- frees the slot.
+- frees the slot after verified drain and cleanup, or quarantines it on failure.
 
 It logs one structured line per session start and end, with session id, client IP, duration, end reason and exit status, and never a token.
 
@@ -199,11 +199,11 @@ Two concurrent sessions edit their workspaces independently. One session's SQLit
 
 ### AC: limits-enforced
 
-Connections above `--max-connections` or `--max-sessions-per-ip`, and shells above `--max-sessions`, get a short "demo is full" message and are closed. Idle and maximum-duration timeouts end the session and clean it up. A stalled handshake is dropped after `--handshake-timeout`. The child runs with the D3 rlimits.
+Connections above `--max-connections` or `--max-sessions-per-ip`, and shells above `--max-sessions`, get a short "demo is full" message and are closed. Idle and maximum-duration timeouts end the session and clean it up. A stalled handshake is dropped after `--handshake-timeout`. The child runs with the D3 rlimits and, in UID mode, the slot cgroup limits.
 
 ### AC: cleanup-always
 
-After a normal exit, an abrupt client drop, a child panic, or a supervisor `SIGTERM`, no session directory, slot-uid process or temporary file remains.
+After a normal exit, an abrupt client drop, a child panic, or a supervisor `SIGTERM`, the supervisor drains the session cgroup before cleaning the workspace. An unverified slot is quarantined before any reuse.
 
 ### AC: device-flow-minimum-scope
 
@@ -219,7 +219,7 @@ A returning visitor who chooses "Open my GitHub project" gets their saved branch
 
 ### AC: egress-allow-list
 
-From a session, the CONNECT proxy reaches only allow-listed hosts on port 443. Direct TCP connections to other hosts fail.
+From a session, the CONNECT proxy reaches only allow-listed hosts on port 443. Direct TCP connections to external hosts fail, and the session UID cannot reach the edge socket.
 
 ### AC: host-key-persists
 

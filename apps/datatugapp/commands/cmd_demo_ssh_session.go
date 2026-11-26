@@ -23,6 +23,7 @@ import (
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtproject"
 	"github.com/datatug/datatug-cli/pkg/auth/ghauth"
 	"github.com/datatug/datatug-cli/pkg/demogit"
+	"github.com/datatug/datatug-cli/pkg/sshdemo"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/spf13/cobra"
@@ -64,6 +65,8 @@ type demoSSHSessionFlags struct {
 	rlimits         demoSSHRlimits
 	cleanup         string
 	prepareTemplate string
+	slot            sshdemo.SlotEntry
+	slotRequested   bool
 }
 
 // Seams for unit tests in cmd_demo_ssh_session_test.go.
@@ -92,6 +95,8 @@ func demoSSHSessionCommand() *cobra.Command {
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			flags := cmd.Flags()
+			f.slotRequested = flags.Changed("slot-cgroup") || flags.Changed("slot-uid") || flags.Changed("slot-gid")
 			return runDemoSSHSession(cmd.Context(), f)
 		},
 	}
@@ -111,10 +116,30 @@ func demoSSHSessionCommand() *cobra.Command {
 	flags.Uint64Var(&f.rlimits.NProc, "rlimit-nproc", demoSSHDefaultRLimitNProc, "RLIMIT_NPROC cap")
 	flags.StringVar(&f.cleanup, "cleanup", "", "Remove contents of the specified session directory and exit")
 	flags.StringVar(&f.prepareTemplate, "prepare-template", "", "Prepare a freshly cloned template directory and exit")
+	flags.StringVar(&f.slot.CgroupDir, "slot-cgroup", "", "Session slot cgroup directory")
+	flags.IntVar(&f.slot.UID, "slot-uid", 0, "Session slot uid")
+	flags.IntVar(&f.slot.GID, "slot-gid", 0, "Session slot gid")
+	_ = flags.MarkHidden("slot-cgroup")
+	_ = flags.MarkHidden("slot-uid")
+	_ = flags.MarkHidden("slot-gid")
 	return cmd
 }
 
 func runDemoSSHSession(ctx context.Context, f demoSSHSessionFlags) error {
+	if f.slotRequested {
+		if err := sshdemo.EnterSlot(f.slot); err != nil {
+			return fmt.Errorf("enter session slot: %w", err)
+		}
+		// The supervisor cannot enter the slot user's mode-0700 workspace.
+		if err := os.Chdir(f.workspace); err != nil {
+			return fmt.Errorf("enter session workspace: %w", err)
+		}
+		ready := os.NewFile(sshdemo.SlotReadyFD, "slot-ready")
+		_, err := ready.WriteString("1")
+		if err := errors.Join(err, ready.Close()); err != nil {
+			return fmt.Errorf("acknowledge session slot entry: %w", err)
+		}
+	}
 	if f.cleanup != "" {
 		return runDemoSSHCleanup(f.cleanup)
 	}
@@ -122,7 +147,7 @@ func runDemoSSHSession(ctx context.Context, f demoSSHSessionFlags) error {
 		return runDemoSSHPrepareTemplate(ctx, f.prepareTemplate, f.projectDir)
 	}
 
-	// FIRST action, before reading input or touching files: apply rlimits (fail closed).
+	// Apply rlimits before reading input.
 	if err := demoSSHApplyRlimits(f.rlimits); err != nil {
 		return fmt.Errorf("apply resource limits: %w", err)
 	}

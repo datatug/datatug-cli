@@ -37,11 +37,34 @@ cleanup() {
 }
 
 cat > "$work_dir/compose.test.yaml" <<'YAML'
-services:
-  edge:
-    ports:
-      - "127.0.0.1::3128"
+services: {}
 YAML
+# The edge serves CONNECT only on a unix socket in the proxy-socket volume.
+# A tiny Go client (golang image) speaks to it from a throwaway container.
+mkdir -p "$work_dir/connectprobe"
+cat > "$work_dir/connectprobe/main.go" <<'GO'
+package main
+
+import (
+	"bufio"
+	"fmt"
+	"net"
+	"os"
+	"time"
+)
+
+func main() {
+	conn, err := net.DialTimeout("unix", os.Args[1], 5*time.Second)
+	if err != nil {
+		fmt.Println("dial:", err)
+		os.Exit(1)
+	}
+	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
+	fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", os.Args[2], os.Args[2])
+	line, _ := bufio.NewReader(conn).ReadString('\n')
+	fmt.Print(line)
+}
+GO
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
@@ -80,7 +103,7 @@ if ! "${compose[@]}" build edge || ! "${compose[@]}" up -d --wait --wait-timeout
     exit 1
 fi
 printf 'PASS build and start a healthy Compose project\n'
-if ! ssh_port=$(port_for 2222) || ! proxy_port=$(port_for 3128); then
+if ! ssh_port=$(port_for 2222); then
     printf 'FAIL resolve the allocated loopback ports\n' >&2
     exit 1
 fi
@@ -226,15 +249,80 @@ check_host_gateway_unreachable() {
     return 1
 }
 
+connect_status() {
+    timeout --kill-after=2s 60s docker run --rm --network none \
+        -v "${project}_proxy-socket:/s:ro" -v "$work_dir/connectprobe:/p:ro" -w /p \
+        -e GOCACHE=/tmp/gocache -e GO111MODULE=off \
+        golang:1.27.3 go run main.go /s/connect.sock "$1"
+}
+
 check_connect_refused() {
     local response
-    response=$(timeout --kill-after=2s 8s bash -e -c '
-        exec 3<>"/dev/tcp/127.0.0.1/$1"
-        printf "CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n" >&3
-        IFS= read -r line <&3
-        printf "%s\n" "$line"
-    ' bash "$proxy_port") || return 1
-    [[ $response =~ ^HTTP/1\.[01][[:blank:]]403([[:space:]]|$) ]]
+    response=$(connect_status example.com:443) || { printf '%s\n' "$response" >&2; return 1; }
+    [[ $response =~ ^HTTP/1\.[01][[:blank:]]403([[:space:]]|$) ]] || { printf '%s\n' "$response" >&2; return 1; }
+}
+
+check_connect_allowed() {
+    local response
+    response=$(connect_status github.com:443) || { printf '%s\n' "$response" >&2; return 1; }
+    [[ $response =~ ^HTTP/1\.[01][[:blank:]]200([[:space:]]|$) ]] || { printf '%s\n' "$response" >&2; return 1; }
+}
+
+# A slot uid must not reach the edge's socket directory at all.
+check_slot_uid_cannot_reach_proxy() {
+    local out
+    if out=$("${compose[@]}" exec -T --user 20000:20000 demo /bin/sh -c 'ls /run/datatug-demo/proxy' 2>&1); then
+        printf 'slot uid listed the proxy directory: %s\n' "$out" >&2
+        return 1
+    fi
+    [[ $out == *"Permission denied"* ]] || { printf '%s\n' "$out" >&2; return 1; }
+}
+
+slots_dir='/run/datatug-demo/cgroup/docker-*.scope'
+
+check_slot_limits() {
+    local out
+    out=$("${compose[@]}" exec -T demo /bin/sh -c "for d in $slots_dir/slot-*; do
+        printf '%s %s %s %s\n' \"\$(basename \$d)\" \"\$(cat \$d/memory.max)\" \"\$(cat \$d/memory.swap.max)\" \"\$(cat \$d/pids.max)\"; done") || return 1
+    printf '%s\n' "$out" | awk -v want="${DEMO_MAX_SESSIONS:-6}" '
+        $2 == 570425344 && $3 == 0 && $4 == 256 { ok++ } END { exit !(ok == want && NR == want) }' ||
+        { printf '%s\n' "$out" >&2; return 1; }
+}
+
+# The kernel, not a watchdog, stops a slot: a 700 MiB tmpfs write inside the
+# last slot is OOM-group-killed at its 544 MiB memory.max and the supervisor
+# stays healthy.
+check_slot_oom_contained() {
+    local status=0 events
+    "${compose[@]}" exec -T demo /bin/sh -c "S=\$(ls -d $slots_dir); echo \$\$ > \$S/slot-5/cgroup.procs &&
+        exec head -c 734003200 /dev/zero > /var/lib/datatug-demo/sessions/oom-probe" >/dev/null 2>&1 || status=$?
+    "${compose[@]}" exec -T demo /bin/rm -f /var/lib/datatug-demo/sessions/oom-probe || true
+    events=$("${compose[@]}" exec -T demo /bin/sh -c "cat $slots_dir/slot-5/memory.events") || return 1
+    (( status == 137 )) || { printf 'probe exit %s, want 137 (killed)\n' "$status" >&2; return 1; }
+    [[ $events =~ oom_group_kill\ [1-9] ]] || { printf '%s\n' "$events" >&2; return 1; }
+    "${compose[@]}" exec -T demo /usr/local/bin/datatug demo ssh-health --addr 127.0.0.1:2222 --proxy-protocol >/dev/null
+}
+
+# A live session's child is inside a slot as a slot uid; after the visitor
+# leaves, the slot drains to empty.
+check_session_in_slot_and_drained() {
+    local pids uid client
+    timeout 30s "${ssh_client[@]}" -o StrictHostKeyChecking=no -tt "$ssh_target" \
+        < <(sleep 20) > /dev/null 2>&1 &
+    client=$!
+    sleep 6
+    pids=$("${compose[@]}" exec -T demo /bin/sh -c "cat $slots_dir/slot-*/cgroup.procs") || { kill "$client"; return 1; }
+    [[ -n $pids ]] || { printf 'no process in any slot during a session\n' >&2; kill "$client"; return 1; }
+    uid=$("${compose[@]}" exec -T demo /bin/sh -c "awk '/^Uid:/ {print \$2, \$3, \$4, \$5}' /proc/$(head -n1 <<< "$pids")/status") || { kill "$client"; return 1; }
+    kill "$client" 2>/dev/null || true
+    wait "$client" 2>/dev/null || true
+    local real eff saved fs
+    read -r real eff saved fs <<< "$uid"
+    [[ $real =~ ^20[0-9]{3}$ && $eff == "$real" && $saved == "$real" && $fs == "$real" ]] ||
+        { printf 'slot process uids: %s\n' "$uid" >&2; return 1; }
+    sleep 6
+    pids=$("${compose[@]}" exec -T demo /bin/sh -c "cat $slots_dir/slot-*/cgroup.procs") || return 1
+    [[ -z $pids ]] || { printf 'slot not drained: %s\n' "$pids" >&2; return 1; }
 }
 
 check 'SSH banner and host key fingerprint' check_initial_key
@@ -245,5 +333,10 @@ check 'host key survives demo restart' check_persistent_key
 check 'demo cannot dial 1.1.1.1:443 directly' check_direct_egress_blocked
 check 'demo cannot reach host services through the bridge gateway' check_host_gateway_unreachable
 check 'edge returns HTTP 403 for a non-allow-listed CONNECT' check_connect_refused
+check 'edge tunnels an allow-listed CONNECT (github.com:443)' check_connect_allowed
+check 'slot uid cannot reach the edge proxy socket' check_slot_uid_cannot_reach_proxy
+check 'every slot has its memory, swap and pids limits' check_slot_limits
+check 'a session child runs in a slot as its slot uid, and the slot drains' check_session_in_slot_and_drained
+check 'kernel OOM-kills a slot over its limit; supervisor stays healthy' check_slot_oom_contained
 
 (( failures == 0 ))

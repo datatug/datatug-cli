@@ -16,3 +16,4 @@ func RunEdge(context.Context, EdgeConfig) error                          { retur
 func CheckHealth(context.Context, string, time.Duration) error           { return errLinuxOnly }
 func CheckHealthProxyLocal(context.Context, string, time.Duration) error { return errLinuxOnly }
 func PrintHostKey(string, io.Writer) error                               { return errLinuxOnly }
+func EnterSlot(SlotEntry) error                                          { return errLinuxOnly }

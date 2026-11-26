@@ -16,7 +16,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -32,7 +31,7 @@ type sessionRelay struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
 	server   *http.Server
-	listener *cappedListener
+	listener net.Listener
 }
 
 type relaySession struct {
@@ -50,44 +49,55 @@ func proxyBasic(user, token string) string {
 	return "Basic " + base64.StdEncoding.EncodeToString([]byte(user+":"+token))
 }
 
-func startSessionRelay(cfg Config, ops SysOps) (*sessionRelay, error) {
+func startSessionRelay(cfg Config, uidBase, uidCount int) (*sessionRelay, error) {
 	upstream, err := url.Parse(cfg.EgressProxy)
-	if err != nil || upstream.Hostname() == "" || (upstream.Scheme != "http" && upstream.Scheme != "https") {
-		return nil, errors.New("sshdemo: --egress-proxy requires a valid HTTP or HTTPS proxy URL")
+	if err != nil || !validRelayUpstream(upstream) {
+		return nil, errors.New("sshdemo: --egress-proxy requires a unix, HTTP or HTTPS proxy URL")
 	}
 	var auth string
 	if upstream.User != nil {
 		password, _ := upstream.User.Password()
 		auth = proxyBasic(upstream.User.Username(), password)
 	}
-	if cfg.EgressProxyAuthFile != "" {
-		auth = proxyBasic("supervisor", randomProxyToken())
-		if err := writeProxyAuthFile(cfg.EgressProxyAuthFile, auth, ops.Chown); err != nil {
-			return nil, fmt.Errorf("sshdemo: publish edge proxy credential: %w", err)
-		}
-	}
 	listener, err := listenTCP("tcp4", "127.0.0.1:0")
 	if err != nil {
 		return nil, fmt.Errorf("sshdemo: listen on loopback for session egress: %w", err)
+	}
+	var admitted net.Listener
+	if cfg.Isolation == IsolationUID {
+		admitted = newUIDRelayListener(listener, uidBase, uidCount, cfg.MaxRelaySocketsPerUID)
+	} else {
+		admitted = capListener(listener, DefaultProxyMaxConns)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	relay := &sessionRelay{
 		upstream: upstream, upAuth: auth, address: listener.Addr().String(),
 		limit:    newConnectionLimit(cfg.MaxEgressTunnels, cfg.MaxSessionTunnels),
 		sessions: make(map[string]relaySession), ctx: ctx, cancel: cancel,
-		listener: capListener(listener, DefaultProxyMaxConns),
+		listener: admitted,
 	}
 	relay.server = newProxyServer(ctx, http.HandlerFunc(relay.handleConnect))
 	go func() { _ = relay.server.Serve(relay.listener) }()
 	return relay, nil
 }
 
+func validRelayUpstream(u *url.URL) bool {
+	if u.Scheme == "unix" {
+		return u.Host == "" && filepath.IsAbs(u.Path) && u.RawQuery == "" && u.Fragment == ""
+	}
+	return u.Hostname() != "" && (u.Scheme == "http" || u.Scheme == "https")
+}
+
 func (s *Server) closeRelay() {
 	if s.relay != nil {
-		s.relay.cancel()
-		_ = s.relay.listener.Close()
-		_ = s.relay.server.Close()
+		s.relay.close()
 	}
+}
+
+func (r *sessionRelay) close() {
+	r.cancel()
+	_ = r.listener.Close()
+	_ = r.server.Close()
 }
 
 func (r *sessionRelay) register(id string) (proxy string, revoke func()) {
@@ -144,21 +154,7 @@ func (r *sessionRelay) handleConnect(w http.ResponseWriter, req *http.Request) {
 func (r *sessionRelay) connectUpstream(ctx context.Context, authority string) (net.Conn, *bufio.Reader, error) {
 	dialCtx, cancel := context.WithTimeout(ctx, proxyRequestTimeout)
 	defer cancel()
-	port := r.upstream.Port()
-	if port == "" {
-		port = "80"
-		if r.upstream.Scheme == "https" {
-			port = "443"
-		}
-	}
-	addr := net.JoinHostPort(r.upstream.Hostname(), port)
-	var dialer interface {
-		DialContext(context.Context, string, string) (net.Conn, error)
-	} = &net.Dialer{}
-	if r.upstream.Scheme == "https" {
-		dialer = &tls.Dialer{}
-	}
-	up, err := dialer.DialContext(dialCtx, "tcp", addr)
+	up, err := r.dialUpstream(dialCtx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -184,25 +180,21 @@ func (r *sessionRelay) connectUpstream(ctx context.Context, authority string) (n
 	return nil, nil, errors.New("sshdemo: edge CONNECT failed")
 }
 
-var createProxyAuthTemp = os.CreateTemp
+func (r *sessionRelay) dialUpstream(ctx context.Context) (net.Conn, error) {
+	var dialer net.Dialer
+	if r.upstream.Scheme == "unix" {
+		return dialer.DialContext(ctx, "unix", r.upstream.Path)
+	}
 
-// writeProxyAuthFile publishes the header atomically even across a supervisor
-// restart. The edge mounts the directory read-only and reads as GID 10001.
-func writeProxyAuthFile(path, auth string, chown func(string, int, int) error) error {
-	f, err := createProxyAuthTemp(filepath.Dir(path), ".proxy-auth-*")
-	if err != nil {
-		return err
+	port := r.upstream.Port()
+	if r.upstream.Scheme == "https" {
+		if port == "" {
+			port = "443"
+		}
+		return (&tls.Dialer{NetDialer: &dialer}).DialContext(ctx, "tcp", net.JoinHostPort(r.upstream.Hostname(), port))
 	}
-	defer func() { _ = os.Remove(f.Name()) }()
-	_, writeErr := io.WriteString(f, auth)
-	if err := errors.Join(writeErr, f.Close()); err != nil {
-		return err
+	if port == "" {
+		port = "80"
 	}
-	if err := chown(f.Name(), -1, edgeProxyGroup); err != nil {
-		return err
-	}
-	if err := os.Chmod(f.Name(), 0o640); err != nil {
-		return err
-	}
-	return os.Rename(f.Name(), path)
+	return dialer.DialContext(ctx, "tcp", net.JoinHostPort(r.upstream.Hostname(), port))
 }

@@ -4,8 +4,6 @@ package sshdemo
 
 import (
 	"context"
-	"crypto/sha256"
-	"crypto/subtle"
 	"io"
 	"net"
 	"net/http"
@@ -43,11 +41,6 @@ func rejectProxy(w http.ResponseWriter, r *http.Request, message string, status 
 func requireProxyAuth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Proxy-Authenticate", `Basic realm="DataTug SSH demo"`)
 	rejectProxy(w, r, "proxy authentication required", http.StatusProxyAuthRequired)
-}
-
-func sameProxyAuth(a, b string) bool {
-	aHash, bHash := sha256.Sum256([]byte(a)), sha256.Sum256([]byte(b))
-	return subtle.ConstantTimeCompare(aHash[:], bHash[:]) == 1
 }
 
 // cappedListener reserves a socket slot before accepting, including for

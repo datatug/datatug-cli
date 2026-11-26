@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -248,7 +249,9 @@ func TestSessionTransportClosureEndsRunningChild(t *testing.T) {
 			h := startTestServer(t, func(c *Config) { c.SaveBranch = "wait-forever" })
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			conn := &connectionState{shellStarted: make(chan struct{})}
+			server, client := net.Pipe()
+			defer func() { _ = client.Close() }()
+			conn := &connectionState{conn: server, shellStarted: make(chan struct{})}
 			meta := &sessionMeta{activityCh: make(chan struct{}), chanDone: make(chan struct{})}
 			sess := contextOnlySession{
 				ctx: &sessionContext{
@@ -274,6 +277,10 @@ func TestSessionTransportClosureEndsRunningChild(t *testing.T) {
 				}
 			case <-time.After(3 * time.Second):
 				t.Fatal("session did not finish")
+			}
+			_ = client.SetReadDeadline(time.Now().Add(time.Second))
+			if _, err := client.Read(make([]byte, 1)); !errors.Is(err, io.EOF) {
+				t.Fatalf("supervisor did not close the connection: %v", err)
 			}
 			if h.srv.slots.ActiveCount() != 0 || !strings.Contains(h.logs.String(), `"end_reason":"client-drop"`) {
 				t.Fatalf("child cleanup log = %s", h.logs.String())

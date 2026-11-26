@@ -90,7 +90,7 @@ func BuildChildEnv(homeDir, term, colorTerm, egressProxy string) []string {
 		"PATH=/usr/local/bin:/usr/bin:/bin",
 		"DATATUG_TELEMETRY=0",
 		"DO_NOT_TRACK=1",
-		// A soft cap on the Go heap of one session; the cgroup is the hard one.
+		// A soft cap on the Go heap of one session; the UID slot cgroup enforces the hard cap.
 		"GOMEMLIMIT="+ChildGoMemLimit,
 	)
 	if egressProxy != "" {
@@ -205,29 +205,8 @@ func createSessionWorkspace(sessionsDir, sessionID string, slot Slot, isolation 
 	return dir, homeDir, repoDir, nil
 }
 
-// killAndDrainUIDProcs kills any process running under uid and waits briefly
-// for /proc to reflect that none remain.
-func killAndDrainUIDProcs(uid int, ops SysOps) bool {
-	for attempt := 0; attempt < 20; attempt++ {
-		pids, err := ops.ListUIDProcs(uid)
-		if err != nil {
-			return false
-		}
-		if len(pids) == 0 {
-			return true
-		}
-		for _, pid := range pids {
-			_ = ops.Kill(pid, syscall.SIGKILL)
-		}
-		time.Sleep(15 * time.Millisecond)
-	}
-	pids, err := ops.ListUIDProcs(uid)
-	return err == nil && len(pids) == 0
-}
-
-// runCleanupCommand invokes `demo ssh-session --cleanup <dir>` as (uid, gid),
-// removes the empty directory, and verifies that the directory is gone and (in
-// uid mode) no processes of that uid remain.
+// runCleanupCommand invokes the trusted cleanup helper under the slot
+// credentials, then removes the empty workspace. Callers must drain it first.
 func runCleanupCommand(
 	ctx context.Context,
 	execPath string,
@@ -238,12 +217,6 @@ func runCleanupCommand(
 	ops SysOps,
 	logger *slog.Logger,
 ) bool {
-	// A process that left the session's process group (setsid) survived the
-	// group kill: kill everything of the slot uid first, so nothing writes into
-	// the workspace while it is being removed.
-	if isolation == IsolationUID {
-		_ = killAndDrainUIDProcs(uid, ops)
-	}
 	args := append(append([]string(nil), execPrefix...), BuildCleanupArgs(dir)...)
 	cmd := exec.CommandContext(ctx, execPath, args...)
 	cmd.Env = buildCleanupEnv(filepath.Join(dir, "home"))
@@ -269,34 +242,15 @@ func runCleanupCommand(
 	}
 
 	_, statErr := os.Lstat(dir)
-	dirGone := os.IsNotExist(statErr)
-
-	procsGone := true
-	if isolation == IsolationUID {
-		procsGone = killAndDrainUIDProcs(uid, ops)
-		if !procsGone {
-			logger.Error("leftover processes remain for slot uid", "uid", uid, "dir", dir)
-		}
-	}
-	return dirGone && procsGone
+	return os.IsNotExist(statErr)
 }
 
-// cleanStaleSessions cleans any leftover directories under cfg.SessionsDir from
-// a previous crash. It independently drains every configured slot UID.
+// cleanStaleSessions reclaims workspaces only after prepareCgroups has drained
+// their slot cgroups or quarantined them.
 func (s *Server) cleanStaleSessions(ctx context.Context) error {
 	entries, err := os.ReadDir(s.cfg.SessionsDir)
 	if err != nil {
 		return fmt.Errorf("sshdemo: read sessions-dir for stale cleanup: %w", err)
-	}
-	allQuarantined := false
-	if s.cfg.Isolation == IsolationUID {
-		for index := range s.cfg.MaxSessions {
-			uid := s.cfg.UIDBase + index
-			if !killAndDrainUIDProcs(uid, s.ops) {
-				s.logger.Error("quarantining uid with surviving or unverified processes", "uid", uid)
-				allQuarantined = s.slots.quarantineUID(uid)
-			}
-		}
 	}
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -323,6 +277,9 @@ func (s *Server) cleanStaleSessions(ctx context.Context) error {
 				)
 				continue
 			}
+			if s.slots.isQuarantined(ownerUID - s.cfg.UIDBase) {
+				continue
+			}
 			uid = ownerUID
 			gid = ownerUID
 		}
@@ -334,14 +291,13 @@ func (s *Server) cleanStaleSessions(ctx context.Context) error {
 			s.logger.Info("cleaned stale session dir", "dir", dir, "uid", uid)
 			continue
 		}
-		s.logger.Error("quarantining uid after unverified stale session cleanup", "dir", dir, "uid", uid)
+		err := fmt.Errorf("sshdemo: could not verify cleanup of workspace %s for uid %d", dir, uid)
 		if s.cfg.Isolation == IsolationProcess {
-			return fmt.Errorf("sshdemo: could not verify cleanup of workspace %s for shared uid %d", dir, uid)
+			return err
 		}
-		allQuarantined = s.slots.quarantineUID(uid)
-	}
-	if allQuarantined {
-		return errors.New("sshdemo: all session slots quarantined after stale cleanup")
+		if s.quarantineSlot(uid-s.cfg.UIDBase, err) {
+			return errors.New("sshdemo: all session slots quarantined after stale cleanup")
+		}
 	}
 	return nil
 }

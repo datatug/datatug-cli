@@ -2,6 +2,19 @@
 
 Run the commands from the repository root on a Linux host with Docker Engine, BuildKit, and Docker Compose v2. See the [deployment design](../../spec/features/ssh-demo/deployment.md) and [visitor guide](../../docs/ssh-demo.md).
 
+## Host requirements
+
+Use rootful Docker Engine 28 or newer with the systemd cgroup driver, cgroup v2 mounted with `nsdelegate`, and a private demo cgroup namespace. The kernel must support `cgroup.kill` and the `oom_group_kill` memory event. The runtime must place exec and health-check processes in the container init's cgroup when the top-level scope cannot accept processes. runc 1.3.4 does this.
+
+Docker creates `datatugdemo.slice` on first start. The slice belongs to this deployment. Keep other workloads out of it. Compose bind-mounts `/sys/fs/cgroup/datatugdemo.slice` at `/run/datatug-demo/cgroup` so the supervisor can create its session slots below its own scope.
+
+```bash
+docker info --format '{{.CgroupDriver}} cgroup v{{.CgroupVersion}}'
+findmnt -no FSTYPE,OPTIONS /sys/fs/cgroup
+```
+
+Keep Docker's stock seccomp profile, the default AppArmor confinement, and the capabilities specified by Compose.
+
 ## Build, start, and stop
 
 The build needs no credential: every dependency is a public Go module.
@@ -21,7 +34,7 @@ docker compose -f deploy/ssh-demo/compose.yaml logs --tail 100 -f edge demo
 docker compose -f deploy/ssh-demo/compose.yaml stop
 ```
 
-To upgrade, check out the desired revision on this host and repeat the build and `up -d --wait` commands with fresh build credentials. The host key survives in the `state` volume. Keep the same Compose project name and volume when upgrading or moving the checkout.
+To upgrade, check out the desired revision, rebuild the image, then run `up -d --wait --force-recreate`. Recreate the containers when changing slot UID assignments so processes from the previous configuration cannot survive. The host key survives in the `state` volume. Keep the same Compose project name and volume when upgrading or moving the checkout.
 
 After pushing demo data changes to the canonical repository, restart the supervisor. It clones and prepares a new template on startup. A restart ends active sessions.
 
@@ -126,38 +139,34 @@ Set these in the environment or in the Compose environment file. Re-run `up -d -
 | `DEMO_PROJECT_DIR` | `demo-project-1` | Relative path to the project in that repository. |
 | `DEMO_GITHUB_CLIENT_ID` | Built-in DataTug OAuth App | Optional device-flow client ID. |
 | `DEMO_SAVE_BRANCH` | `datatug-demo` | Branch in the visitor's fork used by save and reopen. |
-| `DEMO_MAX_SESSIONS` | `16` | Total live session slots. |
-| `DEMO_MAX_SESSIONS_PER_IP` | `3` | Live session slots per client IP. |
+| `DEMO_MAX_SESSIONS` | `6` | Total live session slots. |
+| `DEMO_MAX_SESSIONS_PER_IP` | `2` | Concurrent authenticated SSH connections per client IP. |
 | `DEMO_IDLE_TIMEOUT` | `15m` | How long a session can go without client input. |
 | `DEMO_MAX_SESSION_DURATION` | `60m` | Maximum time per session. |
 | `DEMO_HANDSHAKE_TIMEOUT` | `20s` | Maximum time for SSH handshake. |
 | `DEMO_UID_BASE` | `20000` | First uid and gid in the session slot range. |
-| `DEMO_SESSIONS_TMPFS` | `2g` | Aggregate session workspace storage cap. |
-| `DEMO_MEM_LIMIT` | `3g` | Demo memory cap, including tmpfs usage. |
+| `DEMO_SESSIONS_TMPFS` | `3591m` | Shared sessions tmpfs size. |
+| `DEMO_SESSIONS_TMPFS_INODES` | `6684672` | Shared sessions tmpfs inode count. |
+| `DEMO_MAX_EGRESS_TUNNELS` | `64` | Global CONNECT tunnel cap at the relay and edge. |
+| `DEMO_MEM_LIMIT` | `3776m` | Demo memory cap, including tmpfs usage. |
 | `DEMO_CPUS` | `2` | Demo cgroup CPU quota in cores. |
 | `DEMO_PIDS_LIMIT` | `2048` | Demo cgroup limit for processes and threads. |
 
 ## Size and troubleshoot
 
-- **Capacity.** Measure peak resident memory per session under representative SQLite, DuckDB, and OpenVaultDB queries. Reserve headroom for the supervisor, template preparation, and used tmpfs pages, then size concurrency to fit the cgroup's memory and PID limits. The child has a Go memory target of 768 MiB and an 8 GiB virtual address ceiling. Native allocations can add to resident memory. Size tmpfs from peak workspace bytes times expected concurrency, including the copied repository and generated files.
-- **Healthcheck fails.** Inspect `docker compose -f deploy/ssh-demo/compose.yaml ps` and both service logs. The edge health probe traverses the TCP forwarder, so startup or template failures in the supervisor can affect both probes. Probe the demo directly with `docker compose -f deploy/ssh-demo/compose.yaml exec -T demo /usr/local/bin/datatug demo ssh-health --addr 127.0.0.1:2222`.
+- **Capacity.** Each slot defaults to a combined 544 MiB cgroup cap for application memory and charged tmpfs and 256 PIDs (including threads). Budget all slot caps plus the 512 MiB supervisor reserve in `DEMO_MEM_LIMIT`. The child also has a 256 MiB Go heap target and an 8 GiB virtual address ceiling. Set the sessions tmpfs byte limit to the sum of the slot caps plus 10%, rounded up to a mountable size. Set the inode limit to at least one inode per 512 bytes of the sum of the slot caps. The supervisor checks both limits at startup.
+- **Healthcheck fails.** Inspect `docker compose -f deploy/ssh-demo/compose.yaml ps` and both service logs. The edge health probe traverses the TCP forwarder, so startup or template failures in the supervisor can affect both probes. Probe the demo directly with `docker compose -f deploy/ssh-demo/compose.yaml exec -T demo /usr/local/bin/datatug demo ssh-health --addr 127.0.0.1:2222 --proxy-protocol`.
 - **“Demo is full.”** Check global and per-IP slots, including visitors behind the same NAT. Inspect session end events for `end_reason=full` and check for slots retained after cleanup errors. Measure memory, tmpfs, CPU and PID headroom before raising the caps.
-- **Template clone fails.** Check the HTTPS repo URL, ref and project manifest path. Ensure the edge can resolve the GitHub hosts and open TCP 443. Check the edge log's `host` and `result` for CONNECT denials, and confirm the supervisor has `HTTPS_PROXY=http://edge:3128`.
-- **UID isolation refuses to start.** The supervisor needs container uid 0, its four capabilities, and a root-owned sessions tmpfs with mode `0711`. Verify the effective Compose service and mount options if you supplied an override.
+- **Template clone fails.** Check the HTTPS repo URL, ref and project manifest path. Ensure the edge can resolve the GitHub hosts and open TCP 443. Check the edge log's `host` and `result` for CONNECT denials, and confirm the edge has created `/run/datatug-demo/proxy/connect.sock` in the shared volume.
+- **UID isolation refuses to start.** The supervisor needs container uid 0, its four capabilities, and a root-owned sessions tmpfs with mode `0711`. Check the delegated cgroup mount and finite scope `memory.max`. Visit the startup logs for the operation that failed.
 - **Session logs.** Match the JSON `session start` and `session end` events by `session_id` and inspect `client_ip`, `ssh_user`, `pty_width`, `pty_height`, `duration_ms`, `end_reason`, and `exit_status`. Edge egress logs report the hostname and outcome.
 
 ## Isolation
 
-The supervisor runs as container root with `SETUID`, `SETGID`, `CHOWN` and `KILL`. It assigns each visitor a different uid and gid and a mode-`0700` workspace. Both services use read-only root filesystems and `no-new-privileges`. Visitors can read world-readable image files. Enable Docker `userns-remap` where supported to map container identities to unprivileged host identities.
+The supervisor runs as container root with `SETUID`, `SETGID`, `CHOWN` and `KILL`. It assigns each visitor a different uid and gid and a mode-`0700` workspace. Both services use read-only root filesystems and `no-new-privileges`. Visitors can read world-readable image files. Validate cgroup delegation and socket-volume ownership before adding Docker user namespace remapping.
 
-CPU fairness is enforced per container plus a per-child `RLIMIT_CPU`. The container has a shared cgroup and sessions have individual rlimits. Direct egress from the supervisor network is blocked and HTTPS egress uses the edge allow-list. DataTug forgets GitHub tokens at disconnect. Visitors can revoke their OAuth grant in GitHub Settings under Applications.
+CPU fairness is enforced per container plus a per-child `RLIMIT_CPU`. Each session has its own memory and PID cgroup and individual rlimits. CPU, the kernel, and parts of the network stack remain shared. The sessions tmpfs is sized from the combined hard slot caps and the separate `/dev/shm` mount still has its own shared limit. Direct egress from the supervisor network is blocked and HTTPS egress uses the edge allow-list. DataTug forgets GitHub tokens at disconnect. Visitors can revoke their OAuth grant in GitHub Settings under Applications.
 
 ## Integration check
 
-With build credentials set, Bash, OpenSSH, GNU `timeout`, and Python 3 installed, run:
-
-```bash
-deploy/ssh-demo/integration-test.sh
-```
-
-The script creates a disposable Compose project and publishes SSH and the proxy on random loopback ports. It tears down the containers, state volume, networks and test image when it exits. The production Compose file publishes only SSH.
+Verify SSH, the supervisor's Unix-socket egress, visitor UID denial at the socket directory, and per-slot memory, PID and cleanup behavior on the deployment host. The legacy `integration-test.sh` assumes the previous TCP proxy port and requires an update for the Unix-socket deployment.

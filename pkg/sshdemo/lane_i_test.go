@@ -6,131 +6,47 @@ import (
 	"bufio"
 	"context"
 	"errors"
-	"fmt"
 	"io"
-	"log/slog"
-	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"path/filepath"
-	"strings"
-	"syscall"
 	"testing"
 	"time"
 
 	gossh "golang.org/x/crypto/ssh"
 )
 
-func TestStartupCapacity(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.SessionsDir = t.TempDir()
-	cfg.StateDir = t.TempDir()
-	cfg.Listen = "127.0.0.1:0"
-	cfg.Isolation = IsolationProcess
-	cfg.SkipTemplate = true
-	exactDisk := uint64(cfg.MaxSessions) * cfg.SessionDiskQuota
-	exactMem := uint64(cfg.MaxSessions)*(cfg.SessionMemQuota+cfg.SessionDiskQuota) + supervisorReserve
+func TestStartupFilesystemCapacity(t *testing.T) {
+	cfg := failureTestConfig(t)
+	exact := uint64(cfg.MaxSessions) * cfg.SessionDiskQuota
 	for _, tc := range []struct {
-		name    string
-		size    uint64
-		fsErr   error
-		limit   string
-		readErr error
-		wantErr string
-		warn    bool
+		name string
+		size uint64
+		err  error
+		want string
 	}{
-		{name: "exact fit", size: exactDisk, limit: fmt.Sprint(exactMem)},
-		{name: "disk too small", size: exactDisk - 1, wantErr: "filesystem capacity"},
-		{name: "statfs error", fsErr: os.ErrPermission, wantErr: "statfs sessions-dir"},
-		{name: "memory too small", size: exactDisk, limit: fmt.Sprint(exactMem - 1), wantErr: "exceed the cgroup memory limit"},
-		{name: "reserve too large", size: exactDisk, limit: "1", wantErr: "exceed the cgroup memory limit"},
-		{name: "absent cgroup", size: exactDisk, readErr: os.ErrNotExist, warn: true},
-		{name: "unlimited cgroup", size: exactDisk, limit: "max\n", warn: true},
-		{name: "unreadable cgroup", size: exactDisk, readErr: os.ErrPermission, wantErr: "read cgroup memory limit"},
-		{name: "malformed cgroup", size: exactDisk, limit: "garbage", wantErr: "parse cgroup memory limit"},
+		{"exact fit", exact, nil, ""},
+		{"disk too small", exact - 1, nil, "filesystem capacity"},
+		{"statfs error", 0, os.ErrPermission, "statfs sessions-dir"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var logs strings.Builder
-			cfg.Logger = slog.New(slog.NewTextHandler(&logs, nil))
-			ops := SysOps{
-				FilesystemSize: func(path string) (uint64, error) {
-					if path != cfg.SessionsDir {
-						t.Fatalf("statfs path = %s", path)
-					}
-					return tc.size, tc.fsErr
-				},
-				ReadMemoryMax: func() ([]byte, error) { return []byte(tc.limit), tc.readErr },
-			}
-			s, err := NewServer(t.Context(), cfg, WithSysOps(ops))
-			if tc.wantErr != "" {
-				if s != nil || err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-					t.Fatalf("server = %v, error = %v, want %s", s, err, tc.wantErr)
+			ops := SysOps{FilesystemCapacity: func(path string) (uint64, uint64, error) {
+				if path != cfg.SessionsDir {
+					t.Fatalf("statfs path = %s", path)
 				}
-				return
-			}
-			if err != nil || strings.Contains(logs.String(), "skipping memory capacity check") != tc.warn {
-				t.Fatalf("startup error = %v, logs = %s", err, &logs)
+				return tc.size, 0, tc.err
+			}}
+			_, err := NewServer(t.Context(), cfg, WithSysOps(ops))
+			if tc.want != "" {
+				requireErrorContains(t, err, tc.want)
+			} else if err != nil {
+				t.Fatal(err)
 			}
 		})
 	}
-	cfg.SessionDiskQuota = math.MaxUint64
-	if _, err := NewServer(t.Context(), cfg, WithSysOps(SysOps{FilesystemSize: func(string) (uint64, error) { return math.MaxUint64, nil }})); err == nil || !strings.Contains(err.Error(), "filesystem capacity") {
-		t.Fatalf("overflowing quotas returned %v", err)
-	}
 }
-
-func TestSupervisorChecksDirectorylessUIDs(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.StateDir, cfg.SessionsDir = t.TempDir(), t.TempDir()
-	cfg.MaxSessions = 3
-	cfg.SkipTemplate = true
-	var inspected []int
-	var killed int
-	ops := SysOps{
-		FileUID: func(os.FileInfo) (int, bool) { return 0, true },
-		ListUIDProcs: func(uid int) ([]int, error) {
-			inspected = append(inspected, uid)
-			switch uid {
-			case cfg.UIDBase:
-				return nil, os.ErrPermission
-			case cfg.UIDBase + 1:
-				if killed == 0 {
-					return []int{123}, nil
-				}
-			}
-			return nil, nil
-		},
-		Kill: func(pid int, signal syscall.Signal) error {
-			if pid != 123 || signal != syscall.SIGKILL {
-				t.Fatalf("kill(%d, %v)", pid, signal)
-			}
-			killed++
-			return nil
-		},
-	}
-	if err := os.Chmod(cfg.SessionsDir, 0o711); err != nil {
-		t.Fatal(err)
-	}
-	srv, err := NewServer(t.Context(), cfg, WithSysOps(ops))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if killed != 1 || len(inspected) != 4 || inspected[3] != cfg.UIDBase+2 {
-		t.Fatalf("inspected = %v, killed = %d", inspected, killed)
-	}
-	slot, err := srv.slots.Acquire("a")
-	if err != nil || slot.UID != cfg.UIDBase+1 {
-		t.Fatalf("slot = %+v, err = %v", slot, err)
-	}
-	cfg.MaxSessions = 1
-	if _, err := NewServer(t.Context(), cfg, WithSysOps(ops)); err == nil || !strings.Contains(err.Error(), "all session slots quarantined") {
-		t.Fatalf("startup with no safe UIDs returned %v", err)
-	}
-}
-
 func TestGlobalPreShellConnectionAdmission(t *testing.T) {
 	h := startTestServerWithPeer(t, net.ParseIP("192.0.2.8"), func(c *Config) {
 		c.ProxyProtocol = true
@@ -305,10 +221,11 @@ func TestSessionRelayFairnessAndRevocation(t *testing.T) {
 	}))
 	defer up.Close()
 	cfg := DefaultConfig()
+	cfg.Isolation = IsolationProcess
 	cfg.MaxSessionTunnels = 1
 	cfg.MaxEgressTunnels = 2
 	cfg.EgressProxy = "http://" + sharedUser + ":" + sharedSecret + "@" + up.Listener.Addr().String()
-	relay, err := startSessionRelay(cfg, DefaultSysOps())
+	relay, err := startSessionRelay(cfg, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,41 +289,6 @@ func TestSessionRelayFairnessAndRevocation(t *testing.T) {
 	if resp.StatusCode != http.StatusProxyAuthRequired {
 		t.Fatalf("revoked credential HTTP %d", resp.StatusCode)
 	}
-}
-
-func TestEdgeAuthenticatesSupervisor(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "edge-auth")
-	auth := proxyBasic("supervisor", "test-token")
-	if err := writeProxyAuthFile(path, auth, func(string, int, int) error { return nil }); err != nil {
-		t.Fatal(err)
-	}
-	edge := NewEdge(EdgeConfig{
-		ProxyAuthIP:   "172.31.250.3",
-		ProxyAuthFile: path,
-		MaxTunnels:    3, MaxTunnelsPerIP: 1,
-		LookupIPAddr: func(context.Context, string) ([]net.IPAddr, error) { return nil, errors.New("DNS test") },
-	})
-	do := func(auth string, want int) {
-		t.Helper()
-		req := httptest.NewRequest(http.MethodConnect, "github.com:443", nil)
-		req.RemoteAddr = "172.31.250.3:1234"
-		req.Header.Set("Proxy-Authorization", auth)
-		rec := httptest.NewRecorder()
-		edge.ProxyHandler().ServeHTTP(rec, req)
-		if rec.Code != want {
-			t.Fatalf("proxy HTTP %d, want %d", rec.Code, want)
-		}
-	}
-	do("", http.StatusProxyAuthRequired)
-	if !edge.tunnelLimit.acquire("172.31.250.3") {
-		t.Fatal("reserve first tunnel")
-	}
-	defer edge.tunnelLimit.release("172.31.250.3")
-	do(auth, http.StatusBadGateway) // authenticated demo uses relay cap instead of edge per-IP cap
-	if err := os.Remove(path); err != nil {
-		t.Fatal(err)
-	}
-	do(auth, http.StatusProxyAuthRequired)
 }
 
 func TestCappedListenerCloseAtCapacity(t *testing.T) {

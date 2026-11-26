@@ -61,14 +61,15 @@ const (
 	// Edge forwarder and proxy defaults.
 	DefaultEdgeListen          = ":2222"
 	DefaultEdgeUpstream        = "demo:2222"
-	DefaultEdgeProxyListen     = ":3128"
+	DefaultEdgeProxyListen     = "/run/datatug-demo/proxy/connect.sock"
 	DefaultEdgeMaxConns        = 256
 	DefaultEdgeMaxConnsPerIP   = 8
 	DefaultEdgeMaxTunnels      = 64
 	DefaultEdgeMaxTunnelsPerIP = DefaultEdgeMaxTunnels
 	DefaultProxyMaxConns       = 128
 	DefaultSessionMaxTunnels   = 8
-	edgeProxyGroup             = 10001
+	DefaultRelaySocketsPerUID  = 16
+	edgeUID                    = 10001
 	DefaultEdgeIdleTimeout     = 5 * time.Minute
 )
 
@@ -107,7 +108,8 @@ type Config struct {
 	GitHubClientID         string
 	SaveBranch             string
 	EgressProxy            string
-	EgressProxyAuthFile    string
+	CgroupRoot             string
+	MaxRelaySocketsPerUID  int
 	MaxSessionTunnels      int
 	MaxEgressTunnels       int
 
@@ -124,28 +126,29 @@ type Config struct {
 // DefaultConfig returns a Config populated with the specification defaults.
 func DefaultConfig() Config {
 	return Config{
-		Listen:             DefaultListen,
-		StateDir:           DefaultStateDir,
-		SessionsDir:        DefaultSessionsDir,
-		Repo:               DefaultRepo,
-		ProjectDir:         DefaultProjectDir,
-		MaxSessions:        DefaultMaxSessions,
-		MaxSessionsPerIP:   DefaultMaxSessionsPerIP,
-		IdleTimeout:        DefaultIdleTimeout,
-		MaxSessionDuration: DefaultMaxSessionDuration,
-		HandshakeTimeout:   DefaultHandshakeTimeout,
-		ShellStartTimeout:  DefaultShellStartTimeout,
-		SessionMemQuota:    DefaultSessionMemQuota,
-		SessionDiskQuota:   DefaultSessionDiskQuota,
-		WatchdogInterval:   DefaultWatchdogInterval,
-		MaxSessionTunnels:  DefaultSessionMaxTunnels,
-		MaxEgressTunnels:   DefaultEdgeMaxTunnels,
-		Isolation:          IsolationUID,
-		UIDBase:            DefaultUIDBase,
-		GitHubClientID:     DefaultGitHubClientID,
-		SaveBranch:         DefaultSaveBranch,
-		ShutdownGrace:      DefaultShutdownGrace,
-		CleanupTimeout:     DefaultCleanupTimeout,
+		Listen:                DefaultListen,
+		StateDir:              DefaultStateDir,
+		SessionsDir:           DefaultSessionsDir,
+		Repo:                  DefaultRepo,
+		ProjectDir:            DefaultProjectDir,
+		MaxSessions:           DefaultMaxSessions,
+		MaxSessionsPerIP:      DefaultMaxSessionsPerIP,
+		IdleTimeout:           DefaultIdleTimeout,
+		MaxSessionDuration:    DefaultMaxSessionDuration,
+		HandshakeTimeout:      DefaultHandshakeTimeout,
+		ShellStartTimeout:     DefaultShellStartTimeout,
+		SessionMemQuota:       DefaultSessionMemQuota,
+		SessionDiskQuota:      DefaultSessionDiskQuota,
+		WatchdogInterval:      DefaultWatchdogInterval,
+		MaxSessionTunnels:     DefaultSessionMaxTunnels,
+		MaxRelaySocketsPerUID: DefaultRelaySocketsPerUID,
+		MaxEgressTunnels:      DefaultEdgeMaxTunnels,
+		Isolation:             IsolationUID,
+		UIDBase:               DefaultUIDBase,
+		GitHubClientID:        DefaultGitHubClientID,
+		SaveBranch:            DefaultSaveBranch,
+		ShutdownGrace:         DefaultShutdownGrace,
+		CleanupTimeout:        DefaultCleanupTimeout,
 	}
 }
 
@@ -177,6 +180,9 @@ func (c Config) WithDefaults() Config {
 	}
 	if c.MaxConnections == 0 {
 		c.MaxConnections = 2 * min(max(c.MaxSessions, 0), math.MaxInt/2)
+	}
+	if c.MaxRelaySocketsPerUID == 0 {
+		c.MaxRelaySocketsPerUID = DefaultRelaySocketsPerUID
 	}
 	if c.MaxSessionTunnels == 0 {
 		c.MaxSessionTunnels = DefaultSessionMaxTunnels
@@ -248,6 +254,9 @@ func (c Config) Validate() error {
 	if c.MaxSessionTunnels < 1 || c.MaxEgressTunnels < 1 {
 		return errors.New("sshdemo: egress tunnel limits must be positive")
 	}
+	if c.MaxRelaySocketsPerUID < 1 {
+		return errors.New("sshdemo: --max-relay-sockets-per-uid must be positive")
+	}
 	if c.ProxyProtocol && len(c.ProxyProtocolTrust) == 0 {
 		return errors.New("sshdemo: --proxy-protocol requires --proxy-protocol-trust")
 	}
@@ -290,8 +299,8 @@ func (c Config) validateSlotUIDs(realUID, effectiveUID int) error {
 	if uidInRange(realUID, c.UIDBase, c.MaxSessions) || uidInRange(effectiveUID, c.UIDBase, c.MaxSessions) {
 		return errors.New("sshdemo: slot UID range includes the supervisor UID")
 	}
-	if c.EgressProxyAuthFile != "" && uidInRange(edgeProxyGroup, c.UIDBase, c.MaxSessions) {
-		return errors.New("sshdemo: slot UID range includes the edge proxy credential group")
+	if uidInRange(edgeUID, c.UIDBase, c.MaxSessions) {
+		return errors.New("sshdemo: slot UID range includes the edge socket owner")
 	}
 	return nil
 }
@@ -337,8 +346,6 @@ type EdgeConfig struct {
 	MaxTunnels      int
 	MaxTunnelsPerIP int // zero defaults to MaxTunnels
 	MaxProxyConns   int
-	ProxyAuthIP     string
-	ProxyAuthFile   string
 	IdleTimeout     time.Duration
 	DialTimeout     time.Duration
 

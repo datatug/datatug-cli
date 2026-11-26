@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime/debug"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -40,8 +41,6 @@ const (
 	EndReasonShutdown    = "shutdown"
 	EndReasonChildCrash  = "child-crash"
 	EndReasonMemQuota    = "memory-quota"
-	EndReasonDiskQuota   = "disk-quota"
-	EndReasonQuotaCheck  = "quota-check-failed"
 )
 
 var (
@@ -81,6 +80,7 @@ type Server struct {
 	logger          *slog.Logger
 	ops             SysOps
 	slots           *SlotManager
+	cgroups         []cgroup
 	hostSigner      gossh.Signer
 	executable      string
 	templateDir     string
@@ -131,8 +131,10 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 		return nil, err
 	}
 
-	if err := s.checkCapacity(); err != nil {
-		return nil, err
+	if cfg.Isolation == IsolationProcess {
+		if err := s.checkFilesystemCapacity(0); err != nil {
+			return nil, err
+		}
 	}
 
 	signer, err := LoadOrGenerateHostKey(cfg.HostKey)
@@ -151,17 +153,15 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 	s.executable = execPath
 
 	s.slots = NewSlotManager(cfg.MaxSessions, cfg.MaxSessionsPerIP, cfg.UIDBase, cfg.Isolation)
+	if cfg.Isolation == IsolationUID {
+		if err := s.prepareCgroups(ctx); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.cleanStaleSessions(ctx); err != nil {
 		return nil, err
 	}
 
-	var templateProxy string
-	if cfg.EgressProxy != "" {
-		s.relay, err = startSessionRelay(cfg, s.ops)
-		if err != nil {
-			return nil, err
-		}
-	}
 	ready := false
 	defer func() {
 		if !ready {
@@ -170,9 +170,15 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 	}()
 
 	if !cfg.SkipTemplate {
-		if s.relay != nil {
+		var templateProxy string
+		if cfg.EgressProxy != "" {
+			templateRelay, err := startSessionRelay(cfg, os.Geteuid(), 1)
+			if err != nil {
+				return nil, err
+			}
+			defer templateRelay.close()
 			var revoke func()
-			templateProxy, revoke = s.relay.register("template")
+			templateProxy, revoke = templateRelay.register("template")
 			defer revoke()
 		}
 		tmplCfg := TemplateConfig{
@@ -192,6 +198,13 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 			return nil, err
 		}
 		s.templateDir = tmplDir
+	}
+
+	if cfg.EgressProxy != "" {
+		s.relay, err = startSessionRelay(cfg, cfg.UIDBase, cfg.MaxSessions)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	wishOpts := []ssh.Option{
@@ -445,13 +458,15 @@ func (s *Server) sessionChannelHandler(srv *ssh.Server, conn *gossh.ServerConn, 
 	wrapped := &filteringNewChannel{
 		NewChannel: newChan,
 		meta:       meta,
+		inputReady: state.shellStarted,
 	}
 	ssh.DefaultSessionHandler(srv, conn, wrapped, &sessionContext{Context: ctx, meta: meta})
 }
 
 type filteringNewChannel struct {
 	gossh.NewChannel
-	meta *sessionMeta
+	meta       *sessionMeta
+	inputReady <-chan struct{}
 }
 
 func (f *filteringNewChannel) Accept() (gossh.Channel, <-chan *gossh.Request, error) {
@@ -468,15 +483,25 @@ func (f *filteringNewChannel) Accept() (gossh.Channel, <-chan *gossh.Request, er
 			filteredReqs <- filter.filterSessionRequest(req)
 		}
 	}()
-	return &activityChannel{Channel: ch, activityCh: f.meta.activityCh}, filteredReqs, nil
+	return &activityChannel{
+		Channel: ch, activityCh: f.meta.activityCh, inputReady: f.inputReady, done: f.meta.chanDone,
+	}, filteredReqs, nil
 }
 
 type activityChannel struct {
 	gossh.Channel
 	activityCh chan struct{}
+	inputReady <-chan struct{}
+	done       <-chan struct{}
 }
 
 func (a *activityChannel) Read(p []byte) (int, error) {
+	// charm.land/ssh begins copying to the PTY before it invokes handleSession.
+	select {
+	case <-a.inputReady:
+	case <-a.done:
+		return 0, io.EOF
+	}
 	n, err := a.Channel.Read(p)
 	if n > 0 {
 		select {
@@ -603,6 +628,9 @@ func (s *Server) handleSession(sess ssh.Session) {
 	ctx := sess.Context().(*sessionContext)
 	meta := ctx.meta
 	connection := ctx.Value(connectionStateKey{}).(*connectionState)
+	// This connection serves one session. Close it after sending the exit
+	// status so watchConnection releases admission even if the peer stays open.
+	defer func() { _ = connection.conn.Close() }()
 
 	pty, _, hasPty := sess.Pty()
 	if !hasPty {
@@ -654,6 +682,9 @@ func (s *Server) handleSession(sess ssh.Session) {
 	pgid := 0
 	var waitCh chan error
 	reaped := false
+	var group *cgroup
+	var oomAtStart uint64
+	var oomBaselineAvailable bool
 
 	s.logger.Info("session start",
 		"session_id", sessionID,
@@ -678,33 +709,37 @@ func (s *Server) handleSession(sess ssh.Session) {
 		// 1. Close PTY.
 		_ = pty.Close()
 
-		// 2. Kill the child process group and reap the child.
-		if pgid > 0 {
+		var cleanupErr error
+		if group != nil {
+			cleanupErr = group.drain(context.Background(), cgroupDrainTimeout)
+			if pgid > 0 && oomBaselineAvailable && group.oomGroupKilledSince(oomAtStart) {
+				endReason = EndReasonMemQuota
+				exitStatus = 1
+				writeQuotaNotice(sess.Stderr(), connection.conn, oomGroupNotice)
+			}
+		} else if pgid > 0 {
 			_ = s.ops.Kill(-pgid, syscall.SIGKILL)
 		}
 		if waitCh != nil && !reaped {
 			select {
-			case err := <-waitCh:
-				_ = err // reaped; only the wait matters here
-			case <-time.After(5 * time.Second):
+			case waitErr := <-waitCh:
+				_ = waitErr // The child was reaped. The exit path already chose the result.
+			case <-time.After(maxSessionTerminationGrace):
 			}
 		}
 
-		// 3. Run cleanup as the slot uid, remove the empty dir, verify no uid procs remain.
-		cleanCtx, cancel := context.WithTimeout(context.Background(), s.cfg.CleanupTimeout)
-		cleaned := runCleanupCommand(cleanCtx, s.executable, s.cfg.ExecPrefixArgs, dir, slot.UID, slot.GID, s.cfg.Isolation, s.ops, s.logger)
-		cancel()
-
-		// 4. Release the slot ONLY when the dir is gone and no process of that uid remains.
-		if cleaned {
-			s.slots.Release(slot)
-		} else {
-			s.logger.Error("retaining slot because cleanup did not complete cleanly",
-				"session_id", sessionID,
-				"slot_index", slot.Index,
-				"uid", slot.UID,
-			)
+		if cleanupErr == nil {
+			cleanCtx, cancel := context.WithTimeout(context.Background(), s.cfg.CleanupTimeout)
+			cleaned := runCleanupCommand(cleanCtx, s.executable, s.cfg.ExecPrefixArgs, dir, slot.UID, slot.GID, s.cfg.Isolation, s.ops, s.logger)
+			cancel()
+			if !cleaned {
+				cleanupErr = fmt.Errorf("could not verify cleanup of workspace %s", dir)
+			}
 		}
+		if cleanupErr != nil {
+			s.quarantineSlot(slot.Index, cleanupErr)
+		}
+		s.slots.Release(slot)
 
 		s.logger.Info("session end",
 			"session_id", sessionID,
@@ -724,6 +759,15 @@ func (s *Server) handleSession(sess ssh.Session) {
 		}
 	}()
 
+	if s.cfg.Isolation == IsolationUID {
+		group = &s.cgroups[slot.Index]
+		oomAtStart, err = group.event("memory.events", "oom_group_kill")
+		oomBaselineAvailable = err == nil
+		if err != nil {
+			s.logger.Warn("read slot OOM counter failed", "session_id", sessionID, "err", err)
+		}
+	}
+
 	if s.testPanicHook != nil {
 		s.testPanicHook()
 	}
@@ -732,7 +776,9 @@ func (s *Server) handleSession(sess ssh.Session) {
 	term, colorTerm := extractClientTermAndColorTerm(pty.Term, sess.Environ())
 	childArgs := append(append([]string(nil), s.cfg.ExecPrefixArgs...), BuildChildArgs(s.cfg, dir, s.templateDir, sessionID, deadline)...)
 	cmd := exec.Command(s.executable, childArgs...)
-	cmd.Dir = dir
+	if group == nil {
+		cmd.Dir = dir
+	}
 	var egressProxy string
 	if s.relay != nil {
 		var revoke func()
@@ -740,25 +786,29 @@ func (s *Server) handleSession(sess ssh.Session) {
 		defer revoke()
 	}
 	cmd.Env = BuildChildEnv(homeDir, term, colorTerm, egressProxy)
-	if s.cfg.Isolation == IsolationUID {
-		cmd.SysProcAttr = &syscall.SysProcAttr{
-			Credential: s.ops.CredentialFor(slot.UID, slot.GID),
-		}
-	}
-
-	if err := s.startSessionChild(meta, slot, &pty, cmd); err != nil {
+	ready, err := s.startSessionChild(meta, slot, group, &pty, cmd)
+	if err != nil {
 		s.logger.Error("start session child failed", "session_id", sessionID, "err", err)
 		endReason = EndReasonChildCrash
 		exitStatus = 1
 		return
 	}
 	pgid = cmd.Process.Pid
-	close(connection.shellStarted)
 
 	waitCh = make(chan error, 1)
 	go func() {
 		waitCh <- cmd.Wait()
 	}()
+	if group != nil {
+		if err := group.waitForSlotEntry(sess.Context(), ready, pgid); err != nil {
+			// The child may still be in the supervisor cgroup.
+			_ = cmd.Process.Kill()
+			s.logger.Error("verify session child slot entry failed", "session_id", sessionID, "err", err)
+			exitStatus = 1
+			return
+		}
+	}
+	close(connection.shellStarted)
 
 	var idleTimer *time.Timer
 	var idleC <-chan time.Time
@@ -775,11 +825,19 @@ func (s *Server) handleSession(sess ssh.Session) {
 		defer maxTimer.Stop()
 		maxC = maxTimer.C
 	}
-	watchdog := time.NewTicker(s.cfg.WatchdogInterval)
-	defer watchdog.Stop()
+	var watchdog <-chan time.Time
+	if group != nil {
+		ticker := time.NewTicker(s.cfg.WatchdogInterval)
+		defer ticker.Stop()
+		watchdog = ticker.C
+	}
 
 	terminate := func(grace time.Duration) {
-		_ = s.ops.Kill(-pgid, syscall.SIGTERM)
+		if group != nil {
+			_ = cmd.Process.Signal(syscall.SIGTERM)
+		} else {
+			_ = s.ops.Kill(-pgid, syscall.SIGTERM)
+		}
 		timer := time.NewTimer(grace)
 		defer timer.Stop()
 		select {
@@ -829,13 +887,12 @@ func (s *Server) handleSession(sess ssh.Session) {
 			terminate(min(s.cfg.ShutdownGrace, maxSessionTerminationGrace))
 			return
 
-		case <-watchdog.C:
-			reason, message := s.checkSessionQuota(sessionID, dir, slot, pgid, "/proc")
-			if reason != "" {
-				endReason = reason
-				// The PTY pump writes stdout concurrently. Use SSH extended data.
-				writeQuotaNotice(sess.Stderr(), connection.conn, message)
-				return
+		case <-watchdog:
+			if group.memoryNearLimit() {
+				watchdog = nil
+				// A visitor can stop reading SSH extended data. Send this one
+				// warning asynchronously so flow control cannot stop the session.
+				go func() { _, _ = io.WriteString(sess.Stderr(), memoryPressureNotice) }()
 			}
 
 		case <-s.shutdownCh:
@@ -849,17 +906,31 @@ func (s *Server) handleSession(sess ssh.Session) {
 
 // The request loop may close the PTY on disconnect. Serialize its closer with
 // ownership transfer and fork so the slave cannot be closed during startup.
-func (s *Server) startSessionChild(meta *sessionMeta, slot Slot, pty *ssh.Pty, cmd *exec.Cmd) error {
+func (s *Server) startSessionChild(meta *sessionMeta, slot Slot, group *cgroup, pty *ssh.Pty, cmd *exec.Cmd) (*os.File, error) {
 	meta.ptyMu.Lock()
 	defer meta.ptyMu.Unlock()
-	if s.cfg.Isolation == IsolationUID {
+	var ready *os.File
+	if group != nil {
 		if err := s.ops.Fchown(pty.Slave, slot.UID, slot.GID); err != nil {
-			return fmt.Errorf("chown pty slave descriptor: %w", err)
+			return nil, fmt.Errorf("chown pty slave descriptor: %w", err)
 		}
+		read, write, err := slotReadyPipe()
+		if err != nil {
+			return nil, fmt.Errorf("create slot entry acknowledgement pipe: %w", err)
+		}
+		defer func() { _ = write.Close() }()
+		ready = read
+		cmd.ExtraFiles = []*os.File{write}
+		cmd.Args = append(cmd.Args, "--slot-cgroup", group.path,
+			"--slot-uid", strconv.Itoa(slot.UID), "--slot-gid", strconv.Itoa(slot.GID))
 	}
+
 	if err := pty.Start(cmd, ssh.WithJobControl()); err != nil {
-		return err
+		if ready != nil {
+			_ = ready.Close()
+		}
+		return nil, err
 	}
 	_ = pty.Slave.Close()
-	return nil
+	return ready, nil
 }

@@ -36,11 +36,7 @@ services:
       - --upstream
       - demo:2222
       - --proxy-listen
-      - ":3128"
-      - --proxy-auth-ip
-      - 172.31.250.3
-      - --proxy-auth-file
-      - /var/lib/datatug-demo/proxy-auth/credential
+      - /run/datatug-demo/proxy/connect.sock
       - --max-tunnels
       - "${DEMO_MAX_EGRESS_TUNNELS:-64}"
       - --allow
@@ -48,7 +44,7 @@ services:
     ports:
       - "${DEMO_SSH_PUBLISH:-2222}:2222"
     volumes:
-      - proxy-auth:/var/lib/datatug-demo/proxy-auth:ro
+      - proxy-socket:/run/datatug-demo/proxy
     networks:
       public:
       internal:
@@ -62,6 +58,8 @@ services:
     # D2 requires container root to assign each visitor a separate Linux uid and gid.
     user: "0:0"
     cap_add: [SETUID, SETGID, CHOWN, KILL]
+    cgroup: private
+    cgroup_parent: datatugdemo.slice
     depends_on:
       - edge
     command:
@@ -73,9 +71,9 @@ services:
       - --proxy-protocol-trust
       - 172.31.250.2/32
       - --egress-proxy
-      - http://edge:3128
-      - --egress-proxy-auth-file
-      - /var/lib/datatug-demo/proxy-auth/credential
+      - unix:///run/datatug-demo/proxy/connect.sock
+      - --cgroup-root
+      - /run/datatug-demo/cgroup
       - --max-egress-tunnels
       - "${DEMO_MAX_EGRESS_TUNNELS:-64}"
       - --state-dir
@@ -108,14 +106,19 @@ services:
       - ${DEMO_SAVE_BRANCH:-datatug-demo}
     volumes:
       - state:/var/lib/datatug-demo/state
-      - proxy-auth:/var/lib/datatug-demo/proxy-auth
+      - proxy-socket:/run/datatug-demo/proxy:ro
+      - type: bind
+        source: /sys/fs/cgroup/datatugdemo.slice
+        target: /run/datatug-demo/cgroup
+        bind: { create_host_path: true }
     tmpfs:
-      # 6 sessions × 50,000 entries plus 10% headroom. Scale with DEMO_MAX_SESSIONS.
-      - /var/lib/datatug-demo/sessions:rw,nosuid,nodev,size=${DEMO_SESSIONS_TMPFS:-1g},nr_inodes=${DEMO_SESSIONS_TMPFS_INODES:-330000},mode=0711,uid=0,gid=0
+      # Six slots × 544 MiB plus 10% rounded up, and one inode per 512 bytes.
+      # Scale both ceilings with DEMO_MAX_SESSIONS.
+      - /var/lib/datatug-demo/sessions:rw,nosuid,nodev,size=${DEMO_SESSIONS_TMPFS:-3591m},nr_inodes=${DEMO_SESSIONS_TMPFS_INODES:-6684672},mode=0711,uid=0,gid=0
       # Root-only: session uids get a private TMPDIR inside their workspace,
       # so nothing a visitor writes outlives the session.
       - /tmp:rw,nosuid,nodev,noexec,size=64m,mode=0755,uid=0,gid=0
-    # 6 × (384 MiB RSS + 160 MiB tmpfs) + 512 MiB reserve.
+    # 6 × 544 MiB slot memory.max + 512 MiB supervisor reserve.
     mem_limit: ${DEMO_MEM_LIMIT:-3776m}
     cpus: "${DEMO_CPUS:-2}"
     pids_limit: "${DEMO_PIDS_LIMIT:-2048}"
@@ -151,4 +154,4 @@ networks:
 
 volumes:
   state:
-  proxy-auth:
+  proxy-socket:

@@ -1,3 +1,5 @@
+//go:build linux
+
 package sshdemo
 
 import (
@@ -6,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -147,19 +150,27 @@ func extractClientTermAndColorTerm(ptyTerm string, environ []string) (term, colo
 	return term, colorTerm
 }
 
+var sessionRandom = rand.Reader
+
 func generateSessionID() (string, error) {
 	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
+	if _, err := io.ReadFull(sessionRandom, b[:]); err != nil {
 		return "", fmt.Errorf("sshdemo: generate session id: %w", err)
 	}
 	return hex.EncodeToString(b[:]), nil
 }
+
+var setWorkspaceMode = os.Chmod
 
 func createSessionWorkspace(sessionsDir, sessionID string, slot Slot, isolation string, ops SysOps) (string, string, string, error) {
 	dir := filepath.Join(sessionsDir, sessionID)
 	homeDir := filepath.Join(dir, "home")
 	repoDir := filepath.Join(dir, "repo")
 	tempDir := filepath.Join(dir, "tmp")
+
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		return "", "", "", fmt.Errorf("sshdemo: mkdir %s: %w", dir, err)
+	}
 
 	cleanupOnErr := true
 	defer func() {
@@ -168,11 +179,14 @@ func createSessionWorkspace(sessionsDir, sessionID string, slot Slot, isolation 
 		}
 	}()
 
-	for _, p := range []string{dir, homeDir, repoDir, tempDir} {
+	if err := setWorkspaceMode(dir, 0o700); err != nil {
+		return "", "", "", fmt.Errorf("sshdemo: chmod %s: %w", dir, err)
+	}
+	for _, p := range []string{homeDir, repoDir, tempDir} {
 		if err := os.Mkdir(p, 0o700); err != nil {
 			return "", "", "", fmt.Errorf("sshdemo: mkdir %s: %w", p, err)
 		}
-		if err := os.Chmod(p, 0o700); err != nil {
+		if err := setWorkspaceMode(p, 0o700); err != nil {
 			return "", "", "", fmt.Errorf("sshdemo: chmod %s: %w", p, err)
 		}
 	}
@@ -268,14 +282,22 @@ func runCleanupCommand(
 }
 
 // cleanStaleSessions cleans any leftover directories under cfg.SessionsDir from
-// a previous crash. In uid mode, only directories owned by a UID within the
-// configured slot range are cleaned; others are logged and left untouched.
+// a previous crash. It independently drains every configured slot UID.
 func (s *Server) cleanStaleSessions(ctx context.Context) error {
 	entries, err := os.ReadDir(s.cfg.SessionsDir)
 	if err != nil {
 		return fmt.Errorf("sshdemo: read sessions-dir for stale cleanup: %w", err)
 	}
 	allQuarantined := false
+	if s.cfg.Isolation == IsolationUID {
+		for index := range s.cfg.MaxSessions {
+			uid := s.cfg.UIDBase + index
+			if !killAndDrainUIDProcs(uid, s.ops) {
+				s.logger.Error("quarantining uid with surviving or unverified processes", "uid", uid)
+				allQuarantined = s.slots.quarantineUID(uid)
+			}
+		}
+	}
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -286,6 +308,9 @@ func (s *Server) cleanStaleSessions(ctx context.Context) error {
 			fi, statErr := s.ops.Stat(dir)
 			if statErr != nil {
 				return fmt.Errorf("sshdemo: stat stale session dir %s: %w", dir, statErr)
+			}
+			if !fi.IsDir() {
+				continue
 			}
 			ownerUID, ok := s.ops.FileUID(fi)
 			if !ok {
@@ -321,6 +346,8 @@ func (s *Server) cleanStaleSessions(ctx context.Context) error {
 	return nil
 }
 
+var ptySyscallConn = (*os.File).SyscallConn
+
 // drainPTYMaster waits briefly for the kernel PTY master buffer to drain after
 // the child process has exited (with the supervisor's slave fd already closed)
 // so final output reaches the SSH channel before exit-status closes it.
@@ -332,7 +359,7 @@ func drainPTYMaster(master *os.File, maxWait time.Duration) {
 	for time.Now().Before(deadline) {
 		var pending int
 		var ioctlErr error
-		raw, err := master.SyscallConn()
+		raw, err := ptySyscallConn(master)
 		if err != nil {
 			return
 		}

@@ -1,3 +1,5 @@
+//go:build linux
+
 package sshdemo
 
 import (
@@ -24,9 +26,9 @@ func TestConfig_DefaultsAndValidate(t *testing.T) {
 	if cfg.Listen != DefaultListen || cfg.MaxSessions != DefaultMaxSessions || cfg.Isolation != IsolationUID {
 		t.Fatalf("unexpected DefaultConfig: %+v", cfg)
 	}
-	for _, c := range []Config{cfg, (Config{}).WithDefaults()} {
-		if c.ShellStartTimeout != 30*time.Second || c.WatchdogInterval != 2*time.Second ||
-			c.SessionMemQuota != 1<<30 || c.SessionDiskQuota != 256<<20 {
+	for _, c := range []Config{cfg.WithDefaults(), (Config{}).WithDefaults()} {
+		if c.ShellStartTimeout != 30*time.Second || c.WatchdogInterval != time.Second ||
+			c.SessionMemQuota != 384<<20 || c.SessionDiskQuota != 160<<20 || c.MaxConnections != 12 {
 			t.Fatalf("unexpected pre-shell and quota defaults: %+v", c)
 		}
 	}

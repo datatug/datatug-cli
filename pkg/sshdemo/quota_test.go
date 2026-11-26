@@ -1,3 +1,5 @@
+//go:build linux
+
 package sshdemo
 
 import (
@@ -10,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -144,7 +147,7 @@ func TestQuotaWorkspaceCountsAllocatedBlocksWithoutFollowingLinks(t *testing.T) 
 		if err != nil {
 			return err
 		}
-		want += uint64(info.Sys().(*syscall.Stat_t).Blocks) * 512
+		want += max(uint64(info.Sys().(*syscall.Stat_t).Blocks)*512, 1024)
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -156,12 +159,100 @@ func TestQuotaWorkspaceCountsAllocatedBlocksWithoutFollowingLinks(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	quota := uint64(root.Sys().(*syscall.Stat_t).Blocks) * 512
+	quota := max(uint64(root.Sys().(*syscall.Stat_t).Blocks)*512, 1024)
 	if got, err := allocatedWorkspaceBytes(workspace, quota); err != nil || got <= quota || got >= want {
 		t.Fatalf("early quota measurement = %d, %v, want between %d and %d bytes", got, err, quota, want)
 	}
 	if _, err := allocatedWorkspaceBytes(link, 1<<30); err == nil {
 		t.Fatal("followed symlink as workspace root")
+	}
+}
+
+func TestQuotaWorkspaceEntryLimit(t *testing.T) {
+	workspace := t.TempDir()
+	nested := filepath.Join(workspace, "nested")
+	if err := os.Mkdir(nested, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 49_998 { // The root and nested directory take the other two entries.
+		dir := workspace
+		if i%2 == 0 {
+			dir = nested
+		}
+		if err := os.WriteFile(filepath.Join(dir, strconv.Itoa(i)), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, err := allocatedWorkspaceBytes(workspace, 1<<30); err != nil || got < 50_000*1024 {
+		t.Fatalf("usage at entry limit = %d, %v", got, err)
+	}
+	if err := os.Mkdir(filepath.Join(nested, "one-more"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := allocatedWorkspaceBytes(workspace, 1<<30); !errors.Is(err, errWorkspaceScanLimit) || !strings.Contains(err.Error(), "entries") {
+		t.Fatalf("scan above entry limit: %v", err)
+	}
+}
+
+func TestQuotaWorkspaceDepthLimit(t *testing.T) {
+	workspace := t.TempDir()
+	deep := filepath.Join(workspace, strings.Repeat("d/", 64))
+	if err := os.MkdirAll(deep, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(deep, "file"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := allocatedWorkspaceBytes(workspace, 1<<30); err != nil {
+		t.Fatalf("scan at depth limit: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(deep, "another-dir"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := allocatedWorkspaceBytes(workspace, 1<<30); !errors.Is(err, errWorkspaceScanLimit) || !strings.Contains(err.Error(), "depth") {
+		t.Fatalf("scan above depth limit: %v", err)
+	}
+	s := Server{
+		cfg:    DefaultConfig(),
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		ops:    SysOps{ListUIDProcs: func(int) ([]int, error) { return nil, nil }},
+	}
+	if reason, notice := s.checkSessionQuota("id", workspace, Slot{UID: os.Geteuid()}, 0, ""); reason != EndReasonDiskQuota || !strings.Contains(notice, "disk") {
+		t.Fatalf("depth breach = %s, %q", reason, notice)
+	}
+}
+
+func TestQuotaWorkspaceDirectoryChangedBeforeOpen(t *testing.T) {
+	for _, openErr := range []error{unix.ENOENT, unix.ENOTDIR, unix.ELOOP, unix.EACCES} {
+		t.Run(openErr.Error(), func(t *testing.T) {
+			workspace := t.TempDir()
+			if err := os.Mkdir(filepath.Join(workspace, "child"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			dir, err := os.Open(workspace)
+			if err != nil {
+				t.Fatal(err)
+			}
+			scan := workspaceScan{openat: func(_ int, name string, flags int, _ uint32) (int, error) {
+				if name != "child" || flags&unix.O_NOFOLLOW == 0 {
+					t.Errorf("unexpected child open for %q with flags %#x", name, flags)
+				}
+				return -1, openErr
+			}}
+			used, err := scan.countWorkspaceDir(dir, 1<<30, 0)
+			if openErr == unix.EACCES {
+				if !errors.Is(err, openErr) {
+					t.Fatalf("unreadable child directory: %v", err)
+				}
+				return
+			}
+			if err != nil || used < 1024 || scan.entries != 1 {
+				t.Fatalf("changed directory sample = %d bytes, %d entries, %v", used, scan.entries, err)
+			}
+			if got, err := allocatedWorkspaceBytes(workspace, 1<<30); err != nil || got < used+1024 {
+				t.Fatalf("next sample = %d, %v, want at least %d bytes", got, err, used+1024)
+			}
+		})
 	}
 }
 
@@ -186,10 +277,11 @@ func TestQuotaWorkspaceAccountsForFilesystemErrors(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := countWorkspaceDir(dir, 1<<30); err != nil {
+	scan := workspaceScan{openat: unix.Openat}
+	if _, err := scan.countWorkspaceDir(dir, 1<<30, 0); err != nil {
 		t.Fatalf("should skip vanished entry: %v", err)
 	}
-	if _, err := countWorkspaceDir(dir, 1<<30); !errors.Is(err, unix.EBADF) {
+	if _, err := scan.countWorkspaceDir(dir, 1<<30, 0); !errors.Is(err, unix.EBADF) {
 		t.Fatalf("closed directory descriptor: %v", err)
 	}
 
@@ -197,7 +289,7 @@ func TestQuotaWorkspaceAccountsForFilesystemErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := countWorkspaceDir(file, 1<<30); !errors.Is(err, unix.ENOTDIR) {
+	if _, err := scan.countWorkspaceDir(file, 1<<30, 0); !errors.Is(err, unix.ENOTDIR) {
 		t.Fatalf("file used as directory: %v", err)
 	}
 	denied := filepath.Join(workspace, "unreadable")

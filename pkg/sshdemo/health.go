@@ -1,3 +1,5 @@
+//go:build linux
+
 package sshdemo
 
 import (
@@ -26,30 +28,27 @@ func CheckHealthProxyLocal(ctx context.Context, addr string, timeout time.Durati
 }
 
 func checkHealth(ctx context.Context, addr string, timeout time.Duration, prelude []byte) error {
+	return checkHealthWithDialer(ctx, addr, timeout, prelude, (&net.Dialer{}).DialContext)
+}
+
+func checkHealthWithDialer(ctx context.Context, addr string, timeout time.Duration, prelude []byte, dial func(context.Context, string, string) (net.Conn, error)) error {
 	if addr == "" {
 		addr = DefaultHealthAddr
 	}
 	if timeout <= 0 {
 		timeout = DefaultHealthTimeout
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 
 	dialCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	var dialer net.Dialer
-	conn, err := dialer.DialContext(dialCtx, "tcp", addr)
+	conn, err := dial(dialCtx, "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("ssh-health: connect %s: %w", addr, err)
 	}
 	defer func() { _ = conn.Close() }()
 
-	deadline, ok := dialCtx.Deadline()
-	if !ok {
-		deadline = time.Now().Add(timeout)
-	}
+	deadline, _ := dialCtx.Deadline()
 	_ = conn.SetDeadline(deadline)
 	if len(prelude) > 0 {
 		if _, err := conn.Write(prelude); err != nil {

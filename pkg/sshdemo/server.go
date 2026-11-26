@@ -1,3 +1,5 @@
+//go:build linux
+
 package sshdemo
 
 import (
@@ -10,6 +12,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
@@ -39,6 +42,12 @@ const (
 	EndReasonMemQuota    = "memory-quota"
 	EndReasonDiskQuota   = "disk-quota"
 	EndReasonQuotaCheck  = "quota-check-failed"
+)
+
+var (
+	resolveExecutable = os.Executable
+	newWishServer     = wish.NewServer
+	listenTCP         = net.Listen
 )
 
 // ServerOption customizes Server construction (primarily for tests).
@@ -82,14 +91,15 @@ type Server struct {
 	sessionWg       sync.WaitGroup
 	testPanicHook   func()
 	proxyPolicy     proxyproto.ConnPolicyFunc
-	connectionMu    sync.Mutex
-	connectionsByIP map[string]int
+	connectionLimit connectionLimit
+	relay           *sessionRelay
 }
 
 // NewServer prepares the host key, sessions directory, template clone, and Wish
 // SSH server according to cfg.
 func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, error) {
 	cfg = cfg.WithDefaults()
+	cfg.SessionsDir = filepath.Clean(cfg.SessionsDir)
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -102,10 +112,9 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 		cfg:             cfg,
 		logger:          cfg.Logger,
 		ops:             DefaultSysOps(),
-		slots:           NewSlotManager(cfg.MaxSessions, cfg.MaxSessionsPerIP, cfg.UIDBase, cfg.Isolation),
 		shutdownCh:      make(chan struct{}),
 		proxyPolicy:     proxyPolicy,
-		connectionsByIP: make(map[string]int),
+		connectionLimit: newConnectionLimit(cfg.MaxConnections, cfg.MaxSessionsPerIP),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -122,6 +131,10 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 		return nil, err
 	}
 
+	if err := s.checkCapacity(); err != nil {
+		return nil, err
+	}
+
 	signer, err := LoadOrGenerateHostKey(cfg.HostKey)
 	if err != nil {
 		return nil, err
@@ -130,20 +143,44 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 
 	execPath := cfg.Executable
 	if execPath == "" {
-		execPath, err = os.Executable()
+		execPath, err = resolveExecutable()
 		if err != nil {
 			return nil, fmt.Errorf("sshdemo: resolve executable: %w", err)
 		}
 	}
 	s.executable = execPath
 
+	s.slots = NewSlotManager(cfg.MaxSessions, cfg.MaxSessionsPerIP, cfg.UIDBase, cfg.Isolation)
+	if err := s.cleanStaleSessions(ctx); err != nil {
+		return nil, err
+	}
+
+	var templateProxy string
+	if cfg.EgressProxy != "" {
+		s.relay, err = startSessionRelay(cfg, s.ops)
+		if err != nil {
+			return nil, err
+		}
+	}
+	ready := false
+	defer func() {
+		if !ready {
+			s.closeRelay()
+		}
+	}()
+
 	if !cfg.SkipTemplate {
+		if s.relay != nil {
+			var revoke func()
+			templateProxy, revoke = s.relay.register("template")
+			defer revoke()
+		}
 		tmplCfg := TemplateConfig{
 			StateDir:     cfg.StateDir,
 			Repo:         cfg.Repo,
 			Ref:          cfg.Ref,
 			ProjectDir:   cfg.ProjectDir,
-			EgressProxy:  cfg.EgressProxy,
+			EgressProxy:  templateProxy,
 			ChinookBytes: s.chinookBytes,
 		}
 		if len(s.chinookBytes) == 0 {
@@ -157,10 +194,6 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 		s.templateDir = tmplDir
 	}
 
-	if err := s.cleanStaleSessions(ctx); err != nil {
-		return nil, err
-	}
-
 	wishOpts := []ssh.Option{
 		wish.WithAddress(cfg.Listen),
 		ssh.AllocatePty(),
@@ -169,7 +202,7 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 			return nil
 		},
 	}
-	sshSrv, err := wish.NewServer(wishOpts...)
+	sshSrv, err := newWishServer(wishOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("sshdemo: create wish server: %w", err)
 	}
@@ -227,6 +260,7 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 	sshSrv.Handler = s.handleSession
 
 	s.sshServer = sshSrv
+	ready = true
 	return s, nil
 }
 
@@ -267,6 +301,7 @@ func (s *Server) Serve(ln net.Listener) error {
 // (waiting up to ShutdownGrace before killing and cleaning up every session),
 // and waits for all session cleanups to finish.
 func (s *Server) Shutdown(ctx context.Context) error {
+	defer s.closeRelay()
 	s.shutdownOnce.Do(func() { close(s.shutdownCh) })
 
 	// Stop accepting new connections without immediately tearing down sockets so
@@ -288,13 +323,19 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 
 	_ = s.sshServer.Close()
+	return waitForShutdown(shutdownDone, 2*time.Second)
+}
+
+func waitForShutdown(done <-chan error, timeout time.Duration) error {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
-	case err := <-shutdownDone:
+	case err := <-done:
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil
 		}
 		return err
-	case <-time.After(2 * time.Second):
+	case <-timer.C:
 		return nil
 	}
 }
@@ -308,7 +349,8 @@ func RunServer(ctx context.Context, cfg Config, opts ...ServerOption) error {
 	if err != nil {
 		return err
 	}
-	ln, err := net.Listen("tcp", srv.cfg.Listen)
+	defer srv.closeRelay()
+	ln, err := listenTCP("tcp", srv.cfg.Listen)
 	if err != nil {
 		return fmt.Errorf("sshdemo: listen %s: %w", srv.cfg.Listen, err)
 	}
@@ -348,13 +390,9 @@ func (s *Server) connectionConfig(ctx ssh.Context) *gossh.ServerConfig {
 		NoClientAuth: true,
 		NoClientAuthCallback: func(conn gossh.ConnMetadata) (*gossh.Permissions, error) {
 			ip := clientIPFromAddr(conn.RemoteAddr())
-			s.connectionMu.Lock()
-			if s.connectionsByIP[ip] >= s.cfg.MaxSessionsPerIP {
-				s.connectionMu.Unlock()
-				return nil, &gossh.BannerError{Err: ErrPerIPLimit, Message: demoFullMessage}
+			if err := s.connectionLimit.reserve(ip); err != nil {
+				return nil, &gossh.BannerError{Err: err, Message: demoFullMessage}
 			}
-			s.connectionsByIP[ip]++
-			s.connectionMu.Unlock()
 
 			go s.watchConnection(ctx, state, ip, time.NewTimer(s.cfg.ShellStartTimeout))
 			return nil, nil
@@ -363,14 +401,7 @@ func (s *Server) connectionConfig(ctx ssh.Context) *gossh.ServerConfig {
 }
 
 func (s *Server) watchConnection(ctx context.Context, state *connectionState, ip string, timer *time.Timer) {
-	defer func() {
-		s.connectionMu.Lock()
-		s.connectionsByIP[ip]--
-		if s.connectionsByIP[ip] == 0 {
-			delete(s.connectionsByIP, ip)
-		}
-		s.connectionMu.Unlock()
-	}()
+	defer s.connectionLimit.release(ip)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
@@ -653,7 +684,8 @@ func (s *Server) handleSession(sess ssh.Session) {
 		}
 		if waitCh != nil && !reaped {
 			select {
-			case <-waitCh:
+			case err := <-waitCh:
+				_ = err // reaped; only the wait matters here
 			case <-time.After(5 * time.Second):
 			}
 		}
@@ -701,7 +733,13 @@ func (s *Server) handleSession(sess ssh.Session) {
 	childArgs := append(append([]string(nil), s.cfg.ExecPrefixArgs...), BuildChildArgs(s.cfg, dir, s.templateDir, sessionID, deadline)...)
 	cmd := exec.Command(s.executable, childArgs...)
 	cmd.Dir = dir
-	cmd.Env = BuildChildEnv(homeDir, term, colorTerm, s.cfg.EgressProxy)
+	var egressProxy string
+	if s.relay != nil {
+		var revoke func()
+		egressProxy, revoke = s.relay.register(sessionID)
+		defer revoke()
+	}
+	cmd.Env = BuildChildEnv(homeDir, term, colorTerm, egressProxy)
 	if s.cfg.Isolation == IsolationUID {
 		cmd.SysProcAttr = &syscall.SysProcAttr{
 			Credential: s.ops.CredentialFor(slot.UID, slot.GID),
@@ -767,12 +805,6 @@ func (s *Server) handleSession(sess ssh.Session) {
 
 		case <-meta.activityCh:
 			if idleTimer != nil {
-				if !idleTimer.Stop() {
-					select {
-					case <-idleTimer.C:
-					default:
-					}
-				}
 				idleTimer.Reset(s.cfg.IdleTimeout)
 			}
 
@@ -801,7 +833,8 @@ func (s *Server) handleSession(sess ssh.Session) {
 			reason, message := s.checkSessionQuota(sessionID, dir, slot, pgid, "/proc")
 			if reason != "" {
 				endReason = reason
-				writeQuotaNotice(sess, connection.conn, message)
+				// The PTY pump writes stdout concurrently. Use SSH extended data.
+				writeQuotaNotice(sess.Stderr(), connection.conn, message)
 				return
 			}
 

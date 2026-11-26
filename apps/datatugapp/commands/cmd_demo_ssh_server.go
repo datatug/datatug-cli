@@ -7,9 +7,7 @@ package commands
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io"
 	"math/big"
 	"os/signal"
 	"strconv"
@@ -20,13 +18,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Retained while sibling stub cmd_demo_ssh_session.go references it.
-var errSSHDemoNotImplemented = errors.New("not implemented yet")
-
 // Package seams so unit tests can verify flag binding without binding real sockets.
 var (
 	sshDemoRunServer             = func(ctx context.Context, cfg sshdemo.Config) error { return sshdemo.RunServer(ctx, cfg) }
-	sshDemoPrintHostKey          = func(path string, w io.Writer) error { return sshdemo.PrintHostKey(path, w) }
+	sshDemoPrintHostKey          = sshdemo.PrintHostKey
 	sshDemoCheckHealth           = sshdemo.CheckHealth
 	sshDemoCheckHealthProxyLocal = sshdemo.CheckHealthProxyLocal
 	sshDemoRunEdge               = sshdemo.RunEdge
@@ -66,7 +61,7 @@ func demoSSHServerCommand() *cobra.Command {
 	f := cmd.Flags()
 	f.StringVar(&cfg.Listen, "listen", cfg.Listen, "TCP address to listen on")
 	f.BoolVar(&cfg.ProxyProtocol, "proxy-protocol", cfg.ProxyProtocol, "Expect HAProxy PROXY protocol headers on incoming connections")
-	f.StringSliceVar(&cfg.ProxyProtocolTrust, "proxy-protocol-trust", nil, "Trusted PROXY protocol peer CIDRs (empty allows any non-loopback peer)")
+	f.StringSliceVar(&cfg.ProxyProtocolTrust, "proxy-protocol-trust", nil, "Trusted PROXY protocol peer CIDRs (required when PROXY protocol is enabled)")
 	f.StringVar(&cfg.HostKey, "host-key", "", "Path to SSH host private key (default <state-dir>/ssh_host_ed25519_key)")
 	f.BoolVar(&printHostKey, "print-host-key", false, "Print the public host key and SHA256 fingerprint, then exit")
 	f.StringVar(&cfg.StateDir, "state-dir", cfg.StateDir, "Directory for persistent supervisor state (host key, template)")
@@ -75,19 +70,23 @@ func demoSSHServerCommand() *cobra.Command {
 	f.StringVar(&cfg.Ref, "ref", cfg.Ref, "Git branch or ref of the demo repository (empty = default branch)")
 	f.StringVar(&cfg.ProjectDir, "project-dir", cfg.ProjectDir, "Project sub-directory inside the demo repository")
 	f.IntVar(&cfg.MaxSessions, "max-sessions", cfg.MaxSessions, "Maximum concurrent SSH sessions")
+	f.IntVar(&cfg.MaxConnections, "max-connections", cfg.MaxConnections, "Maximum concurrent authenticated SSH connections (default twice max-sessions)")
 	f.IntVar(&cfg.MaxSessionsPerIP, "max-sessions-per-ip", cfg.MaxSessionsPerIP, "Maximum concurrent authenticated SSH connections per client IP")
 	f.DurationVar(&cfg.IdleTimeout, "idle-timeout", cfg.IdleTimeout, "Idle timeout with no client input")
 	f.DurationVar(&cfg.MaxSessionDuration, "max-session-duration", cfg.MaxSessionDuration, "Maximum lifetime of a single session")
 	f.DurationVar(&cfg.HandshakeTimeout, "handshake-timeout", cfg.HandshakeTimeout, "Maximum duration allowed for SSH handshake")
 	f.DurationVar(&cfg.ShellStartTimeout, "shell-start-timeout", cfg.ShellStartTimeout, "Maximum time from SSH authentication to child startup")
-	f.StringVar(&memQuota, "session-mem-quota", strconv.FormatUint(cfg.SessionMemQuota, 10), "Per-session resident memory quota (e.g. 1GiB)")
-	f.StringVar(&diskQuota, "session-disk-quota", strconv.FormatUint(cfg.SessionDiskQuota, 10), "Per-session workspace disk quota (e.g. 256MiB)")
+	f.StringVar(&memQuota, "session-mem-quota", strconv.FormatUint(cfg.SessionMemQuota, 10), "Per-session resident memory quota (e.g. 384MiB)")
+	f.StringVar(&diskQuota, "session-disk-quota", strconv.FormatUint(cfg.SessionDiskQuota, 10), "Per-session workspace disk quota (e.g. 160MiB)")
 	f.StringVar(&cfg.Isolation, "isolation", cfg.Isolation, "Session isolation mode: uid or process")
 	f.IntVar(&cfg.UIDBase, "uid-base", cfg.UIDBase, "Base Unix UID for slot allocation in uid isolation mode")
 	f.BoolVar(&cfg.AllowInsecureIsolation, "allow-insecure-isolation", cfg.AllowInsecureIsolation, "Allow --isolation=process on non-loopback listen addresses")
 	f.StringVar(&cfg.GitHubClientID, "github-client-id", cfg.GitHubClientID, "GitHub OAuth App client ID for device flow")
 	f.StringVar(&cfg.SaveBranch, "save-branch", cfg.SaveBranch, "Branch name used when saving visitor changes to their fork")
-	f.StringVar(&cfg.EgressProxy, "egress-proxy", cfg.EgressProxy, "HTTP/HTTPS egress proxy URL passed to session children")
+	f.StringVar(&cfg.EgressProxy, "egress-proxy", cfg.EgressProxy, "Upstream HTTP/HTTPS egress proxy URL for the supervisor relay")
+	f.StringVar(&cfg.EgressProxyAuthFile, "egress-proxy-auth-file", "", "Publish the supervisor credential to an edge-shared file")
+	f.IntVar(&cfg.MaxSessionTunnels, "max-session-tunnels", cfg.MaxSessionTunnels, "Maximum concurrent CONNECT tunnels per demo session")
+	f.IntVar(&cfg.MaxEgressTunnels, "max-egress-tunnels", cfg.MaxEgressTunnels, "Maximum concurrent relay CONNECT tunnels (match the edge limit)")
 	return cmd
 }
 
@@ -159,7 +158,10 @@ func demoSSHEdgeCommand() *cobra.Command {
 	f.IntVar(&cfg.MaxConns, "max-conns", cfg.MaxConns, "Maximum concurrent forwarded TCP connections")
 	f.IntVar(&cfg.MaxConnsPerIP, "max-conns-per-ip", cfg.MaxConnsPerIP, "Maximum concurrent forwarded TCP connections per client IP")
 	f.IntVar(&cfg.MaxTunnels, "max-tunnels", cfg.MaxTunnels, "Maximum concurrent CONNECT tunnels")
-	f.IntVar(&cfg.MaxTunnelsPerIP, "max-tunnels-per-ip", cfg.MaxTunnelsPerIP, "Maximum concurrent CONNECT tunnels per client IP")
+	f.IntVar(&cfg.MaxTunnelsPerIP, "max-tunnels-per-ip", cfg.MaxTunnelsPerIP, "Maximum concurrent CONNECT tunnels per client IP (default equals max-tunnels)")
+	f.IntVar(&cfg.MaxProxyConns, "max-proxy-conns", cfg.MaxProxyConns, "Maximum accepted HTTP proxy connections")
+	f.StringVar(&cfg.ProxyAuthIP, "proxy-auth-ip", "", "Require the shared supervisor credential for this client IP")
+	f.StringVar(&cfg.ProxyAuthFile, "proxy-auth-file", "", "Shared supervisor credential file for the protected client IP")
 	f.DurationVar(&cfg.IdleTimeout, "idle-timeout", cfg.IdleTimeout, "Idle timeout on CONNECT tunnels")
 	return cmd
 }

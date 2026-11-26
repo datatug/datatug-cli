@@ -1,3 +1,5 @@
+//go:build linux
+
 package sshdemo
 
 import (
@@ -120,6 +122,7 @@ func TestEdge_TCPForwarderProxyV2EndToEndAndCaps(t *testing.T) {
 	// Start sshdemo.Server with ProxyProtocol enabled, then put Edge in front of it!
 	srvHarness := startTestServerWithPeer(t, net.ParseIP("192.0.2.8"), func(c *Config) {
 		c.ProxyProtocol = true
+		c.ProxyProtocolTrust = []string{"192.0.2.8/32", "203.0.113.7/32"}
 		c.SaveBranch = "exit-now"
 	})
 
@@ -146,7 +149,9 @@ func TestEdge_TCPForwarderProxyV2EndToEndAndCaps(t *testing.T) {
 	}()
 	t.Cleanup(func() {
 		cancel()
-		<-serveDone
+		if err := <-serveDone; err != nil {
+			t.Logf("serve: %v", err)
+		}
 	})
 
 	// Connect SSH client through Edge -> PROXY v2 -> sshdemo.Server!
@@ -196,7 +201,12 @@ func TestEdge_TCPForwarderProxyV2EndToEndAndCaps(t *testing.T) {
 	capCtx, capCancel := context.WithCancel(context.Background())
 	capDone := make(chan error, 1)
 	go func() { capDone <- capEdge.ServeForwarder(capCtx, capLn) }()
-	defer func() { capCancel(); <-capDone }()
+	defer func() {
+		capCancel()
+		if err := <-capDone; err != nil {
+			t.Logf("forwarder: %v", err)
+		}
+	}()
 
 	c1, err := net.Dial("tcp", capLn.Addr().String())
 	if err != nil {
@@ -420,7 +430,7 @@ func TestEdge_CONNECTProxyAllowListAndPrivateIPRefusal(t *testing.T) {
 }
 
 func TestCheckHealthProxyLocal(t *testing.T) {
-	h := startTestServer(t, func(cfg *Config) { cfg.ProxyProtocol = true })
+	h := startTestServer(t, func(cfg *Config) { cfg.ProxyProtocol = true; cfg.ProxyProtocolTrust = []string{"192.0.2.8/32"} })
 	// A plain probe never sees a banner: the server waits for the PROXY header.
 	if err := CheckHealth(context.Background(), h.addr, 300*time.Millisecond); err == nil {
 		t.Fatal("plain CheckHealth against a --proxy-protocol server: want timeout error")
@@ -433,6 +443,7 @@ func TestCheckHealthProxyLocal(t *testing.T) {
 func TestEdge_UpstreamHalfCloseReleasesForwardingSlot(t *testing.T) {
 	h := startTestServer(t, func(cfg *Config) {
 		cfg.ProxyProtocol = true
+		cfg.ProxyProtocolTrust = []string{"192.0.2.8/32"}
 		cfg.HandshakeTimeout = 500 * time.Millisecond
 	})
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -456,7 +467,7 @@ func TestEdge_UpstreamHalfCloseReleasesForwardingSlot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	if err := client.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
 		t.Fatal(err)
 	}
@@ -483,10 +494,10 @@ func TestEdge_UpstreamHalfCloseReleasesForwardingSlot(t *testing.T) {
 func TestEdge_ForwardingWriteDeadlineReleasesBlockedCopy(t *testing.T) {
 	client, edgeClient := net.Pipe()
 	upstream, edgeUpstream := net.Pipe()
-	defer client.Close()
-	defer upstream.Close()
-	defer edgeClient.Close()
-	defer edgeUpstream.Close()
+	defer func() { _ = client.Close() }()
+	defer func() { _ = upstream.Close() }()
+	defer func() { _ = edgeClient.Close() }()
+	defer func() { _ = edgeUpstream.Close() }()
 
 	done := make(chan struct{})
 	go func() {

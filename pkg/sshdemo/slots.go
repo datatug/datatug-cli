@@ -1,3 +1,5 @@
+//go:build linux
+
 package sshdemo
 
 import (
@@ -108,7 +110,7 @@ func (m *SlotManager) Release(slot Slot) {
 
 // InSlotRange reports whether uid falls within [uidBase, uidBase+maxSessions).
 func (m *SlotManager) InSlotRange(uid int) bool {
-	return uid >= m.uidBase && uid < m.uidBase+m.maxSessions
+	return uidInRange(uid, m.uidBase, m.maxSessions)
 }
 
 // quarantineUID permanently removes a slot from the allocator. It returns
@@ -141,30 +143,40 @@ func (m *SlotManager) ActiveCount() int {
 // SysOps groups OS-level operations used for uid isolation so unit tests can
 // verify uid-mode paths without running as root.
 type SysOps struct {
-	Stat          func(string) (os.FileInfo, error)
-	Chown         func(string, int, int) error
-	Fchown        func(*os.File, int, int) error
-	Kill          func(int, syscall.Signal) error
-	ListUIDProcs  func(uid int) ([]int, error)
-	CredentialFor func(uid, gid int) *syscall.Credential
-	FileUID       func(os.FileInfo) (int, bool)
+	FilesystemSize func(string) (uint64, error)
+	ReadMemoryMax  func() ([]byte, error)
+	Stat           func(string) (os.FileInfo, error) // Lstat semantics for session paths.
+	Chown          func(string, int, int) error
+	Fchown         func(*os.File, int, int) error
+	Kill           func(int, syscall.Signal) error
+	ListUIDProcs   func(uid int) ([]int, error)
+	CredentialFor  func(uid, gid int) *syscall.Credential
+	FileUID        func(os.FileInfo) (int, bool)
 }
 
 // DefaultSysOps returns production OS operations backed by Linux syscalls and /proc.
 func DefaultSysOps() SysOps {
 	return SysOps{
-		Stat:          os.Stat,
-		Chown:         os.Chown,
-		Fchown:        (*os.File).Chown,
-		Kill:          syscall.Kill,
-		ListUIDProcs:  func(uid int) ([]int, error) { return listUIDProcsIn("/proc", uid) },
-		CredentialFor: defaultCredentialFor,
-		FileUID:       defaultFileUID,
+		FilesystemSize: filesystemSize,
+		ReadMemoryMax:  func() ([]byte, error) { return os.ReadFile(containerMemoryMax) },
+		Stat:           os.Lstat,
+		Chown:          os.Chown,
+		Fchown:         (*os.File).Chown,
+		Kill:           syscall.Kill,
+		ListUIDProcs:   func(uid int) ([]int, error) { return listUIDProcsIn("/proc", uid) },
+		CredentialFor:  defaultCredentialFor,
+		FileUID:        defaultFileUID,
 	}
 }
 
 func (o SysOps) withDefaults() SysOps {
 	def := DefaultSysOps()
+	if o.FilesystemSize == nil {
+		o.FilesystemSize = def.FilesystemSize
+	}
+	if o.ReadMemoryMax == nil {
+		o.ReadMemoryMax = def.ReadMemoryMax
+	}
 	if o.Stat == nil {
 		o.Stat = def.Stat
 	}
@@ -272,14 +284,20 @@ func statusMatchesUID(statusText string, targetUID int) bool {
 // in uid mode it must already exist, be a directory owned by uid 0, and have
 // exact mode 0711; in process mode it is created with mode 0700 if absent.
 func checkSessionsDir(sessionsDir, isolation string, ops SysOps) error {
+	fi, err := ops.Stat(sessionsDir)
+	if isolation == IsolationProcess && errors.Is(err, os.ErrNotExist) {
+		if err := os.MkdirAll(sessionsDir, 0o700); err != nil {
+			return fmt.Errorf("sshdemo: create sessions-dir %s: %w", sessionsDir, err)
+		}
+		fi, err = ops.Stat(sessionsDir)
+	}
+	if err != nil {
+		return fmt.Errorf("sshdemo: stat sessions-dir %s: %w", sessionsDir, err)
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("sshdemo: sessions-dir %s is not a directory", sessionsDir)
+	}
 	if isolation == IsolationUID {
-		fi, err := ops.Stat(sessionsDir)
-		if err != nil {
-			return fmt.Errorf("sshdemo: stat sessions-dir %s: %w", sessionsDir, err)
-		}
-		if !fi.IsDir() {
-			return fmt.Errorf("sshdemo: sessions-dir %s is not a directory", sessionsDir)
-		}
 		uid, ok := ops.FileUID(fi)
 		if !ok || uid != 0 {
 			return fmt.Errorf("sshdemo: sessions-dir %s must be owned by root (uid 0), got uid %d", sessionsDir, uid)
@@ -287,10 +305,6 @@ func checkSessionsDir(sessionsDir, isolation string, ops SysOps) error {
 		if perm := fi.Mode().Perm(); perm != 0o711 {
 			return fmt.Errorf("sshdemo: sessions-dir %s must have mode 0711, got %04o", sessionsDir, perm)
 		}
-		return nil
-	}
-	if err := os.MkdirAll(sessionsDir, 0o700); err != nil {
-		return fmt.Errorf("sshdemo: create sessions-dir %s: %w", sessionsDir, err)
 	}
 	return nil
 }

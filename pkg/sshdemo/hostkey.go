@@ -1,3 +1,5 @@
+//go:build linux
+
 package sshdemo
 
 import (
@@ -13,6 +15,25 @@ import (
 
 	gossh "golang.org/x/crypto/ssh"
 )
+
+// These operations are isolated so failures while creating a host key can be
+// verified without filesystem or cryptographic faults on the host.
+var (
+	readHostKey      = os.ReadFile
+	generateHostKey  = ed25519.GenerateKey
+	marshalHostKey   = gossh.MarshalPrivateKey
+	newHostKeySigner = gossh.NewSignerFromKey
+	openHostKeyTemp  = func(dir, pattern string) (hostKeyFile, error) {
+		return os.CreateTemp(dir, pattern)
+	}
+)
+
+type hostKeyFile interface {
+	io.WriteCloser
+	Name() string
+	Chmod(os.FileMode) error
+	Sync() error
+}
 
 // LoadOrGenerateHostKey loads an SSH host key from path, refusing unreadable,
 // invalid, or group/world-accessible files without ever overwriting them.
@@ -30,7 +51,7 @@ func LoadOrGenerateHostKey(path string) (gossh.Signer, error) {
 		if perm := info.Mode().Perm(); perm&0o077 != 0 {
 			return nil, fmt.Errorf("sshdemo: host key %s has insecure permissions %04o (must not be group/world-readable)", path, perm)
 		}
-		pemBytes, readErr := os.ReadFile(path)
+		pemBytes, readErr := readHostKey(path)
 		if readErr != nil {
 			return nil, fmt.Errorf("sshdemo: read host key %s: %w", path, readErr)
 		}
@@ -49,11 +70,11 @@ func LoadOrGenerateHostKey(path string) (gossh.Signer, error) {
 		return nil, fmt.Errorf("sshdemo: create host key dir %s: %w", dir, err)
 	}
 
-	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	_, priv, err := generateHostKey(rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("sshdemo: generate ed25519 host key: %w", err)
 	}
-	block, err := gossh.MarshalPrivateKey(priv, "")
+	block, err := marshalHostKey(priv, "")
 	if err != nil {
 		return nil, fmt.Errorf("sshdemo: marshal ed25519 host key: %w", err)
 	}
@@ -62,7 +83,7 @@ func LoadOrGenerateHostKey(path string) (gossh.Signer, error) {
 	if err := writeFileExclusive0600(path, pemBytes); err != nil {
 		return nil, err
 	}
-	signer, err := gossh.NewSignerFromKey(priv)
+	signer, err := newHostKeySigner(priv)
 	if err != nil {
 		return nil, fmt.Errorf("sshdemo: build host key signer: %w", err)
 	}
@@ -74,7 +95,7 @@ func LoadOrGenerateHostKey(path string) (gossh.Signer, error) {
 // existing file.
 func writeFileExclusive0600(path string, data []byte) error {
 	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".ssh_host_key_*")
+	tmp, err := openHostKeyTemp(dir, ".ssh_host_key_*")
 	if err != nil {
 		return fmt.Errorf("sshdemo: create temp host key file: %w", err)
 	}

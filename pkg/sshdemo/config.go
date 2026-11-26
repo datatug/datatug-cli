@@ -1,9 +1,11 @@
 package sshdemo
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"os"
 	"path/filepath"
@@ -18,15 +20,15 @@ const (
 	DefaultSessionsDir        = "/run/datatug-demo/sessions"
 	DefaultRepo               = "https://github.com/datatug/datatug-demo-project"
 	DefaultProjectDir         = "demo-project-1"
-	DefaultMaxSessions        = 16
-	DefaultMaxSessionsPerIP   = 3
+	DefaultMaxSessions        = 6
+	DefaultMaxSessionsPerIP   = 2
 	DefaultIdleTimeout        = 15 * time.Minute
 	DefaultMaxSessionDuration = 60 * time.Minute
 	DefaultHandshakeTimeout   = 20 * time.Second
 	DefaultShellStartTimeout  = 30 * time.Second
-	DefaultSessionMemQuota    = 1 << 30
-	DefaultSessionDiskQuota   = 256 << 20
-	DefaultWatchdogInterval   = 2 * time.Second
+	DefaultSessionMemQuota    = 384 << 20
+	DefaultSessionDiskQuota   = 160 << 20
+	DefaultWatchdogInterval   = time.Second
 	DefaultUIDBase            = 20000
 	DefaultGitHubClientID     = "Ov23liAIKfguW2oYiore"
 	DefaultSaveBranch         = "datatug-demo"
@@ -38,12 +40,12 @@ const (
 	DefaultCleanupTimeout = 30 * time.Second
 
 	// Child rlimit defaults (spec D3).
-	RlimitAS     = 8589934592 // 8 GiB of address space: the cgo binary (Go + DuckDB) reserves more than 2 GiB at start; resident memory is bounded by GOMEMLIMIT, the container cgroup and oom_score_adj
+	RlimitAS     = 8589934592 // 8 GiB of address space for the cgo binary (Go + DuckDB)
 	RlimitCPU    = 900        // 900 s
 	RlimitFSize  = 67108864   // 64 MiB
 	RlimitNoFile = 512
 	// ChildGoMemLimit is the GOMEMLIMIT of every session child.
-	ChildGoMemLimit = "768MiB"
+	ChildGoMemLimit = "256MiB"
 	RlimitNProc     = 256 // per uid; Linux counts threads too (Go runtime + DuckDB)
 
 	// PTY initial dimension bounds (spec D3).
@@ -63,7 +65,10 @@ const (
 	DefaultEdgeMaxConns        = 256
 	DefaultEdgeMaxConnsPerIP   = 8
 	DefaultEdgeMaxTunnels      = 64
-	DefaultEdgeMaxTunnelsPerIP = 16
+	DefaultEdgeMaxTunnelsPerIP = DefaultEdgeMaxTunnels
+	DefaultProxyMaxConns       = 128
+	DefaultSessionMaxTunnels   = 8
+	edgeProxyGroup             = 10001
 	DefaultEdgeIdleTimeout     = 5 * time.Minute
 )
 
@@ -89,6 +94,7 @@ type Config struct {
 	ProjectDir             string
 	MaxSessions            int
 	MaxSessionsPerIP       int
+	MaxConnections         int // zero defaults to twice MaxSessions
 	IdleTimeout            time.Duration
 	MaxSessionDuration     time.Duration
 	HandshakeTimeout       time.Duration
@@ -101,6 +107,9 @@ type Config struct {
 	GitHubClientID         string
 	SaveBranch             string
 	EgressProxy            string
+	EgressProxyAuthFile    string
+	MaxSessionTunnels      int
+	MaxEgressTunnels       int
 
 	// Optional overrides for logging, lifecycle tuning and tests.
 	Logger           *slog.Logger
@@ -129,6 +138,8 @@ func DefaultConfig() Config {
 		SessionMemQuota:    DefaultSessionMemQuota,
 		SessionDiskQuota:   DefaultSessionDiskQuota,
 		WatchdogInterval:   DefaultWatchdogInterval,
+		MaxSessionTunnels:  DefaultSessionMaxTunnels,
+		MaxEgressTunnels:   DefaultEdgeMaxTunnels,
 		Isolation:          IsolationUID,
 		UIDBase:            DefaultUIDBase,
 		GitHubClientID:     DefaultGitHubClientID,
@@ -163,6 +174,15 @@ func (c Config) WithDefaults() Config {
 	}
 	if c.MaxSessionsPerIP == 0 {
 		c.MaxSessionsPerIP = DefaultMaxSessionsPerIP
+	}
+	if c.MaxConnections == 0 {
+		c.MaxConnections = 2 * min(max(c.MaxSessions, 0), math.MaxInt/2)
+	}
+	if c.MaxSessionTunnels == 0 {
+		c.MaxSessionTunnels = DefaultSessionMaxTunnels
+	}
+	if c.MaxEgressTunnels == 0 {
+		c.MaxEgressTunnels = DefaultEdgeMaxTunnels
 	}
 	if c.IdleTimeout == 0 {
 		c.IdleTimeout = DefaultIdleTimeout
@@ -222,6 +242,15 @@ func (c Config) Validate() error {
 	if c.MaxSessionsPerIP < 1 {
 		return fmt.Errorf("sshdemo: max-sessions-per-ip must be >= 1, got %d", c.MaxSessionsPerIP)
 	}
+	if c.MaxConnections < 0 {
+		return fmt.Errorf("sshdemo: max-connections must be >= 0, got %d", c.MaxConnections)
+	}
+	if c.MaxSessionTunnels < 1 || c.MaxEgressTunnels < 1 {
+		return errors.New("sshdemo: egress tunnel limits must be positive")
+	}
+	if c.ProxyProtocol && len(c.ProxyProtocolTrust) == 0 {
+		return errors.New("sshdemo: --proxy-protocol requires --proxy-protocol-trust")
+	}
 	if c.IdleTimeout < 0 {
 		return fmt.Errorf("sshdemo: idle-timeout must be >= 0, got %s", c.IdleTimeout)
 	}
@@ -242,15 +271,27 @@ func (c Config) Validate() error {
 	}
 	switch c.Isolation {
 	case IsolationUID:
-		if c.UIDBase < 1 {
-			return fmt.Errorf("sshdemo: uid-base must be >= 1 in uid isolation mode, got %d", c.UIDBase)
-		}
+		return c.validateSlotUIDs(os.Getuid(), os.Geteuid())
 	case IsolationProcess:
 		if !isLoopbackListen(c.Listen) && !c.AllowInsecureIsolation {
 			return fmt.Errorf("sshdemo: --isolation=process on non-loopback address %q requires --allow-insecure-isolation", c.Listen)
 		}
 	default:
 		return fmt.Errorf("sshdemo: invalid isolation mode %q (want %q or %q)", c.Isolation, IsolationUID, IsolationProcess)
+	}
+	return nil
+}
+
+func (c Config) validateSlotUIDs(realUID, effectiveUID int) error {
+	maxUID := min(uint64(math.MaxUint32-1), uint64(math.MaxInt))
+	if c.UIDBase < 1 || uint64(c.UIDBase)+uint64(c.MaxSessions)-1 > maxUID {
+		return fmt.Errorf("sshdemo: invalid slot UID range (uid-base %d, max-sessions %d)", c.UIDBase, c.MaxSessions)
+	}
+	if uidInRange(realUID, c.UIDBase, c.MaxSessions) || uidInRange(effectiveUID, c.UIDBase, c.MaxSessions) {
+		return errors.New("sshdemo: slot UID range includes the supervisor UID")
+	}
+	if c.EgressProxyAuthFile != "" && uidInRange(edgeProxyGroup, c.UIDBase, c.MaxSessions) {
+		return errors.New("sshdemo: slot UID range includes the edge proxy credential group")
 	}
 	return nil
 }
@@ -279,4 +320,96 @@ func isLoopbackListen(addr string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+func uidInRange(uid, base, count int) bool {
+	return uid >= base && uid-base < count
+}
+
+// EdgeConfig configures `datatug demo ssh-edge` (spec D4).
+type EdgeConfig struct {
+	Listen          string
+	Upstream        string
+	ProxyListen     string
+	Allow           []string
+	MaxConns        int
+	MaxConnsPerIP   int
+	MaxTunnels      int
+	MaxTunnelsPerIP int // zero defaults to MaxTunnels
+	MaxProxyConns   int
+	ProxyAuthIP     string
+	ProxyAuthFile   string
+	IdleTimeout     time.Duration
+	DialTimeout     time.Duration
+
+	Logger       *slog.Logger
+	LookupIPAddr func(ctx context.Context, host string) ([]net.IPAddr, error)
+	DialContext  func(ctx context.Context, network, addr string) (net.Conn, error)
+}
+
+// DefaultEdgeConfig returns an EdgeConfig populated with specification defaults.
+// WithDefaults resolves the per-IP tunnel cap from the configured global cap.
+func DefaultEdgeConfig() EdgeConfig {
+	allow := make([]string, len(DefaultEdgeAllow))
+	copy(allow, DefaultEdgeAllow)
+	return EdgeConfig{
+		Listen:        DefaultEdgeListen,
+		Upstream:      DefaultEdgeUpstream,
+		ProxyListen:   DefaultEdgeProxyListen,
+		Allow:         allow,
+		MaxConns:      DefaultEdgeMaxConns,
+		MaxConnsPerIP: DefaultEdgeMaxConnsPerIP,
+		MaxTunnels:    DefaultEdgeMaxTunnels,
+		MaxProxyConns: DefaultProxyMaxConns,
+		IdleTimeout:   DefaultEdgeIdleTimeout,
+		DialTimeout:   10 * time.Second,
+	}
+}
+
+// WithDefaults returns a copy of c with zero-valued fields replaced by defaults.
+func (c EdgeConfig) WithDefaults() EdgeConfig {
+	if c.Listen == "" {
+		c.Listen = DefaultEdgeListen
+	}
+	if c.Upstream == "" {
+		c.Upstream = DefaultEdgeUpstream
+	}
+	if c.ProxyListen == "" {
+		c.ProxyListen = DefaultEdgeProxyListen
+	}
+	if c.Allow == nil {
+		c.Allow = append([]string(nil), DefaultEdgeAllow...)
+	}
+	if c.MaxConns <= 0 {
+		c.MaxConns = DefaultEdgeMaxConns
+	}
+	if c.MaxConnsPerIP <= 0 {
+		c.MaxConnsPerIP = DefaultEdgeMaxConnsPerIP
+	}
+	if c.MaxTunnels <= 0 {
+		c.MaxTunnels = DefaultEdgeMaxTunnels
+	}
+	if c.MaxTunnelsPerIP <= 0 {
+		c.MaxTunnelsPerIP = c.MaxTunnels
+	}
+	if c.MaxProxyConns <= 0 {
+		c.MaxProxyConns = DefaultProxyMaxConns
+	}
+	if c.IdleTimeout <= 0 {
+		c.IdleTimeout = DefaultEdgeIdleTimeout
+	}
+	if c.DialTimeout <= 0 {
+		c.DialTimeout = 10 * time.Second
+	}
+	if c.Logger == nil {
+		c.Logger = slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	}
+	if c.LookupIPAddr == nil {
+		c.LookupIPAddr = net.DefaultResolver.LookupIPAddr
+	}
+	if c.DialContext == nil {
+		d := &net.Dialer{Timeout: c.DialTimeout}
+		c.DialContext = d.DialContext
+	}
+	return c
 }

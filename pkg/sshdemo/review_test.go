@@ -1,3 +1,5 @@
+//go:build linux
+
 package sshdemo
 
 import (
@@ -47,14 +49,14 @@ func TestServerProxyProtocolPeerPolicy(t *testing.T) {
 		allow  bool
 	}{
 		{name: "loopback LOCAL", trust: []string{"198.51.100.0/24"}, header: "LOCAL", allow: true},
-		{name: "loopback PROXY", header: "PROXY"},
-		{name: "loopback v1", header: "v1"},
-		{name: "loopback missing", header: "missing"},
-		{name: "default edge", peer: net.ParseIP("192.0.2.8"), header: "PROXY", allow: true},
+		{name: "loopback PROXY", trust: []string{"192.0.2.8/32"}, header: "PROXY"},
+		{name: "loopback v1", trust: []string{"192.0.2.8/32"}, header: "v1"},
+		{name: "loopback missing", trust: []string{"192.0.2.8/32"}, header: "missing"},
+
 		{name: "trusted IPv4 edge", peer: net.ParseIP("192.0.2.8"), trust: []string{" 192.0.2.0/24 "}, header: "PROXY", allow: true},
 		{name: "trusted IPv6 edge", peer: net.ParseIP("2001:db8::1"), trust: []string{"192.0.2.0/24", "2001:db8::/64"}, header: "PROXY", allow: true},
 		{name: "trusted edge missing header", peer: net.ParseIP("192.0.2.8"), trust: []string{"192.0.2.0/24"}, header: "missing"},
-		{name: "untrusted edge", peer: net.ParseIP("192.0.2.8"), trust: []string{"198.51.100.0/24"}, header: "PROXY"},
+		{name: "untrusted demo peer", peer: net.ParseIP("172.31.250.3"), trust: []string{"172.31.250.2/32"}, header: "PROXY"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := startTestServerWithPeer(t, tc.peer, func(c *Config) {
@@ -66,7 +68,7 @@ func TestServerProxyProtocolPeerPolicy(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer conn.Close()
+			defer func() { _ = conn.Close() }()
 			if err := conn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
 				t.Fatal(err)
 			}
@@ -88,6 +90,9 @@ func TestServerProxyProtocolPeerPolicy(t *testing.T) {
 		})
 	}
 
+	if _, err := NewServer(t.Context(), Config{ProxyProtocol: true}); err == nil || !strings.Contains(err.Error(), "--proxy-protocol-trust") {
+		t.Fatalf("missing CIDR error = %v", err)
+	}
 	if _, err := NewServer(t.Context(), Config{ProxyProtocol: true, ProxyProtocolTrust: []string{"invalid"}}); err == nil || !strings.Contains(err.Error(), "--proxy-protocol-trust") {
 		t.Fatalf("invalid CIDR error = %v", err)
 	}
@@ -131,7 +136,7 @@ func TestServerLogsSanitizedSSHUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	if err := sess.Shell(); err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +180,7 @@ func TestServerDeadlineTerminatesProcessGroup(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer sess.Close()
+			defer func() { _ = sess.Close() }()
 			if err := sess.RequestPty("xterm", 24, 80, gossh.TerminalModes{}); err != nil {
 				t.Fatal(err)
 			}

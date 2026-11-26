@@ -434,6 +434,73 @@ check_session_in_slot_and_drained() {
     [[ -z $pids ]] || { printf 'slot not drained: %s\n' "$pids" >&2; return 1; }
 }
 
+check_queue_handover() {
+    DEMO_MAX_SESSIONS=1 DEMO_MAX_QUEUE=20 DEMO_MAX_QUEUE_WAIT=30m DEMO_MAX_SESSIONS_PER_IP=2 \
+        "${compose[@]}" up -d --no-deps --force-recreate --wait --wait-timeout 180 demo || return 1
+    python3 - "$work_dir" "${ssh_client[@]}" -o StrictHostKeyChecking=yes -tt "$ssh_target" <<'PY'
+import contextlib
+import fcntl
+import os
+import pathlib
+import pty
+import struct
+import subprocess
+import sys
+import termios
+import time
+
+work_dir = pathlib.Path(sys.argv[1])
+ssh_command = sys.argv[2:]
+
+
+def stop(client):
+    if client.poll() is None:
+        client.terminate()
+        try:
+            client.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            client.kill()
+            client.wait()
+
+
+def start(stack, name):
+    path = work_dir / f"queue-{name}.log"
+    master, slave = pty.openpty()
+    stack.callback(os.close, master)
+    try:
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
+        with path.open("wb") as output:
+            client = subprocess.Popen(ssh_command, stdin=slave, stdout=output, stderr=output)
+    finally:
+        os.close(slave)
+    stack.callback(stop, client)
+    return client, path
+
+
+def see(client, path, text, seconds):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        output = path.read_bytes()
+        if text in output:
+            return
+        if client.poll() is not None:
+            break
+        time.sleep(0.1)
+    sys.stderr.buffer.write(path.read_bytes())
+    sys.exit(f"{path.name} did not show {text.decode()!r}")
+
+
+with contextlib.ExitStack() as stack:
+    first, first_log = start(stack, "first")
+    welcome = b"Welcome to the DataTug demo"
+    see(first, first_log, welcome, 20)
+    second, second_log = start(stack, "second")
+    see(second, second_log, b"You are number 1 in the queue", 10)
+    stop(first)
+    see(second, second_log, welcome, 45)
+PY
+}
+
 check 'SSH banner and host key fingerprint' check_initial_key
 check 'PTY shows the DataTug welcome screen' check_pty
 check 'SSH exec request is refused' check_exec_refused "$work_dir/exec.log" "$exec_status"
@@ -452,5 +519,6 @@ check 'a session child runs in a slot as its slot uid, and the slot drains' chec
 check 'slot 0 denies link, linkat, AF_UNIX sockets, System V IPC and access to slot 1' check_slot_isolation
 check 'cleanup removes the 10000-level, long-name and read-only boundary trees and slot 0 serves another visitor' check_deep_session_cleanup
 check 'kernel OOM-kills a slot over its limit; supervisor stays healthy' check_slot_oom_contained
+check 'second SSH visitor queues and gets the welcome screen when the sole slot is released' check_queue_handover
 
 (( failures == 0 ))

@@ -22,6 +22,8 @@ const (
 	DefaultRepo               = "https://github.com/datatug/datatug-demo-project"
 	DefaultProjectDir         = "demo-project-1"
 	DefaultMaxSessions        = 6
+	DefaultMaxQueue           = 20
+	DefaultMaxQueueWait       = 30 * time.Minute
 	DefaultMaxSessionsPerIP   = 2
 	DefaultIdleTimeout        = 15 * time.Minute
 	DefaultMaxSessionDuration = 60 * time.Minute
@@ -98,8 +100,10 @@ type Config struct {
 	Ref                    string
 	ProjectDir             string
 	MaxSessions            int
+	MaxQueue               int // zero disables the queue
+	MaxQueueWait           time.Duration
 	MaxSessionsPerIP       int
-	MaxConnections         int // zero defaults to twice MaxSessions
+	MaxConnections         int // zero defaults to MaxSessions + MaxQueue, with headroom
 	IdleTimeout            time.Duration
 	MaxSessionDuration     time.Duration
 	HandshakeTimeout       time.Duration
@@ -141,6 +145,8 @@ func DefaultConfig() Config {
 		Repo:                  DefaultRepo,
 		ProjectDir:            DefaultProjectDir,
 		MaxSessions:           DefaultMaxSessions,
+		MaxQueue:              DefaultMaxQueue,
+		MaxQueueWait:          DefaultMaxQueueWait,
 		MaxSessionsPerIP:      DefaultMaxSessionsPerIP,
 		IdleTimeout:           DefaultIdleTimeout,
 		MaxSessionDuration:    DefaultMaxSessionDuration,
@@ -204,7 +210,12 @@ func (c Config) WithDefaults() Config {
 		c.MaxSessionsPerIP = DefaultMaxSessionsPerIP
 	}
 	if c.MaxConnections == 0 {
-		c.MaxConnections = 2 * min(max(c.MaxSessions, 0), math.MaxInt/2)
+		sessions := max(c.MaxSessions, 0)
+		queue := min(max(c.MaxQueue, 0), math.MaxInt-sessions)
+		c.MaxConnections = max(sessions+queue, sessions+min(sessions, math.MaxInt-sessions))
+	}
+	if c.MaxQueueWait == 0 {
+		c.MaxQueueWait = DefaultMaxQueueWait
 	}
 	if c.MaxRelaySocketsPerUID == 0 {
 		c.MaxRelaySocketsPerUID = DefaultRelaySocketsPerUID
@@ -269,6 +280,12 @@ func (c Config) ResolvedHostKey() string {
 func (c Config) Validate() error {
 	if c.MaxSessions < 1 {
 		return fmt.Errorf("sshdemo: max-sessions must be >= 1, got %d", c.MaxSessions)
+	}
+	if c.MaxQueue < 0 {
+		return fmt.Errorf("sshdemo: max-queue must be >= 0, got %d", c.MaxQueue)
+	}
+	if c.MaxQueueWait <= 0 {
+		return fmt.Errorf("sshdemo: max-queue-wait must be positive, got %s", c.MaxQueueWait)
 	}
 	if c.MaxSessionsPerIP < 1 {
 		return fmt.Errorf("sshdemo: max-sessions-per-ip must be >= 1, got %d", c.MaxSessionsPerIP)

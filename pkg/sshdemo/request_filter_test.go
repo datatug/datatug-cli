@@ -32,6 +32,7 @@ func TestFilterSessionRequest(t *testing.T) {
 	}{
 		{"pty-req kept and clamped", "pty-req", ptyReqPayload("xterm", 9999, 9999), "pty-req"},
 		{"malformed pty-req refused", "pty-req", []byte{1}, refusedRequestType},
+		{"truncated terminal mode refused", "pty-req", truncatedTerminalMode(), refusedRequestType},
 		{"window-change kept", "window-change", win, "window-change"},
 		{"malformed window-change refused", "window-change", []byte{1}, refusedRequestType},
 		{"shell kept", "shell", nil, "shell"},
@@ -64,17 +65,22 @@ func TestFilterSessionRequest(t *testing.T) {
 	}
 }
 
-// Every request, refused or not, goes through the one ordered channel, so the
-// session handler answers them in the order the client sent them.
-func TestFilteringNewChannel_ForwardsEveryRequestInOrder(t *testing.T) {
+func truncatedTerminalMode() []byte {
+	payload := ptyReqPayload("xterm", 80, 24)
+	binary.BigEndian.PutUint32(payload[len(payload)-4:], 1)
+	return append(payload, 1)
+}
+
+func TestFilteringNewChannel_DefersPTYUntilShell(t *testing.T) {
 	raw := make(chan *gossh.Request, 3)
 	raw <- &gossh.Request{Type: "pty-req", Payload: ptyReqPayload("xterm", 80, 24)}
 	raw <- &gossh.Request{Type: "exec", Payload: gossh.Marshal(struct{ Command string }{"id"})}
-	raw <- &gossh.Request{Type: "shell"}
+	raw <- &gossh.Request{Type: "env", Payload: gossh.Marshal(struct{ Key, Value string }{"TERM", "xterm"})}
 	close(raw)
 	f := &filteringNewChannel{
 		NewChannel: fakeNewChannel{reqs: raw},
 		meta:       &sessionMeta{activityCh: make(chan struct{}, 1), chanDone: make(chan struct{})},
+		state:      &connectionState{},
 	}
 	_, reqs, err := f.Accept()
 	if err != nil {
@@ -84,7 +90,7 @@ func TestFilteringNewChannel_ForwardsEveryRequestInOrder(t *testing.T) {
 	for r := range reqs {
 		got = append(got, r.Type)
 	}
-	want := []string{"pty-req", refusedRequestType, "shell"}
+	want := []string{"env"}
 	if len(got) != len(want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}

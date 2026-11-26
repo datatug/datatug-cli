@@ -39,6 +39,8 @@ func TestDemoSSHServerCommand_Flags(t *testing.T) {
 		"--ref", "main",
 		"--project-dir", "proj",
 		"--max-sessions", "8",
+		"--max-queue", "0",
+		"--max-queue-wait", "7m",
 		"--max-connections", "14",
 		"--max-sessions-per-ip", "2",
 		"--idle-timeout", "5m",
@@ -67,6 +69,7 @@ func TestDemoSSHServerCommand_Flags(t *testing.T) {
 		gotCfg.StateDir != "/tmp/state" || gotCfg.SessionsDir != "/tmp/sess" ||
 		gotCfg.Repo != "https://example.com/repo.git" || gotCfg.Ref != "main" ||
 		gotCfg.ProjectDir != "proj" || gotCfg.MaxSessions != 8 || gotCfg.MaxConnections != 14 || gotCfg.MaxSessionsPerIP != 2 ||
+		gotCfg.MaxQueue != 0 || gotCfg.MaxQueueWait != 7*time.Minute ||
 		gotCfg.IdleTimeout != 5*time.Minute || gotCfg.MaxSessionDuration != 30*time.Minute ||
 		gotCfg.HandshakeTimeout != 10*time.Second || gotCfg.Isolation != "process" ||
 		gotCfg.ShellStartTimeout != 3*time.Second || gotCfg.SessionMemQuota != 1536<<20 || gotCfg.SessionDiskQuota != 128<<20 ||
@@ -95,6 +98,16 @@ func TestDemoSSHServerCommand_RejectsInvalidQuotas(t *testing.T) {
 		if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), args[0]) {
 			t.Errorf("%v returned %v, want a quota flag error", args, err)
 		}
+	}
+}
+
+func TestDemoSSHServerCommand_RejectsZeroQueueWait(t *testing.T) {
+	cmd := demoSSHServerCommand()
+	cmd.SetArgs([]string{"--max-queue", "0", "--max-queue-wait", "0s"})
+	cmd.SetErr(io.Discard)
+	cmd.SetOut(io.Discard)
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "--max-queue-wait must be positive") {
+		t.Fatalf("invalid queue wait returned %v", err)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"os"
 	"sync"
 	"syscall"
+	"time"
 )
 
 var (
@@ -19,10 +20,15 @@ var (
 
 // Slot identifies one reserved session slot and its Unix credentials.
 type Slot struct {
-	Index    int
-	UID      int
-	GID      int
-	ClientIP string
+	Index       int
+	UID         int
+	GID         int
+	ClientIP    string
+	reservation *slotReservation
+}
+
+type slotReservation struct {
+	deadline time.Time
 }
 
 type slotQuarantine uint8
@@ -41,9 +47,11 @@ type SlotManager struct {
 	maxPerIP    int
 	uidBase     int
 	isolation   string
-	inUse       []bool
+	active      []*slotReservation
 	quarantined []slotQuarantine
 	perIP       map[string]int
+	waiting     []*queueEntry
+	queueClosed bool
 	getUID      func() int
 	getGID      func() int
 }
@@ -55,7 +63,7 @@ func NewSlotManager(maxSessions, maxPerIP, uidBase int, isolation string) *SlotM
 		maxPerIP:    maxPerIP,
 		uidBase:     uidBase,
 		isolation:   isolation,
-		inUse:       make([]bool, maxSessions),
+		active:      make([]*slotReservation, maxSessions),
 		quarantined: make([]slotQuarantine, maxSessions),
 		perIP:       make(map[string]int),
 		getUID:      os.Getuid,
@@ -67,13 +75,18 @@ func NewSlotManager(maxSessions, maxPerIP, uidBase int, isolation string) *SlotM
 func (m *SlotManager) Acquire(clientIP string) (Slot, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
 	if m.perIP[clientIP] >= m.maxPerIP {
 		return Slot{}, ErrPerIPLimit
 	}
+	return m.reserveSlot(clientIP, time.Time{})
+}
+
+// reserveSlot runs with mu held. The SSH server applies its per-IP limit
+// at authentication, where it can count both active and waiting transports.
+func (m *SlotManager) reserveSlot(clientIP string, deadline time.Time) (Slot, error) {
 	idx := -1
-	for i, used := range m.inUse {
-		if !used && m.quarantined[i] == slotUsable {
+	for i, used := range m.active {
+		if used == nil && m.quarantined[i] == slotUsable {
 			idx = i
 			break
 		}
@@ -81,7 +94,8 @@ func (m *SlotManager) Acquire(clientIP string) (Slot, error) {
 	if idx < 0 {
 		return Slot{}, ErrGlobalLimit
 	}
-	m.inUse[idx] = true
+	reservation := &slotReservation{deadline: deadline}
+	m.active[idx] = reservation
 	m.perIP[clientIP]++
 
 	uid, gid := m.getUID(), m.getGID()
@@ -90,28 +104,30 @@ func (m *SlotManager) Acquire(clientIP string) (Slot, error) {
 		gid = m.uidBase + idx
 	}
 	return Slot{
-		Index:    idx,
-		UID:      uid,
-		GID:      gid,
-		ClientIP: clientIP,
+		Index:       idx,
+		UID:         uid,
+		GID:         gid,
+		ClientIP:    clientIP,
+		reservation: reservation,
 	}, nil
 }
 
-// Release frees a previously acquired slot. Calling Release on an already-free
-// slot is a no-op.
+// Release frees a previously acquired slot. A stale reservation cannot free
+// the slot after it has been handed to another visitor.
 func (m *SlotManager) Release(slot Slot) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if slot.Index < 0 || slot.Index >= len(m.inUse) || !m.inUse[slot.Index] {
+	if slot.Index < 0 || slot.Index >= len(m.active) || slot.reservation == nil || m.active[slot.Index] != slot.reservation {
 		return
 	}
-	m.inUse[slot.Index] = false
+	m.active[slot.Index] = nil
 	if count := m.perIP[slot.ClientIP]; count <= 1 {
 		delete(m.perIP, slot.ClientIP)
 	} else {
 		m.perIP[slot.ClientIP] = count - 1
 	}
+	m.admitWaiting(time.Now())
 }
 
 // InSlotRange reports whether uid falls within [uidBase, uidBase+maxSessions).
@@ -143,6 +159,9 @@ func (m *SlotManager) setSlotState(index int, state slotQuarantine) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.quarantined[index] = state
+	if state == slotUsable {
+		m.admitWaiting(time.Now())
+	}
 }
 
 func (m *SlotManager) awaitingMemory(index int) bool {
@@ -168,8 +187,8 @@ func (m *SlotManager) ActiveCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	n := 0
-	for _, used := range m.inUse {
-		if used {
+	for _, used := range m.active {
+		if used != nil {
 			n++
 		}
 	}

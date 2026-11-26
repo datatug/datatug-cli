@@ -23,13 +23,20 @@ import (
 
 func TestConfig_DefaultsAndValidate(t *testing.T) {
 	cfg := DefaultConfig()
-	if cfg.Listen != DefaultListen || cfg.MaxSessions != DefaultMaxSessions || cfg.Isolation != IsolationUID {
+	if cfg.Listen != DefaultListen || cfg.MaxSessions != DefaultMaxSessions || cfg.Isolation != IsolationUID ||
+		cfg.MaxQueue != 20 || cfg.MaxQueueWait != 30*time.Minute || cfg.WithDefaults().MaxConnections != 26 {
 		t.Fatalf("unexpected DefaultConfig: %+v", cfg)
 	}
 	for _, c := range []Config{cfg.WithDefaults(), (Config{}).WithDefaults()} {
 		if c.ShellStartTimeout != 30*time.Second || c.WatchdogInterval != time.Second ||
-			c.SessionMemQuota != 384<<20 || c.SessionDiskQuota != 160<<20 || c.MaxConnections != 12 {
+			c.SessionMemQuota != 384<<20 || c.SessionDiskQuota != 160<<20 {
 			t.Fatalf("unexpected pre-shell and quota defaults: %+v", c)
+		}
+	}
+	for _, tc := range []struct{ queue, connections int }{{0, 12}, {21, 27}} {
+		c := (Config{MaxQueue: tc.queue}).WithDefaults()
+		if c.MaxQueue != tc.queue || c.MaxQueueWait != 30*time.Minute || c.MaxConnections != tc.connections {
+			t.Fatalf("unexpected queue defaults: %+v", c)
 		}
 	}
 	if got := (Config{StateDir: "/tmp/s"}).ResolvedHostKey(); got != "/tmp/s/ssh_host_ed25519_key" {
@@ -45,6 +52,8 @@ func TestConfig_DefaultsAndValidate(t *testing.T) {
 		wantErr string
 	}{
 		{"bad-max-sessions", func(c *Config) { c.MaxSessions = -1 }, "max-sessions"},
+		{"bad-max-queue", func(c *Config) { c.MaxQueue = -1 }, "max-queue"},
+		{"bad-max-queue-wait", func(c *Config) { c.MaxQueueWait = 0 }, "max-queue-wait"},
 		{"bad-max-per-ip", func(c *Config) { c.MaxSessionsPerIP = -1 }, "max-sessions-per-ip"},
 		{"neg-idle", func(c *Config) { c.IdleTimeout = -time.Second }, "idle-timeout"},
 		{"neg-max-dur", func(c *Config) { c.MaxSessionDuration = -time.Second }, "max-session-duration"},

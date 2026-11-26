@@ -699,3 +699,5 @@ other backends and report an explicit error when DuckDB is requested.
 # [License](./LICENSE)
 
 Apache License
+
+<!-- Temporary CI proof for the PostgREST journey gate. -->

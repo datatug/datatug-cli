@@ -1,0 +1,113 @@
+x-ssh-demo: &ssh-demo
+  image: ${DEMO_IMAGE:-datatug-ssh-demo:local}
+  pull_policy: never
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  read_only: true
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD", "/usr/local/bin/datatug", "demo", "ssh-health", "--addr", "127.0.0.1:2222"]
+    interval: 5s
+    timeout: 6s
+    start_period: 90s
+    retries: 5
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  edge:
+    <<: *ssh-demo
+    build:
+      context: ../..
+      dockerfile: deploy/ssh-demo/Dockerfile
+      args:
+        VERSION: ${DEMO_BUILD_VERSION:-dev}
+        REVISION: ${DEMO_BUILD_REVISION:-unknown}
+        BUILD_DATE: ${DEMO_BUILD_DATE:-}
+    user: "10001:10001"
+    command:
+      - demo
+      - ssh-edge
+      - --listen
+      - ":2222"
+      - --upstream
+      - demo:2222
+      - --proxy-listen
+      - ":3128"
+      - --allow
+      - github.com,api.github.com,codeload.github.com,cloud.openvaultdb.com
+    ports:
+      - "${DEMO_SSH_PUBLISH:-2222}:2222"
+    networks: [public, internal]
+    mem_limit: 256m
+    cpus: 0.5
+
+  demo:
+    <<: *ssh-demo
+    # D2 requires container root to assign each visitor a separate Linux uid and gid.
+    user: "0:0"
+    cap_add: [SETUID, SETGID, CHOWN, KILL]
+    depends_on:
+      - edge
+    command:
+      - demo
+      - ssh-server
+      - --listen
+      - ":2222"
+      - --proxy-protocol
+      - --egress-proxy
+      - http://edge:3128
+      - --state-dir
+      - /var/lib/datatug-demo/state
+      - --sessions-dir
+      - /var/lib/datatug-demo/sessions
+      - --repo
+      - ${DEMO_REPO:-https://github.com/datatug/datatug-demo-project}
+      - --ref
+      - "${DEMO_REF:-}"
+      - --project-dir
+      - ${DEMO_PROJECT_DIR:-demo-project-1}
+      - --max-sessions
+      - "${DEMO_MAX_SESSIONS:-16}"
+      - --max-sessions-per-ip
+      - "${DEMO_MAX_SESSIONS_PER_IP:-3}"
+      - --idle-timeout
+      - "${DEMO_IDLE_TIMEOUT:-15m}"
+      - --max-session-duration
+      - "${DEMO_MAX_SESSION_DURATION:-60m}"
+      - --handshake-timeout
+      - "${DEMO_HANDSHAKE_TIMEOUT:-20s}"
+      - --isolation
+      - uid
+      - --uid-base
+      - "${DEMO_UID_BASE:-20000}"
+      - --github-client-id
+      - "${DEMO_GITHUB_CLIENT_ID:-}"
+      - --save-branch
+      - ${DEMO_SAVE_BRANCH:-datatug-demo}
+    environment:
+      HTTPS_PROXY: http://edge:3128
+    volumes:
+      - state:/var/lib/datatug-demo/state
+    tmpfs:
+      - /var/lib/datatug-demo/sessions:rw,nosuid,nodev,size=${DEMO_SESSIONS_TMPFS:-2g},mode=0711,uid=0,gid=0
+      - /tmp:rw,nosuid,nodev,size=64m,mode=1777
+    mem_limit: ${DEMO_MEM_LIMIT:-3g}
+    cpus: "${DEMO_CPUS:-2}"
+    pids_limit: "${DEMO_PIDS_LIMIT:-2048}"
+    init: true
+    stop_grace_period: 20s
+    networks: [internal]
+
+networks:
+  public:
+    driver: bridge
+  internal:
+    driver: bridge
+    internal: true
+
+volumes:
+  state:

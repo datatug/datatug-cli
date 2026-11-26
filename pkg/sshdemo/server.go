@@ -29,7 +29,7 @@ import (
 const (
 	maxSessionTerminationGrace = 5 * time.Second
 
-	noPTYMessage    = "This demo needs an interactive terminal: reconnect with ssh -t (and no command).\n"
+	noPTYMessage    = "This demo needs an interactive terminal: reconnect with ssh -t.\n"
 	demoFullMessage = "The DataTug demo is full, please try again in a few minutes.\r\n"
 
 	// Session end reasons logged in structured JSON output.
@@ -299,7 +299,8 @@ func NewServer(ctx context.Context, cfg Config, opts ...ServerOption) (*Server, 
 		}
 	}
 
-	// Serve ONLY session channels; refuse forwarding, subsystems, exec, and global requests.
+	// Serve ONLY session channels; refuse forwarding, subsystems, and global requests.
+	// An exec request reaches this callback as "shell": its command is discarded.
 	sshSrv.ChannelHandlers = map[string]ssh.ChannelHandler{
 		"session": s.sessionChannelHandler,
 	}
@@ -522,7 +523,7 @@ type sessionContext struct {
 }
 
 // sessionChannelHandler wraps incoming "session" channels so we can:
-//  1. Refuse exec, subsystem, agent forwarding, X11, and disallowed env vars
+//  1. Run exec as shell, and refuse subsystem, agent forwarding, X11, and disallowed env vars
 //     before charm.land/ssh's DefaultSessionHandler processes them.
 //  2. Clamp pty-req and window-change sizes before PTY allocation.
 //  3. Observe client input reads (for input-based idle timeout) and channel
@@ -619,9 +620,9 @@ type sessionRequestFilter struct {
 }
 
 // filterSessionRequest clamps pty-req and window-change sizes, keeps shell and
-// allowed env requests, and turns everything else (exec, subsystem, agent and
-// X11 forwarding, signals, malformed or disallowed requests) into a request the
-// session handler refuses.
+// allowed env requests, turns exec into shell, and turns everything else
+// (subsystem, agent and X11 forwarding, signals, malformed or disallowed
+// requests) into a request the session handler refuses.
 func (f *sessionRequestFilter) filterSessionRequest(req *gossh.Request) *gossh.Request {
 	switch req.Type {
 	case "pty-req":
@@ -636,6 +637,16 @@ func (f *sessionRequestFilter) filterSessionRequest(req *gossh.Request) *gossh.R
 		}
 	case "shell":
 		return req
+	case "exec":
+		// Warp's SSH wrapper and RemoteCommand configs send a command the visitor
+		// never typed. Discard it: the session runs the demo as a shell request
+		// would, or gets the no-PTY message when no terminal was requested.
+		var cmd struct{ Command string }
+		if gossh.Unmarshal(req.Payload, &cmd) == nil {
+			req.Type = "shell"
+			req.Payload = nil
+			return req
+		}
 	case "env":
 		var kv struct{ Key, Value string }
 		if f.envCount < maxEnvRequests && len(req.Payload) <= 8+len("COLORTERM")+maxEnvValue &&

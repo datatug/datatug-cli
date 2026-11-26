@@ -617,13 +617,21 @@ func TestServer_RefusalsNoPTYExecSubsystemForwardingAgentX11(t *testing.T) {
 	}
 	_ = sess.Close()
 
-	// 2. exec refused.
+	// 2. exec without a PTY runs as shell: the command is discarded and the
+	// visitor gets the same no-PTY message.
 	execSess, err := dialSSH(t, h.addr, "visitor").NewSession()
 	if err != nil {
 		t.Fatalf("NewSession exec: %v", err)
 	}
-	if err := execSess.Run("id"); err == nil {
-		t.Fatal("expected exec to be refused")
+	var execOut syncBuffer
+	execSess.Stdout = &execOut
+	execSess.Stderr = &execOut
+	err = execSess.Run("echo INJECTED")
+	if !errors.As(err, &exitErr) || exitErr.ExitStatus() != 1 {
+		t.Fatalf("expected exit status 1 for exec without PTY, got %v", err)
+	}
+	if got := execOut.String(); !strings.Contains(got, "This demo needs an interactive terminal") || strings.Contains(got, "INJECTED") {
+		t.Fatalf("unexpected exec output: %q", got)
 	}
 	_ = execSess.Close()
 
@@ -661,6 +669,29 @@ func TestServer_RefusalsNoPTYExecSubsystemForwardingAgentX11(t *testing.T) {
 	// 6. tcpip-forward (remote port forwarding) refused.
 	if _, err := client.Listen("tcp", "127.0.0.1:0"); err == nil {
 		t.Fatal("expected tcpip-forward remote port forwarding to be refused")
+	}
+}
+
+// Warp's SSH wrapper sends pty-req followed by exec with a bootstrap script.
+func TestServer_ExecWithPTYRunsTheDemo(t *testing.T) {
+	h := startTestServer(t, func(c *Config) { c.SaveBranch = "exit-now" })
+	sess, err := dialSSH(t, h.addr, "visitor").NewSession()
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	var out syncBuffer
+	sess.Stdout = &out
+	if err := sess.RequestPty("xterm-256color", 24, 80, gossh.TerminalModes{}); err != nil {
+		t.Fatalf("RequestPty: %v", err)
+	}
+	if err := sess.Run("export WARP_BOOTSTRAP=INJECTED; exec $SHELL"); err != nil {
+		t.Fatalf("exec with PTY: %v\nlogs:\n%s", err, h.logs.String())
+	}
+	if got := out.String(); !strings.Contains(got, "SEEN:") || strings.Contains(got, "INJECTED") {
+		t.Fatalf("unexpected output: %q", got)
+	}
+	if strings.Contains(h.logs.String(), "INJECTED") {
+		t.Fatalf("exec command reached the logs:\n%s", h.logs.String())
 	}
 }
 

@@ -39,7 +39,8 @@ func TestFilterSessionRequest(t *testing.T) {
 		{"env TERM kept", "env", env("TERM"), "env"},
 		{"env LD_PRELOAD refused", "env", env("LD_PRELOAD"), refusedRequestType},
 		{"malformed env refused", "env", []byte{0xff}, refusedRequestType},
-		{"exec refused", "exec", gossh.Marshal(struct{ Command string }{"id"}), refusedRequestType},
+		{"exec runs as shell", "exec", gossh.Marshal(struct{ Command string }{"id"}), "shell"},
+		{"malformed exec refused", "exec", []byte{0, 0, 0, 9}, refusedRequestType},
 		{"subsystem refused", "subsystem", gossh.Marshal(struct{ Name string }{"sftp"}), refusedRequestType},
 		{"agent forwarding refused", "auth-agent-req@openssh.com", nil, refusedRequestType},
 		{"x11 refused", "x11-req", nil, refusedRequestType},
@@ -52,8 +53,8 @@ func TestFilterSessionRequest(t *testing.T) {
 			if got.Type != tc.wantType {
 				t.Fatalf("type = %q, want %q", got.Type, tc.wantType)
 			}
-			if tc.wantType == refusedRequestType && got.Payload != nil {
-				t.Fatalf("refused request keeps payload %x", got.Payload)
+			if (tc.wantType == refusedRequestType || tc.typ == "exec") && got.Payload != nil {
+				t.Fatalf("%s request keeps payload %x", got.Type, got.Payload)
 			}
 		})
 	}
@@ -74,7 +75,7 @@ func truncatedTerminalMode() []byte {
 func TestFilteringNewChannel_DefersPTYUntilShell(t *testing.T) {
 	raw := make(chan *gossh.Request, 3)
 	raw <- &gossh.Request{Type: "pty-req", Payload: ptyReqPayload("xterm", 80, 24)}
-	raw <- &gossh.Request{Type: "exec", Payload: gossh.Marshal(struct{ Command string }{"id"})}
+	raw <- &gossh.Request{Type: "subsystem", Payload: gossh.Marshal(struct{ Name string }{"sftp"})}
 	raw <- &gossh.Request{Type: "env", Payload: gossh.Marshal(struct{ Key, Value string }{"TERM", "xterm"})}
 	close(raw)
 	f := &filteringNewChannel{

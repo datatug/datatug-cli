@@ -51,7 +51,9 @@ func TestDemoSSHServerCommand_Flags(t *testing.T) {
 		"--allow-insecure-isolation",
 		"--github-client-id", "cid-1",
 		"--save-branch", "custom-demo",
-		"--egress-proxy", "http://edge:3128",
+		"--egress-proxy", "unix:///run/datatug-demo/proxy/connect.sock",
+		"--cgroup-root", "/run/datatug-demo/cgroup",
+		"--max-relay-sockets-per-uid", "11",
 	})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -66,7 +68,8 @@ func TestDemoSSHServerCommand_Flags(t *testing.T) {
 		gotCfg.ShellStartTimeout != 3*time.Second || gotCfg.SessionMemQuota != 1536<<20 || gotCfg.SessionDiskQuota != 128<<20 ||
 		gotCfg.UIDBase != 30000 || !gotCfg.AllowInsecureIsolation ||
 		gotCfg.GitHubClientID != "cid-1" || gotCfg.SaveBranch != "custom-demo" ||
-		gotCfg.EgressProxy != "http://edge:3128" {
+		gotCfg.EgressProxy != "unix:///run/datatug-demo/proxy/connect.sock" ||
+		gotCfg.CgroupRoot != "/run/datatug-demo/cgroup" || gotCfg.MaxRelaySocketsPerUID != 11 {
 		t.Fatalf("unexpected parsed config: %+v", gotCfg)
 	}
 }
@@ -188,7 +191,7 @@ func TestDemoSSHEdgeCommand_Flags(t *testing.T) {
 	cmd.SetArgs([]string{
 		"--listen", ":2224",
 		"--upstream", "demo:2225",
-		"--proxy-listen", ":3129",
+		"--proxy-listen", "/run/demo-edge/connect.sock",
 		"--allow", "github.com,api.github.com",
 		"--max-conns", "64",
 		"--max-conns-per-ip", "4",
@@ -199,7 +202,7 @@ func TestDemoSSHEdgeCommand_Flags(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if gotCfg.Listen != ":2224" || gotCfg.Upstream != "demo:2225" || gotCfg.ProxyListen != ":3129" ||
+	if gotCfg.Listen != ":2224" || gotCfg.Upstream != "demo:2225" || gotCfg.ProxyListen != "/run/demo-edge/connect.sock" ||
 		len(gotCfg.Allow) != 2 || gotCfg.Allow[0] != "github.com" || gotCfg.Allow[1] != "api.github.com" ||
 		gotCfg.MaxConns != 64 || gotCfg.MaxConnsPerIP != 4 || gotCfg.MaxTunnels != 10 || gotCfg.MaxTunnelsPerIP != 3 ||
 		gotCfg.IdleTimeout != 2*time.Minute {

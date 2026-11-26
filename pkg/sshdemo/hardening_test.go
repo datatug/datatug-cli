@@ -8,7 +8,6 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -213,8 +212,10 @@ func TestServer_PTYOwnershipFailurePreventsChildStart(t *testing.T) {
 	if err := os.Chmod(dir, 0o711); err != nil {
 		t.Fatal(err)
 	}
+	root, fs := fakeCgroupMount(t)
 	h := startTestServer(t, func(c *Config) {
 		c.Isolation = IsolationUID
+		c.CgroupRoot = root
 		c.SessionsDir = dir
 	}, WithSysOps(SysOps{
 		FileUID: func(os.FileInfo) (int, bool) { return 0, true },
@@ -225,8 +226,9 @@ func TestServer_PTYOwnershipFailurePreventsChildStart(t *testing.T) {
 			}
 			return syscall.EPERM
 		},
-		ListUIDProcs:  func(int) ([]int, error) { return nil, nil },
-		CredentialFor: func(int, int) *syscall.Credential { return nil },
+		cgroups:            fs,
+		FilesystemCapacity: ampleSessionFilesystem,
+		CredentialFor:      func(int, int) *syscall.Credential { return nil },
 	}))
 	sess, err := dialSSH(t, h.addr, "visitor").NewSession()
 	if err != nil {
@@ -282,23 +284,26 @@ func TestServer_StaleWorkspacesQuarantineSlots(t *testing.T) {
 			}
 		},
 		CredentialFor: func(int, int) *syscall.Credential { return nil },
-		ListUIDProcs: func(uid int) ([]int, error) {
-			if uid == cfg.UIDBase+1 {
-				return []int{123}, nil
-			}
-			return nil, nil
-		},
-		Kill: func(int, syscall.Signal) error { return nil },
+	}
+	cfg.CgroupRoot, ops.cgroups = fakeCgroupMount(t)
+	ops.FilesystemCapacity = ampleSessionFilesystem
+	addFakeSlot(t, cfg.CgroupRoot, "slot-1")
+	write := ops.cgroups.write
+	ops.cgroups.write = func(path, value string) error {
+		if strings.HasSuffix(path, "slot-1/cgroup.kill") {
+			return syscall.EPERM
+		}
+		return write(path, value)
 	}
 	srv, err := NewServer(context.Background(), cfg, WithSysOps(ops))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Lstat(filepath.Join(dir, "procs-left")); !os.IsNotExist(err) {
-		t.Fatalf("expected only processes left for that slot, got %v", err)
+	if _, err := os.Lstat(filepath.Join(dir, "procs-left")); err != nil {
+		t.Fatalf("workspace for undrained slot was altered: %v", err)
 	}
-	if got := strings.Count(logs.String(), `"level":"ERROR","msg":"quarantining uid`); got != 3 {
-		t.Fatalf("expected three quarantine diagnostics, got %d in %s", got, logs.String())
+	if got := strings.Count(logs.String(), `"level":"ERROR","msg":"quarantining session slot`); got != 2 {
+		t.Fatalf("expected two quarantine diagnostics, got %d in %s", got, logs.String())
 	}
 	for range 2 {
 		slot, err := srv.slots.Acquire("ip")
@@ -310,13 +315,14 @@ func TestServer_StaleWorkspacesQuarantineSlots(t *testing.T) {
 		}
 		srv.slots.Release(slot)
 	}
+	cfg.CgroupRoot, ops.cgroups = fakeCgroupMount(t)
 	cfg.MaxSessions = 1
 	if _, err := NewServer(context.Background(), cfg, WithSysOps(ops)); err == nil || !strings.Contains(err.Error(), "all session slots quarantined") {
 		t.Fatalf("starting with all slots quarantined = %v", err)
 	}
 	cfg.Isolation = IsolationProcess
 	cfg.Listen = "127.0.0.1:0"
-	if _, err := NewServer(context.Background(), cfg, WithSysOps(ops)); err == nil || !strings.Contains(err.Error(), "shared uid") {
+	if _, err := NewServer(context.Background(), cfg, WithSysOps(ops)); err == nil || !strings.Contains(err.Error(), "could not verify cleanup") {
 		t.Fatalf("starting with unverified cleanup for shared uid = %v", err)
 	}
 }
@@ -375,114 +381,6 @@ func TestStaleCleanupSkipsDirectoryReplacedBySymlink(t *testing.T) {
 	}
 }
 
-func TestServer_WatchdogEndsOverQuotaSession(t *testing.T) {
-	for _, resource := range []string{"memory", "disk"} {
-		t.Run(resource, func(t *testing.T) {
-			h := startTestServer(t, func(c *Config) {
-				c.SaveBranch = "wait-forever"
-				c.WatchdogInterval = 20 * time.Millisecond
-				if resource == "memory" {
-					c.SessionMemQuota = 1
-				} else {
-					c.SessionDiskQuota = 1
-				}
-			})
-			sess, err := dialSSH(t, h.addr, "visitor").NewSession()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := sess.RequestPty("xterm", 24, 80, nil); err != nil {
-				t.Fatal(err)
-			}
-			var stdout, stderr bytes.Buffer
-			sess.Stdout, sess.Stderr = &stdout, &stderr
-			if err := sess.Shell(); err != nil {
-				t.Fatal(err)
-			}
-			done := make(chan error, 1)
-			go func() { done <- sess.Wait() }()
-			select {
-			case err := <-done:
-				if err == nil {
-					t.Fatal("quota termination returned success")
-				}
-			case <-time.After(3 * time.Second):
-				t.Fatal("watchdog did not end the session")
-			}
-			notice := fmt.Sprintf("This session used more than its share of %s and was ended.", resource)
-			if strings.Count(stderr.String(), notice) != 1 || strings.Contains(stdout.String(), notice) {
-				t.Fatalf("want one quota notice on stderr, got stderr %q, stdout %q", stderr.String(), stdout.String())
-			}
-			waitNoSessionDirs(t, h.sessionsDir, time.Second)
-			log := waitLogContains(t, h.logs, `"end_reason":"`+resource+`-quota"`, time.Second)
-			for _, field := range []string{`"level":"WARN"`, `"resource":"` + resource + `"`, `"quota_bytes":1`, `"used_bytes":`} {
-				if !strings.Contains(log, field) {
-					t.Fatalf("missing %s in %s", field, log)
-				}
-			}
-		})
-	}
-}
-
-func TestServer_WatchdogQuotaNoticeWhilePTYStreams(t *testing.T) {
-	h := startTestServer(t, func(c *Config) {
-		c.SaveBranch = "quota-stream"
-		c.WatchdogInterval = 20 * time.Millisecond
-		c.SessionDiskQuota = 1 << 20
-	})
-	sess, err := dialSSH(t, h.addr, "visitor").NewSession()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = sess.Close() }()
-	if err := sess.RequestPty("xterm", 24, 80, nil); err != nil {
-		t.Fatal(err)
-	}
-	stdout, err := sess.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var stderr bytes.Buffer
-	sess.Stderr = &stderr
-	if err := sess.Shell(); err != nil {
-		t.Fatal(err)
-	}
-	streaming := make(chan error, 1)
-	go func() {
-		_, err := io.CopyN(io.Discard, stdout, 64<<10)
-		streaming <- err
-		_, _ = io.Copy(io.Discard, stdout)
-	}()
-	select {
-	case err := <-streaming:
-		if err != nil {
-			t.Fatalf("PTY output stopped before quota trigger: %v", err)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("PTY output did not start")
-	}
-	entries, err := os.ReadDir(h.sessionsDir)
-	if err != nil || len(entries) != 1 {
-		t.Fatalf("expected one active workspace, got %v, %v", entries, err)
-	}
-	if err := os.WriteFile(filepath.Join(h.sessionsDir, entries[0].Name(), "over-quota"), make([]byte, 2<<20), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan error, 1)
-	go func() { done <- sess.Wait() }()
-	select {
-	case err := <-done:
-		if err == nil {
-			t.Fatal("quota termination returned success")
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("watchdog did not end the streaming session")
-	}
-	if got := stderr.String(); got != "This session used more than its share of disk and was ended.\r\n" {
-		t.Fatalf("quota notice on stderr = %q", got)
-	}
-}
-
 func TestWriteQuotaNotice_ClosesBlockedTransport(t *testing.T) {
 	server, client := net.Pipe()
 	defer func() { _ = client.Close() }()
@@ -499,5 +397,74 @@ func TestWriteQuotaNotice_ClosesBlockedTransport(t *testing.T) {
 	}
 	if _, err := client.Read(make([]byte, 1)); !errors.Is(err, io.EOF) {
 		t.Fatalf("reading from closed quota transport: %v", err)
+	}
+}
+
+func TestServer_ReleasesConnectionAdmissionAfterSession(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		branch     string
+		requestPTY bool
+		wantExit   int
+	}{
+		{"normal exit", "exit-now", true, 0},
+		{"no PTY rejection", "exit-now", false, 1},
+		{"idle exit", "wait-forever", true, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := startTestServer(t, func(c *Config) {
+				c.MaxConnections = 1
+				c.MaxSessionsPerIP = 1
+				c.MaxSessionDuration = time.Hour
+				c.IdleTimeout = 100 * time.Millisecond
+				c.SaveBranch = tc.branch
+			})
+			client := dialSSH(t, h.addr, "visitor")
+			sess, err := client.NewSession()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.requestPTY {
+				if err := sess.RequestPty("xterm", 24, 80, nil); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := sess.Shell(); err != nil {
+				t.Fatal(err)
+			}
+			err = sess.Wait()
+			if tc.wantExit == 0 {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				var exitErr *gossh.ExitError
+				if !errors.As(err, &exitErr) || exitErr.ExitStatus() != tc.wantExit {
+					t.Fatalf("wait = %v, want exit %d", err, tc.wantExit)
+				}
+			}
+			// Keep the client open. The supervisor must close the transport and
+			// release both counters without relying on the client's close.
+			waitForNoConnectionReservations(t, h.srv)
+			_ = dialSSH(t, h.addr, "next visitor")
+		})
+	}
+}
+
+func waitForNoConnectionReservations(t *testing.T, srv *Server) {
+	t.Helper()
+	limit := &srv.connectionLimit
+	deadline := time.Now().Add(time.Second)
+	for {
+		limit.mu.Lock()
+		total, ips := limit.total, len(limit.perIP)
+		limit.mu.Unlock()
+		if total == 0 && ips == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("finished session still holds %d connections across %d IPs", total, ips)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }

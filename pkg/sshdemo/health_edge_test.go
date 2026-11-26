@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -404,10 +405,11 @@ func TestEdge_CONNECTProxyAllowListAndPrivateIPRefusal(t *testing.T) {
 	// 8. RunEdge starts and shuts down cleanly on cancel, and rejects bad listen addresses.
 	runCtx, runCancel := context.WithCancel(context.Background())
 	runDone := make(chan error, 1)
+	proxySocket := filepath.Join(t.TempDir(), "proxy.sock")
 	go func() {
 		runDone <- RunEdge(runCtx, EdgeConfig{
 			Listen:      "127.0.0.1:0",
-			ProxyListen: "127.0.0.1:0",
+			ProxyListen: proxySocket,
 			Upstream:    "127.0.0.1:1",
 			Logger:      slog.New(slog.NewJSONHandler(io.Discard, nil)),
 		})
@@ -417,10 +419,10 @@ func TestEdge_CONNECTProxyAllowListAndPrivateIPRefusal(t *testing.T) {
 	if err := <-runDone; err != nil {
 		t.Fatalf("RunEdge cancel error: %v", err)
 	}
-	if err := RunEdge(context.Background(), EdgeConfig{Listen: "127.0.0.1:-1", ProxyListen: "127.0.0.1:0"}); err == nil {
+	if err := RunEdge(context.Background(), EdgeConfig{Listen: "127.0.0.1:-1", ProxyListen: proxySocket}); err == nil {
 		t.Fatal("expected bad listen error")
 	}
-	if err := RunEdge(context.Background(), EdgeConfig{Listen: "127.0.0.1:0", ProxyListen: "127.0.0.1:-1"}); err == nil {
+	if err := RunEdge(context.Background(), EdgeConfig{Listen: "127.0.0.1:0", ProxyListen: filepath.Join(proxySocket, "missing")}); err == nil {
 		t.Fatal("expected bad proxy-listen error")
 	}
 	proxyLn2, _ := net.Listen("tcp", "127.0.0.1:0")

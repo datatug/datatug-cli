@@ -73,52 +73,6 @@ func TestSlotManager_LimitsAndIsolation(t *testing.T) {
 	}
 }
 
-func TestListUIDProcsIn_FakeProc(t *testing.T) {
-	procDir := t.TempDir()
-
-	writeStatus := func(name, content string) {
-		p := filepath.Join(procDir, name)
-		if err := os.MkdirAll(p, 0o755); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
-		if content != "" {
-			if err := os.WriteFile(filepath.Join(p, "status"), []byte(content), 0o644); err != nil {
-				t.Fatalf("write status: %v", err)
-			}
-		}
-	}
-
-	writeStatus("101", "Name:\tdatatug\nUid:\t20005\t20005\t20005\t20005\nGid:\t20005\n")
-	writeStatus("102", "Name:\tother\nUid:\t1000\t1000\t1000\t1000\n")
-	writeStatus("103", "Name:\teffective\nUid:\t0\t20005\t0\t0\n")
-	writeStatus("104", "") // missing status file (process exited)
-	writeStatus("not-a-pid", "Uid:\t20005\n")
-	_ = os.WriteFile(filepath.Join(procDir, "cpuinfo"), []byte("x"), 0o644)
-
-	pids, err := listUIDProcsIn(procDir, 20005)
-	if err != nil {
-		t.Fatalf("listUIDProcsIn: %v", err)
-	}
-	slices.Sort(pids)
-	if !slices.Equal(pids, []int{101, 103}) {
-		t.Fatalf("got pids %v, want [101 103]", pids)
-	}
-
-	// Missing proc dir returns error.
-	if _, err := listUIDProcsIn(filepath.Join(procDir, "nonexistent"), 20005); err == nil {
-		t.Fatal("expected error for missing procDir")
-	}
-	if statusMatchesUID("Name:\tfoo\nState:\tR\n", 20005) {
-		t.Fatal("status without Uid line should not match")
-	}
-	// Real /proc scan via DefaultSysOps finds our own PID under os.Getuid().
-	defOps := (SysOps{}).withDefaults()
-	realPids, err := defOps.ListUIDProcs(os.Getuid())
-	if err != nil || !slices.Contains(realPids, os.Getpid()) {
-		t.Fatalf("DefaultSysOps.ListUIDProcs(%d) = (%v, %v), want own pid %d", os.Getuid(), realPids, err, os.Getpid())
-	}
-}
-
 func TestCheckSessionsDir_UIDModeSeams(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Chmod(dir, 0o711); err != nil {
@@ -192,7 +146,7 @@ func TestServerRejectsSymlinkSessionsDir(t *testing.T) {
 	}
 }
 
-func TestUIDModeSeams_WorkspaceCredentialKillAndStaleCleanup(t *testing.T) {
+func TestUIDModeSeams_WorkspaceCredentialAndStaleCleanup(t *testing.T) {
 	// 1. CredentialFor sets uid/gid and empty supplementary groups.
 	cred := defaultCredentialFor(20007, 20007)
 	if cred.Uid != 20007 || cred.Gid != 20007 || len(cred.Groups) != 0 {
@@ -244,39 +198,7 @@ func TestUIDModeSeams_WorkspaceCredentialKillAndStaleCleanup(t *testing.T) {
 		t.Fatal("failed workspace should have been removed")
 	}
 
-	// 3. killAndDrainUIDProcs kills leftover PIDs and drains.
-	calls := 0
-	var killed []int
-	killOps := DefaultSysOps()
-	killOps.ListUIDProcs = func(uid int) ([]int, error) {
-		calls++
-		if calls == 1 {
-			return []int{4242, 4243}, nil
-		}
-		return nil, nil
-	}
-	killOps.Kill = func(pid int, sig syscall.Signal) error {
-		if sig != syscall.SIGKILL {
-			t.Fatalf("expected SIGKILL, got %v", sig)
-		}
-		killed = append(killed, pid)
-		return nil
-	}
-	if !killAndDrainUIDProcs(20003, killOps) {
-		t.Fatal("expected killAndDrainUIDProcs to succeed")
-	}
-	if !slices.Equal(killed, []int{4242, 4243}) {
-		t.Fatalf("killed = %v, want [4242 4243]", killed)
-	}
-
-	// Error listing procs fails closed.
-	errOps := DefaultSysOps()
-	errOps.ListUIDProcs = func(int) ([]int, error) { return nil, errors.New("proc err") }
-	if killAndDrainUIDProcs(20003, errOps) {
-		t.Fatal("expected false on ListUIDProcs error")
-	}
-
-	// 4. cleanStaleSessions in uid mode cleans in-range dirs and leaves out-of-range dirs alone.
+	// 3. cleanStaleSessions in uid mode cleans in-range dirs and leaves out-of-range dirs alone.
 	staleRoot := t.TempDir()
 	inRangeDir := filepath.Join(staleRoot, "stale-in-range")
 	outRangeDir := filepath.Join(staleRoot, "stale-out-of-range")
@@ -300,7 +222,6 @@ func TestUIDModeSeams_WorkspaceCredentialKillAndStaleCleanup(t *testing.T) {
 		credRequested = append(credRequested, uid)
 		return nil
 	}
-	staleOps.ListUIDProcs = func(int) ([]int, error) { return nil, nil }
 
 	srv := &Server{
 		cfg: Config{

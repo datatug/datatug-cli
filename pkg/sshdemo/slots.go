@@ -6,9 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 )
@@ -113,18 +110,24 @@ func (m *SlotManager) InSlotRange(uid int) bool {
 	return uidInRange(uid, m.uidBase, m.maxSessions)
 }
 
-// quarantineUID permanently removes a slot from the allocator. It returns
-// true when no UID slot remains usable.
-func (m *SlotManager) quarantineUID(uid int) bool {
+// quarantine permanently removes a slot from the allocator. It returns true
+// when no slot remains usable.
+func (m *SlotManager) quarantine(index int) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.quarantined[uid-m.uidBase] = true
+	m.quarantined[index] = true
 	for _, quarantined := range m.quarantined {
 		if !quarantined {
 			return false
 		}
 	}
 	return true
+}
+
+func (m *SlotManager) isQuarantined(index int) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.quarantined[index]
 }
 
 // ActiveCount returns the number of currently occupied slots.
@@ -143,39 +146,37 @@ func (m *SlotManager) ActiveCount() int {
 // SysOps groups OS-level operations used for uid isolation so unit tests can
 // verify uid-mode paths without running as root.
 type SysOps struct {
-	FilesystemSize func(string) (uint64, error)
-	ReadMemoryMax  func() ([]byte, error)
-	Stat           func(string) (os.FileInfo, error) // Lstat semantics for session paths.
-	Chown          func(string, int, int) error
-	Fchown         func(*os.File, int, int) error
-	Kill           func(int, syscall.Signal) error
-	ListUIDProcs   func(uid int) ([]int, error)
-	CredentialFor  func(uid, gid int) *syscall.Credential
-	FileUID        func(os.FileInfo) (int, bool)
+	FilesystemCapacity func(string) (size, inodes uint64, err error)
+	cgroups            cgroupFS
+	Stat               func(string) (os.FileInfo, error) // Lstat semantics for session paths.
+	Chown              func(string, int, int) error
+	Fchown             func(*os.File, int, int) error
+	Kill               func(int, syscall.Signal) error
+	CredentialFor      func(uid, gid int) *syscall.Credential
+	FileUID            func(os.FileInfo) (int, bool)
 }
 
-// DefaultSysOps returns production OS operations backed by Linux syscalls and /proc.
+// DefaultSysOps returns production OS operations backed by Linux syscalls and cgroupfs.
 func DefaultSysOps() SysOps {
 	return SysOps{
-		FilesystemSize: filesystemSize,
-		ReadMemoryMax:  func() ([]byte, error) { return os.ReadFile(containerMemoryMax) },
-		Stat:           os.Lstat,
-		Chown:          os.Chown,
-		Fchown:         (*os.File).Chown,
-		Kill:           syscall.Kill,
-		ListUIDProcs:   func(uid int) ([]int, error) { return listUIDProcsIn("/proc", uid) },
-		CredentialFor:  defaultCredentialFor,
-		FileUID:        defaultFileUID,
+		FilesystemCapacity: filesystemCapacity,
+		cgroups:            defaultCgroupFS(),
+		Stat:               os.Lstat,
+		Chown:              os.Chown,
+		Fchown:             (*os.File).Chown,
+		Kill:               syscall.Kill,
+		CredentialFor:      defaultCredentialFor,
+		FileUID:            defaultFileUID,
 	}
 }
 
 func (o SysOps) withDefaults() SysOps {
 	def := DefaultSysOps()
-	if o.FilesystemSize == nil {
-		o.FilesystemSize = def.FilesystemSize
+	if o.FilesystemCapacity == nil {
+		o.FilesystemCapacity = def.FilesystemCapacity
 	}
-	if o.ReadMemoryMax == nil {
-		o.ReadMemoryMax = def.ReadMemoryMax
+	if o.cgroups.read == nil {
+		o.cgroups = def.cgroups
 	}
 	if o.Stat == nil {
 		o.Stat = def.Stat
@@ -188,9 +189,6 @@ func (o SysOps) withDefaults() SysOps {
 	}
 	if o.Kill == nil {
 		o.Kill = def.Kill
-	}
-	if o.ListUIDProcs == nil {
-		o.ListUIDProcs = def.ListUIDProcs
 	}
 	if o.CredentialFor == nil {
 		o.CredentialFor = def.CredentialFor
@@ -218,66 +216,6 @@ func defaultFileUID(fi os.FileInfo) (int, bool) {
 		return 0, false
 	}
 	return int(st.Uid), true
-}
-
-// listUIDProcsIn scans procDir (normally "/proc") for every numeric PID whose
-// status file's Uid line includes targetUID in any of real/effective/saved/fs UID.
-func listUIDProcsIn(procDir string, targetUID int) ([]int, error) {
-	pids, err := listProcPIDs(procDir)
-	if err != nil {
-		return nil, err
-	}
-	var owned []int
-	for _, pid := range pids {
-		data, err := os.ReadFile(filepath.Join(procDir, strconv.Itoa(pid), "status"))
-		if err != nil {
-			if procGone(err) {
-				continue
-			}
-			return nil, err
-		}
-		if statusMatchesUID(string(data), targetUID) {
-			owned = append(owned, pid)
-		}
-	}
-	return owned, nil
-}
-
-func listProcPIDs(procDir string) ([]int, error) {
-	entries, err := os.ReadDir(procDir)
-	if err != nil {
-		return nil, fmt.Errorf("sshdemo: read %s: %w", procDir, err)
-	}
-	var pids []int
-	for _, entry := range entries {
-		if entry.IsDir() {
-			if pid, err := strconv.Atoi(entry.Name()); err == nil && pid > 0 {
-				pids = append(pids, pid)
-			}
-		}
-	}
-	return pids, nil
-}
-
-func procGone(err error) bool {
-	return errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH)
-}
-
-func statusMatchesUID(statusText string, targetUID int) bool {
-	for _, line := range strings.Split(statusText, "\n") {
-		if !strings.HasPrefix(line, "Uid:") {
-			continue
-		}
-		fields := strings.Fields(strings.TrimPrefix(line, "Uid:"))
-		for _, f := range fields {
-			v, err := strconv.Atoi(f)
-			if err == nil && v == targetUID {
-				return true
-			}
-		}
-		return false
-	}
-	return false
 }
 
 // checkSessionsDir verifies that sessionsDir satisfies isolation requirements:

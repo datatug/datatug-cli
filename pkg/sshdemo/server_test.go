@@ -957,11 +957,15 @@ func TestServer_UIDModeFullSessionAndErrorPaths(t *testing.T) {
 		credUIDs = append(credUIDs, uid)
 		return nil
 	}
-	ops.ListUIDProcs = func(int) ([]int, error) { return nil, nil }
+	root, cgfs := fakeCgroupMount(t)
+	ops.cgroups = cgfs
+	ops.FilesystemCapacity = ampleSessionFilesystem
+	restoreSpawn := emulateSlotSpawn(t)
 
 	h := startTestServer(t, func(c *Config) {
 		c.Isolation = IsolationUID
 		c.UIDBase = 21000
+		c.CgroupRoot = root
 		c.SessionsDir = sessDir
 		c.SkipTemplate = false
 		c.Repo = repoDir
@@ -988,12 +992,14 @@ func TestServer_UIDModeFullSessionAndErrorPaths(t *testing.T) {
 	}
 	_ = sess.Close()
 	waitNoSessionDirs(t, sessDir, 3*time.Second)
-	if len(credUIDs) < 2 || credUIDs[0] != 21000 || credUIDs[1] != 21000 {
-		t.Fatalf("expected CredentialFor(21000) for child & cleanup, got %v", credUIDs)
+	if len(credUIDs) != 3 || credUIDs[0] != 21000 || credUIDs[1] != 21000 || credUIDs[2] != 21000 {
+		t.Fatalf("expected CredentialFor(21000) for probe, child, and cleanup, got %v", credUIDs)
 	}
 	if len(chowned) != 4 || !slaveChowned {
 		t.Fatalf("expected four workspace path chowns and a slave descriptor chown, got %v / %v", chowned, slaveChowned)
 	}
+
+	restoreSpawn()
 
 	// 2. Malformed pty-req and window-change payloads are refused.
 	ch, reqs, err := dialSSH(t, h.addr, "uid-user").OpenChannel("session", nil)
@@ -1023,7 +1029,7 @@ func TestServer_UIDModeFullSessionAndErrorPaths(t *testing.T) {
 	hForce.stop()
 	waitNoSessionDirs(t, hForce.sessionsDir, 3*time.Second)
 
-	// 4. Child start failure (nonexistent executable) cleans up workspace and releases slot.
+	// 4. A missing executable fails both the child start and the workspace cleanup.
 	hBadExec := startTestServer(t, func(c *Config) {
 		c.Executable = filepath.Join(t.TempDir(), "does-not-exist")
 		c.ExecPrefixArgs = nil
@@ -1033,11 +1039,10 @@ func TestServer_UIDModeFullSessionAndErrorPaths(t *testing.T) {
 	_ = bs.RequestPty("xterm-256color", 24, 80, gossh.TerminalModes{})
 	_ = bs.Shell()
 	_ = bs.Wait()
-	// Because cleanup command also uses the missing executable, the workspace is not emptied
-	// so the slot MUST be retained (fail closed)!
-	waitLogContains(t, hBadExec.logs, "retaining slot because cleanup did not complete cleanly", 3*time.Second)
-	if hBadExec.srv.slots.ActiveCount() != 1 {
-		t.Fatalf("expected slot retained on failed cleanup, active=%d", hBadExec.srv.slots.ActiveCount())
+	// The cleanup executable was unavailable, so quarantine the slot.
+	waitLogContains(t, hBadExec.logs, "quarantining session slot", 3*time.Second)
+	if !hBadExec.srv.slots.isQuarantined(0) {
+		t.Fatal("unverified cleanup did not quarantine slot")
 	}
 
 	// 5. NewServer & RunServer & Serve error paths.

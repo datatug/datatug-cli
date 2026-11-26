@@ -11,14 +11,17 @@ Host TCP 2222 (published to edge)
     |
     v
 edge :2222 ---- SSH + PROXY v2 over internal bridge ----> demo :2222
-edge :3128 <--------- HTTP CONNECT from demo and sessions ---------+
+edge CONNECT socket <-------- Unix socket -------- supervisor relay
+    |                                                     ^
     |                                                             |
     +--> Internet :443 via public bridge                   Same-binary PTY children
 ```
 
 The edge joins the public and internal bridges. It forwards SSH with a PROXY v2 header so that the supervisor can enforce per-client-IP quotas. Its CONNECT proxy allows TCP 443 for exactly `github.com`, `api.github.com`, `codeload.github.com` and `cloud.openvaultdb.com`. The proxy rejects IP literals and unsafe resolved addresses. Only SSH is published on the host.
 
-The supervisor and session children attach only to the internal bridge. The supervisor trusts PROXY headers from `172.31.250.2/32` (edge). The demo service uses `172.31.250.3`. Child HTTPS clients use a loopback CONNECT relay that authenticates each session and gives it up to eight concurrent tunnels. The edge requires the supervisor credential for requests from the demo IP. The supervisor publishes this credential at startup in a shared volume with group read access for the edge and no access for visitor UIDs. Keeping public ingress and egress on the edge gives the supervisor's network namespace no direct route to the internet. `internal: true` alone is not enough: the host keeps an address on the bridge, and every host service that listens on all interfaces (admin sshd included) would be reachable from the demo. The internal bridge therefore uses Docker's isolated gateway mode (Engine 28+), so the host has no address on it. The integration test checks that the gateway address does not answer. Both services use the same image and run different DataTug subcommands.
+The supervisor and session children attach only to the internal bridge. The supervisor trusts PROXY headers from `172.31.250.2/32` (edge). The demo service uses `172.31.250.3`. Child HTTPS clients use an authenticated loopback CONNECT relay. Before HTTP reads, the relay resolves the connecting socket's UID from `/proc/net/tcp` or `/proc/net/tcp6` and admits up to 16 sockets per slot UID, including incomplete requests. Each session also gets up to eight concurrent CONNECT tunnels. The template uses a temporary supervisor-only relay.
+
+The relay reaches edge CONNECT over `/run/datatug-demo/proxy/connect.sock` in a named volume. The edge owns the directory as UID 10001 and GID 0 with mode `0750`. The socket has mode `0666`, and directory traversal restricts access to the edge and the supervisor. The supervisor mounts the volume read-only. This transport removes the need for a shared proxy credential. The internal bridge uses Docker's isolated gateway mode (Engine 28+) so the bridge gives the host no address and the demo has no direct internet route. Both services use the same image and run different DataTug subcommands.
 
 ## Process isolation
 
@@ -29,18 +32,28 @@ Both services drop all capabilities and enable `no-new-privileges` and a read-on
 | `SETUID` | Start each session and its cleanup process under the allocated slot uid. |
 | `SETGID` | Assign the slot gid and clear supplementary groups. |
 | `CHOWN` | Assign the workspace and PTY slave to the slot identity. |
-| `KILL` | Terminate process groups and stray processes belonging to a slot uid before reusing it. |
+| `KILL` | Signal the session leader for graceful termination before draining its cgroup. |
 
 The base image's setuid and setgid bits are stripped. A session runs with an unprivileged uid and gid in its own mode-`0700` directory. The Linux uid boundary protects other sessions and the host key. World-readable image files and the public template are visible to sessions.
 
 ## Storage and startup
 
 - The `state` volume at `/var/lib/datatug-demo/state` holds the mode-`0600` Ed25519 host key and the public project template. It survives restarts and container replacement. The supervisor shallow-clones the canonical project on each start, installs the bundled fixture when needed, invokes `datatug demo ssh-session --prepare-template`, then replaces the template after preparation succeeds.
-- The root-owned, mode-`0711` sessions tmpfs at `/var/lib/datatug-demo/sessions` holds per-visitor homes and clones. It defaults to 1 GiB and 330,000 inodes across all sessions, sized for six sessions at 50,000 workspace entries each plus 10% headroom. When changing `DEMO_MAX_SESSIONS`, set `DEMO_SESSIONS_TMPFS_INODES` to the new session count multiplied by 55,000. The supervisor releases a slot after cleanup, and stopping the container also discards the tmpfs.
+- The root-owned, mode-`0711` sessions tmpfs at `/var/lib/datatug-demo/sessions` holds per-visitor homes and clones. It defaults to 3,591 MiB and 6,684,672 inodes. Size it at the sum of the slot `memory.max` values plus 10%, rounded up, with at least one inode per 512 bytes of that sum. Change both mount limits when changing `DEMO_MAX_SESSIONS`. The supervisor releases a slot after cleanup, and stopping the container also discards the tmpfs.
 - A separate 64 MiB tmpfs supplies `/tmp`. It is root-only (mode 0755), so nothing a visitor writes outlives the session: each session has a private `TMPDIR` inside its workspace. The build needs no credential.
 
-## Resource budgets and lifecycle
+## Cgroup delegation and lifecycle
 
-The supervisor defaults to six concurrent shells, twelve concurrent authenticated SSH connections, two connections per client IP, a 20-second handshake timeout, a 15-minute idle timeout and a 60-minute session deadline. Session processes inherit the cgroup budget and set their own rlimits for address space, CPU time, file size, descriptors, per-uid process count and core dumps. The merged cgo implementation uses an 8 GiB virtual address limit and a 256 MiB Go memory target to allow for startup address reservations and resident memory use. Individual sessions share the container CPU quota.
+The host needs cgroup v2 with `nsdelegate`, the Docker systemd cgroup driver, and the private container cgroup namespace. It also needs Linux support for `clone3(CLONE_INTO_CGROUP)`, `cgroup.kill`, and the `oom_group_kill` memory event. The demo uses a seccomp profile that permits Go's `clone3` call and otherwise preserves Docker's defaults. The host policy must restrict unprivileged user namespace creation. See the [operator runbook](../../../deploy/ssh-demo/README.md#host-requirements) for setup.
 
-Compose defaults to a 3,776 MiB memory cap, a 1 GiB sessions tmpfs, two CPUs and 2,048 PIDs for the supervisor and its children. Startup checks the configured disk budgets against the sessions filesystem size and the combined memory and disk budgets plus a 512 MiB reserve against the cgroup memory limit. The default budgets are 384 MiB RSS and 160 MiB tmpfs per session. The edge gets 256 MiB and half a CPU. A container init reaps orphaned processes in the supervisor container and Compose gives it 20 seconds to stop. Both services use restart policies, SSH banner health checks and rotated JSON logs. The edge probe reaches the supervisor through PROXY v2. The supervisor's probe connects over loopback.
+Docker creates the dedicated `datatugdemo.slice` on first start. Compose bind-mounts only `/sys/fs/cgroup/datatugdemo.slice` at `/run/datatug-demo/cgroup`. The supervisor finds its own Docker scope by its namespace PID, moves scope processes into `supervisor/`, enables the memory and PID controllers, and configures one `slot-N/` leaf per slot. The child is born into its slot through `clone3`; descendants inherit it. At startup and session exit the supervisor uses `cgroup.kill` and waits for `populated 0` before cleaning the workspace and releasing the slot. An unverified slot remains quarantined.
+
+A compromised supervisor controls cgroups and processes inside its own scope. With the specified `nsdelegate` setup and capability set, the observed effect outside the scope was limited to empty sibling cgroups under the dedicated slice. A compromised supervisor could create or modify those empty cgroups. It could neither move a process outside its scope nor change its scope's own `memory.max`. Keep the slice exclusive to the deployment.
+
+## Resource budgets
+
+The supervisor defaults to six shells, twelve concurrent authenticated SSH connections, two connections per client IP, a 20-second handshake timeout, a 15-minute idle timeout and a 60-minute session deadline. Each session gets a hard 544 MiB combined memory and tmpfs cap (`memory.max`), zero swap and 256 processes or threads. It also sets rlimits for address space, CPU time, file size, descriptors, per-UID process count and core dumps. The Go heap target is 256 MiB and the address-space ceiling is 8 GiB. The supervisor sends a notice near the hard cap and a termination message when the kernel records an OOM group kill.
+
+Compose defaults to a 3,776 MiB scope limit, 3,591 MiB sessions tmpfs, two CPUs and 2,048 PIDs. Startup requires a finite scope memory limit covering all slot caps plus 512 MiB for the supervisor and cleanup. It reads the sessions filesystem's block and inode totals with `statfs` and refuses startup if either is below the sizing formula. The edge gets 256 MiB and half a CPU. A container init reaps orphans and Compose allows 20 seconds to stop. Both services use restart policies, SSH banner health checks and rotated JSON logs.
+
+The sessions tmpfs sizing accounts for per-slot page and inode metadata charges. The separate `/dev/shm` mount still has its own shared capacity. CPU capacity, loopback accept and lookup work, global PID capacity, proxy capacity, and the kernel remain shared. The supervisor, template preparation, and container-level infrastructure consume the reserve and can still encounter an outer OOM if their usage exceeds it. A kernel or container-runtime vulnerability can defeat the containment model.

@@ -32,6 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin datatug \
     && mkdir -p /var/lib/datatug-demo/state /var/lib/datatug-demo/sessions \
     && chmod 0711 /var/lib/datatug-demo/sessions \
+    && install -d -o 10001 -g 0 -m 0750 /run/datatug-demo/proxy \
     && find / -xdev -perm /6000 -type f -exec chmod a-s {} +
 COPY --from=build /out/datatug /usr/local/bin/datatug
 

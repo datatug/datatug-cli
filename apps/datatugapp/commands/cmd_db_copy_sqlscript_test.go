@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
-	"syscall"
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
@@ -30,8 +29,6 @@ func sqlscript(path string, query string) string {
 }
 
 func TestSQLScriptWritesAScriptAndReports(t *testing.T) {
-	old := syscall.Umask(0o022)
-	defer syscall.Umask(old)
 	src := scriptSource(t)
 	out := filepath.Join(t.TempDir(), "new", "dir", "out.sql")
 	_, stderr, err := runCopy(t, "db", "copy", "--from", src, "--to", sqlscript(out, "&name=demo&license=MIT&edition=Edition%20X"))

@@ -190,8 +190,8 @@ github.com/dal-go/dalgo2postgres v0.10.1 h1:M3Vpd2LhpkNP8RRQZa4wb36ihyhn+EEPWkMt
 github.com/dal-go/dalgo2postgres v0.10.1/go.mod h1:jiwyaLzKeICdOjju15i6qXr3/keDbtuQVVIHPJP4+58=
 github.com/dal-go/dalgo2postgrest v0.0.0-20261027220602-b8d31e8c335c h1:fYZabkDfiAM61Mhtk0ZgChsWi8cG7UCLABwoRGXTmDc=
 github.com/dal-go/dalgo2postgrest v0.0.0-20261027220602-b8d31e8c335c/go.mod h1:ToqDjSKp3+Py40uLFdj4g7lcLw1DHDsW4KrYEmaXE6Q=
-github.com/dal-go/dalgo2redis v0.1.1-0.20261125224958-d27ed5467763 h1:EDRm+P6pn/B4a/cFmTRNRElH5x93XnEmvPMzI32n/Yg=
-github.com/dal-go/dalgo2redis v0.1.1-0.20261125224958-d27ed5467763/go.mod h1:gXr+RS0bjjgo+JvtExp2rtwokeNtwE5zXtqEP96gKss=
+github.com/dal-go/dalgo2redis v0.1.1 h1:sJV4you57o9tlSDbI46t3Ae0Eru0W03aHVj5ZvC7IdY=
+github.com/dal-go/dalgo2redis v0.1.1/go.mod h1:gXr+RS0bjjgo+JvtExp2rtwokeNtwE5zXtqEP96gKss=
 github.com/dal-go/dalgo2snowflake v0.0.0-20261102131450-918fc72d4976 h1:XtUnIVOc2pcLp8KpBgFA3OpkIv+w78fGvnFB7jz/TOA=
 github.com/dal-go/dalgo2snowflake v0.0.0-20261102131450-918fc72d4976/go.mod h1:bzvbFc2Fr5zbFF8mL3M3J6Ed/RKz86VvwAWOM8b9ac4=
 github.com/dal-go/dalgo2sql v0.32.2 h1:srkabNALS44YN5lMHs5Uc/GzPXDj5uNNPXh0j1Zag+s=

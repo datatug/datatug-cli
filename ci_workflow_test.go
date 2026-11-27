@@ -130,7 +130,7 @@ func TestCIScopesAreDeclared(t *testing.T) {
 		}
 	}
 	for _, use := range strings.Split(string(raw), "needs.changes.outputs.")[1:] {
-		name := use[:strings.IndexFunc(use, func(r rune) bool { return !(r >= 'a' && r <= 'z' || r == '-' || r == '_') })]
+		name := use[:strings.IndexFunc(use, func(r rune) bool { return (r < 'a' || r > 'z') && r != '-' && r != '_' })]
 		if _, ok := declared[name]; !ok {
 			t.Errorf("a job reads needs.changes.outputs.%s, which the changes job does not declare", name)
 		}

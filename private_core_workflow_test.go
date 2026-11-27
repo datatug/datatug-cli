@@ -73,6 +73,9 @@ func TestPrivateCoreAuthPrecedesEveryLocalGoJob(t *testing.T) {
 				}
 				if auth < 0 && step.Uses == "./.github/actions/private-core" {
 					auth = i
+					if step.If != "" {
+						t.Errorf("%s job %s authenticates private Core only if %q", file, name, step.If)
+					}
 				}
 			}
 			if setup < 0 {

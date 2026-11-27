@@ -71,6 +71,13 @@ out=$(bash "$script" "$base")
 expect mysql true "$out"
 expect redis false "$out"
 
+label="non-Go dbcopy fixture selects SQL Server and Oracle"
+change pkg/dbcopy/filter/testdata/full.yaml
+out=$(bash "$script" "$base")
+expect mssql true "$out"
+expect oracle true "$out"
+expect redis false "$out"
+
 label="workflow change selects everything"
 change .github/workflows/golangci.yml
 out=$(bash "$script" "$base")

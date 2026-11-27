@@ -27,7 +27,6 @@ on:
   pull_request:
     branches:
       - '**'
-  workflow_dispatch:
 
 env:
   GOPRIVATE: github.com/datatug/datatug-core
@@ -64,9 +63,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # A pull request is checked out as its merge commit, whose first
-          # parent is the base tip; a merge to main has the old tip as first
-          # parent. Depth 2 has both. Anything deeper is missing, and a
-          # missing base selects every scope.
+          # parent is the base tip, so depth 2 has the base.
           fetch-depth: 2
           persist-credentials: false
       - name: Scope script regression and shellcheck
@@ -77,13 +74,14 @@ jobs:
           shellcheck -x scripts/ci-scope.sh scripts/test-ci-scope.sh
       - name: Determine scopes
         id: scope
-        env:
-          PUSH_BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
+          # A pull request runs what its diff selects. A push to main runs
+          # every scope: it is the commit the release gates on, and a narrow
+          # push (docs only) on top of an earlier commit whose run failed or
+          # is still running must not release that commit's code unchecked.
           case "$GITHUB_EVENT_NAME" in
             pull_request) base=HEAD^1 ;;
-            push) base="$PUSH_BEFORE" ;;
             *) base= ;;
           esac
           bash scripts/ci-scope.sh "$base" | tee -a "$GITHUB_OUTPUT"
@@ -425,13 +423,14 @@ jobs:
 
   # MySQL 8.4 (SQL-script export loaded into a real server, the cross-engine
   # verifier, then scan/query/saved queries) and ClickHouse (bounded server,
-  # command journey).
+  # command journey). Each journey keeps its own deadline and proves its owned
+  # container is gone before the next one starts.
   journeys-sql:
     name: Journeys (MySQL, ClickHouse)
     needs: changes
     if: needs.changes.outputs.mysql == 'true' || needs.changes.outputs.clickhouse == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Authenticate private Core dependency
@@ -444,35 +443,42 @@ jobs:
           cache: true
       - name: MySQL readiness regression (no Docker)
         if: needs.changes.outputs.mysql == 'true'
+        timeout-minutes: 5
         run: bash scripts/check-mysql-readiness.sh
       - name: MySQL journey
         if: needs.changes.outputs.mysql == 'true'
+        timeout-minutes: 40
         env:
           CGO_ENABLED: '1'
           # mysql:8.4 on 2026-10-16.
           MYSQL_IMAGE: mysql:8.4@sha256:24989179f58856db763f418010c1169fecc944e3ec1ea7e921572d83eb070f70
         run: ./scripts/check-journey-mysql.sh
+      - name: Owned MySQL container removed
+        if: always() && needs.changes.outputs.mysql == 'true'
+        timeout-minutes: 2
+        run: bash scripts/check-no-owned-containers.sh datatug-journey-mysql-
       - name: ClickHouse journey
         if: ${{ !cancelled() && needs.changes.outputs.clickhouse == 'true' }}
+        timeout-minutes: 15
         env:
           GOMAXPROCS: '2'
           GOFLAGS: '-p=2'
         run: bash scripts/check-journey-clickhouse.sh
-      - name: Prove owned ClickHouse fixture cleanup
+      - name: Owned ClickHouse container removed
         if: always() && needs.changes.outputs.clickhouse == 'true'
-        run: |
-          set -euo pipefail
-          containers=$(docker ps -aq --filter 'name=datatug-cli-clickhouse-')
-          test -z "$containers" || { echo 'Owned ClickHouse fixture remains'; exit 1; }
+        timeout-minutes: 2
+        run: bash scripts/check-no-owned-containers.sh datatug-cli-clickhouse-
 
-  # Account-free HTTP sources: PostgREST (Compose project), CouchDB and libSQL,
-  # each against a disposable server that its script owns and removes.
+  # Sources whose script starts and owns a disposable server on a random
+  # loopback port: PostgREST (Compose project), CouchDB, libSQL and Typesense.
+  # Each journey keeps its own deadline and proves its owned container is gone
+  # before the next one starts.
   journeys-http:
-    name: Journeys (PostgREST, CouchDB, libSQL)
+    name: Journeys (PostgREST, CouchDB, libSQL, Typesense)
     needs: changes
-    if: needs.changes.outputs.postgrest == 'true' || needs.changes.outputs.couchdb == 'true' || needs.changes.outputs.libsql == 'true'
+    if: needs.changes.outputs.postgrest == 'true' || needs.changes.outputs.couchdb == 'true' || needs.changes.outputs.libsql == 'true' || needs.changes.outputs.typesense == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Authenticate private Core dependency
@@ -490,18 +496,28 @@ jobs:
         if: needs.changes.outputs.libsql == 'true'
         with:
           node-version: '26'
-      - name: Fixture lifecycle regression
-        run: bash scripts/test-fixture-lifecycle.sh
+      - name: Fixture lifecycle regressions
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          bash scripts/test-fixture-lifecycle.sh
+          bash scripts/test-typesense-lifecycle.sh
       - name: Script syntax and shellcheck
+        timeout-minutes: 3
         run: |
           set -euo pipefail
           scripts=(
+            scripts/check-no-owned-containers.sh
             scripts/check-journey-postgrest.sh
             scripts/check-journey-couchdb.sh
             scripts/test-fixture-lifecycle.sh
             scripts/lib/fixture-lifecycle.sh
             scripts/check-journey-libsql.sh
             scripts/lib/libsql-cli-journey.sh
+            scripts/check-journey-typesense.sh
+            scripts/test-typesense-lifecycle.sh
+            scripts/lib/typesense-fixture-lifecycle.sh
+            scripts/lib/typesense-cli-journey.sh
           )
           for script in "${scripts[@]}"; do
             bash -n "$script"
@@ -513,6 +529,7 @@ jobs:
           shellcheck -x "${scripts[@]}"
       - name: PostgREST journey
         if: needs.changes.outputs.postgrest == 'true'
+        timeout-minutes: 25
         env:
           CGO_ENABLED: '1'
         run: |
@@ -527,6 +544,7 @@ jobs:
           grep -qF -- 'owned project and volume removed' "$log"
       - name: CouchDB journey
         if: ${{ !cancelled() && needs.changes.outputs.couchdb == 'true' }}
+        timeout-minutes: 25
         env:
           CGO_ENABLED: '1'
         run: |
@@ -534,8 +552,13 @@ jobs:
           log="$RUNNER_TEMP/couchdb-journey.log"
           bash scripts/check-journey-couchdb.sh 2>&1 | tee "$log"
           grep -qF -- 'couchdb journey passed:' "$log"
+      - name: Owned CouchDB container removed
+        if: always() && needs.changes.outputs.couchdb == 'true'
+        timeout-minutes: 2
+        run: bash scripts/check-no-owned-containers.sh datatug-cli-couchdb-
       - name: libSQL journey
         if: ${{ !cancelled() && needs.changes.outputs.libsql == 'true' }}
+        timeout-minutes: 25
         env:
           CGO_ENABLED: '1'
         run: |
@@ -547,33 +570,37 @@ jobs:
           grep -qF -- 'libsql journey passed:' "$log"
           grep -qF -- 'teardown: containerRemoved=true' "$log"
           grep -qF -- 'libsql journey PASS:' "$log"
-      - name: Owned fixture containers removed
-        if: always()
+      - name: Owned libSQL container removed
+        if: always() && needs.changes.outputs.libsql == 'true'
+        timeout-minutes: 2
+        run: bash scripts/check-no-owned-containers.sh dalgo-libsql-fixture-
+      - name: Typesense journey
+        if: ${{ !cancelled() && needs.changes.outputs.typesense == 'true' }}
+        timeout-minutes: 25
+        env:
+          CGO_ENABLED: '1'
         run: |
           set -euo pipefail
-          # Each journey removes its exact owned container in its EXIT trap. This
-          # proves the receipts above describe a cleanup that really happened,
-          # and never prunes another worker's Docker objects.
-          status=0
-          for prefix in datatug-cli-couchdb- dalgo-libsql-fixture-; do
-            if docker ps -aq --filter "name=$prefix" | grep -q .; then
-              docker ps -a --filter "name=$prefix"
-              echo "an owned $prefix container was not removed" >&2
-              status=1
-            fi
-          done
-          exit "$status"
+          log="$RUNNER_TEMP/typesense-journey.log"
+          bash scripts/check-journey-typesense.sh 2>&1 | tee "$log"
+          grep -qF -- 'Go command journey passed' "$log"
+          grep -qF -- 'typesense CLI journey passed:' "$log"
+          grep -qF -- 'typesense journey passed:' "$log"
+      - name: Owned Typesense container removed
+        if: always() && needs.changes.outputs.typesense == 'true'
+        timeout-minutes: 2
+        run: bash scripts/check-no-owned-containers.sh datatug-cli-typesense- label=datatug.fixture
 
-  # MongoDB and Redis as job services, Typesense as a container its script
-  # owns. On ubuntu-22.04: the mongo service hit SERVER-121912's kernel guard on
-  # ubuntu-latest, and 22.04 hosted runners keep the supported 6.8 kernel series
-  # (https://jira.mongodb.org/browse/SERVER-125742).
-  journeys-nosql:
-    name: Journeys (MongoDB, Redis, Typesense)
+  # MongoDB and Redis as job services. On ubuntu-22.04: the mongo service hit
+  # SERVER-121912's kernel guard on ubuntu-latest, and 22.04 hosted runners keep
+  # the supported 6.8 kernel series (https://jira.mongodb.org/browse/SERVER-125742).
+  # Both services start for the job whichever is in scope; they are small.
+  journeys-services:
+    name: Journeys (MongoDB, Redis)
     needs: changes
-    if: needs.changes.outputs.mongodb == 'true' || needs.changes.outputs.redis == 'true' || needs.changes.outputs.typesense == 'true'
+    if: needs.changes.outputs.mongodb == 'true' || needs.changes.outputs.redis == 'true'
     runs-on: ubuntu-22.04
-    timeout-minutes: 45
+    timeout-minutes: 30
     services:
       mongodb:
         image: mongo:9.0
@@ -597,68 +624,22 @@ jobs:
           cache: true
       - name: MongoDB journey
         if: needs.changes.outputs.mongodb == 'true'
+        timeout-minutes: 15
         env:
           DATATUG_TEST_MONGODB_URI: mongodb://127.0.0.1:27017/dalgo_cli_test
           MONGODB_TEST_URI: mongodb://127.0.0.1:27017/dalgo_mongo_test
         run: go test ./apps/datatugapp/commands ./pkg/dbcopy -run 'TestMongoDB' -count=1
       - name: Wired Cobra Redis journey and write refusal
         if: ${{ !cancelled() && needs.changes.outputs.redis == 'true' }}
+        timeout-minutes: 15
         env:
           REDIS_TEST_URL: redis://localhost:6379/0
         run: go test -race ./apps/datatugapp/commands -run '^TestQueryRedis' -count=1 -v
-      - name: Typesense fixture lifecycle regression
-        if: ${{ !cancelled() && needs.changes.outputs.typesense == 'true' }}
-        run: bash scripts/test-typesense-lifecycle.sh
-      - name: Typesense script syntax and shellcheck
-        if: ${{ !cancelled() && needs.changes.outputs.typesense == 'true' }}
-        run: |
-          set -euo pipefail
-          scripts=(
-            scripts/check-journey-typesense.sh
-            scripts/test-typesense-lifecycle.sh
-            scripts/lib/typesense-fixture-lifecycle.sh
-            scripts/lib/typesense-cli-journey.sh
-          )
-          for script in "${scripts[@]}"; do
-            bash -n "$script"
-          done
-          command -v shellcheck >/dev/null || { echo "shellcheck is not installed on this runner" >&2; exit 1; }
-          shellcheck --version
-          shellcheck -x "${scripts[@]}"
-      - name: Typesense journey
-        if: ${{ !cancelled() && needs.changes.outputs.typesense == 'true' }}
-        env:
-          CGO_ENABLED: '1'
-        run: |
-          set -euo pipefail
-          log="$RUNNER_TEMP/typesense-journey.log"
-          bash scripts/check-journey-typesense.sh 2>&1 | tee "$log"
-          grep -qF -- 'Go command journey passed' "$log"
-          grep -qF -- 'typesense CLI journey passed:' "$log"
-          grep -qF -- 'typesense journey passed:' "$log"
-      - name: Owned Typesense container removed
-        if: always() && needs.changes.outputs.typesense == 'true'
-        run: |
-          set -euo pipefail
-          # Runs even after a failed journey, so a leaked fixture is reported
-          # instead of hidden.
-          filters=(--filter 'name=datatug-cli-typesense-' --filter 'label=datatug.fixture')
-          listing_status=0
-          listing=$(docker ps -aq "${filters[@]}") || listing_status=$?
-          if [ "$listing_status" != 0 ]; then
-            echo "docker ps failed with status $listing_status; the owned Typesense container's absence is unproven" >&2
-            exit 1
-          fi
-          if [ -n "$listing" ]; then
-            docker ps -a "${filters[@]}"
-            echo "the owned Typesense container was not removed" >&2
-            exit 1
-          fi
-          echo "no datatug-cli-typesense- container remains"
 
   # The ONLY check branch protection requires. `if: always()` (not
-  # `!cancelled()`): a cancelled run must report a failed gate, never a skipped
-  # one, because GitHub treats a skipped required check as passed.
+  # `!cancelled()`): when the gate runs it must evaluate every result, and a
+  # cancelled run must not report it as skipped, which GitHub treats as a
+  # passed required check. A gate that never ran is absent, not passed.
   ci-ok:
     name: ci-ok
     if: always()
@@ -674,7 +655,7 @@ jobs:
       - journey-mssql
       - journeys-sql
       - journeys-http
-      - journeys-nosql
+      - journeys-services
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -687,10 +668,14 @@ jobs:
         run: |
           set -euo pipefail
           jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<<"$NEEDS"
-          bad=$(jq -r --arg always "$ALWAYS" '($always | split(" ")) as $a
+          # When every scope is selected (every push to main), no job may be
+          # skipped: a scoped job that skips then has a broken condition, and
+          # this catches it before the release.
+          all=$(jq -r '.changes.outputs // {} | (length > 0 and all(.[]; . == "true"))' <<<"$NEEDS")
+          bad=$(jq -r --arg always "$ALWAYS" --argjson all "$all" '($always | split(" ")) as $a
             | [to_entries[]
                | select(.value.result != "success")
-               | select((.key | IN($a[])) or .value.result != "skipped")
+               | select($all or (.key | IN($a[])) or .value.result != "skipped")
                | .key] | join(", ")' <<<"$NEEDS")
           if [ -n "$bad" ]; then
             echo "::error title=CI not green::$bad"

@@ -61,16 +61,23 @@ func TestCIGateWaitsForEveryJob(t *testing.T) {
 			t.Errorf("job %s is scoped, so ci-ok must accept it as skipped", name)
 		}
 	}
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq is not installed; the gate script needs it (GitHub-hosted runners have it)")
+	}
+	const narrow = `"outputs":{"code":"true","redis":"false"}`
+	const all = `"outputs":{"code":"true","redis":"true"}`
 	for _, c := range []struct {
 		name  string
 		needs string
 		want  int
 	}{
-		{"all green", `{"changes":{"result":"success"},"pure-go":{"result":"success"},"native":{"result":"success"}}`, 0},
-		{"scoped job out of scope", `{"changes":{"result":"success"},"pure-go":{"result":"success"},"native":{"result":"skipped"}}`, 0},
-		{"always job skipped", `{"changes":{"result":"success"},"pure-go":{"result":"skipped"},"native":{"result":"success"}}`, 1},
-		{"scope job failed", `{"changes":{"result":"failure"},"pure-go":{"result":"success"},"native":{"result":"skipped"}}`, 1},
-		{"scoped job cancelled", `{"changes":{"result":"success"},"pure-go":{"result":"success"},"native":{"result":"cancelled"}}`, 1},
+		{"all green", `{"changes":{"result":"success",` + narrow + `},"pure-go":{"result":"success"},"native":{"result":"success"}}`, 0},
+		{"scoped job out of scope", `{"changes":{"result":"success",` + narrow + `},"pure-go":{"result":"success"},"native":{"result":"skipped"}}`, 0},
+		{"scoped job skipped although every scope is selected", `{"changes":{"result":"success",` + all + `},"pure-go":{"result":"success"},"native":{"result":"skipped"}}`, 1},
+		{"every scope selected and green", `{"changes":{"result":"success",` + all + `},"pure-go":{"result":"success"},"native":{"result":"success"}}`, 0},
+		{"always job skipped", `{"changes":{"result":"success",` + narrow + `},"pure-go":{"result":"skipped"},"native":{"result":"success"}}`, 1},
+		{"scope job failed", `{"changes":{"result":"failure","outputs":{}},"pure-go":{"result":"success"},"native":{"result":"skipped"}}`, 1},
+		{"scoped job cancelled", `{"changes":{"result":"success",` + narrow + `},"pure-go":{"result":"success"},"native":{"result":"cancelled"}}`, 1},
 	} {
 		cmd := exec.Command("bash", "-c", gate.Steps[0].Run)
 		cmd.Env = append(os.Environ(), "NEEDS="+c.needs, "ALWAYS="+gate.Steps[0].Env["ALWAYS"])
@@ -106,6 +113,11 @@ func TestCIScopesAreDeclared(t *testing.T) {
 		t.Fatal(err)
 	}
 	declared := wf.Jobs["changes"].Outputs
+	for name, value := range declared {
+		if want := "${{ steps.scope.outputs." + name + " }}"; value != want {
+			t.Errorf("changes output %s = %q, want %q", name, value, want)
+		}
+	}
 	script, err := os.ReadFile(filepath.Join("scripts", "ci-scope.sh"))
 	if err != nil {
 		t.Fatal(err)
@@ -127,8 +139,13 @@ func TestCIScopesAreDeclared(t *testing.T) {
 // dispatches at its exact tag, so the two can never drift apart.
 func TestNativeBuildsRunInsideGoCI(t *testing.T) {
 	t.Parallel()
-	if got := readWorkflow(t, ciWorkflow).Jobs["native"].Uses; got != "./.github/workflows/native-release.yml" {
-		t.Fatalf("Go CI native job uses %q", got)
+	native := readWorkflow(t, ciWorkflow).Jobs["native"]
+	if native.Uses != "./.github/workflows/native-release.yml" {
+		t.Fatalf("Go CI native job uses %q", native.Uses)
+	}
+	if native.Secrets != "inherit" {
+		// The native build authenticates to private Core with an inherited secret.
+		t.Fatalf("Go CI native job must pass secrets: inherit, got %v", native.Secrets)
 	}
 	triggers := workflowTriggers(t, "native-release.yml")
 	for _, want := range []string{"workflow_call", "workflow_dispatch"} {
@@ -153,6 +170,11 @@ func TestOnlyGoCIRunsOnPullRequestsAndPushes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	yamlFiles, err := filepath.Glob(filepath.Join(".github", "workflows", "*.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files = append(files, yamlFiles...)
 	for _, file := range files {
 		name := filepath.Base(file)
 		if allowed[name] || strings.HasSuffix(name, ".lock.yml") {

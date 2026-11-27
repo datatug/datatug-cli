@@ -21,7 +21,7 @@ import (
 // The journey of a MySQL source against a REAL server: `datatug scan -D mysql --dsn-env NAME`, then
 // `datatug query run` with a TugQL query on --db env:NAME and with a saved SQL query of the scanned
 // project, with the real commands, the real opener and the real adapter (dalgo2mysql). It runs in one CI
-// job only ("Journey (MySQL 8.4)" of .github/workflows/journey-mysql.yml, which starts a server and sets
+// job only (the MySQL step of "Journeys (MySQL, ClickHouse)" in .github/workflows/golangci.yml, which starts a server and sets
 // DATATUG_TEST_MYSQL_URL) and skips everywhere else. scripts/check-journey-mysql.sh fails the job when a
 // test of it skips or prints no PASS line.
 //

@@ -19,6 +19,7 @@ import (
 // checks its own result by reading the tap back.
 
 type workflowStep struct {
+	ID   string            `yaml:"id"`
 	Name string            `yaml:"name"`
 	Uses string            `yaml:"uses"`
 	If   string            `yaml:"if"`

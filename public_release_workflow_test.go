@@ -98,7 +98,8 @@ func TestDependencyReleaseClassifierAndGateWiring(t *testing.T) {
 	if !reflect.DeepEqual(release.Needs, yamlStrings{"dependency-release"}) || release.With["default_bump"] != "${{ needs.dependency-release.outputs.bump }}" {
 		t.Fatal("dependency classifier must supply only the existing default bump input")
 	}
-	if release.With["require_workflow_success"] != "Go CI\nNative release builds\n" || release.With["require_notarized_macos"] != true || release.With["allow_major_version_bump"] != false {
+	// Go CI includes the native release targets (its native job).
+	if release.With["require_workflow_success"] != "Go CI\n" || release.With["require_workflow_success_timeout_seconds"] != 9000 || release.With["require_notarized_macos"] != true || release.With["allow_major_version_bump"] != false {
 		t.Fatal("dependency releases must retain CI, native, signing and version guards")
 	}
 	cases := []struct{ name, message, want string }{

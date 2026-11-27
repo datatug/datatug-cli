@@ -13,7 +13,7 @@ name: Renovate Copilot fix
 
 on:
   workflow_run:
-    workflows: ["Renovate go-github semantic-major migration", "Go CI", "Journey (SQL Server)", "Journey (MySQL)", "Journey (Oracle)"]
+    workflows: ["Renovate go-github semantic-major migration", "Go CI"]
     types: [completed]
   workflow_dispatch:
     inputs:

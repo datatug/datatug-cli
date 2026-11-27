@@ -4,7 +4,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -64,21 +63,35 @@ func TestPrivateCoreAuthPrecedesEveryLocalGoJob(t *testing.T) {
 		t.Fatal(err)
 	}
 	workflow := string(data)
-	jobs := regexp.MustCompile(`(?m)^  [a-zA-Z0-9_-]+:\n`).Split(workflow, -1)
 	count := 0
-	for _, job := range jobs {
-		if !strings.Contains(job, "uses: actions/setup-go@v7") {
-			continue
-		}
-		count++
-		auth := strings.Index(job, "uses: ./.github/actions/private-core")
-		setup := strings.Index(job, "uses: actions/setup-go@v7")
-		if auth < 0 || auth > setup {
-			t.Fatal("Go job fetches dependencies before private Core authentication")
+	for _, file := range []string{"golangci.yml", "native-release.yml"} {
+		for name, job := range readWorkflow(t, file).Jobs {
+			setup, auth := -1, -1
+			for i, step := range job.Steps {
+				if setup < 0 && strings.HasPrefix(step.Uses, "actions/setup-go@") {
+					setup = i
+				}
+				if auth < 0 && step.Uses == "./.github/actions/private-core" {
+					auth = i
+					if step.If != "" {
+						t.Errorf("%s job %s authenticates private Core only if %q", file, name, step.If)
+					}
+				}
+			}
+			if setup < 0 {
+				continue
+			}
+			count++
+			if auth < 0 || auth > setup {
+				t.Fatalf("%s job %s fetches dependencies before private Core authentication", file, name)
+			}
 		}
 	}
-	if count != 4 {
-		t.Fatalf("expected four independently authenticated Go jobs, got %d", count)
+	// Go CI's pure-go, hermetic-tests, journey-postgres, watch-firestore and
+	// five journey jobs, plus the native build: a count far below that means
+	// the test stopped seeing the jobs it guards.
+	if count < 10 {
+		t.Fatalf("expected at least ten independently authenticated Go jobs, got %d", count)
 	}
 	if !strings.Contains(workflow, "GOPRIVATE: github.com/datatug/datatug-core") {
 		t.Fatal("private Core could reach public module proxy")
@@ -89,7 +102,7 @@ func TestPrivateCoreAuthPrecedesEveryLocalGoJob(t *testing.T) {
 	}
 	releaseJob := readWorkflow(t, "release.yml").Jobs["release"]
 	gates, _ := releaseJob.With["require_workflow_success"].(string)
-	for _, gate := range []string{"Go CI", "Native release builds"} {
+	for _, gate := range []string{"Go CI"} {
 		found := false
 		for _, configured := range strings.Split(gates, "\n") {
 			if strings.TrimSpace(configured) == gate {

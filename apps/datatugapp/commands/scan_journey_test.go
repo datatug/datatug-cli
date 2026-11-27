@@ -38,7 +38,7 @@ import (
 //  4. I push the folder; a colleague opens the link: the web app lists the
 //     database and its tables.
 //
-// It runs in a build with cgo off as well (see the "Scan without cgo" job of
+// It runs in a build with cgo off as well (see the "Pure-Go release build checks" job of
 // .github/workflows/golangci.yml): a released binary has cgo off.
 
 // writeJourneyDB creates the database every journey scans: a mixed-case table, a

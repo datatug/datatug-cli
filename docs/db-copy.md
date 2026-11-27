@@ -457,7 +457,7 @@ key it passes can still collide; the header says so.
 
 ### How it is proved
 
-`scripts/check-journey-mysql.sh` (the non-required workflow `.github/workflows/journey-mysql.yml`, path-filtered) starts
+`scripts/check-journey-mysql.sh` (the job "Journeys (MySQL, ClickHouse)" of `.github/workflows/golangci.yml`, run when its scope changes) starts
 the digest-pinned `mysql:8.4` image on a private port; for the edge-case fixture
 (`pkg/dbcopy/faithful/testdata/mysql_edge.sql`: hostile names and values, every type, composite, self-referencing and
 text keys), for a fuzz fixture of 4,000 rows of hostile text, bytes and names, and for the six demo databases pinned in
@@ -620,7 +620,7 @@ SQLite's exact comparison, so keys that differ only by case or by a trailing spa
 
 #### How it is proved
 
-`scripts/check-journey-mssql.sh` (the non-required, path-filtered workflow `.github/workflows/journey-mssql.yml`) starts the
+`scripts/check-journey-mssql.sh` (the job "Journey (SQL Server 2022)" of `.github/workflows/golangci.yml`, run when its scope changes) starts the
 digest-pinned `mcr.microsoft.com/mssql/server:2022-latest` image and, for the edge-case fixture
 (`pkg/dbcopy/faithful/testdata/mssql_edge.sql`), a fuzz fixture of 4,000 rows of hostile text, bytes and names, a fixture of 80
 random foreign key graphs, and the six demo databases pinned in `scripts/journey-datasets.txt`: exports twice (the same bytes),
@@ -646,7 +646,7 @@ Docker Desktop needs Rosetta or QEMU enabled) and AdventureWorks takes minutes i
 #### Licence of the test image
 
 `ACCEPT_EULA=Y` accepts the end-user licence of the SQL Server image. The founder decided on 2026-10-16 (decision D10) that CI may
-accept it **for automated testing only** (record: the founder answered "Yes, both" on 2026-10-16 to the question whether CI may accept the SQL Server Developer EULA with `ACCEPT_EULA=Y` and the Oracle Free Use Terms for test-only containers, with no redistribution of any image; the same decision is cited in `.github/workflows/journey-mssql.yml` and `scripts/check-journey-mssql.sh`): the Developer edition is licensed for development and testing, never production,
+accept it **for automated testing only** (record: the founder answered "Yes, both" on 2026-10-16 to the question whether CI may accept the SQL Server Developer EULA with `ACCEPT_EULA=Y` and the Oracle Free Use Terms for test-only containers, with no redistribution of any image; the same decision is cited in `.github/workflows/golangci.yml` and `scripts/check-journey-mssql.sh`): the Developer edition is licensed for development and testing, never production,
 and the image is pulled and thrown away with the runner, **never redistributed**. The generated scripts contain no Microsoft
 code.
 
@@ -747,7 +747,7 @@ text column with no declared length is `VARCHAR2(255 CHAR)` (`key-type-bounded`)
 
 #### How it is proved
 
-`scripts/check-journey-oracle.sh` (the non-required, path-filtered workflow `.github/workflows/journey-oracle.yml`) starts the
+`scripts/check-journey-oracle.sh` (the job "Journey (Oracle Database Free)" of `.github/workflows/golangci.yml`, run when its scope changes) starts the
 digest-pinned `gvenzl/oracle-free:23-slim` image and, for the edge-case fixture (`pkg/dbcopy/faithful/testdata/oracle_edge.sql`),
 a fuzz fixture of 4,000 hostile rows, a fixture of 80 random foreign key graphs and the six demo databases pinned in
 `scripts/journey-datasets.txt`: exports twice (the same bytes), loads with SQL*Plus inside the container, checks that a second

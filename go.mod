@@ -29,7 +29,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.72.3
 	github.com/charmbracelet/ultraviolet v0.0.0-20261008173134-6b8d4baf91b4
 	github.com/charmbracelet/x/ansi v0.11.10
-	github.com/dal-go/dalgo v0.102.4
+	github.com/dal-go/dalgo v0.102.6
 	github.com/dal-go/dalgo2bigquery v0.3.2
 	github.com/dal-go/dalgo2clickhouse v0.0.0-20261030135300-99a44064132e
 	github.com/dal-go/dalgo2cloudflarekv v0.0.0-20261102080843-209a16cff7f5
@@ -43,7 +43,7 @@ require (
 	github.com/dal-go/dalgo2http v0.4.3
 	github.com/dal-go/dalgo2influxdb v0.0.0-20261101231321-deba4dd49915
 	github.com/dal-go/dalgo2libsql v0.0.0-20261028000517-7d8187759a51
-	github.com/dal-go/dalgo2mongodb v0.1.0
+	github.com/dal-go/dalgo2mongodb v0.1.1-0.20261124105105-08ff6460d349
 	github.com/dal-go/dalgo2mssql v0.0.1
 	github.com/dal-go/dalgo2mysql v0.2.2
 	github.com/dal-go/dalgo2openvaultdb v0.4.7
@@ -95,12 +95,12 @@ require (
 	github.com/strongo/logus v0.4.8
 	github.com/strongo/random v0.0.3
 	github.com/strongo/slice v0.3.15
-	github.com/strongo/validation v0.0.17
+	github.com/strongo/validation v0.0.18
 	github.com/tuigoff/tuigoff v0.8.1
 	github.com/xo/dburl v0.24.2
 	github.com/xuri/excelize/v2 v2.11.1
 	github.com/zalando/go-keyring v0.2.8
-	go.mongodb.org/mongo-driver/v2 v2.5.0
+	go.mongodb.org/mongo-driver/v2 v2.10.1
 	golang.org/x/crypto v0.58.0
 	golang.org/x/mod v0.42.0
 	golang.org/x/net v0.62.0
@@ -203,7 +203,7 @@ require (
 	//github.com/jackc/pgx/v5 v5.7.6 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
 	github.com/kevinburke/ssh_config v1.6.0 // indirect
-	github.com/klauspost/compress v1.19.1 // indirect
+	github.com/klauspost/compress v1.20.3 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
 	github.com/lrstanley/bubblezone/v2 v2.0.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
@@ -240,8 +240,7 @@ require (
 	github.com/strongo/strongoapp v0.31.72 // indirect
 	github.com/tiendc/go-deepcopy v1.7.2 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
-	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
-	github.com/xdg-go/scram v1.2.0 // indirect
+	github.com/xdg-go/scram v1.4.0 // indirect
 	github.com/xdg-go/stringprep v1.0.4 // indirect
 	github.com/xo/terminfo v1.2.0 // indirect
 	github.com/xuri/efp v0.0.3-0.20260924042702-217b81952dec // indirect

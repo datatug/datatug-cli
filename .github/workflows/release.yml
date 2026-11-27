@@ -51,7 +51,7 @@ jobs:
   release:
     needs: dependency-release
     # Pin the released private-dependency and macOS signing contract.
-    uses: strongo/cicd/.github/workflows/release.yml@751025d2bac74e10f666325a39e76d849adcfa0c # exact-tag native retry and publication gates
+    uses: strongo/cicd/.github/workflows/release.yml@1bf1d76a6cb7f3b01c806c40f56d3b5e83128d94 # v1.25.6
     permissions:
       contents: write
       # Read exact-head CI results and dispatch the exact-tag native build.

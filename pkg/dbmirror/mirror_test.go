@@ -453,7 +453,7 @@ func TestRunStopsAtTheReadBudgetAndResumes(t *testing.T) {
 	}
 	log.Reset()
 	other := runWith(t, src, testPolicy(t), Options{Output: out, MaxReads: 4, PageSize: 2, Collections: []string{"teams"}, Log: &log})
-	if other.Resumed || !strings.Contains(log.String(), "the selection (--collections, --space, --path) changed since the run that stopped at its read budget: starting over") {
+	if other.Resumed || !strings.Contains(log.String(), "the selection (--include, --space, --path) changed since the run that stopped at its read budget: starting over") {
 		t.Errorf("%v\n%s", other.Resumed, log.String())
 	}
 	if err := os.WriteFile(resumeFile(out), []byte("{"), 0o600); err != nil {

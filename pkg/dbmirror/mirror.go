@@ -188,31 +188,32 @@ type planItem struct {
 }
 
 type run struct {
-	ctx      context.Context
-	src      Source
-	defs     *Definitions
-	policy   *Policy
-	opts     Options
-	report   *Report
-	results  map[string]*CollectionResult
-	under    []string
-	patterns map[string][][]string // spec id -> allowed paths, 2*depth segments, "*" for any id
-	seen     map[string]bool       // every document path read and matched to a collection
-	copied   map[string]bool       // document paths written into the database
-	files    map[string]string     // lower-cased record file -> document path, for collisions
-	multi    map[string]*multiFile // record files kept in one file, being read
-	folders  map[string]string     // lower-cased folder of a record -> the folder as written
-	salt     []byte                // of the fingerprints of undeclared names, new each run
-	defsHash string                // digest of the definition files
-	masked   map[string]map[string]bool
-	others   map[string]map[string]bool // spec id -> other-parent paths
-	outside  map[string]int64
-	stopped  bool
-	complete map[string]bool // collection ids read to the end
-	resumed  map[string]bool // collection ids partly read by an earlier run
-	rejected []Rejection     // this run's rejections
-	planned  []*planItem
-	state    *resumeState
+	ctx          context.Context
+	src          Source
+	defs         *Definitions
+	policy       *Policy
+	opts         Options
+	report       *Report
+	results      map[string]*CollectionResult
+	under        []string
+	patterns     map[string][][]string // spec id -> allowed paths, 2*depth segments, "*" for any id
+	seen         map[string]bool       // every document path read and matched to a collection
+	copied       map[string]bool       // document paths written into the database
+	files        map[string]string     // lower-cased record file -> document path, for collisions
+	multi        map[string]*multiFile // record files kept in one file, being read
+	folders      map[string]string     // lower-cased folder of a record -> the folder as written
+	salt         []byte                // of the fingerprints of undeclared names, new each run
+	defsHash     string                // digest of the definition files
+	encodingName string                // the key encoding name the output's state records; "" before it is claimed
+	masked       map[string]map[string]bool
+	others       map[string]map[string]bool // spec id -> other-parent paths
+	outside      map[string]int64
+	stopped      bool
+	complete     map[string]bool // collection ids read to the end
+	resumed      map[string]bool // collection ids partly read by an earlier run
+	rejected     []Rejection     // this run's rejections
+	planned      []*planItem
+	state        *resumeState
 }
 
 // Run copies what the policy and options select from src into opts.Output

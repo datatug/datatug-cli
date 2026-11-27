@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/posthog/posthog-go"
+	"github.com/posthog/posthog-go/v2"
 	"github.com/strongo/logus"
 	"github.com/strongo/random"
 	"gopkg.in/yaml.v3"

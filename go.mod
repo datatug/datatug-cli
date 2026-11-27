@@ -80,7 +80,7 @@ require (
 	github.com/openvaultdb/openvaultdb-go v0.26.3
 	github.com/pires/go-proxyproto v0.16.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
-	github.com/posthog/posthog-go v1.24.3
+	github.com/posthog/posthog-go/v2 v2.0.0
 	github.com/redis/go-redis/v9 v9.7.3
 	github.com/shopspring/decimal v1.4.0
 	github.com/sijms/go-ora/v3 v3.0.1

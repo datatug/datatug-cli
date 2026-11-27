@@ -8,7 +8,7 @@ import (
 
 	"charm.land/fang/v2"
 	"github.com/datatug/datatug-cli/apps/datatugapp/commands"
-	"github.com/posthog/posthog-go"
+	"github.com/posthog/posthog-go/v2"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

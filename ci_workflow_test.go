@@ -78,6 +78,8 @@ func TestCIGateWaitsForEveryJob(t *testing.T) {
 		{"always job skipped", `{"changes":{"result":"success",` + narrow + `},"pure-go":{"result":"skipped"},"native":{"result":"success"}}`, 1},
 		{"scope job failed", `{"changes":{"result":"failure","outputs":{}},"pure-go":{"result":"success"},"native":{"result":"skipped"}}`, 1},
 		{"scoped job cancelled", `{"changes":{"result":"success",` + narrow + `},"pure-go":{"result":"success"},"native":{"result":"cancelled"}}`, 1},
+		{"malformed scope output", `{"changes":{"result":"success","outputs":{"code":"true","redis":""}},"pure-go":{"result":"success"},"native":{"result":"skipped"}}`, 1},
+		{"missing scope outputs", `{"changes":{"result":"success","outputs":{}},"pure-go":{"result":"success"},"native":{"result":"skipped"}}`, 1},
 	} {
 		cmd := exec.Command("bash", "-c", gate.Steps[0].Run)
 		cmd.Env = append(os.Environ(), "NEEDS="+c.needs, "ALWAYS="+gate.Steps[0].Env["ALWAYS"])
@@ -218,4 +220,33 @@ func workflowTriggers(t *testing.T, name string) map[string]bool {
 		}
 	}
 	return triggers
+}
+
+// A grouped journey job ends with a step that fails unless every journey step
+// whose scope is selected succeeded; each journey step must be listed there.
+func TestGroupedJourneysVerifyEverySelectedStep(t *testing.T) {
+	t.Parallel()
+	for name, job := range readWorkflow(t, ciWorkflow).Jobs {
+		if !strings.HasPrefix(name, "journeys-") {
+			continue
+		}
+		last := job.Steps[len(job.Steps)-1]
+		if last.Name != "Every selected journey ran and passed" || strings.TrimSpace(last.If) != "always()" {
+			t.Errorf("%s must end with an if: always() step that checks every selected journey", name)
+			continue
+		}
+		for _, step := range job.Steps {
+			if !strings.HasSuffix(step.Name, "journey") && !strings.Contains(step.Name, "journey and") {
+				continue
+			}
+			scope := step.If[strings.Index(step.If, "needs.changes.outputs.")+len("needs.changes.outputs."):]
+			scope = scope[:strings.Index(scope, " ")]
+			if step.ID != scope {
+				t.Errorf("%s: step %q has id %q; its outcome is checked as steps.%s", name, step.Name, step.ID, scope)
+			}
+			if want := "check " + scope + ` "${{ needs.changes.outputs.` + scope + ` }}" "${{ steps.` + scope + `.outcome }}"`; !strings.Contains(last.Run, want) {
+				t.Errorf("%s: the last step does not check %q (step %q)", name, scope, step.Name)
+			}
+		}
+	}
 }

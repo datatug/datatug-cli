@@ -430,7 +430,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.mysql == 'true' || needs.changes.outputs.clickhouse == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Authenticate private Core dependency
@@ -446,6 +446,7 @@ jobs:
         timeout-minutes: 5
         run: bash scripts/check-mysql-readiness.sh
       - name: MySQL journey
+        id: mysql
         if: needs.changes.outputs.mysql == 'true'
         timeout-minutes: 40
         env:
@@ -458,6 +459,7 @@ jobs:
         timeout-minutes: 2
         run: bash scripts/check-no-owned-containers.sh datatug-journey-mysql-
       - name: ClickHouse journey
+        id: clickhouse
         if: ${{ !cancelled() && needs.changes.outputs.clickhouse == 'true' }}
         timeout-minutes: 15
         env:
@@ -468,6 +470,22 @@ jobs:
         if: always() && needs.changes.outputs.clickhouse == 'true'
         timeout-minutes: 2
         run: bash scripts/check-no-owned-containers.sh datatug-cli-clickhouse-
+      - name: Every selected journey ran and passed
+        # A broken step condition would skip a selected journey and leave the
+        # job green; this step makes the job fail instead.
+        if: always()
+        run: |
+          set -euo pipefail
+          status=0
+          check() {
+            if [ "$2" = true ] && [ "$3" != success ]; then
+              echo "::error title=Journey not passed::$1 is in scope but its step ended $3"
+              status=1
+            fi
+          }
+            check mysql "${{ needs.changes.outputs.mysql }}" "${{ steps.mysql.outcome }}"
+            check clickhouse "${{ needs.changes.outputs.clickhouse }}" "${{ steps.clickhouse.outcome }}"
+          exit "$status"
 
   # Sources whose script starts and owns a disposable server on a random
   # loopback port: PostgREST (Compose project), CouchDB, libSQL and Typesense.
@@ -478,7 +496,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.postgrest == 'true' || needs.changes.outputs.couchdb == 'true' || needs.changes.outputs.libsql == 'true' || needs.changes.outputs.typesense == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Authenticate private Core dependency
@@ -528,6 +546,7 @@ jobs:
           shellcheck --version
           shellcheck -x "${scripts[@]}"
       - name: PostgREST journey
+        id: postgrest
         if: needs.changes.outputs.postgrest == 'true'
         timeout-minutes: 25
         env:
@@ -543,6 +562,7 @@ jobs:
           grep -qF -- 'postgrest journey PASS:' "$log"
           grep -qF -- 'owned project and volume removed' "$log"
       - name: CouchDB journey
+        id: couchdb
         if: ${{ !cancelled() && needs.changes.outputs.couchdb == 'true' }}
         timeout-minutes: 25
         env:
@@ -557,6 +577,7 @@ jobs:
         timeout-minutes: 2
         run: bash scripts/check-no-owned-containers.sh datatug-cli-couchdb-
       - name: libSQL journey
+        id: libsql
         if: ${{ !cancelled() && needs.changes.outputs.libsql == 'true' }}
         timeout-minutes: 25
         env:
@@ -575,6 +596,7 @@ jobs:
         timeout-minutes: 2
         run: bash scripts/check-no-owned-containers.sh dalgo-libsql-fixture-
       - name: Typesense journey
+        id: typesense
         if: ${{ !cancelled() && needs.changes.outputs.typesense == 'true' }}
         timeout-minutes: 25
         env:
@@ -590,6 +612,24 @@ jobs:
         if: always() && needs.changes.outputs.typesense == 'true'
         timeout-minutes: 2
         run: bash scripts/check-no-owned-containers.sh datatug-cli-typesense- label=datatug.fixture
+      - name: Every selected journey ran and passed
+        # A broken step condition would skip a selected journey and leave the
+        # job green; this step makes the job fail instead.
+        if: always()
+        run: |
+          set -euo pipefail
+          status=0
+          check() {
+            if [ "$2" = true ] && [ "$3" != success ]; then
+              echo "::error title=Journey not passed::$1 is in scope but its step ended $3"
+              status=1
+            fi
+          }
+            check postgrest "${{ needs.changes.outputs.postgrest }}" "${{ steps.postgrest.outcome }}"
+            check couchdb "${{ needs.changes.outputs.couchdb }}" "${{ steps.couchdb.outcome }}"
+            check libsql "${{ needs.changes.outputs.libsql }}" "${{ steps.libsql.outcome }}"
+            check typesense "${{ needs.changes.outputs.typesense }}" "${{ steps.typesense.outcome }}"
+          exit "$status"
 
   # MongoDB and Redis as job services. On ubuntu-22.04: the mongo service hit
   # SERVER-121912's kernel guard on ubuntu-latest, and 22.04 hosted runners keep
@@ -600,7 +640,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.mongodb == 'true' || needs.changes.outputs.redis == 'true'
     runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     services:
       mongodb:
         image: mongo:9.0
@@ -623,6 +663,7 @@ jobs:
           go-version: '1.27.4'
           cache: true
       - name: MongoDB journey
+        id: mongodb
         if: needs.changes.outputs.mongodb == 'true'
         timeout-minutes: 15
         env:
@@ -630,11 +671,28 @@ jobs:
           MONGODB_TEST_URI: mongodb://127.0.0.1:27017/dalgo_mongo_test
         run: go test ./apps/datatugapp/commands ./pkg/dbcopy -run 'TestMongoDB' -count=1
       - name: Wired Cobra Redis journey and write refusal
+        id: redis
         if: ${{ !cancelled() && needs.changes.outputs.redis == 'true' }}
         timeout-minutes: 15
         env:
           REDIS_TEST_URL: redis://localhost:6379/0
         run: go test -race ./apps/datatugapp/commands -run '^TestQueryRedis' -count=1 -v
+      - name: Every selected journey ran and passed
+        # A broken step condition would skip a selected journey and leave the
+        # job green; this step makes the job fail instead.
+        if: always()
+        run: |
+          set -euo pipefail
+          status=0
+          check() {
+            if [ "$2" = true ] && [ "$3" != success ]; then
+              echo "::error title=Journey not passed::$1 is in scope but its step ended $3"
+              status=1
+            fi
+          }
+            check mongodb "${{ needs.changes.outputs.mongodb }}" "${{ steps.mongodb.outcome }}"
+            check redis "${{ needs.changes.outputs.redis }}" "${{ steps.redis.outcome }}"
+          exit "$status"
 
   # The ONLY check branch protection requires. `if: always()` (not
   # `!cancelled()`): when the gate runs it must evaluate every result, and a
@@ -668,6 +726,12 @@ jobs:
         run: |
           set -euo pipefail
           jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<<"$NEEDS"
+          # The scope outputs decide what may skip, so they must be well formed.
+          if [ "$(jq -r '.changes.result' <<<"$NEEDS")" = success ] &&
+             ! jq -e '.changes.outputs | length > 0 and all(.[]; . == "true" or . == "false")' <<<"$NEEDS" >/dev/null; then
+            echo "::error title=Bad scope outputs::$(jq -c '.changes.outputs' <<<"$NEEDS")"
+            exit 1
+          fi
           # When every scope is selected (every push to main), no job may be
           # skipped: a scoped job that skips then has a broken condition, and
           # this catches it before the release.

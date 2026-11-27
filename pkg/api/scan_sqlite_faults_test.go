@@ -18,7 +18,7 @@ import (
 )
 
 // These tests are the first-time mistakes of a SQLite scan, each on a real file made
-// with the pure-Go driver, so they run in a build with cgo off ("Scan without cgo" job
+// with the pure-Go driver, so they run in a build with cgo off ("Pure-Go release build checks" job
 // of .github/workflows/golangci.yml, which runs every test named TestScanDbCatalog_SQLite3).
 
 // scanSQLiteFile scans the file at path as `datatug scan` does and returns what the

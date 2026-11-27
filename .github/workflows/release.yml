@@ -75,10 +75,15 @@ jobs:
       # built against go-github v90 while go.mod declared v91, because
       # GoReleaser's `go mod tidy` before-hook re-added v90 in the runner.
       # Names the workflow's `name:`, not its filename; a name matching no
-      # workflow fails rather than quietly disabling the gate.
+      # workflow fails rather than quietly disabling the gate. Go CI is the one
+      # CI workflow: it also runs the native release targets (native-release.yml
+      # as its `native` job) and the in-scope source journeys.
       require_workflow_success: |
         Go CI
-        Native release builds
+      # Per named workflow. Go CI's critical path is the macOS native build and
+      # the longest journeys (Oracle, SQL Server), plus runner queueing; the
+      # default 30 minutes is too tight for that.
+      require_workflow_success_timeout_seconds: 3600
       native_build_workflow: native-release.yml
       # Must be >= go.mod's `go` directive, whose current value is `go 1.27.3`
       # (it was 1.27.0 when adopting github.com/strongo/buildinfo raised it;

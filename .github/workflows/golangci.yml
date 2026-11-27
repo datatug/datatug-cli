@@ -1,64 +1,97 @@
 name: Go CI
 
-# ⚠ THE NAMES IN THIS FILE ARE LOAD-BEARING.
+# The ONE CI workflow of this repository (backstage rule
+# one-ci-workflow-smart-jobs): every check of a pull request or a push to main
+# is a job here. Branch protection on main requires exactly one check, `ci-ok`
+# (the last job), so jobs can be added, merged, split or renamed without
+# touching the protection. release.yml requires this workflow, by its name
+# "Go CI", to be green for the exact commit before it tags or publishes; keep
+# the name, and keep the filename (a renamed file leaves the old workflow
+# listed under the same name, which the release gate could resolve instead).
 #
-# Branch protection on main requires these three checks by exact string:
+# No workflow-level `paths:` filters. The first job, `changes`, runs
+# scripts/ci-scope.sh and every scoped job reads its outputs. A skipped job
+# counts as passed in `ci-ok`; a failed or cancelled one fails it.
 #
-#   strongo_workflow / Build & test
-#   strongo_workflow / Lint
-#   go.mod is tidy
-#
-# A check's context is "<job id> / <job name>" for a reusable-workflow job, and
-# the job's `name:` for a normal one. So renaming the `strongo_workflow` job
-# key below, or the `go-mod-tidy` job's `name:`, or a job inside strongo/cicd's
-# shared workflow.yml, retires a required context WITHOUT retiring the
-# requirement. GitHub then waits forever for a check that will never post
-# again, and every pull request becomes permanently unmergeable — the failure
-# is silent, and it looks like CI hanging rather than a config error.
-#
-# If you rename any of them, update the protection in the same change:
-#   gh api repos/datatug/datatug-cli/branches/main/protection \
-#     --jq '.required_status_checks.contexts'
-#
-# The `paths:` filters were removed for the same reason; see the note on the
-# triggers below.
-
-# NO `paths:` filters, deliberately. This workflow's checks are REQUIRED by
-# branch protection on main, and GitHub leaves a required check that never
-# runs pending forever rather than passing it — so a paths-filtered required
-# check makes any pull request outside the filter permanently unmergeable
-# (a README-only change could never land).
-#
-# The filters also weakened the release gate. release.yml sets
-# `require_workflow_success: 'Go CI'`, which asks whether this workflow
-# succeeded for the exact commit. A commit the filters excluded produces no
-# run, so the guard has nothing to check and, correctly but unhelpfully,
-# waits out its grace and continues ungated. Running always means the gate
-# always has a real verdict and never burns that wait.
-#
-# The cost is one ~1 minute run on pushes and pull requests that touch no Go
-# code. That is the price of the checks being trustworthy.
+# Jobs are split only where the split buys something: a different runner
+# (native matrix), a service stack (journeys), a long independent suite on the
+# critical path (hermetic tests), or an independent rerun of a flaky real
+# server. Everything else is a step of an existing job; see the rule for why
+# (each job repeats checkout, private-module auth, setup-go, module download
+# and a compile, and is billed rounded up to the minute).
 on:
   push:
-    # Still scoped to the default branch: pull-request branches are covered by
-    # the pull_request trigger below, so this avoids running twice per push.
+    # Pull-request branches are covered by the pull_request trigger below.
     branches:
       - main
-  #    tags:
-  #      - 'v[0-9]+\.[0-9]+\.[0-9]+' # Push events to matching v*, i.e. v20.15.10
   pull_request:
     branches:
       - '**'
+  workflow_dispatch:
 
 env:
   GOPRIVATE: github.com/datatug/datatug-core
 
+# A new push cancels an outdated pull-request run. A push to main never cancels
+# or replaces another main run: each commit gets its own group, so its release
+# gate always finds a finished run for that exact commit.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 jobs:
 
+  changes:
+    name: Scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      code: ${{ steps.scope.outputs.code }}
+      mysql: ${{ steps.scope.outputs.mysql }}
+      mssql: ${{ steps.scope.outputs.mssql }}
+      oracle: ${{ steps.scope.outputs.oracle }}
+      clickhouse: ${{ steps.scope.outputs.clickhouse }}
+      couchdb: ${{ steps.scope.outputs.couchdb }}
+      libsql: ${{ steps.scope.outputs.libsql }}
+      postgrest: ${{ steps.scope.outputs.postgrest }}
+      mongodb: ${{ steps.scope.outputs.mongodb }}
+      redis: ${{ steps.scope.outputs.redis }}
+      typesense: ${{ steps.scope.outputs.typesense }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # A pull request is checked out as its merge commit, whose first
+          # parent is the base tip; a merge to main has the old tip as first
+          # parent. Depth 2 has both. Anything deeper is missing, and a
+          # missing base selects every scope.
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Scope script regression and shellcheck
+        run: |
+          set -euo pipefail
+          bash scripts/test-ci-scope.sh
+          command -v shellcheck >/dev/null || { echo "shellcheck is not installed on this runner" >&2; exit 1; }
+          shellcheck -x scripts/ci-scope.sh scripts/test-ci-scope.sh
+      - name: Determine scopes
+        id: scope
+        env:
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          case "$GITHUB_EVENT_NAME" in
+            pull_request) base=HEAD^1 ;;
+            push) base="$PUSH_BEFORE" ;;
+            *) base= ;;
+          esac
+          bash scripts/ci-scope.sh "$base" | tee -a "$GITHUB_OUTPUT"
+
+  # ⚠ The check names "strongo_workflow / Build & test" and
+  # "strongo_workflow / Lint" are no longer required by branch protection
+  # (ci-ok is), but strongo/cicd's shared workflow still names them. This job
+  # always runs: it is the build, the lint and the 100% coverage gate.
   strongo_workflow:
     permissions:
       contents: write
@@ -82,142 +115,154 @@ jobs:
       min_test_coverage_percent: 100
       # Must be >= go.mod's `go` directive, same constraint as release.yml.
       # This input drives setup-go for BOTH the Lint and Build & test jobs of
-      # the shared workflow (workflow.yml@a62ab9a, lines 413 and 923), and its
-      # default is '1.27.0' — below this module's `go 1.27.3`, which failed both
-      # jobs before any test ran with
-      # "go.mod requires go >= 1.27.3 (running go 1.27.1; GOTOOLCHAIN=local)".
-      # Keep in sync with release.yml's go_version: a mismatch means CI proves
-      # a build under a different toolchain than the release actually uses.
+      # the shared workflow, and its default ('1.27.0') is below this module's
+      # `go` directive. Keep in sync with release.yml's go_version: a mismatch
+      # means CI proves a build under a different toolchain than the release
+      # actually uses.
       go_version: '1.27.3'
-  # Fail fast on go.mod/go.sum drift — the gap that shipped v0.13.2.
+
+  # The pure-Go (CGO_ENABLED=0) configuration a release is built with
+  # (.goreleaser.yaml), checked in one job because every step needs the same
+  # toolchain and the same pure-Go binary, built once:
   #
-  # Renovate raised two PRs for the same go-github v90->v91 bump a minute
-  # apart. #187 merged first and ADDED the v91 require beside v90; CI passed,
-  # because v90 was still there and every import still resolved. #188 was cut
-  # from the pre-#187 base, so it REPLACED the v90 line, leaving go.mod with a
-  # duplicated v91 require, no v90, and five source files still importing v90.
-  #
-  # `strongo_workflow` above builds and tests, so it correctly went red on #188
-  # and on the merge commit. Nothing enforced that: `main` has no branch
-  # protection, so #188 merged red, and Release runs as an independent workflow
-  # that never consults Go CI. This job makes the *earlier* signal — an
-  # untidy go.mod — red on the PR that introduces it, which would have failed
-  # #187 on its unused v91 require, before the pair could interleave.
-  #
-  # `-diff` only reports; it never rewrites go.mod, so it cannot mask drift the
-  # way a mutating `go mod tidy` does.
-  go-mod-tidy:
-    name: go.mod is tidy
+  # - go.mod is tidy. `-diff` only reports; it never rewrites go.mod, so it
+  #   cannot mask drift the way a mutating `go mod tidy` does (the gap that
+  #   shipped v0.13.2: a duplicated go-github require merged green).
+  # - Scan without cgo. In a cgo-off build the cgo SQLite driver
+  #   (github.com/mattn/go-sqlite3, "sqlite3") is a stub that fails on first
+  #   use, while every test of strongo_workflow runs with cgo on. These tests
+  #   make their files with the pure-Go driver, so cgo off is all they need.
+  # - MCP Apps browser: the embedded App and the actual CLI's saved SQL in the
+  #   official sandbox.
+  pure-go:
+    name: Pure-Go release build checks
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CGO_ENABLED: '0'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Authenticate private Core dependency
         uses: ./.github/actions/private-core
         with:
           private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         with:
           # Must be >= go.mod's `go` directive, same constraint as release.yml.
           go-version: '1.27.4'
           cache: true
       - name: go mod tidy -diff
         run: go mod tidy -diff
+      - name: Scan a SQLite file with cgo off
+        run: go test -count=1 -run 'TestScanDbCatalog_SQLite3|TestScanJourney|TestQuickStartOfTheREADMEIsTrue|TestQueryDuckDBRequiresCGO' ./pkg/api/ ./apps/datatugapp/commands/
+      - name: Build the pure-Go CLI once
+        run: go build -o "$RUNNER_TEMP/datatug-purego" .
+      - name: Export SQLite to native inGitDB with cgo off
+        run: |
+          go test -count=1 -run TestExportInGitDB_RecordsFormatsRoundTrip ./pkg/dbcopy/
+          export_parent=$(mktemp -d "$RUNNER_TEMP/datatug-export.XXXXXX")
+          "$RUNNER_TEMP/datatug-purego" db export \
+            --from "sqlite://$PWD/pkg/dbcopy/testdata/chinook.db" \
+            --to "ingitdb://$export_parent/native" --records-format csv
+          test -f "$export_parent/native/Artist/records.csv"
+          test -f "$export_parent/native/Artist/.collection/definition.yaml"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: pkg/mcpserver/app/package-lock.json
+      - name: Check out exact public demo fixture
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: datatug/datatug-demo-project
+          ref: 08cc4d367e33cca82269bff54dc8a35b242e9937
+          path: .browser-fixtures/demo
+          persist-credentials: false
+      - name: Verify locked App source and embedded asset
+        working-directory: pkg/mcpserver/app
+        env:
+          DATATUG_TELEMETRY: '0'
+          DO_NOT_TRACK: '1'
+        run: |
+          npm ci --ignore-scripts
+          npm test
+          npm run build:check
+          npx --no-install playwright install --with-deps chromium
+      - name: Exercise official sandbox and actual CLI saved SQL
+        env:
+          DATATUG_TELEMETRY: '0'
+          DO_NOT_TRACK: '1'
+        run: |
+          DATATUG_MCP_TEST_BINARY="$RUNNER_TEMP/datatug-purego" \
+          DATATUG_DEMO_PROJECT_DIR="$GITHUB_WORKSPACE/.browser-fixtures/demo/demo-project-1" \
+          DATATUG_MCP_APPS_ARTIFACTS="$RUNNER_TEMP/mcp-apps-browser-artifacts" \
+          npm --prefix pkg/mcpserver/app run test:browser
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: mcp-apps-browser
+          path: ${{ runner.temp }}/mcp-apps-browser-artifacts
+          if-no-files-found: error
 
-  # Guards the fix in internal/hermetictest and scripts/check-hermetic-tests.sh
-  # against regressing: `go test ./...` must never read or write the real
-  # user's home, XDG config, or XDG cache directories — see both files' own
-  # doc comments for why (a leaking test polluted the founder's real
-  # ~/.datatug/chat with ~395 files of litter before this job existed).
-  # A separate job, not a step folded into strongo_workflow above, so this
-  # module's own hermeticity gate is never hidden behind — or accidentally
-  # broken by an update to — the shared strongo/cicd workflow.
+  # Guards internal/hermetictest and scripts/check-hermetic-tests.sh: `go test
+  # ./...` must never read or write the real user's home, XDG config, or XDG
+  # cache directories (a leaking test once littered the founder's real
+  # ~/.datatug/chat with ~395 files). Its own job, not a step of
+  # strongo_workflow: it is the longest Go suite and runs in parallel with it,
+  # and an update of the shared workflow can never hide or break it.
   hermetic-tests:
     name: Hermetic tests
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Authenticate private Core dependency
         uses: ./.github/actions/private-core
         with:
           private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         with:
           # Must be >= go.mod's `go` directive, same constraint as release.yml.
           go-version: '1.27.4'
           cache: true
       - name: check-hermetic-tests.sh
         env:
-          # Matches strongo_workflow's cgo_enabled: true above — several
-          # tests (github.com/mattn/go-sqlite3) require cgo.
+          # Several tests (github.com/mattn/go-sqlite3) require cgo.
           CGO_ENABLED: '1'
         run: ./scripts/check-hermetic-tests.sh
 
-  # A release is built with CGO_ENABLED=0 (.goreleaser.yaml), where the cgo SQLite
-  # driver (github.com/mattn/go-sqlite3, registered as "sqlite3") is a stub that
-  # fails on first use. A scan that opened that driver could read no SQLite file in
-  # any released binary, while every test of strongo_workflow passed, as it runs with
-  # cgo on. This job runs the scan's SQLite tests, and the journey of a first user (a
-  # SQLite file scanned into a folder, then read the way chat, saved queries, serve and
-  # the web app read it), in a build with cgo off, and the test that runs the quick start
-  # of the README (TestQuickStartOfTheREADMEIsTrue). Those tests make their database
-  # files with the pure-Go driver and import no cgo one, so cgo off is all they need.
-  scan-without-cgo:
-    name: Scan without cgo
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Authenticate private Core dependency
-        uses: ./.github/actions/private-core
-        with:
-          private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
-      - uses: actions/setup-go@v7
-        with:
-          # Must be >= go.mod's `go` directive, same constraint as release.yml.
-          go-version: '1.27.4'
-          cache: true
-      - name: Scan a SQLite file with cgo off
-        env:
-          CGO_ENABLED: '0'
-        run: go test -count=1 -run 'TestScanDbCatalog_SQLite3|TestScanJourney|TestQuickStartOfTheREADMEIsTrue|TestQueryDuckDBRequiresCGO' ./pkg/api/ ./apps/datatugapp/commands/
-      - name: Export SQLite to native inGitDB with cgo off
-        env:
-          CGO_ENABLED: '0'
-        run: |
-          go test -count=1 -run TestExportInGitDB_RecordsFormatsRoundTrip ./pkg/dbcopy/
-          go build -o "$RUNNER_TEMP/datatug-export-smoke" .
-          export_parent=$(mktemp -d "$RUNNER_TEMP/datatug-export.XXXXXX")
-          "$RUNNER_TEMP/datatug-export-smoke" db export \
-            --from "sqlite://$PWD/pkg/dbcopy/testdata/chinook.db" \
-            --to "ingitdb://$export_parent/native" --records-format csv
-          test -f "$export_parent/native/Artist/records.csv"
-          test -f "$export_parent/native/Artist/.collection/definition.yaml"
+  # The native release targets, in the same file the release dispatches at its
+  # exact tag (native-release.yml), so the PR check and the release build can
+  # never drift apart. Called here instead of running on its own triggers, so
+  # the release gate reads one workflow ("Go CI").
+  native:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    uses: ./.github/workflows/native-release.yml
+    secrets: inherit
 
   # The PostgreSQL scan (`datatug scan -D postgres --dsn-env NAME`), query
-  # (`datatug query run`) and copy (`datatug db copy`) against a real server. Every
-  # other test of the scan reads through a fake schema reader and the test binary refuses to
-  # dial (apps/datatugapp/commands/scan_never_dials_test.go), so this is the one place the scan
-  # meets PostgreSQL: the real command, the real opener and the real DALgo reader, with a role and
-  # a database that the test makes on the service. The URL below is the service's own, for this
-  # job only: an administrator's, to the maintenance database, on a container that lives as long
-  # as the job. The tests skip when it is not set, which `go test` reports as success, so
-  # scripts/check-journey-postgres.sh fails the job on any SKIP and on a missing PASS line for
-  # each test by name. Not a required check for merging a pull request (that is a repository
-  # setting). It IS a gate on the release: this job is part of the workflow named "Go CI", and
-  # release.yml requires "Go CI" green for the exact commit before it tags or publishes anything,
-  # so a red run of this job on main holds the release until it is re-run or fixed. A red job is
-  # a finding about the scan, except when the service container itself is the cause (the image
+  # (`datatug query run`) and copy (`datatug db copy`) against a real server:
+  # the real command, the real opener and the real DALgo reader. Every other
+  # test of the scan reads through a fake schema reader and the test binary
+  # refuses to dial (apps/datatugapp/commands/scan_never_dials_test.go). The
+  # URL below is the service's own, for this job only. The tests skip when it
+  # is not set, which `go test` reports as success, so
+  # scripts/check-journey-postgres.sh fails the job on any SKIP and on a
+  # missing PASS line for each test by name. A red job is a finding about the
+  # scan, except when the service container itself is the cause (the image
   # pull, the health check): re-run it then.
   #
-  # The job runs on every major version of the matrix below, and each run is a job of the workflow
-  # that the release waits for: a release needs both green. 18 is in it because a fix of the adapter
-  # is about a constraint that only PostgreSQL 18 has (a not-null constraint that is not validated);
-  # 17 stays because the first journey was written on it. The tests read the version from the
-  # server and check it against DATATUG_TEST_POSTGRES_MAJOR, so a matrix that stopped changing the
-  # image would fail and not test one version twice. The image tag is written from the matrix, so a
-  # bot that updates the tag of a service finds none here: a version is added to the matrix, or
-  # dropped from it, on purpose.
+  # One job per major version: each needs its own service image. 18 is in it
+  # because a fix of the adapter is about a constraint only PostgreSQL 18 has
+  # (a not-null constraint that is not validated); 17 stays because the first
+  # journey was written on it. The tests read the version from the server and
+  # check it against DATATUG_TEST_POSTGRES_MAJOR.
   journey-postgres:
     name: Journey (PostgreSQL ${{ matrix.postgres }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
@@ -245,12 +290,12 @@ jobs:
       DATATUG_NATIVE_ASSURANCE_CI: '1'
       DATATUG_NATIVE_POOLER_CI: '1'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Authenticate private Core dependency
         uses: ./.github/actions/private-core
         with:
           private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         with:
           # Must be >= go.mod's `go` directive, same constraint as release.yml.
           go-version: '1.27.4'
@@ -261,74 +306,19 @@ jobs:
         run: bash scripts/native-postgres/build-fixture.sh
       - name: Scan and query a real PostgreSQL server
         env:
-          # The test binary of the commands package links the cgo SQLite driver, as in
-          # strongo_workflow above.
+          # The test binary of the commands package links the cgo SQLite driver.
           CGO_ENABLED: '1'
         run: ./scripts/check-journey-postgres.sh
       - name: Remove only owned native pooler resources
         if: always()
         run: bash scripts/native-postgres/cleanup-fixture.sh
 
-  # Runs in the always-present Go CI workflow so exact-commit release gating
-  # observes browser/asset regressions as well as Go tests. No path filter/skip.
-  mcp-apps-browser:
-    name: MCP Apps browser
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    env:
-      DATATUG_TELEMETRY: '0'
-      DO_NOT_TRACK: '1'
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Authenticate private Core dependency
-        uses: ./.github/actions/private-core
-        with:
-          private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
-      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
-        with:
-          go-version: '1.27.4'
-          cache: true
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version: '26'
-          cache: npm
-          cache-dependency-path: pkg/mcpserver/app/package-lock.json
-      - name: Check out exact public demo fixture
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          repository: datatug/datatug-demo-project
-          ref: 08cc4d367e33cca82269bff54dc8a35b242e9937
-          path: .browser-fixtures/demo
-          persist-credentials: false
-      - name: Verify locked App source and embedded asset
-        working-directory: pkg/mcpserver/app
-        run: |
-          npm ci --ignore-scripts
-          npm test
-          npm run build:check
-          npx --no-install playwright install --with-deps chromium
-      - name: Build actual CLI using the release pure-Go configuration
-        env:
-          CGO_ENABLED: '0'
-        run: go build -o "$RUNNER_TEMP/datatug-mcp-apps" .
-      - name: Exercise official sandbox and actual CLI saved SQL
-        run: |
-          DATATUG_MCP_TEST_BINARY="$RUNNER_TEMP/datatug-mcp-apps" \
-          DATATUG_DEMO_PROJECT_DIR="$GITHUB_WORKSPACE/.browser-fixtures/demo/demo-project-1" \
-          DATATUG_MCP_APPS_ARTIFACTS="$RUNNER_TEMP/mcp-apps-browser-artifacts" \
-          npm --prefix pkg/mcpserver/app run test:browser
-      - name: Upload browser evidence
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: mcp-apps-browser
-          path: ${{ runner.temp }}/mcp-apps-browser-artifacts
-          if-no-files-found: error
-
+  # A real Firestore emulator (Java) with owned teardown. Its own job so a
+  # flaky emulator start is re-run on its own.
   watch-firestore:
     name: Watch Firestore conformance
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -365,3 +355,344 @@ jobs:
           name: watch-firestore
           path: ${{ runner.temp }}/watch-firestore
           if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Source journeys against real disposable servers. Each loads the scripts of
+  # `datatug db copy` or runs the CLI's scan/query against a pinned image and
+  # proves its owned fixture was removed. They are grouped into a few jobs of
+  # similar length; inside a job each journey is a step that runs only when its
+  # scope is set, and the steps share one Go build cache. Oracle and SQL Server
+  # keep a job each: they are the two longest and the two largest containers.
+  #
+  # LICENCES (founder decision D10, 2026-10-16): CI may run the SQL Server
+  # Developer edition image (ACCEPT_EULA=Y, passed by the script) and Oracle
+  # Database Free (Oracle Free Use Terms) for AUTOMATED TESTING ONLY. The images
+  # are pulled and thrown away with the runner; never redistributed, republished
+  # or copied into a release.
+  #
+  # Server images are pinned by digest. A bot that updates a digest must also
+  # re-run the journey: that is what the job is for.
+  # ---------------------------------------------------------------------------
+
+  journey-oracle:
+    name: Journey (Oracle Database Free)
+    needs: changes
+    if: needs.changes.outputs.oracle == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # gvenzl/oracle-free:23-slim (Oracle AI Database 26ai Free 23.26.3) on 2026-10-16, by the digest of its
+      # multi-architecture index. The Apache-2.0 label of the gvenzl image covers its build scripts only.
+      ORACLE_IMAGE: gvenzl/oracle-free:23-slim@sha256:6d61d267a3b978c24c5ac1790e62e927416a0aec446bd86e4b3a1527562757bd
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Authenticate private Core dependency
+        uses: ./.github/actions/private-core
+        with:
+          private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
+        with:
+          go-version: '1.27.4'
+          cache: true
+      - name: Oracle journey
+        env:
+          CGO_ENABLED: '1'
+        run: ./scripts/check-journey-oracle.sh
+
+  journey-mssql:
+    name: Journey (SQL Server 2022)
+    needs: changes
+    if: needs.changes.outputs.mssql == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # mcr.microsoft.com/mssql/server:2022-latest on 2026-10-16 (Developer edition).
+      MSSQL_IMAGE: mcr.microsoft.com/mssql/server:2022-latest@sha256:cf8f0ab2ebe61feec2eed2629061a07d247f791c2a8ddda74a4ac9f06a291718
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Authenticate private Core dependency
+        uses: ./.github/actions/private-core
+        with:
+          private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
+        with:
+          go-version: '1.27.4'
+          cache: true
+      - name: SQL Server journey
+        env:
+          CGO_ENABLED: '1'
+        run: ./scripts/check-journey-mssql.sh
+
+  # MySQL 8.4 (SQL-script export loaded into a real server, the cross-engine
+  # verifier, then scan/query/saved queries) and ClickHouse (bounded server,
+  # command journey).
+  journeys-sql:
+    name: Journeys (MySQL, ClickHouse)
+    needs: changes
+    if: needs.changes.outputs.mysql == 'true' || needs.changes.outputs.clickhouse == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Authenticate private Core dependency
+        uses: ./.github/actions/private-core
+        with:
+          private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
+        with:
+          go-version: '1.27.4'
+          cache: true
+      - name: MySQL readiness regression (no Docker)
+        if: needs.changes.outputs.mysql == 'true'
+        run: bash scripts/check-mysql-readiness.sh
+      - name: MySQL journey
+        if: needs.changes.outputs.mysql == 'true'
+        env:
+          CGO_ENABLED: '1'
+          # mysql:8.4 on 2026-10-16.
+          MYSQL_IMAGE: mysql:8.4@sha256:24989179f58856db763f418010c1169fecc944e3ec1ea7e921572d83eb070f70
+        run: ./scripts/check-journey-mysql.sh
+      - name: ClickHouse journey
+        if: ${{ !cancelled() && needs.changes.outputs.clickhouse == 'true' }}
+        env:
+          GOMAXPROCS: '2'
+          GOFLAGS: '-p=2'
+        run: bash scripts/check-journey-clickhouse.sh
+      - name: Prove owned ClickHouse fixture cleanup
+        if: always() && needs.changes.outputs.clickhouse == 'true'
+        run: |
+          set -euo pipefail
+          containers=$(docker ps -aq --filter 'name=datatug-cli-clickhouse-')
+          test -z "$containers" || { echo 'Owned ClickHouse fixture remains'; exit 1; }
+
+  # Account-free HTTP sources: PostgREST (Compose project), CouchDB and libSQL,
+  # each against a disposable server that its script owns and removes.
+  journeys-http:
+    name: Journeys (PostgREST, CouchDB, libSQL)
+    needs: changes
+    if: needs.changes.outputs.postgrest == 'true' || needs.changes.outputs.couchdb == 'true' || needs.changes.outputs.libsql == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Authenticate private Core dependency
+        uses: ./.github/actions/private-core
+        with:
+          private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: '1.27.4'
+          cache: true
+      # The published dalgo2libsql fixture is executed with Node: it needs fetch
+      # and node:crypto, and the journey's receipt must come from the exact
+      # fixture the pinned module ships.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: needs.changes.outputs.libsql == 'true'
+        with:
+          node-version: '26'
+      - name: Fixture lifecycle regression
+        run: bash scripts/test-fixture-lifecycle.sh
+      - name: Script syntax and shellcheck
+        run: |
+          set -euo pipefail
+          scripts=(
+            scripts/check-journey-postgrest.sh
+            scripts/check-journey-couchdb.sh
+            scripts/test-fixture-lifecycle.sh
+            scripts/lib/fixture-lifecycle.sh
+            scripts/check-journey-libsql.sh
+            scripts/lib/libsql-cli-journey.sh
+          )
+          for script in "${scripts[@]}"; do
+            bash -n "$script"
+          done
+          # The runner image ships shellcheck. A missing linter is a hard failure
+          # here, never a silent pass: the scripts must lint on the image CI uses.
+          command -v shellcheck >/dev/null || { echo "shellcheck is not installed on this runner" >&2; exit 1; }
+          shellcheck --version
+          shellcheck -x "${scripts[@]}"
+      - name: PostgREST journey
+        if: needs.changes.outputs.postgrest == 'true'
+        env:
+          CGO_ENABLED: '1'
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/postgrest-journey.log"
+          # pipefail keeps the journey script's own status through tee, so a
+          # failing journey fails this step; tee only captures the receipts.
+          bash scripts/check-journey-postgrest.sh 2>&1 | tee "$log"
+          # The full receipt is printed only after the explicit teardown of the
+          # owned Compose project and its volume, so both lines must be present.
+          grep -qF -- 'postgrest journey PASS:' "$log"
+          grep -qF -- 'owned project and volume removed' "$log"
+      - name: CouchDB journey
+        if: ${{ !cancelled() && needs.changes.outputs.couchdb == 'true' }}
+        env:
+          CGO_ENABLED: '1'
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/couchdb-journey.log"
+          bash scripts/check-journey-couchdb.sh 2>&1 | tee "$log"
+          grep -qF -- 'couchdb journey passed:' "$log"
+      - name: libSQL journey
+        if: ${{ !cancelled() && needs.changes.outputs.libsql == 'true' }}
+        env:
+          CGO_ENABLED: '1'
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/libsql-journey.log"
+          # The script prints its pass line only after the published fixture
+          # verified the teardown of its own container and recorded volumes.
+          bash scripts/check-journey-libsql.sh 2>&1 | tee "$log"
+          grep -qF -- 'libsql journey passed:' "$log"
+          grep -qF -- 'teardown: containerRemoved=true' "$log"
+          grep -qF -- 'libsql journey PASS:' "$log"
+      - name: Owned fixture containers removed
+        if: always()
+        run: |
+          set -euo pipefail
+          # Each journey removes its exact owned container in its EXIT trap. This
+          # proves the receipts above describe a cleanup that really happened,
+          # and never prunes another worker's Docker objects.
+          status=0
+          for prefix in datatug-cli-couchdb- dalgo-libsql-fixture-; do
+            if docker ps -aq --filter "name=$prefix" | grep -q .; then
+              docker ps -a --filter "name=$prefix"
+              echo "an owned $prefix container was not removed" >&2
+              status=1
+            fi
+          done
+          exit "$status"
+
+  # MongoDB and Redis as job services, Typesense as a container its script
+  # owns. On ubuntu-22.04: the mongo service hit SERVER-121912's kernel guard on
+  # ubuntu-latest, and 22.04 hosted runners keep the supported 6.8 kernel series
+  # (https://jira.mongodb.org/browse/SERVER-125742).
+  journeys-nosql:
+    name: Journeys (MongoDB, Redis, Typesense)
+    needs: changes
+    if: needs.changes.outputs.mongodb == 'true' || needs.changes.outputs.redis == 'true' || needs.changes.outputs.typesense == 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    services:
+      mongodb:
+        image: mongo:9.0
+        ports: ['27017:27017']
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ping:1})'"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:8.12-alpine
+        ports: ['6379:6379']
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Authenticate private Core dependency
+        uses: ./.github/actions/private-core
+        with:
+          private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
+        with:
+          go-version: '1.27.4'
+          cache: true
+      - name: MongoDB journey
+        if: needs.changes.outputs.mongodb == 'true'
+        env:
+          DATATUG_TEST_MONGODB_URI: mongodb://127.0.0.1:27017/dalgo_cli_test
+          MONGODB_TEST_URI: mongodb://127.0.0.1:27017/dalgo_mongo_test
+        run: go test ./apps/datatugapp/commands ./pkg/dbcopy -run 'TestMongoDB' -count=1
+      - name: Wired Cobra Redis journey and write refusal
+        if: ${{ !cancelled() && needs.changes.outputs.redis == 'true' }}
+        env:
+          REDIS_TEST_URL: redis://localhost:6379/0
+        run: go test -race ./apps/datatugapp/commands -run '^TestQueryRedis' -count=1 -v
+      - name: Typesense fixture lifecycle regression
+        if: ${{ !cancelled() && needs.changes.outputs.typesense == 'true' }}
+        run: bash scripts/test-typesense-lifecycle.sh
+      - name: Typesense script syntax and shellcheck
+        if: ${{ !cancelled() && needs.changes.outputs.typesense == 'true' }}
+        run: |
+          set -euo pipefail
+          scripts=(
+            scripts/check-journey-typesense.sh
+            scripts/test-typesense-lifecycle.sh
+            scripts/lib/typesense-fixture-lifecycle.sh
+            scripts/lib/typesense-cli-journey.sh
+          )
+          for script in "${scripts[@]}"; do
+            bash -n "$script"
+          done
+          command -v shellcheck >/dev/null || { echo "shellcheck is not installed on this runner" >&2; exit 1; }
+          shellcheck --version
+          shellcheck -x "${scripts[@]}"
+      - name: Typesense journey
+        if: ${{ !cancelled() && needs.changes.outputs.typesense == 'true' }}
+        env:
+          CGO_ENABLED: '1'
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/typesense-journey.log"
+          bash scripts/check-journey-typesense.sh 2>&1 | tee "$log"
+          grep -qF -- 'Go command journey passed' "$log"
+          grep -qF -- 'typesense CLI journey passed:' "$log"
+          grep -qF -- 'typesense journey passed:' "$log"
+      - name: Owned Typesense container removed
+        if: always() && needs.changes.outputs.typesense == 'true'
+        run: |
+          set -euo pipefail
+          # Runs even after a failed journey, so a leaked fixture is reported
+          # instead of hidden.
+          filters=(--filter 'name=datatug-cli-typesense-' --filter 'label=datatug.fixture')
+          listing_status=0
+          listing=$(docker ps -aq "${filters[@]}") || listing_status=$?
+          if [ "$listing_status" != 0 ]; then
+            echo "docker ps failed with status $listing_status; the owned Typesense container's absence is unproven" >&2
+            exit 1
+          fi
+          if [ -n "$listing" ]; then
+            docker ps -a "${filters[@]}"
+            echo "the owned Typesense container was not removed" >&2
+            exit 1
+          fi
+          echo "no datatug-cli-typesense- container remains"
+
+  # The ONLY check branch protection requires. `if: always()` (not
+  # `!cancelled()`): a cancelled run must report a failed gate, never a skipped
+  # one, because GitHub treats a skipped required check as passed.
+  ci-ok:
+    name: ci-ok
+    if: always()
+    needs:
+      - changes
+      - strongo_workflow
+      - pure-go
+      - hermetic-tests
+      - native
+      - journey-postgres
+      - watch-firestore
+      - journey-oracle
+      - journey-mssql
+      - journeys-sql
+      - journeys-http
+      - journeys-nosql
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Every job passed or was out of scope
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          # Jobs without a scope condition must have run and passed: one of
+          # them reported as skipped means something upstream broke.
+          ALWAYS: changes strongo_workflow pure-go hermetic-tests
+        run: |
+          set -euo pipefail
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<<"$NEEDS"
+          bad=$(jq -r --arg always "$ALWAYS" '($always | split(" ")) as $a
+            | [to_entries[]
+               | select(.value.result != "success")
+               | select((.key | IN($a[])) or .value.result != "skipped")
+               | .key] | join(", ")' <<<"$NEEDS")
+          if [ -n "$bad" ]; then
+            echo "::error title=CI not green::$bad"
+            exit 1
+          fi

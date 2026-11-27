@@ -1,15 +1,18 @@
 name: Native release builds
 run-name: ${{ inputs.release_request || format('Native release builds {0}', github.sha) }}
+# Two callers, one definition, so the PR check and the release build cannot drift:
+# - Go CI (golangci.yml, job `native`) calls it on every in-scope pull request and
+#   push to main, as a snapshot build.
+# - The shared release workflow dispatches it at the exact release tag with a
+#   release_request (release.yml: native_build_workflow).
 on:
+  workflow_call:
   workflow_dispatch:
     inputs:
       release_request:
         description: Unique request supplied by the shared release workflow
         type: string
         required: true
-  pull_request:
-  push:
-    branches: [main]
 permissions:
   contents: read
 jobs:

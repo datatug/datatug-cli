@@ -15,7 +15,7 @@ import (
 
 // These tests make their database files with the pure-Go driver the scan itself
 // opens (the "sqlite" driver scan_db_schema_api.go imports), and import no cgo
-// driver, so they run in a build with cgo off: the "Scan without cgo" job of
+// driver, so they run in a build with cgo off: the "Pure-Go release build checks" job of
 // .github/workflows/golangci.yml runs them so, as a release is built.
 
 // TestScanDbCatalog_SQLite3 proves the sqlite3 scan path is wired end-to-end:

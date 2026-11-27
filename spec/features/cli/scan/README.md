@@ -252,7 +252,7 @@ Given an empty folder `./shop` and a SQLite file with two tables, a view, a comp
 
 **Requirements:** scan#req:sqlite-pure-go
 
-In a build with `CGO_ENABLED=0`, as every release is, the scan of the previous criterion passes unchanged. A scan of a `--path` that does not exist exits non-zero, names the path and creates no file. (The `Scan without cgo` job of `.github/workflows/golangci.yml`.)
+In a build with `CGO_ENABLED=0`, as every release is, the scan of the previous criterion passes unchanged. A scan of a `--path` that does not exist exits non-zero, names the path and creates no file. (The `Pure-Go release build checks` job of `.github/workflows/golangci.yml`.)
 
 ### AC: second-scan-is-quiet
 

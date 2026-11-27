@@ -190,8 +190,8 @@ github.com/dal-go/dalgo2postgres v0.10.1 h1:M3Vpd2LhpkNP8RRQZa4wb36ihyhn+EEPWkMt
 github.com/dal-go/dalgo2postgres v0.10.1/go.mod h1:jiwyaLzKeICdOjju15i6qXr3/keDbtuQVVIHPJP4+58=
 github.com/dal-go/dalgo2postgrest v0.0.0-20261027220602-b8d31e8c335c h1:fYZabkDfiAM61Mhtk0ZgChsWi8cG7UCLABwoRGXTmDc=
 github.com/dal-go/dalgo2postgrest v0.0.0-20261027220602-b8d31e8c335c/go.mod h1:ToqDjSKp3+Py40uLFdj4g7lcLw1DHDsW4KrYEmaXE6Q=
-github.com/dal-go/dalgo2redis v0.1.0 h1:+tqsnvap/k3BCZdpIdYr3V4qQwtD46MNvuPUrZkiEcM=
-github.com/dal-go/dalgo2redis v0.1.0/go.mod h1:/R1BNL+dUgQ54CJlFVkxYx/T/Dg9mkPNgUrkdxJqHu4=
+github.com/dal-go/dalgo2redis v0.1.1-0.20261125224958-d27ed5467763 h1:EDRm+P6pn/B4a/cFmTRNRElH5x93XnEmvPMzI32n/Yg=
+github.com/dal-go/dalgo2redis v0.1.1-0.20261125224958-d27ed5467763/go.mod h1:gXr+RS0bjjgo+JvtExp2rtwokeNtwE5zXtqEP96gKss=
 github.com/dal-go/dalgo2snowflake v0.0.0-20261102131450-918fc72d4976 h1:XtUnIVOc2pcLp8KpBgFA3OpkIv+w78fGvnFB7jz/TOA=
 github.com/dal-go/dalgo2snowflake v0.0.0-20261102131450-918fc72d4976/go.mod h1:bzvbFc2Fr5zbFF8mL3M3J6Ed/RKz86VvwAWOM8b9ac4=
 github.com/dal-go/dalgo2sql v0.32.2 h1:srkabNALS44YN5lMHs5Uc/GzPXDj5uNNPXh0j1Zag+s=
@@ -214,8 +214,6 @@ github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSs
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1VwoXQT9A3Wy9MM3WgvqSxFWenqJduM=
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f h1:lO4WD4F/rVNCu3HqELle0jiPLLBs70cWOduZpkS1E78=
-github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f/go.mod h1:cuUVRXasLTGF7a8hSLbxyZXjz+1KgoB3wDUb6vlszIc=
 github.com/dlclark/regexp2/v2 v2.6.0 h1:KugbSrpXcRpziHIcqqFEXwKwi09LbPkTzvLRItf2mo8=
 github.com/dlclark/regexp2/v2 v2.6.0/go.mod h1:avUrQvPaLz2DrFNHJF0taWAFFX2C1GMSSoeiqFjcBmU=
 github.com/duckdb/duckdb-go-bindings v0.10504.0 h1:XKOXNRetaJnMvMIDqi6etZOmh/nlEHM7saaC5UxU17I=
@@ -434,8 +432,8 @@ github.com/qri-io/jsonpointer v0.1.1 h1:prVZBZLL6TW5vsSB9fFHFAMBLI4b0ri5vribQlTJ
 github.com/qri-io/jsonpointer v0.1.1/go.mod h1:DnJPaYgiKu56EuDp8TU5wFLdZIcAnb/uH9v37ZaMV64=
 github.com/qri-io/jsonschema v0.2.1 h1:NNFoKms+kut6ABPf6xiKNM5214jzxAhDBrPHCJ97Wg0=
 github.com/qri-io/jsonschema v0.2.1/go.mod h1:g7DPkiOsK1xv6T/Ao5scXRkd+yTFygcANPBaaqW+VrI=
-github.com/redis/go-redis/v9 v9.7.3 h1:YpPyAayJV+XErNsatSElgRZZVCwXX9QzkKYNvO7x0wM=
-github.com/redis/go-redis/v9 v9.7.3/go.mod h1:bGUrSggJ9X9GUmZpZNEOQKaANxSGgOEBRltRTZHSvrA=
+github.com/redis/go-redis/v9 v9.24.0 h1:X1AnQHWaSfMeggDQm7UFad1YwJmoZxVm5XkaP0kr6nQ=
+github.com/redis/go-redis/v9 v9.24.0/go.mod h1:ted97kpLnB4S2KJkTkw+7GzRjgkFnU909IIrksu+ut4=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
 github.com/richardlehane/mscfb v1.0.9 h1:8xdd9auUvXbFoCw3L9h1spnQHZgjNsSX+ek46J6A9tE=
@@ -564,6 +562,8 @@ go.opentelemetry.io/otel/trace v1.47.0 h1:JOjX/Oci8K94QHddo+bbfya/Ai/nf6/dt9ZfrF
 go.opentelemetry.io/otel/trace v1.47.0/go.mod h1:jNaSLa2PZEYFG6fRjJABAu+bw4FS08uDmPg28lTghu0=
 go.starlark.net v0.0.0-20261021141710-4f4267fb140d h1:wmJ4xTYwnBup3nwA+3OtmpaCwd90YXVyyCHZQoiD0+0=
 go.starlark.net v0.0.0-20261021141710-4f4267fb140d/go.mod h1:Iue6g6iirlfLoVi/DYCi5/x0h/bAOuWF3dULTKpt2Vo=
+go.uber.org/atomic v1.12.0 h1:BvcXdFKuviU4fTL/f+SxdQ5qJX/Jix8pAkgdUcb3XOE=
+go.uber.org/atomic v1.12.0/go.mod h1:I6c4cg+6HCxRjfjSsYtApoFILnpc0CGUdGkXVqbYVNk=
 go.uber.org/mock v0.6.0 h1:hyF9dfmbgIX5EfOdasqLsWD6xqpNZlXblLB/Dbnwv3Y=
 go.uber.org/mock v0.6.0/go.mod h1:KiVJ4BqZJaMj4svdfmHM0AUx4NJYO8ZNpPnZn1Z+BBU=
 go.yaml.in/yaml/v3 v3.0.4/go.mod h1:DhzuOOF2ATzADvBadXxruRBLzYTpT36CKvDb3+aBEFg=

@@ -50,7 +50,7 @@ require (
 	github.com/dal-go/dalgo2oracle v0.0.5
 	github.com/dal-go/dalgo2postgres v0.10.1
 	github.com/dal-go/dalgo2postgrest v0.0.0-20261027220602-b8d31e8c335c
-	github.com/dal-go/dalgo2redis v0.1.0
+	github.com/dal-go/dalgo2redis v0.1.1-0.20261125224958-d27ed5467763
 	github.com/dal-go/dalgo2snowflake v0.0.0-20261102131450-918fc72d4976
 	github.com/dal-go/dalgo2sql v0.32.2
 	github.com/dal-go/dalgo2sqlite v0.6.1
@@ -81,7 +81,7 @@ require (
 	github.com/pires/go-proxyproto v0.16.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
 	github.com/posthog/posthog-go/v2 v2.0.0
-	github.com/redis/go-redis/v9 v9.7.3
+	github.com/redis/go-redis/v9 v9.24.0
 	github.com/shopspring/decimal v1.4.0
 	github.com/sijms/go-ora/v3 v3.0.1
 	github.com/sneat-co/sneat-go-core v0.77.0
@@ -160,7 +160,6 @@ require (
 	github.com/crediterra/money v0.4.2 // indirect
 	github.com/cyphar/filepath-securejoin v0.7.0 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
-	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/dlclark/regexp2/v2 v2.6.0 // indirect
 	github.com/duckdb/duckdb-go-bindings v0.10504.0 // indirect
 	github.com/duckdb/duckdb-go-bindings/lib/darwin-amd64 v0.10504.0 // indirect
@@ -258,6 +257,7 @@ require (
 	go.opentelemetry.io/otel/metric v1.47.0 // indirect
 	go.opentelemetry.io/otel/trace v1.47.0 // indirect
 	go.starlark.net v0.0.0-20261021141710-4f4267fb140d // indirect
+	go.uber.org/atomic v1.12.0 // indirect
 	go.uber.org/mock v0.6.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.6 // indirect
 	golang.org/x/exp v0.0.0-20260908205506-85c1c2202aba // indirect

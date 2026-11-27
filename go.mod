@@ -50,7 +50,7 @@ require (
 	github.com/dal-go/dalgo2oracle v0.0.5
 	github.com/dal-go/dalgo2postgres v0.10.1
 	github.com/dal-go/dalgo2postgrest v0.0.0-20261027220602-b8d31e8c335c
-	github.com/dal-go/dalgo2redis v0.1.1-0.20261125224958-d27ed5467763
+	github.com/dal-go/dalgo2redis v0.1.1
 	github.com/dal-go/dalgo2snowflake v0.0.0-20261102131450-918fc72d4976
 	github.com/dal-go/dalgo2sql v0.32.2
 	github.com/dal-go/dalgo2sqlite v0.6.1

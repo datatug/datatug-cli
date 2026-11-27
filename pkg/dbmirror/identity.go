@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"path/filepath"
 )
 
@@ -91,7 +90,7 @@ type outputState struct {
 func (r *run) claimOutput() error {
 	out := r.opts.Output
 	want := outputState{Format: outputFormat, Source: r.opts.Identity, Encoding: keyEncoding.Name()}
-	content, err := os.ReadFile(outputFile(out))
+	content, err := outFS.ReadFile(outputFile(out))
 	if err == nil {
 		var have outputState
 		switch {
@@ -110,7 +109,7 @@ func (r *run) claimOutput() error {
 	if !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	entries, err := os.ReadDir(out)
+	entries, err := outFS.ReadDir(out)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -101,7 +100,7 @@ func (r *run) loadState(plan []*planItem) *resumeState {
 	if r.opts.Restart {
 		return nil
 	}
-	content, err := os.ReadFile(resumeFile(r.opts.Output))
+	content, err := outFS.ReadFile(resumeFile(r.opts.Output))
 	if err != nil {
 		return nil
 	}

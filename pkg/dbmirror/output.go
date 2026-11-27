@@ -24,20 +24,20 @@ const (
 )
 
 var (
-	createTemp = os.CreateTemp
-	renameFile = os.Rename
-	removeAll  = os.RemoveAll
-	removeFile = os.Remove
+	createTemp = func(dir, pattern string) (*os.File, error) { return outFS.CreateTemp(dir, pattern) }
+	renameFile = func(from, to string) error { return outFS.Rename(from, to) }
+	removeAll  = func(path string) error { return outFS.RemoveAll(path) }
+	removeFile = func(path string) error { return outFS.Remove(path) }
 )
 
 // writeFileIfChanged writes content to path atomically (a temporary file in
 // the same folder, then a rename), creating folders as needed. When the file
 // already holds content it is left as it is. It reports whether it wrote.
 func writeFileIfChanged(path string, content []byte) (bool, error) {
-	if current, err := os.ReadFile(path); err == nil && bytes.Equal(current, content) {
+	if current, err := outFS.ReadFile(path); err == nil && bytes.Equal(current, content) {
 		return false, nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), dirMode); err != nil {
+	if err := outFS.MkdirAll(filepath.Dir(path), dirMode); err != nil {
 		return false, err
 	}
 	temp, err := createTemp(filepath.Dir(path), ".tmp-*")
@@ -47,11 +47,11 @@ func writeFileIfChanged(path string, content []byte) (bool, error) {
 	name := temp.Name()
 	_, writeErr := temp.Write(content)
 	closeErr := temp.Close()
-	if err = firstError(writeErr, closeErr, os.Chmod(name, fileMode)); err == nil {
+	if err = firstError(writeErr, closeErr, outFS.Chmod(name, fileMode)); err == nil {
 		err = renameFile(name, path)
 	}
 	if err != nil {
-		_ = os.Remove(name)
+		_ = outFS.Remove(name)
 		return false, err
 	}
 	return true, nil
@@ -75,7 +75,7 @@ func existingRecords(out string, spec *Spec) []string {
 	walk = func(level int, dir string, parts []string) {
 		col := spec.chain[level]
 		recordsDir := filepath.Join(dir, col.RecordFile.RecordsBasePath())
-		entries, _ := os.ReadDir(recordsDir) // a missing folder holds no record
+		entries, _ := outFS.ReadDir(recordsDir) // a missing folder holds no record
 		if level == len(spec.chain)-1 && spec.multi {
 			records, err := readRecords(filepath.Join(recordsDir, spec.Def.RecordFile.Name), spec)
 			if err != nil {

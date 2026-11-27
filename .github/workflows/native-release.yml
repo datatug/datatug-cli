@@ -9,7 +9,7 @@ on:
         required: true
   pull_request:
   push:
-    branches: ['**']
+    branches: [main]
 permissions:
   contents: read
 jobs:

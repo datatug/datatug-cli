@@ -1,0 +1,94 @@
+name: PostgREST journey gate
+
+# Always report the gate on pull requests. Skipping at the step level leaves a
+# successful check for unrelated changes without provisioning any fixtures.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  postgrest:
+    name: PostgREST journey gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Determine PostgREST journey scope
+        id: scope
+        env:
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          case "$GITHUB_EVENT_NAME" in
+            pull_request) before=HEAD^1 ;;
+            push) before="$PUSH_BEFORE" ;;
+            *) before= ;;
+          esac
+          if [[ -n "$before" ]] && git cat-file -e "$before^{commit}" 2>/dev/null &&
+             git diff --quiet "$before" HEAD -- \
+               '*.go' go.mod go.sum go.work go.work.sum \
+               .github/actions/private-core .github/workflows/postgrest-journey-gate.yml \
+               scripts/check-journey-postgrest.sh scripts/test-fixture-lifecycle.sh \
+               scripts/lib testdata/postgrest
+          then
+            echo 'PostgREST journey skipped. No relevant paths changed.'
+            echo 'run=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'PostgREST journey selected. Relevant paths changed or the comparison is unavailable.'
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Authenticate private Core dependency
+        if: steps.scope.outputs.run == 'true'
+        uses: ./.github/actions/private-core
+        with:
+          private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        if: steps.scope.outputs.run == 'true'
+        with:
+          # Must be >= go.mod's `go` directive, same constraint as release.yml.
+          go-version: '1.27.4'
+          cache: true
+      - name: Fixture lifecycle regression
+        if: steps.scope.outputs.run == 'true'
+        run: bash scripts/test-fixture-lifecycle.sh
+      - name: Script syntax and shellcheck
+        if: steps.scope.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          scripts=(
+            scripts/check-journey-postgrest.sh
+            scripts/test-fixture-lifecycle.sh
+            scripts/lib/fixture-lifecycle.sh
+          )
+          for script in "${scripts[@]}"; do
+            bash -n "$script"
+          done
+          command -v shellcheck >/dev/null || { echo "shellcheck is not installed on this runner" >&2; exit 1; }
+          shellcheck --version
+          shellcheck -x "${scripts[@]}"
+      - name: PostgREST journey
+        if: steps.scope.outputs.run == 'true'
+        env:
+          CGO_ENABLED: '1'
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/postgrest-journey.log"
+          # pipefail keeps the journey script's own status through tee, so a
+          # failing journey fails this step; tee only captures the receipts.
+          bash scripts/check-journey-postgrest.sh 2>&1 | tee "$log"
+          # The full receipt is printed only after the explicit teardown of the
+          # owned Compose project and its volume, so both lines must be present.
+          grep -qF -- 'postgrest journey PASS:' "$log"
+          grep -qF -- 'owned project and volume removed' "$log"

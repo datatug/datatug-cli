@@ -1,0 +1,8 @@
+# Firestore: single/{id} - all records in one YAML file (invented)
+record_file:
+  name: records.yaml
+  type: "map[$record_id]map[$field_name]any"
+  format: yaml
+columns:
+  name:
+    type: string

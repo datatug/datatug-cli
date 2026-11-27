@@ -851,7 +851,10 @@ mirror`, which was this command under another name and is removed.)
    under `ext` under `teams` (its id is `teams/ext/events`). **The definition
    decides how records are stored**, and the mirror writes what it declares (see
    [Storage forms](#storage-forms)); a definition in a form the mirror does not
-   write is reported as `unsupported` and not copied.
+   write is reported as `unsupported` and not copied. The definitions are read
+   with inGitDB's own validation: one inGitDB does not accept (a column type
+   it has not, such as `[]map[string]any`, or a foreign key to no collection)
+   stops the run before anything is read, naming the collection (exit 2).
 2. **A mirror policy** in the DataTug project (one YAML file; `format:
    datatug-mirror-policy/v1`). It says what may leave Firestore:
 
@@ -941,7 +944,7 @@ The flags of `db copy` that mean the same thing in both modes are the same flags
 | Flag | With `--schema=destination` |
 |------|---------|
 | `--from` | The Firestore source (required). |
-| `--to` | Output folder (or `ingitdb://folder`); optional here: default the policy's `output`, else `data/<policy name>` in the project. |
+| `--to` | Output folder (or `ingitdb://folder`); optional here: default the policy's `output`, else `data/<policy name>` in the project. Any other URL (`sqlite://...`, `bigquery://...`) is refused (exit 2): this mode writes an inGitDB folder. |
 | `--include` | Comma-separated collections of the policy's `copy` list (definition ids such as `teams/ext/events`, not source table names); `teams/**` adds every collection below `teams`. An excluded or undeclared name is an error. |
 | `--dry-run` | Count, with Firestore count queries, and write nothing. |
 | `--progress` | One line on stderr per page read. |
@@ -1040,6 +1043,37 @@ parts were read at different times. Counts are not read at the snapshot time.
   `<file>#<encoded id>` for a record kept in one file; reported, and deleted only
   with `--prune`, and only for a collection this run read from its start to its
   end, so a run stopped by its budget deletes nothing it did not see).
+- **An id that changed only in case** between runs (`Bob` became `bob`): on a
+  filesystem that folds case (macOS and Windows by default), `Bob.yaml` and
+  `bob.yaml` are one file, kept under its old name. **A run never deletes or
+  writes over a live record because of that.** It renames the record file, and
+  the folder of its sub-collections, to the new case (through a temporary
+  name) only when the source proves the old id gone: one read of the old
+  document, and one per defined sub-collection below it (Firestore keeps the
+  sub-collections of a deleted document). These reads come out of
+  `--max-reads`: when they would pass it, the run stops as at its budget, and
+  the resume renames. Each rename is listed in the report
+  (`renamed_record_files`) and the log (`renamed: old -> new`). When the old id
+  is still in the source, or the old name is not one the mirror writes, the run
+  stops (exit 1) with an error that names both ids, and writes neither: copy
+  into a folder on a case-sensitive filesystem, or give one of them another id.
+  On macOS a case-sensitive folder is a case-sensitive APFS volume: Disk
+  Utility > Add Volume > format "APFS (Case-sensitive)", or
+  `diskutil apfs addVolume <container disk> "Case-sensitive APFS" <name>`.
+  Whether a folder folds case is found on the folder itself (are the two names
+  one file?), never from the operating system's name. `--prune` never deletes
+  the file of a document the run read (written or rejected) under another
+  case: such a file is listed as kept (`kept_case_folded_files`, `kept:` in the
+  log), not stale. On a case-sensitive filesystem the two names are two files:
+  nothing is renamed, and the old one is stale.
+- **What an interrupted run left** in a folder the run writes to: a rename's
+  temporary name (`.tmp-case-…-<old name>`) is put back under its old name
+  when that name is free, and the rename starts again; one that cannot be put
+  back is left as it is and makes the run incomplete. A temporary file of an
+  interrupted write (`.tmp-` and digits, a regular file) is removed: the file
+  it was to replace was never touched. Any other `.tmp-…` entry is left as it
+  is and reported. Both are listed in the report (`recovered_leftovers`) and the log
+  (`recovered:`).
 - **Rejected documents** (an undeclared field, a missing required field, a wrong
   type, a value a column does not allow, a date that does not parse, a name that
   differs only in case from another's) are not written into the database. The
@@ -1070,7 +1104,9 @@ definition declares it in `record_file`, and the mirror writes:
 
 The format is `yaml` (or `yml`) or `json`; another format is `unsupported`. A
 parent of a sub-collection must keep one file per record, since its records are
-the folders of the sub-collection. Defaults, in the owner's words: "By default
+the folders of the sub-collection. A `record_file.name` or `records_dir` that
+starts with `.tmp-` is `unsupported`: that is the prefix of what an
+interrupted run leaves. Defaults, in the owner's words: "By default
 we export to YAML", and "default is all records in single yaml file": when the
 mirror writes a definition, it is one YAML file of all records,
 
@@ -1159,9 +1195,12 @@ it, comparing types and values.
 A Firestore id can hold any byte but `/` and be up to 1500 bytes long; a file
 name cannot. Every id written as a file or folder name (a document of a
 one-file-per-record collection, and each parent document) is written by the
-encoding `tilde-hex/v1`, recorded in `.datatug-mirror/output.json`. It is to be
-declared in the inGitDB schema and implemented once in ingitdb-go; the mirror
-implements it until then. Exactly:
+encoding `tilde-v1`, recorded in `.datatug-mirror/output.json`. It is the
+encoding inGitDB declares in a collection's schema as
+`record_file.key_encoding: tilde-v1`; the copy implements it until ingitdb-go
+releases its own (ingitdb-go#47). An output written by DataTug CLI v0.157.0
+records the same encoding under its earlier name `tilde-hex/v1`, which is read
+as `tilde-v1`: such an output is kept, resumed and pruned as before. Exactly:
 
 - **Encode** an id (a non-empty byte string with no `/`) byte by byte. A byte
   is kept when it is `A-Z`, `a-z`, `0-9` or one of `-` `_` `.` `@` `+` `=` `,`,

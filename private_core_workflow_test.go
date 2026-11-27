@@ -15,7 +15,7 @@ func TestPrivateCoreCredentialMatchesOnlyExactRepository(t *testing.T) {
 		t.Fatal(err)
 	}
 	action := string(data)
-	for _, value := range []string{"uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510", "client-id: Iv23li26w131Kv6u3IdM", "owner: datatug", "repositories: datatug-core", "permission-contents: read"} {
+	for _, value := range []string{"uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc", "client-id: Iv23li26w131Kv6u3IdM", "owner: datatug", "repositories: datatug-core", "permission-contents: read"} {
 		if !strings.Contains(action, value) {
 			t.Fatalf("missing scoped App input %s", value)
 		}

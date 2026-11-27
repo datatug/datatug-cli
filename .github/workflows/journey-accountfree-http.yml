@@ -5,21 +5,8 @@ name: Journey (Account-free HTTP)
 # This one can, and it does: it only runs when an account-free HTTP source, its command wiring, the journey
 # scripts or the shared fixture lifecycle helper change.
 #
-# It runs the three account-free journeys end to end against real, disposable servers. Each script owns its
-# fixture: scripts/check-journey-couchdb.sh starts one pinned CouchDB container on a random loopback port,
-# scripts/check-journey-postgrest.sh starts one pinned PostgreSQL + PostgREST Compose project on random
-# loopback ports, and scripts/check-journey-libsql.sh runs the published dalgo2libsql fixture (a
-# commit-pinned libsql-server container with ephemeral Ed25519 tokens and writer-only seeding) resolved
-# from the pinned module, not from a source worktree. All three drive the Go command journey and then the
-# datatug binary built from this checkout, so a proof is a separate CLI process, not only a cobra call in
-# the test binary.
-#
-# The shared lifecycle helper (scripts/lib/fixture-lifecycle.sh) is not trusted on the strength of the
-# PostgREST journey alone: scripts/test-fixture-lifecycle.sh regression-tests the shipped teardown and trap
-# code in a subshell. That regression and the script lint run in both jobs, before any container starts.
-#
-# No hosted account, secret or service is involved beyond the private Core read token the CLI already needs
-# to build. Docker (with the Compose plugin) and python3 are preinstalled on the GitHub-hosted Ubuntu runner.
+# CouchDB and libSQL run against disposable servers and exercise the CLI
+# binary. PostgREST has its own always-reported workflow.
 
 on:
   pull_request:
@@ -30,12 +17,10 @@ on:
       - 'pkg/schemers/**'
       - 'apps/datatugapp/commands/**'
       - 'scripts/check-journey-couchdb.sh'
-      - 'scripts/check-journey-postgrest.sh'
       - 'scripts/test-fixture-lifecycle.sh'
       - 'scripts/lib/fixture-lifecycle.sh'
       - 'scripts/check-journey-libsql.sh'
       - 'scripts/lib/libsql-cli-journey.sh'
-      - 'testdata/postgrest/**'
       - 'go.mod'
       - 'go.sum'
       - '.github/workflows/journey-accountfree-http.yml'
@@ -49,12 +34,10 @@ on:
       - 'pkg/schemers/**'
       - 'apps/datatugapp/commands/**'
       - 'scripts/check-journey-couchdb.sh'
-      - 'scripts/check-journey-postgrest.sh'
       - 'scripts/test-fixture-lifecycle.sh'
       - 'scripts/lib/fixture-lifecycle.sh'
       - 'scripts/check-journey-libsql.sh'
       - 'scripts/lib/libsql-cli-journey.sh'
-      - 'testdata/postgrest/**'
       - 'go.mod'
       - 'go.sum'
       - '.github/workflows/journey-accountfree-http.yml'
@@ -90,7 +73,6 @@ jobs:
           set -euo pipefail
           scripts=(
             scripts/check-journey-couchdb.sh
-            scripts/check-journey-postgrest.sh
             scripts/test-fixture-lifecycle.sh
             scripts/lib/fixture-lifecycle.sh
             scripts/check-journey-libsql.sh
@@ -126,54 +108,6 @@ jobs:
             exit 1
           fi
           echo "no datatug-cli-couchdb- container remains"
-
-  postgrest:
-    name: Journey (PostgREST)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Authenticate private Core dependency
-        uses: ./.github/actions/private-core
-        with:
-          private-key: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
-      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
-        with:
-          # Must be >= go.mod's `go` directive, same constraint as release.yml.
-          go-version: '1.27.4'
-          cache: true
-      - name: Fixture lifecycle regression
-        run: bash scripts/test-fixture-lifecycle.sh
-      - name: Script syntax and shellcheck
-        run: |
-          set -euo pipefail
-          scripts=(
-            scripts/check-journey-couchdb.sh
-            scripts/check-journey-postgrest.sh
-            scripts/test-fixture-lifecycle.sh
-            scripts/lib/fixture-lifecycle.sh
-            scripts/check-journey-libsql.sh
-            scripts/lib/libsql-cli-journey.sh
-          )
-          for script in "${scripts[@]}"; do
-            bash -n "$script"
-          done
-          command -v shellcheck >/dev/null || { echo "shellcheck is not installed on this runner" >&2; exit 1; }
-          shellcheck --version
-          shellcheck -x "${scripts[@]}"
-      - name: PostgREST journey
-        env:
-          CGO_ENABLED: '1'
-        run: |
-          set -euo pipefail
-          log="$RUNNER_TEMP/postgrest-journey.log"
-          # pipefail keeps the journey script's own status through tee, so a
-          # failing journey fails this step; tee only captures the receipts.
-          bash scripts/check-journey-postgrest.sh 2>&1 | tee "$log"
-          # The full receipt is printed only after the explicit teardown of the
-          # owned Compose project and its volume, so both lines must be present.
-          grep -qF -- 'postgrest journey PASS:' "$log"
-          grep -qF -- 'owned project and volume removed' "$log"
 
   libsql:
     name: Journey (libSQL)

@@ -212,7 +212,7 @@ secret. The URL is `postgrest+https://<ref>.supabase.co/rest/v1`.
 ./scripts/check-journey-postgrest.sh
 ```
 
-The script starts its own PostgreSQL 17 + PostgREST 16.5 Compose project on two
+The script starts its own Compose project with the pinned PostgreSQL and PostgREST images on two
 random loopback ports under a unique `datatug-cli-postgrest-<run>` name, seeds
 native rows through PostgreSQL's init hook, creates a least-privilege reader and
 a role without grants, and mints short-lived read-only JWTs. It proves the reader

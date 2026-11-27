@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -75,11 +74,20 @@ func digest(parts ...any) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// encoding is the name of the key encoding the output's state records (the
+// one this version writes for a new output).
+func (r *run) encoding() string {
+	if r.encodingName != "" {
+		return r.encodingName
+	}
+	return keyEncoding.Name()
+}
+
 func (r *run) newState() *resumeState {
 	collections := slices.Sorted(slices.Values(r.opts.Collections))
 	return &resumeState{
 		Format:      resumeFormat,
-		Selection:   digest(r.opts.Identity, r.opts.Under, collections, keyEncoding.Name()),
+		Selection:   digest(r.opts.Identity, r.opts.Under, collections, r.encoding()),
 		Definitions: r.defsHash,
 		Policy:      digest(r.policy.Copy, r.policy.Exclude, r.policy.Mask, r.policy.Paths),
 		Items:       map[string]*cursor{}, Counts: map[string]*priorCounts{}, Outside: map[string]int64{},
@@ -92,7 +100,7 @@ func (r *run) loadState(plan []*planItem) *resumeState {
 	if r.opts.Restart {
 		return nil
 	}
-	content, err := os.ReadFile(resumeFile(r.opts.Output))
+	content, err := outFS.ReadFile(resumeFile(r.opts.Output))
 	if err != nil {
 		return nil
 	}
@@ -103,7 +111,7 @@ func (r *run) loadState(plan []*planItem) *resumeState {
 	}
 	var changed []string
 	for name, same := range map[string]bool{
-		"the selection (--collections, --space, --path)": state.Selection == want.Selection,
+		"the selection (--include, --space, --path)": state.Selection == want.Selection,
 		"the definitions": state.Definitions == want.Definitions,
 		"the policy":      state.Policy == want.Policy,
 	} {

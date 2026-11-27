@@ -421,6 +421,12 @@ func TestRunStopsAtTheReadBudgetAndResumes(t *testing.T) {
 	// Each next run continues where the last stopped, never re-reading the first documents.
 	runs := 1
 	report := first
+	starts := 0 // reads of the collection teams from its start, in all runs
+	for _, q := range src.queries {
+		if q.Collection == "teams" && !q.Group && q.After == "" {
+			starts++
+		}
+	}
 	for report.BudgetReached {
 		src.queries = nil
 		report = runWith(t, src, testPolicy(t), Options{Output: out, MaxReads: 4, PageSize: 2, Log: &log})
@@ -429,7 +435,9 @@ func TestRunStopsAtTheReadBudgetAndResumes(t *testing.T) {
 		}
 		for _, q := range src.queries {
 			if q.Collection == "teams" && !q.Group && q.After == "" {
-				t.Errorf("read the collection teams from its start again: %+v", q)
+				if starts++; starts > 1 {
+					t.Errorf("read the collection teams from its start again: %+v", q)
+				}
 			}
 		}
 		if runs++; runs > 20 {
@@ -453,7 +461,7 @@ func TestRunStopsAtTheReadBudgetAndResumes(t *testing.T) {
 	}
 	log.Reset()
 	other := runWith(t, src, testPolicy(t), Options{Output: out, MaxReads: 4, PageSize: 2, Collections: []string{"teams"}, Log: &log})
-	if other.Resumed || !strings.Contains(log.String(), "the selection (--collections, --space, --path) changed since the run that stopped at its read budget: starting over") {
+	if other.Resumed || !strings.Contains(log.String(), "the selection (--include, --space, --path) changed since the run that stopped at its read budget: starting over") {
 		t.Errorf("%v\n%s", other.Resumed, log.String())
 	}
 	if err := os.WriteFile(resumeFile(out), []byte("{"), 0o600); err != nil {

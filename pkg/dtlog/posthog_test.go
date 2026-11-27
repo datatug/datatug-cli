@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/posthog/posthog-go"
+	"github.com/posthog/posthog-go/v2"
 	"github.com/stretchr/testify/assert"
 )
 

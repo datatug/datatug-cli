@@ -66,7 +66,10 @@ func LoadDefinitions(dir string) (*Definitions, error) {
 	if err != nil {
 		return nil, err
 	}
-	def, err := readDefinition(abs)
+	// Validated as inGitDB validates them: a definition inGitDB does not accept
+	// (a column type it has not, a foreign key to no collection) fails here,
+	// naming it, instead of getting every record of the collection rejected.
+	def, err := readDefinition(abs, ingitdb.Validate())
 	if err != nil {
 		return nil, fmt.Errorf("read inGitDB definitions in %s: %w", dir, err)
 	}
@@ -113,6 +116,9 @@ func (s *Spec) layout() string {
 		switch {
 		case rf == nil:
 			return "the definition has no record_file"
+		case slices.ContainsFunc(append(strings.Split(filepath.ToSlash(rf.RecordsBasePath()), "/"), rf.Name), func(name string) bool { return strings.HasPrefix(name, leftoverPrefix) }):
+			// recoverLeftover removes or reports such names as left by an interrupted run
+			return fmt.Sprintf("record_file.name %q or records_dir %q starts with %q, which is the prefix of what an interrupted run leaves: name the files otherwise", rf.Name, rf.RecordsBasePath(), leftoverPrefix)
 		case rf.RecordType == ingitdb.SingleRecord:
 			if strings.Count(rf.Name, "{key}") != 1 || strings.Count(rf.Name, "{") != 1 || strings.ContainsAny(rf.Name, `/\`) {
 				return fmt.Sprintf("record_file.name %q must name the file by {key} alone", rf.Name)

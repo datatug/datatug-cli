@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # check-journey-postgrest.sh runs the PostgREST command journey against an owned,
-# disposable PostgreSQL 17 + PostgREST 16.5 project.
+# disposable PostgreSQL + PostgREST project.
 #
 # It starts the pinned pair as a unique Compose project on two random loopback
 # ports, seeds native rows through PostgreSQL's init hook (never through the
@@ -37,6 +37,12 @@ PY
 export POSTGRES_PORT=$postgres_port POSTGREST_PORT=$postgrest_port
 
 compose=(docker compose -p "$project" -f "$compose_file")
+postgrest_image="$("${compose[@]}" config --format json | python3 -c 'import json, sys; print(json.load(sys.stdin)["services"]["postgrest"]["image"])')"
+if [[ ! "$postgrest_image" =~ :v([0-9]+\.[0-9]+(\.[0-9]+)?)(@sha256:[a-f0-9]{64})?$ ]]; then
+	echo "expected a version-pinned PostgREST image, found $postgrest_image" >&2
+	exit 1
+fi
+expected_server="postgrest/${BASH_REMATCH[1]}"
 work=$(mktemp -d "${TMPDIR:-/tmp}/datatug-journey-postgrest.XXXXXX")
 # started stays 0 until this script's own Compose project has been created, so a
 # launch failure never removes containers or a project name it did not create.
@@ -69,13 +75,10 @@ for attempt in $(seq 1 90); do
 done
 
 server_header="$(curl -fsSI "$base/" | tr -d '\r' | awk 'tolower($1) == "server:" { print $2 }')"
-case "$server_header" in
-	postgrest/16.6*) ;;
-	*)
-		echo "unexpected PostgREST server header: ${server_header:-<missing>}" >&2
-		exit 1
-		;;
-esac
+if [ "$server_header" != "$expected_server" ]; then
+	echo "unexpected PostgREST server header: ${server_header:-<missing>} (expected $expected_server)" >&2
+	exit 1
+fi
 echo "PostgREST server: $server_header"
 
 psql() { "${compose[@]}" exec -T postgres psql -U "$admin_auth" -d appdb -tAc "$@"; }

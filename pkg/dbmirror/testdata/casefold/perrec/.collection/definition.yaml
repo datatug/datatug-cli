@@ -1,0 +1,8 @@
+# Firestore: perrec/{id} - one YAML file per record (invented)
+record_file:
+  name: "{key}.yaml"
+  type: map[string]any
+  format: yaml
+columns:
+  name:
+    type: string

@@ -29,7 +29,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.72.3
 	github.com/charmbracelet/ultraviolet v0.0.0-20261008173134-6b8d4baf91b4
 	github.com/charmbracelet/x/ansi v0.11.10
-	github.com/dal-go/dalgo v0.102.4
+	github.com/dal-go/dalgo v0.102.6
 	github.com/dal-go/dalgo2bigquery v0.3.2
 	github.com/dal-go/dalgo2clickhouse v0.0.0-20261030135300-99a44064132e
 	github.com/dal-go/dalgo2cloudflarekv v0.0.0-20261102080843-209a16cff7f5
@@ -43,14 +43,14 @@ require (
 	github.com/dal-go/dalgo2http v0.4.3
 	github.com/dal-go/dalgo2influxdb v0.0.0-20261101231321-deba4dd49915
 	github.com/dal-go/dalgo2libsql v0.0.0-20261028000517-7d8187759a51
-	github.com/dal-go/dalgo2mongodb v0.1.0
+	github.com/dal-go/dalgo2mongodb v0.1.1-0.20261124105105-08ff6460d349
 	github.com/dal-go/dalgo2mssql v0.0.1
 	github.com/dal-go/dalgo2mysql v0.2.2
 	github.com/dal-go/dalgo2openvaultdb v0.4.7
 	github.com/dal-go/dalgo2oracle v0.0.5
 	github.com/dal-go/dalgo2postgres v0.10.1
 	github.com/dal-go/dalgo2postgrest v0.0.0-20261027220602-b8d31e8c335c
-	github.com/dal-go/dalgo2redis v0.1.0
+	github.com/dal-go/dalgo2redis v0.1.1-0.20261125224958-d27ed5467763
 	github.com/dal-go/dalgo2snowflake v0.0.0-20261102131450-918fc72d4976
 	github.com/dal-go/dalgo2sql v0.32.2
 	github.com/dal-go/dalgo2sqlite v0.6.1
@@ -80,8 +80,8 @@ require (
 	github.com/openvaultdb/openvaultdb-go v0.26.3
 	github.com/pires/go-proxyproto v0.16.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
-	github.com/posthog/posthog-go v1.24.3
-	github.com/redis/go-redis/v9 v9.7.3
+	github.com/posthog/posthog-go/v2 v2.0.0
+	github.com/redis/go-redis/v9 v9.24.0
 	github.com/shopspring/decimal v1.4.0
 	github.com/sijms/go-ora/v3 v3.0.1
 	github.com/sneat-co/sneat-go-core v0.77.0
@@ -95,15 +95,15 @@ require (
 	github.com/strongo/logus v0.4.8
 	github.com/strongo/random v0.0.3
 	github.com/strongo/slice v0.3.15
-	github.com/strongo/validation v0.0.17
+	github.com/strongo/validation v0.0.18
 	github.com/tuigoff/tuigoff v0.8.1
 	github.com/xo/dburl v0.24.2
-	github.com/xuri/excelize/v2 v2.11.0
+	github.com/xuri/excelize/v2 v2.11.1
 	github.com/zalando/go-keyring v0.2.8
-	go.mongodb.org/mongo-driver/v2 v2.5.0
+	go.mongodb.org/mongo-driver/v2 v2.10.1
 	golang.org/x/crypto v0.58.0
 	golang.org/x/mod v0.42.0
-	golang.org/x/net v0.61.0
+	golang.org/x/net v0.62.0
 	golang.org/x/oauth2 v0.37.0
 	golang.org/x/sys v0.50.0
 	golang.org/x/term v0.47.0
@@ -160,7 +160,6 @@ require (
 	github.com/crediterra/money v0.4.2 // indirect
 	github.com/cyphar/filepath-securejoin v0.7.0 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
-	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/dlclark/regexp2/v2 v2.6.0 // indirect
 	github.com/duckdb/duckdb-go-bindings v0.10504.0 // indirect
 	github.com/duckdb/duckdb-go-bindings/lib/darwin-amd64 v0.10504.0 // indirect
@@ -203,7 +202,7 @@ require (
 	//github.com/jackc/pgx/v5 v5.7.6 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
 	github.com/kevinburke/ssh_config v1.6.0 // indirect
-	github.com/klauspost/compress v1.19.1 // indirect
+	github.com/klauspost/compress v1.20.3 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
 	github.com/lrstanley/bubblezone/v2 v2.0.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
@@ -226,7 +225,7 @@ require (
 	github.com/qri-io/jsonpointer v0.1.1 // indirect
 	github.com/qri-io/jsonschema v0.2.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	github.com/richardlehane/mscfb v1.0.7 // indirect
+	github.com/richardlehane/mscfb v1.0.9 // indirect
 	github.com/richardlehane/msoleps v1.0.6 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sahilm/fuzzy v0.1.3 // indirect
@@ -240,11 +239,10 @@ require (
 	github.com/strongo/strongoapp v0.31.72 // indirect
 	github.com/tiendc/go-deepcopy v1.7.2 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
-	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
-	github.com/xdg-go/scram v1.2.0 // indirect
+	github.com/xdg-go/scram v1.4.0 // indirect
 	github.com/xdg-go/stringprep v1.0.4 // indirect
 	github.com/xo/terminfo v1.2.0 // indirect
-	github.com/xuri/efp v0.0.1 // indirect
+	github.com/xuri/efp v0.0.3-0.20260924042702-217b81952dec // indirect
 	github.com/xuri/nfp v0.0.2-0.20250530014748-2ddeb826f9a9 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
@@ -259,6 +257,7 @@ require (
 	go.opentelemetry.io/otel/metric v1.47.0 // indirect
 	go.opentelemetry.io/otel/trace v1.47.0 // indirect
 	go.starlark.net v0.0.0-20261021141710-4f4267fb140d // indirect
+	go.uber.org/atomic v1.12.0 // indirect
 	go.uber.org/mock v0.6.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.6 // indirect
 	golang.org/x/exp v0.0.0-20260908205506-85c1c2202aba // indirect

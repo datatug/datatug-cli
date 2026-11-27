@@ -56,7 +56,7 @@ func TestPublicReleasePublisherUsesExactRepositoryAppToken(t *testing.T) {
 		}
 		if step.ID == "public-release-token" {
 			tokenFound = true
-			if step.Uses != "actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510" {
+			if step.Uses != "actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc" {
 				t.Fatalf("unpinned App action: %s", step.Uses)
 			}
 			want := map[string]string{"client-id": "Iv23li26w131Kv6u3IdM", "private-key": "${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}", "owner": "datatug", "repositories": "datatug", "permission-contents": "write"}

@@ -103,6 +103,8 @@ jobs:
       goprivate_github_app_owner: datatug
       goprivate_github_app_repositories: datatug-core
       require_conventional_pr_title: true
+      allowed_imports: |
+        github.com/datatug/datatug-cli/apps/datatugapp/commands github.com/dal-go/dalgo/adapters/dalgo2memory
       # Uses the C-based github.com/mattn/go-sqlite3 driver, which requires cgo.
       cgo_enabled: true
       # The release-artifacts workflow owns version tags and GitHub assets.

@@ -93,7 +93,7 @@ jobs:
   strongo_workflow:
     permissions:
       contents: write
-    uses: strongo/cicd/.github/workflows/workflow.yml@1bf1d76a6cb7f3b01c806c40f56d3b5e83128d94 # v1.25.6
+    uses: strongo/cicd/.github/workflows/workflow.yml@55305a14a3ac17ee84001f9e0d3c74aca62ce2a0 # v1.26.1
     secrets:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GOPRIVATE_GITHUB_APP_PRIVATE_KEY: ${{ secrets.SNEAT_RELEASER_PRIVATE_KEY }}
